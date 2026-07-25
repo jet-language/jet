@@ -352,7 +352,7 @@ pub(crate) fn is_sketch_method_name(recv_type: Option<&str>, method: &str) -> bo
 }
 
 /// Resolve a numeric receiver query into a total TIR operation.
-pub(crate) fn resolve_numeric_op(method: &str, _src_name: &str) -> Option<TNumericOp> {
+pub(crate) fn resolve_numeric_op(method: &str, src_name: &str) -> Option<TNumericOp> {
     // Float predicates → `(recv).{method}()`.
     if let "is_nan" | "is_infinite" | "is_finite" = method {
         return Some(TNumericOp::Predicate(method.to_string()));
@@ -362,7 +362,16 @@ pub(crate) fn resolve_numeric_op(method: &str, _src_name: &str) -> Option<TNumer
     }
     // Integer bit-population queries → `((recv).{method}() as i64)`.
     if let "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros" = method {
-        return Some(TNumericOp::BitCount(method.to_string()));
+        let width = match src_name {
+            "I8" | "U8" => 8,
+            "I16" | "U16" => 16,
+            "I32" | "U32" => 32,
+            _ => 64,
+        };
+        return Some(TNumericOp::BitCount {
+            method: method.to_string(),
+            width,
+        });
     }
     // `to_string` on a numeric receiver → `(recv).jet_show()` (the AST `to_string` arm).
     if method == "to_string" {

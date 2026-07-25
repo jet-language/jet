@@ -74,7 +74,7 @@ impl EvalCtx<'_> {
                 let v = self.eval_expr(operand, scope)?;
                 match (*op, v) {
                     (UnOp::Neg, CtValue::Int(n)) => Ok(CtValue::Int(-n)),
-                    (UnOp::Neg, CtValue::Float(n)) => Ok(CtValue::Float(CtFloat::f64(-n.as_f64()))),
+                    (UnOp::Neg, CtValue::Float(n)) => Ok(CtValue::Float(n.neg())),
                     (UnOp::Neg, CtValue::BigInt(n)) => Ok(CtValue::BigInt(n.neg())),
                     (UnOp::Not, CtValue::Bool(b)) => Ok(CtValue::Bool(!b)),
                     _ => Err(unsupported("unary form", self.span())),
@@ -175,8 +175,21 @@ impl EvalCtx<'_> {
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
                 }
-                let result = eval_handle(op, &mut r, argv, self.span())?;
+                let result = eval_handle(op, &mut r, &mut argv, self.span())?;
                 self.write_back_place(recv, r, scope)?;
+                // `Rng.shuffle(&list)` mutates the list arg in place. Fragment
+                // lowering may keep `&deck` as Local (Write convention on the
+                // AST CallArg) rather than wrapping TExprKind::Borrow.
+                let force_arg_wb = matches!(*op, crate::Codegen::TIR::THandleOp::RngShuffle);
+                for (place, value) in args.iter().zip(argv.into_iter()) {
+                    if force_arg_wb {
+                        self.write_back_place(place, value, scope)?;
+                        continue;
+                    }
+                    if matches!(place.kind, TExprKind::Borrow { .. }) {
+                        self.write_back_place(place, value, scope)?;
+                    }
+                }
                 Ok(result)
             }
             TExprKind::CoreCall {
@@ -276,7 +289,10 @@ impl EvalCtx<'_> {
                 is_map,
                 ..
             } => {
-                let b = self.eval_expr(base, scope)?;
+                let b = match self.eval_expr(base, scope)? {
+                    CtValue::ResOk(inner) | CtValue::Some(inner) => *inner,
+                    other => other,
+                };
                 let i = self.eval_expr(index, scope)?;
                 if *is_map {
                     let key = crate::AST::CtKey::from_value(i)
@@ -312,7 +328,15 @@ impl EvalCtx<'_> {
                                 .ok_or_else(|| unsupported("string index oob", self.span()))?;
                             Ok(CtValue::Char(ch))
                         }
-                        _ => Err(unsupported("index recv", self.span())),
+                        other => {
+                            if let Some(r) =
+                                crate::Comptime::MathLayout::lane_at(&other, idx, self.span())
+                            {
+                                r
+                            } else {
+                                Err(unsupported("index recv", self.span()))
+                            }
+                        }
                     }
                 }
             }
@@ -359,6 +383,71 @@ impl EvalCtx<'_> {
                 if method.name == "clone" {
                     return Ok(r);
                 }
+                const MUTATING: &[&str] = &[
+                    "push", "pop", "add", "add_new", "insert", "remove", "clear", "reverse",
+                    "sort", "tick", "advance", "wait", "int", "float", "float_range", "bool",
+                    "normal", "exponential", "bytes", "split", "pick", "weighted_pick", "sample",
+                    "shuffle", "require",
+                ];
+                let try_mutating = MUTATING.contains(&method.name.as_str())
+                    || matches!(
+                        &r,
+                        CtValue::Struct { type_name, .. }
+                            if type_name == crate::Syntax::CLOCK_TYPE
+                                || type_name == crate::Syntax::RNG_TYPE
+                                || type_name == crate::Syntax::SOLVER_TYPE
+                                || (type_name == crate::Syntax::MEM_POOL
+                                    && matches!(method.name.as_str(), "add" | "remove"))
+                    );
+                // Mutating dispatch first — `apply_method` for Pool.add returns the
+                // Id but drops the updated arena (write-back lives in apply_mutating).
+                if try_mutating {
+                    if method.name == "shuffle" {
+                        if let CtValue::Struct { type_name, fields } = &r {
+                            if type_name == crate::Syntax::RNG_TYPE {
+                                let mut state = fields
+                                    .iter()
+                                    .find_map(|(name, value)| match (name.as_str(), value) {
+                                        ("state", CtValue::Int(state)) => Some(*state as u64),
+                                        _ => None,
+                                    })
+                                    .unwrap_or(0);
+                                let ret = crate::Comptime::apply_seeded_rng_method(
+                                    &mut state,
+                                    "shuffle",
+                                    &mut argv,
+                                    self.span(),
+                                )?;
+                                r = CtValue::Struct {
+                                    type_name: crate::Syntax::RNG_TYPE.to_string(),
+                                    fields: vec![("state".to_string(), CtValue::Int(state as i64))],
+                                };
+                                self.write_back_place(recv, r, scope)?;
+                                for (a, v) in args.iter().zip(argv.into_iter()) {
+                                    let place_like = matches!(
+                                        &a.value.kind,
+                                        TExprKind::Borrow { .. }
+                                            | TExprKind::Local(_)
+                                            | TExprKind::Field { .. }
+                                    );
+                                    if place_like {
+                                        self.write_back_place(&a.value, v, scope)?;
+                                    }
+                                }
+                                return Ok(ret);
+                            }
+                        }
+                    }
+                    if let Ok(ret) = crate::Comptime::Builtins::apply_mutating(
+                        &mut r,
+                        &method.name,
+                        argv.clone(),
+                        self.span(),
+                    ) {
+                        self.write_back_place(recv, r, scope)?;
+                        return Ok(ret);
+                    }
+                }
                 if let Ok(v) = crate::Comptime::Builtins::apply_method(
                     &r,
                     &method.name,
@@ -366,20 +455,6 @@ impl EvalCtx<'_> {
                     self.span(),
                 ) {
                     return Ok(v);
-                }
-                const MUTATING: &[&str] = &[
-                    "push", "pop", "add", "add_new", "insert", "remove", "clear", "reverse",
-                    "sort",
-                ];
-                if MUTATING.contains(&method.name.as_str()) {
-                    let ret = crate::Comptime::Builtins::apply_mutating(
-                        &mut r,
-                        &method.name,
-                        argv,
-                        self.span(),
-                    )?;
-                    self.write_back_place(recv, r, scope)?;
-                    return Ok(ret);
                 }
                 let mut names = vec![method.name.clone()];
                 if method.mangled {
@@ -448,11 +523,11 @@ impl EvalCtx<'_> {
                 is_option,
             } => {
                 let v = self.eval_expr(value, scope)?;
-                let miss = if *is_option {
-                    matches!(v, CtValue::None(_))
-                } else {
-                    matches!(v, CtValue::ResErr(_))
-                };
+                // Always treat `None` as a miss: fragment lowering can leave
+                // `is_option=false` when the Option return type is unknown, and
+                // `??` must still unwrap (SortedSet.first() ?? -1, etc.).
+                let miss = matches!(v, CtValue::None(_))
+                    || (!*is_option && matches!(v, CtValue::ResErr(_)));
                 if !miss {
                     return match v {
                         CtValue::Some(inner) | CtValue::ResOk(inner) => Ok(*inner),
@@ -469,6 +544,9 @@ impl EvalCtx<'_> {
                     crate::Codegen::TIR::TOrFallback::Return(None) => {
                         self.pending_return = Some(CtValue::Unit);
                         Ok(CtValue::Unit)
+                    }
+                    crate::Codegen::TIR::TOrFallback::Panic { .. } => {
+                        Err(unsupported("or-fallback panic", self.span()))
                     }
                     _ => Err(unsupported("or-fallback form", self.span())),
                 }
@@ -503,14 +581,262 @@ impl EvalCtx<'_> {
                     args,
                 })
             }
-            TExprKind::HostCall(..) => Err(unsupported("expr `HostCall`", self.span())),
+            TExprKind::HostCall(host) => match host.as_ref() {
+                crate::Codegen::TIR::THostCall::ExpectSnapshot { value, .. } => {
+                    // Comptime/transcript: evaluate the wrapped value; snapshot I/O
+                    // is an AOT harness concern.
+                    let _ = self.eval_expr(value, scope)?;
+                    Ok(CtValue::Unit)
+                }
+                crate::Codegen::TIR::THostCall::NumericBounds { ty, member } => {
+                    use crate::AST::Type;
+                    match (ty, member.as_str()) {
+                        (Type::Float32, "MAX") => {
+                            Ok(CtValue::Float(CtFloat::literal(f32::MAX as f64, true)))
+                        }
+                        (Type::Float32, "MIN") => {
+                            Ok(CtValue::Float(CtFloat::literal(f32::MIN as f64, true)))
+                        }
+                        (Type::Float32, "NAN") => {
+                            Ok(CtValue::Float(CtFloat::literal(f32::NAN as f64, true)))
+                        }
+                        (Type::Float32, "INFINITY") => {
+                            Ok(CtValue::Float(CtFloat::literal(f32::INFINITY as f64, true)))
+                        }
+                        (Type::Float32, "NEG_INFINITY") => Ok(CtValue::Float(CtFloat::literal(
+                            f32::NEG_INFINITY as f64,
+                            true,
+                        ))),
+                        (Type::Float32, "EPSILON") => {
+                            Ok(CtValue::Float(CtFloat::literal(f32::EPSILON as f64, true)))
+                        }
+                        (Type::Float, "MAX") => {
+                            Ok(CtValue::Float(CtFloat::literal(f64::MAX, false)))
+                        }
+                        (Type::Float, "MIN") => {
+                            Ok(CtValue::Float(CtFloat::literal(f64::MIN, false)))
+                        }
+                        (Type::Float, "NAN") => {
+                            Ok(CtValue::Float(CtFloat::literal(f64::NAN, false)))
+                        }
+                        (Type::Float, "INFINITY") => {
+                            Ok(CtValue::Float(CtFloat::literal(f64::INFINITY, false)))
+                        }
+                        (Type::Float, "NEG_INFINITY") => {
+                            Ok(CtValue::Float(CtFloat::literal(f64::NEG_INFINITY, false)))
+                        }
+                        (Type::Float, "EPSILON") => {
+                            Ok(CtValue::Float(CtFloat::literal(f64::EPSILON, false)))
+                        }
+                        (Type::Int, "MAX") => Ok(CtValue::Int(i64::MAX)),
+                        (Type::Int, "MIN") => Ok(CtValue::Int(i64::MIN)),
+                        (Type::IntN { signed: false, bits: 8 }, "MAX") => {
+                            Ok(CtValue::Int(u8::MAX as i64))
+                        }
+                        (Type::IntN { signed: false, bits: 8 }, "MIN") => Ok(CtValue::Int(0)),
+                        (Type::IntN { signed: true, bits: 8 }, "MAX") => {
+                            Ok(CtValue::Int(i8::MAX as i64))
+                        }
+                        (Type::IntN { signed: true, bits: 8 }, "MIN") => {
+                            Ok(CtValue::Int(i8::MIN as i64))
+                        }
+                        (Type::IntN { signed: false, bits: 16 }, "MAX") => {
+                            Ok(CtValue::Int(u16::MAX as i64))
+                        }
+                        (Type::IntN { signed: false, bits: 16 }, "MIN") => Ok(CtValue::Int(0)),
+                        (Type::IntN { signed: true, bits: 16 }, "MAX") => {
+                            Ok(CtValue::Int(i16::MAX as i64))
+                        }
+                        (Type::IntN { signed: true, bits: 16 }, "MIN") => {
+                            Ok(CtValue::Int(i16::MIN as i64))
+                        }
+                        (Type::IntN { signed: false, bits: 32 }, "MAX") => {
+                            Ok(CtValue::Int(u32::MAX as i64))
+                        }
+                        (Type::IntN { signed: false, bits: 32 }, "MIN") => Ok(CtValue::Int(0)),
+                        (Type::IntN { signed: true, bits: 32 }, "MAX") => {
+                            Ok(CtValue::Int(i32::MAX as i64))
+                        }
+                        (Type::IntN { signed: true, bits: 32 }, "MIN") => {
+                            Ok(CtValue::Int(i32::MIN as i64))
+                        }
+                        (Type::IntN { signed: false, bits: 64 }, "MAX") => {
+                            Ok(CtValue::Int(i64::MAX))
+                        }
+                        (Type::IntN { signed: false, bits: 64 }, "MIN") => Ok(CtValue::Int(0)),
+                        _ => Err(unsupported(
+                            &format!("numeric bounds `{member}`"),
+                            self.span(),
+                        )),
+                    }
+                }
+                crate::Codegen::TIR::THostCall::FixedListIndex { base, index } => {
+                    let b = self.eval_expr(base, scope)?;
+                    let idx = as_int(&self.eval_expr(index, scope)?, self.span())?;
+                    match b {
+                        CtValue::List(xs) => {
+                            if idx < 0 || idx as usize >= xs.len() {
+                                Err(unsupported("fixed-list index oob", self.span()))
+                            } else {
+                                Ok(xs[idx as usize].clone())
+                            }
+                        }
+                        other => {
+                            if let Some(r) =
+                                crate::Comptime::MathLayout::lane_at(&other, idx, self.span())
+                            {
+                                r
+                            } else {
+                                Err(unsupported("fixed-list index recv", self.span()))
+                            }
+                        }
+                    }
+                }
+                crate::Codegen::TIR::THostCall::Method { recv, method, args } => {
+                    let mut r = self.eval_expr(recv, scope)?;
+                    let mut argv = Vec::with_capacity(args.len());
+                    for a in args {
+                        argv.push(self.eval_expr(a, scope)?);
+                    }
+                    let result = match crate::Comptime::Builtins::apply_mutating(
+                        &mut r,
+                        method,
+                        argv.clone(),
+                        self.span(),
+                    ) {
+                        Ok(v) => v,
+                        Err(_) => crate::Comptime::Builtins::apply_method(
+                            &r,
+                            method,
+                            argv,
+                            self.span(),
+                        )?,
+                    };
+                    self.write_back_place(recv, r, scope)?;
+                    Ok(result)
+                }
+                crate::Codegen::TIR::THostCall::Helper { helper, args } => {
+                    let leaf = helper
+                        .rsplit("::")
+                        .next()
+                        .unwrap_or(helper.as_str());
+                    let mut argv = Vec::with_capacity(args.len());
+                    for a in args {
+                        match a {
+                            crate::Codegen::TIR::THostArg::Expr(e)
+                            | crate::Codegen::TIR::THostArg::Borrow(e) => {
+                                argv.push(self.eval_expr(e, scope)?);
+                            }
+                            crate::Codegen::TIR::THostArg::Lambda(_) => {
+                                return Err(unsupported(
+                                    "expr `HostCall` helper lambda",
+                                    self.span(),
+                                ));
+                            }
+                        }
+                    }
+                    if leaf == "jet_std_clock_new" || leaf.ends_with("jet_std_clock_new") {
+                        let seed = match argv.first() {
+                            Some(CtValue::Int(n)) => *n,
+                            _ => {
+                                return Err(unsupported(
+                                    "Clock.new expects an Int seed",
+                                    self.span(),
+                                ));
+                            }
+                        };
+                        return Ok(CtValue::Struct {
+                            type_name: crate::Syntax::CLOCK_TYPE.to_string(),
+                            fields: vec![("now".to_string(), CtValue::Int(seed))],
+                        });
+                    }
+                    if leaf == "jet_std_clock_system" || leaf.ends_with("jet_std_clock_system") {
+                        return Ok(CtValue::Struct {
+                            type_name: crate::Syntax::CLOCK_TYPE.to_string(),
+                            fields: vec![("now".to_string(), CtValue::Int(0))],
+                        });
+                    }
+                    Err(unsupported(
+                        &format!("expr `HostCall` helper `{leaf}`"),
+                        self.span(),
+                    ))
+                }
+                other => {
+                    let tag = match other {
+                        crate::Codegen::TIR::THostCall::Helper { .. } => "Helper",
+                        crate::Codegen::TIR::THostCall::Method { .. } => "Method",
+                        crate::Codegen::TIR::THostCall::FixedListIndex { .. } => "FixedListIndex",
+                        crate::Codegen::TIR::THostCall::TypedText { .. } => "TypedText",
+                        crate::Codegen::TIR::THostCall::FnName(_) => "FnName",
+                        crate::Codegen::TIR::THostCall::GcEdit { .. } => "GcEdit",
+                        crate::Codegen::TIR::THostCall::GcRead { .. } => "GcRead",
+                        crate::Codegen::TIR::THostCall::OptionProbe { .. } => "OptionProbe",
+                        crate::Codegen::TIR::THostCall::StrMatchScan { .. } => "StrMatchScan",
+                        crate::Codegen::TIR::THostCall::BinMatchScan { .. } => "BinMatchScan",
+                        crate::Codegen::TIR::THostCall::TupleIndex { .. } => "TupleIndex",
+                        crate::Codegen::TIR::THostCall::SwitchSubjectField { .. } => {
+                            "SwitchSubjectField"
+                        }
+                        crate::Codegen::TIR::THostCall::YieldSend { .. } => "YieldSend",
+                        crate::Codegen::TIR::THostCall::TypedTextInterp { .. } => "TypedTextInterp",
+                        crate::Codegen::TIR::THostCall::ExpectSnapshot { .. } => "ExpectSnapshot",
+                        crate::Codegen::TIR::THostCall::EnvSet { .. } => "EnvSet",
+                        _ => "Other",
+                    };
+                    Err(unsupported(
+                        &format!("expr `HostCall` {tag}"),
+                        self.span(),
+                    ))
+                }
+            },
             TExprKind::DataEntriesToMap(..) => Err(unsupported("expr `DataEntriesToMap`", self.span())),
-            TExprKind::DistinctCtor { .. } => Err(unsupported("expr `DistinctCtor`", self.span())),
-            TExprKind::RangeCheckedCtor { .. } => {
-                Err(unsupported("expr `RangeCheckedCtor`", self.span()))
+            TExprKind::DistinctCtor { name: _, arg, base: _ } => {
+                // Distinct is a zero-cost nominal wrapper over its base scalar.
+                self.eval_expr(arg, scope)
             }
-            TExprKind::DistinctConvert { .. } => {
-                Err(unsupported("expr `DistinctConvert`", self.span()))
+            TExprKind::RangeCheckedCtor { name, arg } => {
+                let v = self.eval_expr(arg, scope)?;
+                Ok(CtValue::ResOk(Box::new(v)))
+                // Range bounds are enforced by sema for literals; dynamic checks
+                // reuse the same ok-wrapping Result shape as AOT try_new.
+                .map(|ok| {
+                    let _ = name;
+                    ok
+                })
+            }
+            TExprKind::DistinctConvert {
+                name: _,
+                arg,
+                op,
+                range,
+                fallible,
+            } => {
+                let v = self.eval_expr(arg, scope)?;
+                let converted = self.eval_numeric_op(&v, op, &arg.ty, &expr.ty)?;
+                let inner = match converted {
+                    CtValue::ResOk(v) => *v,
+                    CtValue::ResErr(e) if *fallible => return Ok(CtValue::ResErr(e)),
+                    other if !*fallible => other,
+                    other => other,
+                };
+                if let Some((lo, hi)) = range {
+                    let CtValue::Int(n) = &inner else {
+                        return Err(unsupported("distinct range check on non-Int", self.span()));
+                    };
+                    if *n < *lo || *n >= *hi {
+                        let err = CtValue::Str(format!("value doesn't fit in range {lo}..{hi}"));
+                        return Ok(if *fallible {
+                            CtValue::ResErr(Box::new(err))
+                        } else {
+                            return Err(unsupported("distinct out of range", self.span()));
+                        });
+                    }
+                }
+                Ok(if *fallible {
+                    CtValue::ResOk(Box::new(inner))
+                } else {
+                    inner
+                })
             }
             TExprKind::UnitConvert { .. } => Err(unsupported("expr `UnitConvert`", self.span())),
             TExprKind::MathBuiltin {
@@ -544,7 +870,7 @@ impl EvalCtx<'_> {
                     }
                 }
                 Err(unsupported(
-                    &format!("math `{type_name}.{func}`"),
+                    &format!("`{type_name}.{func}`"),
                     self.span(),
                 ))
             }
@@ -562,7 +888,37 @@ impl EvalCtx<'_> {
             TExprKind::ResourceNew(..) => Err(unsupported("expr `ResourceNew`", self.span())),
             TExprKind::ResourceTake(..) => Err(unsupported("expr `ResourceTake`", self.span())),
             TExprKind::AmbientInput { .. } => Err(unsupported("expr `AmbientInput`", self.span())),
-            TExprKind::RequireStop { .. } => Err(unsupported("expr `RequireStop`", self.span())),
+            TExprKind::RequireStop {
+                kind,
+                always_stops,
+                ..
+            } => {
+                if *always_stops {
+                    return Err(unsupported("panic(...)", self.span()));
+                }
+                match kind {
+                    crate::Codegen::TIR::TRequireKind::Require { cond, .. } => {
+                        let ok = self.eval_expr(cond, scope)?;
+                        if as_bool(&ok, self.span())? {
+                            Ok(CtValue::Unit)
+                        } else {
+                            Err(unsupported("require failed", self.span()))
+                        }
+                    }
+                    crate::Codegen::TIR::TRequireKind::RequireEq { left, right, .. } => {
+                        let l = self.eval_expr(left, scope)?;
+                        let r = self.eval_expr(right, scope)?;
+                        if l == r {
+                            Ok(CtValue::Unit)
+                        } else {
+                            Err(unsupported("require_eq failed", self.span()))
+                        }
+                    }
+                    crate::Codegen::TIR::TRequireKind::Panic { .. } => {
+                        Err(unsupported("panic(...)", self.span()))
+                    }
+                }
+            }
             TExprKind::LayoutCompare { .. } => Err(unsupported("expr `LayoutCompare`", self.span())),
             TExprKind::LayoutLit { .. } => Err(unsupported("expr `LayoutLit`", self.span())),
             TExprKind::IncDec {
@@ -596,7 +952,20 @@ impl EvalCtx<'_> {
             TExprKind::Deref(inner) => self.eval_expr(inner, scope),
             TExprKind::RawOf(inner) => self.eval_expr(inner, scope),
             TExprKind::AllocNew { .. } => Err(unsupported("expr `AllocNew`", self.span())),
-            TExprKind::JsonLit { .. } => Err(unsupported("expr `JsonLit`", self.span())),
+            TExprKind::JsonLit { variant, arg } => {
+                let payload = match arg {
+                    Some(inner) => Some(self.eval_expr(&inner.0, scope)?),
+                    None => None,
+                };
+                Ok(CtValue::Enum {
+                    type_name: "Json".to_string(),
+                    variant: variant.clone(),
+                    args: match payload {
+                        Some(v) => vec![(None, v)],
+                        None => Vec::new(),
+                    },
+                })
+            }
             TExprKind::DbValueLit { .. } => Err(unsupported("expr `DbValueLit`", self.span())),
             TExprKind::ListSpread { .. } => Err(unsupported("expr `ListSpread`", self.span())),
             TExprKind::ColumnarListLit { .. } => {
@@ -610,7 +979,14 @@ impl EvalCtx<'_> {
             }
             TExprKind::PoolSlot { .. } => Err(unsupported("expr `PoolSlot`", self.span())),
             TExprKind::IndexHook { .. } => Err(unsupported("expr `IndexHook`", self.span())),
-            TExprKind::MathLaneIndex { .. } => Err(unsupported("expr `MathLaneIndex`", self.span())),
+            TExprKind::MathLaneIndex { base, index, .. } => {
+                let b = self.eval_expr(base, scope)?;
+                let i = as_int(&self.eval_expr(index, scope)?, self.span())?;
+                match crate::Comptime::MathLayout::lane_at(&b, i, self.span()) {
+                    Some(r) => r,
+                    None => Err(unsupported("expr `MathLaneIndex`", self.span())),
+                }
+            }
             TExprKind::MathSwizzleRead { .. } => {
                 Err(unsupported("expr `MathSwizzleRead`", self.span()))
             }
@@ -634,6 +1010,17 @@ impl EvalCtx<'_> {
                             self.span(),
                         ) {
                             return res;
+                        }
+                        // Core-import alias may still lower as StaticCall when
+                        // function bodies were typed before imports propagated.
+                        if let Some(module) = self.core_imports.get(type_name) {
+                            return apply_core_call(
+                                module,
+                                &method.name,
+                                argv,
+                                self.span(),
+                                self.repl_mode,
+                            );
                         }
                         let candidates = [
                             format!("{type_name}::{}", method.name),
@@ -669,7 +1056,7 @@ impl EvalCtx<'_> {
                     }
                 }
             }
-            TExprKind::Todo { .. } => Err(unsupported("expr `Todo`", self.span())),
+            TExprKind::Todo { expected_type, .. } => Err(unsupported(&format!("expr Todo ({expected_type})"), self.span())),
             TExprKind::DistinctRaw(inner) => self.eval_expr(inner, scope),
             TExprKind::OptField {
                 base,
@@ -723,10 +1110,70 @@ impl EvalCtx<'_> {
             TExprKind::HostBorrowCallback { .. } => {
                 Err(unsupported("expr `HostBorrowCallback`", self.span()))
             }
-            TExprKind::NumericMethod { .. } => {
-                Err(unsupported("expr `NumericMethod`", self.span()))
+            TExprKind::NumericMethod { recv, op } => {
+                let v = self.eval_expr(recv, scope)?;
+                self.eval_numeric_op(&v, op, &recv.ty, &expr.ty)
             }
-            TExprKind::OverflowOpt { .. } => Err(unsupported("expr `OverflowOpt`", self.span())),
+            TExprKind::OverflowOpt {
+                prefix,
+                op,
+                lhs,
+                rhs,
+            } => {
+                let l = self.eval_expr(lhs, scope)?;
+                let r = self.eval_expr(rhs, scope)?;
+                let a = as_int(&l, self.span())?;
+                let b = as_int(&r, self.span())?;
+                let width_ty = match &expr.ty {
+                    Type::Option(inner) => inner.as_ref(),
+                    other => other,
+                };
+                let (signed, bits) = match width_ty {
+                    Type::IntN { signed, bits } => (*signed, *bits),
+                    Type::Int => (true, 64),
+                    Type::Named(n) => match n.as_str() {
+                        "U8" => (false, 8),
+                        "I8" => (true, 8),
+                        "U16" => (false, 16),
+                        "I16" => (true, 16),
+                        "U32" => (false, 32),
+                        "I32" => (true, 32),
+                        "U64" => (false, 64),
+                        "I64" | "Int" => (true, 64),
+                        _ => match &lhs.ty {
+                            Type::IntN { signed, bits } => (*signed, *bits),
+                            Type::Int => (true, 64),
+                            _ => (true, 64),
+                        },
+                    },
+                    _ => match &lhs.ty {
+                        Type::IntN { signed, bits } => (*signed, *bits),
+                        Type::Int => (true, 64),
+                        _ => (true, 64),
+                    },
+                };
+                let bin = match *op {
+                    "add" => crate::AST::BinOp::Add,
+                    "sub" => crate::AST::BinOp::Sub,
+                    "mul" => crate::AST::BinOp::Mul,
+                    "div" => crate::AST::BinOp::Div,
+                    other => {
+                        return Err(unsupported(
+                            &format!("OverflowOpt op `{other}`"),
+                            self.span(),
+                        ));
+                    }
+                };
+                crate::Comptime::MathLayout::overflow_opt(
+                    prefix,
+                    bin,
+                    a,
+                    b,
+                    signed,
+                    bits,
+                    self.span(),
+                )
+            }
             TExprKind::CoreClosureCall { .. } => {
                 Err(unsupported("expr `CoreClosureCall`", self.span()))
             }
@@ -776,6 +1223,112 @@ impl EvalCtx<'_> {
         }
     }
 
+    fn eval_numeric_op(
+        &self,
+        v: &CtValue,
+        op: &crate::Codegen::TIR::TNumericOp,
+        recv_ty: &crate::AST::Type,
+        result_ty: &crate::AST::Type,
+    ) -> Result<CtValue, Diagnostic> {
+        let _ = recv_ty;
+        use crate::Codegen::TIR::TNumericOp;
+        match op {
+            TNumericOp::BitCount { method, width } => {
+                let CtValue::Int(value) = v else {
+                    return Err(unsupported("numeric bit-count recv", self.span()));
+                };
+                let width = *width;
+                let mask = if width == 64 {
+                    u64::MAX
+                } else {
+                    (1_u64 << width) - 1
+                };
+                let bits = (*value as u64) & mask;
+                let ones = bits.count_ones();
+                let count = match method.as_str() {
+                    "count_ones" => ones,
+                    "count_zeros" => width - ones,
+                    "leading_zeros" => bits.leading_zeros() - (64 - width),
+                    "trailing_zeros" => bits.trailing_zeros().min(width),
+                    _ => {
+                        return Err(unsupported(&format!("numeric `{method}`"), self.span()));
+                    }
+                };
+                Ok(CtValue::Int(i64::from(count)))
+            }
+            TNumericOp::ToShow => Ok(CtValue::Str(v.jet_show())),
+            TNumericOp::Predicate(method) => {
+                crate::Comptime::Builtins::apply_method(v, method, vec![], self.span())
+            }
+            TNumericOp::Origin => Ok(CtValue::Str("untracked".to_string())),
+            TNumericOp::CastAs { .. } => {
+                // Width casts keep the same CtValue scalar representation.
+                Ok(v.clone())
+            }
+            TNumericOp::TryFrom {
+                dst_spelling,
+                host_kind,
+                ..
+            } => {
+                let CtValue::Int(n) = v else {
+                    return Err(unsupported("TryFrom expects Int", self.span()));
+                };
+                let (lo, hi) = match *host_kind {
+                    0 => (i8::MIN as i64, i8::MAX as i64),
+                    1 => (i16::MIN as i64, i16::MAX as i64),
+                    2 => (i32::MIN as i64, i32::MAX as i64),
+                    3 => (i64::MIN, i64::MAX),
+                    4 => (0, u8::MAX as i64),
+                    5 => (0, u16::MAX as i64),
+                    6 => (0, u32::MAX as i64),
+                    7 => (0, i64::MAX), // U64 in i64 domain for pure-parity
+                    _ => (i64::MIN, i64::MAX),
+                };
+                if *n < lo || *n > hi {
+                    return Ok(CtValue::ResErr(Box::new(CtValue::Str(format!(
+                        "value doesn't fit in {dst_spelling}"
+                    )))));
+                }
+                let _ = result_ty;
+                Ok(CtValue::ResOk(Box::new(CtValue::Int(*n))))
+            }
+            TNumericOp::FloatToInt {
+                dst_spelling,
+                lower,
+                upper_exclusive,
+                ..
+            } => {
+                let CtValue::Float(f) = v else {
+                    return Err(unsupported("FloatToInt expects Float", self.span()));
+                };
+                let lo: f64 = lower.parse().unwrap_or(f64::NEG_INFINITY);
+                let hi: f64 = upper_exclusive.parse().unwrap_or(f64::INFINITY);
+                if f.is_finite() && f.as_f64() >= lo && f.as_f64() < hi {
+                    Ok(CtValue::ResOk(Box::new(CtValue::Int(f.as_f64().trunc() as i64))))
+                } else {
+                    Ok(CtValue::ResErr(Box::new(CtValue::Str(format!(
+                        "value doesn't fit in {dst_spelling}"
+                    )))))
+                }
+            }
+            TNumericOp::FloatNarrow { dst_spelling } => {
+                let CtValue::Float(f) = v else {
+                    return Err(unsupported("FloatNarrow expects Float", self.span()));
+                };
+                let n = f.as_f64();
+                if n.is_finite() && n >= -(f32::MAX as f64) && n <= f32::MAX as f64 {
+                    Ok(CtValue::ResOk(Box::new(CtValue::Float(
+                        crate::AST::CtFloat::f32(n as f32),
+                    ))))
+                } else {
+                    Ok(CtValue::ResErr(Box::new(CtValue::Str(format!(
+                        "value doesn't fit in {dst_spelling}"
+                    )))))
+                }
+            }
+        }
+    }
+
     fn write_print(&mut self, text: &str, to_stderr: bool) -> Result<(), Diagnostic> {
         let Some(sink) = self.sink.as_mut() else {
             return Err(unsupported("print at comptime", self.span()));
@@ -812,6 +1365,23 @@ impl EvalCtx<'_> {
         if name == "eprint" {
             let text = argv.first().map(|v| v.jet_show()).unwrap_or_default();
             self.write_print(&text, true)?;
+            return Ok(CtValue::Unit);
+        }
+        // D-TOOL4: `expect(x)` — wrap Display text for `.snapshot()`.
+        if name == crate::Syntax::BUILTIN_EXPECT && self.funcs.get(name).is_none() {
+            if argv.len() != 1 {
+                return Err(unsupported("`expect` needs exactly one value", self.span()));
+            }
+            let shown = argv[0].jet_show();
+            return Ok(CtValue::Struct {
+                type_name: "__JetExpect__".to_string(),
+                fields: vec![("value".into(), CtValue::Str(shown))],
+            });
+        }
+        if name == "consume" && self.funcs.get(name).is_none() {
+            if argv.len() != 1 {
+                return Err(unsupported("`consume` discards exactly one value", self.span()));
+            }
             return Ok(CtValue::Unit);
         }
         // D-METADERIVE1=A: `emit(source_string)` — push a re-entry fragment.
@@ -862,6 +1432,9 @@ impl EvalCtx<'_> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<String, Diagnostic> {
         let _ = scope;
+        if let Some(text) = crate::Comptime::display_core_pure_value(v) {
+            return Ok(text);
+        }
         if let CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } = v {
             let key = format!("{type_name}::display");
             if let Some(func) = self.funcs.get(&key).copied() {
@@ -933,6 +1506,7 @@ impl EvalCtx<'_> {
             _ => v.debug_rust(),
         }
     }
+
 }
 
 fn eval_precise_builtin(

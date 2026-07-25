@@ -384,7 +384,7 @@ pub(crate) fn emit_tir_enum_arg(a: &TEnumArg, cx: &Cx) -> String {
 fn emit_numeric_op(recv: &str, op: &TNumericOp, cx: &Cx) -> String {
     match op {
         TNumericOp::Predicate(m) => format!("({recv}).{m}()"),
-        TNumericOp::BitCount(m) => format!("(({recv}).{m}() as i64)"),
+        TNumericOp::BitCount { method: m, .. } => format!("(({recv}).{m}() as i64)"),
         TNumericOp::ToShow => format!("({recv}).jet_show()"),
         TNumericOp::Origin => format!("{}jet_float_origin(&({recv}))", cx.root_prefix),
         TNumericOp::CastAs { dst_rust } => format!("(({recv}) as {dst_rust})"),

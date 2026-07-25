@@ -2494,7 +2494,9 @@ pub enum TNumericOp {
     Predicate(String),
     /// `count_ones`/`count_zeros`/`leading_zeros`/`trailing_zeros` →
     /// `(({recv}).{method}() as i64)` (Rust returns u32 → widen to Int).
-    BitCount(String),
+    /// `width` is the receiver's bit width (baked at lowering — TirBridge may
+    /// evaluate before locals carry `IntN` types).
+    BitCount { method: String, width: u32 },
     /// `origin` on a Float receiver → debug provenance note or `"untracked"`.
     Origin,
     /// A widening / float-targeted / float-sourced conversion → `(({recv}) as {dst})`.

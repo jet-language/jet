@@ -412,12 +412,16 @@ fn eval_expr_hook(
     req: &mut Comptime::TirBridge::ExprEvalRequest<'_>,
 ) -> Result<CtValue, Diagnostic> {
     let tir = lower_expr_for_eval(req.expr, req.globals, req.core_imports)?;
-    let cx = empty_cx();
+    let mut cx = empty_cx();
+    cx.core_imports = req.core_imports.clone();
     let lowered: Vec<TFunc> = req
         .funcs
         .values()
         .filter_map(|f| {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| TIR::lower_func(f, &cx))).ok()
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::Codegen::TIR::with_eval_fragment(|| TIR::lower_func(f, &cx))
+            }))
+            .ok()
         })
         .collect();
     let funcs: HashMap<String, &TFunc> = lowered.iter().map(|f| (f.name.clone(), f)).collect();
@@ -454,12 +458,16 @@ fn eval_block_hook(
     req: &mut Comptime::TirBridge::BlockEvalRequest<'_>,
 ) -> Result<Comptime::TirBridge::StmtOutcome, Diagnostic> {
     let tir = lower_stmts_for_eval(req.stmts, req.globals, req.core_imports)?;
-    let cx = empty_cx();
+    let mut cx = empty_cx();
+    cx.core_imports = req.core_imports.clone();
     let lowered: Vec<TFunc> = req
         .funcs
         .values()
         .filter_map(|f| {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| TIR::lower_func(f, &cx))).ok()
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::Codegen::TIR::with_eval_fragment(|| TIR::lower_func(f, &cx))
+            }))
+            .ok()
         })
         .collect();
     let funcs: HashMap<String, &TFunc> = lowered.iter().map(|f| (f.name.clone(), f)).collect();

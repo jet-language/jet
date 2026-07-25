@@ -67,7 +67,8 @@ pub(super) fn eval_builtin(
         TBuiltinOp::BeforeView => apply_method(recv, "before", args, span),
         TBuiltinOp::Keys => apply_method(recv, "keys", args, span),
         TBuiltinOp::Values => apply_method(recv, "values", args, span),
-        TBuiltinOp::ContainsKey => apply_method(recv, "contains_key", args, span),
+        // Surface is `.has_key`; emit spells `contains_key` on the Rust map API.
+        TBuiltinOp::ContainsKey => apply_method(recv, "has_key", args, span),
         TBuiltinOp::ToString => apply_method(recv, "to_string", args, span),
         TBuiltinOp::MatchGroup => apply_method(recv, "group", args, span),
         TBuiltinOp::Take => apply_method(recv, "take", args, span),
