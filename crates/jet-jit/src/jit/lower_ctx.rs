@@ -3330,6 +3330,14 @@ impl LowerCtx<'_, '_> {
 
 
     fn lower_map_lit(&mut self, entries: &[(TExpr, TExpr)]) -> Result<Value, String> {
+        self.lower_map_lit_pairs(entries.iter().map(|(k, v)| (k, v)))
+    }
+
+    /// Direct map construction on an SSA handle (no shared `__jet_m` local).
+    fn lower_map_lit_pairs<'a, I>(&mut self, entries: I) -> Result<Value, String>
+    where
+        I: IntoIterator<Item = (&'a TExpr, &'a TExpr)>,
+    {
         let new_ref = self
             .module
             .declare_func_in_func(self.host.coll.map_new, self.b.func);
@@ -3363,6 +3371,55 @@ impl LowerCtx<'_, '_> {
             self.b.ins().call(insert_ref, &[handle, key, val]);
         }
         Ok(handle)
+    }
+
+    /// #779 MapLit desugar: `IfExpr(true) { let m = {}; m[k]=v; …; m }`.
+    /// Nested map lits reuse one `__jet_m` local; the generic IfExpr path then
+    /// returns the innermost map. Rebuild from IndexAssigns on an SSA handle.
+    fn map_lit_desugar_entries<'a>(
+        cond: &'a TIfCond,
+        then_body: &'a [TStmt],
+        then_value: &'a TExpr,
+    ) -> Option<Vec<(&'a TExpr, &'a TExpr)>> {
+        let TIfCond::Plain(c) = cond else {
+            return None;
+        };
+        if !matches!(&c.kind, TExprKind::BoolLit(true)) {
+            return None;
+        }
+        let TExprKind::Local(result) = &then_value.kind else {
+            return None;
+        };
+        let (first, rest) = then_body.split_first()?;
+        let TStmt::Let { name, init, .. } = first else {
+            return None;
+        };
+        if name != &result.name {
+            return None;
+        }
+        if !matches!(&init.kind, TExprKind::MapLit(entries) if entries.is_empty()) {
+            return None;
+        }
+        let mut entries = Vec::with_capacity(rest.len());
+        for stmt in rest {
+            let TStmt::IndexAssign {
+                base,
+                index,
+                is_map: true,
+                value,
+            } = stmt
+            else {
+                return None;
+            };
+            let TExprKind::Local(base_local) = &base.kind else {
+                return None;
+            };
+            if base_local.name != *name {
+                return None;
+            }
+            entries.push((index, value));
+        }
+        Some(entries)
     }
 
     fn lower_i64_value_list(&mut self, vals: &[Value]) -> Result<Value, String> {
@@ -3471,6 +3528,11 @@ impl LowerCtx<'_, '_> {
                 else_body,
                 else_value,
             } => {
+                if let Some(entries) =
+                    Self::map_lit_desugar_entries(cond.as_ref(), then_body, then_value)
+                {
+                    return self.lower_map_lit_pairs(entries);
+                }
                 let cond_val = match cond.as_ref() {
                     TIfCond::Plain(cond) => self.lower_expr(cond)?,
                     TIfCond::And { .. } => return Err("jit if-expression binding conjunction unsupported".to_string()),

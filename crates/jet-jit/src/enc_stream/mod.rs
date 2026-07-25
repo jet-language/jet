@@ -1045,10 +1045,7 @@ pub(crate) extern "C" fn jet_jit_cbor_reader(file: i64, limits: i64) -> i64 {
 pub(crate) extern "C" fn jet_jit_xml_writer(file: i64, limits: i64) -> i64 {
     let w = match take_file_writer(file) {
         Ok(w) => w,
-        Err(e) => {
-            eprintln!("xml_writer take_file: {e}");
-            return result_err_msg(&e);
-        }
+        Err(e) => return result_err_msg(&e),
     };
     let lim = if limits == 0 {
         runtime::jet_std::EncodingLimits::safe()
@@ -1061,13 +1058,9 @@ pub(crate) extern "C" fn jet_jit_xml_writer(file: i64, limits: i64) -> i64 {
             let h = Concurrency::with_runtime_mut(|rt| {
                 push_codec!(rt, xml_writers, XmlWriterSlot, writer)
             });
-            eprintln!("xml_writer ok handle={h}");
             push_ok_handle(h)
         }
-        Err(e) => {
-            eprintln!("xml_writer err: {e}");
-            result_err_msg(&e.to_string())
-        }
+        Err(e) => result_err_msg(&e.to_string()),
     }
 }
 
@@ -1313,26 +1306,15 @@ pub(crate) extern "C" fn jet_jit_cbor_reader_next(handle: i64) -> i64 {
 
 pub(crate) extern "C" fn jet_jit_xml_writer_write(handle: i64, tree: i64) -> i64 {
     let Some(dt) = read_datatree(tree) else {
-        eprintln!("xml_write bad DataTree handle={tree}");
         return result_err_msg("bad DataTree");
     };
-    eprintln!("xml_write handle={handle} tree={dt:?}");
     let st = to_stream_tree(&dt);
     match with_writer!(xml_writers, XmlWriterSlot, handle, |w| {
         runtime::enc_xml_writer_write(w, st.clone())
     }) {
-        Some(Ok(())) => {
-            eprintln!("xml_write ok");
-            push_ok_handle(0)
-        }
-        Some(Err(e)) => {
-            eprintln!("xml_write err: {e}");
-            result_err_msg(&e.to_string())
-        }
-        None => {
-            eprintln!("xml_write bad writer");
-            result_err_msg("bad XMLWriter")
-        }
+        Some(Ok(())) => push_ok_handle(0),
+        Some(Err(e)) => result_err_msg(&e.to_string()),
+        None => result_err_msg("bad XMLWriter"),
     }
 }
 
