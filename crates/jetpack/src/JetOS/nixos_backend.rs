@@ -742,7 +742,7 @@ const CONFIGURATION_PROOF_SERVICE: &str = r#"
       Type = "oneshot";
       RemainAfterExit = true;
     };
-    path = [ pkgs.systemd pkgs.procps pkgs.jq pkgs.gawk pkgs.gnused pkgs.coreutils ];
+    path = [ pkgs.bash pkgs.systemd pkgs.procps pkgs.jq pkgs.gawk pkgs.gnused pkgs.coreutils ];
     script = ''
       deadline=$((SECONDS + 300))
       while [ "$SECONDS" -lt "$deadline" ]; do
@@ -758,7 +758,7 @@ const CONFIGURATION_PROOF_SERVICE: &str = r#"
         echo "NIXOS_COMPARISON_DEBUG dm=$dm shell=$shell_pid session=$session stype=$stype" > /dev/ttyS0 || true
         if [ "$dm" = "active" ] && [ -n "$shell_pid" ] && [ "$stype" = "wayland" ]; then
           os_name=$(. /etc/os-release; printf '%s' "$NAME")
-          prompt='NixOS @@HOST@@'
+          prompt=$(bash --noprofile --norc -c '. /etc/profile >/dev/null 2>&1; printf "%s" "$PS1"')
           banner=$(head -n1 /etc/issue)
           jq -cn \
             --arg host "$(cat /proc/sys/kernel/hostname)" \
@@ -1036,7 +1036,7 @@ pub(super) fn cmd_migrate_compare_nixos(
         let run = run_migration_build_and_boot(&stage, &disk)?;
         publish_migration_bundle(out, system, &mapping, &disk, &plan, &run)
     })();
-    let _ = fs::remove_dir_all(&stage);
+    let result = finish_private_stage(&stage, result);
     match result {
         Ok(()) => {
             theme.ok(&format!(
@@ -1055,6 +1055,31 @@ pub(super) fn cmd_migrate_compare_nixos(
             );
             2
         }
+    }
+}
+
+fn finish_private_stage(stage: &Path, result: Result<(), String>) -> Result<(), String> {
+    finish_private_stage_with(stage, result, |path| fs::remove_dir_all(path))
+}
+
+fn finish_private_stage_with(
+    stage: &Path,
+    result: Result<(), String>,
+    cleanup: impl FnOnce(&Path) -> std::io::Result<()>,
+) -> Result<(), String> {
+    let cleanup = match cleanup(stage) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "removing private staging directory `{}` failed: {error}",
+            stage.display()
+        )),
+    };
+    match (result, cleanup) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(root), Ok(())) => Err(root),
+        (Ok(()), Err(cleanup)) => Err(cleanup),
+        (Err(root), Err(cleanup)) => Err(format!("{root}; cleanup also failed: {cleanup}")),
     }
 }
 
@@ -1155,7 +1180,7 @@ fn nix_build(dir: &Path, target: &str) -> Result<PathBuf, String> {
     );
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
-        let tail = nix_error_tail(&stderr);
+        let tail = bounded_redacted_tail(&stderr);
         return Err(format!(
             "`nix build .#{target}` failed; {tail}"
         ));
@@ -1169,20 +1194,60 @@ fn nix_build(dir: &Path, target: &str) -> Result<PathBuf, String> {
     Ok(PathBuf::from(path))
 }
 
-fn nix_error_tail(stderr: &str) -> String {
-    let mut lines = stderr
+const DIAGNOSTIC_MAX_LINES: usize = 12;
+const DIAGNOSTIC_MAX_BYTES: usize = 4096;
+
+fn redact_secret_assignments(text: &str) -> String {
+    let mut redacted = text.to_string();
+    for marker in [
+        "JET_SECRET=",
+        "SECRET=",
+        "TOKEN=",
+        "PASSWORD=",
+        "API_KEY=",
+        "secret=",
+        "token=",
+        "password=",
+        "api_key=",
+    ] {
+        let mut offset = 0;
+        while let Some(found) = redacted[offset..].find(marker) {
+            let value_start = offset + found + marker.len();
+            let value_end = redacted[value_start..]
+                .find(char::is_whitespace)
+                .map(|end| value_start + end)
+                .unwrap_or(redacted.len());
+            redacted.replace_range(value_start..value_end, "<redacted>");
+            offset = value_start + "<redacted>".len();
+        }
+    }
+    redacted
+}
+
+fn bounded_redacted_tail(text: &str) -> String {
+    let redacted = redact_secret_assignments(text);
+    let mut lines = redacted
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .rev()
-        .take(12)
+        .take(DIAGNOSTIC_MAX_LINES)
         .collect::<Vec<_>>();
     lines.reverse();
-    if lines.is_empty() {
+    let joined = if lines.is_empty() {
         "nix wrote no stderr".to_string()
     } else {
         lines.join(" | ")
+    };
+    if joined.len() <= DIAGNOSTIC_MAX_BYTES {
+        return joined;
     }
+    let prefix = "…";
+    let mut start = joined.len() - (DIAGNOSTIC_MAX_BYTES - prefix.len());
+    while !joined.is_char_boundary(start) {
+        start += 1;
+    }
+    format!("{prefix}{}", &joined[start..])
 }
 
 fn find_qcow2(disk_out: &Path) -> Result<PathBuf, String> {
@@ -1261,15 +1326,9 @@ fn poll_for_guest_proof(
         // stderr instead of burning the whole timeout.
         if let Ok(Some(status)) = child.try_wait() {
             let stderr = fs::read_to_string(stderr_path).unwrap_or_default();
-            let line = stderr
-                .lines()
-                .map(str::trim)
-                .find(|line| !line.is_empty())
-                .unwrap_or("no stderr output");
-            let excerpt: String = line.chars().take(240).collect();
+            let excerpt = bounded_redacted_tail(&stderr);
             return Err(format!(
-                "QEMU exited ({status}) before the guest proof marker; {excerpt}; full stderr at `{}`",
-                stderr_path.display()
+                "QEMU exited ({status}) before the guest proof marker; {excerpt}"
             ));
         }
         if start.elapsed() > timeout {
@@ -1283,20 +1342,45 @@ fn poll_for_guest_proof(
     }
 }
 
-fn require_nixos_guest_fact(report: &str) -> Result<(), String> {
-    let fact = JSON::parse(report).map_err(|error| format!("invalid guest fact JSON: {error}"))?;
-    let field = |name| fact.get(name).and_then(JSON::Json::as_str);
-    let honest = field("proof").as_deref() == Ok("live-desktop")
-        && field("os_release").as_deref() == Ok("NixOS")
-        && field("prompt").is_ok_and(|value| value.starts_with("NixOS "))
-        && field("banner").as_deref() == Ok("NixOS comparison guest")
+#[derive(Debug)]
+struct ObservedGuestIdentity {
+    os_release: String,
+    prompt: String,
+    banner: String,
+}
+
+fn require_nixos_guest_fact(report: &str) -> Result<ObservedGuestIdentity, String> {
+    let fact = JSON::parse(report).map_err(|error| {
+        format!(
+            "invalid guest fact JSON: {error}; {}",
+            bounded_redacted_tail(report)
+        )
+    })?;
+    let field = |name| {
+        fact.get(name)
+            .and_then(JSON::Json::as_str)
+            .map(str::to_string)
+    };
+    let proof = field("proof")?;
+    let os_release = field("os_release")?;
+    let prompt = field("prompt")?;
+    let banner = field("banner")?;
+    let honest = proof == "live-desktop"
+        && os_release == "NixOS"
+        && prompt.starts_with("NixOS ")
+        && banner == "NixOS comparison guest"
         && !report.to_ascii_lowercase().contains("jetos");
     if !honest {
         return Err(format!(
-            "guest fact did not prove honest NixOS os-release, prompt, banner, and live desktop: {report}"
+            "guest fact did not prove honest NixOS os-release, observed prompt, banner, and live desktop: {}",
+            bounded_redacted_tail(report)
         ));
     }
-    Ok(())
+    Ok(ObservedGuestIdentity {
+        os_release,
+        prompt,
+        banner,
+    })
 }
 
 #[cfg(not(unix))]
@@ -1358,7 +1442,7 @@ fn publish_migration_bundle(
     plan_path: &Path,
     run: &MigrationRun,
 ) -> Result<(), String> {
-    require_nixos_guest_fact(&run.report)?;
+    let observed = require_nixos_guest_fact(&run.report)?;
     let parent = out
         .parent()
         .filter(|path| !path.as_os_str().is_empty())
@@ -1385,9 +1469,9 @@ fn publish_migration_bundle(
         let guest_fact = format!(
             "{{\"kind\":\"nixos.migration.vmtest.guest-fact\",\"host\":{},\"os_release\":{},\"prompt\":{},\"banner\":{},\"report\":{}}}\n",
             JSON::quote(&system.name),
-            JSON::quote("NixOS"),
-            JSON::quote(&format!("NixOS {}", system.name)),
-            JSON::quote("NixOS comparison guest"),
+            JSON::quote(&observed.os_release),
+            JSON::quote(&observed.prompt),
+            JSON::quote(&observed.banner),
             run.report.trim()
         );
         fs::write(publish.join("guest-fact.json"), &guest_fact)
@@ -1417,10 +1501,7 @@ fn publish_migration_bundle(
         fs::rename(&publish, out)
             .map_err(|error| format!("publishing `{}` failed: {error}", out.display()))
     })();
-    if result.is_err() {
-        let _ = fs::remove_dir_all(&publish);
-    }
-    result
+    finish_private_stage(&publish, result)
 }
 
 // Unit-tested directly: the real-guest CLI path is gated by `require_real_vm_tools`
@@ -1562,6 +1643,11 @@ mod tests {
         assert!(configuration.contains("export PS1='NixOS \\h \\w \\$ '"));
         assert!(configuration.contains("environment.etc.issue.text = \"NixOS comparison guest"));
         assert!(configuration.contains("systemd.services.nixos-comparison-proof = {"));
+        assert!(configuration.contains("path = [ pkgs.bash pkgs.systemd"));
+        assert!(configuration.contains(
+            "prompt=$(bash --noprofile --norc -c '. /etc/profile >/dev/null 2>&1; printf \"%s\" \"$PS1\"')"
+        ));
+        assert!(!configuration.contains("prompt='NixOS"));
         assert!(configuration.contains("pgrep -u nate -f gnome-shell"));
         assert!(configuration.contains("NIXOS_COMPARISON_PROOF:"));
     }
@@ -1641,7 +1727,7 @@ mod tests {
     }
 
     #[test]
-    fn nixos_migration_vmtest_guest_fact_requires_honest_identity() {
+    fn migration_bundle_preserves_observed_guest_identity() {
         let root = std::env::temp_dir().join(format!(
             "nixos-migration-guest-fact-{}",
             std::process::id()
@@ -1656,7 +1742,7 @@ mod tests {
         fs::write(&plan, b"{}").unwrap();
         let system = full_system();
         let mapping = map_system_to_nixos(&system, &table_with_nixpkgs()).unwrap();
-        let report = r#"{"host":"halcyon-gnome","os_release":"NixOS","prompt":"NixOS halcyon-gnome","banner":"NixOS comparison guest","proof":"live-desktop"}"#;
+        let report = r#"{"host":"halcyon-gnome","os_release":"NixOS","prompt":"NixOS observed-profile","banner":"NixOS comparison guest","proof":"live-desktop"}"#;
         let run = MigrationRun {
             report: report.to_string(),
             screenshot,
@@ -1667,7 +1753,8 @@ mod tests {
         let fact = fs::read_to_string(out.join("guest-fact.json")).unwrap();
         assert!(fact.contains("\"kind\":\"nixos.migration.vmtest.guest-fact\""));
         assert!(fact.contains("\"os_release\":\"NixOS\""));
-        assert!(fact.contains("\"prompt\":\"NixOS halcyon-gnome\""));
+        assert!(fact.contains("\"prompt\":\"NixOS observed-profile\""));
+        assert!(!fact.contains("\"prompt\":\"NixOS halcyon-gnome\""));
         assert!(fact.contains("\"banner\":\"NixOS comparison guest\""));
         assert!(!fact.to_ascii_lowercase().contains("jetos"));
         assert!(out.join("system-image.qcow2").is_file());
@@ -1677,16 +1764,46 @@ mod tests {
     }
 
     #[test]
-    fn nix_failure_tail_is_bounded_and_keeps_the_root_error() {
+    fn failure_tail_is_line_and_byte_bounded_and_redacted() {
         let stderr = (0..20)
             .map(|line| format!("context-{line}"))
-            .chain(["error: generated Nix option is invalid".to_string()])
+            .chain([format!(
+                "error: {} SECRET=hunter2",
+                "x".repeat(DIAGNOSTIC_MAX_BYTES * 2)
+            )])
             .collect::<Vec<_>>()
             .join("\n");
-        let tail = nix_error_tail(&stderr);
+        let tail = bounded_redacted_tail(&stderr);
         assert!(!tail.contains("context-0"));
-        assert!(tail.contains("context-19"));
-        assert!(tail.contains("error: generated Nix option is invalid"));
-        assert_eq!(tail.split(" | ").count(), 12);
+        assert!(tail.len() <= DIAGNOSTIC_MAX_BYTES);
+        assert!(!tail.contains("hunter2"));
+        assert!(tail.contains("SECRET=<redacted>"));
+    }
+
+    #[test]
+    fn malformed_guest_report_is_bounded_and_redacted() {
+        let report = format!(
+            "{{not-json {} TOKEN=do-not-print",
+            "x".repeat(DIAGNOSTIC_MAX_BYTES * 2)
+        );
+        let error = require_nixos_guest_fact(&report).unwrap_err();
+        assert!(error.len() <= DIAGNOSTIC_MAX_BYTES + 128);
+        assert!(!error.contains("do-not-print"));
+        assert!(error.contains("TOKEN=<redacted>"));
+    }
+
+    #[test]
+    fn cleanup_failure_preserves_the_root_cause() {
+        let stage = Path::new("/private-stage");
+        let error = finish_private_stage_with(
+            stage,
+            Err("root build failure".to_string()),
+            |_| Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied")),
+        )
+        .unwrap_err();
+        assert!(error.contains("root build failure"));
+        assert!(error.contains("cleanup also failed"));
+        assert!(error.contains("/private-stage"));
+        assert!(error.contains("denied"));
     }
 }

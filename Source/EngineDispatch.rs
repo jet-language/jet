@@ -137,7 +137,7 @@ pub fn dispatch(engine: &str, verb: &str, argv: &[String]) -> i32 {
         Err(code) => return code,
     };
 
-    match Command::new(&bin).args(argv).status() {
+    match engine_command(&bin).args(argv).status() {
         Ok(status) => status.code().unwrap_or(ExitCodes::USER_ERROR),
         Err(e) => {
             eprintln!("error: couldn't run `{}`: {}", bin.display(), e);
@@ -157,7 +157,7 @@ pub fn capture(
     cwd: &Path,
 ) -> Result<Output, i32> {
     let bin = compatible_engine(engine, verb)?;
-    Command::new(&bin)
+    engine_command(&bin)
         .args(argv)
         .current_dir(cwd)
         .output()
@@ -165,6 +165,17 @@ pub fn capture(
             eprintln!("error: couldn't run `{}`: {}", bin.display(), e);
             ExitCodes::USER_ERROR
         })
+}
+
+fn engine_command(bin: &Path) -> Command {
+    let mut command = Command::new(bin);
+    command
+        .env_remove(jet::Syntax::ROOT_ENGINE_DISPATCH_PID_ENV)
+        .env(
+            jet::Syntax::ROOT_ENGINE_DISPATCH_PID_ENV,
+            std::process::id().to_string(),
+        );
+    command
 }
 
 fn compatible_engine(engine: &str, verb: &str) -> Result<PathBuf, i32> {
@@ -242,6 +253,18 @@ mod tests {
     fn find_engine_binary_in_none_when_absent() {
         let d1 = scratch("absent");
         assert_eq!(find_engine_binary_in(vec![d1].into_iter(), "jetpack"), None);
+    }
+
+    #[test]
+    fn engine_command_sets_canonical_root_dispatch_pid() {
+        let command = engine_command(Path::new("jetpack"));
+        let marker = command
+            .get_envs()
+            .find(|(name, _)| *name == jet::Syntax::ROOT_ENGINE_DISPATCH_PID_ENV)
+            .and_then(|(_, value)| value)
+            .and_then(|value| value.to_str());
+        let expected = std::process::id().to_string();
+        assert_eq!(marker, Some(expected.as_str()));
     }
 
     #[test]

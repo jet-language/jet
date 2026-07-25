@@ -343,6 +343,14 @@ pub(super) fn cmd_lift(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
 }
 
 pub(super) fn cmd_migrate(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+    if !invoked_by_root_jet() {
+        theme.error(
+            "NixOS comparison is available only through root `jet`",
+            "D-JOS-MIGRATIONVERB1=A authorizes only `jet os migrate compare-nixos`; direct engine front doors cannot reach the migration backend.",
+            "run `jet os migrate compare-nixos <host> --out <dir>`.",
+        );
+        return 2;
+    }
     let Some((action, rest)) = args.split_first() else {
         theme.error(
             "migration needs an action",
@@ -402,6 +410,38 @@ pub(super) fn cmd_migrate(theme: &Theme, args: &[String], flags: &OsFlags) -> i3
         return 2;
     };
     cmd_migrate_compare_nixos(theme, &plan.table, &system, Path::new(out), flags)
+}
+
+#[cfg(target_os = "linux")]
+fn invoked_by_root_jet() -> bool {
+    let Ok(parent) = std::env::var(Syntax::ROOT_ENGINE_DISPATCH_PID_ENV) else {
+        return false;
+    };
+    let Ok(parent) = parent.parse::<u32>() else {
+        return false;
+    };
+    let Ok(status) = fs::read_to_string("/proc/self/status") else {
+        return false;
+    };
+    let Some(actual_parent) = status
+        .lines()
+        .find_map(|line| line.strip_prefix("PPid:"))
+        .and_then(|value| value.trim().parse::<u32>().ok())
+    else {
+        return false;
+    };
+    if parent != actual_parent {
+        return false;
+    }
+    fs::read_link(format!("/proc/{parent}/exe"))
+        .ok()
+        .and_then(|path| path.file_stem().map(|name| name == Syntax::BINARY_NAME))
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn invoked_by_root_jet() -> bool {
+    false
 }
 
 pub(super) fn cmd_image(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {

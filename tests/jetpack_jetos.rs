@@ -3131,7 +3131,7 @@ fn os_vm_prove_real_tier_is_retired_to_explicit_migration() {
 fn os_migrate_compare_nixos_is_explicit_and_proof_gated() {
     let root = Scratch::new("os-migrate-nixos-root");
     let out_dir = root.join("published");
-    let out = jetpack()
+    let out = jet()
         .args([
             "os",
             "migrate",
@@ -3162,6 +3162,43 @@ fn os_migrate_compare_nixos_is_explicit_and_proof_gated() {
         !out_dir.exists(),
         "comparison artifacts must not publish before guest proof"
     );
+}
+
+#[test]
+fn nixos_migration_rejects_direct_engine_front_doors() {
+    let marker = std::process::id().to_string();
+    for (name, mut command, prefix) in [
+        ("jetpack", jetpack(), &["os", "migrate"][..]),
+        ("jetos", jetos(), &["migrate"][..]),
+    ] {
+        let root = Scratch::new("os-direct-migration-rejected");
+        let out_dir = root.join("should-not-publish");
+        let out = command
+            .args(prefix)
+            .args([
+                "compare-nixos",
+                "halcyon",
+                "--out",
+                out_dir.to_str().unwrap(),
+                "--no-color",
+                "--offline",
+            ])
+            .current_dir(config_example_dir())
+            .env("JETPACK_ROOT", &root.path)
+            .env("JET_INTERNAL_ROOT_DISPATCH_PID", &marker)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(2), "{name}: {stderr}");
+        assert!(
+            stderr.contains("available only through root `jet`"),
+            "{name}: {stderr}"
+        );
+        assert!(
+            !out_dir.exists(),
+            "{name} reached migration publication"
+        );
+    }
 }
 
 #[test]
@@ -3197,9 +3234,16 @@ fn nixos_migration_backend_has_no_product_path_or_rebranding_rewrite() {
     assert!(!vm.contains("nixos_backend"), "{vm}");
     assert!(!generation.contains("nixos_backend"), "{generation}");
     assert!(!backend.contains("distroName = \"jetos\""), "{backend}");
-    assert!(backend.contains("fn nix_error_tail(stderr: &str) -> String"));
-    assert!(backend.contains(".take(12)"));
-    assert!(backend.contains("let _ = fs::remove_dir_all(&stage);"));
+    assert!(backend.contains("fn bounded_redacted_tail(text: &str) -> String"));
+    assert!(backend.contains("const DIAGNOSTIC_MAX_LINES: usize = 12;"));
+    assert!(backend.contains("const DIAGNOSTIC_MAX_BYTES: usize = 4096;"));
+    let service = backend
+        .split_once("const CONFIGURATION_PROOF_SERVICE")
+        .and_then(|(_, rest)| rest.split_once("fn render_configuration_nix"))
+        .map(|(service, _)| service)
+        .unwrap();
+    assert!(service.contains(". /etc/profile"));
+    assert!(!service.contains("prompt='NixOS"));
     assert!(syntax.contains("pub const OS_VERB_MIGRATE: &str = \"migrate\";"));
     assert!(syntax.contains(
         "pub const OS_MIGRATION_COMPARE_NIXOS: &str = \"compare-nixos\";"

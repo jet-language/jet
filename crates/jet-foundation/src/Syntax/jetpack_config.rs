@@ -53,6 +53,10 @@ pub const TRUST_FILE: &str = "trust";
 /// gate's own implementation surface.
 pub const ENGINE_PROTOCOL_FLAG: &str = "--engine-protocol";
 
+/// Internal routing provenance: root `jet` overwrites this with its PID before
+/// dispatching an engine process. Migration code also verifies the live parent.
+pub const ROOT_ENGINE_DISPATCH_PID_ENV: &str = "JET_INTERNAL_ROOT_DISPATCH_PID";
+
 /// D-JPK14: the default visible prompt label inside a Jetpack shell.
 pub const JETPACK_PROMPT_LABEL: &str = "jetpack";
 
