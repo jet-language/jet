@@ -7,8 +7,8 @@ impl<'a> Checker<'a> {
         pub(crate) fn check_if(&mut self, ifs: &mut IfStmt) {
             let before = self.moved.clone();
             let mut after = before.clone();
-            // D-UNINIT1 engine (reused by D-UNINIT-SENTINEL1): definite-assignment
-            // merge. A `:= uninit` name is initialized after the `if` only if it is
+            // D-UNINIT1 engine (reused by D-UNINIT-SENTINEL2): definite-assignment
+            // merge. A `Type.{ uninit }` name is initialized after the `if` only if it is
             // written on *every* path; it stays uninit if still-uninit in any branch
             // (or, with no `else`, on the fall-through).
             let before_u = self.uninit.clone();

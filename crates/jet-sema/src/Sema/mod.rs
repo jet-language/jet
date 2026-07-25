@@ -1168,10 +1168,11 @@ pub(crate) struct Checker<'a> {
     /// with the existing statement-tail analysis, this makes local window
     /// conflicts end at last use instead of lexical scope end.
     views_used_in_stmt: HashSet<String>,
-    /// D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL1: `:= uninit`
-    /// bindings not yet definitely written — maps name → the decl span. A read
-    /// while still in this map is E0420 (write-before-read proof); a write
-    /// clears it. Branch-merged in `check_if` (intersection of "initialized").
+    /// D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL2:
+    /// `Type.{ uninit }` bindings not yet definitely written — maps name → the
+    /// decl span. A read while still in this map is E0420 (write-before-read
+    /// proof); a write clears it. Branch-merged in `check_if` (intersection of
+    /// "initialized").
     uninit: HashMap<String, Span>,
     /// True while inferring an expression that the generated Rust will only
     /// borrow (method receivers, field/index bases, lvalues). Field reads in

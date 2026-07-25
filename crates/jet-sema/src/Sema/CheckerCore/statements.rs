@@ -240,8 +240,9 @@ impl<'a> Checker<'a> {
                         }
                     }
                     self.note_move_if_direct_ident(value);
-                    // D-UNINIT-SENTINEL1: a plain `name = …` initializes a `:= uninit`
-                    // binding; a compound `name += …` reads it first, so it's a
+                    // D-UNINIT-SENTINEL2: a plain `name = …` initializes a
+                    // `Type.{ uninit }` binding (clears the not-yet-written flag);
+                    // a compound `name += …` reads it first, so it's a
                     // read-before-write.
                     if let LValue::Local { name, name_span } = &*target {
                         if self.uninit.contains_key(name) {

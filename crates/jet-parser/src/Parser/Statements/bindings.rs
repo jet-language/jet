@@ -78,9 +78,8 @@ impl<'a> Parser<'a> {
             ));
         }
         let init = self.expr()?;
-        // Thin D-UNINIT-SENTINEL2 trigger: `name := Type.{ uninit }`. Keeps a
-        // working uninit path after typed bindings retire; #782 owns remaining
-        // SENTINEL2 docs/UI polish.
+        // D-UNINIT-SENTINEL2: `name := Type.{ uninit }` — uninit only as a
+        // whole typed-literal body. Mutable bindings only (`:=`).
         if mutable {
             if let Some((ty, ty_span, marker_span)) = typed_lit_uninit_head(&init) {
                 return Ok(Binding {
@@ -528,8 +527,9 @@ impl<'a> Parser<'a> {
     // --- expressions -----------------------------------------------------
 }
 
-/// D-UNINIT-SENTINEL2 thin trigger: `Type.{ uninit }` as a whole typed-literal
-/// body. Returns `(head_type, ty_span, uninit_span)`.
+/// D-UNINIT-SENTINEL2: `Type.{ uninit }` as a whole typed-literal body.
+/// Returns `(head_type, ty_span, uninit_span)`. Non-whole bodies are ordinary
+/// typed literals (not this trigger).
 fn typed_lit_uninit_head(init: &Expr) -> Option<(Type, Span, Span)> {
     let Expr::TypedLit { head, body, span } = init else {
         return None;

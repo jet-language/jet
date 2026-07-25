@@ -1154,7 +1154,7 @@ parse error (E0426) pointing at the new spelling —
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E0420 | `` `{name}` may be read before it is given a value ``. | `` `{name}` was declared `:= uninit`, so it holds no value until you write to it — this read could see garbage ``. | Write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`). |
+| E0420 | `` `{name}` may be read before it is given a value ``. | `` `{name}` was declared with `Type.{ uninit }`, so it holds no value until you write to it — this read could see garbage ``. | Write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`). |
 | E0421 | `` `uninit` needs a typed-literal head ``. | An uninitialized binding has no value to infer its type from, so the type must head the literal. | Write `` `{name} := <Type>.{ uninit }` ``, e.g. `` `buffer := [U8#4096].{ uninit }` ``. |
 | E0423 | `` `uninit` needs a plain-data type ``. | The named type may own heap memory or need cleanup, so leaving it uninitialized is unsafe. | Use plain data — a number, `Bool`, `Char`, `U8`, or a fixed array of those (e.g. `[4096]U8`). |
 | E0424 | `` `uninit` needs the low-level memory tier ``. | `` `uninit` skips the automatic zero-fill — an expert-tier operation ``. | Add `use core.mem` at the top of this file to opt in. |

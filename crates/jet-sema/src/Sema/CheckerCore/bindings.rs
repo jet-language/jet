@@ -132,12 +132,11 @@ impl<'a> Checker<'a> {
             self.diags.extend(check_meta_attr_fields(meta));
         }
 
-        /// D-UNINIT-SENTINEL1: `name: Type := uninit` — gate on `use core.mem`,
+        /// D-UNINIT-SENTINEL2: `name := Type.{ uninit }` — gate on `use core.mem`,
         /// restrict to plain-data types (E0423), declare the binding, and record
         /// it as not-yet-written so the dataflow can prove write-before-read
         /// (E0420). Reuses D-UNINIT1's engine unchanged; only the surface syntax
-        /// (and this function's diagnostic wording) moved off the retired
-        /// `#Uninit` marker.
+        /// moved (SENTINEL1 annotated RHS → SENTINEL2 typed-literal body).
         pub(crate) fn check_uninit_binding(&mut self, b: &mut Binding) {
             let has_mem = self
                 .core_imports
@@ -196,10 +195,10 @@ impl<'a> Checker<'a> {
             self.uninit.insert(b.name.clone(), b.name_span);
         }
     
-        /// D-UNINIT1 engine (reused by D-UNINIT-SENTINEL1): clear a `:= uninit`
-        /// binding's not-yet-written flag when it is passed as a `mut` argument (the
-        /// fill case) — the callee writes it. Call before inferring the args so the
-        /// read-hook doesn't flag the fill site.
+        /// D-UNINIT1 engine (reused by D-UNINIT-SENTINEL2): clear a
+        /// `Type.{ uninit }` binding's not-yet-written flag when it is passed as a
+        /// `mut` argument (the fill case) — the callee writes it. Call before
+        /// inferring the args so the read-hook doesn't flag the fill site.
         pub(crate) fn clear_uninit_mut_args(&mut self, args: &[CallArg]) {
             if self.uninit.is_empty() {
                 return;

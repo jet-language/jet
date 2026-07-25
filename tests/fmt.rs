@@ -2122,16 +2122,14 @@ fn run() {
 
 #[test]
 fn fmt_preserves_uninit_sentinel() {
-    // D-BIND-BARE1 interim: bare Int.{0} until #782 — the binding's `init` AST
-    // node is a harmless never-evaluated placeholder, so the formatter must
-    // special-case `b.uninit` and print the `uninit` keyword literally
-    // instead of formatting the placeholder (own-CLAUDE-memory rule: new
-    // syntax needs a formatter round-trip test, not just a parser).
+    // D-UNINIT-SENTINEL2: formatter special-cases `b.uninit` and prints
+    // `Type.{ uninit }` from the binding type (init AST is a never-evaluated
+    // placeholder). Round-trip must stay byte-identical.
     let src = "\
 use core.mem
 
 fn run() {
-    n := Int.{0}
+    n := Int.{ uninit }
     n = 99
     print(n)
 }
