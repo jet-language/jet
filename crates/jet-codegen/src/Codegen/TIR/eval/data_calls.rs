@@ -173,6 +173,19 @@ impl EvalCtx<'_> {
                 Ok(CtValue::Int(n))
             }
             "status" => apply_core_call("core.data", "status", Vec::new(), span, self.repl_mode),
+            "require_bridge" => {
+                let provider = match self.eval_expr(&args[0], scope)? {
+                    CtValue::Str(s) => s,
+                    _ => return Err(unsupported("`data.require_bridge` needs a String", span)),
+                };
+                apply_core_call(
+                    "core.data",
+                    "require_bridge",
+                    vec![CtValue::Str(provider)],
+                    span,
+                    self.repl_mode,
+                )
+            }
             "mean" | "sum" | "min" | "max" | "median" | "variance" | "stddev" => {
                 let values = as_float_list(&self.eval_expr(&args[0], scope)?, span)?;
                 self.eval_stat(method, &values, checked)

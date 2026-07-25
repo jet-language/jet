@@ -105,49 +105,146 @@ fn jet_data_rolling_mean(values: &Vec<f64>, width: i64) -> Vec<f64> {
     out
 }
 
+fn jet_data_status_native(step: &str) -> jet_std::DataStatus {
+    jet_std::DataStatus {
+        step: step.to_string(),
+        path: "native".to_string(),
+        copy: "none".to_string(),
+        ownership: "jet".to_string(),
+        trust: "native".to_string(),
+        fallback: "none".to_string(),
+        replacement: "native".to_string(),
+    }
+}
+
+fn jet_data_bridge_tool_on_path(tool: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|dir| dir.join(tool).is_file())
+}
+
+/// Live availability. Python binder is Planned and gpu.* is unshipped — both
+/// stay unavailable even if host tools exist. R becomes `available` only when
+/// Rscript is on PATH *and* the expert opt-in `JET_DATA_R_BRIDGE=1` is set
+/// (keeps default goldens deterministic; tests prove the success path).
+fn jet_data_bridge_path(step: &str) -> &'static str {
+    match step {
+        "r.*"
+            if jet_data_bridge_tool_on_path("Rscript")
+                && std::env::var("JET_DATA_R_BRIDGE").as_deref() == Ok("1") =>
+        {
+            "available"
+        }
+        _ => "unavailable",
+    }
+}
+
+/// D-DATA-BRIDGE1 / D-DATA-STATUS1: one honest row per provider root.
+/// Unavailable bridges keep path=`unavailable` and never claim readiness.
+fn jet_data_bridge_status(step: &str) -> jet_std::DataStatus {
+    let path = jet_data_bridge_path(step);
+    match step {
+        "py.*" => jet_std::DataStatus {
+            step: "py.*".to_string(),
+            path: path.to_string(),
+            copy: "owned-copy".to_string(),
+            ownership: "python-sidecar".to_string(),
+            trust: "untrusted-foreign".to_string(),
+            fallback: "none".to_string(),
+            replacement: "core.data native table/series/stats".to_string(),
+        },
+        "r.*" => jet_std::DataStatus {
+            step: "r.*".to_string(),
+            path: path.to_string(),
+            copy: "owned-copy".to_string(),
+            ownership: "r-sidecar".to_string(),
+            trust: "untrusted-foreign".to_string(),
+            fallback: "none".to_string(),
+            replacement: "core.data.Table typed round-trip".to_string(),
+        },
+        "gpu.*" => jet_std::DataStatus {
+            step: "gpu.*".to_string(),
+            path: path.to_string(),
+            copy: "device-transfer".to_string(),
+            ownership: "device-buffer".to_string(),
+            trust: "untrusted-accelerator".to_string(),
+            fallback: "none".to_string(),
+            replacement: "core.data / Tensor native CPU path".to_string(),
+        },
+        _ => jet_std::DataStatus {
+            step: step.to_string(),
+            path: "unavailable".to_string(),
+            copy: "unknown".to_string(),
+            ownership: "unknown".to_string(),
+            trust: "untrusted-foreign".to_string(),
+            fallback: "none".to_string(),
+            replacement: "core.data native".to_string(),
+        },
+    }
+}
+
 fn jet_data_status() -> Vec<jet_std::DataStatus> {
     vec![
-        jet_std::DataStatus {
-            step: "core.data.csv".to_string(),
-            path: "native".to_string(),
-            replacement: "native".to_string(),
-        },
-        jet_std::DataStatus {
-            step: "core.data.stats".to_string(),
-            path: "native".to_string(),
-            replacement: "native".to_string(),
-        },
-        jet_std::DataStatus {
-            step: "core.data.table".to_string(),
-            path: "native".to_string(),
-            replacement: "native".to_string(),
-        },
-        jet_std::DataStatus {
-            step: "core.data.lazy".to_string(),
-            path: "native".to_string(),
-            replacement: "native".to_string(),
-        },
-        jet_std::DataStatus {
-            step: "core.data.missing".to_string(),
-            path: "native".to_string(),
-            replacement: "native".to_string(),
-        },
-        jet_std::DataStatus {
-            step: "core.data.schema".to_string(),
-            path: "native".to_string(),
-            replacement: "native".to_string(),
-        },
-        jet_std::DataStatus {
-            step: "core.data.json".to_string(),
-            path: "native".to_string(),
-            replacement: "native".to_string(),
-        },
-        jet_std::DataStatus {
-            step: "py.* / r.* / gpu.*".to_string(),
-            path: "bridge-ready".to_string(),
-            replacement: "report via data.status() and jet inspect dossier data".to_string(),
-        },
+        jet_data_status_native("core.data.csv"),
+        jet_data_status_native("core.data.stats"),
+        jet_data_status_native("core.data.table"),
+        jet_data_status_native("core.data.lazy"),
+        jet_data_status_native("core.data.missing"),
+        jet_data_status_native("core.data.schema"),
+        jet_data_status_native("core.data.json"),
+        jet_data_bridge_status("py.*"),
+        jet_data_bridge_status("r.*"),
+        jet_data_bridge_status("gpu.*"),
     ]
+}
+
+fn jet_data_normalize_bridge_provider(provider: &str) -> Option<&'static str> {
+    let lower = provider.trim().trim_end_matches('.').to_ascii_lowercase();
+    let p = lower.strip_suffix(".*").unwrap_or(lower.as_str());
+    match p {
+        "py" | "python" => Some("py.*"),
+        "r" => Some("r.*"),
+        "gpu" | "cuda" | "metal" | "vulkan" | "webgpu" => Some("gpu.*"),
+        _ => None,
+    }
+}
+
+fn jet_data_bridge_err(
+    kind: jet_std::DataErrorKind,
+    reason: impl Into<String>,
+) -> jet_std::DataError {
+    // Local builder: DataFmt is included before DataFlow's jet_data_error.
+    jet_std::DataError {
+        kind,
+        operation: "require_bridge".to_string(),
+        row: None,
+        column: None,
+        index: None,
+        reason: reason.into(),
+        cause: None,
+    }
+}
+
+/// Fail closed when a Python/R/GPU bridge is not available. Never invent results.
+fn jet_data_require_bridge(provider: &String) -> Result<(), jet_std::DataError> {
+    let Some(step) = jet_data_normalize_bridge_provider(provider) else {
+        return Err(jet_data_bridge_err(
+            jet_std::DataErrorKind::InvalidArgument,
+            format!("unknown data bridge provider `{provider}`; expected py, r, or gpu"),
+        ));
+    };
+    let status = jet_data_bridge_status(step);
+    if status.path == "available" {
+        return Ok(());
+    }
+    Err(jet_data_bridge_err(
+        jet_std::DataErrorKind::Bridge,
+        format!(
+            "{step} unavailable (copy={}, ownership={}, trust={}, fallback={}, replacement={})",
+            status.copy, status.ownership, status.trust, status.fallback, status.replacement
+        ),
+    ))
 }
 
 fn jet_data_bar_text(groups: &Vec<jet_std::DataGroup>) -> String {

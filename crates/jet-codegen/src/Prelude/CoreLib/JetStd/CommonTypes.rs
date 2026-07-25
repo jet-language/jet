@@ -367,7 +367,7 @@
         pub mean: f64,
     }
 
-    // D-DATAFLOW1=A: typed streaming + invalid-data policy (edition 2027 surface).
+    /// D-DATAFLOW1=A: typed streaming + invalid-data policy (edition 2027 surface).
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum DataErrorKind {
         Decode,
@@ -378,6 +378,23 @@
         NonFinite,
         Overflow,
         State,
+        /// D-DATA-BRIDGE1: foreign/accelerator bridge unavailable or refused.
+        Bridge,
+    }
+    impl std::fmt::Display for DataErrorKind {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{self:?}")
+        }
+    }
+    impl super::JetShow for DataErrorKind {
+        fn jet_show(&self) -> String {
+            format!("{self:?}")
+        }
+    }
+    impl super::JetDisplay for DataErrorKind {
+        fn jet_display(&self) -> String {
+            format!("{self:?}")
+        }
     }
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct DataError {
@@ -473,10 +490,16 @@
         pub type_name: String,
     }
 
+    /// D-DATA-STATUS1 / D-DATA-BRIDGE1: native or bridge step facts.
+    /// Bridges must declare copy, ownership, trust, fallback, and replacement.
     #[derive(Clone, Debug, PartialEq)]
     pub struct DataStatus {
         pub step: String,
         pub path: String,
+        pub copy: String,
+        pub ownership: String,
+        pub trust: String,
+        pub fallback: String,
         pub replacement: String,
     }
 

@@ -1686,7 +1686,8 @@ lambdas, so a misspelled row field is a Jet field error before codegen.
 | `inner_join(left, right, l => key, r => key)` | `[DataJoin<L, R>] ? DataError` | Stable matching row pairs with SQL join multiplicity |
 | `left_join(left, right, l => key, r => key)` | `[DataJoin<L, R?>] ? DataError` | Stable row pairs; unmatched left rows carry `None` |
 | `pivot_sum(rows, row => row_key, row => col_key, row => value)` | `[DataPivotCell] ? DataError` | Distinct row/column sum cells |
-| `status()` | `[DataStatus]` | Native/bridge replacement facts for data workflows |
+| `status()` | `[DataStatus]` | Native and bridge facts: path, copy, ownership, trust, fallback, replacement |
+| `require_bridge(provider)` | `() ? DataError` | Fail closed for unavailable `py` / `r` / `gpu` bridges; never fabricates results |
 | `bar_text(groups)` / `bar_svg(groups)` | `String ? DataError` | Deterministic text/SVG bar output; reject negative/non-finite geometry |
 
 `DataStream<T>.next()` returns `T? ? DataError`: clean EOF is stable `None`,
@@ -1701,7 +1702,14 @@ still report the static element model — schema is type-driven, not sample-driv
 Missing values are ordinary Jet optionals (`T?`) inside a series, not a second
 sentinel type. `DataGroup` fields: `.key: String`, `.count: Int`, `.sum: Float`,
 `.mean: Float`. `DataJoin<L, R>` fields are `.left: L` and `.right: R`; the
-left-join form uses `R?`. `DataStatus` fields: `.step`, `.path`, `.replacement`.
+left-join form uses `R?`. `DataStatus` fields: `.step`, `.path`, `.copy`,
+`.ownership`, `.trust`, `.fallback`, `.replacement`. Bridge rows are separate
+`py.*`, `r.*`, and `gpu.*` entries (D-DATA-BRIDGE1); unavailable bridges keep
+`path=unavailable` by default and `data.require_bridge` returns
+`DataErrorKind.Bridge` with those facts in `.reason` — never a silent
+fallback. R becomes `available` only when Rscript is on PATH and the expert
+opt-in `JET_DATA_R_BRIDGE=1` is set; Python and GPU stay unavailable until
+their binders ship.
 
 ```jet
 use core.data as data

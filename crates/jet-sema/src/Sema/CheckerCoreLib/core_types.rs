@@ -450,7 +450,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     }
     if type_name == "DataStatus" {
         return match field {
-            "step" | "path" | "replacement" => Some(Type::String),
+            "step" | "path" | "copy" | "ownership" | "trust" | "fallback" | "replacement" => {
+                Some(Type::String)
+            }
             _ => None,
         };
     }
@@ -1344,7 +1346,7 @@ pub(crate) fn core_encoding_variants(
     let units: &[&str] = match enum_name {
         "EncodingFormat" => &["JSON", "JSONL", "CSV", "XML", "CBOR"],
         "EncodingErrorKind" => &["Syntax", "Truncated", "Unsupported", "Limit", "IO", "State"],
-        "DataErrorKind" => &["Decode", "Limit", "IO", "Empty", "InvalidArgument", "NonFinite", "Overflow", "State"],
+        "DataErrorKind" => &["Decode", "Limit", "IO", "Empty", "InvalidArgument", "NonFinite", "Overflow", "State", "Bridge"],
         "DataEvent" => &["Null", "ArrayStart", "ArrayEnd", "ObjectStart", "ObjectEnd"],
         "CBORErrorKind" => &["Syntax", "Truncated", "Unsupported", "Limit", "TypeMismatch", "TrailingData", "NonCanonical"],
         "XMLReason" => &["InvalidEncoding", "Malformed", "MismatchedTag", "InvalidName", "Namespace", "DuplicateAttribute", "Entity", "EntityCycle", "Limit", "Canonicalization", "Shape", "Unsupported"],

@@ -593,6 +593,10 @@ pub fn core_fixed_sig(
             vec![],
             Some(Type::List(Box::new(Type::Named("DataStatus".to_string())))),
         )),
+        ("core.data", "require_bridge") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(unit_ty(), Type::Named("DataError".to_string()))),
+        )),
         ("core.data", "bar_text" | "bar_svg") => {
             let args = vec![(
                 read,

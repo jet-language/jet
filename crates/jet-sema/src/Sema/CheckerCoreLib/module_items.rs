@@ -263,6 +263,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "group_sum",
             "group_mean",
             "status",
+            "require_bridge",
             "bar_text",
             "bar_svg",
         ],

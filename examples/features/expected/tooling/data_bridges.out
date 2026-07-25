@@ -1,0 +1,7 @@
+py.* path=unavailable copy=owned-copy ownership=python-sidecar trust=untrusted-foreign fallback=none replacement=core.data native table/series/stats
+r.* path=unavailable copy=owned-copy ownership=r-sidecar trust=untrusted-foreign fallback=none replacement=core.data.Table typed round-trip
+gpu.* path=unavailable copy=device-transfer ownership=device-buffer trust=untrusted-accelerator fallback=none replacement=core.data / Tensor native CPU path
+py: Bridge require_bridge: py.* unavailable (copy=owned-copy, ownership=python-sidecar, trust=untrusted-foreign, fallback=none, replacement=core.data native table/series/stats)
+r: Bridge require_bridge: r.* unavailable (copy=owned-copy, ownership=r-sidecar, trust=untrusted-foreign, fallback=none, replacement=core.data.Table typed round-trip)
+gpu: Bridge require_bridge: gpu.* unavailable (copy=device-transfer, ownership=device-buffer, trust=untrusted-accelerator, fallback=none, replacement=core.data / Tensor native CPU path)
+nope: InvalidArgument require_bridge: unknown data bridge provider `nope`; expected py, r, or gpu

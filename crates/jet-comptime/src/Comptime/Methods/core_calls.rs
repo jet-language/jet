@@ -1806,19 +1806,107 @@ pub fn apply_core_call(
         ("core.data", "status") => Ok(CtValue::List(
             super::super::DataLite::status_rows()
                 .into_iter()
-                .map(|(step, path, replacement)| CtValue::Struct {
-                    type_name: "DataStatus".to_string(),
-                    fields: vec![
-                        ("step".to_string(), CtValue::Str(step.to_string())),
-                        ("path".to_string(), CtValue::Str(path.to_string())),
-                        (
-                            "replacement".to_string(),
-                            CtValue::Str(replacement.to_string()),
-                        ),
-                    ],
-                })
+                .map(
+                    |(step, path, copy, ownership, trust, fallback, replacement)| {
+                        CtValue::Struct {
+                            type_name: "DataStatus".to_string(),
+                            fields: vec![
+                                ("step".to_string(), CtValue::Str(step.to_string())),
+                                ("path".to_string(), CtValue::Str(path.to_string())),
+                                ("copy".to_string(), CtValue::Str(copy.to_string())),
+                                (
+                                    "ownership".to_string(),
+                                    CtValue::Str(ownership.to_string()),
+                                ),
+                                ("trust".to_string(), CtValue::Str(trust.to_string())),
+                                (
+                                    "fallback".to_string(),
+                                    CtValue::Str(fallback.to_string()),
+                                ),
+                                (
+                                    "replacement".to_string(),
+                                    CtValue::Str(replacement.to_string()),
+                                ),
+                            ],
+                        }
+                    },
+                )
                 .collect(),
         )),
+        ("core.data", "require_bridge") => {
+            let provider = as_string(one(0)?, span)?;
+            let Some(step) = super::super::DataLite::normalize_bridge_provider(&provider) else {
+                return Ok(CtValue::ResErr(Box::new(CtValue::Struct {
+                    type_name: "DataError".to_string(),
+                    fields: vec![
+                        (
+                            "kind".to_string(),
+                            CtValue::Enum {
+                                type_name: "DataErrorKind".to_string(),
+                                variant: "InvalidArgument".to_string(),
+                                args: Vec::new(),
+                            },
+                        ),
+                        (
+                            "operation".to_string(),
+                            CtValue::Str("require_bridge".to_string()),
+                        ),
+                        ("row".to_string(), CtValue::None(crate::AST::Type::Int)),
+                        ("column".to_string(), CtValue::None(crate::AST::Type::Int)),
+                        ("index".to_string(), CtValue::None(crate::AST::Type::Int)),
+                        (
+                            "reason".to_string(),
+                            CtValue::Str(format!(
+                                "unknown data bridge provider `{provider}`; expected py, r, or gpu"
+                            )),
+                        ),
+                        (
+                            "cause".to_string(),
+                            CtValue::None(crate::AST::Type::Named("EncodingError".to_string())),
+                        ),
+                    ],
+                })));
+            };
+            let row = super::super::DataLite::status_rows()
+                .into_iter()
+                .find(|(s, ..)| *s == step)
+                .expect("bridge row");
+            let (_s, path, copy, ownership, trust, fallback, replacement) = row;
+            if path == "available" {
+                Ok(CtValue::ResOk(Box::new(CtValue::Unit)))
+            } else {
+                Ok(CtValue::ResErr(Box::new(CtValue::Struct {
+                    type_name: "DataError".to_string(),
+                    fields: vec![
+                        (
+                            "kind".to_string(),
+                            CtValue::Enum {
+                                type_name: "DataErrorKind".to_string(),
+                                variant: "Bridge".to_string(),
+                                args: Vec::new(),
+                            },
+                        ),
+                        (
+                            "operation".to_string(),
+                            CtValue::Str("require_bridge".to_string()),
+                        ),
+                        ("row".to_string(), CtValue::None(crate::AST::Type::Int)),
+                        ("column".to_string(), CtValue::None(crate::AST::Type::Int)),
+                        ("index".to_string(), CtValue::None(crate::AST::Type::Int)),
+                        (
+                            "reason".to_string(),
+                            CtValue::Str(format!(
+                                "{step} unavailable (copy={copy}, ownership={ownership}, trust={trust}, fallback={fallback}, replacement={replacement})"
+                            )),
+                        ),
+                        (
+                            "cause".to_string(),
+                            CtValue::None(crate::AST::Type::Named("EncodingError".to_string())),
+                        ),
+                    ],
+                })))
+            }
+        },
         ("core.data", "bar_text") => Ok(CtValue::Str(super::super::DataLite::bar_text(
             &as_data_groups(one(0)?, span)?,
         ))),
