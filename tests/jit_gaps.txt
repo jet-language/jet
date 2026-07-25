@@ -25,6 +25,7 @@ covered:
   basics/multiline_string
   basics/named_args
   basics/numbers
+  basics/printable
   basics/range_step
   basics/switch
   basics/tuples
@@ -72,6 +73,7 @@ covered:
   functions/lambda_inference
   lowlevel/cross
   lowlevel/layout_c
+  memory/copy_verb
   memory/ref_field
   modules/inline_module
   modules/module_inline_sibling
@@ -107,6 +109,7 @@ covered:
   types/enums
   types/external_methods
   types/inferred_new
+  types/option_combinators
   types/range_types
   types/structs
   types/tags_and_traits
@@ -128,13 +131,12 @@ gaps:
   basics/callbacks: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
   basics/first_hour: run: jit core call unsupported
   basics/pattern_matching: describe_conn: jit unknown local `id`
-  basics/printable: run: jit string interp type unsupported: Named("Greeting")
   basics/variadics_spread: join: jit list spread unsupported
   cli/positionals: lower_jit_program returned None (no zero-parameter runnable entry)
   cli/subcommands: lower_jit_program returned None (no zero-parameter runnable entry)
   cli/typed_entry_args: lower_jit_program returned None (no zero-parameter runnable entry)
   collections/deque: run: jit static `std::collections::VecDeque::new`
-  collections/dynamic-array-view: run: jit clone unsupported type: List(Named("Incident")), other expression
+  collections/dynamic-array-view: run: jit builtin method unsupported
   collections/fixed_arrays: run: jit let type unsupported: FixedList { elem: IntN { signed: false, bits: 8 }, len: 3, len_symbol: None }
   collections/index_hook: Grid::get: jit field type unsupported: List(Named("Cell"))
   collections/iter_hook: BagIter::next: jit place borrow unsupported
@@ -234,11 +236,10 @@ gaps:
   memory/arena: run: automatic resource cleanup uses AOT fallback
   memory/arena_parse: run: automatic resource cleanup uses AOT fallback
   memory/arena_regions: run: automatic resource cleanup uses AOT fallback
-  memory/copy_verb: run: jit clone unsupported type: Named("Ticket"), local t
   memory/entity_tree: run: jit static `jet_std::JetPool::new`
   memory/entity_world: tick: jit for-in collection type unsupported: List(Apply { name: "Id", args: [Named("Player")] })
   memory/expiring_secret: run: jit host/default/uninit/ct-lit unsupported
-  memory/gc_cyclic: promoted_cycle: jit clone unsupported type: Named("Link"), other expression
+  memory/gc_cyclic: promoted_cycle: jit clone unsupported type: Named("Link")
   memory/no_alloc_policy: run: jit call arg wrapper unsupported
   memory/ownership: jit param type unsupported: Fn { params: [String], ret: Some(Int), effect_bound: None }
   memory/parameter_modes: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
@@ -327,12 +328,11 @@ gaps:
   tooling/provenance_track: run: jit numeric origin unsupported
   tooling/testing_helpers: run: jit core call unsupported
   tooling/todo_hole: not_yet: jit todo expression unsupported
-  types/display_debug: run: jit string interp type unsupported: Named("User")
+  types/display_debug: run: jit string interp Debug type unsupported: Named("User")
   types/generic_types: run: jit call to unknown function `make_pair`
   types/measurement: run: jit core call unsupported
   types/no_any_alternatives: run: jit call to unknown function `echo`
   types/option: run: jit if-let pattern unsupported
-  types/option_combinators: lookup_price: lookup_price: verifier: VerifierErrors([VerifierError { location: inst8, context: Some("v8 = iadd.f64 v6, v7  ; v6 = 0x1.3fd70a3d70a3dp4, v7 = 1"), message: "has an invalid controlling type f64 (allowed set is ValueTypeSet { lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: true, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false }, ints: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: true, 4: true, 5: true, 6: true, 7: true }, floats: cranelift_bitset::scalar::ScalarBitSet<u8> { 0: false, 1: false, 2: false, 3: false, 4: false, 5: false, 6: false, 7: false }, dynamic_lanes: cranelift_bitset::scalar::ScalarBitSet<u16> { 0: false, 1: true, 2: true, 3: true, 4: true, 5: true, 6: true, 7: true, 8: true, 9: false, 10: false, 11: false, 12: false, 13: false, 14: false, 15: false } })" }, VerifierError { location: inst8, context: Some("v8 = iadd.f64 v6, v7  ; v6 = 0x1.3fd70a3d70a3dp4, v7 = 1"), message: "arg 1 (v7) has type i64, expected f64" }, VerifierError { location: inst9, context: Some("return v8"), message: "result 0 has type f64, must match function signature of i64" }])
   types/optional_result_variants: run: jit enum arm is not a variant pattern
   types/patchable: run: jit missing method `Employee::apply`
   types/recursive_enum: run: jit print type unsupported
