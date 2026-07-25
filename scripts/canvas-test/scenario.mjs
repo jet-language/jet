@@ -844,6 +844,44 @@ async function expectRenderedComment(ctx, title, label) {
     || region.y >= canvas.height) {
     throw new Error(`${label} has no visible text geometry: ${JSON.stringify({ region, canvas })}`);
   }
+  const pixels = await ctx.driver.evaluate(`(() => {
+    const region = ${JSON.stringify(region)};
+    const canvas = document.getElementById("jet-canvas-view");
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const context = canvas.getContext("2d");
+    const sample = (x, y, w, h) => {
+      const sx = Math.max(0, Math.floor(x * scaleX));
+      const sy = Math.max(0, Math.floor(y * scaleY));
+      const sw = Math.max(1, Math.min(canvas.width - sx, Math.floor(w * scaleX)));
+      const sh = Math.max(1, Math.min(canvas.height - sy, Math.floor(h * scaleY)));
+      const data = context.getImageData(sx, sy, sw, sh).data;
+      let red = 0, green = 0, blue = 0, bright = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        red += data[i];
+        green += data[i + 1];
+        blue += data[i + 2];
+        if (data[i] >= 190 && data[i + 1] >= 210 && data[i + 2] >= 225 && data[i + 3] >= 128) bright += 1;
+      }
+      const count = data.length / 4;
+      return { red: red / count, green: green / count, blue: blue / count, bright, count };
+    };
+    const width = Math.max(24, Math.min(region.w - 24, 180));
+    const title = sample(region.x + 10, region.y + 8, width, Math.min(24, region.h - 12));
+    const inside = sample(region.x + 12, region.y + 4, width, 4);
+    const outside = sample(region.x + 12, Math.max(0, region.y - 8), width, 4);
+    return {
+      brightTitlePixels: title.bright,
+      fillDelta: Math.abs(inside.red - outside.red)
+        + Math.abs(inside.green - outside.green)
+        + Math.abs(inside.blue - outside.blue),
+      titleSamplePixels: title.count
+    };
+  })()`);
+  if (pixels.brightTitlePixels < 8 || pixels.fillDelta < 5) {
+    throw new Error(`${label} has no observed Canvas title/fill pixels: ${JSON.stringify({ region, pixels })}`);
+  }
   return region;
 }
 
@@ -1429,6 +1467,10 @@ fn run() {
     await ctx.openCanvas();
     await ctx.switchGraph("compute");
     const before = await ctx.source();
+    const initialComputeDoc = await ctx.graph();
+    const initialCompute = graphByTitle(initialComputeDoc, "compute");
+    const initialA = nodeByTitle(initialCompute, "a");
+    const initialB = nodeByTitle(initialCompute, "b");
     await selectNodeTitles(ctx, ["a", "b"], "collapse selection setup");
     await ctx.driver.evaluate(`window.prompt = () => "Compute value"`);
     await ctx.driver.shortcut(["Alt", "c"]);
@@ -1449,7 +1491,29 @@ fn run() {
       })}`);
     }
 
+    const onceCollapsed = await ctx.source();
     await selectNodeTitles(ctx, ["Compute value"], "collapsed region setup");
+    await ctx.driver.shortcut(["Alt", "c"]);
+    await expectVisibleRefusal(ctx, "already collapsed", "duplicate collapse refusal");
+    const duplicateRefused = await ctx.source();
+    if (duplicateRefused !== onceCollapsed
+      || (duplicateRefused.match(/canvas:collapse/g) || []).length !== 1) {
+      throw new Error(`duplicate collapse gesture changed source: ${JSON.stringify({ onceCollapsed, duplicateRefused })}`);
+    }
+    const collapsedDoc = await ctx.graph();
+    const collapsedCompute = graphByTitle(collapsedDoc, "compute");
+    const duplicateTransaction = await ctx.uiTransaction({
+      schema_version: 1,
+      op: "create_collapsed_region",
+      revision: collapsedDoc.revision,
+      graph_id: collapsedCompute.graph_id,
+      start: initialA.source_span.start,
+      end: initialB.source_span.end,
+      title: "Duplicate"
+    });
+    if (duplicateTransaction.ok || await ctx.source() !== onceCollapsed) {
+      throw new Error(`duplicate collapse transaction was not idempotently refused: ${JSON.stringify(duplicateTransaction)}`);
+    }
     await ctx.driver.shortcut(["Alt", "Shift", "c"]);
     await ctx.waitFor(async () => !(await ctx.source()).includes("canvas:collapse"), "expanded source");
     if (await ctx.source() !== before) throw new Error("collapse/expand did not restore exact source");
@@ -1543,6 +1607,13 @@ fn run() {
     await clickElement(ctx, `Array.from(document.querySelectorAll("[data-sidebar-graph]")).find((button) => button.textContent.includes("layout"))`, "layout graph sidebar button");
     await ctx.waitFor(async () => (await ctx.state()).graphTitle === "layout", "layout graph navigation");
     const before = await ctx.source();
+    const reloadLayout = async (label) => {
+      await ctx.openCanvas();
+      if (await ctx.source() !== before) throw new Error(`${label} reload changed source bytes`);
+      await clickElement(ctx, `Array.from(document.querySelectorAll("[data-sidebar-graph]")).find((button) => button.textContent.includes("layout"))`, `${label} layout graph`);
+      await ctx.waitFor(async () => (await ctx.state()).graphTitle === "layout", `${label} layout navigation`);
+      return await ctx.state();
+    };
 
     const childCall = await ctx.node("child");
     await doubleClickCanvasPoint(ctx, childCall);
@@ -1556,6 +1627,13 @@ fn run() {
     await ctx.waitFor(async () => (await ctx.state()).graphTitle === "child", "bookmarked child pointer navigation");
     await ctx.driver.shortcut(["Alt", "g"]);
     await ctx.waitFor(async () => (await ctx.state()).graphTitle === "layout", "bookmark keyboard return");
+    await ctx.openCanvas();
+    if (await ctx.source() !== before) throw new Error("bookmark reload changed source bytes");
+    const reloadedChild = graphByTitle(await ctx.graph(), "child");
+    await pressAttribute(ctx, "data-sidebar-graph", reloadedChild.graph_id, "reloaded child graph");
+    await ctx.waitFor(async () => (await ctx.state()).graphTitle === "child", "reloaded child navigation");
+    await ctx.driver.shortcut(["Alt", "g"]);
+    await ctx.waitFor(async () => (await ctx.state()).graphTitle === "layout", "persisted bookmark return");
 
     await selectNodeTitles(ctx, ["a"], "nudge a setup");
     await ctx.driver.press("ArrowLeft");
@@ -1570,16 +1648,34 @@ fn run() {
     await selectNodeTitles(ctx, ["a", "b", "c"], "layout selection setup");
     await ctx.driver.shortcut(["Alt", "a"]);
     await expectVisibleRefusal(ctx, "aligned top", "successful align status");
-    const aligned = Object.fromEntries(Object.values((await ctx.state()).nodeBounds || {})
+    const alignedState = await ctx.state();
+    const aligned = Object.fromEntries(Object.values(alignedState.nodeBounds || {})
       .filter((node) => ["a", "b", "c"].includes(node.title))
       .map((node) => [node.title, node]));
     if (Object.keys(aligned).length !== 3 || Math.max(aligned.a.y, aligned.b.y, aligned.c.y) - Math.min(aligned.a.y, aligned.b.y, aligned.c.y) > 1) {
       throw new Error(`align did not produce one visible row: ${JSON.stringify(aligned)}`);
     }
+    const alignedPositions = JSON.stringify(alignedState.savedNodePositions);
+    const reloadedAlignedState = await reloadLayout("aligned positions");
+    const reloadedAligned = Object.fromEntries(Object.values(reloadedAlignedState.nodeBounds || {})
+      .filter((node) => ["a", "b", "c"].includes(node.title))
+      .map((node) => [node.title, node]));
+    if (JSON.stringify(reloadedAlignedState.savedNodePositions) !== alignedPositions
+      || Object.keys(reloadedAligned).length !== 3
+      || Math.max(reloadedAligned.a.y, reloadedAligned.b.y, reloadedAligned.c.y)
+        - Math.min(reloadedAligned.a.y, reloadedAligned.b.y, reloadedAligned.c.y) > 1) {
+      throw new Error(`aligned positions did not survive reload: ${JSON.stringify({
+        alignedPositions,
+        reloadedPositions: reloadedAlignedState.savedNodePositions,
+        reloadedAligned
+      })}`);
+    }
 
+    await selectNodeTitles(ctx, ["a", "b", "c"], "distribution selection setup");
     await ctx.driver.shortcut(["Alt", "d"]);
     await expectVisibleRefusal(ctx, "distributed horizontally", "successful distribute status");
-    const distributed = Object.values((await ctx.state()).nodeBounds || {})
+    const distributedState = await ctx.state();
+    const distributed = Object.values(distributedState.nodeBounds || {})
       .filter((node) => ["a", "b", "c"].includes(node.title))
       .sort((a, b) => a.x - b.x);
     if (distributed.length !== 3) throw new Error(`distribute lost selected nodes: ${JSON.stringify(distributed)}`);
@@ -1587,6 +1683,27 @@ fn run() {
     const rightGap = distributed[2].x - distributed[1].x;
     if (leftGap <= 0 || Math.abs(leftGap - rightGap) > 1) {
       throw new Error(`distribute did not create equal visible spacing: ${JSON.stringify(distributed)}`);
+    }
+    const distributedPositions = JSON.stringify(distributedState.savedNodePositions);
+    const reloadedDistributedState = await reloadLayout("distributed positions");
+    const reloadedDistributed = Object.values(reloadedDistributedState.nodeBounds || {})
+      .filter((node) => ["a", "b", "c"].includes(node.title))
+      .sort((a, b) => a.x - b.x);
+    const reloadedLeftGap = reloadedDistributed.length === 3
+      ? reloadedDistributed[1].x - reloadedDistributed[0].x
+      : 0;
+    const reloadedRightGap = reloadedDistributed.length === 3
+      ? reloadedDistributed[2].x - reloadedDistributed[1].x
+      : 0;
+    if (JSON.stringify(reloadedDistributedState.savedNodePositions) !== distributedPositions
+      || reloadedDistributed.length !== 3
+      || reloadedLeftGap <= 0
+      || Math.abs(reloadedLeftGap - reloadedRightGap) > 1) {
+      throw new Error(`distributed positions did not survive reload: ${JSON.stringify({
+        distributedPositions,
+        reloadedPositions: reloadedDistributedState.savedNodePositions,
+        reloadedDistributed
+      })}`);
     }
 
     const beforeTidy = JSON.stringify((await ctx.state()).nodeBounds);
@@ -1605,9 +1722,7 @@ fn run() {
     const favoriteId = favoriteBefore.favoriteCandidate;
     const favoriteTitle = favoriteBefore.favoriteCandidateTitle;
 
-    await ctx.openCanvas();
-    if (await ctx.source() !== before) throw new Error("workspace view state changed source bytes across reload");
-    await clickElement(ctx, `Array.from(document.querySelectorAll("[data-sidebar-graph]")).find((button) => button.textContent.includes("layout"))`, "reloaded layout graph sidebar button");
+    await reloadLayout("tidy and favorite");
     await ctx.waitFor(async () => (await ctx.state()).favoriteCandidate === favoriteId, "reloaded favorite candidate");
     const reloaded = await ctx.state();
     if (JSON.stringify(reloaded.savedNodePositions) !== savedPositions) {
@@ -1628,26 +1743,39 @@ fn run() {
   "node-docs-pointer-hover": async (ctx) => {
     await ctx.openCanvas();
     const before = await ctx.source();
-    const hoverAndAssert = async (label) => {
+    const hoverAndAssert = async (nodeTitle, label) => {
       const defaultProfile = await ctx.driver.evaluate(`!document.body.classList.contains("is-dev-mode")`);
       if (!defaultProfile) throw new Error(`${label} unexpectedly enabled developer mode`);
-      const target = await ctx.node("square");
+      const target = await ctx.node(nodeTitle);
       await ctx.driver.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: target.x, y: target.y }, ctx.driver.pageSession);
       await ctx.waitFor(async () => {
         const state = await ctx.state();
-        return state.hoveredNodeTitle === "square" && String(state.hoveredNodeDescription || "").length > 0;
+        return state.hoveredNodeTitle === nodeTitle && String(state.hoveredNodeDescription || "").length > 0;
       }, `${label} node hover documentation`);
       const state = await ctx.state();
       const visible = await visibleSurface(ctx, `document.getElementById("wire-status")`, `${label} node hover details`);
-      if (!visible.text.includes("square") || !visible.text.includes(state.hoveredNodeDescription)) {
+      if (!visible.text.includes(nodeTitle) || !visible.text.includes(state.hoveredNodeDescription)) {
         throw new Error(`${label} node hover text mismatch: ${JSON.stringify({ visible, description: state.hoveredNodeDescription })}`);
       }
+      return visible.text;
     };
-    await hoverAndAssert("before reload");
+    const squareDocs = await hoverAndAssert("square", "initial graph");
+    await ctx.switchGraph("summarize");
+    const resetState = await ctx.state();
+    const resetSurface = await visibleSurface(ctx, `document.getElementById("wire-status")`, "navigation hover reset");
+    if (resetState.hoveredNodeTitle
+      || resetSurface.text.includes("square")
+      || !resetSurface.text.includes("Hover a node or pin for details")) {
+      throw new Error(`graph navigation retained stale hover docs: ${JSON.stringify({ resetState, resetSurface })}`);
+    }
+    const totalDocs = await hoverAndAssert("total", "navigated graph");
+    if (totalDocs === squareDocs || totalDocs.includes("square")) {
+      throw new Error(`navigated graph did not visibly replace hover docs: ${JSON.stringify({ squareDocs, totalDocs })}`);
+    }
     if (await ctx.source() !== before) throw new Error("node docs hover changed source");
     await ctx.openCanvas();
     if (await ctx.source() !== before) throw new Error("node docs hover reload changed source");
-    await hoverAndAssert("after reload");
+    await hoverAndAssert("square", "after reload");
   },
 
   "rename-variable-sidebar": async (ctx) => {

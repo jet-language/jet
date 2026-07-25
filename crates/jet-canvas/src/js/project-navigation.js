@@ -396,6 +396,9 @@
     if (!graph) return;
     const selected = selectedGraphNodes(graphWithViewState(graph)).filter((node) => node.source_span);
     if (!selected.length) return showToast("Select source nodes to collapse");
+    if (selected.some((node) => node.collapsed_region_id)) {
+      return showToast("Selection is already collapsed");
+    }
     const title = window.prompt("Collapsed region title", "Collapsed");
     if (!title) return;
     postTransaction({
@@ -565,6 +568,9 @@
     selectedGraphId = graphId;
     window.__jetCanvasSelectedGraphId = selectedGraphId;
     selectedVariableName = null;
+    hoverPin = null;
+    hoverNode = null;
+    hoverDiagnostic = null;
     selectedNodeId = opts.nodeId || graph.entry_node;
     selectedNodeIds = new Set([selectedNodeId]);
     setViewMode("graph");

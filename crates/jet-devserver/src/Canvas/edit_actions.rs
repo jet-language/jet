@@ -11,7 +11,7 @@ use super::graph_helpers::{
     diagnostics_error, edit, edit_error, edit_ok, function_signature_span, graph_id_name_span,
     indentation_at, line_after, line_start, snippet,
 };
-use super::graph_json::func_source_span;
+use super::graph_json::{canvas_collapse_hints, func_source_span};
 use super::graph_projection::trait_method_signature;
 use super::project_scan::project_file;
 use super::query_actions::{core_member_params, default_arg_for_type};
@@ -803,6 +803,15 @@ pub(super) fn apply_create_collapse_region(
         graph_id,
         SourceSpan { start, end },
     )?;
+    if canvas_collapse_hints(src)
+        .iter()
+        .any(|hint| hint.anchor.start == selected.start && hint.anchor.end == selected.end)
+    {
+        return Err(edit_error(
+            "conflict",
+            "Canvas selection is already collapsed",
+        ));
+    }
     let insert_at = selected.end;
     let indent = indentation_at(src, insert_at.min(src.len()));
     let comment = format!(
