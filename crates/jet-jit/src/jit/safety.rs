@@ -814,6 +814,13 @@ fn resident_safe_builtin_op(
                 && matches!(&args[0].ty, Type::Option(_))
                 && resident_safe_expr(&args[0], callees)
         }
+        // D-RANGE-EXCL1=C: `indexes()` → Iter<Int> of every valid index.
+        TBuiltinOp::Indexes => {
+            (jit_list_native_type(&recv.ty)
+                || jit_list_iter_elem_type(&recv.ty).is_some()
+                || jit_closure_elem_type(&recv.ty).is_some())
+                && args.is_empty()
+        }
         // JIT ABI: View/ViewMut materialize as owned list handles (inclusive slice).
         TBuiltinOp::ViewNew { .. } | TBuiltinOp::ViewMutNew { .. } => {
             (jit_list_native_type(&recv.ty) || jit_list_record_type(&recv.ty))
@@ -993,6 +1000,12 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 && (jit_list_iter_elem_type(&collection.ty).is_some()
                     || jit_closure_elem_type(&collection.ty).is_some()
                     || jit_list_record_type(&collection.ty));
+            // D-RANGE-EXCL1=C: sequence two-binding is index then item.
+            let list_pair_ok = method_kind.is_none()
+                && var2.is_some()
+                && (jit_list_iter_elem_type(&collection.ty).is_some()
+                    || jit_closure_elem_type(&collection.ty).is_some()
+                    || jit_list_record_type(&collection.ty));
             let map_ok = method_kind.is_none()
                 && var2.is_some()
                 && jit_map_string_type(&collection.ty);
@@ -1000,7 +1013,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             // backed under the JIT host ABI (true lazy handles don't cross).
             let by_value_ok = !*by_value
                 || jet_foundation::Collections::is_iter_type(&collection.ty);
-            (chars_ok || list_ok || map_ok)
+            (chars_ok || list_ok || list_pair_ok || map_ok)
                 && !columnar
                 && by_value_ok
                 && resident_safe_expr(source, callees)
