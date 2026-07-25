@@ -502,6 +502,20 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 && resident_safe_expr(else_value, callees)
         }
         TExprKind::Clone(inner) => resident_safe_expr(inner, callees),
+        TExprKind::OptionLift2 { f, a, b } => {
+            matches!(
+                &f.kind,
+                TExprKind::Lambda(lam)
+                    if lam.prep.is_empty()
+                        && lam.source_params.len() == 2
+                        && matches!(
+                            &lam.executable,
+                            TIR::TLambdaBody::Expr(e) if resident_safe_expr(e, callees)
+                        )
+            ) && resident_safe_expr(a, callees)
+                && resident_safe_expr(b, callees)
+                && matches!(&expr.ty, Type::Option(inner) if jit_scalar_type(inner) || matches!(inner.as_ref(), Type::Named(_)|Type::Tuple(_)))
+        }
         TExprKind::ClosureMethod { recv, op, args } => {
             resident_safe_closure_method(recv, op, args, callees)
         }
@@ -593,6 +607,15 @@ fn resident_safe_closure_method(
             jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
                 matches!(elem, Type::Int | Type::String | Type::Named(_))
             }) && resident_safe_unary_lambda(args, callees)
+        }
+        // D-HOLE1: Option.map — packed Option ABI; unary lambda over the payload.
+        TIR::TClosureOp::OptionMap => {
+            matches!(
+                &recv.ty,
+                Type::Option(inner)
+                    if jit_scalar_type(inner)
+                        || matches!(inner.as_ref(), Type::Named(_) | Type::Tuple(_))
+            ) && resident_safe_unary_lambda(args, callees)
         }
         TIR::TClosureOp::Filter => {
             jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
@@ -746,6 +769,13 @@ fn resident_safe_builtin_op(
         }
         TBuiltinOp::TryCollect => {
             jit_result_list_elem(&recv.ty).is_some() && args.is_empty()
+        }
+        // D-HOLE1: Option.zip — both sides packed Option; builds a Present pair.
+        TBuiltinOp::OptionZip { .. } => {
+            matches!(&recv.ty, Type::Option(_))
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::Option(_))
+                && resident_safe_expr(&args[0], callees)
         }
         _ => false,
     }

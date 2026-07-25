@@ -8,14 +8,15 @@ use jet_codegen::Codegen::TIR::{
     TForInMethod, THandleOp, TIfCond, TJitSpawnLambda, TLambdaBody, TLocal, TMethodRef,
     TModuleCallForm, TNumericOp, TOrFallback, TPattern, TPlace, TStaticOwner, TStmt, TStrPart,
 };
-use jet_foundation::AST::{BinOp, IncDecOp, PatSlot, Pattern, Type, UnOp};
+use jet_foundation::AST::{BinOp, IncDecOp, PatSlot, Pattern, StrFormat, Type, UnOp};
 use std::collections::HashMap;
 
 use super::runtime_host::HostFns;
 use super::safety::{
     collect_select_arms_jit, flatten_string, jit_closure_elem_type, jit_list_float_type,
-    jit_list_iter_elem_type, jit_list_native_type, jit_list_of_int_list_type, jit_map_string_type,
-    jit_result_list_elem, jit_tuple_type, jit_value_type, record_type_key, user_type_name,
+    jit_list_iter_elem_type, jit_list_native_type, jit_list_of_int_list_type, jit_list_record_type,
+    jit_map_string_type, jit_result_list_elem, jit_tuple_type, jit_value_type, record_type_key,
+    user_type_name,
 };
 use super::types_meta::{clif_ty, init_clif_ty, JitMeta};
 use super::JitRuntime;
@@ -1472,9 +1473,13 @@ impl LowerCtx<'_, '_> {
                         .declare_func_in_func(self.host.str_push_lit, self.b.func);
                     self.b.ins().call(host_ref, &[buf_id, lit_const]);
                 }
-                TStrPart::Interp(e, _) => {
-                    let val = self.lower_expr(e)?;
+                TStrPart::Interp(e, fmt) => {
                     let push_ty = self.erase_distinct_ty(&e.ty);
+                    if let Type::Named(type_name) = &push_ty {
+                        self.lower_named_str_interp(buf_id, e, type_name, *fmt)?;
+                        continue;
+                    }
+                    let val = self.lower_expr(e)?;
                     let host_id = match &push_ty {
                         Type::Int => self.host.str_push_i64,
                         Type::Float => self.host.str_push_f64,
@@ -1491,6 +1496,141 @@ impl LowerCtx<'_, '_> {
             }
         }
         Ok(buf_id)
+    }
+
+    /// `{named}` / `{named#Debug}` — Display prefers `Type::display` when compiled;
+    /// otherwise JetShow-style mangled Debug (`user_Type { user_field: … }`).
+    /// Debug format uses unmangled JetDebug shape (`Type { field: … }`).
+    fn lower_named_str_interp(
+        &mut self,
+        buf_id: Value,
+        expr: &TExpr,
+        type_name: &str,
+        fmt: StrFormat,
+    ) -> Result<(), String> {
+        if matches!(fmt, StrFormat::Display) {
+            let display_key = format!("{type_name}::display");
+            if let Some(&func_id) = self.func_ids.get(&display_key) {
+                let recv = self.lower_expr(expr)?;
+                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+                let call = self.b.ins().call(func_ref, &[recv]);
+                let text = self.b.inst_results(call)[0];
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_push_str, self.b.func);
+                self.b.ins().call(host_ref, &[buf_id, text]);
+                return Ok(());
+            }
+        } else {
+            // JetDebug needs #[Redact] metadata (not on JitProgram yet). Refuse
+            // rather than leak secrets — Display/JetShow path above stays covered.
+            return Err(format!(
+                "jit string interp Debug type unsupported: Named({type_name:?})"
+            ));
+        }
+        let (field_names, field_tys) = self.meta.struct_layout(type_name).ok_or_else(|| {
+            format!("jit string interp type unsupported: Named({type_name:?})")
+        })?;
+        let handle = self.lower_expr(expr)?;
+        let mangled_show = matches!(fmt, StrFormat::Display);
+        let head = if mangled_show {
+            format!("user_{type_name} {{ ")
+        } else {
+            format!("{type_name} {{ ")
+        };
+        self.push_str_lit(buf_id, &head)?;
+        for (i, (fname, fty)) in field_names.iter().zip(field_tys.iter()).enumerate() {
+            if i > 0 {
+                self.push_str_lit(buf_id, ", ")?;
+            }
+            let label = if mangled_show {
+                fname.clone()
+            } else {
+                fname
+                    .strip_prefix("user_")
+                    .unwrap_or(fname.as_str())
+                    .to_string()
+            };
+            self.push_str_lit(buf_id, &format!("{label}: "))?;
+            let idx = self.b.ins().iconst(types::I64, i as i64);
+            match fty {
+                Type::Int => {
+                    let get = self
+                        .module
+                        .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+                    let call = self.b.ins().call(get, &[handle, idx]);
+                    let val = self.b.inst_results(call)[0];
+                    let push = self
+                        .module
+                        .declare_func_in_func(self.host.str_push_i64, self.b.func);
+                    self.b.ins().call(push, &[buf_id, val]);
+                }
+                Type::Float => {
+                    let get = self
+                        .module
+                        .declare_func_in_func(self.host.struct_get_f64, self.b.func);
+                    let call = self.b.ins().call(get, &[handle, idx]);
+                    let val = self.b.inst_results(call)[0];
+                    let push = self
+                        .module
+                        .declare_func_in_func(self.host.str_push_f64, self.b.func);
+                    self.b.ins().call(push, &[buf_id, val]);
+                }
+                Type::Bool => {
+                    let get = self
+                        .module
+                        .declare_func_in_func(self.host.struct_get_bool, self.b.func);
+                    let call = self.b.ins().call(get, &[handle, idx]);
+                    let val = self.b.inst_results(call)[0];
+                    let push = self
+                        .module
+                        .declare_func_in_func(self.host.str_push_bool, self.b.func);
+                    self.b.ins().call(push, &[buf_id, val]);
+                }
+                Type::Char => {
+                    let get = self
+                        .module
+                        .declare_func_in_func(self.host.struct_get_char, self.b.func);
+                    let call = self.b.ins().call(get, &[handle, idx]);
+                    let val = self.b.inst_results(call)[0];
+                    let push = self
+                        .module
+                        .declare_func_in_func(self.host.str_push_char, self.b.func);
+                    self.b.ins().call(push, &[buf_id, val]);
+                }
+                Type::String => {
+                    // Rust Debug quotes string fields; JetShow/`{:?}` matches.
+                    self.push_str_lit(buf_id, "\"")?;
+                    let get = self
+                        .module
+                        .declare_func_in_func(self.host.struct_get_str, self.b.func);
+                    let call = self.b.ins().call(get, &[handle, idx]);
+                    let val = self.b.inst_results(call)[0];
+                    let push = self
+                        .module
+                        .declare_func_in_func(self.host.str_push_str, self.b.func);
+                    self.b.ins().call(push, &[buf_id, val]);
+                    self.push_str_lit(buf_id, "\"")?;
+                }
+                other => {
+                    return Err(format!(
+                        "jit string interp named field unsupported: {type_name}.{fname}: {other:?}"
+                    ));
+                }
+            }
+        }
+        self.push_str_lit(buf_id, " }")?;
+        Ok(())
+    }
+
+    fn push_str_lit(&mut self, buf_id: Value, text: &str) -> Result<(), String> {
+        let lit_id = self.runtime.heap.alloc_string(text.to_string());
+        let lit_const = self.b.ins().iconst(types::I64, lit_id);
+        let host_ref = self
+            .module
+            .declare_func_in_func(self.host.str_push_lit, self.b.func);
+        self.b.ins().call(host_ref, &[buf_id, lit_const]);
+        Ok(())
     }
 
     /// Variable-map key for a local slot. User bindings live under their mangled
@@ -2327,9 +2467,20 @@ impl LowerCtx<'_, '_> {
             },
             TExprKind::Present(inner) => {
                 let v = self.lower_expr(inner)?;
-                // Encode optional Some as value+1 (0 = None elsewhere).
+                // Encode optional Some as value+1 (0 = None elsewhere). Option ABI is
+                // always i64; widen/bitcast non-i64 payloads before the add.
+                let bits = match clif_ty(&inner.ty) {
+                    Some(ty) if ty == types::F64 => self.b.ins().bitcast(
+                        types::I64,
+                        Self::scalar_bitcast_memflags(),
+                        v,
+                    ),
+                    Some(ty) if ty == types::I8 => self.b.ins().uextend(types::I64, v),
+                    Some(ty) if ty == types::I32 => self.b.ins().uextend(types::I64, v),
+                    _ => v,
+                };
                 let one = self.b.ins().iconst(types::I64, 1);
-                Ok(self.b.ins().iadd(v, one))
+                Ok(self.b.ins().iadd(bits, one))
             }
             TExprKind::Absent => Ok(self.b.ins().iconst(types::I64, 0)),
             TExprKind::Unit => Ok(self.b.ins().iconst(types::I64, 0)),
@@ -2421,7 +2572,9 @@ impl LowerCtx<'_, '_> {
             TExprKind::PatternMatches { .. } => {
                 Err("jit pattern-matches expression unsupported".to_string())
             }
-            TExprKind::OptionLift2 { .. } => Err("jit Option.lift2 unsupported".to_string()),
+            TExprKind::OptionLift2 { f, a, b } => {
+                self.lower_option_lift2(f, a, b, &expr.ty)
+            }
             TExprKind::ClosureMethod { recv, op, args } => {
                 self.lower_closure_method(recv, op, args)
             }
@@ -2787,7 +2940,12 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::Enumerate { .. } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Zip { .. } => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::OptionZip { .. } => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::OptionZip { tuple_struct, elem_ty } => {
+                let other = args
+                    .first()
+                    .ok_or_else(|| "jit Option.zip needs one argument".to_string())?;
+                self.lower_option_zip(recv, other, tuple_struct, elem_ty)
+            }
             TBuiltinOp::SetFrom => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::SetInsert => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::SetRemove => Err("jit builtin method unsupported".to_string()),
@@ -2960,6 +3118,19 @@ impl LowerCtx<'_, '_> {
             let call = self.b.ins().call(host_ref, &[val]);
             return Ok(self.b.inst_results(call)[0]);
         }
+        // List of records — same opaque-handle clone as List(Int/String/Float).
+        if jit_list_record_type(&inner.ty) {
+            let val = self.lower_expr(inner)?;
+            let host_ref = self.module.declare_func_in_func(self.host.coll.list_clone, self.b.func);
+            let call = self.b.ins().call(host_ref, &[val]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        // Named user structs — allocate a fresh record and assign field slots.
+        // Do not use `jit_struct_type` here: it also matches Apply names like
+        // `Sender`/`Task`, which have dedicated host clones below.
+        if matches!(&inner.ty, Type::Named(_)) {
+            return self.lower_clone_struct(inner);
+        }
         if jit_tuple_type(&inner.ty) {
             return self.lower_clone_tuple(inner);
         }
@@ -2971,6 +3142,10 @@ impl LowerCtx<'_, '_> {
             let call = self.b.ins().call(host_ref, &[val]);
             return Ok(self.b.inst_results(call)[0]);
         }
+        // Option packed ABI is a plain i64 — clone is a bitwise copy.
+        if matches!(&inner.ty, Type::Option(_)) {
+            return self.lower_expr(inner);
+        }
         let source = match &inner.kind {
             TExprKind::Local(local) => format!("local {}", local.name),
             TExprKind::Field { field, .. } => format!("field {field}"),
@@ -2978,6 +3153,244 @@ impl LowerCtx<'_, '_> {
             _ => "other expression".to_string(),
         };
         Err(format!("jit clone unsupported type: {:?}, {source}", inner.ty))
+    }
+
+    fn lower_clone_struct(&mut self, inner: &TExpr) -> Result<Value, String> {
+        let type_name = user_type_name(&inner.ty)
+            .ok_or_else(|| format!("jit clone unsupported type: {:?}", inner.ty))?;
+        let n_fields = self
+            .meta
+            .struct_layout(type_name)
+            .map(|(names, _)| names.len())
+            .ok_or_else(|| format!("jit clone unsupported type: {:?}", inner.ty))?;
+        let src = self.lower_expr(inner)?;
+        let n = self.b.ins().iconst(types::I64, n_fields as i64);
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.struct_new, self.b.func);
+        let call = self.b.ins().call(new_ref, &[n]);
+        let dst = self.b.inst_results(call)[0];
+        let assign_ref = self
+            .module
+            .declare_func_in_func(self.host.struct_assign, self.b.func);
+        self.b.ins().call(assign_ref, &[dst, src]);
+        Ok(dst)
+    }
+
+    /// Pack a Present payload into the JIT Option i64 ABI (`0` = None, else `bits+1`).
+    fn pack_option_payload(&mut self, payload: Value, inner: &Type) -> Result<Value, String> {
+        let bits = match clif_ty(inner) {
+            Some(ty) if ty == types::F64 => self.b.ins().bitcast(
+                types::I64,
+                Self::scalar_bitcast_memflags(),
+                payload,
+            ),
+            Some(ty) if ty == types::I8 => self.b.ins().uextend(types::I64, payload),
+            Some(ty) if ty == types::I32 => self.b.ins().uextend(types::I64, payload),
+            Some(ty) if ty == types::I64 => payload,
+            _ if matches!(inner, Type::Named(_) | Type::Tuple(_) | Type::String) => payload,
+            other => {
+                return Err(format!("jit Option payload unsupported: {inner:?} ({other:?})"));
+            }
+        };
+        let one = self.b.ins().iconst(types::I64, 1);
+        Ok(self.b.ins().iadd(bits, one))
+    }
+
+    fn unpack_option_payload(&mut self, packed: Value, inner: &Type) -> Result<Value, String> {
+        let one = self.b.ins().iconst(types::I64, 1);
+        let bits = self.b.ins().isub(packed, one);
+        match clif_ty(inner) {
+            Some(ty) if ty == types::F64 => Ok(self.b.ins().bitcast(
+                types::F64,
+                Self::scalar_bitcast_memflags(),
+                bits,
+            )),
+            Some(ty) if ty == types::I8 => Ok(self.b.ins().ireduce(types::I8, bits)),
+            Some(ty) if ty == types::I32 => Ok(self.b.ins().ireduce(types::I32, bits)),
+            Some(ty) if ty == types::I64 => Ok(bits),
+            _ if matches!(inner, Type::Named(_) | Type::Tuple(_) | Type::String) => Ok(bits),
+            other => Err(format!(
+                "jit Option payload unsupported: {inner:?} ({other:?})"
+            )),
+        }
+    }
+
+    fn lower_option_zip(
+        &mut self,
+        recv: &TExpr,
+        other: &TExpr,
+        tuple_struct: &str,
+        elem_ty: &Type,
+    ) -> Result<Value, String> {
+        let Type::Option(inner_a) = &recv.ty else {
+            return Err("jit Option.zip receiver must be Option".to_string());
+        };
+        let Type::Option(inner_b) = &other.ty else {
+            return Err("jit Option.zip argument must be Option".to_string());
+        };
+        let field_tys: Vec<Type> = match elem_ty {
+            Type::Tuple(fields) if fields.len() == 2 => {
+                fields.iter().map(|(_, t)| t.as_ref().clone()).collect()
+            }
+            _ => vec![inner_a.as_ref().clone(), inner_b.as_ref().clone()],
+        };
+        if field_tys.len() != 2 {
+            return Err("jit Option.zip needs a 2-field pair".to_string());
+        }
+        let a_val = self.lower_expr(recv)?;
+        let b_val = self.lower_expr(other)?;
+        let none_block = self.b.create_block();
+        let check_b = self.b.create_block();
+        let some_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let a_none = self.b.ins().icmp(IntCC::Equal, a_val, zero);
+        self.b.ins().brif(a_none, none_block, &[], check_b, &[]);
+
+        self.b.switch_to_block(check_b);
+        self.b.seal_block(check_b);
+        let b_none = self.b.ins().icmp(IntCC::Equal, b_val, zero);
+        self.b.ins().brif(b_none, none_block, &[], some_block, &[]);
+
+        self.b.switch_to_block(some_block);
+        self.b.seal_block(some_block);
+        let pa = self.unpack_option_payload(a_val, inner_a)?;
+        let pb = self.unpack_option_payload(b_val, inner_b)?;
+        // Build the named-tuple record in declaration field order (a, b).
+        let n = self.b.ins().iconst(types::I64, 2);
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.struct_new, self.b.func);
+        let call = self.b.ins().call(new_ref, &[n]);
+        let handle = self.b.inst_results(call)[0];
+        for (i, (payload, fty)) in [pa, pb].into_iter().zip(field_tys.iter()).enumerate() {
+            let idx = self.b.ins().iconst(types::I64, i as i64);
+            let host_id = match fty {
+                Type::Int => self.host.struct_set_i64,
+                Type::Float => self.host.struct_set_f64,
+                Type::Bool => self.host.struct_set_bool,
+                Type::Char => self.host.struct_set_char,
+                Type::String => self.host.struct_set_str,
+                other if clif_ty(other) == Some(types::I64) => self.host.struct_set_i64,
+                other => {
+                    return Err(format!(
+                        "jit Option.zip pair field unsupported on `{tuple_struct}`: {other:?}"
+                    ));
+                }
+            };
+            let set_ref = self.module.declare_func_in_func(host_id, self.b.func);
+            self.b.ins().call(set_ref, &[handle, idx, payload]);
+        }
+        let present = self.pack_option_payload(handle, &Type::Named(tuple_struct.to_string()))?;
+        self.b.ins().jump(merge, &[present]);
+
+        self.b.switch_to_block(none_block);
+        self.b.seal_block(none_block);
+        self.b.ins().jump(merge, &[zero]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
+    fn lower_option_lift2(
+        &mut self,
+        f: &TExpr,
+        a: &TExpr,
+        b: &TExpr,
+        ret_ty: &Type,
+    ) -> Result<Value, String> {
+        let Type::Option(inner_ret) = ret_ty else {
+            return Err("jit Option.lift2 result must be Option".to_string());
+        };
+        let Type::Option(inner_a) = &a.ty else {
+            return Err("jit Option.lift2 arg a must be Option".to_string());
+        };
+        let Type::Option(inner_b) = &b.ty else {
+            return Err("jit Option.lift2 arg b must be Option".to_string());
+        };
+        let TExprKind::Lambda(lam) = &f.kind else {
+            return Err("jit Option.lift2 needs a lambda".to_string());
+        };
+        if !lam.prep.is_empty() || lam.source_params.len() != 2 {
+            return Err("jit Option.lift2 lambda shape unsupported".to_string());
+        }
+        let TLambdaBody::Expr(body) = &lam.executable else {
+            return Err("jit Option.lift2 lambda body unsupported".to_string());
+        };
+        let p0 = TIR::local_place(&lam.source_params[0]);
+        let p1 = TIR::local_place(&lam.source_params[1]);
+        let a_val = self.lower_expr(a)?;
+        let b_val = self.lower_expr(b)?;
+        let none_block = self.b.create_block();
+        let check_b = self.b.create_block();
+        let some_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let a_none = self.b.ins().icmp(IntCC::Equal, a_val, zero);
+        self.b.ins().brif(a_none, none_block, &[], check_b, &[]);
+
+        self.b.switch_to_block(check_b);
+        self.b.seal_block(check_b);
+        let b_none = self.b.ins().icmp(IntCC::Equal, b_val, zero);
+        self.b.ins().brif(b_none, none_block, &[], some_block, &[]);
+
+        self.b.switch_to_block(some_block);
+        self.b.seal_block(some_block);
+        let pa = self.unpack_option_payload(a_val, inner_a)?;
+        let pb = self.unpack_option_payload(b_val, inner_b)?;
+        let mapped = self.with_bound_local(&p0, inner_a.as_ref().clone(), pa, |this| {
+            this.with_bound_local(&p1, inner_b.as_ref().clone(), pb, |this| {
+                this.lower_expr(body)
+            })
+        })?;
+        let present = self.pack_option_payload(mapped, inner_ret)?;
+        self.b.ins().jump(merge, &[present]);
+
+        self.b.switch_to_block(none_block);
+        self.b.seal_block(none_block);
+        self.b.ins().jump(merge, &[zero]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
+    fn lower_option_map(
+        &mut self,
+        recv: &TExpr,
+        args: &[TExpr],
+        inner: &Type,
+    ) -> Result<Value, String> {
+        let (param_place, body_expr) = self.closure_unary_lambda(args)?;
+        let packed = self.lower_expr(recv)?;
+        let none_block = self.b.create_block();
+        let some_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let is_none = self.b.ins().icmp(IntCC::Equal, packed, zero);
+        self.b.ins().brif(is_none, none_block, &[], some_block, &[]);
+
+        self.b.switch_to_block(some_block);
+        self.b.seal_block(some_block);
+        let payload = self.unpack_option_payload(packed, inner)?;
+        let mapped = self.with_bound_local(&param_place, inner.clone(), payload, |this| {
+            this.lower_expr(body_expr)
+        })?;
+        let present = self.pack_option_payload(mapped, &body_expr.ty)?;
+        self.b.ins().jump(merge, &[present]);
+
+        self.b.switch_to_block(none_block);
+        self.b.seal_block(none_block);
+        self.b.ins().jump(merge, &[zero]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
     }
 
     fn lower_clone_tuple(&mut self, inner: &TExpr) -> Result<Value, String> {
@@ -3829,18 +4242,18 @@ impl LowerCtx<'_, '_> {
                 }
                 // `T?` — packed `0` / `value+1`; show matches AOT Option jet_show.
                 if let Type::Option(inner) = &print_ty {
-                    if matches!(inner.as_ref(), Type::Int | Type::String) {
-                        let string_elems = matches!(inner.as_ref(), Type::String);
-                        let flag = self
-                            .b
-                            .ins()
-                            .iconst(types::I64, if string_elems { 1 } else { 0 });
-                        let host_ref = self
-                            .module
-                            .declare_func_in_func(self.host.coll.print_opt, self.b.func);
-                        self.b.ins().call(host_ref, &[val, flag]);
-                        return Ok(());
-                    }
+                    let kind = match inner.as_ref() {
+                        Type::Int => 0i64,
+                        Type::String => 1,
+                        Type::Float => 2,
+                        _ => return Err("jit print type unsupported".to_string()),
+                    };
+                    let flag = self.b.ins().iconst(types::I64, kind);
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.coll.print_opt, self.b.func);
+                    self.b.ins().call(host_ref, &[val, flag]);
+                    return Ok(());
                 }
                 let host_id = match &print_ty {
                     Type::Int => self.host.print_i64,
@@ -3885,7 +4298,12 @@ impl LowerCtx<'_, '_> {
         args: &[TExpr],
     ) -> Result<Value, String> {
         match op {
-            TClosureOp::Map | TClosureOp::MapMut => self.lower_iter_map_filter(recv, args, false),
+            TClosureOp::Map | TClosureOp::MapMut | TClosureOp::OptionMap => {
+                if let Type::Option(inner) = &recv.ty {
+                    return self.lower_option_map(recv, args, inner);
+                }
+                self.lower_iter_map_filter(recv, args, false)
+            }
             TClosureOp::Filter => self.lower_iter_map_filter(recv, args, true),
             TClosureOp::FilterMap => self.lower_iter_filter_map(recv, args),
             TClosureOp::SortBy => self.lower_iter_sort_by(recv, args),

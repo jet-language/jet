@@ -405,19 +405,26 @@ extern "C" fn jet_jit_print_list(list: i64, string_elems: i64) {
 }
 
 /// Print `T?` using JIT packed Option encoding (`0` = None, else `value + 1`).
-/// `string_elems != 0` → payload is a string handle; else i64.
-extern "C" fn jet_jit_print_opt(packed: i64, string_elems: i64) {
+/// `kind`: 0 = i64 payload, 1 = string handle, 2 = f64 bits (bitcast).
+extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
     Concurrency::with_runtime_mut(|rt| {
         if packed == 0 {
             rt.stdout.push_str("null\n");
             return;
         }
         let payload = packed - 1;
-        if string_elems != 0 {
-            let text = rt.heap.clone_string(payload).unwrap_or_default();
-            rt.stdout.push_str(&text);
-        } else {
-            rt.stdout.push_str(&payload.to_string());
+        match kind {
+            1 => {
+                let text = rt.heap.clone_string(payload).unwrap_or_default();
+                rt.stdout.push_str(&text);
+            }
+            2 => {
+                rt.stdout
+                    .push_str(&jet_rt::display_f64(f64::from_bits(payload as u64)));
+            }
+            _ => {
+                rt.stdout.push_str(&payload.to_string());
+            }
         }
         rt.stdout.push('\n');
     });

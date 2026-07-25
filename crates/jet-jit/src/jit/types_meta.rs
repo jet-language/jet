@@ -153,6 +153,7 @@ pub(crate) fn jit_fn_name(name: &str) -> String {
 
 pub(crate) struct JitMeta<'a> {
     struct_fields: &'a HashMap<String, Vec<String>>,
+    struct_field_types: &'a HashMap<String, Vec<Type>>,
     enum_variants: &'a HashMap<String, Vec<String>>,
     enum_variant_payload_types: &'a HashMap<String, Vec<Type>>,
     int_constants: &'a HashMap<String, i64>,
@@ -164,6 +165,7 @@ impl<'a> JitMeta<'a> {
     pub(crate) fn from_program(program: &'a JitProgram) -> Self {
         JitMeta {
             struct_fields: &program.struct_fields,
+            struct_field_types: &program.struct_field_types,
             enum_variants: &program.enum_variants,
             enum_variant_payload_types: &program.enum_variant_payload_types,
             int_constants: &program.int_constants,
@@ -207,6 +209,16 @@ impl<'a> JitMeta<'a> {
         fields
             .iter()
             .position(|f| f == field || f == &mangled || f.strip_prefix("user_") == Some(field))
+    }
+
+    /// Mangled field names + parallel types for `user_Type { user_f: … }` Debug show.
+    pub(crate) fn struct_layout(&self, type_name: &str) -> Option<(&[String], &[Type])> {
+        let names = self.struct_fields.get(type_name)?;
+        let tys = self.struct_field_types.get(type_name)?;
+        if names.len() != tys.len() {
+            return None;
+        }
+        Some((names.as_slice(), tys.as_slice()))
     }
 
     /// Discriminant index from structured enum + variant Jet names.
