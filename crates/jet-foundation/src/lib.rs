@@ -24,6 +24,7 @@ pub mod TargetProfile;
 pub mod Terminal;
 pub mod Traits;
 pub mod WasmDebug;
+pub mod WebApp;
 pub mod WebPartition;
 pub mod XmlPull;
 #[path = "BaseEncodingStrict.rs"]

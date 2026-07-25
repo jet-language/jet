@@ -43,7 +43,7 @@ use CmdCompile::{
 };
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
-    run_eval, run_explain, run_explain_marker, run_lint_a11y, run_repl, watch_policy_from, WatchPolicy,
+    run_eval, run_explain, run_explain_marker, run_explain_web_graph, run_lint_a11y, run_repl, watch_policy_from, WatchPolicy,
 };
 use CmdDossier::run_dossier;
 use CmdExpand::run_expand;
@@ -1274,6 +1274,10 @@ fn main() {
             return;
         }
         "explain" => {
+            if jet_argv.iter().any(|a| a == "--web-graph") {
+                run_explain_web_graph(&jet_argv[1..], mode);
+                return;
+            }
             if args.get(1).map(|s| s.as_str()) == Some("marker") {
                 run_explain_marker(
                     args.get(2).map(|s| s.as_str()),

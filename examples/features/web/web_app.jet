@@ -1,0 +1,44 @@
+// D-WEBAPP1=D / D-WEBAUTHOR1=D: one statically known full-stack application graph.
+// `fn app()` is the canonical builder; CSR/SSR/SSG/streaming/islands share TIR.
+use core.web as web
+use core.web.devserver as devserver
+
+#Target(Web)
+
+fn home() -> WebPage {
+    return web.page("Home", "hello from csr")
+}
+
+fn save() {
+    print("saved")
+}
+
+fn api_mount(prefix: String) {
+    print(prefix)
+}
+
+fn app() -> WebApp {
+    return web.app()
+        .csr()
+        .route("/", home)
+        .action("save", save)
+        .mount("/api", api_mount, "Net", "csrf")
+        .island()
+        .route("/widget", home)
+        .security("csp-default")
+        .assets("/public")
+        .split("widget")
+        .cache("revalidate")
+        .a11y("wcag-aa")
+        .adapter("node")
+        .hydration_dev()
+}
+
+fn dev() {
+    server :: devserver.app()
+    server.serve()
+}
+
+fn run() {
+    print("web-app-graph-ok")
+}

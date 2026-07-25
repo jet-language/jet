@@ -385,6 +385,8 @@ const UI_GTK_PRELUDE: &str = include_str!("../Prelude/UiGtk.rs");
 /// c-devserver (owner-directed 2026-07-01): `core.web.devserver` — the
 /// configurable `jet dev` server value (`for_app`/`.html`/`.port`/`.serve`).
 const DEVSERVER_PRELUDE: &str = include_str!("../Prelude/DevServer.rs");
+/// D-WEBAPP1=D: `core.web.app` full-stack application builder.
+const WEBAPP_PRELUDE: &str = include_str!("../Prelude/WebApp.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
 const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
 /// D-DEP-GC1=A: one collector source backs jet-rt JIT/dev and emitted AOT code.
@@ -2054,6 +2056,7 @@ pub fn emit_bundle_dbg(
             out.push_str(UI_GTK_PRELUDE);
         }
         out.push_str(DEVSERVER_PRELUDE);
+        out.push_str(WEBAPP_PRELUDE);
     }
     out.push('\n');
 
@@ -2197,6 +2200,7 @@ pub fn emit_bundle_tests_cov(
             out.push_str(UI_GTK_PRELUDE);
         }
         out.push_str(DEVSERVER_PRELUDE);
+        out.push_str(WEBAPP_PRELUDE);
     }
     out.push('\n');
 
@@ -2384,6 +2388,7 @@ pub fn emit_bundle_fuzz(
             out.push_str(UI_GTK_PRELUDE);
         }
         out.push_str(DEVSERVER_PRELUDE);
+        out.push_str(WEBAPP_PRELUDE);
     }
     out.push('\n');
 
@@ -2631,6 +2636,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
             out.push_str(UI_GTK_PRELUDE);
         }
         out.push_str(DEVSERVER_PRELUDE);
+        out.push_str(WEBAPP_PRELUDE);
     }
     out.push('\n');
 

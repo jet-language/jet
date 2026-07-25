@@ -2418,6 +2418,10 @@ fn check_bundle_opts_for_output_inner(
         &public_solved,
     ));
 
+    // D-WEBAPP1=D / D-WEBAUTHOR1=D (Tower #438): one sema-known application graph.
+    let (web_app_graph, web_app_diags) = super::WebApp::extract_web_app_graph(bundle);
+    diags.extend(web_app_diags);
+
     // D-OSTARGET1=A (ratified 2026-07-01, c134): native OS platform gating —
     // mixed-axis conflicts and unmatched cross-gate calls.
     diags.extend(check_os_target(bundle));
@@ -2514,6 +2518,7 @@ fn check_bundle_opts_for_output_inner(
             memory_declarations,
             memory_projections,
             reference_anchors,
+            web_app: web_app_graph,
         },
     )
 }

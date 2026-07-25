@@ -1484,6 +1484,88 @@ pub(crate) fn run_doctor(online: bool, apply: bool, mode: OutputMode) {
     }
 }
 
+/// `jet explain --web-graph <file>` — print the sema-known application graph.
+pub(crate) fn run_explain_web_graph(args: &[String], mode: OutputMode) {
+    let mut file: Option<&str> = None;
+    for arg in args {
+        if arg.starts_with('-') {
+            continue;
+        }
+        file = Some(arg.as_str());
+        break;
+    }
+    let Some(path) = file else {
+        eprintln!(
+            "usage: {} explain --web-graph <file.{}>",
+            jet::Syntax::BINARY_NAME,
+            jet::Syntax::FILE_EXT
+        );
+        exit(ExitCodes::USAGE);
+    };
+    let abs = if Path::new(path).is_absolute() {
+        PathBuf::from(path)
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    };
+    let entry = abs.display().to_string();
+    let (diags, _bundle, facts) =
+        jet::Driver::check_file_with_effect_facts(&entry, None, false);
+    let Some(graph) = facts.web_app.as_ref() else {
+        if diags
+            .iter()
+            .any(|d| d.severity == jet::Diagnostics::Severity::Error)
+        {
+            for d in &diags {
+                eprintln!(
+                    "{}",
+                    jet::render_diagnostics(&entry, "", std::slice::from_ref(d))
+                );
+            }
+            exit(ExitCodes::USER_ERROR);
+        }
+        if mode.json {
+            println!("{{\"web_app\": null}}");
+        } else {
+            println!("(none)");
+        }
+        return;
+    };
+    let empty = graph.entry_file.is_empty()
+        && graph.routes.is_empty()
+        && graph.actions.is_empty()
+        && graph.mounts.is_empty()
+        && graph.routes_from.is_empty();
+    if empty {
+        if diags
+            .iter()
+            .any(|d| d.severity == jet::Diagnostics::Severity::Error)
+        {
+            for d in &diags {
+                eprintln!(
+                    "{}",
+                    jet::render_diagnostics(&entry, "", std::slice::from_ref(d))
+                );
+            }
+            exit(ExitCodes::USER_ERROR);
+        }
+        if mode.json {
+            println!("{{\"web_app\": null}}");
+        } else {
+            println!("(none)");
+        }
+        return;
+    }
+    if mode.json {
+        println!("{}", graph.to_json());
+    } else {
+        for line in graph.explain_lines() {
+            println!("{line}");
+        }
+    }
+}
+
 /// `jet explain <CODE>` — print the offline essay for a diagnostic code.
 pub(crate) fn run_explain(code: Option<&str>, mode: OutputMode) {
     let code = match code {

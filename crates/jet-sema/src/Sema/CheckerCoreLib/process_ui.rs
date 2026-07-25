@@ -402,3 +402,32 @@ pub(crate) fn devserver_method_return(
         _ => None,
     }
 }
+
+/// D-WEBAPP1=D / D-WEBAUTHOR1=D: builder methods on `WebApp`. Chainable methods
+/// return `WebApp`; zero-arg render-mode setters also return `WebApp`.
+pub(crate) fn webapp_method_return(
+    method: &str,
+    n_args: usize,
+    _span: Span,
+    _diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Type>> {
+    let app = Type::Named("WebApp".to_string());
+    let unit = unit_ty();
+    match (method, n_args) {
+        ("route" | "page" | "layout", 2) => Some(Some(app)),
+        ("action" | "form" | "data", 2) => Some(Some(app)),
+        ("mount", 2 | 3 | 4) => Some(Some(app)),
+        ("routes", 1) => Some(Some(app)),
+        (
+            "csr" | "ssr" | "ssg" | "stream" | "streaming" | "island" | "hydration_dev"
+                | "hydration_release",
+            0,
+        ) => Some(Some(app)),
+        ("security" | "assets" | "split" | "code_split" | "cache" | "a11y" | "adapter", 1) => {
+            Some(Some(app))
+        }
+        ("facts_json", 0) => Some(Some(Type::String)),
+        ("serve", 0) => Some(Some(unit)),
+        _ => None,
+    }
+}

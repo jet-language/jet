@@ -3154,6 +3154,7 @@ impl LowerCtx<'_, '_> {
             THandleOp::PathWalk => Err("jit handle method unsupported".to_string()),
             THandleOp::UiBackendMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::DevServerMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::WebAppMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::DbQuery => Err("jit handle method unsupported".to_string()),
             THandleOp::DbQueryOne => Err("jit handle method unsupported".to_string()),
             THandleOp::DbExecute => Err("jit handle method unsupported".to_string()),

@@ -20,6 +20,7 @@ use crate::Codegen::TIR::handle_method_return_ty;
 use crate::Codegen::TIR::is_civil_time_method_name;
 use crate::Codegen::TIR::is_concurrency_method_name;
 use crate::Codegen::TIR::is_devserver_method_name;
+use crate::Codegen::TIR::is_webapp_method_name;
 use crate::Codegen::TIR::is_event_handle_type;
 use crate::Codegen::TIR::is_event_method_name;
 use crate::Codegen::TIR::is_http_method_name;
@@ -1661,6 +1662,26 @@ pub(crate) fn lower_method_call(
             kind: TExprKind::HandleMethod {
                 recv: Box::new(recv_t),
                 op: THandleOp::DevServerMethod {
+                    method: method.to_string(),
+                },
+                args: targs,
+            },
+        };
+    }
+    // D-WEBAPP1=D: a WebApp builder method.
+    if recv_type.as_deref() == Some("WebApp") && is_webapp_method_name(method, args.len()) {
+        let recv_t = lower_expr(receiver, cx, env);
+        let result_ty = match method {
+            "serve" => unit_type(),
+            "facts_json" => Type::String,
+            _ => Type::Named("WebApp".to_string()),
+        };
+        let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+        return TExpr {
+            ty: result_ty,
+            kind: TExprKind::HandleMethod {
+                recv: Box::new(recv_t),
+                op: THandleOp::WebAppMethod {
                     method: method.to_string(),
                 },
                 args: targs,

@@ -2705,6 +2705,16 @@ pub(crate) fn emit_tir_core_call(
         // rustc the browser API checker.
         ("core.web", "on") => "{ let _ = || (); () }".to_string(),
         ("core.web", "value") => "String::new()".to_string(),
+        // D-WEBAPP1=D: application builder + page helper.
+        ("core.web", "app") => format!("{}jet_web_app()", cx.root_prefix),
+        ("core.web", "page") => {
+            format!(
+                "{}jet_web_page(({}).clone(), ({}).clone())",
+                cx.root_prefix,
+                arg(0),
+                arg(1)
+            )
+        },
         ("core.web.storage.local" | "core.web.storage.session", "get") => {
             "None::<String>".to_string()
         }

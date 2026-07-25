@@ -1124,6 +1124,13 @@ impl Cx {
             Type::Named(name) if name == "DevServer" && !self.type_names.contains(name) => {
                 format!("{}JetDevServer", self.root_prefix)
             }
+            // D-WEBAPP1=D: WebApp / WebPage opaque builder types.
+            Type::Named(name) if name == "WebApp" && !self.type_names.contains(name) => {
+                format!("{}JetWebApp", self.root_prefix)
+            }
+            Type::Named(name) if name == "WebPage" && !self.type_names.contains(name) => {
+                format!("{}JetWebPage", self.root_prefix)
+            }
             Type::Named(name)
                 if name == Syntax::TYPE_EFFECT && !self.type_names.contains(name) =>
             {

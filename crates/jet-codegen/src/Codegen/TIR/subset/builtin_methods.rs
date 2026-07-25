@@ -216,6 +216,21 @@ pub(crate) fn is_devserver_method_name(method: &str, nargs: usize) -> bool {
     matches!((method, nargs), ("html", 1) | ("port", 1) | ("serve", 0))
 }
 
+/// D-WEBAPP1=D: is `(method, nargs)` a `WebApp` builder method?
+pub(crate) fn is_webapp_method_name(method: &str, nargs: usize) -> bool {
+    matches!(
+        (method, nargs),
+        ("route" | "page" | "layout" | "action" | "form" | "data", 2)
+            | ("mount", 2 | 3 | 4)
+            | ("routes" | "security" | "assets" | "split" | "code_split" | "cache" | "a11y" | "adapter", 1)
+            | (
+                "csr" | "ssr" | "ssg" | "stream" | "streaming" | "island" | "hydration_dev"
+                    | "hydration_release" | "facts_json" | "serve",
+                0
+            )
+    )
+}
+
 /// D-NETDEP1=A / D-HTTPLIB1=A: is this an HTTP type?
 pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
     matches!(
