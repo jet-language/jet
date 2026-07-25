@@ -142,7 +142,7 @@ fn increment(x: I32) --[]-> I32 {{ return x + 1 }}
 
 fn load(id: U64) -> Record ? String {{
     slot := Record.{{id: 0, flags: 0}}
-    status := I32.{ 1 }
+    status := I32.{{ 1 }}
     #Unsafe("live non-null out slot; read only after status zero") {{
         p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))
         status = c.load_record(id, p)
