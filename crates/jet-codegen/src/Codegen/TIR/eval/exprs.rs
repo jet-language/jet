@@ -713,13 +713,6 @@ impl EvalCtx<'_> {
             TExprKind::PatternMatches { .. } => {
                 Err(unsupported("expr `PatternMatches`", self.span()))
             }
-            TExprKind::FanOut { calls } => {
-                let mut out = Vec::with_capacity(calls.len());
-                for call in calls {
-                    out.push(self.eval_expr(call, scope)?);
-                }
-                Ok(CtValue::List(out))
-            }
             TExprKind::OptionLift2 { .. } => Err(unsupported("expr `OptionLift2`", self.span())),
             TExprKind::ClosureMethod { recv, op, args } => {
                 self.eval_closure_method(recv, op, args, scope)

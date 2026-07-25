@@ -1816,9 +1816,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
-        // c109 Phase 5: a map literal `[k: v, …]` / `[:]`. Keys/values lower as-is;
-        // the result type is `[K: V]` from the first entry (empty `[:]` → unresolved
-        // placeholder, type-inferred by Rust from context like `vec![]`).
+        // #779: map literals desugar to empty `MapLit` + `IndexAssign` inserts inside
+        // an `IfExpr(true)` block. Engines keep only the empty-map constructor arm.
         Expr::MapLit(entries, _) => {
             let tentries: Vec<(TExpr, TExpr)> = entries
                 .iter()
@@ -1828,13 +1827,61 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .first()
                 .map(|(k, v)| (k.ty.clone(), v.ty.clone()))
                 .unwrap_or((Type::String, Type::Int));
+            let map_ty = Type::Map {
+                key: Box::new(kt),
+                key_span: None,
+                value: Box::new(vt),
+            };
+            if tentries.is_empty() {
+                return TExpr {
+                    ty: map_ty,
+                    kind: TExprKind::MapLit(Vec::new()),
+                };
+            }
+            let map_name = "__jet_m";
+            let empty = TExpr {
+                ty: map_ty.clone(),
+                kind: TExprKind::MapLit(Vec::new()),
+            };
+            let mut then_body = vec![crate::Codegen::TIR::TStmt::Let {
+                name: map_name.to_string(),
+                kw: "let mut",
+                let_ty: crate::Codegen::TIR::TLetTy::Inferred,
+                init: empty,
+                track_origin: None,
+                gc_promotion: None,
+                gc_transferred: false,
+            }];
+            for (k, v) in tentries {
+                then_body.push(crate::Codegen::TIR::TStmt::IndexAssign {
+                    base: TExpr {
+                        ty: map_ty.clone(),
+                        kind: TExprKind::Local(TLocal::user(map_name)),
+                    },
+                    index: k,
+                    is_map: true,
+                    value: v,
+                });
+            }
+            let result = TExpr {
+                ty: map_ty.clone(),
+                kind: TExprKind::Local(TLocal::user(map_name)),
+            };
             TExpr {
-                ty: Type::Map {
-                    key: Box::new(kt),
-                    key_span: None,
-                    value: Box::new(vt),
+                ty: map_ty.clone(),
+                kind: TExprKind::IfExpr {
+                    cond: Box::new(crate::Codegen::TIR::TIfCond::Plain(TExpr {
+                        ty: Type::Bool,
+                        kind: TExprKind::BoolLit(true),
+                    })),
+                    then_body,
+                    then_value: Box::new(result),
+                    else_body: Vec::new(),
+                    else_value: Box::new(TExpr {
+                        ty: map_ty,
+                        kind: TExprKind::MapLit(Vec::new()),
+                    }),
                 },
-                kind: TExprKind::MapLit(tentries),
             }
         }
         // c109 Phase 5: indexing `coll[i]`. The `IndexKind` (List/Map) is the total
@@ -2158,19 +2205,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::Lambda(Box::new(tl)),
             }
         }
-        // c109 Phase 11: fan-out `f.[a, b, c]` (S75/S76). The gate proved the callee
-        // is a plain top-level fn ident and every item is in-subset. The AST path
-        // routes the Ident callee through `emit_call` with a SYNTHETIC single-arg
-        // `Call` (`convention: Read`, default flags) per item; reproduce that exactly
-        // as a `TExprKind::Call` per item, then `vec![…]`. The result type is `[T#N]`
-        // (S76), erased to a list of the callee's return type.
+        // #779 / D-ONECORE1: fan-out `f.[a, b, c]` desugars at lowering to a
+        // `ListLit` of synthetic `Call`s (S75/S76). Engines never see a FanOut node.
         Expr::FanOut { callee, items, .. } => {
             let Expr::Ident(name, _) = callee.as_ref() else {
                 unreachable!("gate proved fan-out callee is a plain fn ident");
             };
-            // The callee's signature drives each synthetic arg's borrow wrapper,
-            // exactly as `emit_call_args` does for the synthetic `Read` arg (whose
-            // `implicit_clone` is false — the synthetic CallArg carries default flags).
             let sig = cx.sigs.get(name);
             let borrow = matches!(
                 sig.and_then(|ps| ps.first()),
@@ -2197,16 +2237,22 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     }
                 })
                 .collect();
-            // D-FIXARR1: fan-out result is `[T#N]` — a real Rust stack array.
             let elem_ty = call_return_type(cx, name);
             let len = items.len() as u64;
-            TExpr {
-                ty: Type::FixedList {
-                    elem: Box::new(elem_ty),
-                    len,
-                    len_symbol: None,
-                },
-                kind: TExprKind::FanOut { calls },
+            if len == 0 {
+                TExpr {
+                    ty: Type::List(Box::new(elem_ty)),
+                    kind: TExprKind::ListLit(calls),
+                }
+            } else {
+                TExpr {
+                    ty: Type::FixedList {
+                        elem: Box::new(elem_ty),
+                        len,
+                        len_symbol: None,
+                    },
+                    kind: TExprKind::ListLit(calls),
+                }
             }
         }
         // c109 Phase 18: `mem.Ptr<T>.from_addr(addr)` (S58). The result type is

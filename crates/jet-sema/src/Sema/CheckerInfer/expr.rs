@@ -8,7 +8,8 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::Sema::Diagnostics::soft_public_use;
 use crate::AST::{
-    AccessConvention, Call, CallArg, EnumLitArg, Expr, IndexKind, StrPart, Type, TypedLitBody, UnOp,
+    AccessConvention, Call, CallArg, CallArgFlags, EnumLitArg, Expr, IndexKind, StrPart, Type,
+    TypedLitBody, UnOp,
 };
 use std::collections::HashSet;
 
@@ -18,6 +19,51 @@ fn field_path(expr: &Expr) -> Option<String> {
         Expr::Field(base, field, _) => Some(format!("{}.{}", field_path(base)?, field)),
         _ => None,
     }
+}
+
+/// S75 / #779: `[f.[a, b], c]` flattens to `[f(a), f(b), c]` before typing.
+/// Only Ident callees expand (same gate as fan-out lowering); other shapes stay
+/// so `infer_fan_out` can diagnose.
+fn flatten_fan_out_in_list(elems: &mut Vec<Expr>) {
+    if !elems.iter().any(|e| matches!(e, Expr::FanOut { .. })) {
+        return;
+    }
+    let mut out = Vec::with_capacity(elems.len());
+    for e in std::mem::take(elems) {
+        match e {
+            Expr::FanOut {
+                callee,
+                items,
+                span,
+            } => match *callee {
+                Expr::Ident(name, name_span) => {
+                    for item in items {
+                        let item_span = item.span();
+                        out.push(Expr::Call(Call {
+                            name: name.clone(),
+                            name_span,
+                            args: vec![CallArg {
+                                convention: AccessConvention::Read,
+                                expr: item,
+                                span: item_span,
+                                flags: CallArgFlags::default(),
+                                label: None,
+                                spread: false,
+                            }],
+                            range_checked: false,
+                        }));
+                    }
+                }
+                other => out.push(Expr::FanOut {
+                    callee: Box::new(other),
+                    items,
+                    span,
+                }),
+            },
+            other => out.push(other),
+        }
+    }
+    *elems = out;
 }
 
 impl<'a> Checker<'a> {
@@ -844,6 +890,10 @@ impl<'a> Checker<'a> {
                 None
             }
             Expr::ListLit(elems, span) => {
+                // S75: fan-out inside a list literal flattens — `[f.[a,b], c]` ≡ `[f(a), f(b), c]`.
+                // Rewrite before typing so the list sees call results, not nested `[T#N]`.
+                // #779 demo: surface-only change; engines never learn a new construct.
+                flatten_fan_out_in_list(elems);
                 if !elems.is_empty()
                     && !matches!(self.expected_type.as_ref(), Some(Type::FixedList { .. }))
                 {

@@ -451,6 +451,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   has the same stdout, stderr, exit code, diagnostics, panics, and side effects.
   Native JIT coverage is a performance tier; semantic parity is mandatory.
   (D-ONECORE1=A, ratified 2026-07-24.)
+  Living core-vs-desugar inventory for the #668 freeze: `docs/spec/tir.md`.
 
 ## Exit codes (stable contract)
 

@@ -3,8 +3,6 @@
 # Covered means TIR lowered and Cranelift compiled end-to-end; gaps list the first compile/unsupported reason.
 # Shrink-only perf ratchet (D-LENS-RUN2 / #778): gaps may only shrink; silent growth fails CI.
 # Covered/gap movement is intentional only; update this file in the same diff.
-# #778: lowlevel/target_profile_board is a new post-#239 example (typed target profiles);
-# added as a named gap (core call unsupported) — not silent growth.
 
 covered:
   basics/branches
@@ -12,6 +10,7 @@ covered:
   basics/counted_loop
   basics/default_refs
   basics/digits
+  basics/fan_out_flatten
   basics/fizzbuzz
   basics/functions
   basics/hello
@@ -106,7 +105,7 @@ gaps:
   basics/bare_lambda_param: jit param type unsupported: Fn { params: [Int], ret: None, effect_bound: None }
   basics/callbacks: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
   basics/closures: run: jit closure method unsupported
-  basics/fan_out: run: jit fan-out expression unsupported
+  basics/fan_out: run: jit list destructure unsupported
   basics/first_hour: run: jit core call unsupported
   basics/pattern_matching: describe_conn: jit unknown local `id`
   basics/printable: run: jit string interp type unsupported: Named("Greeting")

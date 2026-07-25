@@ -2289,7 +2289,6 @@ impl LowerCtx<'_, '_> {
             TExprKind::PatternMatches { .. } => {
                 Err("jit pattern-matches expression unsupported".to_string())
             }
-            TExprKind::FanOut { .. } => Err("jit fan-out expression unsupported".to_string()),
             TExprKind::OptionLift2 { .. } => Err("jit Option.lift2 unsupported".to_string()),
             TExprKind::ClosureMethod { .. } => Err("jit closure method unsupported".to_string()),
             TExprKind::NumericMethod { recv, op } => self.lower_numeric_method(recv, op),
