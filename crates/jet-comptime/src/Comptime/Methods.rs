@@ -9,10 +9,25 @@ mod core_calls;
 #[path = "Methods/pool.rs"]
 mod pool;
 
-pub(super) use core_calls::{apply_core_pure_method, as_float, as_string};
+pub(super) use core_calls::{apply_core_pure_method, as_float, as_string, solver_require};
 /// Public host entry for the TIR evaluator (#777).
-pub use core_calls::{apply_core_call, apply_impure_core_call};
+pub use core_calls::{apply_core_call, apply_impure_core_call, display_core_pure_value};
 pub use dispatch::apply_dollar_splices;
+/// Public for TirBridge `Rng.shuffle(&list)` write-back (#777).
+pub use dispatch::apply_seeded_rng_method;
+
+pub(super) fn apply_pool(
+    recv: &crate::AST::CtValue,
+    method: &str,
+    args: &[crate::AST::CtValue],
+    span: crate::Diagnostics::Span,
+) -> Option<Result<(crate::AST::CtValue, Option<crate::AST::CtValue>), crate::Diagnostics::Diagnostic>>
+{
+    if !pool::is_method(recv, method) {
+        return None;
+    }
+    Some(pool::apply(recv, method, args, None, span).map(|o| (o.value, o.updated)))
+}
 
 #[cfg(test)]
 mod structure_tests {

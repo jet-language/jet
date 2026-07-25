@@ -420,6 +420,55 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             let status = if failures == 0 { "ok" } else { "failed" };
             Some(format!("Solver(status: {status}, failures: {failures})"))
         }
+        // Core pure structs: REPL/transcript show uses Type(field: jet_show) —
+        // not Rust `user_*` Debug — matching AOT JetShow for these foreign types.
+        CtValue::Struct { type_name, fields }
+            if matches!(
+                type_name.strip_prefix("user_").unwrap_or(type_name.as_str()),
+                "Mime"
+                    | "Period"
+                    | "LocalDate"
+                    | "LocalTime"
+                    | "DateTime"
+                    | "Date"
+                    | "Zone"
+                    | "ZonedDateTime"
+                    | "Instant"
+                    | "Url"
+                    | "Envelope"
+                    | "Address"
+                    | "Message"
+                    | "Attachment"
+            ) =>
+        {
+            let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
+            let parts: Vec<String> = fields
+                .iter()
+                .map(|(name, v)| {
+                    let field = name.strip_prefix("user_").unwrap_or(name);
+                    let shown = display(v).unwrap_or_else(|| match v {
+                        CtValue::List(xs) => {
+                            let inner: Vec<String> = xs
+                                .iter()
+                                .map(|x| display(x).unwrap_or_else(|| x.jet_show()))
+                                .collect();
+                            format!("[{}]", inner.join(", "))
+                        }
+                        _ => v.jet_show(),
+                    });
+                    format!("{field}: {shown}")
+                })
+                .collect();
+            Some(format!("{ty}({})", parts.join(", ")))
+        }
+        CtValue::Some(inner) => {
+            // Option payloads in Address.display etc. show as the inner jet_show
+            // (null for None is handled by jet_show); keep Some unwrapped in
+            // nested core-struct display via the field map above.
+            display(inner)
+        }
+        CtValue::None(_) => Some("null".to_string()),
+        CtValue::ResOk(inner) => display(inner),
         _ => {
             let CtValue::Float(measured) = field(value, "Measurement", "value")? else {
                 return None;

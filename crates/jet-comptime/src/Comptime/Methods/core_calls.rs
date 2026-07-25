@@ -45,7 +45,7 @@ pub(in super::super) fn solver_new(
     core_pure_parity::solver_new(args, span)
 }
 
-pub(super) fn display_core_pure_value(value: &CtValue) -> Option<String> {
+pub fn display_core_pure_value(value: &CtValue) -> Option<String> {
     core_pure_parity::display(value)
 }
 
@@ -2128,6 +2128,11 @@ pub fn apply_impure_core_call(
     pinned_executable: Option<&std::fs::File>,
     verified_root: Option<&std::fs::File>,
 ) -> Result<CtValue, Diagnostic> {
+    // Pure CorePureParity surfaces (crypto.expert, net.socket_*, datetime, …)
+    // must still resolve under ambient impure depth — same as apply_core_call.
+    if let Some(result) = core_pure_parity::evaluate(module, method, &args, span) {
+        return result;
+    }
     let one = |i: usize| {
         args.get(i).ok_or_else(|| {
             unsupported(
@@ -2345,15 +2350,6 @@ pub fn apply_impure_core_call(
                 Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(&cmd[0], e)))),
             }
         }
-        // E3412: other core.net methods not yet implemented at comptime.
-        ("core.net", _) => Err(Diagnostic::error(
-            "E3412",
-            format!("`core.net.{}()` is not available at comptime", method),
-            "only `core.net.fetch(url, sha256:)` is supported at compile time".to_string(),
-            "use `core.net.fetch(url, sha256: \"<hash>\")` for content-hash-pinned downloads"
-                .to_string(),
-            Some(span),
-        )),
         ("core.tls", _) => Err(Diagnostic::error(
             "E3412",
             format!("`core.tls.{}()` is not available at comptime", method),
@@ -2373,6 +2369,55 @@ pub fn apply_impure_core_call(
         (module, _) if module.starts_with("core.encoding.") => {
             apply_core_call(module, method, args, span, repl_mode)
         }
+        // Ambient impure depth must not block pure-tier CorePureParity surfaces
+        // that TirBridge already evaluates (date/math/measurement/testing/…).
+        // Pure style/net helpers share the AST allowlist so impure_depth>0
+        // (TirBridge / jet run deopt) still hits CorePureParity.
+        ("core.io", method) if super::dispatch::is_pure_tier2_call("core.io", method) => {
+            apply_core_call(module, method, args, span, repl_mode)
+        }
+        ("core.random", _) | ("core.testing", "fake_rng") => {
+            apply_core_call(module, method, args, span, repl_mode)
+        }
+        ("core.time.date", _)
+        | ("core.time.duration", _)
+        | ("core.time.instant", _)
+        | ("core.math", _)
+        | ("core.measurement", _)
+        | ("core.testing", _)
+        | ("core.data", _)
+        | ("core.ui", _)
+        | ("core.crypto", _)
+        | ("core.crypto.expert", _)
+        | ("core.linalg", _)
+        | ("core.email", _)
+        | ("core.xml", _)
+        | ("core.json", _)
+        | ("core.regex", _)
+        | ("core.color", _)
+        | ("core.units", _)
+        | ("core.time", _)
+        | ("core.time.datetime", _)
+        | ("core.science.measurement", _) => apply_core_call(module, method, args, span, repl_mode),
+        // Pure net helpers (e.g. ip_addr, socket_addr_parse) — not live sockets.
+        // Keep E3412 for the rest. Shares the allowlist with the REPL/comptime
+        // AST evaluator (`dispatch::is_pure_tier2_call`) so both tiers agree.
+        ("core.net", method)
+            if matches!(
+                method,
+                "ip_addr" | "ip" | "ipv4" | "ipv6" | "parse_ip" | "is_ipv4" | "is_ipv6"
+            ) || super::dispatch::is_pure_tier2_call("core.net", method) =>
+        {
+            apply_core_call(module, method, args, span, repl_mode)
+        }
+        ("core.net", _) => Err(Diagnostic::error(
+            "E3412",
+            format!("`core.net.{}()` is not available at comptime", method),
+            "only `core.net.fetch(url, sha256:)` is supported at compile time".to_string(),
+            "use `core.net.fetch(url, sha256: \"<hash>\")` for content-hash-pinned downloads"
+                .to_string(),
+            Some(span),
+        )),
         _ => Err(unsupported(
             &format!("`{}.{}()` at comptime (impure tier)", module, method),
             span,

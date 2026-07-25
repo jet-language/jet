@@ -118,7 +118,7 @@ pub fn eval_binop(
         (BinOp::Ge, a, b) => cmp(a, b, span).map(|o| Bool(o != std::cmp::Ordering::Less)),
         (BinOp::And, Bool(a), Bool(b)) => Ok(Bool(a && b)),
         (BinOp::Or, Bool(a), Bool(b)) => Ok(Bool(a || b)),
-        _ => Err(unsupported("this operation", span)),
+        (_op, _left, _right) => Err(unsupported("this operation", span)),
     }
 }
 
@@ -149,6 +149,9 @@ pub fn apply_static_type_method(
     if method == "new" {
         if let Some(result) = super::CollectionEval::prelude_new(type_name, args.clone(), span) {
             return Some(result);
+        }
+        if super::MathLayout::is_math_type(type_name) {
+            return Some(super::MathLayout::construct(type_name, &args, span));
         }
     }
     if let Some(result) = super::MathLayout::apply_static(type_name, method, args.clone(), span) {
@@ -347,6 +350,94 @@ pub fn apply_mutating(
     if let Some(result) = super::CollectionEval::apply_mutating(recv, method, args.clone(), span) {
         return result;
     }
+    if let Some(result) = super::Methods::apply_pool(recv, method, &args, span) {
+        let (value, updated) = result?;
+        if let Some(updated) = updated {
+            *recv = updated;
+        }
+        return Ok(value);
+    }
+    // D-DET1 / #777: Clock + seeded Rng mutate in place for TirBridge handles.
+    let clock_next = if let CtValue::Struct { type_name, fields } = &*recv {
+        if type_name == crate::Syntax::CLOCK_TYPE && matches!(method, "tick" | "advance" | "wait")
+        {
+            let now = fields
+                .iter()
+                .find_map(|(name, value)| match (name.as_str(), value) {
+                    ("now", CtValue::Int(now)) => Some(*now),
+                    _ => None,
+                })
+                .unwrap_or(0);
+            Some(match method {
+                "tick" => now.wrapping_add(as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?),
+                "advance" => as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?,
+                "wait" => match args.first() {
+                    Some(CtValue::Struct {
+                        type_name,
+                        fields: dfields,
+                    }) if type_name == crate::Syntax::DURATION_TYPE =>
+                    {
+                        let millis = dfields
+                            .iter()
+                            .find_map(|(name, value)| match (name.as_str(), value) {
+                                ("ms", CtValue::Int(millis)) => Some(*millis),
+                                _ => None,
+                            })
+                            .unwrap_or(0);
+                        now.wrapping_add(millis)
+                    }
+                    _ => return Err(unsupported("Clock.wait expects a Duration", span)),
+                },
+                _ => unreachable!(),
+            })
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    if let Some(next) = clock_next {
+        *recv = CtValue::Struct {
+            type_name: crate::Syntax::CLOCK_TYPE.to_string(),
+            fields: vec![("now".to_string(), CtValue::Int(next))],
+        };
+        return Ok(CtValue::Int(next));
+    }
+    let rng_state = if let CtValue::Struct { type_name, fields } = &*recv {
+        if type_name == crate::Syntax::RNG_TYPE {
+            Some(
+                fields
+                    .iter()
+                    .find_map(|(name, value)| match (name.as_str(), value) {
+                        ("state", CtValue::Int(state)) => Some(*state as u64),
+                        _ => None,
+                    })
+                    .unwrap_or(0),
+            )
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    if let Some(mut state) = rng_state {
+        let mut argv = args.clone();
+        let value = super::Methods::apply_seeded_rng_method(&mut state, method, &mut argv, span)?;
+        *recv = CtValue::Struct {
+            type_name: crate::Syntax::RNG_TYPE.to_string(),
+            fields: vec![("state".to_string(), CtValue::Int(state as i64))],
+        };
+        return Ok(value);
+    }
+    if matches!(&*recv, CtValue::Struct { type_name, .. } if type_name == crate::Syntax::SOLVER_TYPE)
+        && method == "require"
+    {
+        if let Some(result) = super::Methods::solver_require(recv, &args, span) {
+            let (ret, updated) = result?;
+            *recv = updated;
+            return Ok(ret);
+        }
+    }
     match (recv, method) {
         (CtValue::List(xs), "push") => {
             xs.push(args.into_iter().next().unwrap_or(CtValue::Unit));
@@ -450,6 +541,9 @@ pub fn apply_method(
     }
     if let Some(result) = super::Methods::apply_core_pure_method(recv, method, &args, span) {
         return result;
+    }
+    if let Some(result) = super::Methods::apply_pool(recv, method, &args, span) {
+        return result.map(|(value, _)| value);
     }
     if let Some(result) = super::CollectionEval::apply_method(recv, method, &args, span) {
         return result;
