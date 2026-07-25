@@ -44,7 +44,7 @@ pub(crate) fn jit_list_string_type(ty: &Type) -> bool {
         || matches!(ty, Type::FixedList { elem, .. } if matches!(elem.as_ref(), Type::String))
 }
 
-fn jit_list_native_type(ty: &Type) -> bool {
+pub(crate) fn jit_list_native_type(ty: &Type) -> bool {
     jit_list_int_type(ty) || jit_list_float_type(ty) || jit_list_string_type(ty)
 }
 
@@ -70,10 +70,11 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
         {
             Some(inner.as_ref().clone())
         }
-        // JIT ABI: `Iter<T>` producers (String.split, adapters) materialize list
-        // handles — same scalar elems as list for-in.
+        // JIT ABI: `Iter<T>` / `View<T>` / `ViewMut<T>` producers materialize list
+        // handles — same scalar elems as list for-in / join / len.
         Type::Apply { name, args }
-            if name == jet_foundation::Syntax::TYPE_ITER
+            if (name == jet_foundation::Syntax::TYPE_ITER
+                || matches!(name.as_str(), "View" | "ViewMut"))
                 && args.len() == 1
                 && matches!(
                     &args[0],
@@ -692,10 +693,14 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::JoinSep => {
-            jit_list_native_type(&recv.ty)
+            (jit_list_native_type(&recv.ty) || jit_list_iter_elem_type(&recv.ty).is_some())
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::IsEmpty => {
+            (jit_list_native_type(&recv.ty) || jit_list_iter_elem_type(&recv.ty).is_some())
+                && args.is_empty()
         }
         TBuiltinOp::ParseInt | TBuiltinOp::ParseFloat => {
             matches!(&recv.ty, Type::String) && args.is_empty()
@@ -773,6 +778,11 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                             _ => 0,
                         }
                     && resident_safe_expr(init, callees))
+        }
+        TStmt::ListDestructure { init, elems, .. } => {
+            jit_list_native_type(&init.ty)
+                && !elems.is_empty()
+                && resident_safe_expr(init, callees)
         }
         TStmt::Assign {
             place,

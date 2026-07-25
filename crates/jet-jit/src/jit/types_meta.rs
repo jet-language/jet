@@ -8,8 +8,9 @@ use jet_foundation::AST::Type;
 use std::collections::HashMap;
 
 use super::safety::{
-    jit_concurrency_type, jit_enum_type, jit_list_int_type, jit_list_task_int_type,
-    jit_optional_scalar_type, jit_result_payload_type, jit_struct_type, jit_tuple_type,
+    jit_concurrency_type, jit_enum_type, jit_list_iter_elem_type, jit_list_native_type,
+    jit_list_of_int_list_type, jit_list_task_int_type, jit_optional_scalar_type,
+    jit_result_payload_type, jit_struct_type, jit_tuple_type,
 };
 
 pub(crate) fn init_clif_ty(init: &TExpr, meta: &JitMeta<'_>) -> Result<types::Type, String> {
@@ -82,8 +83,12 @@ pub(crate) fn clif_ty_with_distinct(
     if jit_concurrency_type(&ty) {
         return Some(types::I64);
     }
-    if jit_list_int_type(&ty)
+    // List/FixedList/Iter/View handles share the I64 arena ABI (string elems are
+    // string-handle ints). Fn values stay unsupported until call/closure ABI lands.
+    if jit_list_native_type(&ty)
+        || jit_list_of_int_list_type(&ty)
         || jit_list_task_int_type(&ty)
+        || jit_list_iter_elem_type(&ty).is_some()
         || (jit_struct_type(&ty) && !distinct_bases.contains_key(ty.name().as_str()))
         || jit_tuple_type(&ty)
         || jit_enum_type(&ty)

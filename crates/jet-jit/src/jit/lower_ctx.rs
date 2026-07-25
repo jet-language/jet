@@ -1267,8 +1267,14 @@ impl LowerCtx<'_, '_> {
             TStmt::StructDestructure { .. } => {
                 return Err("jit struct destructure unsupported".to_string());
             }
-            TStmt::ListDestructure { .. } => {
-                return Err("jit list destructure unsupported".to_string());
+            TStmt::ListDestructure {
+                init,
+                elems,
+                want,
+                line,
+                ..
+            } => {
+                self.lower_list_destructure(init, elems, *want, *line)?;
             }
             TStmt::IndexHookAssign { .. } => {
                 return Err("jit index-hook assign unsupported".to_string());
@@ -1550,6 +1556,49 @@ impl LowerCtx<'_, '_> {
             self.b.def_var(var, value);
             self.vars.insert(local.clone(), var);
             self.var_tys.insert(local.clone(), fallback_ty);
+        }
+        Ok(())
+    }
+
+    /// `[a, b, c] :: xs` — bounds-checked element binds via the list-get host.
+    fn lower_list_destructure(
+        &mut self,
+        init: &TExpr,
+        elems: &[String],
+        want: usize,
+        line: usize,
+    ) -> Result<(), String> {
+        let elem_ty = match &init.ty {
+            Type::List(inner) | Type::FixedList { elem: inner, .. } => inner.as_ref().clone(),
+            _ => {
+                return Err(format!(
+                    "jit list destructure collection type unsupported: {:?}",
+                    init.ty
+                ))
+            }
+        };
+        if elems.len() != want {
+            return Err("jit list destructure bind count mismatch".to_string());
+        }
+        let list = self.lower_expr(init)?;
+        let line_const = self.b.ins().iconst(types::I32, line as i64);
+        let host_id = match &elem_ty {
+            Type::Float => self.host.coll.list_get_f64,
+            _ => self.host.coll.list_get,
+        };
+        let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+        let clif = clif_ty(&elem_ty).ok_or_else(|| {
+            format!("jit list destructure element type unsupported: {elem_ty:?}")
+        })?;
+        for (i, local) in elems.iter().enumerate() {
+            let idx = self.b.ins().iconst(types::I64, i as i64);
+            let call = self.b.ins().call(host_ref, &[list, idx, line_const]);
+            let val = self.b.inst_results(call)[0];
+            self.emit_trap_check()?;
+            let var = self.fresh_var(clif);
+            self.b.def_var(var, val);
+            self.vars.insert(local.clone(), var);
+            self.var_tys.insert(local.clone(), elem_ty.clone());
         }
         Ok(())
     }
@@ -2523,7 +2572,15 @@ impl LowerCtx<'_, '_> {
             // named-unsupported). The AOT emitter (TIR/emit/expressions.rs) covers
             // the full set; the tier-0 interpreter covers it too since it re-runs the
             // AST directly. JIT falls through to that fallback ladder for all of these.
-            TBuiltinOp::IsEmpty => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::IsEmpty => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_len, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                let len = self.b.inst_results(call)[0];
+                let zero = self.b.ins().iconst(types::I64, 0);
+                Ok(self.bool_from_icmp(IntCC::Equal, len, zero))
+            }
             TBuiltinOp::Pop => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::InsertMap => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::AddNewMap => Err("jit builtin method unsupported".to_string()),

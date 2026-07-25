@@ -11,6 +11,7 @@ covered:
   basics/counted_loop
   basics/default_refs
   basics/digits
+  basics/fan_out
   basics/fan_out_flatten
   basics/fizzbuzz
   basics/functions
@@ -115,12 +116,11 @@ covered:
 gaps:
   basics/bare_lambda_param: jit param type unsupported: Fn { params: [Int], ret: None, effect_bound: None }
   basics/callbacks: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
-  basics/fan_out: run: jit list destructure unsupported
   basics/first_hour: run: jit core call unsupported
   basics/pattern_matching: describe_conn: jit unknown local `id`
   basics/printable: run: jit string interp type unsupported: Named("Greeting")
   basics/tuples: run: jit clone unsupported type: Tuple([("x", Int), ("y", Int)]), local p
-  basics/variadics_spread: jit param type unsupported: List(String)
+  basics/variadics_spread: join: jit list spread unsupported
   cli/positionals: lower_jit_program returned None (no zero-parameter runnable entry)
   cli/subcommands: lower_jit_program returned None (no zero-parameter runnable entry)
   cli/typed_entry_args: lower_jit_program returned None (no zero-parameter runnable entry)
@@ -141,7 +141,7 @@ gaps:
   concurrency/deadline_context: run: jit context block unsupported
   concurrency/detached_task: run: jit handle method unsupported
   concurrency/parallel_iter: run: jit closure method unsupported
-  concurrency/parallel_scan: jit param type unsupported: List(String)
+  concurrency/parallel_scan: scan_one: jit core call unsupported
   concurrency/task_controls: run: jit handle method unsupported
   concurrency/task_runtime_audit: run: jit core call unsupported
   crypto/auth_tokens: run: jit core call unsupported
@@ -285,7 +285,7 @@ gaps:
   serde/hand_codec: Email::encode: jit JSON literal unsupported
   serde/json_coerce: run: jit core call unsupported
   serde/json_typed: run: jit core call unsupported
-  serde/serde_derive: run: jit record field unsupported: List(String)
+  serde/serde_derive: run: jit core call unsupported
   serde/serde_generic: run: jit core call unsupported
   serde/toml: run: jit core call unsupported
   serde/validate: report: jit enum arm is not a variant pattern
@@ -332,7 +332,7 @@ gaps:
   types/patchable: run: jit missing method `Employee::apply`
   types/range_types: run: jit binary op unsupported
   types/recursive_enum: run: jit print type unsupported
-  types/refinements: jit param type unsupported: FixedList { elem: String, len: 4, len_symbol: None }
+  types/refinements: pick: jit host/default/uninit/ct-lit unsupported
   types/renderable-varargs-multi: run: jit call to unknown function `announce__va1`
   types/renderable-varargs: run: jit call to unknown function `log_all__va4`
   types/traits: print_area: jit missing method `Shape::name`
@@ -360,5 +360,5 @@ gaps:
   web/web_app: dev: jit core call unsupported
   web/web_hello: run: jit core call unsupported
   web/web_wasm_callback: init: jit core call unsupported
-  web/web_wasm_list_string: jit param type unsupported: List(String)
+  web/web_wasm_list_string: echo_strs: jit clone unsupported type: List(String), local xs
   web/web_wasm_map: echo_scores: jit clone unsupported type: Map { key: String, key_span: Some(Span { start: 202, end: 208 }), value: Int }, local scores
