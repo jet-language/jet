@@ -1442,8 +1442,34 @@ impl LowerCtx<'_, '_> {
                     TIfCond::And { .. } => {
                         return Err("jit binding conjunction unsupported".to_string());
                     }
-                    TIfCond::IsNone { .. } => {
-                        return Err("jit is-none condition unsupported".to_string());
+                    TIfCond::IsNone { subj } => {
+                        // Option ABI: 0 = None, else bits+1. `x == .None` → IsNone.
+                        let packed = self.lower_expr(subj)?;
+                        let zero = self.b.ins().iconst(types::I64, 0);
+                        let is_none = self.b.ins().icmp(IntCC::Equal, packed, zero);
+                        let then_block = self.b.create_block();
+                        let else_block = self.b.create_block();
+                        let merge_block = self.b.create_block();
+                        self.b
+                            .ins()
+                            .brif(is_none, then_block, &[], else_block, &[]);
+                        self.b.switch_to_block(then_block);
+                        self.b.seal_block(then_block);
+                        for s in then_body {
+                            self.lower_stmt(s)?;
+                        }
+                        self.b.ins().jump(merge_block, &[]);
+                        self.b.switch_to_block(else_block);
+                        self.b.seal_block(else_block);
+                        if let Some(body) = else_body {
+                            for s in body {
+                                self.lower_stmt(s)?;
+                            }
+                        }
+                        self.b.ins().jump(merge_block, &[]);
+                        self.b.switch_to_block(merge_block);
+                        self.b.seal_block(merge_block);
+                        return Ok(());
                     }
                     TIfCond::Matches { .. } => {
                         return Err("jit pattern-match condition unsupported".to_string());
@@ -2555,6 +2581,19 @@ impl LowerCtx<'_, '_> {
         fmt: StrFormat,
     ) -> Result<(), String> {
         if matches!(fmt, StrFormat::Display) {
+            if type_name == "EncodingError" {
+                let recv = self.lower_expr(expr)?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.encoding.encoding_error_show, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv]);
+                let text = self.b.inst_results(call)[0];
+                let push_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_push_str, self.b.func);
+                self.b.ins().call(push_ref, &[buf_id, text]);
+                return Ok(());
+            }
             let display_key = format!("{type_name}::display");
             if let Some(&func_id) = self.func_ids.get(&display_key) {
                 let recv = self.lower_expr(expr)?;
@@ -3533,12 +3572,100 @@ impl LowerCtx<'_, '_> {
                                 if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv" | "Xml")
                         )
                     });
+                    let datatree_list_ok = matches!(
+                        &expr.ty,
+                        Type::Result { ok, .. }
+                            if matches!(
+                                ok.as_ref(),
+                                Type::List(elem)
+                                    if matches!(
+                                        elem.as_ref(),
+                                        Type::Named(n)
+                                            if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv" | "Xml")
+                                    )
+                            )
+                    );
+                    let option_string_ok = matches!(
+                        &expr.ty,
+                        Type::Result { ok, .. }
+                            if matches!(ok.as_ref(), Type::Option(inner) if matches!(inner.as_ref(), Type::String))
+                    );
+                    let bytes_ok = matches!(
+                        &expr.ty,
+                        Type::Result { ok, .. }
+                            if matches!(
+                                ok.as_ref(),
+                                Type::List(elem)
+                                    if matches!(
+                                        elem.as_ref(),
+                                        Type::IntN {
+                                            signed: false,
+                                            bits: 8
+                                        }
+                                    ) || matches!(elem.as_ref(), Type::Named(n) if n == "U8")
+                            )
+                    );
+                    let bytes_arg = args.first().is_some_and(|a| {
+                        matches!(
+                            &a.ty,
+                            Type::List(elem)
+                                if matches!(
+                                    elem.as_ref(),
+                                    Type::IntN {
+                                        signed: false,
+                                        bits: 8
+                                    }
+                                ) || matches!(elem.as_ref(), Type::Named(n) if n == "U8")
+                        )
+                    });
+                    let expanded_ok = matches!(
+                        &expr.ty,
+                        Type::Result { ok, .. } if matches!(ok.as_ref(), Type::Tuple(_))
+                    );
+                    // Typed `xml.decode<T>` / `decode_bytes<T>` → project then Codable decode.
+                    if method == "decode" && args.len() == 1 && !datatree_ok {
+                        if let Type::Result { ok, .. } = &expr.ty {
+                            return self.lower_typed_tree_decode(
+                                &args[0],
+                                ok,
+                                self.host.encoding.xml_project,
+                            );
+                        }
+                    }
+                    if method == "decode_bytes" && args.len() == 1 && bytes_arg {
+                        if let Type::Result { ok, .. } = &expr.ty {
+                            return self.lower_typed_tree_decode(
+                                &args[0],
+                                ok,
+                                self.host.encoding.xml_project_bytes,
+                            );
+                        }
+                    }
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "parse" if args.len() == 1 && datatree_ok => {
                             (self.host.encoding.xml_parse, vec![self.lower_expr(&args[0])?])
                         }
                         "to_string" if args.len() == 1 && datatree_arg => (
                             self.host.encoding.xml_to_string,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "root" if args.len() == 1 && datatree_ok && datatree_arg => {
+                            (self.host.encoding.xml_root, vec![self.lower_expr(&args[0])?])
+                        }
+                        "expanded_name" if args.len() == 1 && expanded_ok && datatree_arg => (
+                            self.host.encoding.xml_expanded_name,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "attribute" if args.len() == 2 && option_string_ok && datatree_arg => (
+                            self.host.encoding.xml_attribute,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "content" if args.len() == 1 && datatree_list_ok && datatree_arg => (
+                            self.host.encoding.xml_content,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "to_bytes" if args.len() == 1 && bytes_ok && datatree_arg => (
+                            self.host.encoding.xml_to_bytes,
                             vec![self.lower_expr(&args[0])?],
                         ),
                         _ => {
@@ -4307,6 +4434,47 @@ impl LowerCtx<'_, '_> {
                 method,
                 args,
             } => {
+                // D-ENCSTREAM-SURFACE1: `EncodingLimits.safe()` — fixed defaults, no host.
+                let is_encoding_limits_safe = method.name == "safe"
+                    && args.is_empty()
+                    && match owner {
+                        TStaticOwner::User(name) => name == "EncodingLimits",
+                        TStaticOwner::Prelude { path, .. } => {
+                            path == "EncodingLimits"
+                                || path.ends_with("::EncodingLimits")
+                                || path.ends_with(".EncodingLimits")
+                        }
+                    }
+                    && owner_type
+                        .as_ref()
+                        .map(|t| matches!(t, Type::Named(n) if n == "EncodingLimits"))
+                        .unwrap_or(true);
+                if is_encoding_limits_safe {
+                    // Field order matches jet_std::EncodingLimits / sema core_types.
+                    let n = self.b.ins().iconst(types::I64, 6);
+                    let new_ref = self
+                        .module
+                        .declare_func_in_func(self.host.struct_new, self.b.func);
+                    let new_call = self.b.ins().call(new_ref, &[n]);
+                    let handle = self.b.inst_results(new_call)[0];
+                    let set_i = self
+                        .module
+                        .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+                    let fields = [
+                        65536i64, // buffer_bytes
+                        256,      // max_depth
+                        16777216, // max_item_bytes
+                        0,        // max_total_bytes = None
+                        32,       // max_expansion_depth
+                        8388608,  // max_expansion_bytes
+                    ];
+                    for (i, v) in fields.into_iter().enumerate() {
+                        let idx = self.b.ins().iconst(types::I64, i as i64);
+                        let val = self.b.ins().iconst(types::I64, v);
+                        self.b.ins().call(set_i, &[handle, idx, val]);
+                    }
+                    return Ok(handle);
+                }
                 let key = Self::static_method_key(owner, owner_type.as_ref(), method)
                     .ok_or_else(|| format!("jit static `{}::{}`", match owner {
                         TStaticOwner::User(name) => name.as_str(),
@@ -8012,6 +8180,26 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         "LogSpan" => &["id", "name"],
         // Mirrors jet_std::ProcessResult field order (Open.rs).
         "ProcessResult" => &["code", "output", "errors", "success", "signal", "timed_out"],
+        // D-ENCSTREAM-SURFACE1 / jet_std::EncodingLimits.
+        "EncodingLimits" => &[
+            "buffer_bytes",
+            "max_depth",
+            "max_item_bytes",
+            "max_total_bytes",
+            "max_expansion_depth",
+            "max_expansion_bytes",
+        ],
+        "EncodingCause" => &["kind", "os_code", "message"],
+        "EncodingError" => &[
+            "format",
+            "kind",
+            "byte_offset",
+            "line",
+            "column",
+            "path",
+            "reason",
+            "cause",
+        ],
         _ => return None,
     };
     fields.iter().position(|f| *f == field)

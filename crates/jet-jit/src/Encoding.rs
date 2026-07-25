@@ -946,6 +946,143 @@ extern "C" fn jet_jit_xml_to_string(tree: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
 }
 
+fn xml_tree_value(tree: i64) -> Result<jet_foundation::XmlPull::Value, String> {
+    let dt = read_datatree(tree).ok_or_else(|| "invalid DataTree".to_string())?;
+    datatree_to_xml_value(&dt)
+}
+
+fn pack_opt_string(opt: Option<String>) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match opt {
+        None => 0,
+        Some(s) => {
+            let sid = rt.heap.alloc_string(s);
+            sid + 1
+        }
+    })
+}
+
+/// D-ENCXML-PROJECTION1: `xml.root` via XmlPull::document_root.
+extern "C" fn jet_jit_xml_root(tree: i64) -> i64 {
+    match xml_tree_value(tree).and_then(|v| {
+        jet_foundation::XmlPull::document_root(&v).map_err(xml_err_msg)
+    }) {
+        Ok(root) => result_ok_bits(alloc_datatree(&xml_value_to_datatree(root)) as u64),
+        Err(e) => result_err_msg(&e),
+    }
+}
+
+/// `xml.expanded_name` → Result[(raw, prefix?, local, namespace_uri?), XMLError].
+extern "C" fn jet_jit_xml_expanded_name(tree: i64) -> i64 {
+    match xml_tree_value(tree).and_then(|v| {
+        jet_foundation::XmlPull::expanded_name_parts(&v).map_err(xml_err_msg)
+    }) {
+        Ok((raw, prefix, local, uri)) => {
+            let handle = Concurrency::with_runtime_mut(|rt| {
+                let rec = rt.heap.alloc_record(4);
+                let raw_id = rt.heap.alloc_string(raw);
+                let _ = rt.heap.record_set_string(rec, 0, raw_id);
+                let prefix_bits = match prefix {
+                    None => 0,
+                    Some(s) => rt.heap.alloc_string(s) + 1,
+                };
+                let _ = rt.heap.record_set_int(rec, 1, prefix_bits);
+                let local_id = rt.heap.alloc_string(local);
+                let _ = rt.heap.record_set_string(rec, 2, local_id);
+                let uri_bits = match uri {
+                    None => 0,
+                    Some(s) => rt.heap.alloc_string(s) + 1,
+                };
+                let _ = rt.heap.record_set_int(rec, 3, uri_bits);
+                rec
+            });
+            result_ok_bits(handle as u64)
+        }
+        Err(e) => result_err_msg(&e),
+    }
+}
+
+/// `xml.attribute` → Result[String?, XMLError] (Option packed as 0 / sid+1).
+extern "C" fn jet_jit_xml_attribute(tree: i64, name: i64) -> i64 {
+    let key = clone_heap_string(name);
+    match xml_tree_value(tree).and_then(|v| {
+        jet_foundation::XmlPull::lookup_attribute(&v, &key).map_err(xml_err_msg)
+    }) {
+        Ok(opt) => result_ok_bits(pack_opt_string(opt) as u64),
+        Err(e) => result_err_msg(&e),
+    }
+}
+
+/// `xml.content` → Result[[DataTree], XMLError].
+extern "C" fn jet_jit_xml_content(tree: i64) -> i64 {
+    match xml_tree_value(tree).and_then(|v| {
+        jet_foundation::XmlPull::element_content(&v).map_err(xml_err_msg)
+    }) {
+        Ok(nodes) => {
+            let handles: Vec<i64> = nodes
+                .into_iter()
+                .map(|n| alloc_datatree(&xml_value_to_datatree(n)))
+                .collect();
+            let list = Concurrency::with_runtime_mut(|rt| {
+                let list = rt.heap.alloc_empty_list();
+                for h in handles {
+                    let _ = rt.heap.list_push_int(list, h);
+                }
+                list
+            });
+            result_ok_bits(list as u64)
+        }
+        Err(e) => result_err_msg(&e),
+    }
+}
+
+/// `xml.to_bytes` with XMLRenderOptions::safe (UTF-8 + PreserveValid).
+extern "C" fn jet_jit_xml_to_bytes(tree: i64) -> i64 {
+    match xml_tree_value(tree).and_then(|v| {
+        jet_foundation::XmlPull::render_document_bytes(
+            &v,
+            jet_foundation::XmlPull::RenderEncoding::Utf8,
+            jet_foundation::XmlPull::LexicalPolicy::PreserveValid,
+        )
+        .map_err(xml_err_msg)
+    }) {
+        Ok(bytes) => result_ok_bits(alloc_byte_list(&bytes) as u64),
+        Err(e) => result_err_msg(&e),
+    }
+}
+
+/// Parse + `project_document_for_decode` — front half of typed `xml.decode`.
+extern "C" fn jet_jit_xml_project(text: i64) -> i64 {
+    match jet_foundation::XmlPull::parse_document(&clone_heap_string(text)) {
+        Ok(mut value) => {
+            jet_foundation::XmlPull::invalidate_untrusted_lexical_evidence(&mut value);
+            match jet_foundation::XmlPull::project_document_for_decode(&value) {
+                Ok(projected) => {
+                    result_ok_bits(alloc_datatree(&xml_value_to_datatree(projected)) as u64)
+                }
+                Err(e) => result_err_msg(&xml_err_msg(e)),
+            }
+        }
+        Err(e) => result_err_msg(&xml_err_msg(e)),
+    }
+}
+
+/// Parse bytes + project — front half of typed `xml.decode_bytes`.
+extern "C" fn jet_jit_xml_project_bytes(bytes: i64) -> i64 {
+    let input = clone_heap_bytes(bytes);
+    match jet_foundation::XmlPull::parse_document_bytes(&input) {
+        Ok(mut value) => {
+            jet_foundation::XmlPull::invalidate_untrusted_lexical_evidence(&mut value);
+            match jet_foundation::XmlPull::project_document_for_decode(&value) {
+                Ok(projected) => {
+                    result_ok_bits(alloc_datatree(&xml_value_to_datatree(projected)) as u64)
+                }
+                Err(e) => result_err_msg(&xml_err_msg(e)),
+            }
+        }
+        Err(e) => result_err_msg(&xml_err_msg(e)),
+    }
+}
+
 // ── CBOR (mirrors EncodingCodecs jet_cbor_* for DataTree; safe options) ─────
 
 fn cbor_push_len(out: &mut Vec<u8>, major: u8, n: u64) {
@@ -1330,6 +1467,39 @@ extern "C" fn jet_jit_yaml_to_string(tree: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
 }
 
+/// Mirror `jet_std::EncodingError::display_text` for `{err}` interp.
+extern "C" fn jet_jit_encoding_error_show(handle: i64) -> i64 {
+    const FORMAT: &[&str] = &["JSON", "JSONL", "CSV", "XML", "CBOR"];
+    const KIND: &[&str] = &["Syntax", "Truncated", "Unsupported", "Limit", "IO", "State"];
+    let text = Concurrency::with_runtime_mut(|rt| {
+        let format = rt.heap.record_get_int(handle, 0).unwrap_or(0) as usize;
+        let kind = rt.heap.record_get_int(handle, 1).unwrap_or(0) as usize;
+        let byte_offset = rt.heap.record_get_int(handle, 2).unwrap_or(0);
+        let line = rt.heap.record_get_int(handle, 3).unwrap_or(0);
+        let column = rt.heap.record_get_int(handle, 4).unwrap_or(0);
+        let path_id = rt.heap.record_get_string(handle, 5).unwrap_or(0);
+        let reason_id = rt.heap.record_get_string(handle, 6).unwrap_or(0);
+        let path = rt.heap.clone_string(path_id).unwrap_or_default();
+        let reason = rt.heap.clone_string(reason_id).unwrap_or_default();
+        let format_s = FORMAT.get(format).copied().unwrap_or("?");
+        let kind_s = KIND.get(kind).copied().unwrap_or("?");
+        let mut out = format!("{format_s} {kind_s} at byte {byte_offset}");
+        // Option ABI: 0 = None, else bits+1.
+        if line != 0 {
+            out.push_str(&format!(", line {}", line - 1));
+        }
+        if column != 0 {
+            out.push_str(&format!(", column {}", column - 1));
+        }
+        if !path.is_empty() {
+            out.push_str(&format!(", path {path}"));
+        }
+        out.push_str(&format!(": {reason}"));
+        rt.heap.alloc_string(out)
+    });
+    text
+}
+
 /// Pack a lowered DataTree/Json enum lit into the heap record ABI.
 pub(crate) fn pack_datatree_host(disc: i64, payload: i64) -> i64 {
     alloc_dt_record(disc, payload)
@@ -1358,6 +1528,13 @@ pub(crate) struct EncodingHostFns {
     pub jsonl_to_string: cranelift_module::FuncId,
     pub xml_parse: cranelift_module::FuncId,
     pub xml_to_string: cranelift_module::FuncId,
+    pub xml_root: cranelift_module::FuncId,
+    pub xml_expanded_name: cranelift_module::FuncId,
+    pub xml_attribute: cranelift_module::FuncId,
+    pub xml_content: cranelift_module::FuncId,
+    pub xml_to_bytes: cranelift_module::FuncId,
+    pub xml_project: cranelift_module::FuncId,
+    pub xml_project_bytes: cranelift_module::FuncId,
     pub cbor_to_bytes: cranelift_module::FuncId,
     pub cbor_parse: cranelift_module::FuncId,
     pub csv_decode_trees: cranelift_module::FuncId,
@@ -1372,6 +1549,7 @@ pub(crate) struct EncodingHostFns {
     pub toml_to_string: cranelift_module::FuncId,
     pub yaml_parse: cranelift_module::FuncId,
     pub yaml_to_string: cranelift_module::FuncId,
+    pub encoding_error_show: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -1400,6 +1578,13 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
     builder.symbol("jet_jit_jsonl_to_string", jet_jit_jsonl_to_string as *const u8);
     builder.symbol("jet_jit_xml_parse", jet_jit_xml_parse as *const u8);
     builder.symbol("jet_jit_xml_to_string", jet_jit_xml_to_string as *const u8);
+    builder.symbol("jet_jit_xml_root", jet_jit_xml_root as *const u8);
+    builder.symbol("jet_jit_xml_expanded_name", jet_jit_xml_expanded_name as *const u8);
+    builder.symbol("jet_jit_xml_attribute", jet_jit_xml_attribute as *const u8);
+    builder.symbol("jet_jit_xml_content", jet_jit_xml_content as *const u8);
+    builder.symbol("jet_jit_xml_to_bytes", jet_jit_xml_to_bytes as *const u8);
+    builder.symbol("jet_jit_xml_project", jet_jit_xml_project as *const u8);
+    builder.symbol("jet_jit_xml_project_bytes", jet_jit_xml_project_bytes as *const u8);
     builder.symbol("jet_jit_cbor_to_bytes", jet_jit_cbor_to_bytes as *const u8);
     builder.symbol("jet_jit_cbor_parse", jet_jit_cbor_parse as *const u8);
     builder.symbol("jet_jit_csv_decode_trees", jet_jit_csv_decode_trees as *const u8);
@@ -1414,6 +1599,10 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
     builder.symbol("jet_jit_toml_to_string", jet_jit_toml_to_string as *const u8);
     builder.symbol("jet_jit_yaml_parse", jet_jit_yaml_parse as *const u8);
     builder.symbol("jet_jit_yaml_to_string", jet_jit_yaml_to_string as *const u8);
+    builder.symbol(
+        "jet_jit_encoding_error_show",
+        jet_jit_encoding_error_show as *const u8,
+    );
 }
 
 extern "C" fn jet_jit_datatree_pack(disc: i64, payload: i64) -> i64 {
@@ -1464,6 +1653,13 @@ pub(crate) fn declare_encoding_host_fns(
         jsonl_to_string: import("jet_jit_jsonl_to_string", &sig_unary)?,
         xml_parse: import("jet_jit_xml_parse", &sig_unary)?,
         xml_to_string: import("jet_jit_xml_to_string", &sig_unary)?,
+        xml_root: import("jet_jit_xml_root", &sig_unary)?,
+        xml_expanded_name: import("jet_jit_xml_expanded_name", &sig_unary)?,
+        xml_attribute: import("jet_jit_xml_attribute", &sig_binary)?,
+        xml_content: import("jet_jit_xml_content", &sig_unary)?,
+        xml_to_bytes: import("jet_jit_xml_to_bytes", &sig_unary)?,
+        xml_project: import("jet_jit_xml_project", &sig_unary)?,
+        xml_project_bytes: import("jet_jit_xml_project_bytes", &sig_unary)?,
         cbor_to_bytes: import("jet_jit_cbor_to_bytes", &sig_unary)?,
         cbor_parse: import("jet_jit_cbor_parse", &sig_unary)?,
         csv_decode_trees: import("jet_jit_csv_decode_trees", &sig_unary)?,
@@ -1478,5 +1674,6 @@ pub(crate) fn declare_encoding_host_fns(
         toml_to_string: import("jet_jit_toml_to_string", &sig_unary)?,
         yaml_parse: import("jet_jit_yaml_parse", &sig_unary)?,
         yaml_to_string: import("jet_jit_yaml_to_string", &sig_unary)?,
+        encoding_error_show: import("jet_jit_encoding_error_show", &sig_unary)?,
     })
 }

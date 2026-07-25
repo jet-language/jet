@@ -188,7 +188,29 @@ pub(crate) fn jit_list_record_type(ty: &Type) -> bool {
 }
 
 pub(crate) fn jit_tuple_type(ty: &Type) -> bool {
-    matches!(ty, Type::Tuple(fields) if fields.iter().all(|(_, t)| matches!(t.as_ref(), Type::Int | Type::Float)))
+    // Named tuples lower to record handles (i64), same as structs — any field
+    // shape that fits the record ABI (scalars, Option, String, nested records).
+    matches!(
+        ty,
+        Type::Tuple(fields)
+            if !fields.is_empty()
+                && fields.iter().all(|(_, t)| {
+                    matches!(
+                        t.as_ref(),
+                        Type::Int
+                            | Type::IntN { .. }
+                            | Type::Float
+                            | Type::Float32
+                            | Type::Bool
+                            | Type::Char
+                            | Type::String
+                            | Type::Option(_)
+                            | Type::Named(_)
+                            | Type::Tuple(_)
+                            | Type::List(_)
+                    )
+                })
+    )
 }
 
 pub(crate) fn jit_enum_type(ty: &Type) -> bool {

@@ -274,6 +274,45 @@ impl<'a> JitMeta<'a> {
                 _ => None,
             };
         }
+        // D-ENCSTREAM-SURFACE1 core enums (not always on JitProgram).
+        if enum_name == "EncodingFormat" {
+            return match variant {
+                "JSON" => Some(0),
+                "JSONL" => Some(1),
+                "CSV" => Some(2),
+                "XML" => Some(3),
+                "CBOR" => Some(4),
+                _ => None,
+            };
+        }
+        if enum_name == "EncodingErrorKind" {
+            return match variant {
+                "Syntax" => Some(0),
+                "Truncated" => Some(1),
+                "Unsupported" => Some(2),
+                "Limit" => Some(3),
+                "IO" => Some(4),
+                "State" => Some(5),
+                _ => None,
+            };
+        }
+        if enum_name == "DataEvent" {
+            // Unit variants first (sema registration order), then payload ones.
+            return match variant {
+                "Null" => Some(0),
+                "ArrayStart" => Some(1),
+                "ArrayEnd" => Some(2),
+                "ObjectStart" => Some(3),
+                "ObjectEnd" => Some(4),
+                "Bool" => Some(5),
+                "Int" => Some(6),
+                "Float" => Some(7),
+                "Text" => Some(8),
+                "Bytes" => Some(9),
+                "Key" => Some(10),
+                _ => None,
+            };
+        }
         // DataTree (+ format aliases): Null/Bool/Int/Float/Text/Array/Object.
         if matches!(enum_name, "DataTree" | "Json" | "Toml" | "Yaml" | "Csv") {
             return match variant {
@@ -296,8 +335,18 @@ impl<'a> JitMeta<'a> {
     }
 
     pub(crate) fn is_enum(&self, name: &str) -> bool {
-        matches!(name, "DataTree" | "Json" | "Toml" | "Yaml" | "Csv" | "ProcessStreamMode")
-            || self.enum_variants.contains_key(name)
+        matches!(
+            name,
+            "DataTree"
+                | "Json"
+                | "Toml"
+                | "Yaml"
+                | "Csv"
+                | "ProcessStreamMode"
+                | "EncodingFormat"
+                | "EncodingErrorKind"
+                | "DataEvent"
+        ) || self.enum_variants.contains_key(name)
     }
 
     /// Packed i64 enum ABI (disc in low byte, payload >> 8): every variant is
@@ -350,6 +399,26 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         "Rng" => &["state"],
         // Mirrors jet_std::ProcessResult field order (Open.rs).
         "ProcessResult" => &["code", "output", "errors", "success", "signal", "timed_out"],
+        // D-ENCSTREAM-SURFACE1 / jet_std::EncodingLimits.
+        "EncodingLimits" => &[
+            "buffer_bytes",
+            "max_depth",
+            "max_item_bytes",
+            "max_total_bytes",
+            "max_expansion_depth",
+            "max_expansion_bytes",
+        ],
+        "EncodingCause" => &["kind", "os_code", "message"],
+        "EncodingError" => &[
+            "format",
+            "kind",
+            "byte_offset",
+            "line",
+            "column",
+            "path",
+            "reason",
+            "cause",
+        ],
         _ => return None,
     };
     fields.iter().position(|f| *f == field)
@@ -365,6 +434,26 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
             "output" | "errors" => Some(Type::String),
             "success" | "timed_out" => Some(Type::Bool),
             "signal" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        },
+        "EncodingLimits" => match field {
+            "buffer_bytes" | "max_depth" | "max_item_bytes" | "max_expansion_depth"
+            | "max_expansion_bytes" => Some(Type::Int),
+            "max_total_bytes" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        },
+        "EncodingCause" => match field {
+            "kind" | "message" => Some(Type::String),
+            "os_code" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        },
+        "EncodingError" => match field {
+            "format" => Some(Type::Named("EncodingFormat".into())),
+            "kind" => Some(Type::Named("EncodingErrorKind".into())),
+            "byte_offset" => Some(Type::Int),
+            "line" | "column" => Some(Type::Option(Box::new(Type::Int))),
+            "path" | "reason" => Some(Type::String),
+            "cause" => Some(Type::Option(Box::new(Type::Named("EncodingCause".into())))),
             _ => None,
         },
         _ => None,
