@@ -1703,11 +1703,19 @@ behind `use core.mem` (E0424); sema proves write-before-read on all paths
 green; codegen rides D-FIXARR1 stack arrays)*
 
 **D-UNINIT-SENTINEL1 — `uninit` contextual keyword (opt D, ratified
-2026-07-02)**: replaces D-UNINIT1's marker spelling. `buffer: [U8#4096] :=
-uninit` — `uninit` is legal only as the RHS of `:=` on a binding with an
-explicit type annotation; the flow-analysis engine (E0420/E0423/E0424) is
-unchanged, only the trigger moved. The old `#Uninit buffer: [U8#4096]`
-spelling is retired: a hard parse error (E0426) teaches the new form.
+2026-07-02; amended by D-UNINIT-SENTINEL2)**: replaced D-UNINIT1's marker
+spelling with `uninit` as a contextual keyword. The original trigger was
+`buffer: [U8#4096] := uninit` (RHS of `:=` on an annotated binding). The old
+`#Uninit buffer: [U8#4096]` marker is a hard parse error (E0426).
+
+**D-UNINIT-SENTINEL2=A — body sentinel `Type.{ uninit }` (ratified
+2026-07-24)**: amends D-UNINIT-SENTINEL1 after D-BIND-BARE1 and D-DOTCTOR3.
+`uninit` is legal only as the whole body of a typed-literal head:
+`bytes := [U8#128].{ uninit }` (scalars too: `n := Int.{ uninit }`). The
+annotated form `name: Type := uninit` is gone with typed bindings. Flow proof
+E0420 / E0423 / E0424, POD-only, MaybeUninit lowering, and `use core.mem` stay
+the same — only the spelling moves. Anywhere else, `uninit` is an ordinary
+identifier (or bare `:= uninit` is E0421).
 
 **D-REF-SHORTHAND1 — Stored-ref field shorthand (retired 2026-07-04 by
 D-MEM1/S3)**: originally, a stored-reference field spelled its type `&T` —
@@ -4865,6 +4873,11 @@ D-DOTCTOR1 / D-DOTCTOR2 and D-EMPTYLIT1. Implemented on card #780.
 (ordinary parse error, no teaching window). Types ride the value
 (`Type.{ … }` from D-DOTCTOR3) or live on signatures and fields. Amends S2 /
 D-BIND4. Implemented on card #781.
+
+**2026-07-24 — D-UNINIT-SENTINEL2=A**: `uninit` is legal only as the whole
+body of a typed literal — `name := Type.{ uninit }`. Amends D-UNINIT-SENTINEL1
+(retires `name: Type := uninit`). Flow proof E0420/E0423/E0424 and
+`use core.mem` unchanged. Implemented on card #782.
 
 **2026-07-19 — D-SHAPE-OUTPUT-CALLABLE1=A,
 D-ECO-OUTPUT-CALLCONTRACT1=A**: typed runnable Outputs now parse and format as

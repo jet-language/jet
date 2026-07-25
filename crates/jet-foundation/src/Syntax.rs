@@ -16,6 +16,9 @@
 // D-BIND-BARE1=A adds no token: bindings are always bare `name :: value` /
 // `name := value`; types ride values (`Type.{ … }`) or live on signatures
 // and fields. Retires `name: Type ::` / `name: Type :=`.
+// D-UNINIT-SENTINEL2=A amends D-UNINIT-SENTINEL1: `uninit` is legal only as
+// the whole body of a `Type.{ uninit }` head (`name := Type.{ uninit }`).
+// Retires annotated `name: Type := uninit`. KW_UNINIT stays the same token.
 // D-SHAPE-CLI1 reuses the existing `fn run` / `#Cli` surface: a resolved
 // entry-parameter type owns typed shell inputs, while zero-parameter `fn run()`
 // stays valid. D-CLI-POS1=A adds field marker `Flag` (`CONTRACT_FLAG`): required

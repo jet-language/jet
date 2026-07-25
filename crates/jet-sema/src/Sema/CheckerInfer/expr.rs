@@ -750,7 +750,7 @@ impl<'a> Checker<'a> {
                     self.moved.remove(name); // report once
                     return None;
                 }
-                // D-UNINIT-SENTINEL1: reading a `:= uninit` binding before it is written.
+                // D-UNINIT-SENTINEL2: reading a `Type.{ uninit }` binding before it is written.
                 if self.uninit.contains_key(name) {
                     self.diags.push(Diagnostic::error(
                         "E0420",

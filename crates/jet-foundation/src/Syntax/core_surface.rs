@@ -398,15 +398,15 @@ pub const CORE_MEM_MODULE: &str = "core.mem";
 /// teaching error (E0426) pointing at the new spelling.
 pub const ATTR_UNINIT: &str = "Uninit";
 
-/// D-UNINIT-SENTINEL1 (ratified 2026-07-02, opt D) → D-UNINIT-SENTINEL2:
-/// contextual keyword `uninit`. After D-BIND-BARE1 the trigger is
-/// `name := Type.{ uninit }` (thin support landed with #781; #782 owns the
-/// remaining SENTINEL2 checklist). Bare `name := uninit` is E0421. Still gated
-/// by `use core.mem` (E0424) and restricted to plain-data types (E0423).
-/// Contextual like `region`/`state`/`migration`: the word `uninit` stays
-/// usable as an ordinary identifier everywhere else; the lexer emits it as a
-/// plain `Ident`, and only the typed-literal / initializer position recognizes it.
-pub const KW_UNINIT: &str = "uninit"; // D-UNINIT-SENTINEL1 → D-UNINIT-SENTINEL2
+/// D-UNINIT-SENTINEL2=A (ratified 2026-07-24; amends D-UNINIT-SENTINEL1):
+/// contextual keyword `uninit`, legal only as the whole body of a typed-literal
+/// head — `name := Type.{ uninit }`. Bare `name := uninit` is E0421. Still gated
+/// by `use core.mem` (E0424) and restricted to plain-data types (E0423). Flow
+/// proof E0420 is unchanged. Contextual like `region`/`state`/`migration`: the
+/// word `uninit` stays usable as an ordinary identifier everywhere else; the
+/// lexer emits it as a plain `Ident`, and only a whole `Type.{ uninit }` body
+/// is the uninit trigger.
+pub const KW_UNINIT: &str = "uninit"; // D-UNINIT-SENTINEL2
 
 /// D-SOLVER-LIB1=A (ratified 2026-07-06): explicit finite solver library.
 pub const CORE_SOLVE_MODULE: &str = "core.solve";

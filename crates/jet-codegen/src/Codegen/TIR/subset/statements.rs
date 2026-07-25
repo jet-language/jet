@@ -93,8 +93,8 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                 #[allow(unreachable_patterns)]
                 Some(_) => false,
                 None => {
-                    // D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL1: a
-                    // `:= uninit` binding needs no init expression to be in-subset —
+                    // D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL2: a
+                    // `Type.{ uninit }` binding needs no init expression to be in-subset —
                     // lower.rs emits `MaybeUninit::uninit().assume_init()` verbatim
                     // (the placeholder `Expr::Int(0, …)` init is never evaluated or
                     // lowered).
