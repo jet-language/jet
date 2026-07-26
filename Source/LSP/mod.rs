@@ -42,8 +42,8 @@ mod tests {
 
     static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(0);
 
-    /// Keep unit overlays outside the Jet checkout. A relative `test.jet`
-    /// discovers this repository's manifest and scans the full workspace.
+    /// Give unit overlays their own manifest boundary. A relative `test.jet`
+    /// can discover and scan the full workspace.
     struct TestProject {
         root: std::path::PathBuf,
         entry: String,
@@ -63,6 +63,11 @@ mod tests {
                     Err(error) => panic!("create isolated LSP test project: {error}"),
                 }
             };
+            std::fs::write(
+                root.join(crate::Syntax::PAYLOAD_FILE),
+                "identity: .{ name: \"lsp_unit\", version: \"0.1.0\" }\n",
+            )
+            .expect("write isolated LSP test manifest");
             let entry = root.join("test.jet").to_string_lossy().into_owned();
             Self { root, entry }
         }
@@ -107,10 +112,14 @@ mod tests {
         let (project, diagnostics, bundle, _) = check_test_document("fn run() {}\n");
         assert!(diagnostics.is_empty(), "{diagnostics:#?}");
         let bundle = bundle.expect("bundle");
+        assert!(project.root.is_absolute());
+        assert_eq!(
+            crate::Loader::find_manifest_root(&project.root),
+            Some(project.root.clone())
+        );
         assert_eq!(bundle.project_root, project.root);
         assert_eq!(bundle.modules.len(), 1);
         assert_eq!(bundle.modules[0].display, project.entry());
-        assert!(!project.root.starts_with(env!("CARGO_MANIFEST_DIR")));
     }
 
     #[test]
@@ -126,7 +135,7 @@ mod tests {
     fn symbol_db_finds_function() {
         let src =
             "fn greet(name: String) {\n    print(name);\n}\nfn run() {\n    greet(\"world\");\n}\n";
-        let (_, _, bundle, facts) = check_test_document(src);
+        let (_project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
         assert!(db.defs.iter().any(|d| d.name == "greet"));
