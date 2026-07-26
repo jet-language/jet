@@ -4,6 +4,7 @@ use crate::Comptime::CtValue;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Codegen::TIR::THandleOp;
 use super::unsupported;
+use super::browser;
 
 pub(super) fn eval_handle(
     op: &THandleOp,
@@ -11,6 +12,9 @@ pub(super) fn eval_handle(
     args: &mut [CtValue],
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
+    if let Some(result) = browser::handle(op, recv, args, span) {
+        return result;
+    }
     match op {
         THandleOp::DurationNew { unit, float } => duration_new(recv, unit, *float, span),
         THandleOp::ClockNow => apply_method(recv, "now", args.to_vec(), span),

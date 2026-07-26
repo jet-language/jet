@@ -7,6 +7,7 @@ mod common;
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::fs;
 use std::thread;
 use std::time::Duration;
 
@@ -167,13 +168,14 @@ fn run_mock(listener: TcpListener) -> Vec<String> {
     let (mut stream, _) = listener.accept().unwrap();
     accept_websocket(&mut stream);
     let mut methods = Vec::new();
-    for _ in 0..13 {
+    for _ in 0..14 {
         let request = read_text_frame(&mut stream);
         let id = field(&request, "id");
         let method = field(&request, "method");
         methods.push(method.clone());
         let result = match method.as_str() {
-            "session.status" => r#"{"ready":true,"message":"ready","capabilities":{"browserName":"mock","browserVersion":"1","goog:cdp":true}}"#,
+            "session.status" => r#"{"ready":true,"message":"ready"}"#,
+            "session.new" => r#"{"sessionId":"mock-session","capabilities":{"browserName":"mock","browserVersion":"1","goog:cdp":true}}"#,
             "browser.createUserContext" => r#"{"userContext":"user-1"}"#,
             "browsingContext.create" => r#"{"context":"page-1"}"#,
             "browsingContext.navigate" => r#"{"url":"https://example.test/app","navigation":"nav-1"}"#,
@@ -224,12 +226,24 @@ fn run_hostile(listener: TcpListener, reply: HostileReply) {
             ),
         ),
         HostileReply::Timeout => thread::sleep(Duration::from_millis(500)),
-        HostileReply::NoCdp => write_text_frame(
-            &mut stream,
-            &format!(
-                r#"{{"type":"success","id":{id},"result":{{"ready":true,"capabilities":{{"goog:cdp":false}}}}}}"#
-            ),
-        ),
+        HostileReply::NoCdp => {
+            write_text_frame(
+                &mut stream,
+                &format!(
+                    r#"{{"type":"success","id":{id},"result":{{"ready":true,"message":"ready"}}}}"#
+                ),
+            );
+            let request = read_text_frame(&mut stream);
+            assert_eq!(field(&request, "method"), "session.new");
+            assert!(request.contains(r#""capabilities":{"alwaysMatch":{}}"#));
+            let id = field(&request, "id");
+            write_text_frame(
+                &mut stream,
+                &format!(
+                    r#"{{"type":"success","id":{id},"result":{{"sessionId":"no-cdp","capabilities":{{"goog:cdp":false}}}}}}"#
+                ),
+            );
+        }
     }
 }
 
@@ -240,19 +254,20 @@ fn run_lifecycle(listener: TcpListener) -> Vec<String> {
     let mut page_closes = 0;
     let mut context_closes = 0;
     let mut session_closes = 0;
-    for _ in 0..13 {
+    for _ in 0..14 {
         let request = read_text_frame(&mut stream);
         let id = field(&request, "id");
         let method = field(&request, "method");
         methods.push(method.clone());
         let result = match method.as_str() {
-            "session.status" => Some(r#"{"ready":true,"capabilities":{}}"#),
-            "browser.createUserContext" => Some(if methods.len() < 8 {
+            "session.status" => Some(r#"{"ready":true,"message":"ready"}"#),
+            "session.new" => Some(r#"{"sessionId":"lifecycle","capabilities":{}}"#),
+            "browser.createUserContext" => Some(if methods.len() < 9 {
                 r#"{"userContext":"retry-context"}"#
             } else {
                 r#"{"userContext":"drop-context"}"#
             }),
-            "browsingContext.create" => Some(if methods.len() < 9 {
+            "browsingContext.create" => Some(if methods.len() < 10 {
                 r#"{"context":"retry-page"}"#
             } else {
                 r#"{"context":"drop-page"}"#
@@ -285,6 +300,109 @@ fn run_lifecycle(listener: TcpListener) -> Vec<String> {
             );
         }
     }
+    methods
+}
+
+fn run_smoke(listener: TcpListener) -> Vec<String> {
+    let (mut stream, _) = listener.accept().unwrap();
+    accept_websocket(&mut stream);
+    let mut methods = Vec::new();
+    for _ in 0..3 {
+        let request = read_text_frame(&mut stream);
+        let id = field(&request, "id");
+        let method = field(&request, "method");
+        methods.push(method.clone());
+        let result = match method.as_str() {
+            "session.status" => r#"{"ready":true,"message":"ready"}"#,
+            "session.new" => {
+                assert!(request.contains(r#""capabilities":{"alwaysMatch":{}}"#));
+                r#"{"sessionId":"dev-session","capabilities":{"browserName":"mock"}}"#
+            }
+            "session.end" => "{}",
+            other => panic!("unexpected smoke method {other}: {request}"),
+        };
+        write_text_frame(
+            &mut stream,
+            &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+        );
+    }
+    methods
+}
+
+fn run_event_storm(listener: TcpListener) -> Vec<String> {
+    let (mut stream, _) = listener.accept().unwrap();
+    accept_websocket(&mut stream);
+    let mut methods = Vec::new();
+    for command in 0..4 {
+        let request = read_text_frame(&mut stream);
+        let id = field(&request, "id");
+        let method = field(&request, "method");
+        methods.push(method.clone());
+        let result = match command {
+            0 => r#"{"ready":true,"message":"ready"}"#,
+            1 => r#"{"sessionId":"storm","capabilities":{}}"#,
+            2 => {
+                for index in 0..300 {
+                    let method = if index == 100 {
+                        format!("SECRET_REMOTE_METHOD_{}", "x".repeat(4_000))
+                    } else {
+                        format!("event.{index}")
+                    };
+                    write_text_frame(
+                        &mut stream,
+                        &format!(r#"{{"type":"event","method":"{method}","params":{{}}}}"#),
+                    );
+                }
+                r#"{"ready":true,"message":"ready"}"#
+            }
+            3 => "{}",
+            _ => unreachable!(),
+        };
+        write_text_frame(
+            &mut stream,
+            &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+        );
+    }
+    methods
+}
+
+fn run_continuous_events(listener: TcpListener) -> Vec<String> {
+    let (mut stream, _) = listener.accept().unwrap();
+    accept_websocket(&mut stream);
+    let mut methods = Vec::new();
+    for command in 0..2 {
+        let request = read_text_frame(&mut stream);
+        let id = field(&request, "id");
+        let method = field(&request, "method");
+        methods.push(method);
+        let result = match command {
+            0 => r#"{"ready":true,"message":"ready"}"#,
+            1 => r#"{"sessionId":"deadline","capabilities":{}}"#,
+            _ => unreachable!(),
+        };
+        write_text_frame(
+            &mut stream,
+            &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+        );
+    }
+    let request = read_text_frame(&mut stream);
+    methods.push(field(&request, "method"));
+    for index in 0..60 {
+        write_text_frame(
+            &mut stream,
+            &format!(
+                r#"{{"type":"event","method":"network.tick{index}","params":{{}}}}"#
+            ),
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    let request = read_text_frame(&mut stream);
+    let id = field(&request, "id");
+    methods.push(field(&request, "method"));
+    write_text_frame(
+        &mut stream,
+        &format!(r#"{{"type":"success","id":{id},"result":{{}}}}"#),
+    );
     methods
 }
 
@@ -353,6 +471,50 @@ fn run() {
 }
 
 #[test]
+fn native_bidi_session_handles_cannot_cross_tasks_or_channels() {
+    let source = r#"
+use core.browser as browser
+use core.tasks
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? return
+    timeout :: browser.timeout(10) ?? return
+    session :: browser.connect_profile("ws://127.0.0.1:1", profile, timeout) ?? return
+    task :: tasks.spawn(() => session.close())
+    (sender, channel) :: tasks.channel<Browser>()
+    sender.send(session)
+}
+"#;
+    let diags = jet::compile(source).expect_err("Browser handles must stay thread-confined");
+    assert!(
+        diags.iter().filter(|diag| diag.code == "E1102").count() >= 2,
+        "task and channel crossings must stop in sema without rustc: {diags:?}"
+    );
+}
+
+#[test]
+fn native_bidi_io_handle_methods_record_net_effect() {
+    let source = r#"
+fn context(session: Browser) --[Fs]-> Unit { session.context() ?? return }
+fn subscribe(session: Browser) --[Fs]-> Unit { session.subscribe("log.entryAdded") ?? return }
+fn next(session: Browser, timeout: BrowserTimeout) --[Fs]-> Unit { session.next_event(timeout) ?? return }
+fn protocol(session: Browser) --[Fs]-> Unit { session.protocol("bidi") ?? return }
+fn close(session: Browser) --[Fs]-> Unit { session.close() ?? return }
+fn page(context: BrowserContext) --[Fs]-> Unit { context.page() ?? return }
+fn goto(page: BrowserPage) --[Fs]-> Unit { page.goto("https://example.test") ?? return }
+fn wait(locator: BrowserLocator, timeout: BrowserTimeout) --[Fs]-> Unit { locator.wait(timeout) ?? return }
+fn click(locator: BrowserLocator) --[Fs]-> Unit { locator.click() ?? return }
+fn send(protocol: BrowserProtocol) --[Fs]-> Unit { protocol.send("session.status", "{{}}") ?? return }
+fn run() {}
+"#;
+    let diags = jet::compile(source).expect_err("Browser I/O methods must infer Net");
+    assert!(
+        diags.iter().filter(|diag| diag.code == "E0740").count() >= 10,
+        "every Browser I/O method must violate an Fs-only bound: {diags:?}"
+    );
+}
+
+#[test]
 fn native_bidi_cleanup_retries_failures_and_drops_last_owners_once() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let endpoint = format!("ws://{}/session?token=LIFECYCLE_SECRET", listener.local_addr().unwrap());
@@ -367,8 +529,13 @@ fn run() {
 
     retry_context :: session.context() ?? panic("retry context")
     retry_page :: retry_context.page() ?? panic("retry page")
+    retry_locator :: retry_page.get_by_role("button", "Save")
     loop attempt; [1, 2] {
         retry_page.close() ?? next
+    }
+    loop attempt; [1] {
+        retry_locator.click() ?? next
+        print("unexpected click")
     }
     loop attempt; [1, 2] {
         retry_context.close() ?? next
@@ -391,6 +558,7 @@ fn run() {
         server.join().unwrap(),
         [
             "session.status",
+            "session.new",
             "browser.createUserContext",
             "browsingContext.create",
             "browsingContext.close",
@@ -419,7 +587,10 @@ fn native_bidi_profile_drives_isolated_session_and_redacts_trace() {
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert!(stdout.contains("caps:true:true:bidi-2025.5"), "{stdout}");
     assert!(stdout.contains("event:log.entryAdded"), "{stdout}");
-    assert!(stdout.contains(r#"raw:{"capabilities":"#), "{stdout}");
+    assert!(
+        stdout.contains(r#"raw:{"message":"ready","ready":true}"#),
+        "{stdout}"
+    );
     assert!(stdout.contains("cdp:{}"), "{stdout}");
     assert!(stdout.contains("trace:"), "{stdout}");
     assert!(stdout.contains(":true:"), "{stdout}");
@@ -430,6 +601,7 @@ fn native_bidi_profile_drives_isolated_session_and_redacts_trace() {
         server.join().unwrap(),
         [
             "session.status",
+            "session.new",
             "browser.createUserContext",
             "browsingContext.create",
             "browsingContext.navigate",
@@ -513,4 +685,148 @@ fn run() {
     protocol_server.join().unwrap();
     timeout_server.join().unwrap();
     no_cdp_server.join().unwrap();
+}
+
+#[test]
+fn native_bidi_bounds_event_queue_and_hashes_large_remote_method_facts() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!("ws://{}/session", listener.local_addr().unwrap());
+    let server = thread::spawn(move || run_event_storm(listener));
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    bidi :: session.protocol("bidi") ?? panic("protocol")
+    bidi.send("session.status", "{{}}") ?? panic("storm")
+    first :: session.next_event(timeout) ?? panic("queued event")
+    print(first.kind() == "event.44")
+    trace :: session.trace()
+    print("{trace.redacted()}:{trace.entry_count()}")
+    print(trace.summary())
+    session.close() ?? panic("close")
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_browser_bidi_storm", "browser_bidi_storm", &source);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    let mut lines = stdout.lines();
+    assert_eq!(lines.next(), Some("true"), "{stdout}");
+    let summary = lines.next().expect("trace facts");
+    assert!(summary.starts_with("true:"), "{stdout}");
+    let count: usize = summary.trim_start_matches("true:").parse().unwrap();
+    assert!(count < 310, "trace must be byte bounded: {stdout}");
+    assert!(!stdout.contains("SECRET_REMOTE_METHOD"), "{stdout}");
+    assert!(!stdout.contains(&"x".repeat(128)), "{stdout}");
+    assert_eq!(
+        server.join().unwrap(),
+        ["session.status", "session.new", "session.status", "session.end"]
+    );
+}
+
+#[test]
+fn native_bidi_command_deadline_does_not_reset_on_continuous_events() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!("ws://{}/session", listener.local_addr().unwrap());
+    let server = thread::spawn(move || run_continuous_events(listener));
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(200) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    bidi :: session.protocol("bidi") ?? panic("protocol")
+    outcome :: bidi.send("session.status", "{{}}") ?? "caught"
+    print(outcome)
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_deadline",
+        "browser_bidi_deadline",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "caught\n");
+    assert!(!stderr.contains("network.tick"), "{stderr}");
+    assert_eq!(
+        server.join().unwrap(),
+        ["session.status", "session.new", "session.status", "session.end"]
+    );
+}
+
+#[test]
+fn native_bidi_runs_real_network_path_in_forced_and_default_dev_tier_zero() {
+    fn run_once(use_interpreter: bool) -> (String, Vec<String>, Vec<jet_jit::TierRow>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let endpoint = format!("ws://{}/session", listener.local_addr().unwrap());
+        let server = thread::spawn(move || run_smoke(listener));
+        let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2024.11") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    print(session.capabilities().profile())
+    bidi :: session.protocol("bidi") ?? panic("protocol")
+    blocked :: bidi.send("webExtension.install", "{{}}") ?? "blocked"
+    print(blocked)
+    session.close() ?? panic("close")
+}
+"#
+        .replace("__ENDPOINT__", &endpoint);
+        let dir = common::unique_tmp("jet_browser_bidi_dev");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("browser_bidi_dev.jet");
+        fs::write(&path, source).unwrap();
+
+        jet_jit::reset_jit_trace_for_test();
+        jet_jit::set_trace_tiers(true);
+        let outcome =
+            jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, use_interpreter);
+        jet_jit::set_trace_tiers(false);
+        let trace = jet_jit::take_last_trace();
+        let stdout = match outcome {
+            jet::Interpreter::RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => {
+                assert_eq!(exit_code, 0, "dev stderr:\n{stderr}");
+                assert_eq!(stderr, "");
+                stdout
+            }
+            jet::Interpreter::RunOutcome::Problems(diags) => {
+                panic!("Browser dev tier rejected real network program: {diags:?}")
+            }
+        };
+        (stdout, server.join().unwrap(), trace)
+    }
+
+    let (forced_stdout, forced_methods, _) = run_once(true);
+    assert_eq!(forced_stdout, "bidi-2024.11\nblocked\n");
+    assert_eq!(
+        forced_methods,
+        ["session.status", "session.new", "session.end"]
+    );
+
+    let (default_stdout, default_methods, trace) = run_once(false);
+    assert_eq!(default_stdout, forced_stdout);
+    assert_eq!(default_methods, forced_methods);
+    assert!(
+        trace
+            .iter()
+            .any(|row| row.function == "run" && row.tier == jet_jit::Tier::Interp),
+        "Browser must visibly select/deopt to tier-0, never AOT: {trace:?}"
+    );
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "default dev must not hide Browser behind the legacy/AOT fallback"
+    );
 }

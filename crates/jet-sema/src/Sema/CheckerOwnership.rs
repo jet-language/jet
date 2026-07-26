@@ -2971,6 +2971,24 @@ impl<'a> Checker<'a> {
                     kind: SendProblemKind::ThreadConfined(name.clone()),
                 })
             }
+            // D-BROWSER-AUTO1=A: Browser protocol objects retain one
+            // Rc/RefCell-backed session and are deliberately thread-confined.
+            Type::Named(name)
+                if matches!(
+                    name.as_str(),
+                    "Browser"
+                        | "BrowserContext"
+                        | "BrowserPage"
+                        | "BrowserLocator"
+                        | "BrowserProtocol"
+                ) =>
+            {
+                Some(SendabilityProblem {
+                    root: None,
+                    path: Vec::new(),
+                    kind: SendProblemKind::ThreadConfined(name.clone()),
+                })
+            }
             Type::Named(name) if is_type_var_name(name) || core_type_known(name) => None,
             Type::Named(name) => self.named_sendability_problem(name, &[], seen),
             Type::Apply { name, args }

@@ -363,6 +363,7 @@ const CORELIB_PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/Top/NetHttp.rs"),
     include_str!("../Prelude/CoreLib/Top/HttpClient.rs"),
     include_str!("../Prelude/CoreLib/Top/HttpServer.rs"),
+    include_str!("../Prelude/CoreLib/Top/WsClient.rs"),
     include_str!("../Prelude/CoreLib/Top/Ws.rs"),
     include_str!("../Prelude/CoreLib/Top/Browser.rs"),
     include_str!("../Prelude/CoreLib/Top/Args.rs"),

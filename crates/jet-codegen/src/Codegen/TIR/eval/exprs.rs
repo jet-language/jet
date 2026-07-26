@@ -233,6 +233,9 @@ impl EvalCtx<'_> {
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
                 }
+                if module == "core.browser" && self.runtime_execution {
+                    return super::browser::core_call(method, argv, self.span());
+                }
                 // Runtime deopt / `jet run` sets impure_depth>0 so Tier-2
                 // ambient I/O matches AOT (env/fs/process). Pure comptime
                 // keeps depth 0 and stays on apply_core_call (E3410).

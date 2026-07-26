@@ -1,6 +1,7 @@
 //! Canonical TIR evaluator — reference semantics (D-ONECORE1=A / #777).
 
 mod builtins;
+mod browser;
 mod closure_ops;
 mod data_calls;
 mod exprs;
@@ -101,6 +102,9 @@ pub(super) struct EvalCtx<'a> {
     pub(super) allow_impure: bool,
     #[allow(dead_code)]
     pub(super) impure_depth: usize,
+    /// True only for an actual dev/JIT runtime execution. Comptime may permit
+    /// explicit I/O, but it must never open a Browser session while compiling.
+    pub(super) runtime_execution: bool,
     pub(super) repl_mode: bool,
     pub(super) pending_return: Option<CtValue>,
     pub(super) call_depth: usize,
@@ -310,6 +314,7 @@ pub fn run_program_with_structs(
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
 ) -> Result<CtValue, Diagnostic> {
+    let _browser_session = browser::SessionGuard::new();
     let funcs = program_funcs(program);
     let entry = funcs.get(&program.entry).copied().ok_or_else(|| {
         Diagnostic::error(
@@ -331,6 +336,7 @@ pub fn run_program_with_structs(
         // Runtime `run_bundle` / deopt: ambient Tier-2 I/O matches AOT `jet run`.
         // Comptime purity still uses eval_expr/eval_block with explicit depths.
         impure_depth: if allow_impure { 1 } else { 0 },
+        runtime_execution: true,
         repl_mode: false,
         pending_return: None,
         call_depth: 0,
@@ -371,6 +377,7 @@ pub fn run_named_func(
         // Runtime deopt is not comptime: open Tier-2 ambient I/O so `jet run`
         // matches AOT for env/fs/process (D-LENS-RUN2 / #778).
         impure_depth: 1,
+        runtime_execution: true,
         repl_mode: false,
         pending_return: None,
         call_depth: 0,
@@ -473,6 +480,7 @@ fn eval_expr_hook(
         globals: globals.clone(),
         allow_impure,
         impure_depth,
+        runtime_execution: false,
         repl_mode,
         pending_return: None,
         call_depth: 0,
@@ -519,6 +527,7 @@ fn eval_block_hook(
         globals: globals.clone(),
         allow_impure,
         impure_depth,
+        runtime_execution: false,
         repl_mode,
         pending_return: None,
         call_depth: 0,

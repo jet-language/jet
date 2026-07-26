@@ -1,6 +1,7 @@
 use crate::AST::{CallArg, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
+use crate::Sema::Effects::Effect;
 use super::alloc_ptrs::result_ty;
 use super::core_types::{u8_ty, unit_ty};
 use super::serde_diags::wrong_core_arity;
@@ -35,6 +36,16 @@ impl<'a> Checker<'a> {
             }
             _ => return false,
         };
+        if matches!(
+            (type_name, method),
+            ("Browser", "context" | "subscribe" | "close" | "next_event" | "protocol")
+                | ("BrowserContext", "page" | "close")
+                | ("BrowserPage", "goto" | "close")
+                | ("BrowserLocator", "wait" | "click")
+                | ("BrowserProtocol", "send")
+        ) {
+            self.record_effect(Effect::Net.name(), span);
+        }
 
         if args.len() != expected.len() {
             self.diags.push(wrong_core_arity(
