@@ -6,14 +6,14 @@ struct Employee {
 }
 
 fn run() {
-    emp := Employee.{level: 3, title: "Staff", team: "Eng"}
-    promote := Employee.Patch.{level: 4, title: "Senior"}
-    emp2 := Employee.{emp.apply(~promote)}
+    emp :: Employee.{level: 3, title: "Staff", team: "Eng"}
+    promote :: Employee.Patch.{level: 4, title: "Senior"}
+    emp2 :: Employee.{emp.apply(~promote)}
     print("level: {emp2.level}")
     print("title: {emp2.title}")
-    undo := Employee.diff(^emp2, ^emp)
+    undo :: Employee.diff(^emp2, ^emp)
     print("undo level: {undo.level}")
-    relocate := Employee.Patch.{team: "Platform"}
-    both := Employee.Patch.{promote.merge(^relocate)}
+    relocate :: Employee.Patch.{team: "Platform"}
+    both :: Employee.Patch.{promote.merge(^relocate)}
     print("merged title: {both.title}")
 }

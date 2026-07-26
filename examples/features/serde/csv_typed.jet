@@ -14,9 +14,7 @@ fn run() {
     raw :: "item,qty\npen,3\nink,5"
     sales :: csv.decode<Sale>(raw) ?? panic("bad csv")
     total := 0
-    loop s; sales {
-        total = total + s.qty
-    }
+    loop s; sales { total = total + s.qty }
     print("rows: {sales.len()}")
     print("total qty: {total}")
     print(json.to_string(sales))

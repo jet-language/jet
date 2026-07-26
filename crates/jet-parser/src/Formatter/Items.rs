@@ -436,7 +436,6 @@ impl<'a> Fmt<'a> {
                 self.write(")");
             }
         }
-        self.write(";");
     }
 
     fn fmt_type_params(&mut self, params: &[TypeParam]) {
@@ -796,6 +795,17 @@ impl<'a> Fmt<'a> {
             return;
         }
         self.write(" {");
+        if f.body.is_empty()
+            && self
+                .src
+                .get(f.span.start..f.span.end)
+                .and_then(|source| source.rsplit_once('{'))
+                .and_then(|(_, body)| body.rsplit_once('}'))
+                .is_some_and(|(body, _)| !body.contains('\n') && !body.contains("//") && !body.contains("/*"))
+        {
+            self.write("}");
+            return;
+        }
         // D-FMT1: a one-line `fn` body the author wrote inline survives.
         self.fmt_body(&f.body);
     }

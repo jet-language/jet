@@ -29,8 +29,8 @@ fn run() {
             app :: ui.gtk_backend()
             render_app :: ~app
             ui.reactive_render(take(render_app) () => {
-                tree := ui.box([ui.text("Jet — native GTK4 counter"), ui.node_color("count: {clicks.get()}", 220.0, 40.0, "#3366ff"), ui.button("Increment")])
-                size := render_app.measure(tree, ui.constraint(0.0, 0.0, 320.0, 240.0))
+                tree :: ui.box([ui.text("Jet — native GTK4 counter"), ui.node_color("count: {clicks.get()}", 220.0, 40.0, "#3366ff"), ui.button("Increment")])
+                size :: render_app.measure(tree, ui.constraint(0.0, 0.0, 320.0, 240.0))
                 render_app.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
                 render_app.paint(tree)
             })
@@ -43,12 +43,7 @@ fn run() {
             print("native backend: gtk4")
             app.present("Jet — GTK4")
         }
-        .Macos -> {
-            print("native backend: not yet on macOS")
-        }
-        .Windows -> {
-            print("native backend: not yet on Windows")
-        }
-
+        .Macos -> { print("native backend: not yet on macOS") }
+        .Windows -> { print("native backend: not yet on Windows") }
     }
 }

@@ -23,14 +23,14 @@ fn run() {
     loop c; cols {
         print("{c.name}:{c.type_name}")
     }
-    selected :: data.filter(data.rows(table), (t) => t.minutes >= 5.0)
+    selected :: data.filter(data.rows(table), t => t.minutes >= 5.0)
     print("selected:{data.count(selected)}")
     loop t; selected {
         print("{t.team}:{t.minutes}")
     }
-    empty_units := [Empty].{}
+    empty_units :: [Empty].{}
     print("empty_struct:{data.count(data.schema(data.table(empty_units)))}")
-    boxed := [Box<Int>].{}
+    boxed :: [Box<Int>].{}
     loop c; data.schema(data.table(boxed)) {
         print("generic:{c.name}:{c.type_name}")
     }

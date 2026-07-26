@@ -30,8 +30,8 @@ fn two_rolls(rng: &Rng) --[]-> String {
 // through the same injected, seeded handle, so still pure + reproducible.
 fn coin_and_card(rng: &Rng) --[]-> String {
     flip :: rng.bool()
-    cards := ["A", "K", "Q", "J"]
-    drawn := rng.pick(cards) ?? "none"
+    cards :: ["A", "K", "Q", "J"]
+    drawn :: rng.pick(cards) ?? "none"
     return "flip={flip} card={drawn}"
 }
 
@@ -50,8 +50,8 @@ fn run() {
     // `wait`. Type-owned unit methods mint checked runtime durations.
     print("now={clock.now()}")
     print("advanced={clock.advance(5000)}")
-    span := Duration.seconds(2) ?? panic("duration")
-    span_ms := span.in(.Milliseconds) ?? panic("duration read")
+    span :: Duration.seconds(2) ?? panic("duration")
+    span_ms :: span.in(.Milliseconds) ?? panic("duration read")
     print("span={span_ms}ms waited={clock.wait(span)}")
     // The expert escape: inside this block the determinism check is suspended.
     // A footgun — use only when you can guarantee reproducibility yourself.

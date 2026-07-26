@@ -5,12 +5,8 @@ enum ParseError {
 }
 
 fn parse_age(raw: String) -> Int ? ParseError {
-    if raw == "" {
-        return Err(ParseError.Empty)
-    }
-    if raw == "x" {
-        return Err(ParseError.BadDigit(~raw))
-    }
+    if raw == "" { return Err(ParseError.Empty) }
+    if raw == "x" { return Err(ParseError.BadDigit(~raw)) }
     return Ok(42)
 }
 
@@ -25,12 +21,7 @@ fn run() {
     doubled :: load() ?? 0
     print(doubled)
     if parse_age("x") == {
-        .Ok(n) -> {
-            print(n)
-        }
-        .Err(e) -> {
-            print(e)
-        }
-
+        .Ok(n) -> { print(n) }
+        .Err(e) -> { print(e) }
     }
 }

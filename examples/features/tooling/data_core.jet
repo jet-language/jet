@@ -11,14 +11,14 @@ fn run() {
     raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nTools,7.0"
     rows :: data.csv<Ticket>(raw) ?? panic("bad csv")
     print("rows: {data.count(rows)}")
-    groups :: data.group_mean(rows, (t) => t.team, (t) => t.minutes) ?? panic("group_mean")
+    groups :: data.group_mean(rows, t => t.team, t => t.minutes) ?? panic("group_mean")
     loop g; groups {
         print("{g.key}: count={g.count} sum={g.sum} mean={g.mean}")
     }
     values :: [2.0, 4.0, 6.0]
     mean :: data.mean(values) ?? panic("mean")
     print("series mean: {mean}")
-    counts :: data.group_count(rows, (t) => t.team) ?? panic("group_count")
+    counts :: data.group_count(rows, t => t.team) ?? panic("group_count")
     print(data.bar_text(counts) ?? panic("bar"))
     svg :: data.bar_svg(counts) ?? panic("svg")
     print("svg bytes: {svg.len()}")

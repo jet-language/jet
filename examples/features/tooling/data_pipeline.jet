@@ -17,9 +17,7 @@ fn must_stay_deferred(ticket: Ticket) -> Bool {
     return false
 }
 
-fn no_minutes() -> (Float?) {
-    return None
-}
+fn no_minutes() -> (Float?) { return None }
 
 fn run() {
     raw :: "team,minutes\nCore,4.0\nTools,5.0\nCore,8.0\nDocs,3.0"
@@ -28,17 +26,17 @@ fn run() {
     budgets :: data.csv<Budget>(budget_raw) ?? panic("bad budget")
     table :: data.table(rows)
     lazy :: data.lazy(table)
-    deferred :: data.lazy_filter(lazy, (t) => must_stay_deferred(t))
+    deferred :: data.lazy_filter(lazy, t => must_stay_deferred(t))
     print("deferred: {data.plan(deferred)[1]}")
-    planned :: data.lazy_sort_by(data.lazy_filter(lazy, (t) => t.minutes >= 4.0), (t) => t.team)
+    planned :: data.lazy_sort_by(data.lazy_filter(lazy, t => t.minutes >= 4.0), t => t.team)
     collected :: data.collect(planned) ?? panic("collect")
     planned_rows :: data.rows(collected)
-    focused :: data.filter(rows, (t) => t.minutes >= 4.0)
-    sorted :: data.sort_by(focused, (t) => t.team) ?? panic("sort")
-    groups :: data.group_sum(sorted, (t) => t.team, (t) => t.minutes) ?? panic("group_sum")
-    joined :: data.inner_join(sorted, budgets, (t) => t.team, (b) => b.team) ?? panic("join")
-    left :: data.left_join(rows, budgets, (t) => t.team, (b) => b.team) ?? panic("left")
-    pivot :: data.pivot_sum(rows, (t) => t.team, (t) => if t.minutes >= 5.0 { "long" } else { "short" }, (t) => t.minutes) ?? panic("pivot")
+    focused :: data.filter(rows, t => t.minutes >= 4.0)
+    sorted :: data.sort_by(focused, t => t.team) ?? panic("sort")
+    groups :: data.group_sum(sorted, t => t.team, t => t.minutes) ?? panic("group_sum")
+    joined :: data.inner_join(sorted, budgets, t => t.team, b => b.team) ?? panic("join")
+    left :: data.left_join(rows, budgets, t => t.team, b => b.team) ?? panic("left")
+    pivot :: data.pivot_sum(rows, t => t.team, t => if t.minutes >= 5.0 { "long" } else { "short" }, t => t.minutes) ?? panic("pivot")
     values :: [4.0, 5.0, 8.0, 3.0]
     summary :: data.describe(values) ?? panic("describe")
     rolling :: data.rolling_mean(values, 2) ?? panic("rolling")
@@ -59,8 +57,8 @@ fn run() {
     }
     loop pair; left {
         if pair.right == {
-            Val(budget) -> print("left: {pair.left.team} -> {budget.owner}")
-            None -> print("left: {pair.left.team} -> none")
+            .Val(budget) -> { print("left: {pair.left.team} -> {budget.owner}") }
+            .None -> { print("left: {pair.left.team} -> none") }
         }
     }
     loop cell; pivot {

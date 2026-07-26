@@ -13,18 +13,12 @@ fn run() {
             print("IPv{version}, header {ihl} words, {len} bytes total")
             print("payload is {rest.len()} bytes, tos {tos}")
         }
-        else -> {
-            print("not a recognizable packet")
-        }
+        else -> { print("not a recognizable packet") }
     }
     // A truncated buffer can't fill the same shape, so the `else` runs.
     short :: [U8].{0x45}
     if short == {
-        b"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}" -> {
-            print("unexpected match")
-        }
-        else -> {
-            print("too short to decode")
-        }
+        b"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}" -> { print("unexpected match") }
+        else -> { print("too short to decode") }
     }
 }

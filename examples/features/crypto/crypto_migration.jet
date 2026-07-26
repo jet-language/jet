@@ -33,8 +33,8 @@ fn run() {
         historical = expert.open_v1(key, v1) ?? panic("v1 open failed")
         source.write_atomic(v1) ?? panic("v1 fixture")
         expert.migrate_v1(key, source, [recipient.public_key()], migrated) ?? panic("v1 migration failed")
-        default_secret := expert.x25519(alice, bob) ?? panic("X25519 failed")
-        override_secret := expert.x25519(alice, bob, true) ?? panic("X25519 failed")
+        default_secret :: expert.x25519(alice, bob) ?? panic("X25519 failed")
+        override_secret :: expert.x25519(alice, bob, true) ?? panic("X25519 failed")
         shared_default = expert.secret_bytes(default_secret)
         shared_override = expert.secret_bytes(override_secret)
     }

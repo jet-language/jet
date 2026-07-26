@@ -6,23 +6,20 @@ fn show_publish(outcome: HookOutcome<Int, String>) {
         .Continue(value) -> {
             print("publish {value}")
         }
-        Cancel -> {
-            print("publish cancelled")
-        }
+        Cancel -> { print("publish cancelled") }
         .Fail(error) -> {
             print("publish failed {error}")
         }
-
     }
 }
 
 fn run() {
     scope :: event.scope()
     clicked :: event.new<Int>()
-    sub :: clicked.on(scope, (n) => {
+    sub :: clicked.on(scope, n => {
         print("clicked {n}")
     })
-    clicked.once(scope, (n) => {
+    clicked.once(scope, n => {
         print("once {n}")
     })
     first :: clicked.emit(1)
@@ -35,7 +32,7 @@ fn run() {
     print(third.summary())
     print("active {scope.active_count()}")
     before_save :: event.hook<Int, String>("allow")
-    before_save.on_priority(scope, 10, (n) => "seen {n}")
+    before_save.on_priority(scope, 10, n => "seen {n}")
     print(before_save.run(5, "fallback"))
     async_scope :: event.scope()
     queued :: event.async_result<Int, String>(AsyncPolicy.{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")

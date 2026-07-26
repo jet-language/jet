@@ -16,9 +16,7 @@ fn run() {
         return
     }
     root :: "/tmp/jet_watcher_demo"
-    if fs.exists(root) {
-        fs.remove_all(root) ?? panic("cleanup failed")
-    }
+    if fs.exists(root) { fs.remove_all(root) ?? panic("cleanup failed") }
     fs.create_dir_all(root) ?? panic("mkdir failed")
     nested :: path.join(root, "nested")
     fs.create_dir_all(nested) ?? panic("nested mkdir failed")
@@ -26,7 +24,7 @@ fn run() {
     scope :: event.scope()
     files :: watcher.files(root) ?? panic("watch files failed")
     callback_path :: ~created
-    sub :: files.on(scope, (ev) => {
+    sub :: files.on(scope, ev => {
         if ev.path == ~callback_path {
             print("callback {ev.domain}:{ev.kind}:recursive")
         }
@@ -35,9 +33,7 @@ fn run() {
     first :: files.poll()
     first_kind := "none"
     loop ev; first {
-        if ev.path == created {
-            first_kind = ev.kind
-        }
+        if ev.path == created { first_kind = ev.kind }
     }
     print("recursive file: {first_kind}")
     print("callback active: {sub.is_active()}")
@@ -47,19 +43,15 @@ fn run() {
     dropped_path :: ~after_drop
     if true {
         dropped_scope :: event.scope()
-        files.on(dropped_scope, (ev) => {
-            if ev.path == ~dropped_path {
-                print("leaked callback after scope drop")
-            }
+        files.on(dropped_scope, ev => {
+            if ev.path == ~dropped_path { print("leaked callback after scope drop") }
         })
     }
     fs.write(after_drop, "cleanup") ?? panic("scope-drop write failed")
     after_drop_events :: files.poll()
     after_drop_kind := "none"
     loop ev; after_drop_events {
-        if ev.path == after_drop {
-            after_drop_kind = ev.kind
-        }
+        if ev.path == after_drop { after_drop_kind = ev.kind }
     }
     print("scope drop file: {after_drop_kind}")
     child :: process.cmd([os.executable(), "--watch-child"]).spawn() ?? panic("child spawn failed")
@@ -79,12 +71,8 @@ fn run() {
     process_kind := "none"
     port_kind := "none"
     loop ev; combined {
-        if ev.domain == "process" {
-            process_kind = ev.kind
-        }
-        if ev.domain == "port" {
-            port_kind = ev.kind
-        }
+        if ev.domain == "process" { process_kind = ev.kind }
+        if ev.domain == "port" { port_kind = ev.kind }
     }
     print("process event: {process_kind}")
     print("port event: {port_kind}")

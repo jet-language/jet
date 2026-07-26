@@ -3,39 +3,33 @@
 // price when BOTH price and quantity are present; either missing makes the
 // total unknown (`None`), never a silent zero or a distinct "hole" type.
 fn lookup_price(id: Int) -> (Float?) {
-    if id == 1 {
-        return Val(19.99)
-    }
+    if id == 1 { return Val(19.99) }
     return None
 }
 
 fn lookup_qty(id: Int) -> (Float?) {
-    if id == 1 {
-        return Val(3.0)
-    }
-    if id == 2 {
-        return Val(5.0)
-    }
+    if id == 1 { return Val(3.0) }
+    if id == 2 { return Val(5.0) }
     return None
 }
 
 fn run() {
     // Both present: `.zip` pairs them, `.map` computes the total.
-    price ::  lookup_price(1) 
-    qty ::  lookup_qty(1) 
-    total1 :: price.zip(qty).map((pair) => pair.a * pair.b)
+    price :: lookup_price(1)
+    qty :: lookup_qty(1)
+    total1 :: price.zip(qty).map(pair => pair.a * pair.b)
     print(total1)
     // `Option.lift2` does the same combination without an explicit pair.
     total2 :: Option.lift2((p, q) => p * q, price, qty)
     print(total2)
     // One absent (id 2 has a quantity but no price) -> None, not a partial total.
-    price2 ::  lookup_price(2) 
-    qty2 ::  lookup_qty(2) 
-    total3 :: price2.zip(qty2).map((pair) => pair.a * pair.b)
+    price2 :: lookup_price(2)
+    qty2 :: lookup_qty(2)
+    total3 :: price2.zip(qty2).map(pair => pair.a * pair.b)
     print(total3)
     // Both absent (id 3 has neither) -> None.
-    price3 ::  lookup_price(3) 
-    qty3 ::  lookup_qty(3) 
+    price3 :: lookup_price(3)
+    qty3 :: lookup_qty(3)
     total4 :: Option.lift2((p, q) => p * q, price3, qty3)
     print(total4)
 }

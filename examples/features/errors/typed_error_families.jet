@@ -22,19 +22,13 @@ impl FileErr -> AppErr { return AppErr.File(self) }
 impl ParseErr -> AppErr { return AppErr.Parse(self) }
 
 fn read_file(path: String) -> String ? FileErr {
-    if path == "" {
-        return Err(FileErr.NotFound("(empty path)"))
-    }
+    if path == "" { return Err(FileErr.NotFound("(empty path)")) }
     return Ok("42")
 }
 
 fn parse_int(s: String) -> Int ? ParseErr {
-    if s == "" {
-        return Err(ParseErr.Empty)
-    }
-    if s == "x" {
-        return Err(ParseErr.BadInt(~s))
-    }
+    if s == "" { return Err(ParseErr.Empty) }
+    if s == "x" { return Err(ParseErr.BadInt(~s)) }
     return Ok(42)
 }
 
@@ -51,12 +45,8 @@ fn run() {
     print(n)
     // Trigger FileErr -> AppErr conversion via ?
     if load("") == {
-        .Ok(v) -> {
-            print(v)
-        }
-        .Err(e) -> {
-            print("error")
-        }
+        .Ok(v) -> { print(v) }
+        .Err(e) -> { print("error") }
         else -> {
 
         }

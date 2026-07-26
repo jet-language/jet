@@ -79,7 +79,6 @@ impl<'a> Fmt<'a> {
                 } else {
                     f.fmt_value_block(else_body, else_value, false);
                 }
-                f.newline();
                 break;
             }
         });
@@ -331,34 +330,110 @@ impl<'a> Fmt<'a> {
             }
             Expr::Bool(b, _) => self.write(if *b { "true" } else { "false" }),
             Expr::Char(c, _) => self.write(&fmt_char(*c)),
-            Expr::ListLit(elems, _) => {
+            Expr::ListLit(elems, span) => {
                 self.write("[");
-                for (i, e) in elems.iter().enumerate() {
-                    if i > 0 {
-                        self.write(", ");
+                if self.source_span_multiline(*span) {
+                    self.newline();
+                    self.with_indent(|f| {
+                        for (i, e) in elems.iter().enumerate() {
+                            if i > 0 {
+                                f.newline();
+                            }
+                            f.emit_leading(e.span().start);
+                            f.fmt_expr(e, Prec::OrFallback);
+                            if i + 1 < elems.len() {
+                                f.write(",");
+                            }
+                            f.emit_trailing(e.span().end);
+                        }
+                        f.emit_leading(span.end);
+                    });
+                    if !self.at_line_start {
+                        self.newline();
                     }
-                    self.fmt_expr(e, Prec::OrFallback);
+                } else {
+                    for (i, e) in elems.iter().enumerate() {
+                        if i > 0 {
+                            self.write(", ");
+                        }
+                        self.fmt_expr(e, Prec::OrFallback);
+                    }
                 }
                 self.write("]");
             }
-            Expr::TupleLit(fields, _, _) => {
+            Expr::TupleLit(fields, span, _) => {
                 self.write("(");
-                for (i, (name, e)) in fields.iter().enumerate() {
-                    if i > 0 {
-                        self.write(", ");
+                if self.source_span_multiline(*span) {
+                    self.newline();
+                    self.with_indent(|f| {
+                        for (i, (name, e)) in fields.iter().enumerate() {
+                            if i > 0 {
+                                f.newline();
+                            }
+                            let field_start = if i == 0 {
+                                span.start
+                            } else {
+                                fields[i - 1].1.span().end
+                            };
+                            let colon = f.src
+                                .get(field_start..e.span().start)
+                                .and_then(|source| source.rfind(':'))
+                                .map_or(e.span().start, |offset| field_start + offset);
+                            f.emit_leading(colon);
+                            f.write(name);
+                            f.write(": ");
+                            f.emit_leading(e.span().start);
+                            f.fmt_expr(e, Prec::OrFallback);
+                            if i + 1 < fields.len() {
+                                f.write(",");
+                            }
+                            f.emit_trailing(e.span().end);
+                        }
+                        f.emit_leading(span.end);
+                    });
+                    if !self.at_line_start {
+                        self.newline();
                     }
-                    self.write(name);
-                    self.write(": ");
-                    self.fmt_expr(e, Prec::OrFallback);
+                } else {
+                    for (i, (name, e)) in fields.iter().enumerate() {
+                        if i > 0 {
+                            self.write(", ");
+                        }
+                        self.write(name);
+                        self.write(": ");
+                        self.fmt_expr(e, Prec::OrFallback);
+                    }
                 }
                 self.write(")");
             }
-            Expr::MapLit(pairs, _) => {
+            Expr::MapLit(pairs, span) => {
                 // D-EMPTYLIT1: an empty map is spelled `[]`, same as an empty
                 // list — sema (not the formatter) is the only thing that
                 // knows an empty `MapLit` node came from that shared spelling.
                 self.write("[");
-                if !pairs.is_empty() {
+                if self.source_span_multiline(*span) {
+                    self.newline();
+                    self.with_indent(|f| {
+                        for (i, (k, v)) in pairs.iter().enumerate() {
+                            if i > 0 {
+                                f.newline();
+                            }
+                            f.emit_leading(k.span().start);
+                            f.fmt_expr(k, Prec::OrFallback);
+                            f.write(": ");
+                            f.emit_leading(v.span().start);
+                            f.fmt_expr(v, Prec::OrFallback);
+                            if i + 1 < pairs.len() {
+                                f.write(",");
+                            }
+                            f.emit_trailing(v.span().end);
+                        }
+                        f.emit_leading(span.end);
+                    });
+                    if !self.at_line_start {
+                        self.newline();
+                    }
+                } else {
                     for (i, (k, v)) in pairs.iter().enumerate() {
                         if i > 0 {
                             self.write(", ");
@@ -585,6 +660,7 @@ impl<'a> Fmt<'a> {
                 import_ns,
                 fields,
                 inferred,
+                span,
                 ..
             } => {
                 // D-DOTCTOR1: emit `Type.{ … }` (named) or `.{ … }` (inferred).
@@ -610,54 +686,153 @@ impl<'a> Fmt<'a> {
                     }
                 }
                 self.write(".{");
-                for (i, (name, _, expr)) in fields.iter().enumerate() {
+                let multiline = self.source_span_multiline(*span);
+                if multiline {
+                    self.newline();
+                    self.indent += 1;
+                }
+                for (i, (name, name_span, expr)) in fields.iter().enumerate() {
                     if i > 0 {
-                        self.write(", ");
+                        if multiline {
+                            self.newline();
+                        } else {
+                            self.write(", ");
+                        }
+                    }
+                    if multiline {
+                        self.emit_leading(name_span.start);
                     }
                     self.write(name);
                     self.write(": ");
+                    if multiline {
+                        self.emit_leading(expr.span().start);
+                    }
                     self.fmt_expr(expr, Prec::OrFallback);
+                    if multiline && i + 1 < fields.len() {
+                        self.write(",");
+                    }
+                    if multiline {
+                        self.emit_trailing(expr.span().end);
+                    }
+                }
+                if multiline {
+                    self.emit_leading(span.end);
+                    self.indent -= 1;
+                    if !self.at_line_start {
+                        self.newline();
+                    }
                 }
                 self.write("}");
             }
-            Expr::TypedLit { head, body, .. } => {
+            Expr::TypedLit { head, body, span } => {
                 // D-DOTCTOR3: print the head (when present) and the body shape.
                 if let Some(head) = head {
                     self.fmt_type(head);
                 }
                 self.write(".{");
+                let multiline = self.source_span_multiline(*span);
+                if multiline {
+                    self.newline();
+                }
+                let len = match body {
+                    crate::AST::TypedLitBody::Fields(fields) => fields.len(),
+                    crate::AST::TypedLitBody::Elements(elems) => elems.len(),
+                    crate::AST::TypedLitBody::Entries(entries) => entries.len(),
+                    _ => 0,
+                };
+                if multiline {
+                    self.indent += 1;
+                }
                 match body {
                     crate::AST::TypedLitBody::Empty => {}
                     crate::AST::TypedLitBody::Fields(fields) => {
-                        for (i, (name, _, expr)) in fields.iter().enumerate() {
+                        for (i, (name, name_span, expr)) in fields.iter().enumerate() {
                             if i > 0 {
-                                self.write(", ");
+                                if multiline {
+                                    self.newline();
+                                } else {
+                                    self.write(", ");
+                                }
+                            }
+                            if multiline {
+                                self.emit_leading(name_span.start);
                             }
                             self.write(name);
                             self.write(": ");
+                            if multiline {
+                                self.emit_leading(expr.span().start);
+                            }
                             self.fmt_expr(expr, Prec::OrFallback);
+                            if multiline && i + 1 < len {
+                                self.write(",");
+                            }
+                            if multiline {
+                                self.emit_trailing(expr.span().end);
+                            }
                         }
                     }
                     crate::AST::TypedLitBody::Elements(elems) => {
                         for (i, expr) in elems.iter().enumerate() {
                             if i > 0 {
-                                self.write(", ");
+                                if multiline {
+                                    self.newline();
+                                } else {
+                                    self.write(", ");
+                                }
+                            }
+                            if multiline {
+                                self.emit_leading(expr.span().start);
                             }
                             self.fmt_expr(expr, Prec::OrFallback);
+                            if multiline && i + 1 < len {
+                                self.write(",");
+                            }
+                            if multiline {
+                                self.emit_trailing(expr.span().end);
+                            }
                         }
                     }
                     crate::AST::TypedLitBody::Entries(entries) => {
                         for (i, (key, val)) in entries.iter().enumerate() {
                             if i > 0 {
-                                self.write(", ");
+                                if multiline {
+                                    self.newline();
+                                } else {
+                                    self.write(", ");
+                                }
+                            }
+                            if multiline {
+                                self.emit_leading(key.span().start);
                             }
                             self.fmt_expr(key, Prec::OrFallback);
                             self.write(": ");
+                            if multiline {
+                                self.emit_leading(val.span().start);
+                            }
                             self.fmt_expr(val, Prec::OrFallback);
+                            if multiline && i + 1 < len {
+                                self.write(",");
+                            }
+                            if multiline {
+                                self.emit_trailing(val.span().end);
+                            }
                         }
                     }
                     crate::AST::TypedLitBody::Value(expr) => {
+                        if multiline {
+                            self.emit_leading(expr.span().start);
+                        }
                         self.fmt_expr(expr, Prec::OrFallback);
+                        if multiline {
+                            self.emit_trailing(expr.span().end);
+                        }
+                    }
+                }
+                if multiline {
+                    self.emit_leading(span.end);
+                    self.indent -= 1;
+                    if !self.at_line_start {
+                        self.newline();
                     }
                 }
                 self.write("}");
@@ -810,7 +985,16 @@ impl<'a> Fmt<'a> {
             }
             self.write(") ");
         }
-        self.write("(");
+        // D-LAMBDAINFER1: preserve the bare one-parameter spelling. Its
+        // lambda span starts at the parameter name; the parenthesized form
+        // starts at the opening `(`.
+        let bare_param = lam.take_names.is_empty()
+            && lam.params.len() == 1
+            && lam.params[0].ty.is_none()
+            && lam.span.start == lam.params[0].name_span.start;
+        if !bare_param {
+            self.write("(");
+        }
         for (i, p) in lam.params.iter().enumerate() {
             if i > 0 {
                 self.write(", ");
@@ -821,7 +1005,10 @@ impl<'a> Fmt<'a> {
                 self.fmt_type(ty);
             }
         }
-        self.write(") => ");
+        if !bare_param {
+            self.write(")");
+        }
+        self.write(" => ");
         match &lam.body {
             crate::AST::LambdaBody::Expr(e) => self.fmt_expr(e, Prec::OrFallback.add_rhs()),
             crate::AST::LambdaBody::Block(stmts) => {
@@ -833,6 +1020,13 @@ impl<'a> Fmt<'a> {
                 self.end_block();
             }
         }
+    }
+
+    fn source_span_multiline(&self, span: crate::Diagnostics::Span) -> bool {
+        self.src
+            .get(span.start..span.end)
+            .is_some_and(|source| source.contains('\n'))
+            || self.span_has_comment(span.start, span.end)
     }
 
     fn fmt_or_fallback(&mut self, fb: &OrFallback) {

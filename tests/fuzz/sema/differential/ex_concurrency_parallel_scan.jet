@@ -13,13 +13,7 @@ use core.files as fs
 use core.io as io
 use core.env as env
 
-fn count_lines(text: String) -> Int {
-    lines := 0
-    loop _line; text.split("\n") {
-        lines += 1
-    }
-    return lines
-}
+fn count_lines(text: String) -> Int { return text.lines().len() }
 
 fn scan_one(path: String) -> String {
     text :: fs.read(~path) ?? return "{path}: unreadable"
@@ -28,30 +22,22 @@ fn scan_one(path: String) -> String {
 }
 
 fn default_paths() -> [String] {
-    return ["examples/features/concurrency/tasks.jet", "examples/features/concurrency/pipeline.jet", "examples/features/collections/wordcount.jet", "examples/features/serde/json.jet"]
+    return [
+        "examples/features/concurrency/tasks.jet",
+        "examples/features/concurrency/pipeline.jet",
+        "examples/features/collections/wordcount.jet",
+        "examples/features/serde/json.jet"
+    ]
 }
 
-fn paths_from_args() -> [String] {
-    args :: io.args()
-    out := [String].{}
-    i := 1
-    loop i < args.len() {
-        if args.get(i) == Val(path) {
-            out.push(path)
-        }
-        i += 1
-    }
-    return out
-}
+fn paths_from_args() -> [String] { return io.args().skip(1).to_list() }
 
 fn paths_from_prompt() -> [String] {
     print("Enter file paths (blank line when done):")
     out := [String].{}
     loop true {
         raw :: io.input("> ") ?? return ~out
-        if raw == "" {
-            break
-        }
+        if raw == "" { break }
         out.push(raw)
     }
     return out
@@ -59,28 +45,21 @@ fn paths_from_prompt() -> [String] {
 
 fn gather_paths() -> [String] {
     from_args :: paths_from_args()
-    if from_args.len() > 0 {
-        return from_args
-    }
-    if (env.get("INTERACTIVE") ?? "") == "1" {
-        return paths_from_prompt()
-    }
+    if from_args.len() > 0 { return from_args }
+    if (env.get("INTERACTIVE") ?? "") == "1" { return paths_from_prompt() }
     return default_paths()
 }
 
 fn scan_parallel(paths: [String]) -> [String] {
+    expected :: paths.len()
     (sender, ch) :: tasks.channel<String>()
     workers := [Task<Unit>].{}
-    i := 0
-    loop i < paths.len() {
-        if paths.get(i) == Val(path) {
-            tx :: ~sender
-            file :: ~path
-            workers.push(tasks.spawn(take(tx, file) () => {
-                tx.send(scan_one(file))
-            }))
-        }
-        i += 1
+    loop path; paths {
+        tx :: ~sender
+        file :: ~path
+        workers.push(tasks.spawn(take(tx, file) () => {
+            tx.send(scan_one(file))
+        }))
     }
     loop workers.len() > 0 {
         worker :: workers.pop() ?? panic("missing worker")
@@ -88,7 +67,7 @@ fn scan_parallel(paths: [String]) -> [String] {
     }
     results := [String].{}
     got := 0
-    loop got < paths.len() {
+    loop got < expected {
         results.push(ch.receive() ?? panic("channel closed early"))
         got += 1
     }
@@ -96,13 +75,7 @@ fn scan_parallel(paths: [String]) -> [String] {
     return results
 }
 
-fn copy_paths(paths: [String]) -> [String] {
-    out := [String].{}
-    loop path; paths {
-        out.push(path)
-    }
-    return out
-}
+fn copy_paths(paths: [String]) -> [String] { return paths.map(path => ~path).to_list() }
 
 fn run() {
     paths :: gather_paths()
@@ -114,9 +87,7 @@ fn run() {
     print("")
     parallel_paths :: copy_paths(paths)
     parallel :: scan_parallel(parallel_paths)
-    loop line; parallel {
-        print(line)
-    }
+    loop line; parallel { print(line) }
     print("")
     print("done — {paths.len()} files scanned in parallel")
 }

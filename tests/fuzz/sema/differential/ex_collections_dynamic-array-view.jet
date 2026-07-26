@@ -4,7 +4,13 @@ struct Incident {
 }
 
 fn run() {
-    incidents := [Incident].{ Incident.{severity: 1}, Incident.{severity: 2}, Incident.{severity: 3}, Incident.{severity: 4}, Incident.{severity: 5} }
+    incidents :: [Incident].{
+        Incident.{severity: 1},
+        Incident.{severity: 2},
+        Incident.{severity: 3},
+        Incident.{severity: 4},
+        Incident.{severity: 5}
+    }
     // Explicit copy: `head` owns its own three `Incident`s.
     head :: ~incidents[0..2]
     print("copy-slice len: {head.len()}")
@@ -14,7 +20,7 @@ fn run() {
     print("indexed: {window[0].severity}")
     sum :: window.fold(0, (a, i) => a + i.severity)
     print("fold sum: {sum}")
-    doubled :: window.map((i) => i.severity * 2)
+    doubled :: window.map(i => i.severity * 2)
     print("map-to-owned: {doubled.join(",")}")
     loop i; window {
         print("iter: {i.severity}")

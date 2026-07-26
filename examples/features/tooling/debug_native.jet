@@ -14,17 +14,15 @@ use core.files as fs
 
 fn word_count(text: String) -> Int {
     total := 0
-    loop word; text.split(" ") {
-        total += 1
-    }
+    loop word; text.split(" ") { total += 1 }
     return total
 }
 
 fn run() {
-    path := "/tmp/jet_189_debug_native_notes.txt"
+    path :: "/tmp/jet_189_debug_native_notes.txt"
     fs.write(path, "jet debug steps the full feature set") ?? return
-    text := fs.read(path) ?? ""
-    n := word_count(text)
+    text :: fs.read(path) ?? ""
+    n :: word_count(text)
     print("that note has {n} words")
     fs.remove(path) ?? return
 }

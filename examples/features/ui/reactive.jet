@@ -13,10 +13,10 @@ fn run() {
     qty := reactive.signal(2)
     // A derived value recomputes from the signals it reads. Reading `price.get()`
     // and `qty.get()` here subscribes this derived to both.
-    total := reactive.derived(() => (price.get() * qty.get()))
+    total :: reactive.derived(() => (price.get() * qty.get()))
     print(total.get())
     // An effect runs now and again whenever a signal it read changes.
-    effect := reactive.effect(() => {
+    effect :: reactive.effect(() => {
         print(total.get())
     })
     // Change a source: the derived recomputes and the effect re-runs.

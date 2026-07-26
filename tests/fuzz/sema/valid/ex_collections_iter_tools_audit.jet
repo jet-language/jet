@@ -1,35 +1,30 @@
 // D-ITERTOOLS1=A: collection breadth and iterator adapter audit.
 fn run() {
-    nums := [1, 2, 3, 4]
+    nums :: [1, 2, 3, 4]
     print(nums.sum())
     print(nums.product())
     print(nums.min())
     print(nums.max())
     print([[1, 2], [3], [4, 5]].flatten())
     print([1, 2, 3].intersperse(0))
-
-    pairs := ["a", "bb", "c"].zip([1, 2, 3])
-    split := pairs.unzip()
+    pairs :: ["a", "bb", "c"].zip([1, 2, 3])
+    split :: pairs.unzip()
     print(split.a)
     print(split.b)
-
-    counts := ["ant", "bee", "ape", "bat"].count_by((s: String) => s.slice(0, 0))
+    counts :: ["ant", "bee", "ape", "bat"].count_by((s: String) => s.slice(0, 0))
     print(counts.keys())
     print(counts.values())
-
     ss := SortedSet.from([3, 1, 2, 3])
     ss.add(4)
     ss.remove(2)
     print(ss.to_list())
     print(ss.first())
     print(ss.last())
-
     pq := PriorityQueue.from([4, 1, 7, 3])
     pq.push(5)
     print(pq.peek())
     print(pq.pop())
     print(pq.to_sorted_list())
-
     cache := Lru.new(2)
     cache.add("a", 1).drop("cache is new, so no displaced value is needed")
     cache.add("b", 2).drop("cache is new, so no displaced value is needed")
@@ -37,7 +32,6 @@ fn run() {
     cache.add("c", 3).drop("this audit only needs the eviction effect")
     print(cache.has_key("b"))
     print(cache.keys())
-
     bits := BitSet.new()
     bits.add(1)
     bits.add(4)
@@ -45,10 +39,9 @@ fn run() {
     print(bits.to_list())
     print(bits.count())
     print(bits.len())
-
     b := ByteBuffer.new()
-    one :: U8.{ 1 }
-    word :: U16.{ 0x0203 }
+    one :: U8.{1}
+    word :: U16.{0x0203}
     b.write_u8(one)
     b.write_u16_be(word)
     b.write_bytes([4, 5])

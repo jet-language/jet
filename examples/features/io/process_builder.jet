@@ -11,9 +11,7 @@ fn run() {
     piped :: process.pipeline([spec1, spec2]) ?? panic("pipeline failed")
     print(piped.output.trim())
     child :: process.cmd(["echo", "spawn-api"]).stdout(.Stream).spawn() ?? panic("spawn failed")
-    loop line; child.stdout.lines() {
-        print(line.trim())
-    }
+    loop line; child.stdout.lines() { print(line.trim()) }
     waited :: child.wait() ?? panic("wait failed")
     print(waited.success)
 }

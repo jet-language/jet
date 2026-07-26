@@ -10,9 +10,7 @@ fn repaint(old: [UiNode], updated: [UiNode]) -> Int {
     loop leaf; updated {
         same := false
         if i < old.len() {
-            if leaf.label == old[i].label {
-                same = true
-            }
+            if leaf.label == old[i].label { same = true }
         }
         if !same {
             backend.layout(leaf, ui.rect(0.0, Float.from_int(i), leaf.width, leaf.height))
@@ -28,22 +26,22 @@ fn repaint(old: [UiNode], updated: [UiNode]) -> Int {
 }
 
 fn run() {
-    initial := [UiNode].{ui.text("a"), ui.text("b")}
+    initial :: [UiNode].{ui.text("a"), ui.text("b")}
     leaves := reactive.signal(initial)
     backend := ui.tui_backend()
     render_backend := ~backend
     ui.reactive_render(take(render_backend) () => {
-        tree := ui.box(leaves.get())
-        size := render_backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+        tree :: ui.box(leaves.get())
+        size :: render_backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
         render_backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
         render_backend.paint(tree)
     })
-    empty := [UiNode].{}
-    before := leaves.get()
+    empty :: [UiNode].{}
+    before :: leaves.get()
     print("initial repaints: {repaint(empty, before)}")
     print("renders: {backend.render_count()}")
     leaves.set([ui.text("a"), ui.text("zz")])
-    after := leaves.get()
+    after :: leaves.get()
     print("update repaints: {repaint(before, after)}")
     print("renders: {backend.render_count()}")
     loop line; backend.frame_lines() {

@@ -6,7 +6,7 @@
 fn run() {
     // header/count/payload wire shape: a little-endian u32 magic, a
     // little-endian u16 item count, then that many raw bytes.
-    packet :: [U8].{ 0x2a, 0x00, 0x00, 0x00, 0x03, 0x00, 0x10, 0x20, 0x30 }
+    packet :: [U8].{0x2a, 0x00, 0x00, 0x00, 0x03, 0x00, 0x10, 0x20, 0x30}
     // magic = 42
     // count = 3
     // payload
@@ -18,15 +18,14 @@ fn run() {
     print("magic={magic} count={count} payload_len={payload.len()}")
     print("remaining={r.remaining()} is_at_end={r.is_at_end()}")
     // A bounds miss is an ordinary error value — `?`-composable, never a panic.
-    short :: [U8].{ 0x01 }
+    short :: [U8].{0x01}
     r2 :: Reader.over(short)
     if r2.read_u32_le() == {
-        Ok(v) -> {
+        .Ok(v) -> {
             print("unexpected ok: {v}")
         }
-        Err(e) -> {
+        .Err(e) -> {
             print("expected error: {e}")
         }
-
     }
 }

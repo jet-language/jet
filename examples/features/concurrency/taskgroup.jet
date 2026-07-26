@@ -3,30 +3,20 @@ use core.time as time
 
 fn sum_range(first: Int, last: Int) -> Int {
     total := 0
-    loop n; first..last {
-        total = (total + n)
-    }
+    loop n; first..last { total += n }
     return total
 }
 
-fn fast_val() -> Int {
-    return 42
-}
+fn fast_val() -> Int { return 42 }
 
 fn run() {
     taskgroup g {
         print("inside taskgroup")
-        a :: g.task(() => {
-            sum_range(1, 25)
-        })
-        b :: g.task(() => {
-            sum_range(26, 50)
-        })
+        a :: g.task(() => sum_range(1, 25))
+        b :: g.task(() => sum_range(26, 50))
         results :: g.all([a, b])
         print((results[0] + results[1]))
-        fast :: g.task(() => {
-            fast_val()
-        })
+        fast :: g.task(() => fast_val())
         slow :: g.task(() => {
             time.sleep(200)
             sum_range(1, 500000)

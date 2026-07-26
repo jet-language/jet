@@ -285,10 +285,10 @@ fn fmt_comptime_os_dispatch_round_trips() {
         out.contains("comptime if build.os == {"),
         "expected the `comptime if build.os == {{` dispatch head, got:\n{out}"
     );
-    // Arms and their bodies survive (the formatter canonicalizes braceless arm
-    // bodies to block form, like any `if … == { }` dispatch).
+    // Arms and their bodies survive. Braceless simple arms stay concise; the
+    // author-written scoped arm stays braced.
     assert!(
-        out.contains(".Linux -> {") && out.contains(".Macos -> {"),
+        out.contains(".Linux -> {") && out.contains(".Macos -> print(\"mac\")"),
         "expected OS arms preserved, got:\n{out}"
     );
     assert!(
@@ -296,7 +296,7 @@ fn fmt_comptime_os_dispatch_round_trips() {
         "expected arm bodies preserved, got:\n{out}"
     );
     assert!(
-        out.contains("else -> {") && out.contains("print(\"other\")"),
+        out.contains("else -> print(\"other\")"),
         "expected the else arm preserved, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("comptime OS dispatch output should re-fmt");
@@ -304,6 +304,197 @@ fn fmt_comptime_os_dispatch_round_trips() {
         out, twice,
         "comptime OS dispatch formatting must be idempotent"
     );
+}
+
+#[test]
+fn fmt_preserves_concise_dispatch_arms() {
+    // D-IF1/D-FMT1: simple braceless arms remain one line. Explicit braces
+    // still define visible scope and remain exactly as written.
+    let src = r#"fn run() {
+    value :: 2
+    if value == {
+        1 -> print("one")
+        2 -> { print("two") }
+        else -> print("other")
+    }
+}
+"#;
+    assert_fmt_stable(src, "concise dispatch arms");
+}
+
+#[test]
+fn fmt_keeps_trailing_dispatch_arm_comments_attached() {
+    let src = r#"fn run() {
+    value :: 1
+    if value == {
+        1 -> print("one") // The common case.
+        else -> print("other")
+    }
+}
+"#;
+    let once = jet::format_source(src).expect("commented dispatch arm should format");
+    assert!(
+        once.contains("print(\"one\")  // The common case."),
+        "formatter moved or dropped the arm comment:\n{once}"
+    );
+    let twice = jet::format_source(&once).expect("commented dispatch arm should reformat");
+    assert_eq!(once, twice, "commented dispatch arm must be idempotent");
+}
+
+#[test]
+fn fmt_expands_multiline_lambda_dispatch_arms_without_losing_comments() {
+    let src = r#"fn run() {
+    value :: 1
+    if value == {
+        1 -> apply(x => {
+            // Keep this explanation with the lambda.
+            return x + 1
+        })
+        else -> print("other")
+    }
+}
+"#;
+    let once = jet::format_source(src).expect("multiline lambda arm should format");
+    assert!(
+        once.contains("// Keep this explanation with the lambda."),
+        "formatter dropped the lambda comment:\n{once}"
+    );
+    let twice = jet::format_source(&once).expect("multiline lambda arm should reformat");
+    assert_eq!(once, twice, "multiline lambda arm must be idempotent");
+}
+
+#[test]
+fn fmt_preserves_multiline_collection_literals() {
+    // S44 author intent applies to collection layout too: readable vertical
+    // data must not collapse into one over-width line.
+    let src = r#"fn run() {
+    values :: [
+        1,
+        2,
+        3
+    ]
+    typed :: [Int].{
+        4,
+        5,
+        6
+    }
+    lookup :: [
+        "a": 1,
+        "b": 2
+    ]
+    point :: (
+        x: 7,
+        y: 8
+    )
+    record :: Point.{
+        x: 9,
+        y: 10
+    }
+    print(values.len() + typed.len() + lookup.len() + point.x + point.y + record.x)
+}
+"#;
+    assert_fmt_stable(src, "multiline collection literals");
+}
+
+#[test]
+fn fmt_preserves_comments_inside_multiline_collection_literals() {
+    let src = r#"fn run() {
+    values :: [
+        // Primary value.
+        1,
+        2  // Secondary value.
+    ]
+    point :: (
+        // Horizontal coordinate.
+        x: /* coordinate value */ 7,
+        y: 8
+    )
+    lookup :: [
+        // Stable key.
+        "a": /* mapped value */ 1,
+        "b": 2
+    ]
+    typed :: [Int].{
+        // First typed value.
+        3,
+        4
+    }
+    record :: Point.{
+        // Named field.
+        x: /* field value */ 9,
+        y: 10
+    }
+    typed_lookup :: [String: Int].{
+        "c": /* typed mapped value */ 5,
+        "d": 6
+    }
+    empty :: [
+        // Intentionally empty.
+    ]
+    typed_empty :: [Int].{
+        /* Typed sentinel. */
+    }
+    print(values.len() + point.x + lookup.len() + typed.len())
+}
+"#;
+    let once = jet::format_source(src).expect("commented collection literals should format");
+    for comment in [
+        "// Primary value.",
+        "// Secondary value.",
+        "// Horizontal coordinate.",
+        "/* coordinate value */",
+        "// Stable key.",
+        "/* mapped value */",
+        "// First typed value.",
+        "// Named field.",
+        "/* field value */",
+        "/* typed mapped value */",
+        "// Intentionally empty.",
+        "/* Typed sentinel. */",
+    ] {
+        assert!(once.contains(comment), "formatter dropped `{comment}`:\n{once}");
+    }
+    let twice = jet::format_source(&once).expect("commented collection literals should reformat");
+    assert_eq!(once, twice, "commented collection literals must be idempotent");
+}
+
+#[test]
+fn fmt_preserves_blank_lines_between_statement_sections() {
+    let src = r#"fn run() {
+    first()
+
+    // Second phase.
+    second()
+
+    third()
+}
+"#;
+    assert_fmt_stable(src, "statement section breaks");
+}
+
+#[test]
+fn fmt_keeps_section_break_after_leading_comment() {
+    let src = r#"fn run() {
+    first()
+    // First phase is complete.
+
+    second()
+}
+"#;
+    assert_fmt_stable(src, "section break after a leading comment");
+}
+
+#[test]
+fn fmt_keeps_section_break_between_leading_comment_groups() {
+    let src = r#"fn run() {
+    first()
+    // First phase is complete.
+
+    // Second phase starts here.
+    second()
+}
+"#;
+    assert_fmt_stable(src, "section break between leading comment groups");
 }
 
 #[test]
@@ -511,8 +702,8 @@ fn use_collections(items: [String], counts: [String: Int]) {}
         "expected bracket collection type formatting, got:\n{out}"
     );
     assert!(
-        out.contains("return [JSON.Null]"),
-        "expected semicolon-separated list input to format cleanly, got:\n{out}"
+        out.contains("return [\n        JSON.Null\n    ]"),
+        "expected semicolon-separated list input to format cleanly while preserving vertical layout, got:\n{out}"
     );
     let twice = jet::format_source(&out).expect("collection shorthand output should re-fmt");
     assert_eq!(
@@ -889,6 +1080,9 @@ fn fmt_preserves_single_line_loops_and_fn() {
 
     let fn_src = "fn one() -> Int { return 1 }\n";
     assert_fmt_stable(fn_src, "single-line fn body");
+
+    let empty_fn_src = "fn noop() {}\n";
+    assert_fmt_stable(empty_fn_src, "empty single-line fn body");
 }
 
 #[test]
@@ -1880,14 +2074,17 @@ fn run() {
 
 #[test]
 fn fmt_preserves_bare_lambda_params() {
-    // D-LAMBDAINFER1: fmt must NOT re-insert an inferred parameter type — that
-    // would be reading noise the ballot explicitly rejects. `(x) => …` stays
-    // exactly as written; an already-annotated `(n: Int) => …` also survives.
+    // D-LAMBDAINFER1: fmt preserves the bare spelling and does not insert a
+    // parameter type. Explicit parentheses and annotations also survive.
     let src = "\
 fn run() {
     nums :: [1, 2, 3, 4, 5]
-    big :: nums.filter((x) => x > 3)
+    big :: nums.filter(x => x > 3)
+    explicit :: nums.filter((x) => x > 3)
+    typed :: nums.filter((n: Int) => n > 3)
     print(big)
+    print(explicit)
+    print(typed)
 }
 ";
     assert_fmt_stable(src, "bare lambda params");
@@ -1990,7 +2187,7 @@ fn fmt_preserves_range_constraint() {
     // verbatim, so the `(0..10)` clause survives structurally; this pins it
     // down explicitly rather than relying on that being an accident.
     let src = "\
-Severity :: distinct Int(0..10);
+Severity :: distinct Int(0..10)
 
 fn run() {
     sev :: Severity.from_int(3)
@@ -2105,9 +2302,9 @@ fn fmt_preserves_capbundle_markers() {
     // verbatim from source span, but the span must actually start at the
     // first marker, not the type name).
     let src = "\
-#[Numeric, Comparable] Usd :: distinct Int;
+#[Numeric, Comparable] Usd :: distinct Int
 
-#[Printable, CodableAsBase] CustomerId :: distinct Int;
+#[Printable, CodableAsBase] CustomerId :: distinct Int
 
 fn run() {
     a :: Usd.from_int(100)
@@ -2684,9 +2881,9 @@ fn subjectless_guards_preserve_tokens_and_are_byte_stable() {
     }
     print(label)
 }
-
 "#;
     let once = jet::format_source(src).expect("subjectless guards should format");
+    assert_eq!(once, src, "concise subjectless guards should stay byte-stable");
     for preserved in [
         "if ready -> print(\"inline\")",
         "if {",

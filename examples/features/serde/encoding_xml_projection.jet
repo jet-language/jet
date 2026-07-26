@@ -21,24 +21,24 @@ struct Price {
 
 fn run() {
     source :: "<catalog><book id=\"7\"><title>Hi</title><price currency=\"USD\">9</price></book><book id=\"8\"><title>Lo</title><price currency=\"EUR\">3</price></book></catalog>"
-    document := xml.parse(source) ?? panic("parse")
-    root := xml.root(document) ?? panic("root")
-    name := xml.expanded_name(root) ?? panic("name")
+    document :: xml.parse(source) ?? panic("parse")
+    root :: xml.root(document) ?? panic("root")
+    name :: xml.expanded_name(root) ?? panic("name")
     print(name.local)
     print((xml.attribute(root, "id") ?? panic("attr")) ?? "missing")
-    children := xml.content(root) ?? panic("content")
+    children :: xml.content(root) ?? panic("content")
     loop child; children {
-        child_name := xml.expanded_name(child) ?? panic("child")
+        child_name :: xml.expanded_name(child) ?? panic("child")
         print(child_name.local)
         print((xml.attribute(child, "id") ?? panic("child attr")) ?? "missing")
     }
-    catalog := xml.decode<Catalog>(source) ?? panic("decode")
+    catalog :: xml.decode<Catalog>(source) ?? panic("decode")
     print(catalog.book.len())
     print(catalog.book[0].id)
     print(catalog.book[0].title)
     print(catalog.book[0].price.currency)
     print(catalog.book[0].price.amount)
-    wire := xml.to_bytes(document) ?? panic("bytes")
-    again := xml.decode_bytes<Catalog>(wire) ?? panic("decode_bytes")
+    wire :: xml.to_bytes(document) ?? panic("bytes")
+    again :: xml.decode_bytes<Catalog>(wire) ?? panic("decode_bytes")
     print(again.book[1].title)
 }

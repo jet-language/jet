@@ -21,11 +21,74 @@ impl<'a> Fmt<'a> {
         for (i, stmt) in body.iter().enumerate() {
             if i > 0 {
                 self.newline();
+                self.emit_leading_statement_gap(
+                    stmt_end(&body[i - 1]),
+                    stmt_start(stmt),
+                );
+            } else {
+                self.emit_leading(stmt_start(stmt));
             }
-            self.emit_leading(stmt_start(stmt));
             self.fmt_stmt(stmt);
             self.emit_trailing(self.statement_source_end(stmt));
         }
+    }
+
+    /// Emit leading comments and preserve section breaks on either side of,
+    /// and between, comment groups. A single boolean for the whole gap can move
+    /// a comment across a section boundary and attach it to the wrong phase.
+    fn emit_leading_statement_gap(&mut self, start: usize, end: usize) {
+        let mut cursor = start;
+        while self.comment_i < self.comments.len() {
+            let (text, span) = {
+                let comment = &self.comments[self.comment_i];
+                (comment.text.clone(), comment.span)
+            };
+            if span.start >= end {
+                break;
+            }
+            if span.start < start {
+                self.emit_comment_line(&text);
+                self.comment_i += 1;
+                self.pending_blank = false;
+                cursor = cursor.max(span.end);
+                continue;
+            }
+            if self
+                .src
+                .get(cursor..span.start)
+                .is_some_and(Self::source_has_blank_line)
+            {
+                self.newline();
+            }
+            self.emit_comment_line(&text);
+            self.comment_i += 1;
+            self.pending_blank = false;
+            cursor = span.end;
+        }
+        if self
+            .src
+            .get(cursor..end)
+            .is_some_and(Self::source_has_blank_line)
+        {
+            self.newline();
+        }
+    }
+
+    fn source_has_blank_line(gap: &str) -> bool {
+        let mut saw_newline = false;
+        let mut only_space_since_newline = true;
+        for ch in gap.chars() {
+            if ch == '\n' {
+                if saw_newline && only_space_since_newline {
+                    return true;
+                }
+                saw_newline = true;
+                only_space_since_newline = true;
+            } else if !ch.is_whitespace() {
+                only_space_since_newline = false;
+            }
+        }
+        false
     }
 
     /// D-FMT1: render a single simple statement (no leading indent/newline) for
@@ -616,10 +679,9 @@ impl<'a> Fmt<'a> {
         }
     }
 
-    /// D-IF1: render one arm as `head -> { body }`. A bare-value arm
+    /// D-IF1/D-FMT1: render one dispatch arm. A bare-value arm
     /// (`subject == value`) prints just the value; a full condition prints as
-    /// written. A single-statement body could be braceless, but fmt always uses
-    /// a block for a stable, idempotent shape.
+    /// written. Preserve an author-written braceless simple body when it fits.
     /// D-IF3 / D-OSTARGET2=B: render a dispatch body `== { arm -> … [else -> …] }`
     /// (the caller has already written the `if` / `comptime if` lead and subject
     /// keyword). Shared verbatim by `Stmt::Switch` and `Stmt::ComptimeSwitch` so
@@ -629,18 +691,23 @@ impl<'a> Fmt<'a> {
         self.write(" == {");
         self.newline();
         self.with_indent(|f| {
-            for arm in arms {
-                f.fmt_switch_arm(subject, arm);
-                f.newline();
+            for (index, arm) in arms.iter().enumerate() {
+                if index > 0 {
+                    f.newline();
+                }
+                let next_starts_with_dot = arms
+                    .get(index + 1)
+                    .is_some_and(|next| Self::arm_head_starts_with_dot(&next.cond));
+                f.fmt_switch_arm(subject, arm, next_starts_with_dot);
             }
             if let Some(else_b) = else_body {
+                if !arms.is_empty() {
+                    f.newline();
+                }
                 f.write(Syntax::KW_ELSE);
                 f.write(" ");
                 f.write(Syntax::OP_ARM_ARROW);
-                f.write(" {");
-                f.newline();
-                f.with_indent(|f| f.fmt_block_stmts(else_b));
-                f.end_block();
+                f.fmt_arm_body(else_b, false);
             }
         });
         self.end_block();
@@ -657,8 +724,7 @@ impl<'a> Fmt<'a> {
                 f.fmt_expr(&arm.cond, Prec::OrFallback);
                 f.write(" ");
                 f.write(Syntax::OP_ARM_ARROW);
-                f.write(" {");
-                f.fmt_body(&arm.body);
+                f.fmt_arm_body(&arm.body, false);
             }
             if let Some(body) = else_body {
                 if !arms.is_empty() {
@@ -667,19 +733,107 @@ impl<'a> Fmt<'a> {
                 f.write(Syntax::KW_ELSE);
                 f.write(" ");
                 f.write(Syntax::OP_ARM_ARROW);
-                f.write(" {");
-                f.fmt_body(body);
+                f.fmt_arm_body(body, false);
             }
         });
         self.end_block();
     }
 
-    fn fmt_switch_arm(&mut self, subject: &Expr, arm: &SwitchArm) {
+    fn fmt_switch_arm(&mut self, subject: &Expr, arm: &SwitchArm, force_braces: bool) {
         self.fmt_switch_cond(subject, &arm.cond, Prec::OrFallback);
         self.write(" ");
         self.write(Syntax::OP_ARM_ARROW);
+        self.fmt_arm_body(&arm.body, force_braces);
+    }
+
+    /// Preserve `head -> statement` when the author chose that shape and the
+    /// rendered arm still fits the width limit. Braced and multiline bodies
+    /// keep their explicit scope. Add concise braces when the next leading-dot
+    /// arm would otherwise parse as a chain on this body's final expression.
+    fn fmt_arm_body(&mut self, body: &[Stmt], force_braces: bool) {
+        let was_braceless = self.arm_body_was_braceless(body);
+        if was_braceless && force_braces {
+            let saved_out = self.out.len();
+            let saved_col = self.col;
+            let saved_line_start = self.at_line_start;
+            let saved_pending_blank = self.pending_blank;
+            let saved_comment_i = self.comment_i;
+            self.write(" { ");
+            self.fmt_stmt_inline(&body[0]);
+            self.write(" }");
+            if self.col <= MAX_WIDTH {
+                return;
+            }
+            self.out.truncate(saved_out);
+            self.col = saved_col;
+            self.at_line_start = saved_line_start;
+            self.pending_blank = saved_pending_blank;
+            self.comment_i = saved_comment_i;
+            self.write(" {");
+            self.fmt_body_expanded(body);
+            return;
+        }
+        if was_braceless {
+            let saved_out = self.out.len();
+            let saved_col = self.col;
+            let saved_line_start = self.at_line_start;
+            let saved_pending_blank = self.pending_blank;
+            let saved_comment_i = self.comment_i;
+            self.write(" ");
+            self.fmt_stmt_inline(&body[0]);
+            if self.col <= MAX_WIDTH {
+                return;
+            }
+            self.out.truncate(saved_out);
+            self.col = saved_col;
+            self.at_line_start = saved_line_start;
+            self.pending_blank = saved_pending_blank;
+            self.comment_i = saved_comment_i;
+            self.write(" {");
+            self.fmt_body_expanded(body);
+            return;
+        }
         self.write(" {");
-        self.fmt_body(&arm.body);
+        self.fmt_body(body);
+    }
+
+    fn arm_head_starts_with_dot(cond: &Expr) -> bool {
+        match cond {
+            Expr::PatternTest {
+                pattern: crate::AST::Pattern::Variant { .. },
+                ..
+            } => true,
+            Expr::Binary(_, left, _, _) => Self::arm_head_starts_with_dot(left),
+            _ => false,
+        }
+    }
+
+    /// The nearest source `->` belongs to this arm. No opening brace or line
+    /// break between it and the lone simple statement means the body was the
+    /// concise braceless form.
+    fn arm_body_was_braceless(&self, body: &[Stmt]) -> bool {
+        if body.len() != 1 || !is_simple_stmt(&body[0]) {
+            return false;
+        }
+        let start = stmt_start(&body[0]);
+        let Some(prefix) = self.src.get(..start) else {
+            return false;
+        };
+        let Some(arrow) = prefix.rfind(Syntax::OP_ARM_ARROW) else {
+            return false;
+        };
+        let between = &prefix[arrow + Syntax::OP_ARM_ARROW.len()..];
+        let source_end = self.statement_source_end(&body[0]);
+        let line_end = self.src[start..]
+            .find('\n')
+            .map_or(self.src.len(), |offset| start + offset);
+        !between.contains('{')
+            && !between.contains('\n')
+            && self
+                .src
+                .get(start..source_end)
+                .is_some_and(|source| !source.contains('\n'))
+            && !self.span_has_comment(arrow + Syntax::OP_ARM_ARROW.len(), line_end)
     }
 
     fn fmt_switch_cond(&mut self, subject: &Expr, cond: &Expr, prec: Prec) {

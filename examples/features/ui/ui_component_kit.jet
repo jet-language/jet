@@ -43,15 +43,15 @@ fn button_view(value: Button) -> UiNode {
 fn container(children: [UiNode]) -> UiNode { return ui.box(children) }
 
 fn paint_form(name: Label, input_value: Input, save: Button) {
-    tree := container([label_view(name), input_view(input_value), button_view(save)])
+    tree :: container([label_view(name), input_view(input_value), button_view(save)])
     backend := ui.null_backend()
-    size := backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+    size :: backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
     backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
     backend.paint(tree)
 }
 
 fn run() {
-    name := label("Name:")
+    name :: label("Name:")
     name_input := input("type here…")
     save := button("Save")
     paint_form(name, name_input, save)
