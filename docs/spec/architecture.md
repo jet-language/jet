@@ -276,11 +276,12 @@ Each action returns edits for the current document version. The engine rejects
 effects, possible traps, unstable mutable reads, and dirty import sources.
 Function extraction accepts only `Bool`, `Char`, `Int`, and `Float` parameters
 and result expressions because the index proves these values are safe to copy.
-It rejects nominal `Clock` inputs and a selected `String` result. Other
-non-scalar parameters and results stay unsupported until sema supplies a
-complete ownership contract for reads, writes, takes, and returned values.
-The focused proof is
-`code_actions_reject_non_scalar_extract_without_ownership_proof`.
+The code-action test rejects nominal `Clock` inputs. The helper-level
+`code_actions_reject_non_scalar_return_at_type_gate` test passes a sema-checked,
+total, pure `String` result to return inference. Inference rejects that result,
+and the function-extract helper returns no action. Other non-scalar parameters
+and results stay unsupported until sema supplies a complete ownership contract
+for reads, writes, takes, and returned values.
 
 ## Compiler-extension plugins (D-DX5-HOOK1=A)
 

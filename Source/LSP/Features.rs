@@ -1070,6 +1070,53 @@ fn infer_total_pure_return_type(
     from_ident.filter(|name| is_scalar_name(name))
 }
 
+#[cfg(test)]
+mod refactor_safety_tests {
+    use super::{extract_function_action, infer_total_pure_return_type, is_total_pure_expr};
+    use crate::Diagnostics::{Severity, Span};
+
+    #[test]
+    fn code_actions_reject_non_scalar_return_at_type_gate() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-lsp-string-result-gate-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("main.jet");
+        let source = "fn run() {\n    print(\"result\")\n}\n";
+        std::fs::write(&path, source).unwrap();
+        let shown = path.to_string_lossy().into_owned();
+        let mut bundle = crate::Loader::load_entry(&shown).unwrap();
+        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+            &mut bundle,
+            crate::Sema::CompileMode::Check,
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.severity != Severity::Error),
+            "{diagnostics:#?}"
+        );
+        let db = jet_semindex::build_symbol_db(&bundle, &facts);
+        let (tokens, lex_diagnostics) = crate::Lexer::lex(source);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:#?}");
+        let start = source.find("\"result\"").unwrap();
+        let selected = Span::new(start, start + "\"result\"".len());
+
+        assert!(is_total_pure_expr(&db, &tokens, &shown, selected));
+        assert_eq!(
+            infer_total_pure_return_type(&db, &tokens, &shown, selected),
+            None
+        );
+        assert!(
+            extract_function_action(&db, &tokens, source, &shown, selected, "\"result\"")
+                .is_none()
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
 fn trim_span(src: &str, span: Span) -> Option<Span> {
     let text = src.get(span.start..span.end)?;
     let start = text.len() - text.trim_start().len();
