@@ -214,6 +214,15 @@ fn datatree_name_check_distinguishes_prose_and_type_names() {
             .collect::<Vec<_>>(),
         [2, 4]
     );
+    let multiline_fence =
+        "```jet\n/*\nData in a comment\n*/\ntext :: \"\"\"\nData in text\n\"\"\"\nvalue: Data\n```";
+    assert_eq!(
+        markdown_data_name_lines(multiline_fence)
+            .iter()
+            .map(|(line_no, _)| *line_no)
+            .collect::<Vec<_>>(),
+        [8]
+    );
 
     let lawful_source = "// Data is retired\ntext :: \"Data\"\n/* Data */\nvalue: DataTree";
     assert!(source_identifier_offsets(lawful_source, "Data").is_empty());
@@ -750,19 +759,29 @@ fn source_identifier_offsets(source: &str, identifier: &str) -> Vec<usize> {
 }
 
 fn markdown_data_name_lines(text: &str) -> Vec<(usize, &str)> {
-    let mut fence = None;
+    let mut fence: Option<(u8, usize, usize, String)> = None;
     let mut lines = Vec::new();
-    for (index, line) in text.lines().enumerate() {
-        if let Some((open_marker, open_len)) = fence {
+    let source_lines: Vec<_> = text.lines().collect();
+    for (index, line) in source_lines.iter().copied().enumerate() {
+        if let Some((open_marker, open_len, _, _)) = fence.as_ref() {
             if markdown_fence(line).is_some_and(|(marker, len, rest)| {
-                marker == open_marker && len >= open_len && rest.trim().is_empty()
+                marker == *open_marker && len >= *open_len && rest.trim().is_empty()
             }) {
-                fence = None;
-            } else if !source_identifier_offsets(line, "Data").is_empty() {
-                lines.push((index + 1, line));
+                let (_, _, start_line, source) = fence.take().unwrap();
+                for offset in source_identifier_offsets(&source, "Data") {
+                    let line_no =
+                        start_line + source[..offset].bytes().filter(|byte| *byte == b'\n').count();
+                    if !lines.iter().any(|(existing, _)| *existing == line_no) {
+                        lines.push((line_no, source_lines[line_no - 1]));
+                    }
+                }
+            } else {
+                let (_, _, _, source) = fence.as_mut().unwrap();
+                source.push_str(line);
+                source.push('\n');
             }
         } else if let Some((marker, len, _)) = markdown_fence(line) {
-            fence = Some((marker, len));
+            fence = Some((marker, len, index + 2, String::new()));
         } else if inline_code_has_identifier(line, "Data") {
             lines.push((index + 1, line));
         }
