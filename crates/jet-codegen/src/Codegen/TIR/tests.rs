@@ -111,6 +111,54 @@
     }
 
     #[test]
+    fn comptime_float_and_string_constants_lower_to_typed_literals() {
+        install_comptime_bridge();
+        let lowered = lower_after_sema(
+            r#"
+comptime narrow = F32.{16777217.0}
+comptime wide = 2.5
+comptime label = "ready"
+
+fn run() {
+    print(narrow)
+    print(wide)
+    print(label)
+}
+"#,
+            "run",
+        );
+        let printed: Vec<_> = lowered
+            .body
+            .iter()
+            .filter_map(|stmt| match stmt {
+                TStmt::ExprStmt(TExpr {
+                    kind: TExprKind::Print(value),
+                    ..
+                }) => Some(value.as_ref()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(printed.len(), 3);
+        assert_eq!(printed[0].ty, Type::Float32);
+        assert!(matches!(
+            printed[0].kind,
+            TExprKind::FloatLit(value) if value == 16_777_216.0
+        ));
+        assert_eq!(printed[1].ty, Type::Float);
+        assert!(matches!(
+            printed[1].kind,
+            TExprKind::FloatLit(value) if value == 2.5
+        ));
+        assert_eq!(printed[2].ty, Type::String);
+        assert!(matches!(
+            &printed[2].kind,
+            TExprKind::StrLit(parts)
+                if matches!(parts.as_slice(), [TStrPart::Lit(text)] if text == "ready")
+        ));
+    }
+
+    #[test]
     fn refined_collection_results_have_exact_tir_types() {
         let src = "\
 fn run() {

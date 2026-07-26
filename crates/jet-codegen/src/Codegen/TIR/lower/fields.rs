@@ -506,17 +506,21 @@ pub(crate) fn let_ty_tuple(types: Vec<Type>) -> crate::Codegen::TIR::TLetTy {
 }
 
 /// A comptime scalar as a structured literal node. Sema already folded the
-/// value, so the scalar cases carry the number/flag/char itself instead of the
+/// value, so the scalar cases carry the number/text/flag/char itself instead of the
 /// rendered Rust text — every engine reads the fact, and emit still renders the
 /// same bytes `CtValue::serialize` would have produced.
 pub(crate) fn lower_comptime_scalar(
     value: Option<&crate::AST::CtValue>,
 ) -> Option<crate::Codegen::TIR::TExprKind> {
-    use crate::Codegen::TIR::TExprKind;
+    use crate::Codegen::TIR::{TExprKind, TStrPart};
     match value? {
         crate::AST::CtValue::Int(int) => Some(TExprKind::IntLit(*int, None)),
+        crate::AST::CtValue::Float(float) => Some(TExprKind::FloatLit(float.as_f64())),
         crate::AST::CtValue::Bool(flag) => Some(TExprKind::BoolLit(*flag)),
         crate::AST::CtValue::Char(ch) => Some(TExprKind::CharLit(*ch)),
+        crate::AST::CtValue::Str(text) => {
+            Some(TExprKind::StrLit(vec![TStrPart::Lit(text.clone())]))
+        }
         _ => None,
     }
 }

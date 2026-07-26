@@ -3769,6 +3769,51 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
 }
 
 #[test]
+fn comptime_scalar_examples_match_interpreter_resident_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    for stem in ["comptime/comptime_core", "comptime/comptime_tiers"] {
+        let file = example_path(stem);
+        let expected = ProgramOutput::ran(golden_stdout(stem), String::new(), 0);
+        let interpreted = match dev_iteration(&file, false, true) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => ProgramOutput::ran(stdout, stderr, exit_code),
+            RunOutcome::Problems(diags) => {
+                panic!("interpreter failed `{stem}`: {diags:?}")
+            }
+        };
+
+        let source = fs::read_to_string(&file).unwrap();
+        jet_jit::reset_jit_trace_for_test();
+        let resident = run_cranelift_without_fallback(&source, &stem.replace('/', "_"));
+        assert!(jet_jit::jit_executed_for_test(), "`{stem}` did not execute in JIT");
+        assert!(
+            !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+            "`{stem}` used deopt or fallback"
+        );
+
+        let dir = std::env::temp_dir().join(format!(
+            "jet_comptime_scalar_{}_{}",
+            stem.replace('/', "_"),
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let aot = compiled_binary_output(&dir, "comptime_scalar", 0, stem, &file);
+
+        assert_eq!(interpreted, expected, "interpreter drifted for `{stem}`");
+        assert_eq!(resident, expected, "resident JIT drifted for `{stem}`");
+        assert_eq!(aot, expected, "AOT drifted for `{stem}`");
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
 fn generic_modules_full_example_matches_resident_jit_and_aot() {
     // Corpus gate classifies this stem as frontend_rejected (E0857); skip three-way.
     if frontend_rejected_stems().contains("modules/generic_modules") {
