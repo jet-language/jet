@@ -2641,6 +2641,58 @@ fn bigint_example_matches_interpreter_resident_jit_default_dev_and_aot() {
 }
 
 #[test]
+fn archive_matches_interpreter_resident_jit_default_dev_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let file = "examples/features/io/archive.jet";
+    let expected = ProgramOutput::ran(golden_stdout("io/archive"), String::new(), 0);
+
+    let interpreted = match dev_iteration(file, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("Archive example must execute in interpreter tier: {diags:?}")
+        }
+    };
+
+    let source = fs::read_to_string(file).unwrap();
+    jet_jit::reset_jit_trace_for_test();
+    let resident = run_cranelift_without_fallback(&source, "archive");
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "Archive example must execute as native JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "Archive example must not use interpreter deopt or fallback"
+    );
+    let default = match dev_iteration(file, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("default dev failed Archive example: {diags:?}"),
+    };
+
+    let dir = std::env::temp_dir().join(format!("jet_archive_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let aot = compiled_binary_output(&dir, "archive", 0, "archive", file);
+
+    assert_eq!(interpreted, expected);
+    assert_eq!(resident, expected);
+    assert_eq!(default, expected);
+    assert_eq!(aot, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn set_union_matches_interpreter_resident_jit_default_dev_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
@@ -3711,28 +3763,9 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
         "JIT vs interpreter divergence for `{stem}`"
     );
 
-    let src = fs::read_to_string(file).expect("read source");
-    let compiled = jet::compile_with_path(&src, file).expect("compile");
-    // stems are topic-relative paths (basics/compound) — flatten for temp names
-    let flat = stem.replace('/', "_");
-    let rs = std::env::temp_dir().join(format!("jet_jit_3way_{flat}.rs"));
-    let bin = std::env::temp_dir().join(format!("jet_jit_3way_{flat}"));
-    fs::write(&rs, &compiled.rust).unwrap();
-    let rustc = Command::new("rustc")
-        .args(["--edition", "2021"])
-        .arg(&rs)
-        .arg("-o")
-        .arg(&bin)
-        .output()
-        .expect("run rustc");
-    assert!(
-        rustc.status.success(),
-        "rustc failed for `{stem}`: {}",
-        String::from_utf8_lossy(&rustc.stderr)
-    );
-    let run = Command::new(&bin).output().expect("run binary");
-    let aot = String::from_utf8_lossy(&run.stdout).to_string();
-    assert_eq!(jit, aot, "JIT vs AOT divergence for `{stem}`");
+    let dir = std::env::temp_dir().join(format!("jet_jit_3way_{}", std::process::id()));
+    let aot = compiled_binary_output(&dir, "jit_3way", 0, stem, file);
+    assert_eq!(jit, aot.stdout, "JIT vs AOT divergence for `{stem}`");
 }
 
 #[test]

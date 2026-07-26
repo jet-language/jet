@@ -21,6 +21,22 @@ pub fn as_int(v: &CtValue, span: Span) -> Result<i64, Diagnostic> {
     }
 }
 
+fn values_equal(left: &CtValue, right: &CtValue) -> bool {
+    fn bytes_equal_list(bytes: &[u8], values: &[CtValue]) -> bool {
+        bytes.len() == values.len()
+            && bytes
+                .iter()
+                .zip(values)
+                .all(|(&byte, value)| matches!(value, CtValue::Int(n) if *n == i64::from(byte)))
+    }
+
+    match (left, right) {
+        (CtValue::Bytes(bytes), CtValue::List(values))
+        | (CtValue::List(values), CtValue::Bytes(bytes)) => bytes_equal_list(bytes, values),
+        _ => left == right,
+    }
+}
+
 /// Binary operators with runtime-identical semantics (i64 wrapping is
 /// rejected: debug-profile rustc panics on overflow, so comptime does too).
 pub fn eval_binop(
@@ -110,8 +126,8 @@ pub fn eval_binop(
             };
             Ok(out.to_value())
         }
-        (BinOp::Eq, a, b) => Ok(Bool(a == b)),
-        (BinOp::Ne, a, b) => Ok(Bool(a != b)),
+        (BinOp::Eq, a, b) => Ok(Bool(values_equal(&a, &b))),
+        (BinOp::Ne, a, b) => Ok(Bool(!values_equal(&a, &b))),
         (BinOp::Lt, a, b) => cmp(a, b, span).map(|o| Bool(o == std::cmp::Ordering::Less)),
         (BinOp::Gt, a, b) => cmp(a, b, span).map(|o| Bool(o == std::cmp::Ordering::Greater)),
         (BinOp::Le, a, b) => cmp(a, b, span).map(|o| Bool(o != std::cmp::Ordering::Greater)),
@@ -119,6 +135,59 @@ pub fn eval_binop(
         (BinOp::And, Bool(a), Bool(b)) => Ok(Bool(a && b)),
         (BinOp::Or, Bool(a), Bool(b)) => Ok(Bool(a || b)),
         (_op, _left, _right) => Err(unsupported("this operation", span)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_storage_and_u8_list_compare_by_value() {
+        let bytes = CtValue::Bytes(vec![0, 127, 255]);
+        let list = CtValue::List(vec![
+            CtValue::Int(0),
+            CtValue::Int(127),
+            CtValue::Int(255),
+        ]);
+
+        assert_eq!(
+            eval_binop(BinOp::Eq, bytes.clone(), list.clone(), Span::new(0, 0)).unwrap(),
+            CtValue::Bool(true)
+        );
+        assert_eq!(
+            eval_binop(BinOp::Eq, list.clone(), bytes.clone(), Span::new(0, 0)).unwrap(),
+            CtValue::Bool(true)
+        );
+        assert_eq!(
+            eval_binop(BinOp::Ne, bytes, list, Span::new(0, 0)).unwrap(),
+            CtValue::Bool(false)
+        );
+    }
+
+    #[test]
+    fn unequal_byte_storage_and_u8_list_do_not_compare_equal() {
+        let bytes = CtValue::Bytes(vec![1, 2, 3]);
+        let different = CtValue::List(vec![
+            CtValue::Int(1),
+            CtValue::Int(2),
+            CtValue::Int(4),
+        ]);
+
+        assert_eq!(
+            eval_binop(
+                BinOp::Eq,
+                bytes.clone(),
+                different.clone(),
+                Span::new(0, 0),
+            )
+            .unwrap(),
+            CtValue::Bool(false)
+        );
+        assert_eq!(
+            eval_binop(BinOp::Ne, bytes, different, Span::new(0, 0)).unwrap(),
+            CtValue::Bool(true)
+        );
     }
 }
 
