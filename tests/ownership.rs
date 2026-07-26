@@ -317,6 +317,124 @@ fn run() {
 }
 
 #[test]
+fn nested_lambda_forms_use_the_enclosing_call_access_frame() {
+    let composite = r#"
+struct Work { callback: fn() -> Int }
+fn both(values: &[Int], work: Work) { values.push(work.callback()) }
+
+fn run() {
+    values := [1, 2]
+    both(&values, Work.{ callback: () => values.len() })
+}
+"#;
+    let diags =
+        jet::compile(composite).expect_err("a lambda inside an aggregate must see the active write");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let immediate_callee = r#"
+fn both(values: &[Int], count: Int) { values.push(count) }
+
+fn run() {
+    values := [1, 2]
+    both(&values, (() => values.len())())
+}
+"#;
+    let diags = jet::compile(immediate_callee)
+        .expect_err("an immediate lambda callee must see the outer active write");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn move_and_fnmut_lambda_captures_have_exact_lifetimes_and_places() {
+    let copy_move = r#"
+fn both(callback: fn() -> Int, value: &Int) { value += callback() }
+fn run() {
+    value := 1
+    both(() => value, &value)
+}
+"#;
+    jet::compile(copy_move).expect("a read-only move closure copies a scalar before the write");
+
+    let disjoint = r#"
+struct Pair { left: [Int], right: [Int] }
+fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    both(() => pair.right.push(3), pair.left)
+}
+"#;
+    jet::compile(disjoint).expect("Rust 2021 captures disjoint struct fields separately");
+
+    let conflicting = r#"
+struct Pair { left: [Int], right: [Int] }
+fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    both(() => pair.right.push(3), pair.right)
+}
+"#;
+    let diags =
+        jet::compile(conflicting).expect_err("the same captured field must remain write-borrowed");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn builtin_and_composite_receivers_use_the_call_access_frame() {
+    let builtin = r#"
+fn run() {
+    values := [1, 2]
+    values.insert(0, values.remove(0))
+}
+"#;
+    let diags = jet::compile(builtin)
+        .expect_err("a nested builtin receiver must see the outer receiver write");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let composite = r#"
+fn both(value: &Int, count: Int) { value += count }
+fn run() {
+    value := 1
+    both(&value, [value].len())
+}
+"#;
+    let diags =
+        jet::compile(composite).expect_err("a composite receiver must evaluate inside the call");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn if_expression_prefix_reads_use_the_call_access_frame() {
+    let src = r#"
+fn both(value: &Int, count: Int) { value += count }
+fn run() {
+    value := 1
+    both(&value, if true { seen :: value; seen } else { 0 })
+}
+"#;
+    let diags =
+        jet::compile(src).expect_err("an if-expression prefix read must see the active write");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn deferred_lambda_capture_reports_once() {
+    let src = r#"
+fn see(value: String) -> String { return value }
+fn both(value: &String, callback: fn() -> String) { print(value); print(callback()) }
+fn run() {
+    value := "jet"
+    both(&value, () => see(value))
+}
+"#;
+    let diags = jet::compile(src).expect_err("the deferred capture conflicts with the active write");
+    assert_eq!(
+        diags.iter().filter(|diag| diag.code == "E0204").count(),
+        1,
+        "the post-inference capture summary must be the only report: {diags:?}"
+    );
+}
+
+#[test]
 fn generic_constructor_nested_argument_sees_active_write_place() {
     let src = r#"
 struct Pair<T> { value: T }
@@ -482,6 +600,78 @@ fn main() {
             "E0502",
         ),
         (
+            "composite_lambda.rs",
+            r#"
+struct Work<F> { callback: F }
+fn both<F: Fn() -> usize>(values: &mut Vec<i64>, work: Work<F>) {
+    values.push((work.callback)() as i64);
+}
+fn main() {
+    let mut values = vec![1, 2];
+    both(&mut values, Work { callback: move || values.len() });
+}
+"#,
+            "E0505",
+        ),
+        (
+            "immediate_lambda_callee.rs",
+            r#"
+fn both(values: &mut Vec<i64>, count: usize) { values.push(count as i64) }
+fn main() {
+    let mut values = vec![1, 2];
+    both(&mut values, (move || values.len())());
+}
+"#,
+            "E0505",
+        ),
+        (
+            "conflicting_capture_field.rs",
+            r#"
+struct Pair { left: Vec<i64>, right: Vec<i64> }
+fn both<F: FnMut()>(mut callback: F, values: &Vec<i64>) {
+    callback();
+    println!("{}", values.len());
+}
+fn main() {
+    let mut pair = Pair { left: vec![1], right: vec![2] };
+    both(|| pair.right.push(3), &pair.right);
+}
+"#,
+            "E0502",
+        ),
+        (
+            "builtin_receiver.rs",
+            r#"
+fn main() {
+    let mut values = vec![1, 2];
+    values.insert(0, values.remove(0));
+}
+"#,
+            "E0499",
+        ),
+        (
+            "if_prefix.rs",
+            r#"
+fn both(value: &mut i64, count: i64) { *value += count }
+fn main() {
+    let mut value = 1;
+    both(&mut value, if true { let seen = value; seen } else { 0 });
+}
+"#,
+            "E0503",
+        ),
+        (
+            "composite_receiver.rs",
+            r#"
+fn both(value: &mut i64, count: usize) { *value += count as i64 }
+fn main() {
+    let mut value = 1;
+    both(&mut value, vec![value].len());
+}
+"#,
+            "E0503",
+        ),
+        (
             "dynamic_index.rs",
             r#"
 fn both(index: &mut usize, value: i64) { *index += value as usize }
@@ -520,6 +710,57 @@ fn main() {
         assert!(
             !output.status.success() && stderr.contains(expected),
             "native oracle must reject {name} with {expected}: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn rustc_oracle_accepts_move_copy_and_disjoint_field_captures() {
+    if Command::new("rustc").arg("--version").output().is_err() {
+        return;
+    }
+    let root = common::unique_tmp("jet_call_place_rustc_positive_oracle");
+    fs::create_dir_all(&root).unwrap();
+    let cases = [
+        (
+            "copy_move.rs",
+            r#"
+fn both<F: Fn() -> i64>(callback: F, value: &mut i64) { *value += callback() }
+fn main() {
+    let mut value = 1;
+    both(move || value, &mut value);
+}
+"#,
+        ),
+        (
+            "disjoint_field.rs",
+            r#"
+struct Pair { left: Vec<i64>, right: Vec<i64> }
+fn both<F: FnMut()>(mut callback: F, values: &Vec<i64>) {
+    callback();
+    println!("{}", values.len());
+}
+fn main() {
+    let mut pair = Pair { left: vec![1], right: vec![2] };
+    both(|| pair.right.push(3), &pair.left);
+}
+"#,
+        ),
+    ];
+    for (name, source) in cases {
+        let path = root.join(name);
+        fs::write(&path, source).unwrap();
+        let output = Command::new("rustc")
+            .arg("--edition=2021")
+            .arg(&path)
+            .arg("-o")
+            .arg(root.join(format!("{name}.bin")))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "native oracle must accept {name}: {}",
+            String::from_utf8_lossy(&output.stderr)
         );
     }
 }

@@ -49,7 +49,9 @@ impl<'a> Checker<'a> {
             let mut call_access = self.call_access_frame();
             let Some(callee_ty) = self.with_call_access(&mut call_access, |checker| {
                 checker.check_call_receiver_evaluation(callee, callee.span());
-                checker.infer(callee)
+                let inferred = checker.infer(callee);
+                checker.check_call_argument_captures(callee);
+                inferred
             }) else {
                 return None;
             };

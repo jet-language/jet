@@ -1622,7 +1622,9 @@ impl<'a> Checker<'a> {
                     }),
                     _ => self.expected_type.clone(),
                 };
-                self.check_lambda(lam, expected.as_ref())
+                self.with_deferred_call_access(|checker| {
+                    checker.check_lambda(lam, expected.as_ref())
+                })
             }
             Expr::CallValue { callee, args, span } => self.infer_call_value(callee, args, *span),
             Expr::FanOut {

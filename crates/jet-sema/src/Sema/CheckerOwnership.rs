@@ -2,7 +2,10 @@ use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::is_type_var_name;
 use crate::Syntax;
-use crate::AST::{AccessConvention, Expr, Lambda, LValue, Type, UnOp, VariantPayload};
+use crate::AST::{
+    AccessConvention, ElseBranch, Expr, Lambda, LambdaBody, LValue, Stmt, Type, UnOp,
+    VariantPayload,
+};
 use std::collections::{HashMap, HashSet};
 
 fn const_place_int(expr: &Expr) -> Option<i64> {
@@ -445,6 +448,18 @@ impl<'a> Checker<'a> {
         result
     }
 
+    /// Lambda bodies are deferred execution. Keep calls inside the body scoped
+    /// to that body; the enclosing call sees the post-inference capture summary.
+    pub(crate) fn with_deferred_call_access<T>(
+        &mut self,
+        check: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let active = std::mem::take(&mut self.call_access_frames);
+        let result = check(self);
+        self.call_access_frames = active;
+        result
+    }
+
     fn check_call_place_access(
         &mut self,
         place: &ViewPlace,
@@ -596,12 +611,16 @@ impl<'a> Checker<'a> {
             }
             Expr::If {
                 cond,
+                then_body,
                 then_value,
+                else_body,
                 else_value,
                 ..
             } => {
                 self.collect_call_value_reads(cond, reads);
+                self.collect_call_stmt_reads(then_body, reads);
                 self.collect_call_value_reads(then_value, reads);
+                self.collect_call_stmt_reads(else_body, reads);
                 self.collect_call_value_reads(else_value, reads);
             }
             Expr::PtrFromAddr { addr, .. } => self.collect_call_value_reads(addr, reads),
@@ -624,6 +643,47 @@ impl<'a> Checker<'a> {
             | Expr::ReduceMarker(_, _)
             | Expr::Lambda(_)
             | Expr::ComptimeSplice { .. } => {}
+        }
+    }
+
+    fn collect_call_stmt_reads(&self, body: &[Stmt], reads: &mut Vec<(ViewPlace, Span)>) {
+        for stmt in body {
+            match stmt {
+                Stmt::Expr(expr) | Stmt::Yield(expr, _) => {
+                    self.collect_call_value_reads(expr, reads);
+                }
+                Stmt::Val(binding) => self.collect_call_value_reads(&binding.init, reads),
+                Stmt::Assign { target, value, .. } => {
+                    match target {
+                        LValue::Index { base, index, .. } => {
+                            self.collect_call_value_reads(base, reads);
+                            self.collect_call_value_reads(index, reads);
+                        }
+                        LValue::Field { base, .. } => {
+                            self.collect_call_value_reads(base, reads);
+                        }
+                        LValue::Local { .. } => {}
+                    }
+                    self.collect_call_value_reads(value, reads);
+                }
+                Stmt::Return(Some(expr), _) => self.collect_call_value_reads(expr, reads),
+                Stmt::If(branch) => self.collect_call_if_reads(branch, reads),
+                _ => {}
+            }
+        }
+    }
+
+    fn collect_call_if_reads(
+        &self,
+        branch: &crate::AST::IfStmt,
+        reads: &mut Vec<(ViewPlace, Span)>,
+    ) {
+        self.collect_call_value_reads(&branch.cond, reads);
+        self.collect_call_stmt_reads(&branch.then_body, reads);
+        match &branch.else_branch {
+            Some(ElseBranch::ElseIf(branch)) => self.collect_call_if_reads(branch, reads),
+            Some(ElseBranch::Else(body)) => self.collect_call_stmt_reads(body, reads),
+            None => {}
         }
     }
 
@@ -695,18 +755,207 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Lambda bodies run later, but constructing a lambda evaluates its free
-    /// captures now. Nonescaping closures keep their capture loans for the
-    /// enclosing call; escaping closures move/clone them during construction.
-    pub(crate) fn check_call_argument_captures(&mut self, expr: &Expr) {
-        let lambda = match expr {
-            Expr::Lambda(lambda) => lambda,
-            Expr::Paren(inner, _) => {
-                self.check_call_argument_captures(inner);
-                return;
+    fn collect_lambda_capture_places(
+        &self,
+        expr: &Expr,
+        roots: &HashSet<String>,
+        places: &mut Vec<(String, ViewPlace, Span)>,
+    ) {
+        if let Some(place) = self.place_from_expr(expr) {
+            let root = place.owner.name.clone();
+            if roots.contains(&root)
+                && !places.iter().any(|(_, seen, _)| {
+                    seen.owner == place.owner && seen.projections == place.projections
+                })
+            {
+                places.push((root, place, expr.span()));
             }
-            _ => return,
-        };
+            match expr {
+                Expr::Index { index, .. } => {
+                    self.collect_lambda_capture_places(index, roots, places);
+                }
+                Expr::Slice { start, end, .. } => {
+                    self.collect_lambda_capture_places(start, roots, places);
+                    self.collect_lambda_capture_places(end, roots, places);
+                }
+                _ => {}
+            }
+            return;
+        }
+        match expr {
+            Expr::Call(call) => {
+                for arg in &call.args {
+                    self.collect_lambda_capture_places(&arg.expr, roots, places);
+                }
+            }
+            Expr::MethodCall { receiver, args, .. } => {
+                self.collect_lambda_capture_places(receiver, roots, places);
+                for arg in args {
+                    self.collect_lambda_capture_places(&arg.expr, roots, places);
+                }
+            }
+            Expr::CallValue { callee, args, .. } => {
+                self.collect_lambda_capture_places(callee, roots, places);
+                for arg in args {
+                    self.collect_lambda_capture_places(&arg.expr, roots, places);
+                }
+            }
+            Expr::Binary(_, left, right, _) => {
+                self.collect_lambda_capture_places(left, roots, places);
+                self.collect_lambda_capture_places(right, roots, places);
+            }
+            Expr::CompareChain { operands, .. } | Expr::ListLit(operands, _) => {
+                for operand in operands {
+                    self.collect_lambda_capture_places(operand, roots, places);
+                }
+            }
+            Expr::Unary(_, inner, _)
+            | Expr::Spread(inner, _)
+            | Expr::Deref(inner, _)
+            | Expr::RawOf(inner, _)
+            | Expr::Copy(inner, _)
+            | Expr::Place(inner, _, _)
+            | Expr::Tainted(inner, _, _)
+            | Expr::Present(inner, _)
+            | Expr::Ok(inner, _)
+            | Expr::Err(inner, _)
+            | Expr::Try(inner, _, _)
+            | Expr::Paren(inner, _)
+            | Expr::IncDec { operand: inner, .. } => {
+                self.collect_lambda_capture_places(inner, roots, places);
+            }
+            Expr::MapLit(entries, _) => {
+                for (key, value) in entries {
+                    self.collect_lambda_capture_places(key, roots, places);
+                    self.collect_lambda_capture_places(value, roots, places);
+                }
+            }
+            Expr::StructLit { fields, .. } => {
+                for (_, _, value) in fields {
+                    self.collect_lambda_capture_places(value, roots, places);
+                }
+            }
+            Expr::TypedLit { body, .. } => {
+                body.for_each_expr(|value| {
+                    self.collect_lambda_capture_places(value, roots, places)
+                });
+            }
+            Expr::TupleLit(fields, _, _) => {
+                for (_, value) in fields {
+                    self.collect_lambda_capture_places(value, roots, places);
+                }
+            }
+            Expr::EnumLit { args, .. } => {
+                for arg in args {
+                    let value = match arg {
+                        crate::AST::EnumLitArg::Positional(value)
+                        | crate::AST::EnumLitArg::Named { expr: value, .. } => value,
+                    };
+                    self.collect_lambda_capture_places(value, roots, places);
+                }
+            }
+            Expr::Str(parts, _) => {
+                for part in parts {
+                    if let crate::AST::StrPart::Interp(value, _) = part {
+                        self.collect_lambda_capture_places(value, roots, places);
+                    }
+                }
+            }
+            Expr::If {
+                cond,
+                then_body,
+                then_value,
+                else_body,
+                else_value,
+                ..
+            } => {
+                self.collect_lambda_capture_places(cond, roots, places);
+                self.collect_lambda_capture_places_in_stmts(then_body, roots, places);
+                self.collect_lambda_capture_places(then_value, roots, places);
+                self.collect_lambda_capture_places_in_stmts(else_body, roots, places);
+                self.collect_lambda_capture_places(else_value, roots, places);
+            }
+            Expr::PatternTest { subject, .. } => {
+                self.collect_lambda_capture_places(subject, roots, places);
+            }
+            Expr::OrFallback {
+                value, fallback, ..
+            } => {
+                self.collect_lambda_capture_places(value, roots, places);
+                if let crate::AST::OrFallback::Value(value)
+                | crate::AST::OrFallback::Return(Some(value), _) = fallback
+                {
+                    self.collect_lambda_capture_places(value, roots, places);
+                }
+            }
+            Expr::PtrFromAddr { addr, .. } => {
+                self.collect_lambda_capture_places(addr, roots, places);
+            }
+            Expr::FanOut { callee, items, .. } => {
+                self.collect_lambda_capture_places(callee, roots, places);
+                for item in items {
+                    self.collect_lambda_capture_places(item, roots, places);
+                }
+            }
+            Expr::Field(..)
+            | Expr::OptField { .. }
+            | Expr::Index { .. }
+            | Expr::Slice { .. }
+            | Expr::Lambda(_)
+            | Expr::StrMatchLit(..)
+            | Expr::BinMatchLit(..)
+            | Expr::Int(..)
+            | Expr::Float(..)
+            | Expr::Bool(..)
+            | Expr::Char(..)
+            | Expr::Ident(..)
+            | Expr::UnitLit { .. }
+            | Expr::Absent(..)
+            | Expr::Todo { .. }
+            | Expr::ReduceMarker(..)
+            | Expr::ComptimeSplice { .. } => {}
+        }
+    }
+
+    fn collect_lambda_capture_places_in_stmts(
+        &self,
+        body: &[Stmt],
+        roots: &HashSet<String>,
+        places: &mut Vec<(String, ViewPlace, Span)>,
+    ) {
+        for stmt in body {
+            match stmt {
+                Stmt::Expr(expr) | Stmt::Yield(expr, _) => {
+                    self.collect_lambda_capture_places(expr, roots, places);
+                }
+                Stmt::Val(binding) => {
+                    self.collect_lambda_capture_places(&binding.init, roots, places);
+                }
+                Stmt::Assign { target, value, .. } => {
+                    match target {
+                        LValue::Index { base, index, .. } => {
+                            self.collect_lambda_capture_places(base, roots, places);
+                            self.collect_lambda_capture_places(index, roots, places);
+                        }
+                        LValue::Field { base, .. } => {
+                            self.collect_lambda_capture_places(base, roots, places);
+                        }
+                        LValue::Local { name, name_span } => {
+                            let target = Expr::Ident(name.clone(), *name_span);
+                            self.collect_lambda_capture_places(&target, roots, places);
+                        }
+                    }
+                    self.collect_lambda_capture_places(value, roots, places);
+                }
+                Stmt::Return(Some(expr), _) => {
+                    self.collect_lambda_capture_places(expr, roots, places);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn check_one_call_lambda_capture(&mut self, lambda: &Lambda) {
         let params = lambda
             .params
             .iter()
@@ -727,20 +976,90 @@ impl<'a> Checker<'a> {
         );
         writes.extend(lambda.meta.mut_captures.iter().cloned());
         reads.extend(writes.iter().cloned());
-        for name in reads {
-            let capture = Expr::Ident(name.clone(), lambda.span);
-            let Some(place) = self.place_from_expr(&capture) else {
-                continue;
-            };
+        let mut places = Vec::new();
+        match &lambda.body {
+            LambdaBody::Expr(body) => {
+                self.collect_lambda_capture_places(body, &reads, &mut places);
+            }
+            LambdaBody::Block(body) => {
+                self.collect_lambda_capture_places_in_stmts(body, &reads, &mut places);
+            }
+        }
+        for name in &reads {
+            if !places.iter().any(|(root, _, _)| root == name) {
+                let capture = Expr::Ident(name.clone(), lambda.span);
+                if let Some(place) = self.place_from_expr(&capture) {
+                    places.push((name.clone(), place, lambda.span));
+                }
+            }
+        }
+        let retains_borrows = !lambda.meta.escapes && !lambda.meta.mut_captures.is_empty();
+        for (name, place, span) in places {
             let access = if writes.contains(&name) {
                 ViewAccess::Write
             } else {
                 ViewAccess::Read
             };
-            self.check_call_place_access(&place, access, lambda.span);
-            if !lambda.meta.escapes && !taken.contains(&name) {
+            self.check_call_place_access(&place, access, span);
+            if retains_borrows && !taken.contains(&name) {
                 self.record_call_place_access(place, access);
             }
+        }
+    }
+
+    /// Lambda bodies run later, but constructing a lambda evaluates its free
+    /// captures now. Only nonescaping FnMut closures retain capture borrows.
+    pub(crate) fn check_call_argument_captures(&mut self, expr: &Expr) {
+        match expr {
+            Expr::Lambda(lambda) => self.check_one_call_lambda_capture(lambda),
+            Expr::Paren(inner, _)
+            | Expr::Spread(inner, _)
+            | Expr::Tainted(inner, _, _)
+            | Expr::Present(inner, _)
+            | Expr::Ok(inner, _)
+            | Expr::Err(inner, _) => self.check_call_argument_captures(inner),
+            Expr::ListLit(values, _) => {
+                for value in values {
+                    self.check_call_argument_captures(value);
+                }
+            }
+            Expr::MapLit(entries, _) => {
+                for (key, value) in entries {
+                    self.check_call_argument_captures(key);
+                    self.check_call_argument_captures(value);
+                }
+            }
+            Expr::StructLit { fields, .. } => {
+                for (_, _, value) in fields {
+                    self.check_call_argument_captures(value);
+                }
+            }
+            Expr::TypedLit { body, .. } => {
+                body.for_each_expr(|value| self.check_call_argument_captures(value));
+            }
+            Expr::TupleLit(fields, _, _) => {
+                for (_, value) in fields {
+                    self.check_call_argument_captures(value);
+                }
+            }
+            Expr::EnumLit { args, .. } => {
+                for arg in args {
+                    let value = match arg {
+                        crate::AST::EnumLitArg::Positional(value)
+                        | crate::AST::EnumLitArg::Named { expr: value, .. } => value,
+                    };
+                    self.check_call_argument_captures(value);
+                }
+            }
+            Expr::If {
+                then_value,
+                else_value,
+                ..
+            } => {
+                self.check_call_argument_captures(then_value);
+                self.check_call_argument_captures(else_value);
+            }
+            _ => {}
         }
     }
 
@@ -752,6 +1071,10 @@ impl<'a> Checker<'a> {
             self.collect_call_projection_reads(receiver, &mut projection_reads);
             self.check_call_transient_reads(projection_reads);
             self.check_call_place_access(&place, ViewAccess::Read, span);
+        } else {
+            let mut reads = Vec::new();
+            self.collect_call_value_reads(receiver, &mut reads);
+            self.check_call_transient_reads(reads);
         }
     }
 
