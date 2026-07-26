@@ -4262,7 +4262,8 @@ fn classify_corpus_stem(
     }
 
     jet_jit::reset_jit_trace_for_test();
-    let jit = dev_run_bundle(&bundle, false, false);
+    let jit =
+        jet_jit::with_program_args(&[file.clone()], || dev_run_bundle(&bundle, false, false));
     assert!(
         !jet_jit::fallback_invoked_for_test(),
         "`{stem}` must not invoke forbidden interpreter/AOT fallback under tiered Cranelift"
@@ -4570,6 +4571,7 @@ fn example_corpus_strict_jit_aot_differential_gate() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
+    let filter = std::env::var("JET_CORPUS_GATE_FILTER").ok();
     let records = collect_corpus_gate_records();
     if std::env::var("JET_DUMP_CORPUS_GATE").as_deref() == Ok("1") {
         print_corpus_gate_manifest(&records);
@@ -4595,8 +4597,10 @@ fn example_corpus_strict_jit_aot_differential_gate() {
         );
         return;
     }
-    let expected = parse_corpus_gate_manifest();
-    if std::env::var("JET_CORPUS_GATE_FILTER").is_err() {
+    let mut expected = parse_corpus_gate_manifest();
+    if let Some(filter) = filter {
+        expected.retain(|record| record.stem.contains(&filter));
+    } else {
         assert_eq!(
             records.len(),
             all_example_stems().len(),
