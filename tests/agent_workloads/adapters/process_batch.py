@@ -12,10 +12,10 @@ for line_number, line in enumerate(Path(sys.argv[1]).read_text().splitlines()[1:
     fields = line.split("\t")
     if len(fields) != 4:
         raise SystemExit(f"bad process row {line_number}")
-    label, program, argument, timeout_text = fields
+    label, program, arguments_text, timeout_text = fields
     try:
         completed = subprocess.run(
-            [program, argument],
+            [program, *arguments_text.split("|")],
             capture_output=True,
             text=True,
             timeout=int(timeout_text) / 1000,

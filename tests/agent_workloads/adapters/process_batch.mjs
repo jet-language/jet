@@ -5,15 +5,16 @@ if (process.argv.length !== 3) {
   throw new Error("usage: process_batch INPUT_FILE");
 }
 
-function run(program, argument, timeoutMs) {
+function run(program, args, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const child = spawn(program, [argument], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(program, args, { stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     let timedOut = false;
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
       output += chunk;
     });
+    child.stderr.resume();
     child.on("error", reject);
     const timer = setTimeout(() => {
       timedOut = true;
@@ -34,8 +35,12 @@ for (let index = 1; index < lines.length; index += 1) {
   if (fields.length !== 4) {
     throw new Error(`bad process row ${index + 1}`);
   }
-  const [label, program, argument, timeoutText] = fields;
-  const result = await run(program, argument, Number.parseInt(timeoutText, 10));
+  const [label, program, argumentsText, timeoutText] = fields;
+  const result = await run(
+    program,
+    argumentsText.split("|"),
+    Number.parseInt(timeoutText, 10),
+  );
   if (result.timedOut) {
     console.log(`${label}|timeout`);
   } else {

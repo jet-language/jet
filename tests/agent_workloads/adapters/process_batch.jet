@@ -20,10 +20,14 @@ fn run() {
             }
             label :: fields[0]
             program :: fields[1]
-            argument :: fields[2]
+            arguments :: fields[2]
             timeout_ms :: Int.parse(fields[3]) ?? panic("bad timeout")
             timeout :: Duration.milliseconds(timeout_ms) ?? panic("bad timeout")
-            result :: process.cmd([~program, ~argument])
+            argv := [String].{~program}
+            loop argument; arguments.split("|") {
+                argv.push(argument)
+            }
+            result :: process.cmd(argv)
                 .stdout(.Capture)
                 .stderr(.Capture)
                 .timeout(timeout)

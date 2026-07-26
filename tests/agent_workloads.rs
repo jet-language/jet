@@ -43,6 +43,12 @@ const EXPECTED_TASKS: &[(&str, &str, &str, &str)] = &[
         "exit=0;stdout=exact",
     ),
     (
+        "process-batch-large-stderr",
+        "long-running-and-interactive-commands",
+        "large-stderr",
+        "exit=0;stdout=exact",
+    ),
+    (
         "process-batch-timeout-recovery",
         "long-running-and-interactive-commands",
         "timeout-cancellation-cleanup",
@@ -337,6 +343,23 @@ fn source_tokens(path: &Path) -> usize {
         .count()
 }
 
+fn undeclared_scratch_entries(adapter: &str, path: &Path) -> Vec<String> {
+    let mut entries = fs::read_dir(path)
+        .unwrap()
+        .filter_map(|entry| {
+            let entry = entry.unwrap();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if adapter == "jet" && name == "build" && entry.path().is_dir() {
+                None
+            } else {
+                Some(name)
+            }
+        })
+        .collect::<Vec<_>>();
+    entries.sort();
+    entries
+}
+
 #[test]
 fn manifest_is_complete_frozen_and_non_vacuous() {
     let tasks = read_tasks();
@@ -385,7 +408,7 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
 
     let sums = fs::read_to_string(corpus_root().join("SHA256SUMS")).unwrap();
     let verified = verify_checksum_closure(&corpus_root(), &sums).unwrap();
-    assert_eq!(verified, 14, "all inputs and declared outputs must be frozen");
+    assert_eq!(verified, 16, "all inputs and declared outputs must be frozen");
 }
 
 #[test]
@@ -507,6 +530,15 @@ fn equivalent_adapters_complete_declared_tasks() {
                 input_hashes(&input),
                 before,
                 "{} {adapter} changed its read-only input authority",
+                task.id
+            );
+            // This must run before Scratch::drop so adapter residue cannot be
+            // mistaken for successful cleanup. Jet's public AOT build directory
+            // is declared compilation output; no adapter gets another exception.
+            assert_eq!(
+                undeclared_scratch_entries(adapter, &scratch.path),
+                Vec::<String>::new(),
+                "{} {adapter} left undeclared scratch residue",
                 task.id
             );
             declared_outputs.push(cold.output.stdout);
