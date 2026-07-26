@@ -60,6 +60,7 @@ impl<'a> Fmt<'a> {
             .map(str::to_owned);
         if let Some(source_ty) = source_ty {
             self.write(&source_ty);
+            self.skip_verbatim_comments(span.start + source_ty.len());
         } else {
             self.fmt_type(ty);
         }
@@ -907,7 +908,14 @@ impl<'a> Fmt<'a> {
                     f.newline();
                 }
                 f.emit_leading(field.name_span.start);
-                f.fmt_field(field, derives_decode);
+                let decodes_field = derives_decode
+                    && !field.serde_markers.iter().any(|marker| {
+                        matches!(
+                            marker.name.as_str(),
+                            Syntax::ATTR_SKIP | Syntax::ATTR_FLATTEN
+                        )
+                    });
+                f.fmt_field(field, decodes_field);
             }
             for (i, trait_name) in body_derives.iter().enumerate() {
                 if i > 0 || !s.fields.is_empty() {

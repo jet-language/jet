@@ -796,7 +796,6 @@ impl<'a> Fmt<'a> {
                 break;
             }
             match token.kind {
-                TokKind::LineComment(_) | TokKind::BlockComment(_) => return None,
                 TokKind::LParen => parens += 1,
                 TokKind::RParen => parens = parens.saturating_sub(1),
                 TokKind::LBracket => brackets += 1,

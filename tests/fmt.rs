@@ -656,6 +656,22 @@ fn fmt_preserves_ambiguous_codable_union_source_order() {
 }
 
 #[test]
+fn fmt_preserves_comments_in_ambiguous_decode_unions() {
+    for (src, label) in [
+        (
+            "#Decode\nstruct Row {\n    value: String /* Text */ | Char\n}\n",
+            "block comment inside ambiguous Decode union",
+        ),
+        (
+            "#Decode\nstruct Row {\n    value: String | Char // note\n}\n",
+            "line comment after ambiguous Decode union",
+        ),
+    ] {
+        assert_fmt_stable(src, label);
+    }
+}
+
+#[test]
 fn fmt_still_canonicalizes_valid_codable_union() {
     let src = "#Codable\nstruct Row {\n    value: String | Int\n}\n";
     let once = jet::format_source(src).expect("valid Codable union should format");
@@ -667,6 +683,21 @@ fn fmt_still_canonicalizes_valid_codable_union() {
     assert_eq!(
         once, twice,
         "valid Codable union formatting must be idempotent"
+    );
+}
+
+#[test]
+fn fmt_canonicalizes_skipped_decode_union() {
+    let src = "#Decode\nstruct Row {\n    #Skip value: String | Char\n}\n";
+    let once = jet::format_source(src).expect("skipped Decode union should format");
+    assert!(
+        once.contains("#Skip value: Char | String"),
+        "skipped Decode field should retain canonical union order:\n{once}"
+    );
+    let twice = jet::format_source(&once).expect("skipped Decode union output should re-format");
+    assert_eq!(
+        once, twice,
+        "skipped Decode union formatting must be idempotent"
     );
 }
 
