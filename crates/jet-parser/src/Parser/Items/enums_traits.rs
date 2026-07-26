@@ -27,9 +27,14 @@ impl<'a> Parser<'a> {
                     self.bump();
                     continue;
                 }
+                if self.method_starts_here() {
+                    methods.push(self.method_in_type()?);
+                    continue;
+                }
                 // D-SERDE5/7 + D-SHAPE2: one bare marker or one multi-marker list.
                 if self.at_marker_list() || matches!(self.peek().kind, TokKind::Hash) {
-                    let variant_markers = self.parse_field_markers()?;
+                    let variant_markers =
+                        self.parse_field_markers(crate::Policy::RuleSite::Variant)?;
                     self.variant_entry("", &mut variants, &mut groups, variant_markers)?;
                     if matches!(self.peek().kind, TokKind::Semi) {
                         self.bump();
@@ -40,8 +45,6 @@ impl<'a> Parser<'a> {
                     derives.push(self.derive_line()?);
                 } else if matches!(self.peek().kind, TokKind::KwImpl) {
                     trait_impls.push(self.trait_impl_block()?);
-                } else if matches!(self.peek().kind, TokKind::KwFn | TokKind::KwPub) {
-                    methods.push(self.method_in_type()?);
                 } else {
                     self.variant_entry("", &mut variants, &mut groups, Vec::new())?;
                     if matches!(self.peek().kind, TokKind::Semi) {
@@ -84,6 +87,13 @@ impl<'a> Parser<'a> {
             serde_markers: Vec<crate::AST::Marker>,
         ) -> Result<(), Diagnostic> {
             let (name, name_span) = self.expect_ident("for a variant name")?;
+            for marker in &serde_markers {
+                self.bind_rule_fact(
+                    marker.name_span,
+                    Some(name_span),
+                    crate::Policy::RuleSite::Variant,
+                );
+            }
             let path = if prefix.is_empty() {
                 name
             } else {
@@ -159,7 +169,7 @@ impl<'a> Parser<'a> {
                 }
                 let entry_markers =
                     if self.at_marker_list() || matches!(self.peek().kind, TokKind::Hash) {
-                    self.parse_field_markers()?
+                    self.parse_field_markers(crate::Policy::RuleSite::Variant)?
                 } else {
                     Vec::new()
                 };

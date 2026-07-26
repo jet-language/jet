@@ -486,22 +486,22 @@ impl<'a> Parser<'a> {
                     self.bump();
                     continue;
                 }
-                let is_method = matches!(self.peek().kind, TokKind::KwFn)
-                    || (matches!(self.peek().kind, TokKind::KwPub)
-                        && matches!(self.peek2().kind, TokKind::KwFn))
-                    || self.at_pure_fn()
-                    || self.at_sanitizer_fn()
-                    || self.at_inline_fn()
-                    || self.at_state_fn()
-                    || self.at_transition_fn();
-                if is_method {
+                if self.method_starts_here() {
                     methods.push(self.method_in_type()?);
                     continue;
                 }
                 // D-MARK-STACK1: one field rule is bare; two or more share `#[…]`.
                 if self.at_marker_list() || matches!(self.peek().kind, TokKind::Hash) {
-                    let field_markers = self.parse_field_markers()?;
+                    let field_markers =
+                        self.parse_field_markers(crate::Policy::RuleSite::Field)?;
                     let mut f = self.field()?;
+                    for marker in &field_markers {
+                        self.bind_rule_fact(
+                            marker.name_span,
+                            Some(f.name_span),
+                            crate::Policy::RuleSite::Field,
+                        );
+                    }
                     let mut redact = false;
                     let mut serde_markers = Vec::new();
                     for m in field_markers {

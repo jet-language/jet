@@ -832,9 +832,6 @@ fn check_bundle_opts_for_output_inner(
     let mut top_level_embed_inputs = Vec::new();
 
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
-        diags.extend(super::CheckerMarkers::check_rule_signatures(
-            &module.rule_facts,
-        ));
         super::Protocol::expand_module_protocols(&mut module.items, &mut diags);
         // D-DOTSCOPE1: validate contextual `.member { … }` scope statements
         // against each marker's declared vocabulary (E0614/E0615/E0616/E0617/E0618).
@@ -1311,24 +1308,6 @@ fn check_bundle_opts_for_output_inner(
         }
 
         st.consts.extend(comptime_types);
-        // Defaults must exist before serde source expansion so Decode bodies
-        // embed the evaluated value rather than re-evaluating at runtime.
-        let serde_core_imports: HashMap<String, String> = module
-            .imports
-            .iter()
-            .filter_map(|imp| Some((imp.import_alias(), imp.core_module_path()?)))
-            .collect();
-        let serde_base = module
-            .path
-            .parent()
-            .map(|path| path.to_path_buf())
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        eval_default_markers(
-            &mut module.items,
-            &serde_base,
-            &mut diags,
-            &serde_core_imports,
-        );
         // D-SERDE2=A/R11: built-in codecs re-enter as ordinary Jet source in
         // bundle builds too; this is the production multi-file path.
         super::Registration::expand_builtin_serde_items(&mut module.items, &mut diags);

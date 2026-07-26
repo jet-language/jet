@@ -156,8 +156,31 @@ pub fn explain(policy: &EffectivePolicy) -> String {
     out
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuleSite { Package, File, Module, Function, Block, Statement, Expression, Type, Impl, Declaration, Constant, Field, Parameter, Test, Bench, Operation }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RuleSite { Package, File, Module, Function, Method, Block, Statement, Expression, Type, Impl, Declaration, Constant, Field, Variant, Parameter, Test, Bench, Operation }
+
+impl RuleSite {
+    pub const ALL: [Self; 18] = [
+        Self::Package,
+        Self::File,
+        Self::Module,
+        Self::Function,
+        Self::Method,
+        Self::Block,
+        Self::Statement,
+        Self::Expression,
+        Self::Type,
+        Self::Impl,
+        Self::Declaration,
+        Self::Constant,
+        Self::Field,
+        Self::Variant,
+        Self::Parameter,
+        Self::Test,
+        Self::Bench,
+        Self::Operation,
+    ];
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppliedRule {
@@ -214,38 +237,25 @@ impl RuleArgType {
         }
     }
 
-    /// D-MARKSIG1=A: value-shape half of the shared applied-rule signature.
-    /// Expressions with a statically visible literal shape are checked here;
-    /// `Any` deliberately accepts every expression.
+    /// Literal/source-shape predicate for parser tooling. Sema validates
+    /// nonliteral arguments from inferred lexical types or evaluated
+    /// compile-time values; this predicate never guesses their type.
     pub fn matches_expr(self, expr: &crate::AST::Expr) -> bool {
-        let definite_literal = matches!(
-            expr,
-            crate::AST::Expr::Str(..)
-                | crate::AST::Expr::StrMatchLit(..)
-                | crate::AST::Expr::BinMatchLit(..)
-                | crate::AST::Expr::Int(..)
-                | crate::AST::Expr::Float(..)
-                | crate::AST::Expr::Bool(..)
-                | crate::AST::Expr::Char(..)
-                | crate::AST::Expr::ListLit(..)
-                | crate::AST::Expr::MapLit(..)
-                | crate::AST::Expr::UnitLit { .. }
-        );
         match self {
             Self::Any => true,
-            Self::String => matches!(expr, crate::AST::Expr::Str(..)) || !definite_literal,
+            Self::String => matches!(expr, crate::AST::Expr::Str(..)),
             Self::Ident => matches!(
                 expr,
                 crate::AST::Expr::Ident(..)
                     | crate::AST::Expr::Field(..)
                     | crate::AST::Expr::EnumLit { .. }
             ),
-            Self::Bool => matches!(expr, crate::AST::Expr::Bool(..)) || !definite_literal,
-            Self::Int => matches!(expr, crate::AST::Expr::Int(..)) || !definite_literal,
+            Self::Bool => matches!(expr, crate::AST::Expr::Bool(..)),
+            Self::Int => matches!(expr, crate::AST::Expr::Int(..)),
             Self::DurationOrString => matches!(
                 expr,
                 crate::AST::Expr::UnitLit { .. } | crate::AST::Expr::Str(..)
-            ) || !definite_literal,
+            ),
         }
     }
 }
@@ -461,11 +471,13 @@ const NO_POLICY_SCOPES: &[PolicyScope] = &[];
 const FILE_SITE: &[RuleSite] = &[RuleSite::File];
 const MODULE_SITE: &[RuleSite] = &[RuleSite::Module];
 const FUNCTION_SITE: &[RuleSite] = &[RuleSite::Function];
+const CALLABLE_SITE: &[RuleSite] = &[RuleSite::Function, RuleSite::Method];
 const BLOCK_SITE: &[RuleSite] = &[RuleSite::Block];
 const STATEMENT_SITE: &[RuleSite] = &[RuleSite::Statement, RuleSite::Block];
 const TYPE_SITE: &[RuleSite] = &[RuleSite::Type];
 const DECLARATION_SITE: &[RuleSite] = &[RuleSite::Declaration];
 const FIELD_SITE: &[RuleSite] = &[RuleSite::Field];
+const FIELD_OR_VARIANT_SITE: &[RuleSite] = &[RuleSite::Field, RuleSite::Variant];
 const CONST_SITE: &[RuleSite] = &[RuleSite::Constant];
 const EXPR_SITE: &[RuleSite] = &[RuleSite::Expression];
 
@@ -534,29 +546,29 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
         name: "Policy",
         signature: sig!(variadic Any => "PolicySetting"),
         policy_scopes: ALL_SCOPES,
-        sites: &[RuleSite::Package, RuleSite::Module, RuleSite::Function, RuleSite::Block],
+        sites: &[RuleSite::Package, RuleSite::Module, RuleSite::Function, RuleSite::Method, RuleSite::Block],
         form: RuleForm::Call,
         status: RuleStatus::Active,
         inherits: true,
         resolution: RuleResolution::Tighten,
     },
-    rule!("Unsafe", sig!(param!("reason", String), param!("obligations", Ident => "ObligationMode", ".None")), &[RuleSite::Function, RuleSite::Block, RuleSite::Operation], Call),
+    rule!("Unsafe", sig!(param!("reason", String), param!("obligations", Ident => "ObligationMode", ".None")), &[RuleSite::Function, RuleSite::Method, RuleSite::Block, RuleSite::Operation], Call),
     rule!("Grant", sig!(variadic Ident => "Capability"), &[RuleSite::Block, RuleSite::Operation], Call),
     rule!("Tainted", sig!(param!("kind", Ident => "TaintKind", ".Input")), &[RuleSite::Expression, RuleSite::Operation], BareOrCall),
-    rule!("Sanitizer", sig!(), FUNCTION_SITE, Bare),
-    rule!(retired "Pure", sig!(), FUNCTION_SITE, Bare, "--[]->"),
-    rule!("Pre", sig!(param!("condition", Any), param!("message", String)), FUNCTION_SITE, Call),
-    rule!("Post", sig!(param!("condition", Any), param!("message", String)), FUNCTION_SITE, Call),
-    rule!("Inline", sig!(param!("mode", Ident => "InlineMode", ".Hint")), &[RuleSite::Function, RuleSite::Constant], BareOrCall),
+    rule!("Sanitizer", sig!(), CALLABLE_SITE, Bare),
+    rule!(retired "Pure", sig!(), CALLABLE_SITE, Bare, "--[]->"),
+    rule!("Pre", sig!(param!("condition", Any), param!("message", String)), CALLABLE_SITE, Call),
+    rule!("Post", sig!(param!("condition", Any), param!("message", String)), CALLABLE_SITE, Call),
+    rule!("Inline", sig!(param!("mode", Ident => "InlineMode", ".Hint")), &[RuleSite::Function, RuleSite::Method, RuleSite::Constant], BareOrCall),
     rule!("Task", sig!(), FUNCTION_SITE, Bare),
     rule!("Every", sig!(param!("schedule", DurationOrString)), FUNCTION_SITE, Call),
-    rule!("Replayable", sig!(), FUNCTION_SITE, Bare),
+    rule!("Replayable", sig!(), CALLABLE_SITE, Bare),
     rule!("WasmExport", sig!(), FUNCTION_SITE, Bare),
-    rule!("State", sig!(param!("state", Ident => "State")), FUNCTION_SITE, Call),
-    rule!("Transition", sig!(param!("from", Ident => "State"), param!("to", Ident => "State")), FUNCTION_SITE, Call),
+    rule!("State", sig!(param!("state", Ident => "State")), CALLABLE_SITE, Call),
+    rule!("Transition", sig!(param!("from", Ident => "State"), param!("to", Ident => "State")), CALLABLE_SITE, Call),
     rule!("FFI", sig!(param!("language", Ident => "FfiLanguage")), FUNCTION_SITE, Call),
     rule!("Abi", sig!(param!("name", Ident => "Abi")), FUNCTION_SITE, Call),
-    rule!("MustUse", sig!(), &[RuleSite::Function, RuleSite::Type], Bare),
+    rule!("MustUse", sig!(), &[RuleSite::Function, RuleSite::Method, RuleSite::Type], Bare),
     rule!("Codable", sig!(), TYPE_SITE, Bare),
     rule!("Encode", sig!(), TYPE_SITE, Bare),
     rule!("Decode", sig!(), TYPE_SITE, Bare),
@@ -577,7 +589,7 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Tag", sig!(param!("field", String)), TYPE_SITE, Call),
     rule!("Untagged", sig!(), TYPE_SITE, Bare),
     rule!("Redact", sig!(), FIELD_SITE, Bare),
-    rule!("Rename", sig!(param!("name", String)), FIELD_SITE, Call),
+    rule!("Rename", sig!(param!("name", String)), FIELD_OR_VARIANT_SITE, Call),
     rule!("Skip", sig!(), FIELD_SITE, Bare),
     rule!("Default", sig!(param!("value", Any, "T.default")), FIELD_SITE, BareOrCall),
     rule!("Flatten", sig!(), FIELD_SITE, Bare),
@@ -587,7 +599,7 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Track", sig!(), DECLARATION_SITE, Bare),
     rule!("Local", sig!(), DECLARATION_SITE, Bare),
     rule!("Shared", sig!(), DECLARATION_SITE, Bare),
-    rule!("Meta", sig!(param!("category", String, "\"\""), param!("tunable", Bool, "false"), param!("maturity", Ident => "Maturity", ".Tested")), &[RuleSite::Function, RuleSite::Declaration, RuleSite::Constant], Call),
+    rule!("Meta", sig!(param!("category", String, "\"\""), param!("tunable", Bool, "false"), param!("maturity", Ident => "Maturity", ".Tested")), &[RuleSite::Function, RuleSite::Method, RuleSite::Declaration, RuleSite::Constant], Call),
     rule!("Todo", sig!(), EXPR_SITE, Bare),
     rule!("Shield", sig!(), BLOCK_SITE, Block),
     rule!("Impure", sig!(param!("reason", String, "none")), BLOCK_SITE, Block),
@@ -597,7 +609,7 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Live", sig!(), BLOCK_SITE, Block),
     rule!("Nondeterministic", sig!(param!("reason", String)), BLOCK_SITE, Block),
     rule!("Context", sig!(param!("allocator", Any, "default"), param!("logger", Any, "default"), param!("deadline", Int, "default")), BLOCK_SITE, Block),
-    rule!("Reactive", sig!(), &[RuleSite::Function, RuleSite::Block], Block),
+    rule!("Reactive", sig!(), &[RuleSite::Function, RuleSite::Method, RuleSite::Block], Block),
     rule!("Off", sig!(), STATEMENT_SITE, Prefix),
     rule!("DebugOnly", sig!(), STATEMENT_SITE, Prefix),
     rule!("Test", sig!(param!("name", String, "function name")), &[RuleSite::Test], Block),
@@ -620,7 +632,7 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!(retired "Mul", sig!(), EXPR_SITE, Bare, ".Mul"),
     rule!(retired "Min", sig!(), EXPR_SITE, Bare, ".Min"),
     rule!(retired "Max", sig!(), EXPR_SITE, Bare, ".Max"),
-    rule!(retired "Audit", sig!(param!("reason", String)), &[RuleSite::Function, RuleSite::Block], Call, "#Unsafe(reason)"),
+    rule!(retired "Audit", sig!(param!("reason", String)), &[RuleSite::Function, RuleSite::Method, RuleSite::Block], Call, "#Unsafe(reason)"),
     rule!(retired "Debug", sig!(), TYPE_SITE, Bare, "remove the marker; Debug derives automatically"),
     rule!(retired "Wasm", sig!(), FUNCTION_SITE, Bare, "#Target(Wasm)"),
     rule!(retired "Js", sig!(), FUNCTION_SITE, Bare, "#Target(Js)"),
@@ -662,6 +674,27 @@ mod tests {
     }
 
     #[test]
+    fn active_rule_attachment_census_covers_every_site_without_duplicates() {
+        for row in super::applied_rule_registry()
+            .iter()
+            .filter(|row| matches!(row.status, super::RuleStatus::Active))
+        {
+            let mut declared = std::collections::HashSet::new();
+            for site in row.sites {
+                assert!(declared.insert(*site), "{} repeats {site:?}", row.name);
+            }
+            for site in super::RuleSite::ALL {
+                assert_eq!(
+                    super::rule_allows(row.name, site),
+                    declared.contains(&site),
+                    "{} at {site:?}",
+                    row.name
+                );
+            }
+        }
+    }
+
+    #[test]
     fn authority_rows_are_site_bound_and_policy_is_lexical() {
         let rows = super::applied_rule_registry();
         for name in ["Authority", "Unsafe", "Grant", "Tainted", "Sanitizer", "wire"] {
@@ -695,19 +728,19 @@ mod tests {
         };
         assert!(super::RuleArgType::Any.matches_expr(&boolean));
         assert!(super::RuleArgType::String.matches_expr(&string));
-        assert!(super::RuleArgType::String.matches_expr(&ident));
+        assert!(!super::RuleArgType::String.matches_expr(&ident));
         assert!(!super::RuleArgType::String.matches_expr(&boolean));
         assert!(super::RuleArgType::Ident.matches_expr(&ident));
         assert!(!super::RuleArgType::Ident.matches_expr(&integer));
         assert!(super::RuleArgType::Bool.matches_expr(&boolean));
-        assert!(super::RuleArgType::Bool.matches_expr(&ident));
+        assert!(!super::RuleArgType::Bool.matches_expr(&ident));
         assert!(!super::RuleArgType::Bool.matches_expr(&integer));
         assert!(super::RuleArgType::Int.matches_expr(&integer));
-        assert!(super::RuleArgType::Int.matches_expr(&ident));
+        assert!(!super::RuleArgType::Int.matches_expr(&ident));
         assert!(!super::RuleArgType::Int.matches_expr(&string));
         assert!(super::RuleArgType::DurationOrString.matches_expr(&duration));
         assert!(super::RuleArgType::DurationOrString.matches_expr(&string));
-        assert!(super::RuleArgType::DurationOrString.matches_expr(&ident));
+        assert!(!super::RuleArgType::DurationOrString.matches_expr(&ident));
         assert!(!super::RuleArgType::DurationOrString.matches_expr(&integer));
 
         let policy = super::applied_rule("Policy").unwrap().signature;

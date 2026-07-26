@@ -1217,6 +1217,9 @@ fn serde_has(markers: &[Marker], name: &str) -> bool {
     markers.iter().any(|m| m.name == name)
 }
 fn marker_str_arg(m: &Marker) -> Option<String> {
+    if let Some(crate::AST::CtValue::Str(value)) = &m.ct {
+        return Some(value.clone());
+    }
     match m.args.first() {
         Some(Expr::Str(parts, _)) if parts.len() == 1 => match &parts[0] {
             StrPart::Lit(s) => Some(s.clone()),

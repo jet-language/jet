@@ -154,17 +154,6 @@ pub(crate) fn union_wire_shape(ty: &Type) -> Option<&'static str> {
     }
 }
 
-/// E2407: `#[Rename(...)]` needs a single string-literal wire key.
-pub(crate) fn e2407(span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E2407",
-        "`#[Rename(...)]` needs a string literal".to_string(),
-        "the wire key is a constant string, e.g. `#[Rename(\"customer\")]`".to_string(),
-        "pass one quoted string — `#[Rename(\"wire_name\")]`".to_string(),
-        Some(span),
-    )
-}
-
 /// E2408: `#[Flatten]` needs a field whose type is itself a Codable struct.
 pub(crate) fn e2408(field: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
@@ -350,13 +339,6 @@ fn is_struct_named(ty: &Type) -> bool {
     matches!(ty, Type::Named(n) if !is_json_type_name(n))
 }
 
-fn marker_is_string_literal(m: &crate::AST::Marker) -> bool {
-    matches!(
-        m.args.first(),
-        Some(Expr::Str(parts, _)) if parts.len() == 1 && matches!(parts[0], crate::AST::StrPart::Lit(_))
-    )
-}
-
 /// D-SERDE: validate serde markers on every `#[Codable]`/`#[Encode]`/`#[Decode]` type
 /// (E2407–E2412). Runs after the trait registry is built so field types resolve. This
 /// keeps generated code rustc-clean (I2): a field with no wire form is caught here, not
@@ -409,12 +391,6 @@ pub(crate) fn validate_serde_items(
                     .serde_markers
                     .iter()
                     .any(|m| m.name == Syntax::ATTR_FLATTEN);
-                for m in &f.serde_markers {
-                    // E2407: `#[Rename]` needs a string literal.
-                    if m.name == Syntax::ATTR_RENAME && !marker_is_string_literal(m) {
-                        out.push(e2407(m.span));
-                    }
-                }
                 if flatten && !is_struct_named(&f.ty) {
                     out.push(e2408(&f.name, f.name_span));
                     continue;
@@ -458,11 +434,6 @@ pub(crate) fn validate_serde_items(
         }
         if let Item::Enum(e) = item {
             for v in &e.variants {
-                for m in &v.serde_markers {
-                    if m.name == Syntax::ATTR_RENAME && !marker_is_string_literal(m) {
-                        out.push(e2407(m.span));
-                    }
-                }
                 let tys: Vec<&Type> = match &v.payload {
                     crate::AST::VariantPayload::Unit => vec![],
                     crate::AST::VariantPayload::Single(t, _) => vec![t],

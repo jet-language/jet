@@ -151,12 +151,11 @@ fn expand_builtin_enum_serde(
     }
     let params = crate::Generics::format_type_params(&codec_params);
     let target = format!("{}{}", e.name, serde_type_arg_names(&e.type_params));
-    let tag = e.serde_markers.iter().find(|m| m.name == crate::Syntax::ATTR_TAG)
-        .and_then(|m| m.args.first()).and_then(|x| match x {
-            crate::AST::Expr::Str(parts, _) => parts.first().and_then(|p| match p {
-                crate::AST::StrPart::Lit(s) => Some(s.clone()), _ => None,
-            }), _ => None,
-        });
+    let tag = e
+        .serde_markers
+        .iter()
+        .find(|m| m.name == crate::Syntax::ATTR_TAG)
+        .and_then(marker_static_string);
     let untagged = e.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_UNTAGGED);
     let mut source = String::new();
     if enc {
@@ -341,9 +340,20 @@ mod serde_source_tests {
 
 fn serde_enum_variant_key(v: &crate::AST::Variant) -> String {
     v.serde_markers.iter().find(|m| m.name == crate::Syntax::ATTR_RENAME)
-        .and_then(|m| m.args.first()).and_then(|e| match e {
-            crate::AST::Expr::Str(parts, _) => parts.first().and_then(|p| match p { crate::AST::StrPart::Lit(s) => Some(s.clone()), _ => None }), _ => None,
-        }).unwrap_or_else(|| v.name.clone())
+        .and_then(marker_static_string).unwrap_or_else(|| v.name.clone())
+}
+
+fn marker_static_string(marker: &crate::AST::Marker) -> Option<String> {
+    if let Some(crate::AST::CtValue::Str(value)) = &marker.ct {
+        return Some(value.clone());
+    }
+    marker.args.first().and_then(|expression| match expression {
+        crate::AST::Expr::Str(parts, _) => parts.first().and_then(|part| match part {
+            crate::AST::StrPart::Lit(value) => Some(value.clone()),
+            crate::AST::StrPart::Interp(..) => None,
+        }),
+        _ => None,
+    })
 }
 
 fn serde_enum_pattern_and_value(v: &crate::AST::Variant) -> (String, String) {
@@ -393,8 +403,8 @@ fn serde_enum_decode_constructor(target: &str, v: &crate::AST::Variant, src: &st
 
 fn serde_source_field_key(container: &[crate::AST::Marker], f: &crate::AST::Field) -> String {
     if let Some(marker) = f.serde_markers.iter().find(|m| m.name == crate::Syntax::ATTR_RENAME) {
-        if let Some(crate::AST::Expr::Str(parts, _)) = marker.args.first() {
-            if let Some(crate::AST::StrPart::Lit(value)) = parts.first() { return value.clone(); }
+        if let Some(value) = marker_static_string(marker) {
+            return value;
         }
     }
     let style = container.iter().find(|m| m.name == crate::Syntax::ATTR_RENAME_ALL)

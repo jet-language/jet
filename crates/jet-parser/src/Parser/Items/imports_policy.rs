@@ -650,6 +650,7 @@ impl<'a> Parser<'a> {
                                         |marker| crate::AST::AppliedRuleApplication {
                                             marker,
                                             target: None,
+                                            site: Some(crate::Policy::RuleSite::File),
                                         },
                                     ));
                                 }
@@ -760,6 +761,7 @@ impl<'a> Parser<'a> {
                             self.applied_rules.push(crate::AST::AppliedRuleApplication {
                                 marker,
                                 target: None,
+                                site: Some(crate::Policy::RuleSite::File),
                             });
                             continue;
                         }

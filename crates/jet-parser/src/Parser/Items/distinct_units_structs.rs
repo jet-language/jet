@@ -127,6 +127,11 @@ impl<'a> Parser<'a> {
                 if attr == Syntax::ATTR_INVARIANT {
                     let mut marker = self.finish_rule_marker(attr, attr_span)?;
                     marker.span.start = sigil_span.start;
+                    self.bind_rule_fact(
+                        marker.name_span,
+                        None,
+                        crate::Policy::RuleSite::Type,
+                    );
                     let (bounds, span, text) = self.parse_invariant_range(marker.clone())?;
                     invariant_range = bounds.map(|(lo, hi)| (lo, hi, span));
                     invariant = text.map(|text| (text, span));
@@ -936,22 +941,22 @@ impl<'a> Parser<'a> {
                     self.bump();
                     continue;
                 }
-                let is_method = matches!(self.peek().kind, TokKind::KwFn)
-                    || (matches!(self.peek().kind, TokKind::KwPub)
-                        && matches!(self.peek2().kind, TokKind::KwFn))
-                    || self.at_pure_fn()
-                    || self.at_sanitizer_fn()
-                    || self.at_inline_fn()
-                    || self.at_state_fn()
-                    || self.at_transition_fn();
-                if is_method {
+                if self.method_starts_here() {
                     methods.push(self.method_in_type()?);
                     continue;
                 }
                 // D-SHAPE2: one field rule is bare; two or more share `#[…]`.
                 if self.at_marker_list() || matches!(self.peek().kind, TokKind::Hash) {
-                    let field_markers = self.parse_field_markers()?;
+                    let field_markers =
+                        self.parse_field_markers(crate::Policy::RuleSite::Field)?;
                     let mut f = self.field()?;
+                    for marker in &field_markers {
+                        self.bind_rule_fact(
+                            marker.name_span,
+                            Some(f.name_span),
+                            crate::Policy::RuleSite::Field,
+                        );
+                    }
                     let mut redact = false;
                     let mut serde_markers = Vec::new();
                     for m in field_markers {

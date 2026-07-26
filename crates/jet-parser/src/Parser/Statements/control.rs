@@ -480,7 +480,8 @@ impl<'a> Parser<'a> {
             return Err(Diagnostic::error(
                 "E0760",
                 "context fields are set with `:`, not `=`".to_string(),
-                "`=` is reassignment; ordinary call labels use `name: value`".to_string(),
+                "`=` is reassignment (S17); the `name: value` form sets a context field (D-CTX1)"
+                    .to_string(),
                 format!("write `#{}({field}: …) {{ … }}`", Syntax::CTX_BLOCK),
                 Some(self.peek5().span),
             ));

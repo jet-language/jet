@@ -49,6 +49,7 @@ pub struct Program {
 pub struct AppliedRuleApplication {
     pub marker: Marker,
     pub target: Option<Span>,
+    pub site: Option<crate::Policy::RuleSite>,
 }
 
 /// S16: `import "path" [as alias];` or `import name [as alias];`

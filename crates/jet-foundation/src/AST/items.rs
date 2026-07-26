@@ -1154,7 +1154,8 @@ impl EnumDef {
 /// into `derives` at parse time (Codable expands to Encode+Decode); the serde
 /// *attribute* markers — container `RenameAll`/`DenyUnknownFields`/`Tag`/`Untagged`
 /// and field `Rename`/`Skip`/`Default`/`Flatten` — are kept raw here so sema can
-/// validate them (E2407–E2412) and codegen can apply them. Args parse as
+/// validate their shared signature and serde domain rules, then codegen can
+/// apply them. Args parse as
 /// expressions: a string literal (`Rename("x")`), a bare word (`RenameAll(camel)`
 /// → `Expr::Ident`), or any expression (`Default(8080)`).
 #[derive(Debug, Clone)]
@@ -1167,12 +1168,10 @@ pub struct Marker {
     /// typed signature.
     pub arg_labels: Vec<Option<(String, Span)>>,
     pub span: Span,
-    /// Card #131 / D-SERDE5: for an `#[Default(expr)]` field rule, the
-    /// compile-time value its argument evaluates to. Sema fills this once
-    /// (`eval_default_markers`) so both the AOT codegen tier and the comptime
-    /// decode tier bake the *exact same* value (R12 parity) — a non-primitive
-    /// default never silently degrades to `Default::default()`. `None` for
-    /// every non-`Default` rule and for a bare `#[Default]` (zero value).
+    /// D-MARKSIG1=A / D-SERDE5: the compile-time value of a static rule
+    /// argument. The shared signature gate fills this once so every consumer
+    /// sees the same typed value. `None` for dynamic rules and for a bare
+    /// `#[Default]` (zero value).
     pub ct: Option<CtValue>,
 }
 

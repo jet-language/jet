@@ -281,50 +281,6 @@ fn comptime_builtin_fixed_return_type(
 /// the comptime decode tier reuses it, so the two tiers bake the same default —
 /// a non-primitive `#[Default(expr)]` never silently degrades to
 /// `Default::default()` (R11/R12). A non-const argument is E2414.
-pub(crate) fn eval_default_markers(
-    items: &mut [Item],
-    base_dir: &std::path::Path,
-    diags: &mut Vec<Diagnostic>,
-    core_imports: &HashMap<String, String>,
-) {
-    // Every struct that carries `#[Default(expr)]` needs the baked value —
-    // Codable decode absents AND `#Cli` entry-arg absents read it (one
-    // mechanism, I8); gating on Codable silently zeroed CLI defaults.
-    let any = items.iter().any(|i| matches!(i, Item::Struct(s)
-        if s.fields.iter().any(|f| f.serde_markers.iter().any(|m|
-            m.name == crate::Syntax::ATTR_DEFAULT && !m.args.is_empty()))));
-    if !any {
-        return;
-    }
-    let (funcs_owned, externs, globals) = comptime_context_from_items(items);
-    let funcs: HashMap<String, &Func> = funcs_owned.iter().map(|(k, v)| (k.clone(), v)).collect();
-    for item in items.iter_mut() {
-        let Item::Struct(s) = item else { continue };
-        for f in &mut s.fields {
-            let field_name = f.name.clone();
-            for m in &mut f.serde_markers {
-                if m.name != crate::Syntax::ATTR_DEFAULT {
-                    continue;
-                }
-                let Some(expr) = m.args.first() else { continue };
-                match crate::Comptime::evaluate_with_imports_opts_collecting(
-                    expr,
-                    &funcs,
-                    &externs,
-                    base_dir,
-                    &globals,
-                    core_imports,
-                    false,
-                    0,
-                ) {
-                    Ok((v, _)) => m.ct = Some(v),
-                    Err(_) => diags.push(crate::Sema::e2414(&field_name, m.span)),
-                }
-            }
-        }
-    }
-}
-
 pub(crate) fn comptime_context_from_items(
     items: &[Item],
 ) -> (

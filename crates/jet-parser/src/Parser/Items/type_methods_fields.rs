@@ -63,17 +63,7 @@ impl<'a> Parser<'a> {
     
         /// S27: method inside a type body or `impl` block.
         pub(super) fn method_in_type(&mut self) -> Result<Func, Diagnostic> {
-            let (is_must_use, must_use_span) = if self.at_must_use_fn() {
-                (true, Some(self.bump_must_use_marker()?))
-            } else {
-                (false, None)
-            };
-            // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: allow `#Pure fn` on methods
-            // too; the marker precedes `pub`.
-            let is_pure = if self.at_pure_fn() {
-                self.bump_pure_marker();
-                true
-            } else if retired_s14_teaching_enabled()
+            let is_pure = if retired_s14_teaching_enabled()
                 && matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::FOREIGN_PURE)
                 && self.foreign_pure_follows()
             {
@@ -83,85 +73,40 @@ impl<'a> Parser<'a> {
             } else {
                 false
             };
-            // D-TAINT1: `#Sanitizer fn` is valid on methods too.
-            let is_sanitizer = if self.at_sanitizer_fn() {
-                self.bump(); // `#`
-                self.bump(); // `Sanitizer`
-                true
+            let markers = if matches!(self.peek().kind, TokKind::Hash) {
+                self.parse_method_marker_sequence()?
             } else {
-                false
+                Vec::new()
             };
-            let mut is_replayable = false;
-            let mut replayable_span = None;
-            if self.at_replayable_fn() {
-                let start = self.bump().span.start; // `#`
-                let end = self.bump().span.end; // `Replayable`
-                is_replayable = true;
-                replayable_span = Some(Span::new(start, end));
-            }
-            // D-METHODMACRO1=A: `#Inline`/`#Inline(Always)` on methods too.
-            let (is_inline, is_inline_always, inline_span) = self.parse_inline_marker()?;
-            // D-STATE1: `#State(S)` / `#Transition(From, To)` typestate markers on
-            // methods — the common case (typestate methods carry `self`).
-            let mut state_requires = None;
-            let mut state_transition = None;
-            loop {
-                // D-SCHEDULE1 (card #505): a marker on its own line before `fn`
-                // gets a lexer-inserted `;` — skip it, matching `func()`'s own
-                // stacked-marker loop, so `#Task`/`#Every(…)` (wrong here, but
-                // still stacked with `#State`/`#Transition`) don't cascade into
-                // a spurious "expected `fn`" parse error after the E0925 push.
-                while matches!(self.peek().kind, TokKind::Semi) {
-                    self.bump();
-                }
-                if state_requires.is_none() && self.at_state_fn() {
-                    state_requires = Some(self.parse_state_require_marker()?);
-                } else if state_transition.is_none() && self.at_transition_fn() {
-                    state_transition = Some(self.parse_transition_marker()?);
-                } else if self.at_task_fn() {
-                    // D-SCHEDULE1 (card #505): `#Task` only marks a top-level
-                    // function (D-JPK-TASKRUN1) — recoverable diagnostic, same
-                    // shape as the E0062 plane-teaching pushes elsewhere, then
-                    // keep parsing the method normally.
-                    let start = self.bump().span.start; // `#`
-                    let end = self.bump().span.end; // `Task`
-                    self.diags
-                        .push(Self::e0925_task_not_toplevel(Span::new(start, end)));
-                } else if self.at_every_fn() {
-                    let m = self.parse_every_marker()?;
-                    self.diags.push(Self::e0925_task_not_toplevel(m.span));
-                } else {
-                    break;
-                }
-            }
             while matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
             let (is_pub, is_package_pub) = self.parse_pub_qualifier();
             self.expect_kw(TokKind::KwFn, "to start a method")?;
-            self.func_after_fn(
+            let function = self.func_after_fn(
                 is_pub,
                 is_package_pub,
                 false,
                 None,
                 None,
                 is_pure,
-                is_sanitizer,
-                None,
-                state_requires,
-                state_transition,
                 false,
                 None,
-                is_must_use,
-                must_use_span,
                 None,
                 None,
-                is_inline,
-                is_inline_always,
-                inline_span,
-                is_replayable,
-                replayable_span,
-            )
+                false,
+                None,
+                false,
+                None,
+                None,
+                None,
+                false,
+                false,
+                None,
+                false,
+                None,
+            )?;
+            self.apply_method_markers(function, markers)
         }
     
         pub(super) fn field(&mut self) -> Result<Field, Diagnostic> {

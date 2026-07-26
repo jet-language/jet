@@ -50,6 +50,11 @@ impl<'a> Parser<'a> {
         /// `test` path enters via `test_def_after_kw` after emitting E0052.
         pub(in crate::Parser) fn test_def(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
             let marker = self.parse_rule_marker()?;
+            self.bind_rule_fact(
+                marker.name_span,
+                None,
+                crate::Policy::RuleSite::Test,
+            );
             if matches!(self.peek().kind, TokKind::KwFn) {
                 if !marker.args.is_empty() {
                     return Err(crate::Policy::marker_argument_shape_error(
@@ -149,6 +154,11 @@ impl<'a> Parser<'a> {
         pub(in crate::Parser) fn bench_def(&mut self) -> Result<crate::AST::BenchDef, Diagnostic> {
             let item_start = self.peek().span.start;
             let marker = self.parse_rule_marker()?;
+            self.bind_rule_fact(
+                marker.name_span,
+                None,
+                crate::Policy::RuleSite::Bench,
+            );
             let arguments = self.bound_registered_rule_arguments(&marker)?;
             let Some(name_argument) = arguments.parameter(0) else {
                 return Err(crate::Policy::marker_argument_shape_error(
@@ -485,7 +495,7 @@ impl<'a> Parser<'a> {
         pub(super) fn extern_fn(&mut self) -> Result<crate::AST::ExternFn, Diagnostic> {
             let abi = if matches!(self.peek().kind, TokKind::Hash) {
                 let markers = self.parse_attached_marker_sequence(
-                    Some(crate::Policy::RuleSite::Function),
+                    crate::Policy::RuleSite::Function,
                     "C declaration",
                 )?;
                 let marker = markers

@@ -17,173 +17,7 @@
 use crate::AST::{Item, Marker};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
-use std::collections::HashSet;
-
-fn literal_string(expression: &crate::AST::Expr) -> Option<String> {
-    match expression {
-        crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
-            crate::AST::StrPart::Lit(text) => Some(text.clone()),
-            crate::AST::StrPart::Interp(..) => None,
-        },
-        _ => None,
-    }
-}
-
-pub(crate) fn resolve_static_rule_products(
-    module: &mut crate::AST::LoadedModule,
-    base_dir: &std::path::Path,
-    core_imports: &std::collections::HashMap<String, String>,
-    diags: &mut Vec<Diagnostic>,
-) {
-    let (funcs_owned, externs, globals) =
-        crate::Sema::Registration::comptime_context_from_items(&module.items);
-    let funcs = funcs_owned
-        .iter()
-        .map(|(name, function)| (name.clone(), function))
-        .collect::<std::collections::HashMap<_, _>>();
-    let facts = module.rule_facts.clone();
-    for application in facts {
-        let marker = application.marker;
-        if !matches!(
-            marker.name.as_str(),
-            Syntax::ATTR_INVARIANT | Syntax::ATTR_HTML
-        ) {
-            continue;
-        }
-        let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
-            continue;
-        };
-        let Some(bindings) = rule.signature.marker_argument_bindings(&marker) else {
-            diags.push(crate::Policy::marker_argument_shape_error(
-                &marker.name,
-                marker.span,
-            ));
-            continue;
-        };
-        let Some(binding) = bindings
-            .iter()
-            .find(|binding| binding.parameter_index == Some(0))
-        else {
-            continue;
-        };
-        let expression = &marker.args[binding.source_index];
-        let text = match literal_string(expression) {
-            Some(text) => text,
-            None => {
-                let value = crate::Comptime::evaluate_with_imports_opts_collecting(
-                    expression,
-                    &funcs,
-                    &externs,
-                    base_dir,
-                    &globals,
-                    core_imports,
-                    false,
-                    0,
-                );
-                let Ok((crate::Comptime::CtValue::Str(text), _)) = value else {
-                    diags.push(crate::Policy::marker_argument_shape_error(
-                        &marker.name,
-                        marker.span,
-                    ));
-                    continue;
-                };
-                text
-            }
-        };
-        match marker.name.as_str() {
-            Syntax::ATTR_HTML => module.html_path = Some(text),
-            Syntax::ATTR_INVARIANT => {
-                if let Some(crate::AST::Item::Distinct(distinct)) = module
-                    .items
-                    .iter_mut()
-                    .find(|item| matches!(item, crate::AST::Item::Distinct(distinct)
-                        if distinct.span.start <= marker.span.start && marker.span.end <= distinct.span.end))
-                {
-                    match crate::Policy::parse_invariant_bounds(&text) {
-                        Some((lo, hi)) if lo <= hi => {
-                            distinct.range = Some((lo, hi, marker.span));
-                            distinct.invariant = Some((text, marker.span));
-                        }
-                        Some((lo, hi)) => diags.push(Diagnostic::error(
-                            "E0137",
-                            format!("this invariant range is empty — {lo} is after {hi}"),
-                            "a refinement's low bound must not be greater than its high bound"
-                                .to_string(),
-                            "fix the `#Invariant` bounds".to_string(),
-                            Some(expression.span()),
-                        )),
-                        None => diags.push(Diagnostic::error(
-                            "E0003",
-                            "`#Invariant` only supports linear integer bounds over `value`"
-                                .to_string(),
-                            "the first D-REFINE1 prover accepts comparisons joined with `&&`"
-                                .to_string(),
-                            "write `value >= lo && value < hi`, `lo <= value && value <= hi`, or `value == n`"
-                                .to_string(),
-                            Some(marker.span),
-                        )),
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    for item in &mut module.items {
-        let (name, expression, prefix, marker_name, marker_span) = match item {
-            Item::Test(test) => {
-                let Some(expression) = test.name_expr.as_ref() else {
-                    continue;
-                };
-                (
-                    &mut test.name,
-                    expression,
-                    test.name_prefix.as_deref(),
-                    Syntax::KW_TEST,
-                    test.name_span,
-                )
-            }
-            Item::Bench(bench) => (
-                &mut bench.name,
-                &bench.name_expr,
-                bench.name_prefix.as_deref(),
-                Syntax::KW_BENCH,
-                bench.name_span,
-            ),
-            _ => continue,
-        };
-        let text = match literal_string(expression) {
-            Some(text) => text,
-            None => {
-                let value = crate::Comptime::evaluate_with_imports_opts_collecting(
-                    expression,
-                    &funcs,
-                    &externs,
-                    base_dir,
-                    &globals,
-                    core_imports,
-                    false,
-                    0,
-                );
-                let Ok((crate::Comptime::CtValue::Str(text), _)) = value else {
-                    diags.push(crate::Policy::marker_argument_shape_error(
-                        marker_name,
-                        marker_span,
-                    ));
-                    continue;
-                };
-                text
-            }
-        };
-        *name = Some(match prefix {
-            Some(prefix) => format!(
-                "{}_{}",
-                prefix.trim_end_matches('_'),
-                text.trim_start_matches('_')
-            ),
-            None => text,
-        });
-    }
-}
+use std::collections::{HashMap, HashSet, VecDeque};
 
 pub(crate) struct ValidatedRuleArguments {
     pub(crate) bindings: Vec<crate::Policy::RuleArgumentBinding>,
@@ -213,18 +47,357 @@ impl ValidatedRuleArguments {
     }
 }
 
+fn rule_signature_bindings(
+    marker: &Marker,
+) -> Result<Vec<crate::Policy::RuleArgumentBinding>, Diagnostic> {
+    let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
+        return Ok(Vec::new());
+    };
+    rule.signature
+        .marker_argument_bindings(marker)
+        .ok_or_else(|| crate::Policy::marker_argument_shape_error(&marker.name, marker.span))
+}
+
+fn static_rule_site(site: Option<crate::Policy::RuleSite>) -> bool {
+    matches!(
+        site,
+        Some(
+            crate::Policy::RuleSite::Package
+                | crate::Policy::RuleSite::File
+                | crate::Policy::RuleSite::Module
+                | crate::Policy::RuleSite::Type
+                | crate::Policy::RuleSite::Declaration
+                | crate::Policy::RuleSite::Constant
+                | crate::Policy::RuleSite::Field
+                | crate::Policy::RuleSite::Variant
+                | crate::Policy::RuleSite::Test
+                | crate::Policy::RuleSite::Bench
+        )
+    )
+}
+
+fn materialize_static_marker_values(
+    items: &mut [Item],
+    validated: &HashMap<usize, ValidatedRuleArguments>,
+    invalid: &HashSet<usize>,
+) {
+    fn apply(marker: &mut Marker, validated: &HashMap<usize, ValidatedRuleArguments>) {
+        marker.ct = validated
+            .get(&marker.name_span.start)
+            .and_then(|arguments| arguments.constant_for_source(0))
+            .cloned();
+    }
+    fn apply_all(
+        markers: &mut Vec<Marker>,
+        validated: &HashMap<usize, ValidatedRuleArguments>,
+        invalid: &HashSet<usize>,
+    ) {
+        markers.retain(|marker| !invalid.contains(&marker.name_span.start));
+        for marker in markers {
+            apply(marker, validated);
+        }
+    }
+    for item in items {
+        match item {
+            Item::Struct(item) => {
+                apply_all(&mut item.type_markers, validated, invalid);
+                apply_all(&mut item.serde_markers, validated, invalid);
+                for field in &mut item.fields {
+                    apply_all(&mut field.serde_markers, validated, invalid);
+                }
+            }
+            Item::Enum(item) => {
+                apply_all(&mut item.type_markers, validated, invalid);
+                apply_all(&mut item.serde_markers, validated, invalid);
+                for variant in &mut item.variants {
+                    apply_all(&mut variant.serde_markers, validated, invalid);
+                }
+            }
+            Item::Distinct(item) => apply_all(&mut item.type_markers, validated, invalid),
+            _ => {}
+        }
+    }
+}
+
+pub(crate) fn resolve_static_rule_products(
+    module: &mut crate::AST::LoadedModule,
+    base_dir: &std::path::Path,
+    core_imports: &std::collections::HashMap<String, String>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let (funcs_owned, externs, globals) =
+        crate::Sema::Registration::comptime_context_from_items(&module.items);
+    let funcs = funcs_owned
+        .iter()
+        .map(|(name, function)| (name.clone(), function))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut facts = module
+        .rule_facts
+        .iter()
+        .filter(|application| {
+            !matches!(
+                application.marker.name.as_str(),
+                Syntax::KW_TEST | Syntax::KW_BENCH
+            )
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    for item in &module.items {
+        let (name, expression, span) = match item {
+            Item::Test(test) => {
+                let Some(expression) = &test.name_expr else {
+                    continue;
+                };
+                (Syntax::KW_TEST, expression.clone(), test.span)
+            }
+            Item::Bench(bench) => (Syntax::KW_BENCH, bench.name_expr.clone(), bench.span),
+            _ => continue,
+        };
+        facts.push(crate::AST::AppliedRuleApplication {
+            marker: Marker {
+                name: name.to_string(),
+                name_span: span,
+                args: vec![expression],
+                arg_labels: vec![None],
+                span,
+                ct: None,
+            },
+            target: Some(span),
+            site: Some(if name == Syntax::KW_TEST {
+                crate::Policy::RuleSite::Test
+            } else {
+                crate::Policy::RuleSite::Bench
+            }),
+        });
+    }
+    let mut validated = HashMap::new();
+    let mut invalid = HashSet::new();
+    let mut static_strings = Vec::new();
+    for application in &facts {
+        let marker = &application.marker;
+        let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
+            continue;
+        };
+        if matches!(rule.status, crate::Policy::RuleStatus::Retired { .. })
+            || !static_rule_site(application.site)
+        {
+            continue;
+        }
+        if application
+            .site
+            .is_some_and(|site| !crate::Policy::rule_allows(&marker.name, site))
+        {
+            diags.push(Diagnostic::error(
+                "E0355",
+                format!("`#{}` cannot attach at this site", marker.name),
+                "the applied-rule registry gives every rule exact attachment sites".to_string(),
+                "remove the marker or move it to one of its registered sites".to_string(),
+                Some(marker.span),
+            ));
+            continue;
+        }
+        let bindings = match rule_signature_bindings(marker) {
+            Ok(bindings) => bindings,
+            Err(diagnostic) => {
+                diags.push(diagnostic);
+                invalid.insert(marker.name_span.start);
+                continue;
+            }
+        };
+        let mut types = Vec::with_capacity(bindings.len());
+        let mut constants = Vec::with_capacity(bindings.len());
+        let mut mismatch = false;
+        for binding in &bindings {
+            let expression = &marker.args[binding.source_index];
+            if binding.ty == crate::Policy::RuleArgType::Ident {
+                mismatch |= !matches!(
+                    expression,
+                    crate::AST::Expr::Ident(..)
+                        | crate::AST::Expr::Field(..)
+                        | crate::AST::Expr::EnumLit { .. }
+                );
+                types.push(None);
+                constants.push(None);
+                continue;
+            }
+            let needs_value = !matches!(binding.ty, crate::Policy::RuleArgType::Any)
+                || marker.name == Syntax::ATTR_DEFAULT;
+            if !needs_value {
+                types.push(None);
+                constants.push(None);
+                continue;
+            }
+            let value = crate::Comptime::evaluate_with_imports_opts_collecting(
+                expression,
+                &funcs,
+                &externs,
+                base_dir,
+                &globals,
+                core_imports,
+                false,
+                0,
+            );
+            let Ok((value, _)) = value else {
+                mismatch |= binding.ty != crate::Policy::RuleArgType::Any;
+                types.push(None);
+                constants.push(None);
+                continue;
+            };
+            let ty = match &value {
+                crate::Comptime::CtValue::Str(_) => Some(crate::AST::Type::String),
+                crate::Comptime::CtValue::Bool(_) => Some(crate::AST::Type::Bool),
+                crate::Comptime::CtValue::Int(_) => Some(crate::AST::Type::Int),
+                _ => None,
+            };
+            mismatch |= match binding.ty {
+                crate::Policy::RuleArgType::Any => false,
+                crate::Policy::RuleArgType::String => {
+                    !matches!(value, crate::Comptime::CtValue::Str(_))
+                }
+                crate::Policy::RuleArgType::Bool => {
+                    !matches!(value, crate::Comptime::CtValue::Bool(_))
+                }
+                crate::Policy::RuleArgType::Int => {
+                    !matches!(value, crate::Comptime::CtValue::Int(_))
+                }
+                crate::Policy::RuleArgType::DurationOrString => {
+                    !matches!(value, crate::Comptime::CtValue::Str(_))
+                        && !matches!(expression, crate::AST::Expr::UnitLit { .. })
+                }
+                crate::Policy::RuleArgType::Ident => false,
+            };
+            types.push(ty);
+            constants.push(Some(value));
+        }
+        if mismatch {
+            diags.push(crate::Policy::marker_argument_shape_error(
+                &marker.name,
+                marker.span,
+            ));
+            invalid.insert(marker.name_span.start);
+            continue;
+        }
+        let arguments = ValidatedRuleArguments {
+            bindings,
+            types,
+            constants,
+        };
+        if let Some(crate::Comptime::CtValue::Str(text)) =
+            arguments.constant_for_source(0)
+        {
+            static_strings.push((marker.name.clone(), marker.span, text.clone()));
+        }
+        validated.insert(marker.name_span.start, arguments);
+    }
+    materialize_static_marker_values(&mut module.items, &validated, &invalid);
+    for item in &module.items {
+        let Item::Struct(item) = item else { continue };
+        for field in &item.fields {
+            for marker in &field.serde_markers {
+                if marker.name == Syntax::ATTR_DEFAULT
+                    && !marker.args.is_empty()
+                    && marker.ct.is_none()
+                    && validated.contains_key(&marker.name_span.start)
+                {
+                    diags.push(crate::Sema::e2414(&field.name, marker.span));
+                }
+            }
+        }
+    }
+    for (name, marker_span, text) in &static_strings {
+        match name.as_str() {
+            Syntax::ATTR_HTML => module.html_path = Some(text.clone()),
+            Syntax::ATTR_INVARIANT => {
+                if let Some(crate::AST::Item::Distinct(distinct)) = module
+                    .items
+                    .iter_mut()
+                    .find(|item| matches!(item, crate::AST::Item::Distinct(distinct)
+                        if distinct.span.start <= marker_span.start && marker_span.end <= distinct.span.end))
+                {
+                    match crate::Policy::parse_invariant_bounds(text) {
+                        Some((lo, hi)) if lo <= hi => {
+                            distinct.range = Some((lo, hi, *marker_span));
+                            distinct.invariant = Some((text.clone(), *marker_span));
+                        }
+                        Some((lo, hi)) => diags.push(Diagnostic::error(
+                            "E0137",
+                            format!("this invariant range is empty — {lo} is after {hi}"),
+                            "a refinement's low bound must not be greater than its high bound"
+                                .to_string(),
+                            "fix the `#Invariant` bounds".to_string(),
+                            Some(*marker_span),
+                        )),
+                        None => diags.push(Diagnostic::error(
+                            "E0003",
+                            "`#Invariant` only supports linear integer bounds over `value`"
+                                .to_string(),
+                            "the first D-REFINE1 prover accepts comparisons joined with `&&`"
+                                .to_string(),
+                            "write `value >= lo && value < hi`, `lo <= value && value <= hi`, or `value == n`"
+                                .to_string(),
+                            Some(*marker_span),
+                        )),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut test_names: VecDeque<_> = static_strings
+        .iter()
+        .filter(|(name, _, _)| name == Syntax::KW_TEST)
+        .map(|(_, _, text)| text.clone())
+        .collect();
+    let mut bench_names: VecDeque<_> = static_strings
+        .iter()
+        .filter(|(name, _, _)| name == Syntax::KW_BENCH)
+        .map(|(_, _, text)| text.clone())
+        .collect();
+    for item in &mut module.items {
+        let (name, prefix, text) = match item {
+            Item::Test(test) => {
+                if test.name_expr.is_none() {
+                    continue;
+                }
+                (
+                    &mut test.name,
+                    test.name_prefix.as_deref(),
+                    test_names.pop_front(),
+                )
+            }
+            Item::Bench(bench) => (
+                &mut bench.name,
+                bench.name_prefix.as_deref(),
+                bench_names.pop_front(),
+            ),
+            _ => continue,
+        };
+        let Some(text) = text else {
+            continue;
+        };
+        *name = Some(match prefix {
+            Some(prefix) => format!(
+                "{}_{}",
+                prefix.trim_end_matches('_'),
+                text.trim_start_matches('_')
+            ),
+            None => text,
+        });
+    }
+}
+
 impl<'a> crate::Sema::Checker<'a> {
     pub(crate) fn validate_rule_signature(
         &mut self,
         marker: &mut Marker,
     ) -> Option<ValidatedRuleArguments> {
-        let rule = crate::Policy::applied_rule(&marker.name)?;
-        let Some(bindings) = rule.signature.marker_argument_bindings(marker) else {
-            self.diags.push(crate::Policy::marker_argument_shape_error(
-                &marker.name,
-                marker.span,
-            ));
-            return None;
+        crate::Policy::applied_rule(&marker.name)?;
+        let bindings = match rule_signature_bindings(marker) {
+            Ok(bindings) => bindings,
+            Err(diagnostic) => {
+                self.diags.push(diagnostic);
+                return None;
+            }
         };
         let mut types = Vec::with_capacity(bindings.len());
         let mut constants = Vec::with_capacity(bindings.len());
@@ -232,7 +405,7 @@ impl<'a> crate::Sema::Checker<'a> {
         for binding in &bindings {
             let argument = &mut marker.args[binding.source_index];
             let ty = match binding.ty {
-                crate::Policy::RuleArgType::Any => None,
+                crate::Policy::RuleArgType::Any => self.infer(argument),
                 crate::Policy::RuleArgType::Ident => None,
                 crate::Policy::RuleArgType::Bool
                     if marker.name == Syntax::ATTR_META
@@ -252,7 +425,12 @@ impl<'a> crate::Sema::Checker<'a> {
                 crate::Policy::RuleArgType::String => {
                     matches!(ty, Some(crate::AST::Type::String))
                 }
-                crate::Policy::RuleArgType::Ident => binding.ty.matches_expr(argument),
+                crate::Policy::RuleArgType::Ident => matches!(
+                    argument,
+                    crate::AST::Expr::Ident(..)
+                        | crate::AST::Expr::Field(..)
+                        | crate::AST::Expr::EnumLit { .. }
+                ),
                 crate::Policy::RuleArgType::Bool => {
                     matches!(ty, Some(crate::AST::Type::Bool))
                 }
@@ -334,70 +512,6 @@ impl<'a> crate::Sema::Checker<'a> {
         })?;
         Some(self.rule_facts.remove(index).marker)
     }
-}
-
-/// D-MARKSIG1=A: one sema pass checks every source-order rule fact against
-/// the registry signature. Parser owns grammar/labels/arity; sema owns
-/// argument kinds. One bad marker produces one E0930.
-pub(crate) fn check_rule_signatures(
-    applications: &[crate::AST::AppliedRuleApplication],
-) -> Vec<Diagnostic> {
-    let mut out = Vec::new();
-    for application in applications {
-        let marker = &application.marker;
-        if matches!(
-            marker.name.as_str(),
-            Syntax::ATTR_META
-                | Syntax::CTX_BLOCK
-                | Syntax::KW_TEST
-                | Syntax::KW_BENCH
-                | Syntax::ATTR_INVARIANT
-                | Syntax::ATTR_HTML
-        ) {
-            continue;
-        }
-        let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
-            continue;
-        };
-        if application.target.is_some()
-            || rule.sites.iter().any(|site| {
-                matches!(
-                    site,
-                    crate::Policy::RuleSite::Function
-                        | crate::Policy::RuleSite::Block
-                        | crate::Policy::RuleSite::Statement
-                        | crate::Policy::RuleSite::Declaration
-                        | crate::Policy::RuleSite::Expression
-                        | crate::Policy::RuleSite::Operation
-                )
-            })
-        {
-            continue;
-        }
-        if matches!(rule.status, crate::Policy::RuleStatus::Retired { .. })
-            || marker.name == Syntax::KW_UNSAFE && marker.args.is_empty()
-        {
-            continue;
-        }
-        let Some(bindings) = rule.signature.marker_argument_bindings(marker) else {
-            out.push(crate::Policy::marker_argument_shape_error(
-                &marker.name,
-                marker.span,
-            ));
-            continue;
-        };
-        if bindings.iter().any(|binding| {
-            !binding
-                .ty
-                .matches_expr(&marker.args[binding.source_index])
-        }) {
-            out.push(crate::Policy::marker_argument_shape_error(
-                &marker.name,
-                marker.span,
-            ));
-        }
-    }
-    out
 }
 
 /// E0927: `name` isn't a registered applied rule. `vocab` supplies nearest

@@ -22,6 +22,78 @@ fn codes(source: &str) -> Vec<String> {
     checked(source, jet::Sema::CompileMode::Check).1
 }
 
+fn parse_codes(source: &str) -> Vec<String> {
+    let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
+    assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+    match jet::Parser::parse(&tokens) {
+        Ok(_) => Vec::new(),
+        Err(diagnostics) => diagnostics
+            .into_iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect(),
+    }
+}
+
+#[test]
+fn field_and_variant_sites_reject_every_non_applicable_example() {
+    for source in [
+        "#[Task, Static] struct Bad { value: Int }\nfn run() {}",
+        "enum Bad { #Comparable Value }\nfn run() {}",
+        "enum Bad { #Skip Value }\nfn run() {}",
+    ] {
+        let diagnostics = parse_codes(source);
+        assert_eq!(
+            diagnostics.iter().filter(|code| *code == "E0355").count(),
+            1,
+            "{diagnostics:?}\n{source}"
+        );
+    }
+}
+
+#[test]
+fn method_markers_share_the_ordered_registry_collector() {
+    let source = r#"
+state Door { Ready }
+struct Door {
+    #[Inline, State(Ready)]
+    fn open(self) {}
+}
+fn run() {}
+"#;
+    let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
+    assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+    let program = jet::Parser::parse(&tokens).expect("method marker list should parse");
+    let jet::AST::Item::Struct(door) = &program.items[1] else {
+        panic!("Door struct")
+    };
+    assert!(door.methods[0].is_inline);
+    assert_eq!(
+        door.methods[0].state_requires.as_ref().map(|state| state.0.as_str()),
+        Some("Ready")
+    );
+
+    let wrong = parse_codes("struct Bad { #Task fn work(self) {} }\nfn run() {}");
+    assert_eq!(wrong.iter().filter(|code| *code == "E0355").count(), 1);
+}
+
+#[test]
+fn adjacent_method_markers_keep_the_shared_e0999_rewrite() {
+    let source =
+        "state Door { Ready }\nstruct Door { #Inline #State(Ready) fn open(self) {} }\nfn run() {}";
+    let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
+    assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+    let (_, diagnostics) =
+        jet::Parser::parse_for_check(&tokens).expect("adjacent method markers recover");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0999")
+        .expect("shared adjacent-marker diagnostic");
+    assert_eq!(
+        diagnostic.edit.as_ref().map(|edit| edit.new_text.as_str()),
+        Some("#[Inline, State(Ready)]")
+    );
+}
+
 #[test]
 fn string_and_bool_rule_arguments_use_local_semantic_types() {
     let valid = codes(
@@ -239,6 +311,42 @@ fn static_string_products_report_one_shared_type_error_each() {
                 .filter(|code| code.as_str() == "E0930")
                 .count(),
             1,
+            "{diagnostics:?}\n{source}"
+        );
+    }
+}
+
+#[test]
+fn static_type_and_field_strings_use_the_same_signature_gate() {
+    let valid = codes(
+        r#"
+comptime tag_name = "kind"
+comptime field_name = "identifier"
+comptime variant_name = "ready"
+#[Codable, Tag(tag_name)]
+enum Event { #Rename(variant_name) Ready }
+#Codable
+struct Row { #Rename(field_name) id: Int }
+fn run() {}
+"#,
+    );
+    assert!(!valid.iter().any(|code| code == "E0930"), "{valid:?}");
+
+    for source in [
+        "comptime value = 42\n#[Codable, Tag(value)] enum Event { Ready }\nfn run() {}",
+        "comptime value = 42\n#Codable struct Row { #Rename(value) id: Int }\nfn run() {}",
+        "comptime value = 42\n#Codable enum Event { #Rename(value) Ready }\nfn run() {}",
+    ] {
+        let diagnostics = codes(source);
+        assert_eq!(
+            diagnostics.iter().filter(|code| *code == "E0930").count(),
+            1,
+            "{diagnostics:?}\n{source}"
+        );
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|code| matches!(code.as_str(), "E2407" | "E2409")),
             "{diagnostics:?}\n{source}"
         );
     }

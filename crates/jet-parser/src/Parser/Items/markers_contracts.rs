@@ -282,6 +282,11 @@ impl<'a> Parser<'a> {
             &mut self,
         ) -> Result<(crate::AST::Marker, Option<String>), Diagnostic> {
             let marker = self.parse_rule_marker()?;
+            self.bind_rule_fact(
+                marker.name_span,
+                None,
+                crate::Policy::RuleSite::File,
+            );
             let path = self.html_from_marker(&marker)?;
             Ok((marker, path))
         }
@@ -494,21 +499,6 @@ impl<'a> Parser<'a> {
                 arg,
                 span: Span::new(start, marker.span.end),
             })
-        }
-
-        /// E0925: `#Task`/`#Every(…)` written somewhere D-SCHEDULE1 doesn't
-        /// place them — on a method (only a top-level function can be a
-        /// task, D-JPK-TASKRUN1).
-        pub(super) fn e0925_task_not_toplevel(span: Span) -> Diagnostic {
-            Diagnostic::error(
-                "E0925",
-                "`#Task`/`#Every(…)` only mark a top-level function".to_string(),
-                "a task needs a free-standing name for `jet run --task <name> <entry>` — a \
-                 method has no such name, so it can't be one (D-JPK-TASKRUN1)."
-                    .to_string(),
-                "move this function to the top level, beside `fn run()`.".to_string(),
-                Some(span),
-            )
         }
 
         /// E0925: `#Every(…)` without the `#Task` marker it schedules.
