@@ -1242,7 +1242,9 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let direct_static = records.iter().filter(|record| record.entry.surface == Surface::DirectStatic).count();
     let value = records.iter().filter(|record| record.entry.surface == Surface::Value).count();
     let bespoke = records.iter().filter(|record| record.entry.surface == Surface::Bespoke).count();
-    assert_eq!((fixed, direct_static, value, bespoke), (512, 151, 528, 57));
+    // #747 / D-RANGE-EXCL1=C replaced enumerate with indexed + indexes on
+    // List, FixedList, and Iter: six additions, three removals, net +3 values.
+    assert_eq!((fixed, direct_static, value, bespoke), (512, 151, 531, 57));
 
     assert_eq!(record(&records, Surface::Fixed, "core.math", "round").class, Class::Covered);
     assert_eq!(record(&records, Surface::Fixed, "core.encoding.json", "to_string_pretty").class, Class::Covered);
@@ -1316,7 +1318,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     assert_eq!(record(&records, Surface::Value, "List", "filter").class, Class::Covered);
     assert_eq!(record(&records, Surface::Value, "List", "clear").class, Class::Covered);
     let sequence_methods = comptime_sequence_methods();
-    assert_eq!(sequence_methods.len(), 39, "SequenceParity method-set drift");
+    assert_eq!(sequence_methods.len(), 40, "SequenceParity method-set drift");
     for owner in ["List", "FixedList"] {
         for method in &sequence_methods {
             let expected = if owner == "FixedList" && method == "insert" {
@@ -1693,7 +1695,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let boundaries = records.iter().filter(|record| record.class == Class::Boundary).count();
     // #722 closed View/ViewMut.join. Iter.* covered via sequence dispatch (list-shaped TirBridge + AOT JetIter).
     // #722/#743: View.join + Iter.* covered. Zero PurePending effect-free backlog.
-    assert_eq!((records.len(), covered, pending, boundaries), (1_248, 901, 0, 347));
+    assert_eq!((records.len(), covered, pending, boundaries), (1_251, 904, 0, 347));
     eprintln!(
         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
         records.len()
@@ -1701,7 +1703,7 @@ fn canonical_builtin_inventory_is_complete_and_stable() {
     let hash = stable_hash(&rendered);
     assert_eq!(
         hash,
-        12183271370701440103,
+        14619055002375487292,
         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
     );
 }
