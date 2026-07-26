@@ -617,6 +617,133 @@ fn run() {
     );
 }
 
+/// #1162: a simulation may keep statically disjoint particle edit windows
+/// live while reading grid cells. D-SHAPE-PLACE1 lowers the particle windows
+/// through safe structural splits.
+#[test]
+fn indexed_simulation_static_update_lowers_to_safe_splits() {
+    let src = r#"
+struct Particle { position: Int, velocity: Int }
+struct Cell { force: Int }
+
+fn run() {
+    particles := [Particle].{
+        Particle.{ position: 10, velocity: 2 },
+        Particle.{ position: 20, velocity: 3 },
+        Particle.{ position: 30, velocity: 4 }
+    }
+    grid :: [Cell].{
+        Cell.{ force: 5 },
+        Cell.{ force: 7 },
+        Cell.{ force: 11 }
+    }
+
+    left :: &particles[0]
+    right :: &particles[2]
+    left.velocity += grid[0].force
+    right.velocity += grid[2].force
+    left.position += left.velocity
+    right.position += right.velocity
+    print("{left.position},{particles[1].position},{right.position}")
+}
+"#;
+    let out = jet::compile(src).expect("static particle indexes must compile");
+    assert!(
+        out.rust.matches(".split_at_mut(").count() >= 4,
+        "particle edit windows must use safe structural splits: {}",
+        out.rust
+    );
+}
+
+/// #1162 / #1198: source-level claims that two runtime indexes differ do not
+/// prove place disjointness. The existing checker must reject this case.
+#[test]
+fn indexed_simulation_rejects_dynamic_disjointness_claim() {
+    let src = r#"
+struct Particle { position: Int }
+
+fn update_pair(particles: &[Particle], left_index: Int, right_index: Int) {
+    left :: &particles[left_index]
+    right :: &particles[right_index]
+    left.position += 1
+    right.position += 1
+}
+
+fn run() {
+    particles := [Particle].{
+        Particle.{ position: 10 },
+        Particle.{ position: 20 }
+    }
+    update_pair(&particles, 0, 1)
+}
+"#;
+    let diags = jet::compile(src)
+        .expect_err("runtime indexes stay conservatively overlapping until #1198");
+    let diag = diags
+        .iter()
+        .find(|diag| diag.code == "E0212")
+        .unwrap_or_else(|| panic!("expected the overlapping-window error: {diags:?}"));
+    assert_eq!(
+        diag.what,
+        "`particles[…]` already has a live view that conflicts with `right`"
+    );
+    assert!(diag.why.contains("exclusive mutable view"), "{diag:?}");
+}
+
+/// #1162: hostile source cannot create two live edit windows to the same
+/// particle, even when the bindings have different names.
+#[test]
+fn indexed_simulation_rejects_hostile_overlap() {
+    let src = r#"
+struct Particle { position: Int }
+
+fn run() {
+    particles := [Particle].{
+        Particle.{ position: 10 },
+        Particle.{ position: 20 }
+    }
+    first :: &particles[0]
+    duplicate :: &particles[0]
+    first.position += 1
+    duplicate.position += 1
+}
+"#;
+    let diags = jet::compile(src).expect_err("overlapping particle edits must fail");
+    let diag = diags
+        .iter()
+        .find(|diag| diag.code == "E0212")
+        .unwrap_or_else(|| panic!("expected the overlapping-window error: {diags:?}"));
+    assert_eq!(
+        diag.what,
+        "`particles[…]` already has a live view that conflicts with `duplicate`"
+    );
+    assert!(diag.why.contains("exclusive mutable view"), "{diag:?}");
+}
+
+/// #1162: the memory example runs the indexed particle/grid update through
+/// the production CLI and native backend with exact output.
+#[test]
+fn indexed_simulation_example_runs_production_pipeline() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args([
+            "run",
+            "--release",
+            "examples/features/memory/place_windows.jet",
+        ])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("run the indexed simulation through the production native CLI path");
+    assert!(
+        output.status.success(),
+        "native indexed simulation failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("example stdout must be UTF-8"),
+        "17,20,45\n"
+    );
+}
+
 #[test]
 fn disjoint_place_split_plans_follow_source_order() {
     let src = r#"

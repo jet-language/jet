@@ -1,16 +1,34 @@
-// D-SHAPE-PLACE1=A: bare range reads, `&` edits, `~` copies.
+// D-SHAPE-PLACE1=A: a particle/grid update using bare reads, `&` edits,
+// and `~` copies. The two constant particle indexes are provably disjoint,
+// so Jet lowers their live edit windows through a safe structural split.
+struct Particle {
+    position: Int
+    velocity: Int
+}
+
+struct Cell {
+    force: Int
+}
+
 fn run() {
-    xs := [1, 2, 3]
-    if true {
-        read :: xs[0..1]
-        print(read[1])
+    particles := [Particle].{
+        Particle.{ position: 10, velocity: 2 },
+        Particle.{ position: 20, velocity: 3 },
+        Particle.{ position: 30, velocity: 4 }
     }
-    if true {
-        edit :: &xs[1..2]
-        edit[0] = 9
+    grid :: [Cell].{
+        Cell.{ force: 5 },
+        Cell.{ force: 7 },
+        Cell.{ force: 11 }
     }
-    print(xs[1])
-    copied :: ~xs[0..1]
-    xs[0] = 7
-    print(copied[0])
+
+    forces :: grid[0..2]
+    middle_before :: ~particles[1]
+    left :: &particles[0]
+    right :: &particles[2]
+    left.velocity += forces[0].force
+    right.velocity += forces[2].force
+    left.position += left.velocity
+    right.position += right.velocity
+    print("{left.position},{middle_before.position},{right.position}")
 }
