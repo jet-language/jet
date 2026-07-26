@@ -9,15 +9,39 @@ use super::builtins::eval_builtin;
 use super::handles::eval_handle;
 use super::{materialize_view_mut_window, unsupported, EvalCtx, Flow};
 
-fn show_typed_integer(value: &CtValue, ty: &Type) -> Option<String> {
-    if let (CtValue::Some(value), Type::Option(inner)) = (value, ty) {
-        return show_typed_integer(value, inner);
+fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
+    match (value, ty) {
+        (CtValue::Int(value), ty) => {
+            let (signed, _) = crate::Comptime::MathLayout::integer_type_layout(ty)?;
+            Some(crate::Comptime::MathLayout::integer_show(*value, signed))
+        }
+        (CtValue::Some(value), Type::Option(inner)) => {
+            Some(show_typed_value(value, inner, debug).unwrap_or_else(|| {
+                if debug {
+                    value.debug_rust()
+                } else {
+                    value.jet_show()
+                }
+            }))
+        }
+        (CtValue::None(_), Type::Option(_)) => Some("null".to_string()),
+        (CtValue::List(values), Type::List(inner) | Type::FixedList { elem: inner, .. }) => {
+            let parts = values
+                .iter()
+                .map(|value| {
+                    show_typed_value(value, inner, debug).unwrap_or_else(|| {
+                        if debug {
+                            value.debug_rust()
+                        } else {
+                            value.jet_show()
+                        }
+                    })
+                })
+                .collect::<Vec<_>>();
+            Some(format!("[{}]", parts.join(", ")))
+        }
+        _ => None,
     }
-    let CtValue::Int(value) = value else {
-        return None;
-    };
-    let (signed, _) = crate::Comptime::MathLayout::integer_type_layout(ty)?;
-    Some(crate::Comptime::MathLayout::integer_show(*value, signed))
 }
 
 impl EvalCtx<'_> {
@@ -43,9 +67,14 @@ impl EvalCtx<'_> {
                         TStrPart::Interp(e, fmt) => {
                             let v = self.eval_expr(e, scope)?;
                             let text = match fmt {
-                                crate::AST::StrFormat::Debug => self.debug_value(&v),
-                                crate::AST::StrFormat::Display => show_typed_integer(&v, &e.ty)
-                                    .unwrap_or(self.show_value(&v, scope)?),
+                                crate::AST::StrFormat::Debug => {
+                                    show_typed_value(&v, &e.ty, true)
+                                        .unwrap_or_else(|| self.debug_value(&v))
+                                }
+                                crate::AST::StrFormat::Display => {
+                                    show_typed_value(&v, &e.ty, false)
+                                        .unwrap_or(self.show_value(&v, scope)?)
+                                }
                             };
                             out.push_str(&text);
                         }
@@ -70,7 +99,8 @@ impl EvalCtx<'_> {
                 if self.pending_return.is_some() {
                     return Ok(CtValue::Unit);
                 }
-                let shown = show_typed_integer(&v, &inner.ty).unwrap_or_else(|| v.jet_show());
+                let shown =
+                    show_typed_value(&v, &inner.ty, false).unwrap_or_else(|| v.jet_show());
                 self.write_print(&shown, false)?;
                 Ok(CtValue::Unit)
             }
@@ -1377,7 +1407,7 @@ impl EvalCtx<'_> {
                     .ok_or_else(|| unsupported(&format!("numeric `{method}`"), self.span()))
             }
             TNumericOp::ToShow => Ok(CtValue::Str(
-                show_typed_integer(v, recv_ty).unwrap_or_else(|| v.jet_show()),
+                show_typed_value(v, recv_ty, false).unwrap_or_else(|| v.jet_show()),
             )),
             TNumericOp::Predicate(method) => {
                 crate::Comptime::Builtins::apply_method(v, method, vec![], self.span())

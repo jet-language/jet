@@ -5,7 +5,7 @@ use crate::AST::{BinOp, CtFloat, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 
-use super::Diagnostics::{overflow, unsupported};
+use super::Diagnostics::{comptime_panic, overflow, unsupported};
 use super::Value::CtValue;
 
 pub fn integer_type_layout(ty: &Type) -> Option<(bool, u8)> {
@@ -78,6 +78,27 @@ pub fn integer_bit_count(value: i64, width: u32, method: &str) -> Option<i64> {
     Some(i64::from(count))
 }
 
+pub fn integer_shift_trap(op: BinOp, count: i128, bits: u8) -> Option<String> {
+    if !matches!(op, BinOp::Shl | BinOp::Shr) || (0..i128::from(bits)).contains(&count) {
+        return None;
+    }
+    let direction = if op == BinOp::Shl { "left" } else { "right" };
+    Some(format!(
+        "shifting {direction} by {count} bits is out of range (this type is {bits} bits wide)"
+    ))
+}
+
+pub fn integer_remainder_overflows(
+    left: i64,
+    right: i64,
+    signed: bool,
+    bits: u8,
+) -> bool {
+    signed && left == integer_bound(true, bits, false) && right == -1
+}
+
+pub const INTEGER_REMAINDER_OVERFLOW: &str = "attempt to calculate the remainder with overflow";
+
 pub fn integer_binop(
     op: BinOp,
     left: i64,
@@ -95,6 +116,9 @@ pub fn integer_binop(
             .map(|value| CtValue::Int(integer_narrow(value, signed, bits)))
             .ok_or_else(|| overflow(name, span))
     };
+    if let Some(message) = integer_shift_trap(op, b, bits) {
+        return Err(comptime_panic(&message, span));
+    }
     match op {
         BinOp::Add => checked(a.checked_add(b), "add"),
         BinOp::Sub => checked(a.checked_sub(b), "subtract"),
@@ -102,14 +126,18 @@ pub fn integer_binop(
         BinOp::Div if b == 0 => Err(unsupported("division by zero", span)),
         BinOp::Div => checked(a.checked_div(b), "divide"),
         BinOp::Rem if b == 0 => Err(unsupported("division by zero", span)),
+        BinOp::Rem if integer_remainder_overflows(left, right, signed, bits) => {
+            Err(comptime_panic(INTEGER_REMAINDER_OVERFLOW, span))
+        }
         BinOp::Rem => checked(a.checked_rem(b), "take the remainder of"),
         BinOp::BitAnd => Ok(CtValue::Int(integer_narrow(a & b, signed, bits))),
         BinOp::BitOr => Ok(CtValue::Int(integer_narrow(a | b, signed, bits))),
         BinOp::BitXor => Ok(CtValue::Int(integer_narrow(a ^ b, signed, bits))),
-        BinOp::Shl | BinOp::Shr if b < 0 || b >= i128::from(bits) => {
-            Err(overflow(if op == BinOp::Shl { "shift left" } else { "shift right" }, span))
-        }
-        BinOp::Shl => checked(a.checked_shl(b as u32), "shift left"),
+        BinOp::Shl => Ok(CtValue::Int(integer_narrow(
+            a << (b as u32),
+            signed,
+            bits,
+        ))),
         BinOp::Shr => {
             let value = if signed {
                 a >> (b as u32)

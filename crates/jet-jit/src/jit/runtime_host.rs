@@ -253,11 +253,20 @@ extern "C" fn jet_jit_intn_binop(
     };
     let signed = signed != 0;
     let bits = bits as u8;
-    if matches!(op, BinOp::Shl | BinOp::Shr)
-        && right_signed == 0
-        && (right as u64) >= u64::from(bits)
+    let shift_count = if right_signed != 0 {
+        right as i128
+    } else {
+        right as u64 as i128
+    };
+    if let Some(message) = MathLayout::integer_shift_trap(op, shift_count, bits) {
+        with_runtime_mut(|rt| rt.set_trap(&message));
+        return 0;
+    }
+    if mode == INTN_MODE_TRAP
+        && op == BinOp::Rem
+        && MathLayout::integer_remainder_overflows(left, right, signed, bits)
     {
-        jet_trap_overflow("shift");
+        with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_REMAINDER_OVERFLOW));
         return 0;
     }
     let span = jet_codegen::Diagnostics::Span::new(0, 0);

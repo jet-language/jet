@@ -3955,6 +3955,9 @@ fn run() {
     print(maximum)
     print("{maximum}")
     print(maximum.to_string())
+    print("{maximum#Debug}")
+    print([maximum, U64.{1}])
+    print([U64#2].{maximum, U64.{1}})
     print(-i8_id(I8.{8}))
     print(-i16_id(I16.{16}))
     print(-i32_id(I32.{32}))
@@ -3973,6 +3976,8 @@ fn run() {
     print(combined)
     print(flags ^ mask)
     print(flags << 1)
+    print(u8_id(U8.MAX) << 1)
+    print(i8_id(I8.{64}) << 1)
     print(flags >> 2)
     print(u16_id(U16.MAX) > U16.{1})
     print(u32_id(U32.MAX) > U32.{1})
@@ -4052,7 +4057,9 @@ fn run() {
         concat!(
             "-8\n-1600\n-320000\n-6400000000\n8\n1600\n320000\n",
             "18446744073709551615\n18446744073709551615\n18446744073709551615\n",
-            "-8\n-16\n-32\n-64\n15\n60\n42\n42\n1\n8\n15\n7\n26\n3\n",
+            "18446744073709551615\n",
+            "[18446744073709551615, 1]\n[18446744073709551615, 1]\n",
+            "-8\n-16\n-32\n-64\n15\n60\n42\n42\n1\n8\n15\n7\n26\n254\n-128\n3\n",
             "true\ntrue\ntrue\n1\n3\n5\n4\n0\n",
             "-128\n127\n127\n0\n",
             "-32768\n32767\n32767\n0\n",
@@ -4121,6 +4128,100 @@ fn run() {
         let example = example_path(stem);
         assert_cranelift_three_way(&example, stem);
     }
+}
+
+#[test]
+fn fixed_width_signed_remainder_overflow_traps_across_tiers() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let source = r#"
+fn remainder(value: I8, divisor: I8) -> I8 {
+    return value % divisor
+}
+
+fn run() {
+    print(remainder(I8.MIN, I8.{-1}))
+}
+"#;
+    let dir = std::env::temp_dir().join(format!(
+        "jet_fixed_width_remainder_trap_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("fixed_width_remainder_trap.jet");
+    fs::write(&file, source).unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let bundle = checked_bundle_from_path(&shown);
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "signed remainder trap fixture must stay resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|reason| panic!("signed remainder trap must JIT-compile: {reason}"));
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Problems(diags) => diags,
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => panic!(
+            "interpreter did not trap: stdout={stdout:?} stderr={stderr:?} exit={exit_code}"
+        ),
+    };
+    jet_jit::reset_jit_trace_for_test();
+    let resident =
+        match run_cranelift_outcome_without_fallback(source, "fixed_width_remainder_trap") {
+            RunOutcome::Problems(diags) => diags,
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => panic!(
+                "resident JIT did not trap: stdout={stdout:?} stderr={stderr:?} exit={exit_code}"
+            ),
+        };
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "signed remainder trap used deopt or fallback"
+    );
+
+    assert_eq!(interpreted.len(), 1, "interpreter trap count");
+    assert_eq!(resident.len(), 1, "resident JIT trap count");
+    let interpreted = &interpreted[0];
+    let resident = &resident[0];
+    assert_eq!(resident.code, interpreted.code, "trap code drift");
+    assert_eq!(resident.what, interpreted.what, "trap summary drift");
+    assert_eq!(resident.why, interpreted.why, "trap detail drift");
+    assert_eq!(resident.fix, interpreted.fix, "trap fix drift");
+    let trap = "attempt to calculate the remainder with overflow";
+    assert_eq!(interpreted.code, "E0953");
+    assert!(
+        interpreted.why.contains(trap),
+        "interpreter trap lost source-width remainder detail: {}",
+        interpreted.why
+    );
+
+    let aot = compiled_binary_output(
+        &dir,
+        "fixed_width_remainder_trap",
+        0,
+        "fixed_width_remainder_trap",
+        &shown,
+    );
+    assert_eq!(aot.exit_code, 101, "AOT remainder trap exit: {aot:?}");
+    assert!(aot.stdout.is_empty(), "AOT printed a wrapped result: {aot:?}");
+    assert!(
+        aot.stderr.contains(trap),
+        "AOT remainder trap lost overflow detail: {}",
+        aot.stderr
+    );
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
