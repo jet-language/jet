@@ -1,7 +1,70 @@
-use crate::AST::Type;
+use crate::AST::{CallArg, Type};
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Checker;
+use crate::Sema::Effects::Effect;
 use super::alloc_ptrs::result_ty;
 use super::core_types::{u8_ty, unit_ty};
+use super::serde_diags::wrong_core_arity;
+
+impl<'a> Checker<'a> {
+    /// D-BROWSER-AUTO1=A: one argument checker for every Browser handle method.
+    /// Return-shape lookup stays in `net_method_return`; this seam owns arity,
+    /// argument types, and the ordinary read-only access convention.
+    pub(crate) fn check_browser_method_args(
+        &mut self,
+        type_name: &str,
+        method: &str,
+        args: &mut [CallArg],
+        span: Span,
+    ) -> bool {
+        let expected = match (type_name, method) {
+            ("Browser", "capabilities" | "context" | "close" | "trace")
+            | ("BrowserContext", "page" | "close")
+            | ("BrowserPage", "close")
+            | ("BrowserLocator", "click")
+            | ("BrowserEvent", "kind")
+            | ("BrowserCapabilities", "bidi" | "cdp" | "profile")
+            | ("BrowserTrace", "entry_count" | "redacted" | "summary") => Vec::new(),
+            ("Browser", "subscribe" | "protocol") | ("BrowserPage", "goto") => {
+                vec![Type::String]
+            }
+            ("Browser", "next_event") | ("BrowserLocator", "wait") => {
+                vec![Type::Named("BrowserTimeout".to_string())]
+            }
+            ("BrowserPage", "get_by_role") | ("BrowserProtocol", "send") => {
+                vec![Type::String, Type::String]
+            }
+            _ => return false,
+        };
+        if matches!(
+            (type_name, method),
+            ("Browser", "context" | "subscribe" | "close" | "next_event" | "protocol")
+                | ("BrowserContext", "page" | "close")
+                | ("BrowserPage", "goto" | "close")
+                | ("BrowserLocator", "wait" | "click")
+                | ("BrowserProtocol", "send")
+        ) {
+            self.record_effect(Effect::Net.name(), span);
+        }
+
+        if args.len() != expected.len() {
+            self.diags.push(wrong_core_arity(
+                method,
+                expected.len(),
+                args.len(),
+                span,
+            ));
+        }
+        for (index, arg) in args.iter_mut().enumerate() {
+            if let Some(param_ty) = expected.get(index) {
+                self.expect_core_arg(method, index, param_ty, arg);
+            } else {
+                self.infer(&mut arg.expr);
+            }
+        }
+        true
+    }
+}
 
 /// E2-M10: type-check a method call on a networking opaque type.
 /// Returns `Some(return_type)` when the method is valid.
@@ -81,6 +144,70 @@ pub fn net_method_return(
             ok: Box::new(Type::List(Box::new(u8_ty()))),
             err: Box::new(Type::Named("WsError".to_string())),
         })),
+        // D-BROWSER-AUTO1=A: native BiDi handles.
+        ("Browser", "capabilities") => {
+            Some(Some(Type::Named("BrowserCapabilities".to_string())))
+        }
+        ("Browser", "context") => Some(Some(Type::Result {
+            ok: Box::new(Type::Named("BrowserContext".to_string())),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
+        ("Browser", "subscribe") => Some(Some(Type::Result {
+            ok: Box::new(unit.clone()),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
+        ("Browser", "close") => Some(Some(Type::Result {
+            ok: Box::new(unit.clone()),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
+        ("Browser", "next_event") => Some(Some(Type::Result {
+            ok: Box::new(Type::Named("BrowserEvent".to_string())),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
+        ("Browser", "protocol") => Some(Some(Type::Result {
+            ok: Box::new(Type::Named("BrowserProtocol".to_string())),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
+        ("Browser", "trace") => {
+            Some(Some(Type::Named("BrowserTrace".to_string())))
+        }
+        ("BrowserContext", "page") => Some(Some(Type::Result {
+            ok: Box::new(Type::Named("BrowserPage".to_string())),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
+        ("BrowserContext", "close") => Some(Some(Type::Result {
+            ok: Box::new(unit.clone()),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
+        ("BrowserPage", "goto") => Some(Some(Type::Result {
+            ok: Box::new(unit.clone()),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
+        ("BrowserPage", "close") => Some(Some(Type::Result {
+            ok: Box::new(unit.clone()),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
+        ("BrowserPage", "get_by_role") => {
+            Some(Some(Type::Named("BrowserLocator".to_string())))
+        }
+        ("BrowserLocator", "wait") => Some(Some(Type::Result {
+            ok: Box::new(unit.clone()),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
+        ("BrowserLocator", "click") => Some(Some(Type::Result {
+            ok: Box::new(unit.clone()),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
+        ("BrowserEvent", "kind") => Some(Some(Type::String)),
+        ("BrowserProtocol", "send") => Some(Some(Type::Result {
+            ok: Box::new(Type::String),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
+        ("BrowserCapabilities", "bidi" | "cdp") => Some(Some(Type::Bool)),
+        ("BrowserCapabilities", "profile") => Some(Some(Type::String)),
+        ("BrowserTrace", "entry_count") => Some(Some(Type::Int)),
+        ("BrowserTrace", "redacted") => Some(Some(Type::Bool)),
+        ("BrowserTrace", "summary") => Some(Some(Type::String)),
         // D-ROUTE1=A: HttpRouter registration methods.
         ("HttpRouter", "get" | "post" | "put" | "delete") => Some(Some(unit.clone())),
         // TcpListener methods.
@@ -441,6 +568,75 @@ pub fn http_type_method_return(
                 ok: Box::new(Type::List(Box::new(u8_ty()))),
                 err: Box::new(Type::Named("WsError".to_string())),
             })),
+            _ => None,
+        },
+        Type::Named(n) if n == "Browser" => match (method, _args.len()) {
+            ("capabilities", 0) => mk("BrowserCapabilities"),
+            ("context", 0) => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("BrowserContext".to_string())),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
+            ("subscribe", 1) | ("close", 0) => Some(Some(Type::Result {
+                ok: Box::new(unit_ty()),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
+            ("next_event", 1) => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("BrowserEvent".to_string())),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
+            ("protocol", 1) => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("BrowserProtocol".to_string())),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
+            ("trace", 0) => mk("BrowserTrace"),
+            _ => None,
+        },
+        Type::Named(n) if n == "BrowserContext" => match (method, _args.len()) {
+            ("page", 0) => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("BrowserPage".to_string())),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
+            ("close", 0) => Some(Some(Type::Result {
+                ok: Box::new(unit_ty()),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
+            _ => None,
+        },
+        Type::Named(n) if n == "BrowserPage" => match (method, _args.len()) {
+            ("goto", 1) | ("close", 0) => Some(Some(Type::Result {
+                ok: Box::new(unit_ty()),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
+            ("get_by_role", 2) => mk("BrowserLocator"),
+            _ => None,
+        },
+        Type::Named(n) if n == "BrowserLocator" => match (method, _args.len()) {
+            ("wait", 1) | ("click", 0) => Some(Some(Type::Result {
+                ok: Box::new(unit_ty()),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
+            _ => None,
+        },
+        Type::Named(n) if n == "BrowserEvent" => match (method, _args.len()) {
+            ("kind", 0) => mk_str(),
+            _ => None,
+        },
+        Type::Named(n) if n == "BrowserProtocol" => match (method, _args.len()) {
+            ("send", 2) => Some(Some(Type::Result {
+                ok: Box::new(Type::String),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
+            _ => None,
+        },
+        Type::Named(n) if n == "BrowserCapabilities" => match (method, _args.len()) {
+            ("bidi" | "cdp", 0) => Some(Some(Type::Bool)),
+            ("profile", 0) => mk_str(),
+            _ => None,
+        },
+        Type::Named(n) if n == "BrowserTrace" => match (method, _args.len()) {
+            ("entry_count", 0) => mk_int(),
+            ("redacted", 0) => Some(Some(Type::Bool)),
+            ("summary", 0) => mk_str(),
             _ => None,
         },
         Type::Named(n) if n == "HttpBody" => match method {

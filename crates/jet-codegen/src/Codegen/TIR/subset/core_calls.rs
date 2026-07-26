@@ -160,6 +160,12 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     if module == "core.ws" && matches!(method, "connect" | "upgrade") {
         return true;
     }
+    // D-BROWSER-AUTO1=A: fixed native BiDi entry points.
+    if module == "core.browser"
+        && matches!(method, "profile" | "timeout" | "connect" | "connect_profile")
+    {
+        return true;
+    }
     crate::Sema::core_fixed_sig(module, method).is_some()
 }
 

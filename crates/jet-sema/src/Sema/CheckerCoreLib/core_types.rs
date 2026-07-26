@@ -247,6 +247,9 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "HttpMethod" | "HttpStatus" | "HttpVersion" | "HttpHeaderName" | "HttpHeaderValue"
         | "HttpHeaders" | "HttpBody" | "HttpBodyChunks" | "HttpError" | "HttpOperation" | "HttpProxy" | "HttpRedirectPolicy" | "HttpRetryPolicy" | "HttpCookieJar" | "HttpMux" | "HttpHandler" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport" | "HttpCorsPolicy" | "HttpCompressEncoding"
         | "WsConn" | "WsError" | "WsMessage"
+        | "Browser" | "BrowserContext" | "BrowserPage" | "BrowserLocator"
+        | "BrowserEvent" | "BrowserTrace" | "BrowserError" | "BrowserCapabilities"
+        | "BrowserProfile" | "BrowserTimeout" | "BrowserProtocol"
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
         // expected-type elaboration of a string literal (E0149 guards a plain
         // runtime `String` from filling this position).

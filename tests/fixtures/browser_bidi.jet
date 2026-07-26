@@ -1,0 +1,42 @@
+// D-BROWSER-AUTO1=A: native BiDi profile, isolated context, semantic locator,
+// deterministic wait, checked raw protocol, redacted trace, and cleanup.
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+
+    caps :: session.capabilities()
+    print("caps:{caps.bidi()}:{caps.cdp()}:{caps.profile()}")
+
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    page.goto("https://example.test/app") ?? panic("goto")
+
+    save :: page.get_by_role("button", "Save")
+    save.wait(timeout) ?? panic("wait")
+    save.click() ?? panic("click")
+
+    session.subscribe("log.entryAdded") ?? panic("subscribe")
+    event :: session.next_event(timeout) ?? panic("event")
+    print("event:{event.kind()}")
+
+    bidi :: session.protocol("bidi") ?? panic("protocol")
+    raw :: bidi.send("session.status", "{{}}") ?? panic("raw")
+    print("raw:{raw}")
+
+    cdp :: session.protocol("cdp") ?? panic("cdp capability")
+    cdp_raw :: cdp.send("Network.setCacheDisabled", "{{\"cacheDisabled\":true}}") ?? panic("cdp")
+    print("cdp:{cdp_raw}")
+
+    trace :: session.trace()
+    print("trace:{trace.entry_count()}:{trace.redacted()}:{trace.summary()}")
+
+    page.close() ?? panic("page close")
+    page.close() ?? panic("page close idempotent")
+    context.close() ?? panic("context close")
+    context.close() ?? panic("context close idempotent")
+    session.close() ?? panic("session close")
+    session.close() ?? panic("session close idempotent")
+}

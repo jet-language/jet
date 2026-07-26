@@ -2769,6 +2769,20 @@ pub(crate) fn emit_tir_core_call(
             };
             format!("jet_http_client_request_new(&({}), &({}))", arg(0), u)
         }
+        // D-BROWSER-AUTO1=A: native versioned BiDi entry points.
+        ("core.browser", "profile") => {
+            format!("jet_browser_profile(&({}))", arg(0))
+        }
+        ("core.browser", "timeout") => format!("jet_browser_timeout({})", arg(0)),
+        ("core.browser", "connect") => {
+            format!("jet_browser_connect(&({}))", arg(0))
+        }
+        ("core.browser", "connect_profile") => format!(
+            "jet_browser_connect_profile(&({}), &({}), {})",
+            arg(0),
+            arg(1),
+            arg(2)
+        ),
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP server constructors (CoreLib, no prefix needed).
         ("core.http.server", "bind") if args.len() == 3 => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");

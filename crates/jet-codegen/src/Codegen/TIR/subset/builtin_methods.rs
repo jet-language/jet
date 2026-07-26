@@ -246,7 +246,15 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
                 | "HttpServer"
                 | "HttpServerTls"
                 | "WsConn"
-                | "WsMessage",
+                | "WsMessage"
+                | "Browser"
+                | "BrowserContext"
+                | "BrowserPage"
+                | "BrowserLocator"
+                | "BrowserEvent"
+                | "BrowserTrace"
+                | "BrowserCapabilities"
+                | "BrowserProtocol",
         )
     )
 }
@@ -271,6 +279,17 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
         Some("HttpServer") => matches!(method, "local_addr" | "serve" | "shutdown"),
         Some("WsConn") => matches!(method, "send_text" | "send_bytes" | "recv" | "close"),
         Some("WsMessage") => matches!(method, "is_text" | "is_binary" | "is_close" | "text" | "bytes"),
+        Some("Browser") => matches!(
+            method,
+            "capabilities" | "context" | "subscribe" | "next_event" | "protocol" | "trace" | "close"
+        ),
+        Some("BrowserContext") => matches!(method, "page" | "close"),
+        Some("BrowserPage") => matches!(method, "goto" | "get_by_role" | "close"),
+        Some("BrowserLocator") => matches!(method, "wait" | "click"),
+        Some("BrowserEvent") => method == "kind",
+        Some("BrowserProtocol") => method == "send",
+        Some("BrowserCapabilities") => matches!(method, "bidi" | "cdp" | "profile"),
+        Some("BrowserTrace") => matches!(method, "entry_count" | "redacted" | "summary"),
         _ => false,
     }
 }

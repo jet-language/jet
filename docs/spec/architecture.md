@@ -205,6 +205,39 @@ surfaces, client leases, live reload, and last-good swap. `CmdCompile.rs`
 drives its build-state API while retaining compile/codegen/rustc execution;
 there is no callback or dependency edge from the seam back to the root.
 
+### Browser automation protocol core
+
+D-BROWSER-AUTO1=A puts the portable automation API in `core.browser`. The
+generated runtime uses the existing std-only WebSocket and strict JSON codecs
+to speak WebDriver BiDi. It does not require Node, Playwright, or a Canvas
+facade. Browser installation and process launch are separate Jetpack work.
+
+`BrowserProfile` pins a client command contract; it is not a claim about a
+server version. The runtime gates raw commands against that contract. A
+connection checks `session.status`, then creates the session with
+`session.new`; only that command's matched capability map enables optional
+protocols such as CDP. `Browser.context()` creates an isolated BiDi user
+context, and the context owns its pages. The beginner path uses semantic
+accessibility locators and bounded waits. The expert path exposes raw BiDi and
+capability-checked CDP commands through `Browser.protocol`.
+
+The protocol core accepts only strict JSON objects and exact response IDs.
+Malformed messages, protocol errors, unsupported profiles, unavailable expert
+protocols, and timeouts return `BrowserError`. Commands and waits use one
+absolute deadline even while events arrive. The event queue has 256 slots, and
+the trace has an 8 KiB byte budget. Entries record only sequence IDs, hashed
+method facts, and status. They never record endpoints, raw method names, command
+parameters, results, event payloads, secrets, or page data. Page, context, and
+session cleanup is explicit, idempotent, and retry-safe after protocol failure.
+Last-owner drops perform the same cleanup as a best effort; page leases keep
+their isolated user context alive until the final child is gone.
+
+The AOT emitter and default development tier use the same `Browser.rs`,
+strict-JSON behavior, and extracted RFC6455 client source. Browser session
+handles are thread-confined. Programs that use them select the canonical TIR
+tier-0 network host; the tier trace reports that choice and no AOT fallback is
+hidden behind `jet dev`.
+
 ### Adding an FFI bridge
 
 Foreign dependencies stay behind the existing runtime boundary; they never

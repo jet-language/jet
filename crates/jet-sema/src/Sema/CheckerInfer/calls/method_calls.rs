@@ -1961,7 +1961,9 @@ impl<'a> Checker<'a> {
                 {
                     self.check_http_route_constant(handle_ty, method, args);
                     require_net_method_labels(handle_ty, method, args, span, &mut self.diags);
-                    if handle_ty == "TlsClientConfig" && method == "with_alpn" {
+                    if self.check_browser_method_args(handle_ty, method, args, span) {
+                        // Browser handles share one exact argument checker.
+                    } else if handle_ty == "TlsClientConfig" && method == "with_alpn" {
                         if let Some(arg) = args.first_mut() {
                             self.expect_core_arg(
                                 "with_alpn",

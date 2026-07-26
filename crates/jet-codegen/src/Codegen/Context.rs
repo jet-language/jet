@@ -1071,6 +1071,20 @@ impl Cx {
             Type::Named(name) if name == "WsConn" => "JetWsConn".to_string(),
             Type::Named(name) if name == "WsError" => "JetWsError".to_string(),
             Type::Named(name) if name == "WsMessage" => "JetWsMessage".to_string(),
+            // D-BROWSER-AUTO1=A: native BiDi opaque types.
+            Type::Named(name) if name == "Browser" => "JetBrowser".to_string(),
+            Type::Named(name) if name == "BrowserContext" => "JetBrowserContext".to_string(),
+            Type::Named(name) if name == "BrowserPage" => "JetBrowserPage".to_string(),
+            Type::Named(name) if name == "BrowserLocator" => "JetBrowserLocator".to_string(),
+            Type::Named(name) if name == "BrowserEvent" => "JetBrowserEvent".to_string(),
+            Type::Named(name) if name == "BrowserTrace" => "JetBrowserTrace".to_string(),
+            Type::Named(name) if name == "BrowserError" => "JetBrowserError".to_string(),
+            Type::Named(name) if name == "BrowserCapabilities" => {
+                "JetBrowserCapabilities".to_string()
+            }
+            Type::Named(name) if name == "BrowserProfile" => "JetBrowserProfile".to_string(),
+            Type::Named(name) if name == "BrowserTimeout" => "JetBrowserTimeout".to_string(),
+            Type::Named(name) if name == "BrowserProtocol" => "JetBrowserProtocol".to_string(),
             // c97/D-STRPARSE1: the builtin parse error (`Int.parse`, `Float.parse`)
             // erases to a plain message — never user-constructed.
             // A user enum named `ParseError` (in `type_names`) keeps its own lowering.
@@ -2298,6 +2312,21 @@ pub(crate) fn build_cx_items(
     cx.cloneable.insert("WsError".to_string());
     cx.cloneable.insert("WsConn".to_string());
     cx.cloneable.insert("WsMessage".to_string());
+    for name in [
+        "Browser",
+        "BrowserContext",
+        "BrowserPage",
+        "BrowserLocator",
+        "BrowserEvent",
+        "BrowserTrace",
+        "BrowserError",
+        "BrowserCapabilities",
+        "BrowserProfile",
+        "BrowserTimeout",
+        "BrowserProtocol",
+    ] {
+        cx.cloneable.insert(name.to_string());
+    }
     cx.enum_variants.insert(
         Syntax::TYPE_ORDERING.to_string(),
         ["Less", "Equal", "Greater"]

@@ -6,6 +6,7 @@ pub use jet_sema::{
     Syntax, TargetProfile, Traits, AST, SHA256,
 };
 pub mod Codegen;
+mod BrowserHost;
 /// D-ASYNCRT1=A: M:N scheduler substrate for jet-jit host shims.
 pub mod scheduler;
 // Prelude/ contains include_str-embedded text files, not Rust modules.
