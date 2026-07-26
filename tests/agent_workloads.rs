@@ -343,21 +343,59 @@ fn source_tokens(path: &Path) -> usize {
         .count()
 }
 
-fn undeclared_scratch_entries(adapter: &str, path: &Path) -> Vec<String> {
-    let mut entries = fs::read_dir(path)
-        .unwrap()
-        .filter_map(|entry| {
-            let entry = entry.unwrap();
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if adapter == "jet" && name == "build" && entry.path().is_dir() {
-                None
+fn scratch_output_violations(
+    adapter: &str,
+    path: &Path,
+    jet_artifact_name: &str,
+) -> Vec<String> {
+    fn walk(root: &Path, dir: &Path, entries: &mut BTreeMap<String, &'static str>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let relative = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            let file_type = fs::symlink_metadata(&path).unwrap().file_type();
+            let kind = if file_type.is_dir() {
+                "directory"
+            } else if file_type.is_file() {
+                "file"
+            } else if file_type.is_symlink() {
+                "symlink"
             } else {
-                Some(name)
+                "other"
+            };
+            entries.insert(relative, kind);
+            if file_type.is_dir() {
+                walk(root, &path, entries);
             }
-        })
+        }
+    }
+
+    let mut actual = BTreeMap::new();
+    walk(path, path, &mut actual);
+    let expected = if adapter == "jet" {
+        BTreeMap::from([
+            ("build".to_string(), "directory"),
+            (format!("build/{jet_artifact_name}"), "file"),
+        ])
+    } else {
+        BTreeMap::new()
+    };
+    let mut violations = actual
+        .iter()
+        .filter(|(entry, kind)| expected.get(*entry) != Some(*kind))
+        .map(|(entry, kind)| format!("unexpected {kind}: {entry}"))
         .collect::<Vec<_>>();
-    entries.sort();
-    entries
+    violations.extend(
+        expected
+            .iter()
+            .filter(|(entry, kind)| actual.get(*entry) != Some(*kind))
+            .map(|(entry, kind)| format!("missing {kind}: {entry}")),
+    );
+    violations.sort();
+    violations
 }
 
 #[test]
@@ -450,6 +488,26 @@ fn process_deadline_reaps_and_scratch_drop_cleans() {
 }
 
 #[test]
+fn scratch_output_shape_rejects_arbitrary_build_residue() {
+    let scratch = Scratch::new("jet_agent_scratch_output_shape");
+    fs::create_dir(scratch.path.join("build")).unwrap();
+    fs::write(scratch.path.join("build/process_batch"), "declared artifact").unwrap();
+    assert_eq!(
+        scratch_output_violations("jet", &scratch.path, "process_batch"),
+        Vec::<String>::new()
+    );
+
+    fs::write(scratch.path.join("build/leak"), "undeclared residue").unwrap();
+    let violations = scratch_output_violations("jet", &scratch.path, "process_batch");
+    assert!(
+        violations
+            .iter()
+            .any(|violation| violation == "unexpected file: build/leak"),
+        "{violations:?}"
+    );
+}
+
+#[test]
 fn equivalent_adapters_complete_declared_tasks() {
     if std::env::consts::OS == "windows" {
         panic!("Bash is explicitly unavailable as a native Windows adapter; this task cannot pass");
@@ -532,11 +590,12 @@ fn equivalent_adapters_complete_declared_tasks() {
                 "{} {adapter} changed its read-only input authority",
                 task.id
             );
+            let jet_artifact_name = source.file_stem().unwrap().to_string_lossy();
             // This must run before Scratch::drop so adapter residue cannot be
-            // mistaken for successful cleanup. Jet's public AOT build directory
-            // is declared compilation output; no adapter gets another exception.
+            // mistaken for successful cleanup. Jet may leave only its exact
+            // public AOT artifact; no adapter gets a broad path exception.
             assert_eq!(
-                undeclared_scratch_entries(adapter, &scratch.path),
+                scratch_output_violations(adapter, &scratch.path, &jet_artifact_name),
                 Vec::<String>::new(),
                 "{} {adapter} left undeclared scratch residue",
                 task.id
