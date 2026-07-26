@@ -270,6 +270,16 @@ with request execution and replaces a cancelled in-flight result with JSON-RPC
 `-32800`. D-LSP2 requires every advertised LSP capability to have named coverage
 in `tests/lsp.rs`; the server must not advertise speculative features.
 
+The code-action engine uses the same semantic index. It ships unique workspace
+imports, binding and function extraction, and immutable-binding inline actions.
+Each action returns edits for the current document version. The engine rejects
+effects, possible traps, unstable mutable reads, and dirty import sources.
+Function extraction accepts only `Bool`, `Char`, `Int`, and `Float` parameters
+and returns because the index proves these values are safe to copy. It rejects
+non-scalar parameters and returns until sema supplies a complete ownership
+contract for reads, writes, takes, and returned values. The focused rejection
+proof is `code_actions_reject_non_scalar_extract_without_ownership_proof`.
+
 ## Compiler-extension plugins (D-DX5-HOOK1=A)
 
 Tower #549. After sema, the compiler may freeze a **versioned typed

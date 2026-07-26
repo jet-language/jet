@@ -2393,7 +2393,13 @@ mod project_part_tests {
         );
         assert!(!inlined.contains("Inline `value`"), "{inlined}");
         let _ = std::fs::remove_dir_all(partial_root);
+    }
 
+    #[test]
+    fn code_actions_reject_non_scalar_extract_without_ownership_proof() {
+        // The semantic index does not yet prove `Clock` is Copy or give the
+        // read/write/take and return contract needed to preserve ownership.
+        // The refactor engine must fail closed instead of guessing from syntax.
         let clock =
             "fn run(left: Clock, right: Clock) {\n    same :: left == right\n    print(same)\n}\n";
         let clock_root = std::env::temp_dir().join(format!(
