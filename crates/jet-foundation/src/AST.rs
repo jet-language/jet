@@ -13,7 +13,7 @@ pub use types::{
 #[path = "AST/program_imports.rs"]
 mod program_imports;
 pub use program_imports::{
-    Program, ImportDecl, InlineVersion, ForeignLanguage, ForeignNamespace, ImportKind,
+    AppliedRuleApplication, Program, ImportDecl, InlineVersion, ForeignLanguage, ForeignNamespace, ImportKind,
     ProgramBundle, LoadedModule, TryConvert, ErrorConvDef, MigrationDecl, MigrationOp,
 };
 

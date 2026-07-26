@@ -653,6 +653,9 @@ impl<'a> Parser<'a> {
     fn top_level_item_in_code_module(&mut self) -> Result<Item, Diagnostic> {
         match &self.peek().kind {
             TokKind::KwFn => self.func().map(Item::Func),
+            TokKind::Hash if self.marker_sequence_leads_to_function() => {
+                self.func_with_marker_list().map(Item::Func)
+            }
             TokKind::Hash if self.at_meta_attr() => {
                 if matches!(self.meta_attr_next_kind(), Some(TokKind::KwConst)) {
                     self.const_def().map(Item::Const)

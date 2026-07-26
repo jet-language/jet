@@ -145,31 +145,6 @@ impl<'a> Parser<'a> {
             let decl_start = markers
                 .first()
                 .map_or(self.peek().span.start, |marker| marker.span.start);
-            let unsafe_marker = markers.iter().find(|marker| marker.name == Syntax::KW_UNSAFE);
-            let (is_unsafe, unsafe_reason, unsafe_span) = if let Some(marker) = unsafe_marker {
-                let reason = match marker.args.as_slice() {
-                    [] => return Err(Diagnostic::error(
-                        "E3112",
-                        "an `#Unsafe` function needs a reason".to_string(),
-                        "every unsafe function records why callers can rely on its unchecked contract".to_string(),
-                        "write `#Unsafe(\"why this is safe\") #FFI(asm) fn …`".to_string(),
-                        Some(marker.span),
-                    )),
-                    [crate::AST::Expr::Str(parts, _)]
-                        if marker.arg_labels[0].is_none() && parts.len() == 1 =>
-                    {
-                        match &parts[0] {
-                            crate::AST::StrPart::Lit(value) => Some(value.clone()),
-                            crate::AST::StrPart::Interp(..) => return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, marker.span)),
-                        }
-                    }
-                    _ => return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, marker.span)),
-                };
-                (true, reason, Some(marker.span))
-            } else {
-                (false, None, None)
-            };
-
             let Some(ffi) = markers.iter().find(|marker| marker.name == Syntax::ATTR_FFI) else {
                 return Err(Self::marker_argument_shape_error(
                     Syntax::ATTR_FFI,
@@ -242,7 +217,7 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::RBrace, "to close the `#FFI` foreign-source body")?;
             let declaration_end = self.toks[self.pos - 1].span.end;
 
-            Ok(Func {
+            let function = Func {
                 span: Span::new(decl_start, declaration_end),
                 is_pub,
                 is_package_pub,
@@ -257,9 +232,9 @@ impl<'a> Parser<'a> {
                 return_view_provenance: None,
             gc_return: false,
             gc_scope: false,
-                is_unsafe,
-                unsafe_reason,
-                unsafe_span,
+                is_unsafe: false,
+                unsafe_reason: None,
+                unsafe_span: None,
                 is_pure: false,
                 is_sanitizer: false,
                 is_reactive: false,
@@ -291,7 +266,8 @@ impl<'a> Parser<'a> {
                     source_span,
                 }),
                 body: Vec::new(),
-            })
+            };
+            self.apply_function_markers(function, markers)
         }
 
         /// D-FFI-INLINE1=A (card #501): read the single foreign-source string that
@@ -359,58 +335,18 @@ impl<'a> Parser<'a> {
         /// checked like any other fn; the contract is enforced at call sites (E3103).
         pub(super) fn unsafe_fn(&mut self) -> Result<Func, Diagnostic> {
             let marker = self.parse_rule_marker()?;
-            let marker_span = marker.span;
-            let mut obligation_mode = None;
-            if marker.args.is_empty() {
-                return Err(Diagnostic::error(
-                    "E3112",
-                    "an `#Unsafe` function needs a reason".to_string(),
-                    "every unsafe function records why callers can rely on its unchecked contract"
-                        .to_string(),
-                    "write `#Unsafe(\"why this is safe\") fn …`".to_string(),
-                    Some(marker_span),
-                ));
-            }
-            let reason = match (&marker.args[0], &marker.arg_labels[0]) {
-                (crate::AST::Expr::Str(parts, _), None) if parts.len() == 1 => {
-                    match &parts[0] {
-                        crate::AST::StrPart::Lit(value) => Some(value.clone()),
-                        crate::AST::StrPart::Interp(..) => return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, marker.span)),
-                    }
-                }
-                _ => return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, marker.span)),
-            };
-            if marker.args.len() > 2 {
-                return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, marker.span));
-            }
-            if let Some(value) = marker.args.get(1) {
-                let Some((field, field_span)) = marker.arg_labels[1].as_ref() else {
-                    return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, marker.span));
-                };
-                if field != "obligations" { return Err(Diagnostic::error("E3108", format!("`{field}` is not an unsafe-gate option"), "per-site control has one typed field: `obligations`".to_string(), "write `obligations: .Track` or `obligations: .Skip`".to_string(), Some(*field_span))); }
-                let (mode, mode_span) = match value {
-                    crate::AST::Expr::EnumLit { type_name, variant, args, span }
-                        if type_name.is_empty() && args.is_empty() => (variant, span),
-                    _ => return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, value.span())),
-                };
-                obligation_mode = Some(match mode.as_str() {
-                    "Track" => crate::Policy::PolicyValue::UnsafeTrack,
-                    "Skip" => crate::Policy::PolicyValue::UnsafeSkip,
-                    _ => return Err(Diagnostic::error("E3108", format!("`.{mode}` is not a per-site obligation mode"), "a gate either tracks typed obligations or explicitly skips them when policy permits".to_string(), "write `.Track` or `.Skip`".to_string(), Some(*mode_span))),
-                });
-            }
             // S6-R: a marker on its own line gets a synthetic separator.
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
             let (is_pub, is_package_pub) = self.parse_item_visibility();
             self.expect_kw(TokKind::KwFn, "after `#Unsafe`")?;
-            let function = self.func_after_fn(
+            let mut function = self.func_after_fn(
                 is_pub,
                 is_package_pub,
-                true,
-                reason,
-                Some(marker_span),
+                false,
+                None,
+                None,
                 false,
                 false,
                 None,
@@ -428,15 +364,10 @@ impl<'a> Parser<'a> {
                 false,
                 None,
             )?;
-            if let Some(value) = obligation_mode {
-                self.policy_declarations.push(crate::Policy::PolicyDeclaration {
-                    key: crate::Policy::PolicyKey::Unsafe,
-                    value,
-                    scope: crate::Policy::PolicyScope::Function,
-                    span: marker_span,
-                    target: Some(function.span),
-                    source: "<source>".to_string(),
-                });
+            if let Some(declaration) =
+                self.apply_unsafe_function_marker(&mut function, &marker)?
+            {
+                self.policy_declarations.push(declaration);
             }
             Ok(function)
         }

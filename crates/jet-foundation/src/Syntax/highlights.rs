@@ -228,10 +228,6 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::KeywordDeclaration,
     },
     HighlightToken {
-        text: KW_PURE,
-        class: HighlightClass::KeywordDeclaration,
-    },
-    HighlightToken {
         text: KW_TODO,
         class: HighlightClass::KeywordDeclaration,
     },
@@ -1036,7 +1032,7 @@ use super::{
     KW_ADD, KW_ALIAS, KW_AS, KW_BENCH, KW_BREAK, KW_CHANGE,
     KW_COMPTIME, KW_CONST, KW_DERIVE, KW_DISTINCT, KW_ELSE, KW_ENUM,
     KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IT, KW_LOOP,
-    KW_MIGRATION, KW_MODULE, KW_PRIV, KW_PROTOCOL, KW_PUB, KW_PURE,
+    KW_MIGRATION, KW_MODULE, KW_PRIV, KW_PROTOCOL, KW_PUB,
     KW_DEFER, KW_REACTIVE, KW_REMOVE, KW_RENAME, KW_RETURN, KW_RUST, KW_SANITIZER, KW_SELF,
     KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TAINTED, KW_TASKGROUP, KW_TEST, KW_TODO,
     KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNINIT, KW_UNSAFE, KW_USE, KW_VALIDATE_BLOCK,

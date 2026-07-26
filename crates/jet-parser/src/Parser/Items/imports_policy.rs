@@ -430,7 +430,7 @@ impl<'a> Parser<'a> {
                     // D-MEM1/S7 (D-NOALLOC-SEM1=A): `policy no_alloc;` — file-scoped
                     // allocation floor, parsed like `use`/`#PubFile` (not inside any
                     // `module { … }` body — only the top-level file item list).
-                    TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_POLICY) && self.policy_is_file_decl() => match self.policy_decl(crate::Policy::PolicyScope::Module) {
+                    TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_POLICY) && self.policy_is_file_decl() && !self.marker_sequence_leads_to_function() => match self.policy_decl(crate::Policy::PolicyScope::Module) {
                         Ok(declarations) => {
                             for declaration in declarations {
                                 if declaration.key == crate::Policy::PolicyKey::NoAlloc { no_alloc_policy = Some(declaration.span); }
@@ -470,7 +470,7 @@ impl<'a> Parser<'a> {
                             continue;
                         }
                     }
-                    TokKind::Hash if self.at_pub_file() => {
+                    TokKind::Hash if self.at_pub_file() && !self.file_marker_stack_starts_here() => {
                         if pub_file {
                             let span = self.peek().span;
                             self.diags.push(Diagnostic::error(
@@ -492,7 +492,7 @@ impl<'a> Parser<'a> {
                         self.pub_file_default = true;
                         continue;
                     }
-                    TokKind::Hash if self.at_no_prelude() => {
+                    TokKind::Hash if self.at_no_prelude() && !self.file_marker_stack_starts_here() => {
                         if no_prelude {
                             let span = self.peek().span;
                             self.diags.push(Diagnostic::error(
@@ -550,12 +550,42 @@ impl<'a> Parser<'a> {
                         self.bump();
                         continue;
                     }
-                    TokKind::Hash if self.marker_list_is_file_rules() => {
-                        match self.parse_marker_groups() {
+                    TokKind::Hash if self.file_marker_stack_starts_here() => {
+                        match self.parse_file_marker_sequence() {
                             Ok(markers) => {
                                 let mut failed = false;
+                                let ordered_markers = markers.clone();
                                 for marker in markers {
                                     match marker.name.as_str() {
+                                        Syntax::MARKER_PUB_FILE => {
+                                            if pub_file {
+                                                self.diags.push(Diagnostic::error(
+                                                    "E0416",
+                                                    "only one `#PubFile` marker is allowed per file".to_string(),
+                                                    "a file may declare at most one public-by-default visibility marker".to_string(),
+                                                    "remove the duplicate marker".to_string(),
+                                                    Some(marker.span),
+                                                ));
+                                                failed = true;
+                                            } else {
+                                                pub_file = true;
+                                                self.pub_file_default = true;
+                                            }
+                                        }
+                                        Syntax::MARKER_NO_PRELUDE => {
+                                            if no_prelude {
+                                                self.diags.push(Diagnostic::error(
+                                                    "E0428",
+                                                    "only one `#NoPrelude` marker is allowed per file".to_string(),
+                                                    "a file may opt out of the ambient prelude at most once".to_string(),
+                                                    "remove the duplicate marker".to_string(),
+                                                    Some(marker.span),
+                                                ));
+                                                failed = true;
+                                            } else {
+                                                no_prelude = true;
+                                            }
+                                        }
                                         Syntax::ATTR_TARGET => match Self::web_target_from_marker(&marker) {
                                             Ok(TargetMarker::DefaultWeb) if default_target.is_none() => {
                                                 default_target = Some(crate::Syntax::BUILD_TARGET_WEB.to_string());
@@ -609,6 +639,13 @@ impl<'a> Parser<'a> {
                                 }
                                 if failed {
                                     self.sync_top();
+                                } else {
+                                    self.applied_rules.extend(ordered_markers.into_iter().map(
+                                        |marker| crate::AST::AppliedRuleApplication {
+                                            marker,
+                                            target: None,
+                                        },
+                                    ));
                                 }
                             }
                             Err(d) => {
@@ -622,7 +659,7 @@ impl<'a> Parser<'a> {
                     // attached to a following `fn`/`pub fn` is the per-function
                     // bucket override (routed to `at_web_partition_fn` below,
                     // parsed inside `func()`), not the file/module ceiling.
-                    TokKind::Hash if self.at_web_target() && !self.at_web_partition_fn() => match self.parse_web_target_marker() {
+                    TokKind::Hash if self.at_web_target() && !self.marker_sequence_leads_to_function() => match self.parse_web_target_marker() {
                         Ok(TargetMarker::DefaultWeb) => {
                             if matches!(self.peek().kind, TokKind::KwModule) {
                                 let span = self.peek().span;
@@ -723,7 +760,7 @@ impl<'a> Parser<'a> {
                     },
                     TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
                     TokKind::KwFn => self.func().map(Item::Func),
-                    TokKind::Hash if self.marker_list_leads_to_function() => {
+                    TokKind::Hash if self.marker_sequence_leads_to_function() => {
                         self.func_with_marker_list().map(Item::Func)
                     }
                     TokKind::Ident(_)
@@ -1372,6 +1409,7 @@ impl<'a> Parser<'a> {
                 html_path,
                 no_alloc_policy,
                 policy_declarations: std::mem::take(&mut self.policy_declarations),
+                applied_rules: std::mem::take(&mut self.applied_rules),
             }
         }
     

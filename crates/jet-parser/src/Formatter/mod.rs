@@ -72,8 +72,70 @@ fn format_program_with_tokens(
         trailing_comment_limit: usize::MAX,
         pub_file: prog.pub_file,
         policy_declarations: &prog.policy_declarations,
+        applied_rules: &prog.applied_rules,
     };
     let mut first = true;
+    let ordered_file_rules = prog
+        .applied_rules
+        .iter()
+        .filter(|application| application.target.is_none())
+        .map(|application| application.marker.clone())
+        .collect::<Vec<_>>();
+    let has_ordered_file_rules = !ordered_file_rules.is_empty();
+    let ordered_file_rules_precede_imports = ordered_file_rules.iter().any(|marker| {
+        marker.name == Syntax::MARKER_PUB_FILE || marker.name == Syntax::MARKER_NO_PRELUDE
+    });
+    let file_rule_count = usize::from(prog.pub_file)
+        + usize::from(prog.no_prelude)
+        + usize::from(prog.default_target.as_deref() == Some(crate::Syntax::BUILD_TARGET_WEB))
+        + usize::from(prog.web_target_ceiling.is_some())
+        + usize::from(prog.html_path.is_some());
+    let grouped_file_rules = file_rule_count > 1;
+    if has_ordered_file_rules && ordered_file_rules_precede_imports {
+        let rules = ordered_file_rules.iter().collect::<Vec<_>>();
+        f.fmt_marker_group(&rules, Syntax::RULE_PREFIX, true);
+        first = false;
+    } else if !has_ordered_file_rules && grouped_file_rules {
+        let mut rule_index = 0usize;
+        f.write("#[");
+        let mut write_separator = |f: &mut Fmt<'_>| {
+            if rule_index > 0 {
+                f.write(", ");
+            }
+            rule_index += 1;
+        };
+        if prog.pub_file {
+            write_separator(&mut f);
+            f.write(Syntax::MARKER_PUB_FILE);
+        }
+        if prog.no_prelude {
+            write_separator(&mut f);
+            f.write(Syntax::MARKER_NO_PRELUDE);
+        }
+        if prog.default_target.as_deref() == Some(crate::Syntax::BUILD_TARGET_WEB) {
+            write_separator(&mut f);
+            f.write(&format!(
+                "{}({})",
+                Syntax::ATTR_TARGET,
+                Syntax::WEB_TARGET_DEFAULT_WEB
+            ));
+        }
+        if let Some(bucket) = prog.web_target_ceiling {
+            write_separator(&mut f);
+            f.write(&format!("{}({})", Syntax::ATTR_TARGET, bucket.name()));
+        }
+        if let Some(html_path) = &prog.html_path {
+            write_separator(&mut f);
+            f.write(&format!(
+                "{}(\"{}\")",
+                Syntax::ATTR_HTML,
+                escape_str_lit(html_path)
+            ));
+        }
+        f.write("]");
+        f.newline();
+        first = false;
+    }
     // D-VISDEFAULT2: `#PubFile` must precede any `priv`-qualified import in
     // the rendered output — imports are formatted relative to `f.pub_file`
     // (emitting a `priv` prefix when the file is public-by-default), so the
@@ -81,14 +143,14 @@ fn format_program_with_tokens(
     // after it. Emitting it post-imports produced output that failed to
     // reparse (`priv use …` with no preceding `#PubFile`) — a real fmt
     // idempotence bug, not just a reordering of independent items.
-    if prog.pub_file {
+    if prog.pub_file && !grouped_file_rules && !has_ordered_file_rules {
         first = false;
         f.write(&format!("#{}", Syntax::MARKER_PUB_FILE));
         f.newline();
     }
     // D-PRELUDEX1=A: `#NoPrelude` is a file-level directive; emit before imports
     // so fmt round-trips the opt-out at the top of the file.
-    if prog.no_prelude {
+    if prog.no_prelude && !grouped_file_rules && !has_ordered_file_rules {
         if !first {
             f.newline();
         }
@@ -105,6 +167,14 @@ fn format_program_with_tokens(
         f.fmt_import(imp);
         f.emit_trailing(imp.span.end);
     }
+    if has_ordered_file_rules && !ordered_file_rules_precede_imports {
+        if !first {
+            f.blank_line_between_items();
+        }
+        first = false;
+        let rules = ordered_file_rules.iter().collect::<Vec<_>>();
+        f.fmt_marker_group(&rules, Syntax::RULE_PREFIX, true);
+    }
     // D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Web)` — the file's
     // default CLI backend. D-WASM1: `#Target(Wasm)`/`#Target(Js)` — the file's
     // web partition ceiling. Neither carries a span (single-instance file
@@ -113,7 +183,10 @@ fn format_program_with_tokens(
     // originally wrote it in the source. Unlike `#PubFile`, these markers
     // don't gate any import's rendered qualifier, so they have no ordering
     // dependency on the imports loop and keep their original position.
-    if prog.default_target.as_deref() == Some(crate::Syntax::BUILD_TARGET_WEB) {
+    if prog.default_target.as_deref() == Some(crate::Syntax::BUILD_TARGET_WEB)
+        && !grouped_file_rules
+        && !has_ordered_file_rules
+    {
         if !first {
             f.blank_line_between_items();
         }
@@ -125,7 +198,10 @@ fn format_program_with_tokens(
         ));
         f.newline();
     }
-    if let Some(bucket) = prog.web_target_ceiling {
+    if let Some(bucket) = prog
+        .web_target_ceiling
+        .filter(|_| !grouped_file_rules && !has_ordered_file_rules)
+    {
         if !first {
             f.blank_line_between_items();
         }
@@ -135,7 +211,11 @@ fn format_program_with_tokens(
     }
     // D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — the
     // file's explicit companion host page.
-    if let Some(html_path) = &prog.html_path {
+    if let Some(html_path) = prog
+        .html_path
+        .as_ref()
+        .filter(|_| !grouped_file_rules && !has_ordered_file_rules)
+    {
         if !first {
             f.blank_line_between_items();
         }
@@ -195,6 +275,7 @@ struct Fmt<'a> {
     /// D-VISDEFAULT2=A: file uses `#PubFile` public-by-default visibility.
     pub_file: bool,
     policy_declarations: &'a [crate::Policy::PolicyDeclaration],
+    applied_rules: &'a [crate::AST::AppliedRuleApplication],
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

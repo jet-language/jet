@@ -350,7 +350,7 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Grant", sig!(variadic Ident => "Capability"), &[RuleSite::Block, RuleSite::Operation], Call),
     rule!("Tainted", sig!(param!("kind", Ident => "TaintKind", ".Input")), &[RuleSite::Expression, RuleSite::Operation], BareOrCall),
     rule!("Sanitizer", sig!(), FUNCTION_SITE, Bare),
-    rule!(retired "Pure", sig!(), FUNCTION_SITE, Bare, "pure fn"),
+    rule!(retired "Pure", sig!(), FUNCTION_SITE, Bare, "--[]->"),
     rule!("Pre", sig!(param!("condition", Any), param!("message", String)), FUNCTION_SITE, Call),
     rule!("Post", sig!(param!("condition", Any), param!("message", String)), FUNCTION_SITE, Call),
     rule!("Inline", sig!(param!("mode", Ident => "InlineMode", ".Hint")), &[RuleSite::Function, RuleSite::Constant], BareOrCall),

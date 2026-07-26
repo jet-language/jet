@@ -422,7 +422,6 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     // Test / tooling (S43, S60, D-TOOL2, D-BENCH1)
     KW_TEST,
     KW_BENCH,
-    KW_PURE,
     KW_TODO,
     // Taint tracking (D-TAINT1): value-fact tag + sanitizer modifier
     KW_TAINTED,
@@ -550,12 +549,8 @@ pub const IMPURE_BUILTINS: &[&str] = &[BUILTIN_PRINT, "eprint", "print", BUILTIN
 // `#RenameAll`, `#DenyUnknownFields`, `#Tag`, `#Untagged`) are wire-format
 // machinery, not promises, and stay on `#`.
 //
-// D-MARKERMOVE2 (B, ratified 2026-07-02): whole-move, no carve-out by
-// position — `#Pure` is one spelling everywhere, including the type-position
-// callback bound (`f: fn(T) --[]-> U`). The plane law gains exactly one
-// exception: a contract marker may prefix a function TYPE to state a bound;
-// "declarations only" reads "declarations, plus contract bounds on function
-// types".
+// D-SHAPE8 supersedes D-MARKERMOVE2: `#Pure` is retired teaching syntax.
+// Empty effect bounds use the return-arrow row `--[]->`.
 //
 // D-MARKERMOVE3 (B, ratified 2026-07-02): all built-in derive markers move,
 // user derives stay `#`. `#Debug`, `#Summarize`, `#Comparable` join
@@ -566,7 +561,7 @@ use super::{
     BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS, KW_BENCH,
     KW_BREAK, KW_COMPTIME, KW_CONST, KW_DEFER, KW_DERIVE, KW_ELSE, KW_ENUM,
     KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IT, KW_LOOP, KW_MODULE,
-    KW_PRIV, KW_PROTOCOL, KW_PUB, KW_PURE, KW_RETURN, KW_SANITIZER,
+    KW_PRIV, KW_PROTOCOL, KW_PUB, KW_RETURN, KW_SANITIZER,
     KW_SELF, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TAINTED, KW_TASK, KW_TASKGROUP, KW_TEST,
     KW_TODO, KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNSAFE, KW_USE, LIT_FALSE,
     LIT_NULL, LIT_TRUE, PROTO_CLIENT, PROTO_SERVER, TYPE_BIT_SET, TYPE_BOOL,

@@ -1,4 +1,4 @@
-use super::{CFfi, ComptimeInput, Expr, Item, Stmt, Type};
+use super::{CFfi, ComptimeInput, Expr, Item, Marker, Stmt, Type};
 use crate::{Diagnostics::Span, Syntax};
 
 #[derive(Debug)]
@@ -36,6 +36,16 @@ pub struct Program {
     pub no_alloc_policy: Option<Span>,
     /// D-MARK-SCOPE1: source policy declarations with compiler-owned scope/target metadata.
     pub policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
+    /// D-MARK-STACK1: source-order applied rules for attachment sites whose
+    /// semantic AST fields do not retain order. `None` targets the file;
+    /// `Some(span)` targets the parsed function declaration.
+    pub applied_rules: Vec<AppliedRuleApplication>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AppliedRuleApplication {
+    pub marker: Marker,
+    pub target: Option<Span>,
 }
 
 /// S16: `import "path" [as alias];` or `import name [as alias];`

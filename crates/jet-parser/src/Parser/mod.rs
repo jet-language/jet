@@ -54,6 +54,7 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
         in_layout_body: 0,
         module_arg_expr_depth: None,
         policy_declarations: Vec::new(),
+        applied_rules: Vec::new(),
         block_spans: Vec::new(),
     };
     let prog = p.program();
@@ -82,6 +83,7 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
         in_layout_body: 0,
         module_arg_expr_depth: None,
         policy_declarations: Vec::new(),
+        applied_rules: Vec::new(),
         block_spans: Vec::new(),
     };
     let prog = p.program();
@@ -187,6 +189,7 @@ struct Parser<'a> {
     /// still use `>` normally.
     module_arg_expr_depth: Option<usize>,
     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
+    applied_rules: Vec<crate::AST::AppliedRuleApplication>,
     block_spans: Vec<Span>,
 }
 
@@ -603,7 +606,7 @@ mod s61_tests {
     /// parses with both the unsafe contract and the inline foreign payload.
     #[test]
     fn ffi_asm_inline_tier_with_unsafe_gate_parses() {
-        let src = "use core.mem\n#Unsafe(\"cycle counter\")\n#FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"rdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n; clobbers rdx\"\"\"\n}\n";
+        let src = "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() -> U64 {\n    \"\"\"rdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n; clobbers rdx\"\"\"\n}\n";
         let p = program(src);
         let func = p
             .items
@@ -667,8 +670,79 @@ mod s61_tests {
             .iter()
             .find(|diagnostic| diagnostic.code == "E0999")
             .and_then(|diagnostic| diagnostic.edit.as_ref())
-            .expect("machine-applicable stack edit");
+            .unwrap_or_else(|| panic!("machine-applicable stack edit: {diagnostics:?}"));
         assert_eq!(edit.new_text, "#[Codable, RenameAll(camel)]");
+    }
+
+    #[test]
+    fn adjacent_marker_stacks_share_one_ordered_e0999_rewrite() {
+        for (src, expected) in [
+            (
+                "#Task\n#Every(1s)\nfn tick() {}\n",
+                "#[Task, Every(1s)]",
+            ),
+            (
+                "use core.mem\n#Unsafe(\"register ABI\")\n#FFI(c)\nfn add() { \"\"\"void add(void) {}\"\"\" }\n",
+                "#[Unsafe(\"register ABI\"), FFI(c)]",
+            ),
+            (
+                "#Target(Web)\n#Html(\"index.html\")\nfn main() {}\n",
+                "#[Target(Web), Html(\"index.html\")]",
+            ),
+            (
+                "#PubFile\n#NoPrelude\nfn main() {}\n",
+                "#[PubFile, NoPrelude]",
+            ),
+            (
+                "#Codable\n#RenameAll(camel)\nstruct Particle { x: Float }\n",
+                "#[Codable, RenameAll(camel)]",
+            ),
+        ] {
+            let (tokens, lex_diagnostics) = lex(src);
+            assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+            let diagnostics = parse(&tokens).expect_err("adjacent markers are E0999");
+            let edit = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.code == "E0999")
+                .and_then(|diagnostic| diagnostic.edit.as_ref())
+                .unwrap_or_else(|| panic!("machine-applicable stack edit: {diagnostics:?}"));
+            assert_eq!(edit.new_text, expected, "{src}");
+        }
+    }
+
+    #[test]
+    fn ordered_function_and_file_groups_format_idempotently() {
+        use crate::Formatter::format_source;
+        for (src, expected_group) in [
+            (
+                "use core.mem\n#[Policy(no_alloc), Meta(category: \"ffi\"), Task, Unsafe(\"register ABI\", obligations: .None), FFI(c)]\nfn add() {\n    \"\"\"void add(void) {}\"\"\"\n}\n",
+                "#[Policy(no_alloc), Meta(category: \"ffi\"), Task, Unsafe(\"register ABI\", obligations: .None), FFI(c)]",
+            ),
+            (
+                "#[Html(\"index.html\"), PubFile, Target(Web), NoPrelude]\nfn main() {}\n",
+                "#[Html(\"index.html\"), PubFile, Target(Web), NoPrelude]",
+            ),
+        ] {
+            let once = format_source(src).expect("format once");
+            assert!(once.contains(expected_group), "{once}");
+            let twice = format_source(&once).expect("format twice");
+            assert_eq!(once, twice, "{once}");
+        }
+    }
+
+    #[test]
+        fn grouped_retired_function_markers_keep_known_teaching() {
+        for (src, code) in [
+            ("#[Pure, Task]\nfn work() {}\n", "E0066"),
+            ("#[InlineAlways, Task]\nfn work() {}\n", "E0927"),
+        ] {
+            let (tokens, lex_diagnostics) = lex(src);
+            assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+            let diagnostics = parse(&tokens).expect_err("retired marker is teaching");
+            assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == code), "{diagnostics:?}");
+            assert!(!diagnostics.iter().any(|diagnostic| diagnostic.code == "E0930" || diagnostic.code == "E0355"), "{diagnostics:?}");
+        }
+
     }
 
     /// D-FFI-INLINE1=A (card #501): `jet fmt` round-trips `#FFI` fns idempotently
@@ -678,11 +752,10 @@ mod s61_tests {
         use crate::Formatter::format_source;
         for src in [
             "#FFI(c) fn add(a: Int, b: Int) -> Int {\n    \"\"\"long add(long a, long b) { return a + b; }\n\"\"\"\n}\n",
-            "use core.mem\n#Unsafe(\"cycle counter\")\n#FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}\n",
             "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() -> U64 {\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}\n",
         ] {
             let once = format_source(src).expect("format once");
-            assert!(once.contains("#FFI("), "formatted output keeps the #FFI marker: {once}");
+            assert!(once.contains("FFI("), "formatted output keeps the FFI marker: {once}");
             let twice = format_source(&once).expect("format twice");
             assert_eq!(once, twice, "jet fmt is idempotent for #FFI fns");
         }
@@ -742,6 +815,7 @@ fn run() {
             in_layout_body: 0,
             module_arg_expr_depth: None,
             policy_declarations: Vec::new(),
+            applied_rules: Vec::new(),
             block_spans: Vec::new(),
         };
         let _prog = p.program();

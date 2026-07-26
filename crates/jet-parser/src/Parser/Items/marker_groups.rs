@@ -71,7 +71,13 @@ impl<'a> Parser<'a> {
             let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
                 return Ok(());
             };
-            use crate::Policy::{RuleArgType, RuleForm};
+            if marker.name == Syntax::KW_TEST && marker.args.is_empty() {
+                return Ok(());
+            }
+            use crate::Policy::RuleForm;
+            if matches!(rule.status, crate::Policy::RuleStatus::Retired { .. }) {
+                return Ok(());
+            }
             let call_required = matches!(rule.form, RuleForm::Call)
                 || matches!(rule.form, RuleForm::Block) && rule.signature.required() > 0;
             let bare_required = matches!(rule.form, RuleForm::Bare);
@@ -89,43 +95,14 @@ impl<'a> Parser<'a> {
                 return Err(Self::marker_argument_shape_error(&marker.name, marker.span));
             }
             let mut supplied = vec![false; signature.params.len()];
-            for (index, argument) in marker.args.iter().enumerate() {
+            for (index, _argument) in marker.args.iter().enumerate() {
                 let parameter_index = if let Some((label, _)) = marker.arg_labels[index].as_ref() {
                     signature.params.iter().position(|parameter| parameter.name == label)
                 } else {
                     (index < signature.params.len()).then_some(index)
                 };
                 if let Some(parameter_index) = parameter_index {
-                    if supplied[parameter_index] {
-                        return Err(Self::marker_argument_shape_error(
-                            &marker.name,
-                            argument.span(),
-                        ));
-                    }
                     supplied[parameter_index] = true;
-                }
-                let expected = parameter_index
-                    .map(|parameter_index| signature.params[parameter_index].ty)
-                    .or(signature.variadic)
-                    .ok_or_else(|| Self::marker_argument_shape_error(&marker.name, argument.span()))?;
-                let matches = match expected {
-                    RuleArgType::Any => true,
-                    RuleArgType::String => matches!(argument, crate::AST::Expr::Str(..)),
-                    RuleArgType::Ident => matches!(
-                        argument,
-                        crate::AST::Expr::Ident(..)
-                            | crate::AST::Expr::EnumLit { .. }
-                            | crate::AST::Expr::Field(..)
-                    ),
-                    RuleArgType::Bool => matches!(argument, crate::AST::Expr::Bool(..)),
-                    RuleArgType::Int => matches!(argument, crate::AST::Expr::Int(..)),
-                    RuleArgType::DurationOrString => matches!(
-                        argument,
-                        crate::AST::Expr::UnitLit { .. } | crate::AST::Expr::Str(..)
-                    ),
-                };
-                if !matches {
-                    return Err(Self::marker_argument_shape_error(&marker.name, argument.span()));
                 }
             }
             if signature
@@ -195,7 +172,7 @@ impl<'a> Parser<'a> {
             }
             Some(format!("{}({})", marker.name, args.join(", ")))
         }
-    
+
         /// D-SHAPE2: parse one `#[ Name (, …)* ]` group; cursor on `@`.
         fn parse_marker_bracket_group(&mut self) -> Result<Vec<Marker>, Diagnostic> {
             let group_span = self.bump().span; // `#`
@@ -234,137 +211,353 @@ impl<'a> Parser<'a> {
             }
             Ok(group)
         }
-    
-        /// D-SHAPE2: parse `#[ … ]` applied-rule groups. A second consecutive
-        /// group is teaching error E0999 (merge into one list).
-        pub(super) fn parse_marker_groups(&mut self) -> Result<Vec<Marker>, Diagnostic> {
-            let mut out = Vec::new();
-            let mut groups = 0usize;
-            while self.at_marker_list() {
-                groups += 1;
-                if groups > 1 {
-                    self.diags.push(Diagnostic::error(
-                        "E0999",
-                        "multiple `#[…]` rule lines belong in one comma-separated list".to_string(),
-                        "Jet attaches every applied rule on a type in a single `#[A, B]` group (D-SHAPE2); one rule alone is `#A`".to_string(),
-                        "merge them: `#[RenameAll(camel), Skip]`, or use `#RenameAll(camel)` when there is only one".to_string(),
-                        Some(self.peek().span),
-                    ));
-                }
-                out.extend(self.parse_marker_bracket_group()?);
-            }
-            Ok(out)
-        }
-    
-        /// D-SHAPE2: parse one bare applied rule, with optional args, before `struct`/`enum`.
-        fn parse_single_type_prefix_marker(&mut self) -> Result<Marker, Diagnostic> {
-            let start = self.bump().span.start;
-            let mut marker = self.parse_one_marker()?;
-            marker.span.start = start;
-            Ok(marker)
-        }
-    
-        /// D-SHAPE2: parse leading `#[…]` applied-rule groups before a
-        /// struct/enum field (e.g. `#[Redact, Rename("x")]`).
-        /// Used at field position, which only ever supports the bracket form
-        /// (no bare `#Redact`/`#Rename` without brackets).
-        pub(super) fn parse_field_markers(&mut self) -> Result<Vec<Marker>, Diagnostic> {
-            let mut out = Vec::new();
-            let mut bare = 0usize;
+
+        fn parse_attached_marker_sequence(
+            &mut self,
+            site: Option<crate::Policy::RuleSite>,
+            noun: &str,
+        ) -> Result<Vec<Marker>, Diagnostic> {
+            let sequence_start = self.peek().span.start;
+            let mut sequence_end = sequence_start;
+            let mut markers = Vec::new();
+            let mut chunks = 0usize;
+            let mut bracket_chunks = 0usize;
             loop {
+                while matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                }
                 if self.at_marker_list() {
-                    out.extend(self.parse_marker_groups()?);
-                } else if matches!(self.peek().kind, TokKind::Hash) {
-                    let start = self.bump().span.start;
-                    let mut marker = self.parse_one_marker()?;
-                    marker.span.start = start;
-                    out.push(marker);
-                    bare += 1;
-                } else {
+                    let close_index = Self::skip_bracket_group(&self.toks, self.pos + 1)
+                        .ok_or_else(|| Diagnostic::error(
+                            "E0003",
+                            "this marker list is not closed".to_string(),
+                            "a marker group ends with `]`".to_string(),
+                            "close the marker group with `]`".to_string(),
+                            Some(self.peek().span),
+                        ))?;
+                    sequence_end = self.toks[close_index - 1].span.end;
+                    chunks += 1;
+                    bracket_chunks += 1;
+                    markers.extend(self.parse_marker_bracket_group()?);
+                    continue;
+                }
+                let Some(name) = self.marker_name_at(self.pos) else { break };
+                if site.is_some_and(|site| !crate::Policy::rule_allows(name, site)) {
                     break;
                 }
+                chunks += 1;
+                let marker = self.parse_rule_marker()?;
+                sequence_end = marker.span.end;
+                markers.push(marker);
             }
-            if bare > 1 {
-                let span = Span::new(out[0].span.start, out.last().unwrap().span.end);
+            if markers.len() > 1 && !(chunks == 1 && bracket_chunks == 1) {
+                let span = Span::new(sequence_start, sequence_end);
                 let mut diagnostic = Diagnostic::error(
                     "E0999",
-                    "multiple field markers belong in one bracket list".to_string(),
-                    "two or more markers use one `#[A, B]` group".to_string(),
-                    "replace the bare stack with one bracket list".to_string(),
+                    format!("adjacent {noun} markers belong in one bracket list"),
+                    format!("two or more rules attached to one {noun} use one ordered `#[A, B]` group"),
+                    "replace the adjacent markers with one bracket list".to_string(),
                     Some(span),
                 );
-                if let Some(markers) = out
+                if let Some(rendered) = markers
                     .iter()
                     .map(Self::marker_fix_source)
                     .collect::<Option<Vec<_>>>()
                 {
                     diagnostic.edit = Some(crate::Diagnostics::TextEdit {
                         span,
-                        new_text: format!("#[{}]", markers.join(", ")),
+                        new_text: format!("#[{}]", rendered.join(", ")),
                     });
                 }
                 self.diags.push(diagnostic);
             }
-            Ok(out)
+            Ok(markers)
         }
 
-        pub(super) fn marker_list_leads_to_function(&self) -> bool {
-            if !self.at_marker_list() {
-                return false;
+        /// D-SHAPE2: parse leading `#[…]` applied-rule groups before a
+        /// struct/enum field (e.g. `#[Redact, Rename("x")]`).
+        /// Used at field position, which only ever supports the bracket form
+        /// (no bare `#Redact`/`#Rename` without brackets).
+        pub(super) fn parse_field_markers(&mut self) -> Result<Vec<Marker>, Diagnostic> {
+            self.parse_attached_marker_sequence(None, "field")
+        }
+
+        fn marker_name_at(&self, index: usize) -> Option<&str> {
+            if !matches!(
+                self.toks.get(index).map(|token| &token.kind),
+                Some(TokKind::Hash)
+            ) {
+                return None;
             }
-            let Some(mut i) = Self::skip_bracket_group(&self.toks, self.pos + 1) else {
-                return false;
-            };
-            while matches!(self.toks.get(i).map(|token| &token.kind), Some(TokKind::Semi)) {
-                i += 1;
+            match self.toks.get(index + 1).map(|token| &token.kind) {
+                Some(TokKind::Ident(name)) => Some(name),
+                Some(TokKind::KwUnsafe) => Some(Syntax::KW_UNSAFE),
+                _ => None,
             }
+        }
+
+        fn target_marker_selects_file_web_at(&self, name_index: usize) -> bool {
             matches!(
-                self.toks.get(i).map(|token| &token.kind),
-                Some(TokKind::KwFn | TokKind::KwPub)
+                (
+                    self.toks.get(name_index).map(|token| &token.kind),
+                    self.toks.get(name_index + 1).map(|token| &token.kind),
+                    self.toks.get(name_index + 2).map(|token| &token.kind),
+                ),
+                (
+                    Some(TokKind::Ident(name)),
+                    Some(TokKind::LParen),
+                    Some(TokKind::Ident(target)),
+                ) if name == Syntax::ATTR_TARGET && target == Syntax::WEB_TARGET_DEFAULT_WEB
+            )
+        }
+
+        fn shared_function_marker(name: &str) -> bool {
+            matches!(
+                name,
+                Syntax::ATTR_POLICY
+                    | Syntax::ATTR_META
+                    | Syntax::KW_UNSAFE
+                    | Syntax::KW_TASK
+                    | Syntax::ATTR_EVERY
+                    | Syntax::ATTR_MUST_USE
+                    | Syntax::ATTR_REPLAYABLE
+                    | Syntax::ATTR_WASM_EXPORT
+                    | Syntax::ATTR_TARGET
+                    | Syntax::KW_REACTIVE
+                    | Syntax::KW_SANITIZER
+                    | Syntax::CONTRACT_INLINE
+                    | Syntax::CONTRACT_PRE
+                    | Syntax::CONTRACT_POST
+                    | Syntax::KW_STATE
+                    | Syntax::KW_TRANSITION
+                    | Syntax::ATTR_FFI
+                    | Syntax::KW_PURE
+                    | "InlineAlways"
+            )
+        }
+
+        fn skip_bare_marker(&self, index: usize) -> Option<usize> {
+            if !matches!(self.toks.get(index).map(|token| &token.kind), Some(TokKind::Hash)) {
+                return None;
+            }
+            self.marker_name_at(index)?;
+            let mut cursor = index + 2;
+            if matches!(self.toks.get(cursor).map(|token| &token.kind), Some(TokKind::LParen)) {
+                let mut depth = 0usize;
+                while let Some(token) = self.toks.get(cursor) {
+                    match token.kind {
+                        TokKind::LParen => depth += 1,
+                        TokKind::RParen => {
+                            depth = depth.checked_sub(1)?;
+                            cursor += 1;
+                            if depth == 0 {
+                                break;
+                            }
+                            continue;
+                        }
+                        TokKind::Eof => return None,
+                        _ => {}
+                    }
+                    cursor += 1;
+                }
+                if depth != 0 {
+                    return None;
+                }
+            }
+            Some(cursor)
+        }
+
+        fn bracket_group_allows_site(
+            &self,
+            open_index: usize,
+            site: crate::Policy::RuleSite,
+        ) -> bool {
+            let mut cursor = open_index + 1;
+            loop {
+                let name = match self.toks.get(cursor).map(|token| &token.kind) {
+                    Some(TokKind::Ident(name)) => name.as_str(),
+                    Some(TokKind::KwUnsafe) => Syntax::KW_UNSAFE,
+                    _ => return false,
+                };
+                if site == crate::Policy::RuleSite::Function
+                    && (!Self::shared_function_marker(name)
+                        || self.target_marker_selects_file_web_at(cursor))
+                {
+                    return false;
+                }
+                if !crate::Policy::rule_allows(name, site) {
+                    return false;
+                }
+                cursor += 1;
+                if matches!(self.toks.get(cursor).map(|token| &token.kind), Some(TokKind::LParen)) {
+                    let mut depth = 0usize;
+                    while let Some(token) = self.toks.get(cursor) {
+                        match token.kind {
+                            TokKind::LParen => depth += 1,
+                            TokKind::RParen => {
+                                let Some(next_depth) = depth.checked_sub(1) else { return false };
+                                depth = next_depth;
+                                cursor += 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                                continue;
+                            }
+                            TokKind::Eof => return false,
+                            _ => {}
+                        }
+                        cursor += 1;
+                    }
+                }
+                match self.toks.get(cursor).map(|token| &token.kind) {
+                    Some(TokKind::Comma) => cursor += 1,
+                    Some(TokKind::RBracket) => return true,
+                    _ => return false,
+                }
+            }
+        }
+
+        pub(in crate::Parser) fn marker_sequence_leads_to_function(&self) -> bool {
+            let mut cursor = self.pos;
+            let mut saw_marker = false;
+            loop {
+                while matches!(self.toks.get(cursor).map(|token| &token.kind), Some(TokKind::Semi)) {
+                    cursor += 1;
+                }
+                let next = if matches!(
+                    (
+                        self.toks.get(cursor).map(|token| &token.kind),
+                        self.toks.get(cursor + 1).map(|token| &token.kind),
+                    ),
+                    (Some(TokKind::Hash), Some(TokKind::LBracket))
+                ) {
+                    if !self.bracket_group_allows_site(
+                        cursor + 1,
+                        crate::Policy::RuleSite::Function,
+                    ) {
+                        break;
+                    }
+                    Self::skip_bracket_group(&self.toks, cursor + 1)
+                } else {
+                    let Some(name) = self.marker_name_at(cursor) else { break };
+                    if !Self::shared_function_marker(name)
+                        || self.target_marker_selects_file_web_at(cursor + 1)
+                    {
+                        break;
+                    }
+                    if !crate::Policy::rule_allows(name, crate::Policy::RuleSite::Function) {
+                        break;
+                    }
+                    self.skip_bare_marker(cursor)
+                };
+                let Some(next) = next else { break };
+                saw_marker = true;
+                cursor = next;
+            }
+            while matches!(self.toks.get(cursor).map(|token| &token.kind), Some(TokKind::Semi)) {
+                cursor += 1;
+            }
+            saw_marker
+                && matches!(
+                    self.toks.get(cursor).map(|token| &token.kind),
+                    Some(TokKind::KwFn | TokKind::KwPub)
+                )
+        }
+
+        fn parse_function_marker_sequence(&mut self) -> Result<Vec<Marker>, Diagnostic> {
+            self.parse_attached_marker_sequence(
+                Some(crate::Policy::RuleSite::Function),
+                "function",
             )
         }
 
         pub(super) fn marker_list_is_file_rules(&self) -> bool {
-            if !self.at_marker_list() {
+            if !self.at_marker_list() || self.marker_sequence_leads_to_function() {
                 return false;
             }
-            let first_is_html = matches!(
-                self.toks.get(self.pos + 2).map(|token| &token.kind),
-                Some(TokKind::Ident(name)) if name == Syntax::ATTR_HTML
-            );
-            let first_is_web_default = matches!(
-                (
-                    self.toks.get(self.pos + 2).map(|token| &token.kind),
-                    self.toks.get(self.pos + 4).map(|token| &token.kind),
-                ),
-                (
-                    Some(TokKind::Ident(name)),
-                    Some(TokKind::Ident(target)),
-                ) if name == Syntax::ATTR_TARGET && target == Syntax::WEB_TARGET_DEFAULT_WEB
-            );
-            let mut index = self.pos + 2;
-            let mut contains_html = false;
-            while let Some(token) = self.toks.get(index) {
-                match &token.kind {
-                    TokKind::RBracket | TokKind::Eof => break,
-                    TokKind::Ident(name) if name == Syntax::ATTR_HTML => contains_html = true,
-                    _ => {}
-                }
-                index += 1;
-            }
-            first_is_html || first_is_web_default || contains_html
+            self.bracket_group_allows_site(self.pos + 1, crate::Policy::RuleSite::File)
         }
 
-        /// D-MARK-STACK1=A: apply one bracket list to a function. Marker
-        /// payloads were already parsed by the shared call-grammar reader.
-        pub(super) fn func_with_marker_list(&mut self) -> Result<crate::AST::Func, Diagnostic> {
-            let markers = self.parse_marker_groups()?;
+        pub(super) fn file_marker_stack_starts_here(&self) -> bool {
+            if self.marker_sequence_leads_to_function() {
+                return false;
+            }
+            if self.at_marker_list() {
+                return self.marker_list_is_file_rules();
+            }
+            let mut cursor = self.pos;
+            let mut count = 0usize;
+            loop {
+                while matches!(self.toks.get(cursor).map(|token| &token.kind), Some(TokKind::Semi)) {
+                    cursor += 1;
+                }
+                let Some(name) = self.marker_name_at(cursor) else { break };
+                if !crate::Policy::rule_allows(name, crate::Policy::RuleSite::File) {
+                    break;
+                }
+                let Some(next) = self.skip_bare_marker(cursor) else { break };
+                count += 1;
+                cursor = next;
+            }
+            count > 1
+        }
+
+        pub(super) fn parse_file_marker_sequence(&mut self) -> Result<Vec<Marker>, Diagnostic> {
+            self.parse_attached_marker_sequence(Some(crate::Policy::RuleSite::File), "file")
+        }
+
+        /// D-MARK-STACK1=A: collect every marker attached to one function,
+        /// diagnose non-canonical adjacent spellings, then lower through one
+        /// applicator. FFI changes only the body parser.
+        pub(in crate::Parser) fn func_with_marker_list(&mut self) -> Result<crate::AST::Func, Diagnostic> {
+            let markers = self.parse_function_marker_sequence()?;
             if markers.iter().any(|marker| marker.name == Syntax::ATTR_FFI) {
                 return self.ffi_fn_from_markers(markers);
             }
-            let mut function = self.func()?;
+            let function = self.func()?;
+            self.apply_function_markers(function, markers)
+        }
+
+        pub(in crate::Parser) fn apply_function_markers(
+            &mut self,
+            mut function: crate::AST::Func,
+            markers: Vec<Marker>,
+        ) -> Result<crate::AST::Func, Diagnostic> {
+            let ordered_markers = markers.clone();
             let mut policy = Vec::new();
             for marker in markers {
+                if let Some(crate::Policy::RuleStatus::Retired { replacement }) =
+                    crate::Policy::applied_rule(&marker.name).map(|rule| rule.status)
+                {
+                    match marker.name.as_str() {
+                        Syntax::KW_PURE => {
+                            self.diags.push(Self::retired_effect_syntax(marker.span));
+                            function.is_pure = true;
+                        }
+                        "InlineAlways" => {
+                            self.diags.push(Diagnostic::error(
+                                "E0927",
+                                "`#InlineAlways` is retired".to_string(),
+                                "one `#Inline` marker carries both inline modes".to_string(),
+                                format!("write `{replacement}`"),
+                                Some(marker.span),
+                            ));
+                            function.is_inline_always = true;
+                            function.inline_span = Some(marker.span);
+                        }
+                        _ => {
+                            self.diags.push(Diagnostic::error(
+                                "E0927",
+                                format!("`#{}` is retired", marker.name),
+                                "the applied-rule registry owns retired spellings and replacements"
+                                    .to_string(),
+                                format!("write `{replacement}`"),
+                                Some(marker.span),
+                            ));
+                        }
+                    }
+                    continue;
+                }
                 match marker.name.as_str() {
                     Syntax::ATTR_POLICY => {
                         policy.extend(self.policy_declarations_from_marker(
@@ -390,21 +583,11 @@ impl<'a> Parser<'a> {
                         function.meta = Some(meta);
                     }
                     Syntax::KW_UNSAFE => {
-                        let [crate::AST::Expr::Str(parts, _)] = marker.args.as_slice() else {
-                            return Err(Self::marker_argument_shape_error(
-                                Syntax::KW_UNSAFE,
-                                marker.span,
-                            ));
-                        };
-                        let [crate::AST::StrPart::Lit(reason)] = parts.as_slice() else {
-                            return Err(Self::marker_argument_shape_error(
-                                Syntax::KW_UNSAFE,
-                                marker.span,
-                            ));
-                        };
-                        function.is_unsafe = true;
-                        function.unsafe_reason = Some(reason.clone());
-                        function.unsafe_span = Some(marker.span);
+                        if let Some(declaration) =
+                            self.apply_unsafe_function_marker(&mut function, &marker)?
+                        {
+                            policy.push(declaration);
+                        }
                     }
                     Syntax::KW_TASK if marker.args.is_empty() => {
                         function.is_task = true;
@@ -568,6 +751,7 @@ impl<'a> Parser<'a> {
                             span: marker.span,
                         });
                     }
+                    Syntax::ATTR_FFI if function.inline_foreign.is_some() => {}
                     _ => {
                         return Err(Diagnostic::error(
                             "E0355",
@@ -583,8 +767,102 @@ impl<'a> Parser<'a> {
             for declaration in &mut policy {
                 declaration.target = Some(function.span);
             }
+            if let Some(every) = &function.every {
+                if !function.is_task {
+                    self.diags
+                        .push(Self::e0925_every_without_task(every.span));
+                }
+            }
             self.policy_declarations.extend(policy);
+            self.applied_rules.extend(
+                ordered_markers
+                    .into_iter()
+                    .filter(|marker| {
+                        crate::Policy::applied_rule(&marker.name).is_some_and(|rule| {
+                            matches!(rule.status, crate::Policy::RuleStatus::Active)
+                        })
+                    })
+                    .map(|marker| crate::AST::AppliedRuleApplication {
+                        marker,
+                        target: Some(function.span),
+                    }),
+            );
             Ok(function)
+        }
+
+        pub(in crate::Parser) fn apply_unsafe_function_marker(
+            &mut self,
+            function: &mut crate::AST::Func,
+            marker: &Marker,
+        ) -> Result<Option<crate::Policy::PolicyDeclaration>, Diagnostic> {
+            if marker.args.is_empty() {
+                return Err(Diagnostic::error(
+                    "E3112",
+                    "an `#Unsafe` function needs a reason".to_string(),
+                    "every unsafe function records why callers can rely on its unchecked contract"
+                        .to_string(),
+                    "write `#Unsafe(\"why this is safe\") fn …`".to_string(),
+                    Some(marker.span),
+                ));
+            }
+            let reason = match &marker.args[0] {
+                crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+                    crate::AST::StrPart::Lit(value) => value.clone(),
+                    crate::AST::StrPart::Interp(..) => {
+                        return Err(Self::marker_argument_shape_error(
+                            Syntax::KW_UNSAFE,
+                            marker.span,
+                        ));
+                    }
+                },
+                _ => {
+                    return Err(Self::marker_argument_shape_error(
+                        Syntax::KW_UNSAFE,
+                        marker.span,
+                    ));
+                }
+            };
+            function.is_unsafe = true;
+            function.unsafe_reason = Some(reason);
+            function.unsafe_span = Some(marker.span);
+            let Some(value) = marker.args.get(1) else { return Ok(None) };
+            let mode = match value {
+                crate::AST::Expr::EnumLit {
+                    type_name,
+                    variant,
+                    args,
+                    ..
+                } if type_name.is_empty() && args.is_empty() => variant.as_str(),
+                _ => {
+                    return Err(Self::marker_argument_shape_error(
+                        Syntax::KW_UNSAFE,
+                        value.span(),
+                    ));
+                }
+            };
+            let value = match mode {
+                "None" => return Ok(None),
+                "Track" => crate::Policy::PolicyValue::UnsafeTrack,
+                "Skip" => crate::Policy::PolicyValue::UnsafeSkip,
+                _ => {
+                    return Err(Diagnostic::error(
+                        "E3108",
+                        format!("`.{mode}` is not a per-site obligation mode"),
+                        "a gate tracks typed obligations, skips them when policy permits, or keeps the default"
+                            .to_string(),
+                        "write `.Track`, `.Skip`, or `.None`".to_string(),
+                        Some(value.span()),
+                    ));
+                }
+            };
+            Ok(Some(crate::Policy::PolicyDeclaration {
+                key: crate::Policy::PolicyKey::Unsafe,
+                value,
+                scope: crate::Policy::PolicyScope::Function,
+                span: marker.span,
+                target: Some(function.span),
+                source: "<source>".to_string(),
+            }))
         }
     
         /// Split parsed markers on a struct/enum: derive-trait markers
@@ -735,44 +1013,7 @@ impl<'a> Parser<'a> {
         /// D-SHAPE2: parse leading `#[…]`/`#Name` applied rules, then the
         /// struct/enum they attach to.
         pub(in crate::Parser) fn type_def_with_any_markers(&mut self) -> Result<Item, Diagnostic> {
-            let mut markers = Vec::new();
-            let mut bare_markers = 0usize;
-            loop {
-                // A marker line may end with an auto-inserted/explicit `;` before
-                // the next stacked rule line or the `struct`/`enum`.
-                while matches!(self.peek().kind, TokKind::Semi) {
-                    self.bump();
-                }
-                if self.at_marker_list() {
-                    markers.extend(self.parse_marker_groups()?);
-                } else if self.at_single_type_marker() {
-                    markers.push(self.parse_single_type_prefix_marker()?);
-                    bare_markers += 1;
-                } else {
-                    break;
-                }
-            }
-            if bare_markers > 1 {
-                let span = Span::new(markers[0].span.start, markers.last().unwrap().span.end);
-                let mut diagnostic = Diagnostic::error(
-                    "E0999",
-                    "multiple markers belong in one bracket list".to_string(),
-                    "two or more markers use one `#[A, B]` group".to_string(),
-                    "replace the bare stack with one bracket list".to_string(),
-                    Some(span),
-                );
-                if let Some(markers) = markers
-                    .iter()
-                    .map(Self::marker_fix_source)
-                    .collect::<Option<Vec<_>>>()
-                {
-                    diagnostic.edit = Some(crate::Diagnostics::TextEdit {
-                        span,
-                        new_text: format!("#[{}]", markers.join(", ")),
-                    });
-                }
-                self.diags.push(diagnostic);
-            }
+            let markers = self.parse_attached_marker_sequence(None, "type")?;
             let item = self.parse_type_after_markers()?;
             self.attach_type_markers(markers, item)
         }

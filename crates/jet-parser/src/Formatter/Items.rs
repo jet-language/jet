@@ -12,7 +12,12 @@ enum EnumFmtEntry<'b> {
 
 impl<'a> Fmt<'a> {
     pub(super) fn fmt_meta_attr(&mut self, meta: &MetaAttr) {
-        self.write(&format!("#{}(", Syntax::ATTR_META));
+        self.write("#");
+        self.fmt_meta_rule(meta);
+    }
+
+    fn fmt_meta_rule(&mut self, meta: &MetaAttr) {
+        self.write(&format!("{}(", Syntax::ATTR_META));
         for (idx, field) in meta.fields.iter().enumerate() {
             if idx > 0 {
                 self.write(", ");
@@ -373,7 +378,7 @@ impl<'a> Fmt<'a> {
     }
 
     /// D-SHAPE2 / D-SERDE2–8: render one applied rule.
-    fn fmt_marker(&mut self, m: &Marker) {
+    pub(super) fn fmt_marker(&mut self, m: &Marker) {
         self.write(&m.name);
         if !m.args.is_empty() {
             self.write("(");
@@ -402,7 +407,7 @@ impl<'a> Fmt<'a> {
     }
 
     /// One marker-list group on a single plane. `sigil` is `"@"` or `"#"`.
-    fn fmt_marker_group(&mut self, markers: &[&Marker], sigil: &str, lone_ok: bool) {
+    pub(super) fn fmt_marker_group(&mut self, markers: &[&Marker], sigil: &str, lone_ok: bool) {
         if markers.is_empty() {
             return;
         }
@@ -490,85 +495,115 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_func(&mut self, f: &Func, top_level: bool) {
+        let ordered_rules = self
+            .applied_rules
+            .iter()
+            .filter(|application| application.target == Some(f.span))
+            .map(|application| application.marker.clone())
+            .collect::<Vec<_>>();
+        if !ordered_rules.is_empty() {
+            let rules = ordered_rules.iter().collect::<Vec<_>>();
+            if rules.len() == 1 {
+                self.write(Syntax::RULE_PREFIX);
+                self.fmt_marker(rules[0]);
+                if matches!(
+                    rules[0].name.as_str(),
+                    Syntax::ATTR_META
+                        | Syntax::KW_UNSAFE
+                        | Syntax::ATTR_FFI
+                        | Syntax::ATTR_TARGET
+                        | Syntax::ATTR_WASM_EXPORT
+                ) {
+                    self.newline();
+                } else {
+                    self.write(" ");
+                }
+            } else {
+                self.write("#[");
+                for (index, rule) in rules.iter().enumerate() {
+                    if index > 0 {
+                        self.write(", ");
+                    }
+                    self.fmt_marker(rule);
+                }
+                self.write("]");
+                self.write(" ");
+            }
+        } else {
         let policies = self.policy_declarations.iter().filter(|d| d.scope == crate::Policy::PolicyScope::Function && d.target == Some(f.span) && d.key != crate::Policy::PolicyKey::Unsafe).cloned().collect::<Vec<_>>();
+        let unsafe_site_mode = self.policy_declarations.iter().find(|declaration| declaration.key == crate::Policy::PolicyKey::Unsafe && declaration.target == Some(f.span)).map(|declaration| declaration.value);
+        let rule_count = usize::from(!policies.is_empty())
+            + usize::from(f.meta.is_some())
+            + usize::from(f.is_unsafe)
+            + usize::from(f.inline_foreign.is_some())
+            + usize::from(f.web_marker.is_some())
+            + usize::from(f.is_reactive)
+            + usize::from(f.is_sanitizer)
+            + usize::from(f.is_replayable)
+            + usize::from(f.is_task)
+            + usize::from(f.every.is_some())
+            + usize::from(f.is_must_use)
+            + usize::from(f.is_inline || f.is_inline_always)
+            + usize::from(f.state_requires.is_some())
+            + usize::from(f.state_transition.is_some())
+            + f.pre.len()
+            + f.post.len();
+        let grouped = rule_count > 1;
+        let mut rule_index = 0usize;
+        if grouped {
+            self.write("#[");
+        }
+        macro_rules! start_rule {
+            () => {{
+                if grouped {
+                    if rule_index > 0 {
+                        self.write(", ");
+                    }
+                } else {
+                    self.write("#");
+                }
+                rule_index += 1;
+            }};
+        }
         if !policies.is_empty() {
-            self.fmt_policy_declarations(&policies);
-            self.write(" ");
+            start_rule!();
+            self.fmt_policy_rule(&policies);
         }
         if let Some(meta) = &f.meta {
-            self.fmt_meta_attr(meta);
-            self.newline();
+            start_rule!();
+            self.fmt_meta_rule(meta);
         }
-        // S58 (E2-M13): `#Unsafe` whole-function contract sits on its own line.
-        if f.is_unsafe && crate::Policy::rule_allows(Syntax::KW_UNSAFE, crate::Policy::RuleSite::Function) {
-            let site_mode = self.policy_declarations.iter().find(|declaration| declaration.key == crate::Policy::PolicyKey::Unsafe && declaration.target == Some(f.span)).map(|declaration| declaration.value);
-            match (&f.unsafe_reason, site_mode) {
-                (Some(reason), Some(mode)) => self.write(&format!("#{}(\"{}\", obligations: {})", Syntax::KW_UNSAFE, escape_str_lit(reason), mode.display())),
-                (None, Some(mode)) => self.write(&format!("#{}(obligations: {})", Syntax::KW_UNSAFE, mode.display())),
-                (Some(reason), None) => self.write(&format!("#{}(\"{}\")", Syntax::KW_UNSAFE, escape_str_lit(reason))),
-                (None, None) => self.write(&format!("#{}", Syntax::KW_UNSAFE)),
+        if f.is_unsafe {
+            start_rule!();
+            match (&f.unsafe_reason, unsafe_site_mode) {
+                (Some(reason), Some(mode)) => self.write(&format!("{}(\"{}\", obligations: {})", Syntax::KW_UNSAFE, escape_str_lit(reason), mode.display())),
+                (None, Some(mode)) => self.write(&format!("{}(obligations: {})", Syntax::KW_UNSAFE, mode.display())),
+                (Some(reason), None) => self.write(&format!("{}(\"{}\")", Syntax::KW_UNSAFE, escape_str_lit(reason))),
+                (None, None) => self.write(Syntax::KW_UNSAFE),
             }
-            self.newline();
         }
-        // D-FFI-INLINE1=A (card #501): the `#FFI(<lang>)` inline foreign tier
-        // marker sits on its own line before `fn`, directly after any `#Unsafe`
-        // gate (matching the ratified rdtsc example: `#Unsafe(…)` then
-        // `#FFI(asm)`).
-        if let Some(inl) = &f.inline_foreign {
-            self.write(&format!("#{}({})", Syntax::ATTR_FFI, inl.lang));
-            self.newline();
+        if let Some(inline) = &f.inline_foreign {
+            start_rule!();
+            self.write(&format!("{}({})", Syntax::ATTR_FFI, inline.lang));
         }
-        // D-WASM1: `#Wasm` / `#Js` / `#WasmExport` per-function web partition
-        // override, on its own line before `fn`/`pub` (the convention every
-        // web example uses; the parser skips the lexer-inserted `;` between
-        // marker lines). fmt used to drop this marker entirely — every
-        // browser-side function silently fell back to the Wasm bucket,
-        // breaking the cross-partition checks in tests/web_build.rs.
         if let Some(marker) = f.web_marker {
-            self.write(&format!("#{}", marker.name()));
-            self.newline();
+            start_rule!();
+            self.write(marker.name());
         }
-        // D-REACTCORE1: `#Reactive fn` marker precedes `pub`/`fn`.
-        if f.is_reactive {
-            self.write(&format!("#{} ", Syntax::KW_REACTIVE));
-        }
-        // D-TAINT1: the `#Sanitizer` taint-strip modifier precedes `pub`/`fn`.
-        if f.is_sanitizer && crate::Policy::rule_allows(Syntax::KW_SANITIZER, crate::Policy::RuleSite::Function) {
-            self.write(&format!("#{} ", Syntax::KW_SANITIZER));
-        }
-        // D-REPLAY1: `#Replayable` deterministic replay guard precedes `pub`/`fn`.
-        if f.is_replayable {
-            self.write(&format!("#{} ", Syntax::ATTR_REPLAYABLE));
-        }
-        // D-SCHEDULE1 (card #505): `#Task` / `#Every(…)` schedule-as-code
-        // markers precede `pub`/`fn`, `#Task` first (the parser accepts
-        // either order; fmt canonicalizes on one so round-tripping is
-        // idempotent).
-        let grouped_schedule = f.is_task && f.every.is_some();
-        if grouped_schedule {
-            self.write(&format!("#[{}, {}(", Syntax::KW_TASK, Syntax::ATTR_EVERY));
-            match &f.every.as_ref().expect("grouped schedule has Every").arg {
-                crate::AST::EveryArg::Duration { int, float, suffix, .. } => {
-                    if let Some(n) = int {
-                        self.write(&n.to_string());
-                    } else if let Some(v) = float {
-                        self.write(&fmt_float(*v));
-                    }
-                    self.write(suffix);
-                }
-                crate::AST::EveryArg::WallClock { text, .. } => {
-                    self.write("\"");
-                    self.write(&escape_str_lit(text));
-                    self.write("\"");
-                }
+        for (enabled, name) in [
+            (f.is_reactive, Syntax::KW_REACTIVE),
+            (f.is_sanitizer, Syntax::KW_SANITIZER),
+            (f.is_replayable, Syntax::ATTR_REPLAYABLE),
+            (f.is_task, Syntax::KW_TASK),
+        ] {
+            if enabled {
+                start_rule!();
+                self.write(name);
             }
-            self.write(")] ");
-        } else if f.is_task {
-            self.write(&format!("#{} ", Syntax::KW_TASK));
         }
-        if !grouped_schedule {
-            if let Some(every) = &f.every {
-            self.write(&format!("#{}(", Syntax::ATTR_EVERY));
+        if let Some(every) = &f.every {
+            start_rule!();
+            self.write(&format!("{}(", Syntax::ATTR_EVERY));
             match &every.arg {
                 crate::AST::EveryArg::Duration { int, float, suffix, .. } => {
                     if let Some(n) = int {
@@ -584,82 +619,47 @@ impl<'a> Fmt<'a> {
                     self.write("\"");
                 }
             }
-                self.write(") ");
-            }
+            self.write(")");
         }
-        // D-MUSTUSE1 (c18iwxqx): `#MustUse fn` / method precedes `pub`/`fn`.
         if f.is_must_use {
-            self.write(&format!("#{} ", Syntax::ATTR_MUST_USE));
+            start_rule!();
+            self.write(Syntax::ATTR_MUST_USE);
         }
-        // D-INLINE-PARAM1=A: `#Inline`/`#Inline(Always)` precedes `pub`/`fn`, in
-        // the same slot the parser checks (after `#MustUse`/`#Pure`/
-        // `#Sanitizer`, before the typestate markers).
         if f.is_inline_always {
-            self.write(&format!("#{}(Always) ", Syntax::CONTRACT_INLINE));
+            start_rule!();
+            self.write(&format!("{}(Always)", Syntax::CONTRACT_INLINE));
         } else if f.is_inline {
-            self.write(&format!("#{} ", Syntax::CONTRACT_INLINE));
+            start_rule!();
+            self.write(Syntax::CONTRACT_INLINE);
         }
-        // D-STATE1: typestate markers precede `pub`/`fn`. `#State(S)` is the
-        // require-state guard; `#Transition(From, To)` is the transition (the
-        // from-state is `_` for an entry transition). Round-tripped verbatim so
-        // `jet fmt` never drops a typestate contract.
         if let Some((state, _)) = &f.state_requires {
-            self.write(&format!("#{}({}) ", Syntax::KW_STATE, state));
+            start_rule!();
+            self.write(&format!("{}({})", Syntax::KW_STATE, state));
         }
-        if let Some(tr) = &f.state_transition {
-            let from = tr.from.as_deref().unwrap_or(Syntax::STATE_ENTRY);
+        if let Some(transition) = &f.state_transition {
+            start_rule!();
             self.write(&format!(
-                "#{}({}, {}) ",
+                "{}({}, {})",
                 Syntax::KW_TRANSITION,
-                from,
-                tr.to
+                transition.from.as_deref().unwrap_or(Syntax::STATE_ENTRY),
+                transition.to
             ));
         }
-        // D-PREPOST1: `#Pre(cond, "msg")` / `#Post(cond, "msg")` clauses
-        // precede `pub`/`fn`, one call-shaped marker per clause, in source
-        // order — same inline-marker convention as the typestate markers
-        // above (not each on its own line: I8, one marker-placement rule).
-        let grouped_contracts = f.pre.len() + f.post.len() > 1;
-        if grouped_contracts {
-            self.write("#[");
-        }
-        let mut contract_index = 0usize;
-        for clause in &f.pre {
-            if grouped_contracts && contract_index > 0 {
-                self.write(", ");
-            }
-            if !grouped_contracts {
-                self.write("#");
-            }
-            self.write(&format!("{}(", Syntax::CONTRACT_PRE));
+        for (name, clause) in f.pre.iter().map(|clause| (Syntax::CONTRACT_PRE, clause))
+            .chain(f.post.iter().map(|clause| (Syntax::CONTRACT_POST, clause)))
+        {
+            start_rule!();
+            self.write(&format!("{name}("));
             self.fmt_expr(&clause.cond, Prec::OrFallback);
             self.write(", \"");
-            self.write(&clause.message.replace('\\', "\\\\").replace('"', "\\\""));
+            self.write(&escape_str_lit(&clause.message));
             self.write("\")");
-            if !grouped_contracts {
-                self.write(" ");
-            }
-            contract_index += 1;
         }
-        for clause in &f.post {
-            if grouped_contracts && contract_index > 0 {
-                self.write(", ");
-            }
-            if !grouped_contracts {
-                self.write("#");
-            }
-            self.write(&format!("{}(", Syntax::CONTRACT_POST));
-            self.fmt_expr(&clause.cond, Prec::OrFallback);
-            self.write(", \"");
-            self.write(&clause.message.replace('\\', "\\\\").replace('"', "\\\""));
-            self.write("\")");
-            if !grouped_contracts {
-                self.write(" ");
-            }
-            contract_index += 1;
-        }
-        if grouped_contracts {
+        if grouped {
             self.write("] ");
+        } else if rule_index == 1 {
+            self.write(" ");
+        }
         }
         if top_level {
             self.fmt_pub_qualifier(f.is_pub, f.is_package_pub);
@@ -727,7 +727,12 @@ impl<'a> Fmt<'a> {
     }
 
     pub(super) fn fmt_policy_declarations(&mut self, declarations: &[crate::Policy::PolicyDeclaration]) {
-        self.write(&format!("#{}(", Syntax::ATTR_POLICY));
+        self.write("#");
+        self.fmt_policy_rule(declarations);
+    }
+
+    fn fmt_policy_rule(&mut self, declarations: &[crate::Policy::PolicyDeclaration]) {
+        self.write(&format!("{}(", Syntax::ATTR_POLICY));
         for (i, declaration) in declarations.iter().enumerate() {
             if i > 0 { self.write(", "); }
             self.write(declaration.key.name());

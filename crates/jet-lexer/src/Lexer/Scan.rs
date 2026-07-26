@@ -47,7 +47,10 @@ impl<'a> Lexer<'a> {
             .filter(|token| {
                 !matches!(
                     token.kind,
-                    TokKind::LineComment(_) | TokKind::BlockComment(_) | TokKind::KwPub
+                    TokKind::LineComment(_)
+                        | TokKind::BlockComment(_)
+                        | TokKind::KwPub
+                        | TokKind::Semi
                 )
             })
             .collect::<Vec<_>>();

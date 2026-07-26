@@ -958,18 +958,17 @@ struct Person {
 
 #[test]
 fn fmt_keeps_layout_columnar_and_codable() {
-    // `#[Codable]` then `#Layout(columnar)` on the same struct — both survive,
-    // neither is rewritten into body `derive` lines.
+    // Two rules on the same struct share one ordered group; neither is
+    // rewritten into body `derive` lines.
     let src = "\
-#[Codable]
-#Layout(columnar)
+#[Codable, Layout(columnar)]
 struct Particle {
     x: Float
 }
 ";
     assert_fmt_keeps(
         src,
-        &["#[Codable]", "#Layout(columnar)"],
+        &["#[Codable, Layout(columnar)]"],
         "layout columnar + codable",
     );
     // And no `derive Encode`/`derive Decode` body lines leak in.
@@ -997,8 +996,7 @@ fn double(n: Int) --[]-> Int {
     assert_fmt_stable(fn_src, "#Pure fn round-trip");
 
     let struct_src = "\
-#[Codable]
-#Layout(columnar)
+#[Codable, Layout(columnar)]
 struct Particle {
     x: Float
 }
@@ -2296,7 +2294,7 @@ fn fmt_target_web_marker_stability() {
 fn fmt_html_marker_stability() {
     // D-HTMLPAIR1=A: `#Html(\"path.html\")` — same marker family as
     // `#Target(Web)`, same fixed-position treatment.
-    let src = "use core.ui as ui\n#Target(Web)\n\n#Html(\"dashboard.html\")\n\nfn run() {\n    ui.print(\"hi\")\n}\n";
+    let src = "use core.ui as ui\n#[Target(Web), Html(\"dashboard.html\")]\n\nfn run() {\n    ui.print(\"hi\")\n}\n";
     assert_fmt_stable(src, "#Html(...) marker");
 }
 
@@ -2548,6 +2546,7 @@ fn fmt_preserves_per_function_c_abi() {
     assert!(once.contains("#Abi(system)") && once.contains("#Abi(sysv64)"), "fmt dropped #Abi: {once}");
     assert_eq!(once, jet::format_source(&once).expect("re-fmt"));
 }
+
 
 #[test]
 fn fmt_preserves_casing_errors_for_sema() {
