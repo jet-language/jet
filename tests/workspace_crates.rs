@@ -100,6 +100,7 @@ fn workspace_crates_keep_declared_dependency_direction() {
             "jet-lexer",
             "jet-parser",
             "jet-pkg-model",
+            "jet-queries",
             "jet-sema",
         ],
     );
@@ -140,7 +141,7 @@ fn workspace_crates_keep_declared_dependency_direction() {
     assert_deps("crates/jet-net/Cargo.toml", &[]);
     assert_deps(
         "crates/jet-semindex/Cargo.toml",
-        &["jet-driver", "jet-foundation", "jet-sema"],
+        &["jet-driver", "jet-foundation", "jet-lexer", "jet-sema"],
     );
     assert_deps("crates/jet-impact/Cargo.toml", &["jet-semindex"]);
     // D-ARCH-SOURCE1=A: interactive shell owns behavior, depending only
@@ -160,7 +161,7 @@ fn workspace_crates_keep_declared_dependency_direction() {
     // only inward on shared syntax policy and the terminal/symbol index seam.
     assert_deps(
         "crates/jet-cli/Cargo.toml",
-        &["jet-foundation", "jet-repl"],
+        &["jet-foundation", "jet-repl", "jet-semindex"],
     );
     assert_deps("crates/jet-canvas/Cargo.toml", &["jet-foundation"]);
     // Card #367 slice 5: `jetpack` removed from jet-devserver — Canvas

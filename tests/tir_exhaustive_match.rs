@@ -193,3 +193,54 @@ fn eval_handle_is_exhaustive_over_thandleop() {
     let body = fn_body(&source, "eval_handle");
     assert_no_wildcard_at_indent(body, 8, "eval_handle (THandleOp)");
 }
+
+#[test]
+fn comptime_repl_and_deopt_use_canonical_tir_without_external_fallback() {
+    let root = root();
+    let interpreter =
+        fs::read_to_string(root.join("crates/jet-comptime/src/Comptime/Interpreter.rs")).unwrap();
+    let expression = fn_body(&interpreter, "eval");
+    let block = fn_body(&interpreter, "exec_block");
+    assert!(expression.contains("TirBridge::eval_expr"));
+    assert!(block.contains("TirBridge::eval_block"));
+
+    let repl = fs::read_to_string(root.join("crates/jet-repl/src/lib.rs")).unwrap();
+    assert!(repl.contains("crate::Comptime::run_repl_step("));
+
+    let evaluator =
+        fs::read_to_string(root.join("crates/jet-codegen/src/Codegen/TIR/eval/mod.rs")).unwrap();
+    let install = fn_body(&evaluator, "install_comptime_bridge");
+    for hook in [
+        "run_bundle,",
+        "eval_expr: eval_expr_hook",
+        "eval_block: eval_block_hook",
+    ] {
+        assert!(install.contains(hook), "canonical TIR bridge omits `{hook}`");
+    }
+
+    let deopt = fs::read_to_string(root.join("crates/jet-jit/src/jit/deopt.rs")).unwrap();
+    let whole_program = fn_body(&deopt, "run_whole_interp");
+    let function = fn_body(&deopt, "jet_deopt_call");
+    assert!(whole_program.contains("Comptime::TirBridge::run_bundle"));
+    assert!(function.contains("TIR::run_named_func"));
+
+    for (name, body) in [
+        ("comptime expression", expression),
+        ("comptime block", block),
+        ("whole-program deopt", whole_program),
+        ("function deopt", function),
+    ] {
+        for forbidden in [
+            "Command::new",
+            "std::process",
+            "compile_generated_src",
+            "rustc",
+            "jetpack",
+        ] {
+            assert!(
+                !body.contains(forbidden),
+                "{name} hides external fallback `{forbidden}`"
+            );
+        }
+    }
+}
