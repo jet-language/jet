@@ -178,7 +178,7 @@ fn gzip_round_trip_uses_core_compress() {
 use core.compress.gzip as gz
 
 fn run() {
-original.{ [U8].{ 72, 101, 108, 108, 111 }
+    original :: [U8].{ 72, 101, 108, 108, 111 }
     compressed :: gz.compress(original)
     print((compressed.len() > 5))
     restored :: gz.decompress(compressed) ?? panic("bad gzip")
@@ -186,7 +186,7 @@ original.{ [U8].{ 72, 101, 108, 108, 111 }
 }
 "#;
     let out = run_core_bridge(src);
-    assert_eq!(out, "true }\ntrue\n", "gzip round-trip failed: {out:?}");
+    assert_eq!(out, "true\ntrue\n", "gzip round-trip failed: {out:?}");
 }
 
 #[test]
