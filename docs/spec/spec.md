@@ -1418,8 +1418,8 @@ emits **zero** `unsafe` (the I1 amendment, D-LL1, recorded in `architecture.md`)
 - **Audit gate** — `#Unsafe("reason") { … }` opens the operations that can
   violate memory safety (pointer build/deref, volatile access). The reason
   string is the argument to `#Unsafe` itself (D-UNSAFE2; the former separate
-  `#Audit("…")` line is retired → **E0055**). Under **D-UNSAFE-REASON1=B**,
-  bare `#Unsafe { … }` and bare `#Unsafe fn` compile and emit lint **L3101**.
+  `#Audit("…")` line is retired → **E0055**). Under **D-UNSAFE-REASON1=A**,
+  bare `#Unsafe { … }` and bare `#Unsafe fn` are hard errors (**E3112**).
   `#Unsafe("reason") fn` marks a whole-function contract; its body is itself
   an audited region, and calling it requires an enclosing `#Unsafe` block →
   **E3103**.
@@ -1431,13 +1431,14 @@ emits **zero** `unsafe` (the I1 amendment, D-LL1, recorded in `architecture.md`)
 
 Codegen stays dumb (I3): an `#Unsafe { … }` region lowers straight to a Rust
 `unsafe { … }`, an `#Unsafe fn` to a Rust `unsafe fn`. All gating is decided in
-sema. Diagnostics **E3101–E3104 + L3101** in diagnostics.md with snapshots
+sema. Diagnostics **E3101–E3104 + E3112** in diagnostics.md with snapshots
 (`tests/ui/lowlevel_e310*`, `tests/ui/mem_arena_gate`, `tests/ui/mem_use_after_free`,
-`tests/ui_lint/unsafe_missing_audit`); the audited end-to-end example is
+`tests/ui/unsafe_missing_reason`, `tests/ui/unsafe_fn_missing_reason`); the audited end-to-end example is
 `examples/features/lowlevel/lowlevel.jet`.
 
 D-UNSAFE-OBLIG1 adds a policy layer without weakening either gate. Absent policy
-and `.GateOnly` retain the behavior above; `.Relaxed` only suppresses L3101.
+and `.GateOnly` retain the behavior above. Policy never suppresses the mandatory
+reason.
 `.Obligations` requires an operation-specific typed assertion immediately after
 each low-level operation, using the closed facts `valid_ptr`, `aligned`, and
 `no_alias`, for example `assert valid_ptr, aligned`. `.PerSite` requires each

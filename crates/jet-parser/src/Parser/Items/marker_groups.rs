@@ -34,7 +34,8 @@ impl<'a> Parser<'a> {
             let mut args = Vec::new();
             let mut arg_labels = Vec::new();
             let mut end = name_span.end;
-            if matches!(self.peek().kind, TokKind::LParen) {
+            let parenthesized = matches!(self.peek().kind, TokKind::LParen);
+            if parenthesized {
                 self.bump(); // `(`
                 if !matches!(self.peek().kind, TokKind::RParen) {
                     loop {
@@ -50,14 +51,92 @@ impl<'a> Parser<'a> {
                 end = self.peek().span.end;
                 self.expect(TokKind::RParen, "to close marker arguments")?;
             }
-            Ok(Marker {
+            let marker = Marker {
                 name,
                 name_span,
                 args,
                 arg_labels,
                 span: Span::new(name_span.start, end),
                 ct: None,
-            })
+            };
+            self.validate_registered_rule_marker(&marker, parenthesized)?;
+            Ok(marker)
+        }
+
+        fn validate_registered_rule_marker(
+            &self,
+            marker: &Marker,
+            parenthesized: bool,
+        ) -> Result<(), Diagnostic> {
+            let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
+                return Ok(());
+            };
+            use crate::Policy::{RuleArgType, RuleForm};
+            let call_required = matches!(rule.form, RuleForm::Call)
+                || matches!(rule.form, RuleForm::Block) && rule.signature.required() > 0;
+            let bare_required = matches!(rule.form, RuleForm::Bare);
+            // `#Unsafe` keeps its product diagnostic E3112 for a missing reason.
+            if (call_required && !parenthesized && marker.name != Syntax::KW_UNSAFE)
+                || bare_required && parenthesized
+            {
+                return Err(Self::marker_argument_shape_error(&marker.name, marker.span));
+            }
+            if marker.name == Syntax::KW_UNSAFE && marker.args.is_empty() {
+                return Ok(());
+            }
+            let signature = rule.signature;
+            if signature.variadic.is_none() && marker.args.len() > signature.params.len() {
+                return Err(Self::marker_argument_shape_error(&marker.name, marker.span));
+            }
+            let mut supplied = vec![false; signature.params.len()];
+            for (index, argument) in marker.args.iter().enumerate() {
+                let parameter_index = if let Some((label, _)) = marker.arg_labels[index].as_ref() {
+                    signature.params.iter().position(|parameter| parameter.name == label)
+                } else {
+                    (index < signature.params.len()).then_some(index)
+                };
+                if let Some(parameter_index) = parameter_index {
+                    if supplied[parameter_index] {
+                        return Err(Self::marker_argument_shape_error(
+                            &marker.name,
+                            argument.span(),
+                        ));
+                    }
+                    supplied[parameter_index] = true;
+                }
+                let expected = parameter_index
+                    .map(|parameter_index| signature.params[parameter_index].ty)
+                    .or(signature.variadic)
+                    .ok_or_else(|| Self::marker_argument_shape_error(&marker.name, argument.span()))?;
+                let matches = match expected {
+                    RuleArgType::Any => true,
+                    RuleArgType::String => matches!(argument, crate::AST::Expr::Str(..)),
+                    RuleArgType::Ident => matches!(
+                        argument,
+                        crate::AST::Expr::Ident(..)
+                            | crate::AST::Expr::EnumLit { .. }
+                            | crate::AST::Expr::Field(..)
+                    ),
+                    RuleArgType::Bool => matches!(argument, crate::AST::Expr::Bool(..)),
+                    RuleArgType::Int => matches!(argument, crate::AST::Expr::Int(..)),
+                    RuleArgType::DurationOrString => matches!(
+                        argument,
+                        crate::AST::Expr::UnitLit { .. } | crate::AST::Expr::Str(..)
+                    ),
+                };
+                if !matches {
+                    return Err(Self::marker_argument_shape_error(&marker.name, argument.span()));
+                }
+            }
+            if signature
+                .params
+                .iter()
+                .zip(supplied)
+                .any(|(parameter, supplied)| parameter.default.is_none() && !supplied)
+            {
+                return Err(Self::marker_argument_shape_error(&marker.name, marker.span));
+            }
+            Ok(())
         }
 
         /// Shared entry for a bare `#Name` / `#Name(args)` application.
@@ -67,6 +146,54 @@ impl<'a> Parser<'a> {
             let mut marker = self.parse_one_marker()?;
             marker.span.start = start;
             Ok(marker)
+        }
+
+        fn marker_fix_source(marker: &Marker) -> Option<String> {
+            fn expr_source(expr: &crate::AST::Expr) -> Option<String> {
+                match expr {
+                    crate::AST::Expr::Str(parts, _) => {
+                        let [crate::AST::StrPart::Lit(value)] = parts.as_slice() else {
+                            return None;
+                        };
+                        Some(format!("{value:?}"))
+                    }
+                    crate::AST::Expr::Ident(name, _) => Some(name.clone()),
+                    crate::AST::Expr::Int(value, _, _, source) => {
+                        Some(source.clone().unwrap_or_else(|| value.to_string()))
+                    }
+                    crate::AST::Expr::Bool(value, _) => Some(value.to_string()),
+                    crate::AST::Expr::UnitLit { raw, suffix, .. } => {
+                        Some(format!("{raw}{suffix}"))
+                    }
+                    crate::AST::Expr::Field(base, field, _) => {
+                        Some(format!("{}.{}", expr_source(base)?, field))
+                    }
+                    crate::AST::Expr::EnumLit {
+                        type_name,
+                        variant,
+                        args,
+                        ..
+                    } if args.is_empty() => Some(if type_name.is_empty() {
+                        format!(".{variant}")
+                    } else {
+                        format!("{type_name}.{variant}")
+                    }),
+                    _ => None,
+                }
+            }
+
+            if marker.args.is_empty() {
+                return Some(marker.name.clone());
+            }
+            let mut args = Vec::new();
+            for (argument, label) in marker.args.iter().zip(&marker.arg_labels) {
+                let value = expr_source(argument)?;
+                args.push(match label {
+                    Some((name, _)) => format!("{name}: {value}"),
+                    None => value,
+                });
+            }
+            Some(format!("{}({})", marker.name, args.join(", ")))
         }
     
         /// D-SHAPE2: parse one `#[ Name (, …)* ]` group; cursor on `@`.
@@ -94,10 +221,10 @@ impl<'a> Parser<'a> {
                     format!("replace `#[{}]` with `#{}`", group[0].name, group[0].name),
                     Some(Span::new(group_span.start, close.end)),
                 );
-                if group[0].args.is_empty() {
+                if let Some(marker) = Self::marker_fix_source(&group[0]) {
                     diagnostic.edit = Some(crate::Diagnostics::TextEdit {
                         span: Span::new(group_span.start, close.end),
-                        new_text: format!("#{}", group[0].name),
+                        new_text: format!("#{marker}"),
                     });
                 }
                 self.diags.push(diagnostic);
@@ -166,16 +293,14 @@ impl<'a> Parser<'a> {
                     "replace the bare stack with one bracket list".to_string(),
                     Some(span),
                 );
-                if out.iter().all(|marker| marker.args.is_empty()) {
+                if let Some(markers) = out
+                    .iter()
+                    .map(Self::marker_fix_source)
+                    .collect::<Option<Vec<_>>>()
+                {
                     diagnostic.edit = Some(crate::Diagnostics::TextEdit {
                         span,
-                        new_text: format!(
-                            "#[{}]",
-                            out.iter()
-                                .map(|marker| marker.name.as_str())
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        ),
+                        new_text: format!("#[{}]", markers.join(", ")),
                     });
                 }
                 self.diags.push(diagnostic);
@@ -199,13 +324,88 @@ impl<'a> Parser<'a> {
             )
         }
 
+        pub(super) fn marker_list_is_file_rules(&self) -> bool {
+            if !self.at_marker_list() {
+                return false;
+            }
+            let first_is_html = matches!(
+                self.toks.get(self.pos + 2).map(|token| &token.kind),
+                Some(TokKind::Ident(name)) if name == Syntax::ATTR_HTML
+            );
+            let first_is_web_default = matches!(
+                (
+                    self.toks.get(self.pos + 2).map(|token| &token.kind),
+                    self.toks.get(self.pos + 4).map(|token| &token.kind),
+                ),
+                (
+                    Some(TokKind::Ident(name)),
+                    Some(TokKind::Ident(target)),
+                ) if name == Syntax::ATTR_TARGET && target == Syntax::WEB_TARGET_DEFAULT_WEB
+            );
+            let mut index = self.pos + 2;
+            let mut contains_html = false;
+            while let Some(token) = self.toks.get(index) {
+                match &token.kind {
+                    TokKind::RBracket | TokKind::Eof => break,
+                    TokKind::Ident(name) if name == Syntax::ATTR_HTML => contains_html = true,
+                    _ => {}
+                }
+                index += 1;
+            }
+            first_is_html || first_is_web_default || contains_html
+        }
+
         /// D-MARK-STACK1=A: apply one bracket list to a function. Marker
         /// payloads were already parsed by the shared call-grammar reader.
         pub(super) fn func_with_marker_list(&mut self) -> Result<crate::AST::Func, Diagnostic> {
             let markers = self.parse_marker_groups()?;
+            if markers.iter().any(|marker| marker.name == Syntax::ATTR_FFI) {
+                return self.ffi_fn_from_markers(markers);
+            }
             let mut function = self.func()?;
+            let mut policy = Vec::new();
             for marker in markers {
                 match marker.name.as_str() {
+                    Syntax::ATTR_POLICY => {
+                        policy.extend(self.policy_declarations_from_marker(
+                            marker,
+                            crate::Policy::PolicyScope::Function,
+                        )?);
+                    }
+                    Syntax::ATTR_META => {
+                        if function.meta.is_some() {
+                            return Err(Diagnostic::error(
+                                "E0355",
+                                "a function can have only one `#Meta` rule".to_string(),
+                                "metadata fields belong in one function marker".to_string(),
+                                "merge the fields into one `#Meta(...)` entry".to_string(),
+                                Some(marker.span),
+                            ));
+                        }
+                        let meta = self.meta_attr_from_marker(marker)?;
+                        if let Some((maturity, span)) = meta.maturity() {
+                            function.maturity = Some(maturity);
+                            function.maturity_span = Some(span);
+                        }
+                        function.meta = Some(meta);
+                    }
+                    Syntax::KW_UNSAFE => {
+                        let [crate::AST::Expr::Str(parts, _)] = marker.args.as_slice() else {
+                            return Err(Self::marker_argument_shape_error(
+                                Syntax::KW_UNSAFE,
+                                marker.span,
+                            ));
+                        };
+                        let [crate::AST::StrPart::Lit(reason)] = parts.as_slice() else {
+                            return Err(Self::marker_argument_shape_error(
+                                Syntax::KW_UNSAFE,
+                                marker.span,
+                            ));
+                        };
+                        function.is_unsafe = true;
+                        function.unsafe_reason = Some(reason.clone());
+                        function.unsafe_span = Some(marker.span);
+                    }
                     Syntax::KW_TASK if marker.args.is_empty() => {
                         function.is_task = true;
                         function.task_span = Some(marker.span);
@@ -264,6 +464,30 @@ impl<'a> Parser<'a> {
                         function.is_replayable = true;
                         function.replayable_span = Some(marker.span);
                     }
+                    Syntax::ATTR_WASM_EXPORT if marker.args.is_empty() => {
+                        function.web_marker =
+                            Some(crate::Syntax::WebPartitionMarker::WasmExport);
+                    }
+                    Syntax::ATTR_TARGET => {
+                        function.web_marker = Some(match Self::web_target_from_marker(&marker)? {
+                            super::TargetMarker::Bucket(crate::Syntax::WebBucket::Wasm) => {
+                                crate::Syntax::WebPartitionMarker::Wasm
+                            }
+                            super::TargetMarker::Bucket(crate::Syntax::WebBucket::Js) => {
+                                crate::Syntax::WebPartitionMarker::Js
+                            }
+                            _ => {
+                                return Err(Diagnostic::error(
+                                    "E0003",
+                                    "`#Target` on a function needs `Wasm` or `Js`".to_string(),
+                                    "function target rules select one web partition".to_string(),
+                                    "write `#Target(Wasm)` or `#Target(Js)`".to_string(),
+                                    Some(marker.span),
+                                ));
+                            }
+                        });
+                    }
+                    Syntax::KW_REACTIVE if marker.args.is_empty() => function.is_reactive = true,
                     Syntax::KW_SANITIZER if marker.args.is_empty() => function.is_sanitizer = true,
                     Syntax::CONTRACT_INLINE => {
                         function.inline_span = Some(marker.span);
@@ -356,6 +580,10 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
+            for declaration in &mut policy {
+                declaration.target = Some(function.span);
+            }
+            self.policy_declarations.extend(policy);
             Ok(function)
         }
     
@@ -533,17 +761,14 @@ impl<'a> Parser<'a> {
                     "replace the bare stack with one bracket list".to_string(),
                     Some(span),
                 );
-                if markers.iter().all(|marker| marker.args.is_empty()) {
+                if let Some(markers) = markers
+                    .iter()
+                    .map(Self::marker_fix_source)
+                    .collect::<Option<Vec<_>>>()
+                {
                     diagnostic.edit = Some(crate::Diagnostics::TextEdit {
                         span,
-                        new_text: format!(
-                            "#[{}]",
-                            markers
-                                .iter()
-                                .map(|marker| marker.name.as_str())
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        ),
+                        new_text: format!("#[{}]", markers.join(", ")),
                     });
                 }
                 self.diags.push(diagnostic);

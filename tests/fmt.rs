@@ -944,8 +944,7 @@ fn run(args: ServeArgs) {
 fn fmt_keeps_container_rename_all() {
     // Derive and container serde rules share one applied-rule group.
     let src = "\
-#Codable
-#RenameAll(camel)
+#[Codable, RenameAll(camel)]
 struct Person {
     full_name: String
 }
@@ -1071,8 +1070,7 @@ struct Score {
 fn fmt_keeps_enum_variant_rename_and_tag() {
     // Enum derive + container rule share one group; the variant keeps its group.
     let src = "\
-#Codable
-#Tag(\"type\")
+#[Codable, Tag(\"type\")]
 enum Shape {
     #Rename(\"circle\") Circle(Float)
     Square(Float)
@@ -1104,8 +1102,8 @@ fn fmt_keeps_typestate_markers() {
 struct Reservation {
     guest: String
 
-    #Transition(_, Pending) fn book(guest: ^String) -> Reservation {
-        return Reservation.{guest: guest}
+    #Transition(_, Pending) fn book(guest: String) -> Reservation {
+        return Reservation.{guest: ~guest}
     }
 
     #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -> Reservation {
@@ -1177,7 +1175,7 @@ fn fmt_impure_block_no_reason_round_trips() {
 
 #[test]
 fn fmt_unsafe_reasons_escape_strings() {
-    // D-UNSAFE-REASON1=B: unsafe block/function reasons are normal string
+    // D-UNSAFE-REASON1=A: unsafe block/function reasons are normal string
     // literals, so fmt must preserve quotes/backslashes as parseable Jet.
     let src = "use core.mem\n\n#Unsafe(\"caller says \\\"ok\\\"\") fn raw() -> Int {\n    return 1\n}\n\nfn run() {\n    #Unsafe(\"path C:\\\\tmp\") {\n        print(\"{raw()}\")\n    }\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on unsafe reasons");

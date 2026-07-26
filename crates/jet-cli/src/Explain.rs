@@ -119,14 +119,26 @@ pub fn lookup(code: &str) -> Option<Explanation> {
         })
         .or_else(|| {
             let row = jet_foundation::Policy::applied_rule(code.trim())?;
+            let (retired, replacement) = match row.status {
+                jet_foundation::Policy::RuleStatus::Active => (false, None),
+                jet_foundation::Policy::RuleStatus::Retired { replacement } => {
+                    (true, Some(replacement))
+                }
+            };
             Some(Explanation {
                 code: row.name.to_string(),
                 stage: "rule applicability".to_string(),
-                meaning: format!("`#{}` applicability", row.name),
-                what: Some(format!("`#{}` may attach at: {:?}.", row.name, row.sites)),
+                meaning: format!("`#{}{}`", row.name, row.signature.render()),
+                what: Some(format!(
+                    "form: {:?}; status: {:?}; attachment sites: {:?}.",
+                    row.form, row.status, row.sites
+                )),
                 why: Some(format!("resolution is {:?}; site-bound authority never becomes ambient policy", row.resolution)),
-                fix: Some("move the rule to one of its registered sites".to_string()),
-                retired: false,
+                fix: Some(replacement.map_or_else(
+                    || "move the rule to one of its registered sites".to_string(),
+                    |replacement| format!("replace it with `{replacement}`"),
+                )),
+                retired,
             })
         })
 }
@@ -261,4 +273,18 @@ fn split_cells(s: &str) -> Vec<String> {
     }
     cells.push(cur.trim().to_string());
     cells
+}
+
+#[cfg(test)]
+mod marker_registry_tests {
+    #[test]
+    fn marker_explain_reports_typed_signature_and_retirement() {
+        let inline = super::lookup("Inline").expect("Inline registry explanation");
+        assert_eq!(inline.meaning, "`#Inline(mode: InlineMode = .Hint)`");
+        assert!(!inline.retired);
+
+        let pure = super::lookup("Pure").expect("Pure retirement explanation");
+        assert!(pure.retired);
+        assert_eq!(pure.fix.as_deref(), Some("replace it with `pure fn`"));
+    }
 }

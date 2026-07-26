@@ -21,8 +21,8 @@ impl<'a> Parser<'a> {
     
         pub(in crate::Parser) fn marker_argument_shape_error(name: &str, span: Span) -> Diagnostic {
             let expected = crate::Policy::applied_rule(name)
-                .map(|row| row.signature)
-                .unwrap_or("()");
+                .map(|row| row.signature.render())
+                .unwrap_or_else(|| "()".to_string());
             Diagnostic::error(
                 "E0930",
                 format!("`#{name}` arguments do not match `{name}{expected}`"),
@@ -296,6 +296,10 @@ impl<'a> Parser<'a> {
         /// explicit companion host page for `--target=web` builds.
         pub(super) fn parse_html_marker(&mut self) -> Result<String, Diagnostic> {
             let marker = self.parse_rule_marker()?;
+            Self::html_from_marker(&marker)
+        }
+
+        pub(super) fn html_from_marker(marker: &crate::AST::Marker) -> Result<String, Diagnostic> {
             if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
                 return Err(Self::marker_argument_shape_error(Syntax::ATTR_HTML, marker.span));
             }
@@ -319,6 +323,10 @@ impl<'a> Parser<'a> {
         /// backend — a different axis, same marker).
         pub(in crate::Parser) fn parse_web_target_marker(&mut self) -> Result<TargetMarker, Diagnostic> {
             let marker = self.parse_rule_marker()?;
+            Self::web_target_from_marker(&marker)
+        }
+
+        pub(super) fn web_target_from_marker(marker: &crate::AST::Marker) -> Result<TargetMarker, Diagnostic> {
             if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
                 return Err(Self::marker_argument_shape_error(
                     Syntax::ATTR_TARGET,

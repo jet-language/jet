@@ -804,8 +804,8 @@ pub struct Func {
     pub gc_scope: bool,
     /// S58 (E2-M13): `#Unsafe` on the line before `fn` — a whole-function
     /// contract. Calling such a function requires an enclosing `#Unsafe`
-    /// block (else E3103). D-UNSAFE-REASON1=B: the reason is optional but
-    /// missing it emits L3101.
+    /// block (else E3103). D-UNSAFE-REASON1=A: a missing reason is E3112;
+    /// the option remains only for parser recovery.
     pub is_unsafe: bool,
     pub unsafe_reason: Option<String>,
     pub unsafe_span: Option<Span>,

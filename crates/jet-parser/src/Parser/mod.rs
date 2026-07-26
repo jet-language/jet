@@ -624,6 +624,53 @@ mod s61_tests {
         );
     }
 
+    #[test]
+    fn grouped_ffi_keeps_unsafe_gate_and_raw_payload() {
+        let src = "use core.mem\n#[Unsafe(\"scalar registers\"), FFI(asm)]\nfn add(a: Int, b: Int) -> Int {\n    \"\"\"add {a}, {b} ; -> return\"\"\"\n}\n";
+        let p = program(src);
+        let func = p.items.iter().find_map(|item| match item {
+            crate::AST::Item::Func(func) if func.name == "add" => Some(func),
+            _ => None,
+        }).expect("add function");
+        assert_eq!(func.unsafe_reason.as_deref(), Some("scalar registers"));
+        assert_eq!(
+            func.inline_foreign.as_ref().map(|inline| inline.source.as_str()),
+            Some("add {a}, {b} ; -> return")
+        );
+    }
+
+    #[test]
+    fn grouped_function_rules_keep_meta_and_policy_semantics() {
+        let src = "#[Policy(no_alloc), Meta(category: \"api\", maturity: .Tested), Task]\nfn sync() {}\n";
+        let p = program(src);
+        let func = p.items.iter().find_map(|item| match item {
+            crate::AST::Item::Func(func) if func.name == "sync" => Some(func),
+            _ => None,
+        }).expect("sync function");
+        assert!(func.is_task);
+        assert!(func.meta.is_some());
+        assert_eq!(func.maturity, Some(crate::AST::MaturityTag::Tested));
+        assert!(p.policy_declarations.iter().any(|declaration| {
+            declaration.key == crate::Policy::PolicyKey::NoAlloc
+                && declaration.scope == crate::Policy::PolicyScope::Function
+                && declaration.target == Some(func.span)
+        }));
+    }
+
+    #[test]
+    fn argument_marker_stack_fix_keeps_payloads_and_order() {
+        let src = "#Codable\n#RenameAll(camel)\nstruct Particle { x: Float }\n";
+        let (tokens, lex_diagnostics) = lex(src);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+        let diagnostics = parse(&tokens).expect_err("bare stack is E0999");
+        let edit = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E0999")
+            .and_then(|diagnostic| diagnostic.edit.as_ref())
+            .expect("machine-applicable stack edit");
+        assert_eq!(edit.new_text, "#[Codable, RenameAll(camel)]");
+    }
+
     /// D-FFI-INLINE1=A (card #501): `jet fmt` round-trips `#FFI` fns idempotently
     /// (formatter-roundtrip-required-for-new-syntax).
     #[test]
@@ -632,6 +679,7 @@ mod s61_tests {
         for src in [
             "#FFI(c) fn add(a: Int, b: Int) -> Int {\n    \"\"\"long add(long a, long b) { return a + b; }\n\"\"\"\n}\n",
             "use core.mem\n#Unsafe(\"cycle counter\")\n#FFI(asm) fn rdtsc() -> U64 {\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}\n",
+            "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() -> U64 {\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}\n",
         ] {
             let once = format_source(src).expect("format once");
             assert!(once.contains("#FFI("), "formatted output keeps the #FFI marker: {once}");

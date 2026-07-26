@@ -290,10 +290,10 @@ pub const KW_YIELD: &str = "yield";
 pub const TYPE_STREAM: &str = "Stream";
 
 /// D-UNSAFE2 (ratified 2026-06-22, opt B; prev S58 2026-06-12) and
-/// D-UNSAFE-REASON1=B (ratified 2026-07-06): the audited
+/// D-UNSAFE-REASON1=A: the audited
 /// expert gate. Block form: `#Unsafe("reason") { … }`. Whole-function form:
-/// `#Unsafe("reason") fn`. Bare `#Unsafe { … }` / `#Unsafe fn` compile and
-/// emit L3101. The reason is the argument of `#Unsafe` itself; the separate
+/// `#Unsafe("reason") fn`. Bare `#Unsafe { … }` / `#Unsafe fn` are E3112.
+/// The reason is the argument of `#Unsafe` itself; the separate
 /// `#Audit` marker is retired (E0055). The bare lowercase `unsafe` keyword
 /// (FOREIGN_UNSAFE) is the rejected foreign spelling, recognized only to emit a
 /// teaching error.

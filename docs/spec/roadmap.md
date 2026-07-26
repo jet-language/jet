@@ -67,9 +67,9 @@ interpreter (I2/I3); JIT deferred to Epoch 3 (D-DEV2). Std-only file watching
 (I6).
 
 **E2-M13 — Expert low-level tier (S58)** verified 2026-06-17. `use
-core.mem` discovery gate, `#Unsafe("reason") { … }` / `#Unsafe fn` audit
+core.mem` discovery gate, `#Unsafe("reason") { … }` / `#Unsafe("reason") fn` audit
 gate, `*T` (→ `*mut`), `p.*` dereference, and raw address interop;
-diagnostics E3101/E3102/E3103 + lint L3101; the I1 amendment (D-LL1) recorded in
+diagnostics E3101/E3102/E3103/E3112; the I1 amendment (D-LL1) recorded in
 `architecture.md` (generated `unsafe` only inside user gates; safe Jet emits
 none, enforced by `tests/golden.rs`). Deferred (open ballots): arenas (D-REF2),
 wider `core.mem` API (D-LL3, name TBD).

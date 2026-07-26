@@ -22,6 +22,14 @@ impl<'a> Parser<'a> {
         /// D-MARK-SCOPE1: parse one source `#Policy(...)` declaration list.
         pub(in crate::Parser) fn policy_decl(&mut self, scope: crate::Policy::PolicyScope) -> Result<Vec<crate::Policy::PolicyDeclaration>, Diagnostic> {
             let marker = self.parse_rule_marker()?;
+            self.policy_declarations_from_marker(marker, scope)
+        }
+
+        pub(in crate::Parser) fn policy_declarations_from_marker(
+            &mut self,
+            marker: crate::AST::Marker,
+            scope: crate::Policy::PolicyScope,
+        ) -> Result<Vec<crate::Policy::PolicyDeclaration>, Diagnostic> {
             let marker_span = marker.span;
             let mut out = Vec::new();
             for expr in marker.args {
@@ -540,6 +548,74 @@ impl<'a> Parser<'a> {
                         }
                         self.bump();
                         self.bump();
+                        continue;
+                    }
+                    TokKind::Hash if self.marker_list_is_file_rules() => {
+                        match self.parse_marker_groups() {
+                            Ok(markers) => {
+                                let mut failed = false;
+                                for marker in markers {
+                                    match marker.name.as_str() {
+                                        Syntax::ATTR_TARGET => match Self::web_target_from_marker(&marker) {
+                                            Ok(TargetMarker::DefaultWeb) if default_target.is_none() => {
+                                                default_target = Some(crate::Syntax::BUILD_TARGET_WEB.to_string());
+                                            }
+                                            Ok(TargetMarker::Bucket(target)) if web_target_ceiling.is_none() => {
+                                                web_target_ceiling = Some(target);
+                                            }
+                                            Ok(_) => {
+                                                self.diags.push(Diagnostic::error(
+                                                    "E0003",
+                                                    "this grouped `#Target` duplicates or cannot attach at file scope".to_string(),
+                                                    "a file marker list may contain one file target and one companion `#Html` marker".to_string(),
+                                                    "remove the duplicate, or move an OS target directly onto its `impl`".to_string(),
+                                                    Some(marker.span),
+                                                ));
+                                                failed = true;
+                                            }
+                                            Err(d) => {
+                                                self.diags.push(d);
+                                                failed = true;
+                                            }
+                                        },
+                                        Syntax::ATTR_HTML => match Self::html_from_marker(&marker) {
+                                            Ok(path) if html_path.is_none() => html_path = Some(path),
+                                            Ok(_) => {
+                                                self.diags.push(Diagnostic::error(
+                                                    "E0003",
+                                                    "only one `#Html(…)` marker is allowed per file".to_string(),
+                                                    "a file may declare at most one companion host page".to_string(),
+                                                    "remove the duplicate `#Html(…)` marker".to_string(),
+                                                    Some(marker.span),
+                                                ));
+                                                failed = true;
+                                            }
+                                            Err(d) => {
+                                                self.diags.push(d);
+                                                failed = true;
+                                            }
+                                        },
+                                        _ => {
+                                            self.diags.push(Diagnostic::error(
+                                                "E0355",
+                                                format!("`#{}` cannot attach in this file marker list", marker.name),
+                                                "the compiler-owned registry gives each marker exact attachment sites".to_string(),
+                                                "remove it or move it to a registered site".to_string(),
+                                                Some(marker.span),
+                                            ));
+                                            failed = true;
+                                        }
+                                    }
+                                }
+                                if failed {
+                                    self.sync_top();
+                                }
+                            }
+                            Err(d) => {
+                                self.diags.push(d);
+                                self.sync_top();
+                            }
+                        }
                         continue;
                     }
                     // D-MARK-TARGET1=A: `#Target(Wasm)`/`#Target(Js)` immediately

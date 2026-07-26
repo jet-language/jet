@@ -51,7 +51,7 @@ impl<'a> Lexer<'a> {
                 )
             })
             .collect::<Vec<_>>();
-        matches!(
+        let bare = matches!(
             significant.as_slice(),
             [.., hash, ffi, open, lang, close]
                 if matches!(hash.kind, TokKind::Hash)
@@ -59,7 +59,28 @@ impl<'a> Lexer<'a> {
                     && matches!(open.kind, TokKind::LParen)
                     && matches!(lang.kind, TokKind::Ident(_))
                     && matches!(close.kind, TokKind::RParen)
-        )
+        );
+        if bare {
+            return true;
+        }
+        let Some(group_start) = significant
+            .windows(2)
+            .rposition(|pair| {
+                matches!(pair[0].kind, TokKind::Hash)
+                    && matches!(pair[1].kind, TokKind::LBracket)
+            })
+        else {
+            return false;
+        };
+        matches!(significant.last().map(|token| &token.kind), Some(TokKind::RBracket))
+            && significant[group_start + 2..significant.len() - 1]
+                .windows(4)
+                .any(|window| {
+                    matches!(&window[0].kind, TokKind::Ident(name) if name == Syntax::ATTR_FFI)
+                        && matches!(window[1].kind, TokKind::LParen)
+                        && matches!(window[2].kind, TokKind::Ident(_))
+                        && matches!(window[3].kind, TokKind::RParen)
+                })
     }
 
     pub(super) fn at(&self, i: usize) -> char {
@@ -562,5 +583,24 @@ value={value}
         assert!(strings[1]
             .iter()
             .any(|part| matches!(part, StrTokPart::Interp(_))), "{strings:?}");
+    }
+
+    #[test]
+    fn grouped_ffi_marker_keeps_foreign_body_raw() {
+        let source = r#"#[Unsafe("scalar registers"), FFI(asm)]
+fn add(a: Int, b: Int) -> Int {
+    """add {a}, {b} ; -> return"""
+}"#;
+        let (tokens, diagnostics) = lex_raw(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let body = tokens.iter().find_map(|token| match &token.kind {
+            TokKind::Str(parts)
+                if matches!(parts.as_slice(), [StrTokPart::Lit(text)] if text.contains("-> return")) =>
+            {
+                Some(parts)
+            }
+            _ => None,
+        });
+        assert!(body.is_some(), "{tokens:?}");
     }
 }

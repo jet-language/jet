@@ -1642,8 +1642,7 @@ impl<'a> Checker<'a> {
                     }
                     self.memory_control_multiplier = memory_multiplier;
                 }
-                Stmt::Unsafe { audit, body, span } => {
-                    let _ = (audit, span); // L3101 is policy-aware in UnsafeObligations.
+                Stmt::Unsafe { body, .. } => {
                     let prev = self.in_unsafe;
                     self.in_unsafe = true;
                     self.check_block(body, true);
@@ -1653,7 +1652,7 @@ impl<'a> Checker<'a> {
                 // gate. At runtime (which is what sema is checking here), this block is
                 // semantically a plain block: it has no runtime significance. The gate is
                 // enforced only inside the comptime interpreter. L3102 fires when no
-                // reason was given (matches L3101 pattern for #Unsafe).
+                // reason was given.
                 Stmt::Impure { reason, body, span } => {
                     if reason.is_none() {
                         self.diags.push(Diagnostic::lint(

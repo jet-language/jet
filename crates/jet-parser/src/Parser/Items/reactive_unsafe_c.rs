@@ -125,12 +125,28 @@ impl<'a> Parser<'a> {
         /// unsafe-language gate are checked in sema (Names are validated in
         /// sema, not the parser).
         pub(super) fn ffi_fn(&mut self) -> Result<Func, Diagnostic> {
-            let decl_start = self.peek().span.start;
-            // Optional leading `#Unsafe("reason")` gate.
-            let (is_unsafe, unsafe_reason, unsafe_span) = if matches!(self.peek().kind, TokKind::Hash)
+            let mut markers = Vec::new();
+            if matches!(self.peek().kind, TokKind::Hash)
                 && matches!(self.peek2().kind, TokKind::KwUnsafe)
             {
-                let marker = self.parse_rule_marker()?;
+                markers.push(self.parse_rule_marker()?);
+                while matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                }
+            }
+            markers.push(self.parse_rule_marker()?);
+            self.ffi_fn_from_markers(markers)
+        }
+
+        pub(super) fn ffi_fn_from_markers(
+            &mut self,
+            markers: Vec<crate::AST::Marker>,
+        ) -> Result<Func, Diagnostic> {
+            let decl_start = markers
+                .first()
+                .map_or(self.peek().span.start, |marker| marker.span.start);
+            let unsafe_marker = markers.iter().find(|marker| marker.name == Syntax::KW_UNSAFE);
+            let (is_unsafe, unsafe_reason, unsafe_span) = if let Some(marker) = unsafe_marker {
                 let reason = match marker.args.as_slice() {
                     [] => return Err(Diagnostic::error(
                         "E3112",
@@ -149,16 +165,17 @@ impl<'a> Parser<'a> {
                     }
                     _ => return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, marker.span)),
                 };
-                if matches!(self.peek().kind, TokKind::Semi) {
-                    self.bump();
-                }
                 (true, reason, Some(marker.span))
             } else {
                 (false, None, None)
             };
 
-            // `#FFI(<lang>)`
-            let ffi = self.parse_rule_marker()?;
+            let Some(ffi) = markers.iter().find(|marker| marker.name == Syntax::ATTR_FFI) else {
+                return Err(Self::marker_argument_shape_error(
+                    Syntax::ATTR_FFI,
+                    markers.first().map_or(self.peek().span, |marker| marker.span),
+                ));
+            };
             if ffi.name != Syntax::ATTR_FFI
                 || ffi.args.len() != 1
                 || ffi.arg_labels[0].is_some()

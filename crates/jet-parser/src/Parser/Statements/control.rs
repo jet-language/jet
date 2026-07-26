@@ -80,6 +80,13 @@ impl<'a> Parser<'a> {
 
     pub(in super::super) fn parse_meta_attr(&mut self) -> Result<MetaAttr, Diagnostic> {
         let marker = self.parse_rule_marker()?;
+        self.meta_attr_from_marker(marker)
+    }
+
+    pub(in crate::Parser) fn meta_attr_from_marker(
+        &mut self,
+        marker: Marker,
+    ) -> Result<MetaAttr, Diagnostic> {
         let mut fields = Vec::new();
         for (value, label) in marker.args.into_iter().zip(marker.arg_labels) {
             match label {

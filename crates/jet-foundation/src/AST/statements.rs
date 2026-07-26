@@ -89,9 +89,9 @@ pub enum Stmt {
         span: Span,
         label: Option<(String, Span)>,
     },
-    /// S58 (E2-M13): `#Unsafe { … }` audited region. `audit` carries the
-    /// optional reason argument. D-UNSAFE-REASON1=B: missing reason emits
-    /// L3101 but does not block compilation. `body` is the gated statements.
+    /// S58 (E2-M13): `#Unsafe("reason") { … }` audited region. `audit` carries
+    /// the mandatory-at-source reason; the option remains only for parser
+    /// recovery after E3112. `body` is the gated statements.
     Unsafe {
         audit: Option<String>,
         body: Vec<Stmt>,
