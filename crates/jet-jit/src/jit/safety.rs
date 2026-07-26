@@ -472,6 +472,10 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     || jit_list_record_type(&base.ty)
                     || jit_list_iter_elem_type(&base.ty).is_some()
                     || jit_closure_elem_type(&base.ty).is_some())
+                    && !matches!(
+                        &base.ty,
+                        Type::Apply { name, .. } if name == "ViewMut"
+                    )
                     && matches!(&index.ty, Type::Int)
                     && resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
@@ -550,7 +554,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                         || matches!(
                             &base.ty,
                             Type::Apply { name, args }
-                                if matches!(name.as_str(), "View" | "ViewMut")
+                                if name == "View"
                                     && args.len() == 1
                                     && record_type_key(&args[0]).is_some()
                         ))
@@ -1238,6 +1242,10 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 (jit_list_native_type(&base.ty)
                     || jit_list_iter_elem_type(&base.ty).is_some()
                     || jit_closure_elem_type(&base.ty).is_some())
+                    && !matches!(
+                        &base.ty,
+                        Type::Apply { name, .. } if name == "ViewMut"
+                    )
                     && matches!(&index.ty, Type::Int)
                     && matches!(&value.ty, Type::Int | Type::Float | Type::String | Type::Char)
                     && resident_safe_expr(base, callees)
@@ -1344,9 +1352,14 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         TStmt::SplitViews {
             owner,
             single,
+            elem_ty,
             ..
         } => {
             *single
+                && elem_ty.as_ref().is_some_and(|ty| {
+                    matches!(ty, Type::Int | Type::Float | Type::String)
+                        || record_type_key(ty).is_some()
+                })
                 && owner
                     .as_ref()
                     .is_none_or(|o| resident_safe_expr(o, callees))

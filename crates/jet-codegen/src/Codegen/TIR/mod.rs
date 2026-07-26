@@ -1429,6 +1429,7 @@ pub enum TStmt {
         end: i64,
         single: bool,
         write: bool,
+        elem_ty: Option<Type>,
         line: usize,
     },
     /// c109 Phase 23: a TUPLE-destructuring binding `(a, b) :: <init>` (S74,

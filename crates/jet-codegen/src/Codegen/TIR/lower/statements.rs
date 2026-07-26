@@ -20,6 +20,7 @@ use crate::Codegen::TIR::lower_switch;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::lower::timeout_nanos;
 use crate::Codegen::TIR::lower::tracked_float_origin;
+use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::TIR::ScopeMemberKind;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
@@ -45,6 +46,10 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
                 out.push(TStmt::LineMarker(view.candidate.line));
             }
             let candidate = view.candidate;
+            let elem_ty = match tir_recv_jet_ty(&candidate.owner, env) {
+                Some(Type::List(elem) | Type::FixedList { elem, .. }) => Some(*elem),
+                _ => None,
+            };
             let slot = if candidate.single {
                 TLocal::user(&candidate.name).through_ref()
             } else {
@@ -68,6 +73,7 @@ pub(crate) fn lower_stmts(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TS
                 end: candidate.end,
                 single: candidate.single,
                 write: candidate.write,
+                elem_ty,
                 line: candidate.line,
             });
             index += 1;

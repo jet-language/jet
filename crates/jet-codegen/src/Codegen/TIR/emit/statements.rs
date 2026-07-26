@@ -399,6 +399,7 @@ fn emit_tir_stmt(
             end,
             single,
             write,
+            elem_ty: _,
             line,
         } => {
             if let Some(owner) = owner {

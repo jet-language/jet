@@ -3927,6 +3927,73 @@ fn place_windows_matches_resident_jit_and_aot_without_fallback() {
 }
 
 #[test]
+fn float_singleton_splits_match_resident_jit_and_aot_without_fallback() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let source = r#"
+fn run() {
+    values := [1.5, 2.5, 3.5]
+    first :: &values[0]
+    last :: &values[2]
+    first = 4.5
+    last = 6.5
+    print(first)
+    print(last)
+    print(values[0])
+    print(values[2])
+}
+"#;
+    let expected = ProgramOutput::ran("4.5\n6.5\n4.5\n6.5\n".into(), String::new(), 0);
+    let dir =
+        std::env::temp_dir().join(format!("jet_float_singleton_splits_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("float_singleton_splits.jet");
+    fs::write(&file, source).unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let bundle = checked_bundle_from_path(&shown);
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "Float singleton split must stay resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|reason| panic!("Float singleton split must JIT-compile: {reason}"));
+
+    let RunOutcome::Problems(interpreter_diags) = dev_iteration(&shown, false, true) else {
+        panic!("Float singleton split unexpectedly left its interpreter boundary");
+    };
+    assert!(
+        interpreter_diags.iter().any(|diag| diag.code == "E2201"),
+        "Float singleton split interpreter boundary drifted: {interpreter_diags:?}"
+    );
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = run_cranelift_without_fallback(source, "float_singleton_splits");
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "Float singleton split did not execute in JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "Float singleton split used deopt or fallback"
+    );
+
+    let aot = compiled_binary_output(
+        &dir,
+        "float_singleton_splits",
+        0,
+        "float_singleton_splits",
+        &shown,
+    );
+    assert_eq!(resident, expected, "resident JIT Float singleton split drifted");
+    assert_eq!(aot, expected, "AOT Float singleton split drifted");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn resident_jit_safety_detail_smoke() {
     for stem in [
         "basics/compound",

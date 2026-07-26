@@ -1534,6 +1534,7 @@ impl LowerCtx<'_, '_> {
                 end,
                 single,
                 write,
+                elem_ty: split_elem_ty,
                 line,
                 ..
             } => {
@@ -1552,7 +1553,7 @@ impl LowerCtx<'_, '_> {
                     .vars
                     .get(root)
                     .ok_or_else(|| format!("jit split views missing owner `{root}`"))?;
-                let elem_ty = match self.var_tys.get(root) {
+                let owner_elem_ty = match self.var_tys.get(root) {
                     Some(Type::List(elem) | Type::FixedList { elem, .. }) => {
                         elem.as_ref().clone()
                     }
@@ -1562,15 +1563,28 @@ impl LowerCtx<'_, '_> {
                         ));
                     }
                 };
+                let elem_ty = split_elem_ty
+                    .as_ref()
+                    .filter(|ty| *ty == &owner_elem_ty)
+                    .cloned()
+                    .ok_or_else(|| {
+                        format!(
+                            "jit split views element type mismatch: owner={owner_elem_ty:?}, split={split_elem_ty:?}"
+                        )
+                    })?;
                 let list = self.b.use_var(list_var);
                 let start_v = self.b.ins().iconst(types::I64, *start);
                 let end_v = self.b.ins().iconst(types::I64, *end);
                 let line_c = self.b.ins().iconst(types::I32, *line as i64);
                 let (bound, bound_ty) = if *write {
                     if *single {
+                        let host_id = match &elem_ty {
+                            Type::Float => self.host.coll.list_get_f64,
+                            _ => self.host.coll.list_get,
+                        };
                         let get_ref = self
                             .module
-                            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+                            .declare_func_in_func(host_id, self.b.func);
                         self.b.ins().call(get_ref, &[list, start_v, line_c]);
                         self.emit_trap_check()?;
                     }
@@ -1583,9 +1597,13 @@ impl LowerCtx<'_, '_> {
                         },
                     )
                 } else if *single {
+                    let host_id = match &elem_ty {
+                        Type::Float => self.host.coll.list_get_f64,
+                        _ => self.host.coll.list_get,
+                    };
                     let get_ref = self
                         .module
-                        .declare_func_in_func(self.host.coll.list_get, self.b.func);
+                        .declare_func_in_func(host_id, self.b.func);
                     let call = self.b.ins().call(get_ref, &[list, start_v, line_c]);
                     let result = self.b.inst_results(call)[0];
                     self.emit_trap_check()?;
@@ -1610,7 +1628,14 @@ impl LowerCtx<'_, '_> {
                     )
                 };
                 let place = TIR::local_place(name);
-                let var = self.fresh_var(types::I64);
+                let clif = if *write || !*single {
+                    types::I64
+                } else {
+                    clif_ty(&bound_ty).ok_or_else(|| {
+                        format!("jit split views element type unsupported: {bound_ty:?}")
+                    })?
+                };
+                let var = self.fresh_var(clif);
                 self.b.def_var(var, bound);
                 self.vars.insert(place.clone(), var);
                 self.var_tys.insert(place, bound_ty);
@@ -1729,12 +1754,24 @@ impl LowerCtx<'_, '_> {
                 if local.deref && op.is_none() {
                     let dst = self.b.use_var(var);
                     let src = self.lower_expr(value)?;
-                    if self.var_tys.get(&key).is_some_and(Self::is_view_mut_ty) {
+                    let view_elem_ty = match self.var_tys.get(&key) {
+                        Some(Type::Apply { name, args })
+                            if name == "ViewMut" && args.len() == 1 =>
+                        {
+                            Some(args[0].clone())
+                        }
+                        _ => None,
+                    };
+                    if let Some(elem_ty) = view_elem_ty {
                         let (list, start, _) = self.unpack_view_mut(dst)?;
                         let line = self.b.ins().iconst(types::I32, 1);
+                        let host_id = match elem_ty {
+                            Type::Float => self.host.coll.list_set_f64,
+                            _ => self.host.coll.list_set,
+                        };
                         let set = self
                             .module
-                            .declare_func_in_func(self.host.coll.list_set, self.b.func);
+                            .declare_func_in_func(host_id, self.b.func);
                         self.b.ins().call(set, &[list, start, src, line]);
                         self.emit_trap_check()?;
                         return Ok(());
@@ -3345,12 +3382,22 @@ impl LowerCtx<'_, '_> {
             return Ok(raw);
         }
         let ty = self.var_tys.get(&key).cloned();
-        if ty.as_ref().is_some_and(Self::is_view_mut_ty) {
+        let view_elem_ty = match ty.as_ref() {
+            Some(Type::Apply { name, args }) if name == "ViewMut" && args.len() == 1 => {
+                Some(&args[0])
+            }
+            _ => None,
+        };
+        if let Some(elem_ty) = view_elem_ty {
             let (list, start, _) = self.unpack_view_mut(raw)?;
             let line = self.b.ins().iconst(types::I32, 1);
+            let host_id = match elem_ty {
+                Type::Float => self.host.coll.list_get_f64,
+                _ => self.host.coll.list_get,
+            };
             let get = self
                 .module
-                .declare_func_in_func(self.host.coll.list_get, self.b.func);
+                .declare_func_in_func(host_id, self.b.func);
             let call = self.b.ins().call(get, &[list, start, line]);
             let result = self.b.inst_results(call)[0];
             self.emit_trap_check()?;
@@ -8193,6 +8240,13 @@ impl LowerCtx<'_, '_> {
         if let TExprKind::Local(local) = &expr.kind {
             let key = TIR::local_place(&local.name);
             if let Some(ty) = self.var_tys.get(&key) {
+                if local.deref {
+                    if let Type::Apply { name, args } = ty {
+                        if name == "ViewMut" && args.len() == 1 {
+                            return self.erase_distinct_ty(&args[0]);
+                        }
+                    }
+                }
                 if !matches!(ty, Type::Named(n) if n == "Unit" || n == "Void") {
                     return self.erase_distinct_ty(ty);
                 }
