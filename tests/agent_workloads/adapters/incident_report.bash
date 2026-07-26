@@ -15,21 +15,31 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   ((line_number += 1))
   ((line_number == 1)) && continue
   [[ -z "$line" ]] && continue
-  IFS=$'\t' read -r service status duration extra <<< "$line"
-  if [[ -n ${extra:-} || -z ${duration:-} ]]; then
+  rest=$line
+  field_count=1
+  while [[ $rest == *$'\t'* ]]; do
+    rest=${rest#*$'\t'}
+    ((field_count += 1))
+  done
+  if ((field_count != 3)); then
     rejects+=("reject|$line_number|field-count")
-  elif [[ "$status" != ok && "$status" != error ]]; then
-    rejects+=("reject|$line_number|status")
-  elif [[ -z "$service" ]]; then
-    rejects+=("reject|$line_number|service")
   else
-    services+=("$service")
-    statuses+=("$status")
-    seen=false
-    for known in "${unique_services[@]}"; do
-      [[ "$known" == "$service" ]] && seen=true
-    done
-    $seen || unique_services+=("$service")
+    service=${line%%$'\t'*}
+    rest=${line#*$'\t'}
+    status=${rest%%$'\t'*}
+    if [[ "$status" != ok && "$status" != error ]]; then
+      rejects+=("reject|$line_number|status")
+    elif [[ -z "$service" ]]; then
+      rejects+=("reject|$line_number|service")
+    else
+      services+=("$service")
+      statuses+=("$status")
+      seen=false
+      for known in "${unique_services[@]}"; do
+        [[ "$known" == "$service" ]] && seen=true
+      done
+      $seen || unique_services+=("$service")
+    fi
   fi
 done < "$1"
 
