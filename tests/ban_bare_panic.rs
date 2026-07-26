@@ -37,8 +37,8 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
     (
         "crates/jet-foundation/src/XmlPull.rs",
-        10,
-        "#[cfg(test)] XML parser/event/tree assertion fixtures",
+        32,
+        "#[cfg(test)] XML parser/event/tree assertion fixtures; exact audited count",
     ),
     (
         "crates/jet-foundation/src/Terminal.rs",
@@ -64,6 +64,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "crates/jet-codegen/src/Prelude/Mem.rs",
         3,
         "include_str! allocator runtime template — user-program RUNTIME_PANIC path, not compiler code",
+    ),
+    (
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs",
+        1,
+        "include_str! runtime template — cbor.encode user-program runtime panic, not compiler code",
     ),
     (
         "crates/jet-codegen/src/scheduler.rs",
@@ -92,8 +97,8 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
     (
         "crates/jet-parser/src/Parser/mod.rs",
-        2,
-        "#[cfg(test)] mod s61_tests fixtures",
+        4,
+        "#[cfg(test)] mod s61_tests assertion fixtures; exact audited count",
     ),
     (
         "crates/jet-parser/src/lib.rs",
@@ -131,6 +136,11 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
         "#[test] history lock assertion fixture",
     ),
     (
+        "crates/jet-repl/src/Notebook/trust.rs",
+        1,
+        "#[cfg(test)] notebook render-decision assertion fixture",
+    ),
+    (
         "Source/BudgetProviders.rs",
         1,
         "#[cfg(test)] deliberately panicking hostile provider fixture for catch_unwind",
@@ -147,8 +157,8 @@ const ALLOWLIST: &[(&str, usize, &str)] = &[
     ),
     (
         "Source/LSP/mod.rs",
-        1,
-        "#[cfg(test)] bundle-presence assertion fixture",
+        2,
+        "#[cfg(test)] isolated-project and bundle-presence assertion fixtures",
     ),
     (
         "crates/jet-driver/src/CompilerExtensionHook.rs",
