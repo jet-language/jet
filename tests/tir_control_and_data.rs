@@ -256,14 +256,9 @@ struct Output {
     value: Int | WriteOnly
 }
 
+#Decode
 struct ReadOnly {
     marker: Int
-}
-
-impl ReadOnly.Decode {
-    fn decode(tree: DataTree) -> ReadOnly ? DecodeError {
-        return Ok(ReadOnly.{ marker: 0 })
-    }
 }
 
 #Decode
@@ -318,6 +313,39 @@ fn run() {
         stdout,
         "{\"value\":null}\n{\"Value\":7}\n{\"Value\":7}\n"
     );
+}
+
+#[test]
+fn codable_union_distinct_member_uses_base_wire_shape() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+use core.encoding.json as json
+
+#CodableAsBase
+Usd :: distinct Int
+
+#Codable
+struct Row {
+    value: Usd | String
+}
+
+fn run() {
+    row :: Row.{ value: Usd.from_int(7) }
+    wire :: json.to_string(row)
+    print(wire)
+    decoded :: json.decode<Row>(wire) ?? panic("row")
+    decoded_value :: decoded.value
+    if decoded_value == {
+        Usd(value) -> print(value.raw())
+        String(value) -> print(value)
+    }
+}
+"#;
+    let (code, stdout) = build_and_run("union_codable_distinct", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "{\"value\":7}\n7\n");
 }
 
 // --- c109 Phase 2: control-flow loops ---------------------------------------

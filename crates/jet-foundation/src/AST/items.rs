@@ -1536,3 +1536,191 @@ pub struct Field {
     /// `Sema::CheckerFieldPolicy`). `None` for an ordinary stored field.
     pub computed: Option<Box<Expr>>,
 }
+
+/// DataTree variant a derived decoder accepts at its outer wire boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SerdeWireShape {
+    Null,
+    Int,
+    Float,
+    Bool,
+    Text,
+    Array,
+    Object,
+}
+
+impl SerdeWireShape {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Null => "Null",
+            Self::Int => "Int",
+            Self::Float => "Float",
+            Self::Bool => "Bool",
+            Self::Text => "Text",
+            Self::Array => "Array",
+            Self::Object => "Object",
+        }
+    }
+}
+
+/// Resolve every outer wire shape a type's compiler-known decoder accepts.
+///
+/// Manual/imported codecs have no declared shape fact and return `None`.
+/// `#CodableAsBase` distinct types recurse through their base. Derived enums
+/// follow the same tagged/untagged/default container rules as serde synthesis.
+pub fn resolved_decode_wire_shapes(items: &[Item], ty: &Type) -> Option<Vec<SerdeWireShape>> {
+    fn finish(mut shapes: Vec<SerdeWireShape>) -> Option<Vec<SerdeWireShape>> {
+        shapes.sort_unstable();
+        shapes.dedup();
+        (!shapes.is_empty()).then_some(shapes)
+    }
+
+    fn substitute(ty: &Type, params: &[TypeParam], args: &[Type]) -> Type {
+        let subst = params
+            .iter()
+            .zip(args)
+            .map(|(param, arg)| (param.name.clone(), arg.clone()))
+            .collect();
+        crate::Generics::substitute_type(ty, &subst)
+    }
+
+    fn named(
+        items: &[Item],
+        name: &str,
+        args: &[Type],
+        seen: &mut std::collections::HashSet<String>,
+    ) -> Option<Vec<SerdeWireShape>> {
+        if !seen.insert(name.to_string()) {
+            return None;
+        }
+        let result = (|| {
+            for item in items {
+                match item {
+                    Item::Struct(def) if def.name == name => {
+                        return def
+                            .derives
+                            .iter()
+                            .any(|(derive, _)| derive == crate::Generics::DECODE)
+                            .then_some(vec![SerdeWireShape::Object]);
+                    }
+                    Item::Enum(def) if def.name == name => {
+                        if !def
+                            .derives
+                            .iter()
+                            .any(|(derive, _)| derive == crate::Generics::DECODE)
+                        {
+                            return None;
+                        }
+                        if def
+                            .serde_markers
+                            .iter()
+                            .any(|marker| marker.name == crate::Syntax::ATTR_TAG)
+                        {
+                            return Some(vec![SerdeWireShape::Object]);
+                        }
+                        let untagged = def
+                            .serde_markers
+                            .iter()
+                            .any(|marker| marker.name == crate::Syntax::ATTR_UNTAGGED);
+                        if !untagged {
+                            let mut shapes = Vec::new();
+                            for variant in &def.variants {
+                                shapes.push(match &variant.payload {
+                                    VariantPayload::Unit => SerdeWireShape::Text,
+                                    _ => SerdeWireShape::Object,
+                                });
+                            }
+                            return finish(shapes);
+                        }
+                        let mut shapes = Vec::new();
+                        for variant in &def.variants {
+                            match &variant.payload {
+                                VariantPayload::Unit => shapes.push(SerdeWireShape::Null),
+                                VariantPayload::Single(payload, _) => {
+                                    let payload = substitute(payload, &def.type_params, args);
+                                    shapes.extend(resolve(items, &payload, seen)?);
+                                }
+                                VariantPayload::Named(_) => shapes.push(SerdeWireShape::Object),
+                            }
+                        }
+                        return finish(shapes);
+                    }
+                    Item::Distinct(def) if def.name == name => {
+                        return def
+                            .is_codable_as_base
+                            .then(|| resolve(items, &def.base, seen))
+                            .flatten();
+                    }
+                    Item::TypeAlias(def) if def.name == name => {
+                        let target = substitute(&def.target, &def.type_params, args);
+                        return resolve(items, &target, seen);
+                    }
+                    Item::UnitFamily(family) => {
+                        if let Some(def) =
+                            family.distinct_defs().into_iter().find(|def| def.name == name)
+                        {
+                            return def
+                                .is_codable_as_base
+                                .then(|| resolve(items, &def.base, seen))
+                                .flatten();
+                        }
+                    }
+                    Item::CodeModule(module) => {
+                        let Some(body) = &module.body else {
+                            continue;
+                        };
+                        let prefix = format!("{}__", module.name);
+                        if let Some(inner) = name.strip_prefix(&prefix) {
+                            if let Some(shapes) = named(body, inner, args, seen) {
+                                return Some(shapes);
+                            }
+                        }
+                        if let Some(shapes) = named(body, name, args, seen) {
+                            return Some(shapes);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            None
+        })();
+        seen.remove(name);
+        result
+    }
+
+    fn resolve(
+        items: &[Item],
+        ty: &Type,
+        seen: &mut std::collections::HashSet<String>,
+    ) -> Option<Vec<SerdeWireShape>> {
+        let shapes = match ty {
+            Type::Int | Type::IntN { .. } => vec![SerdeWireShape::Int],
+            Type::Float | Type::Float32 => vec![SerdeWireShape::Float],
+            Type::Bool => vec![SerdeWireShape::Bool],
+            Type::String | Type::Char => vec![SerdeWireShape::Text],
+            Type::Named(name) if name == "Decimal" => vec![SerdeWireShape::Text],
+            Type::List(_) | Type::FixedList { .. } => vec![SerdeWireShape::Array],
+            Type::Map { .. } | Type::Tuple(_) => vec![SerdeWireShape::Object],
+            Type::Shared(inner) => resolve(items, inner, seen)?,
+            Type::Option(inner) => {
+                let mut shapes = vec![SerdeWireShape::Null];
+                shapes.extend(resolve(items, inner, seen)?);
+                shapes
+            }
+            Type::Union(members) => {
+                let mut shapes = Vec::new();
+                for member in members {
+                    shapes.extend(resolve(items, member, seen)?);
+                }
+                shapes
+            }
+            Type::Named(name) => return named(items, name, &[], seen),
+            Type::Apply { name, args } => return named(items, name, args, seen),
+            Type::Tagged { inner, .. } => return resolve(items, inner, seen),
+            Type::Result { .. } | Type::Fn { .. } | Type::TraitObject(_) => return None,
+        };
+        finish(shapes)
+    }
+
+    resolve(items, ty, &mut std::collections::HashSet::new())
+}

@@ -1012,7 +1012,7 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
             for m in &members {
                 let tag = crate::AST::union_member_tag(m);
                 let rust = cx.rust_type(m);
-                let Some(shape_pat) = union_member_datatree_pat(m) else {
+                let Some(shape_pat) = union_member_datatree_pat(items, m) else {
                     continue;
                 };
                 out.push_str(&format!(
@@ -1145,40 +1145,22 @@ fn union_codec_needs(
     (encodes, decodes)
 }
 
-fn union_member_datatree_pat(ty: &Type) -> Option<String> {
-    let mut patterns = match ty {
-        Type::Int | Type::IntN { .. } => vec!["jet_std::DataTree::Int(_)".to_string()],
-        Type::Float | Type::Float32 => vec!["jet_std::DataTree::Float(_)".to_string()],
-        Type::Bool => vec!["jet_std::DataTree::Bool(_)".to_string()],
-        Type::String | Type::Char => vec!["jet_std::DataTree::Text(_)".to_string()],
-        Type::Named(n) if n == "Decimal" => vec!["jet_std::DataTree::Text(_)".to_string()],
-        Type::List(_) | Type::FixedList { .. } => {
-            vec!["jet_std::DataTree::Array(_)".to_string()]
-        }
-        Type::Map { .. } | Type::Named(_) | Type::Apply { .. } | Type::Tuple(_) => {
-            vec!["jet_std::DataTree::Object(_)".to_string()]
-        }
-        Type::Option(inner) => {
-            let mut patterns = vec!["jet_std::DataTree::Null".to_string()];
-            patterns.extend(union_member_datatree_pat(inner)?.split(" | ").map(str::to_string));
-            patterns
-        }
-        Type::Union(members) => {
-            let mut patterns = Vec::new();
-            for member in members {
-                patterns.extend(
-                    union_member_datatree_pat(member)?
-                        .split(" | ")
-                        .map(str::to_string),
-                );
-            }
-            patterns
-        }
-        _ => return None,
-    };
-    patterns.sort();
-    patterns.dedup();
-    Some(patterns.join(" | "))
+fn union_member_datatree_pat(items: &[Item], ty: &Type) -> Option<String> {
+    crate::AST::resolved_decode_wire_shapes(items, ty).map(|shapes| {
+        shapes
+            .into_iter()
+            .map(|shape| match shape {
+                crate::AST::SerdeWireShape::Null => "jet_std::DataTree::Null",
+                crate::AST::SerdeWireShape::Int => "jet_std::DataTree::Int(_)",
+                crate::AST::SerdeWireShape::Float => "jet_std::DataTree::Float(_)",
+                crate::AST::SerdeWireShape::Bool => "jet_std::DataTree::Bool(_)",
+                crate::AST::SerdeWireShape::Text => "jet_std::DataTree::Text(_)",
+                crate::AST::SerdeWireShape::Array => "jet_std::DataTree::Array(_)",
+                crate::AST::SerdeWireShape::Object => "jet_std::DataTree::Object(_)",
+            })
+            .collect::<Vec<_>>()
+            .join(" | ")
+    })
 }
 
 pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {

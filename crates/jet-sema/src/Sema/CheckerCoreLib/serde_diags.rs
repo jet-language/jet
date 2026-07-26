@@ -126,6 +126,21 @@ pub(crate) fn e2411(ty: &str, encode: bool, span: Span) -> Diagnostic {
     )
 }
 
+fn e2411_unknown_union_shape(union_ty: &str, member: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E2411",
+        format!(
+            "union `{union_ty}` can't be decoded — `{member}` has no compiler-known wire shape"
+        ),
+        format!(
+            "`{member}` uses a custom or imported decoder; anonymous unions need each member's outer wire shape before codegen"
+        ),
+        "use a compiler-derived codec, a configured tagged enum, or a #CodableAsBase distinct type"
+            .to_string(),
+        Some(span),
+    )
+}
+
 /// E2415 (D-UNIONTYPE1=A): two Codable union members share a primary wire shape,
 /// so decode cannot pick a unique member without declaration-order guessing.
 pub(crate) fn e2415(union_ty: &str, a: &str, b: &str, shape: &str, span: Span) -> Diagnostic {
@@ -138,53 +153,34 @@ pub(crate) fn e2415(union_ty: &str, a: &str, b: &str, shape: &str, span: Span) -
     )
 }
 
-/// Every DataTree kind a type can encode as (for union decode dispatch).
-pub(crate) fn union_wire_shapes(ty: &Type) -> Option<Vec<&'static str>> {
-    let mut shapes = match ty {
-        Type::Int | Type::IntN { .. } => vec!["Int"],
-        Type::Float | Type::Float32 => vec!["Float"],
-        Type::Bool => vec!["Bool"],
-        Type::String | Type::Char => vec!["Text"],
-        Type::Named(n) if n == "Decimal" => vec!["Text"],
-        Type::List(_) | Type::FixedList { .. } => vec!["Array"],
-        Type::Map { .. } | Type::Named(_) | Type::Apply { .. } | Type::Tuple(_) => {
-            vec!["Object"]
-        }
-        Type::Option(inner) => {
-            let mut shapes = vec!["Null"];
-            shapes.extend(union_wire_shapes(inner)?);
-            shapes
-        }
-        Type::Union(members) => {
-            let mut shapes = Vec::new();
-            for member in members {
-                shapes.extend(union_wire_shapes(member)?);
-            }
-            shapes
-        }
-        Type::Shared(_) | Type::Result { .. } | Type::Fn { .. }
-        | Type::TraitObject(_) | Type::Tagged { .. } => return None,
-    };
-    shapes.sort_unstable();
-    shapes.dedup();
-    Some(shapes)
-}
+fn validate_union_decode_shapes(
+    items: &[crate::AST::Item],
+    ty: &Type,
+    span: Span,
+    out: &mut Vec<Diagnostic>,
+) {
+    fn label(ty: &Type) -> String {
+        ty.show().trim_matches('`').to_string()
+    }
 
-fn validate_union_decode_shapes(ty: &Type, span: Span, out: &mut Vec<Diagnostic>) {
     if let Type::Union(members) = ty {
-        let mut seen: Vec<(&str, &Type)> = Vec::new();
+        let mut seen: Vec<(crate::AST::SerdeWireShape, &Type)> = Vec::new();
         for member in members {
-            let Some(shapes) = union_wire_shapes(member) else {
-                out.push(e2411(&ty.show(), false, span));
+            let Some(shapes) = crate::AST::resolved_decode_wire_shapes(items, member) else {
+                out.push(e2411_unknown_union_shape(
+                    &ty.show(),
+                    &label(member),
+                    span,
+                ));
                 continue;
             };
             for shape in shapes {
                 if let Some((_, previous)) = seen.iter().find(|(known, _)| *known == shape) {
                     out.push(e2415(
                         &ty.show(),
-                        &previous.show(),
-                        &member.show(),
-                        shape,
+                        &label(previous),
+                        &label(member),
+                        shape.name(),
                         span,
                     ));
                 } else {
@@ -199,28 +195,28 @@ fn validate_union_decode_shapes(ty: &Type, span: Span, out: &mut Vec<Diagnostic>
         | Type::Option(inner)
         | Type::Tagged { inner, .. }
         | Type::FixedList { elem: inner, .. } => {
-            validate_union_decode_shapes(inner, span, out)
+            validate_union_decode_shapes(items, inner, span, out)
         }
         Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
-            validate_union_decode_shapes(key, span, out);
-            validate_union_decode_shapes(value, span, out);
+            validate_union_decode_shapes(items, key, span, out);
+            validate_union_decode_shapes(items, value, span, out);
         }
         Type::Apply { args, .. } | Type::Union(args) => {
             for arg in args {
-                validate_union_decode_shapes(arg, span, out);
+                validate_union_decode_shapes(items, arg, span, out);
             }
         }
         Type::Tuple(fields) => {
             for (_, field) in fields {
-                validate_union_decode_shapes(field, span, out);
+                validate_union_decode_shapes(items, field, span, out);
             }
         }
         Type::Fn { params, ret, .. } => {
             for param in params {
-                validate_union_decode_shapes(param, span, out);
+                validate_union_decode_shapes(items, param, span, out);
             }
             if let Some(ret) = ret {
-                validate_union_decode_shapes(ret, span, out);
+                validate_union_decode_shapes(items, ret, span, out);
             }
         }
         _ => {}
@@ -479,7 +475,7 @@ pub(crate) fn validate_serde_items(
                     out.push(e2411(&f.ty.show(), false, f.name_span));
                 }
                 if dec {
-                    validate_union_decode_shapes(&f.ty, f.name_span, &mut out);
+                    validate_union_decode_shapes(items, &f.ty, f.name_span, &mut out);
                 }
             }
         }
@@ -498,7 +494,7 @@ pub(crate) fn validate_serde_items(
                         out.push(e2411(&t.show(), false, v.name_span));
                     }
                     if dec {
-                        validate_union_decode_shapes(t, v.name_span, &mut out);
+                        validate_union_decode_shapes(items, t, v.name_span, &mut out);
                     }
                 }
             }

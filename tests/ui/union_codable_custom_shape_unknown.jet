@@ -1,0 +1,25 @@
+struct Token {
+    raw: String
+}
+
+impl Token.Encode {
+    fn encode(self) -> DataTree {
+        return DataTree.Text(~self.raw)
+    }
+}
+
+impl Token.Decode {
+    fn decode(tree: DataTree) -> Token ? DecodeError {
+        raw :: tree.text()?
+        return Ok(Token.{ raw: raw })
+    }
+}
+
+#Codable
+struct Row {
+    value: Token | Int
+}
+
+fn run() {
+    print("x")
+}
