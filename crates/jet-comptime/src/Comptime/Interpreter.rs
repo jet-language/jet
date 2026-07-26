@@ -330,6 +330,7 @@ impl<'a> Interp<'a> {
         let structs = self.structs;
         let sink = self.sink.as_deref_mut();
         let emitted_fragments = Some(&mut self.emitted_fragments);
+        let embed_inputs = Some(&mut self.embed_inputs);
         let mut req = super::TirBridge::BlockEvalRequest {
             stmts,
             funcs,
@@ -338,12 +339,15 @@ impl<'a> Interp<'a> {
             globals: &globals,
             core_imports,
             structs,
+            distinct_ranges: self.distinct_ranges,
+            distinct_bases: self.distinct_bases,
             fuel,
             sink,
             repl_mode,
             allow_impure,
             impure_depth,
             emitted_fragments,
+            embed_inputs,
         };
         match super::TirBridge::eval_block(&mut req)? {
             super::TirBridge::StmtOutcome::Done(new_scope) => {
@@ -473,6 +477,7 @@ impl<'a> Interp<'a> {
         let structs = self.structs;
         let sink = self.sink.as_deref_mut();
         let emitted_fragments = Some(&mut self.emitted_fragments);
+        let embed_inputs = Some(&mut self.embed_inputs);
         let mut req = super::TirBridge::ExprEvalRequest {
             expr: e,
             funcs,
@@ -483,10 +488,13 @@ impl<'a> Interp<'a> {
             allow_impure,
             initial_impure_depth: impure_depth,
             structs,
+            distinct_ranges: self.distinct_ranges,
+            distinct_bases: self.distinct_bases,
             fuel,
             sink,
             repl_mode,
             emitted_fragments,
+            embed_inputs,
         };
         super::TirBridge::eval_expr(&mut req)
     }

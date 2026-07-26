@@ -253,7 +253,15 @@ fn check_embed_path(builtin: &str, arg: &CallArg, span: Span) -> Result<String, 
         },
         _ => return Err(embed_path_err(builtin, "literal", span)),
     };
-    let p = std::path::Path::new(&path);
+    check_literal_embed_path(builtin, &path, span)
+}
+
+pub(crate) fn check_literal_embed_path(
+    builtin: &str,
+    path: &str,
+    span: Span,
+) -> Result<String, Diagnostic> {
+    let p = std::path::Path::new(path);
     if p.is_absolute() {
         return Err(embed_path_err(builtin, "absolute", span));
     }
@@ -262,10 +270,10 @@ fn check_embed_path(builtin: &str, arg: &CallArg, span: Span) -> Result<String, 
     {
         return Err(embed_path_err(builtin, "escape", span));
     }
-    Ok(path)
+    Ok(path.to_string())
 }
 
-fn embed_path_err(builtin: &str, kind: &str, span: Span) -> Diagnostic {
+pub(crate) fn embed_path_err(builtin: &str, kind: &str, span: Span) -> Diagnostic {
     let noun = if builtin == crate::Syntax::BUILTIN_FIND {
         "glob"
     } else {
@@ -296,7 +304,11 @@ fn embed_path_err(builtin: &str, kind: &str, span: Span) -> Diagnostic {
     Diagnostic::error("E0957", msg, why, fix, Some(span))
 }
 
-fn find_glob(base_dir: &Path, glob: &str, span: Span) -> Result<Vec<String>, Diagnostic> {
+pub(crate) fn find_glob(
+    base_dir: &Path,
+    glob: &str,
+    span: Span,
+) -> Result<Vec<String>, Diagnostic> {
     let pattern = normalize_rel(glob);
     let segments = split_rel(&pattern);
     let root_rel = static_glob_prefix(&segments);

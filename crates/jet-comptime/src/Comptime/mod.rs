@@ -361,10 +361,13 @@ pub fn evaluate_with_imports_opts(
         allow_impure,
         initial_impure_depth,
         structs: &HashMap::new(),
+        distinct_ranges: empty_distinct(),
+        distinct_bases: empty_distinct_bases(),
         fuel: FUEL_BUDGET,
         sink: None,
         repl_mode: false,
         emitted_fragments: None,
+        embed_inputs: None,
     })
 }
 
@@ -410,6 +413,7 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
     if initial_impure_depth == 0 {
         check_purity(init, funcs, extern_names)?;
     }
+    let mut embed_inputs = Vec::new();
     let val = TirBridge::eval_expr(&mut TirBridge::ExprEvalRequest {
         expr: init,
         funcs,
@@ -420,14 +424,15 @@ pub fn evaluate_with_imports_opts_collecting_structs<'a>(
         allow_impure,
         initial_impure_depth,
         structs,
+        distinct_ranges: empty_distinct(),
+        distinct_bases: empty_distinct_bases(),
         fuel: FUEL_BUDGET,
         sink: None,
         repl_mode: false,
         emitted_fragments: None,
+        embed_inputs: Some(&mut embed_inputs),
     })?;
-    // ponytail: embed_inputs collection moves into the TIR host surface when a
-    // comptime embed path needs it again; empty for the #777 cutover.
-    Ok((val, Vec::new()))
+    Ok((val, embed_inputs))
 }
 
 /// Whole-program dev interpretation (E2-M4 `jet dev`). Runs `main`'s body
@@ -885,12 +890,15 @@ pub fn run_block_with_imports(
         globals,
         core_imports,
         structs: &HashMap::new(),
+        distinct_ranges: empty_distinct(),
+        distinct_bases: empty_distinct_bases(),
         fuel: FUEL_BUDGET,
         sink: None,
         repl_mode: false,
         allow_impure: false,
         impure_depth: 0,
         emitted_fragments: None,
+        embed_inputs: None,
     })? {
         TirBridge::StmtOutcome::Done(scope) => Ok(scope),
         TirBridge::StmtOutcome::Returned { scope, .. } => Ok(scope),

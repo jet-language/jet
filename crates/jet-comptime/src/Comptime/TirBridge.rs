@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::OnceLock;
 
-use crate::AST::{Expr, Func, ProgramBundle, Stmt, StructDef};
+use crate::AST::{ComptimeInput, Expr, Func, ProgramBundle, Stmt, StructDef, Type};
 use crate::Diagnostics::Diagnostic;
 use crate::Comptime::CtValue;
 use crate::Comptime::DevSink;
@@ -20,11 +20,15 @@ pub struct ExprEvalRequest<'a> {
     pub allow_impure: bool,
     pub initial_impure_depth: usize,
     pub structs: &'a HashMap<String, &'a StructDef>,
+    pub distinct_ranges: &'a HashMap<String, Option<(i64, i64)>>,
+    pub distinct_bases: &'a HashMap<String, Type>,
     pub fuel: u64,
     pub sink: Option<&'a mut DevSink>,
     pub repl_mode: bool,
     /// D-METADERIVE1: `emit(…)` fragments (usually unused for single exprs).
     pub emitted_fragments: Option<&'a mut Vec<String>>,
+    /// D-CTEFFECT1 Tier-1 inputs recorded by the canonical host surface.
+    pub embed_inputs: Option<&'a mut Vec<ComptimeInput>>,
 }
 
 pub struct BlockEvalRequest<'a> {
@@ -35,6 +39,8 @@ pub struct BlockEvalRequest<'a> {
     pub globals: &'a HashMap<String, CtValue>,
     pub core_imports: &'a HashMap<String, String>,
     pub structs: &'a HashMap<String, &'a StructDef>,
+    pub distinct_ranges: &'a HashMap<String, Option<(i64, i64)>>,
+    pub distinct_bases: &'a HashMap<String, Type>,
     pub fuel: u64,
     pub sink: Option<&'a mut DevSink>,
     pub repl_mode: bool,
@@ -42,6 +48,8 @@ pub struct BlockEvalRequest<'a> {
     pub impure_depth: usize,
     /// D-METADERIVE1: `emit(…)` fragments from a derive body.
     pub emitted_fragments: Option<&'a mut Vec<String>>,
+    /// D-CTEFFECT1 Tier-1 inputs recorded by the canonical host surface.
+    pub embed_inputs: Option<&'a mut Vec<ComptimeInput>>,
 }
 
 /// Outcome of evaluating a statement list through the canonical TIR evaluator.

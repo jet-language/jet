@@ -8,10 +8,11 @@ use super::handles::{
 use super::plan_graph::BuildPlan;
 use super::provenance_toolchains::{BuildProvenance, ProbeSpec, ToolchainSpec};
 use super::targets::TargetSpec;
-use crate::AST::CtValue;
+use crate::AST::{ComptimeInput, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::path::Path;
 
 #[derive(Debug)]
 struct ProgramBuildSession {
@@ -79,7 +80,8 @@ pub fn finish_program_build(context: &CtValue, returned: &CtValue) -> Result<(Bu
     Ok((plan, session.diagnostics))
 }
 
-pub(crate) fn eval_program_build_method(
+#[doc(hidden)]
+pub fn eval_program_build_method(
     receiver: &CtValue,
     method: &str,
     args: Vec<CtValue>,
@@ -94,6 +96,118 @@ pub(crate) fn eval_program_build_method(
             .ok_or_else(|| build_diag("build context expired", span))?;
         eval_session_method(id, session, method, args, span, in_impure_gate)
     }))
+}
+
+#[doc(hidden)]
+pub fn eval_program_build_input_method(
+    receiver: &CtValue,
+    method: &str,
+    args: &[CtValue],
+    first_string_literal: Option<&str>,
+    base_dir: &Path,
+    embed_inputs: Option<&mut Vec<ComptimeInput>>,
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    build_session_id(receiver)?;
+    match method {
+        "find" => Some(eval_find(
+            args,
+            first_string_literal,
+            base_dir,
+            embed_inputs,
+            span,
+        )),
+        "embed" => Some(eval_embed(args, base_dir, embed_inputs, span)),
+        _ => None,
+    }
+}
+
+fn eval_find(
+    args: &[CtValue],
+    first_string_literal: Option<&str>,
+    base_dir: &Path,
+    mut embed_inputs: Option<&mut Vec<ComptimeInput>>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let builtin = crate::Syntax::BUILTIN_FIND;
+    if args.len() != 1 {
+        return Err(build_diag("`b.find` requires exactly one glob", span));
+    }
+    let glob = first_string_literal
+        .ok_or_else(|| crate::Comptime::Methods::embed_path_err(builtin, "literal", span))?;
+    let glob = crate::Comptime::Methods::check_literal_embed_path(builtin, glob, span)?;
+    let mut matches = crate::Comptime::Methods::find_glob(base_dir, &glob, span)?;
+    matches.sort();
+    for rel in &matches {
+        let bytes = std::fs::read(base_dir.join(rel)).map_err(|error| {
+            Diagnostic::error(
+                "E0955",
+                format!("`{builtin}` can't open `{rel}`"),
+                format!("{error} (matched while expanding `{glob}`)"),
+                "check the glob and remove unreadable files from its match set".to_string(),
+                Some(span),
+            )
+        })?;
+        if let Some(inputs) = embed_inputs.as_deref_mut() {
+            inputs.push(ComptimeInput {
+                path: rel.clone(),
+                hash: crate::SHA256::sha256_hex(&bytes),
+            });
+        }
+    }
+    Ok(CtValue::List(
+        matches.into_iter().map(CtValue::Str).collect(),
+    ))
+}
+
+fn eval_embed(
+    args: &[CtValue],
+    base_dir: &Path,
+    embed_inputs: Option<&mut Vec<ComptimeInput>>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let rel = string_arg(args, 0, span)?;
+    let path = Path::new(&rel);
+    if args.len() != 1
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(Diagnostic::error(
+            "E0957",
+            format!("`b.embed` path `{rel}` escapes the build root"),
+            "locked build inputs must stay beneath the selected source directory".to_string(),
+            "use a relative path returned by `b.find`, without `..`".to_string(),
+            Some(span),
+        ));
+    }
+    let bytes = std::fs::read(base_dir.join(path)).map_err(|error| {
+        Diagnostic::error(
+            "E0955",
+            format!("`b.embed` cannot open `{rel}`"),
+            error.to_string(),
+            "check the locked relative path".to_string(),
+            Some(span),
+        )
+    })?;
+    if let Some(inputs) = embed_inputs {
+        inputs.push(ComptimeInput {
+            path: rel.clone(),
+            hash: crate::SHA256::sha256_hex(&bytes),
+        });
+    }
+    String::from_utf8(bytes)
+        .map(CtValue::Str)
+        .map_err(|_| {
+            Diagnostic::error(
+                "E0955",
+                format!("`b.embed` cannot decode `{rel}` as text"),
+                "the embedded file is not valid UTF-8".to_string(),
+                "embed a UTF-8 text file".to_string(),
+                Some(span),
+            )
+        })
 }
 
 fn eval_session_method(

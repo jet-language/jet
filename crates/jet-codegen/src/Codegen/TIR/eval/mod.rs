@@ -109,6 +109,7 @@ pub(super) struct EvalCtx<'a> {
     pub(super) pending_return: Option<CtValue>,
     pub(super) call_depth: usize,
     pub(super) emitted_fragments: Option<&'a mut Vec<String>>,
+    pub(super) embed_inputs: Option<&'a mut Vec<crate::AST::ComptimeInput>>,
     /// `TypeName -> [(field, redact)]` for JetDebug formatting (D-DISPLAYDBG).
     pub(super) struct_fields: HashMap<String, Vec<(String, bool)>>,
     /// `TypeName -> [(field, Type)]` for `core.data.csv` / decode on deopt.
@@ -183,13 +184,32 @@ fn empty_cx() -> Cx {
     build_cx_items(&[], "", "<eval>", None, &HashMap::new())
 }
 
+fn seed_fragment_distinct_types(
+    cx: &mut Cx,
+    ranges: &HashMap<String, Option<(i64, i64)>>,
+    bases: &HashMap<String, crate::AST::Type>,
+) {
+    for (name, base) in bases {
+        cx.distinct_types
+            .insert(name.clone(), (base.clone(), base.is_numeric()));
+    }
+    for (name, range) in ranges {
+        if let Some(bounds) = range {
+            cx.distinct_ranges.insert(name.clone(), *bounds);
+        }
+    }
+}
+
 /// Lower one expression for the evaluator (comptime / REPL fragments).
 pub fn lower_expr_for_eval(
     expr: &Expr,
     globals: &HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
+    distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
+    distinct_bases: &HashMap<String, crate::AST::Type>,
 ) -> Result<TExpr, Diagnostic> {
     let mut cx = empty_cx();
+    seed_fragment_distinct_types(&mut cx, distinct_ranges, distinct_bases);
     cx.const_values = globals.clone();
     for (name, value) in globals {
         cx.consts.insert(name.clone(), String::new());
@@ -215,8 +235,11 @@ pub fn lower_stmts_for_eval(
     stmts: &[Stmt],
     globals: &HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
+    distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
+    distinct_bases: &HashMap<String, crate::AST::Type>,
 ) -> Result<Vec<TStmt>, Diagnostic> {
     let mut cx = empty_cx();
+    seed_fragment_distinct_types(&mut cx, distinct_ranges, distinct_bases);
     cx.const_values = globals.clone();
     for name in globals.keys() {
         cx.consts.insert(name.clone(), String::new());
@@ -341,6 +364,7 @@ pub fn run_program_with_structs(
         pending_return: None,
         call_depth: 0,
         emitted_fragments: None,
+        embed_inputs: None,
         struct_fields,
         struct_field_types,
     };
@@ -383,6 +407,7 @@ pub fn run_named_func(
         pending_return: None,
         call_depth: 0,
         emitted_fragments: None,
+        embed_inputs: None,
         struct_fields: HashMap::new(),
         struct_field_types: HashMap::new(),
     };
@@ -449,8 +474,15 @@ fn run_bundle(
 fn eval_expr_hook(
     req: &mut Comptime::TirBridge::ExprEvalRequest<'_>,
 ) -> Result<CtValue, Diagnostic> {
-    let tir = lower_expr_for_eval(req.expr, req.globals, req.core_imports)?;
+    let tir = lower_expr_for_eval(
+        req.expr,
+        req.globals,
+        req.core_imports,
+        req.distinct_ranges,
+        req.distinct_bases,
+    )?;
     let mut cx = empty_cx();
+    seed_fragment_distinct_types(&mut cx, req.distinct_ranges, req.distinct_bases);
     cx.core_imports = req.core_imports.clone();
     let lowered: Vec<TFunc> = req
         .funcs
@@ -472,6 +504,7 @@ fn eval_expr_hook(
     let repl_mode = req.repl_mode;
     let sink = req.sink.take();
     let emitted_fragments = req.emitted_fragments.take();
+    let embed_inputs = req.embed_inputs.take();
     let mut ctx = EvalCtx {
         funcs,
         base_dir,
@@ -486,6 +519,7 @@ fn eval_expr_hook(
         pending_return: None,
         call_depth: 0,
         emitted_fragments,
+        embed_inputs,
         struct_fields: HashMap::new(),
         struct_field_types: HashMap::new(),
     };
@@ -496,8 +530,15 @@ fn eval_expr_hook(
 fn eval_block_hook(
     req: &mut Comptime::TirBridge::BlockEvalRequest<'_>,
 ) -> Result<Comptime::TirBridge::StmtOutcome, Diagnostic> {
-    let tir = lower_stmts_for_eval(req.stmts, req.globals, req.core_imports)?;
+    let tir = lower_stmts_for_eval(
+        req.stmts,
+        req.globals,
+        req.core_imports,
+        req.distinct_ranges,
+        req.distinct_bases,
+    )?;
     let mut cx = empty_cx();
+    seed_fragment_distinct_types(&mut cx, req.distinct_ranges, req.distinct_bases);
     cx.core_imports = req.core_imports.clone();
     let lowered: Vec<TFunc> = req
         .funcs
@@ -519,6 +560,7 @@ fn eval_block_hook(
     let repl_mode = req.repl_mode;
     let sink = req.sink.take();
     let emitted_fragments = req.emitted_fragments.take();
+    let embed_inputs = req.embed_inputs.take();
     let mut ctx = EvalCtx {
         funcs,
         base_dir,
@@ -533,6 +575,7 @@ fn eval_block_hook(
         pending_return: None,
         call_depth: 0,
         emitted_fragments,
+        embed_inputs,
         struct_fields: HashMap::new(),
         struct_field_types: HashMap::new(),
     };

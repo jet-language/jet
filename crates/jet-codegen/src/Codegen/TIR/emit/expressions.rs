@@ -661,6 +661,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             method,
             args,
             operator_line,
+            ..
         } => {
             let method_rust = method.rust();
             let arg_str = emit_tir_call_args(args, cx);

@@ -239,7 +239,7 @@ impl EvalCtx<'_> {
                 // Runtime deopt / `jet run` sets impure_depth>0 so Tier-2
                 // ambient I/O matches AOT (env/fs/process). Pure comptime
                 // keeps depth 0 and stays on apply_core_call (E3410).
-                if self.impure_depth > 0 {
+                if self.impure_depth > 0 && self.allow_impure {
                     apply_impure_core_call(
                         module,
                         method,
@@ -251,8 +251,18 @@ impl EvalCtx<'_> {
                         None,
                         None,
                     )
-                } else {
+                } else if self.impure_depth == 0 {
                     apply_core_call(module, method, argv, self.span(), self.repl_mode)
+                } else {
+                    Err(Diagnostic::error(
+                        "E3411",
+                        format!(
+                            "`{module}.{method}()` inside `#Impure` gate, but `--allow-impure` was not passed"
+                        ),
+                        "the `#Impure` block opts in to ambient comptime I/O, but the build flag is required so CI can audit builds that touch the host".to_string(),
+                        "add `--allow-impure` to your `jet build` / `jet run` invocation".to_string(),
+                        Some(self.span()),
+                    ))
                 }
             }
             TExprKind::StructLit { fields, .. } => {
@@ -404,6 +414,7 @@ impl EvalCtx<'_> {
                 recv,
                 method,
                 args,
+                source_first_string_literal,
                 ..
             } => {
                 let mut r = self.eval_expr(recv, scope)?;
@@ -413,6 +424,30 @@ impl EvalCtx<'_> {
                 }
                 if method.name == "clone" {
                     return Ok(r);
+                }
+                let span = self.span();
+                let base_dir = self.base_dir.clone();
+                if let Some(result) =
+                    crate::Comptime::Build::eval_program_build_input_method(
+                        &r,
+                        &method.name,
+                        &argv,
+                        source_first_string_literal.as_deref(),
+                        &base_dir,
+                        self.embed_inputs.as_deref_mut(),
+                        span,
+                    )
+                {
+                    return result;
+                }
+                if let Some(result) = crate::Comptime::Build::eval_program_build_method(
+                    &r,
+                    &method.name,
+                    argv.clone(),
+                    self.span(),
+                    self.impure_depth > 0,
+                ) {
+                    return result;
                 }
                 const MUTATING: &[&str] = &[
                     "push", "pop", "add", "add_new", "insert", "remove", "clear", "reverse",
