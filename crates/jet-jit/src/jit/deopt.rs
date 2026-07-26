@@ -381,7 +381,7 @@ pub(crate) extern "C" fn jet_deopt_call(
 
 fn bits_to_ct(rt: &JitRuntime, ty: &Type, bits: i64) -> Result<CtValue, Diagnostic> {
     match ty {
-        Type::Int => Ok(CtValue::Int(bits)),
+        Type::Int | Type::IntN { .. } => Ok(CtValue::Int(bits)),
         Type::Bool => Ok(CtValue::Bool(bits != 0)),
         Type::Char => Ok(CtValue::Char(char::from_u32(bits as u32).unwrap_or('\0'))),
         Type::String => Ok(CtValue::Str(

@@ -9,6 +9,17 @@ use super::builtins::eval_builtin;
 use super::handles::eval_handle;
 use super::{materialize_view_mut_window, unsupported, EvalCtx, Flow};
 
+fn show_typed_integer(value: &CtValue, ty: &Type) -> Option<String> {
+    if let (CtValue::Some(value), Type::Option(inner)) = (value, ty) {
+        return show_typed_integer(value, inner);
+    }
+    let CtValue::Int(value) = value else {
+        return None;
+    };
+    let (signed, _) = crate::Comptime::MathLayout::integer_type_layout(ty)?;
+    Some(crate::Comptime::MathLayout::integer_show(*value, signed))
+}
+
 impl EvalCtx<'_> {
     pub(crate) fn eval_expr(
         &mut self,
@@ -33,7 +44,8 @@ impl EvalCtx<'_> {
                             let v = self.eval_expr(e, scope)?;
                             let text = match fmt {
                                 crate::AST::StrFormat::Debug => self.debug_value(&v),
-                                crate::AST::StrFormat::Display => self.show_value(&v, scope)?,
+                                crate::AST::StrFormat::Display => show_typed_integer(&v, &e.ty)
+                                    .unwrap_or(self.show_value(&v, scope)?),
                             };
                             out.push_str(&text);
                         }
@@ -58,7 +70,8 @@ impl EvalCtx<'_> {
                 if self.pending_return.is_some() {
                     return Ok(CtValue::Unit);
                 }
-                self.write_print(&v.jet_show(), false)?;
+                let shown = show_typed_integer(&v, &inner.ty).unwrap_or_else(|| v.jet_show());
+                self.write_print(&shown, false)?;
                 Ok(CtValue::Unit)
             }
             TExprKind::Drop(inner) | TExprKind::Close(inner) => {
@@ -68,12 +81,35 @@ impl EvalCtx<'_> {
             TExprKind::Binary { op, lhs, rhs, .. } => {
                 let l = self.eval_expr(lhs, scope)?;
                 let r = self.eval_expr(rhs, scope)?;
+                if let Type::IntN { signed, bits } = &lhs.ty {
+                    let a = as_int(&l, self.span())?;
+                    let b = as_int(&r, self.span())?;
+                    return crate::Comptime::MathLayout::integer_binop(
+                        *op,
+                        a,
+                        b,
+                        *signed,
+                        *bits,
+                        self.span(),
+                    );
+                }
                 eval_binop(*op, l, r, self.span())
             }
             TExprKind::Unary { op, operand } => {
                 let v = self.eval_expr(operand, scope)?;
                 match (*op, v) {
-                    (UnOp::Neg, CtValue::Int(n)) => Ok(CtValue::Int(-n)),
+                    (UnOp::Neg, CtValue::Int(n))
+                        if matches!(&operand.ty, Type::IntN { signed: true, .. }) =>
+                    {
+                        let (_, bits) =
+                            crate::Comptime::MathLayout::integer_type_layout(&operand.ty)
+                                .expect("IntN layout");
+                        crate::Comptime::MathLayout::integer_neg(n, bits, self.span())
+                    }
+                    (UnOp::Neg, CtValue::Int(n)) => n
+                        .checked_neg()
+                        .map(CtValue::Int)
+                        .ok_or_else(|| unsupported("integer negation overflow", self.span())),
                     (UnOp::Neg, CtValue::Float(n)) => Ok(CtValue::Float(n.neg())),
                     (UnOp::Neg, CtValue::BigInt(n)) => Ok(CtValue::BigInt(n.neg())),
                     (UnOp::Not, CtValue::Bool(b)) => Ok(CtValue::Bool(!b)),
@@ -86,7 +122,18 @@ impl EvalCtx<'_> {
                     vals.push(self.eval_expr(o, scope)?);
                 }
                 for (i, op) in ops.iter().enumerate() {
-                    let part = eval_binop(*op, vals[i].clone(), vals[i + 1].clone(), self.span())?;
+                    let part = if let Type::IntN { signed, bits } = &operands[i].ty {
+                        crate::Comptime::MathLayout::integer_binop(
+                            *op,
+                            as_int(&vals[i], self.span())?,
+                            as_int(&vals[i + 1], self.span())?,
+                            *signed,
+                            *bits,
+                            self.span(),
+                        )?
+                    } else {
+                        eval_binop(*op, vals[i].clone(), vals[i + 1].clone(), self.span())?
+                    };
                     if !as_bool(&part, self.span())? {
                         return Ok(CtValue::Bool(false));
                     }
@@ -746,10 +793,12 @@ impl EvalCtx<'_> {
                         (Type::IntN { signed: true, bits: 32 }, "MIN") => {
                             Ok(CtValue::Int(i32::MIN as i64))
                         }
-                        (Type::IntN { signed: false, bits: 64 }, "MAX") => {
-                            Ok(CtValue::Int(i64::MAX))
-                        }
-                        (Type::IntN { signed: false, bits: 64 }, "MIN") => Ok(CtValue::Int(0)),
+                        (Type::IntN { signed, bits }, "MAX") => Ok(CtValue::Int(
+                            crate::Comptime::MathLayout::integer_bound(*signed, *bits, true),
+                        )),
+                        (Type::IntN { signed, bits }, "MIN") => Ok(CtValue::Int(
+                            crate::Comptime::MathLayout::integer_bound(*signed, *bits, false),
+                        )),
                         _ => Err(unsupported(
                             &format!("numeric bounds `{member}`"),
                             self.span(),
@@ -1323,26 +1372,13 @@ impl EvalCtx<'_> {
                 let CtValue::Int(value) = v else {
                     return Err(unsupported("numeric bit-count recv", self.span()));
                 };
-                let width = *width;
-                let mask = if width == 64 {
-                    u64::MAX
-                } else {
-                    (1_u64 << width) - 1
-                };
-                let bits = (*value as u64) & mask;
-                let ones = bits.count_ones();
-                let count = match method.as_str() {
-                    "count_ones" => ones,
-                    "count_zeros" => width - ones,
-                    "leading_zeros" => bits.leading_zeros() - (64 - width),
-                    "trailing_zeros" => bits.trailing_zeros().min(width),
-                    _ => {
-                        return Err(unsupported(&format!("numeric `{method}`"), self.span()));
-                    }
-                };
-                Ok(CtValue::Int(i64::from(count)))
+                crate::Comptime::MathLayout::integer_bit_count(*value, *width, method)
+                    .map(CtValue::Int)
+                    .ok_or_else(|| unsupported(&format!("numeric `{method}`"), self.span()))
             }
-            TNumericOp::ToShow => Ok(CtValue::Str(v.jet_show())),
+            TNumericOp::ToShow => Ok(CtValue::Str(
+                show_typed_integer(v, recv_ty).unwrap_or_else(|| v.jet_show()),
+            )),
             TNumericOp::Predicate(method) => {
                 crate::Comptime::Builtins::apply_method(v, method, vec![], self.span())
             }

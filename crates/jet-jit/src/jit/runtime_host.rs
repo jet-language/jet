@@ -163,6 +163,21 @@ fn jet_trap_overflow(op: &str) {
     with_runtime_mut(|rt| rt.set_trap(msg));
 }
 
+pub(crate) const INTN_OP_ADD: i64 = 0;
+pub(crate) const INTN_OP_SUB: i64 = 1;
+pub(crate) const INTN_OP_MUL: i64 = 2;
+pub(crate) const INTN_OP_DIV: i64 = 3;
+pub(crate) const INTN_OP_REM: i64 = 4;
+pub(crate) const INTN_OP_BIT_AND: i64 = 5;
+pub(crate) const INTN_OP_BIT_OR: i64 = 6;
+pub(crate) const INTN_OP_BIT_XOR: i64 = 7;
+pub(crate) const INTN_OP_SHL: i64 = 8;
+pub(crate) const INTN_OP_SHR: i64 = 9;
+pub(crate) const INTN_MODE_TRAP: i64 = 0;
+pub(crate) const INTN_MODE_WRAPPING: i64 = 1;
+pub(crate) const INTN_MODE_SATURATING: i64 = 2;
+pub(crate) const INTN_MODE_CHECKED: i64 = 3;
+
 /// Reads the resident runtime's trapped flag from JIT code. `1` = a trap is
 /// pending (branch to epilogue); `0` = keep going.
 extern "C" fn jet_jit_is_trapped() -> i64 {
@@ -207,6 +222,109 @@ extern "C" fn jet_jit_div_i64(a: i64, b: i64, _line: u32) -> i64 {
             0
         }
     }
+}
+
+extern "C" fn jet_jit_intn_binop(
+    left: i64,
+    right: i64,
+    op: i64,
+    mode: i64,
+    signed: i64,
+    bits: i64,
+    right_signed: i64,
+) -> i64 {
+    use jet_codegen::AST::BinOp;
+    use jet_codegen::Comptime::{CtValue, MathLayout};
+    let op = match op {
+        INTN_OP_ADD => BinOp::Add,
+        INTN_OP_SUB => BinOp::Sub,
+        INTN_OP_MUL => BinOp::Mul,
+        INTN_OP_DIV => BinOp::Div,
+        INTN_OP_REM => BinOp::Rem,
+        INTN_OP_BIT_AND => BinOp::BitAnd,
+        INTN_OP_BIT_OR => BinOp::BitOr,
+        INTN_OP_BIT_XOR => BinOp::BitXor,
+        INTN_OP_SHL => BinOp::Shl,
+        INTN_OP_SHR => BinOp::Shr,
+        _ => {
+            with_runtime_mut(|rt| rt.set_trap("unknown fixed-width integer operation"));
+            return 0;
+        }
+    };
+    let signed = signed != 0;
+    let bits = bits as u8;
+    if matches!(op, BinOp::Shl | BinOp::Shr)
+        && right_signed == 0
+        && (right as u64) >= u64::from(bits)
+    {
+        jet_trap_overflow("shift");
+        return 0;
+    }
+    let span = jet_codegen::Diagnostics::Span::new(0, 0);
+    let result = match mode {
+        INTN_MODE_TRAP => MathLayout::integer_binop(op, left, right, signed, bits, span),
+        INTN_MODE_WRAPPING => MathLayout::overflow_opt(
+            jet_codegen::Syntax::BUILTIN_WRAPPING,
+            op,
+            left,
+            right,
+            signed,
+            bits,
+            span,
+        ),
+        INTN_MODE_SATURATING => MathLayout::overflow_opt(
+            jet_codegen::Syntax::BUILTIN_SATURATING,
+            op,
+            left,
+            right,
+            signed,
+            bits,
+            span,
+        ),
+        INTN_MODE_CHECKED => MathLayout::overflow_opt(
+            jet_codegen::Syntax::BUILTIN_CHECKED,
+            op,
+            left,
+            right,
+            signed,
+            bits,
+            span,
+        ),
+        _ => unreachable!("fixed-width integer mode"),
+    };
+    match result {
+        Ok(CtValue::Int(value)) => value,
+        Ok(CtValue::Some(value)) => {
+            let CtValue::Int(value) = *value else {
+                return 0;
+            };
+            Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, true, value as u64))
+        }
+        Ok(CtValue::None(_)) => 0,
+        Ok(_) => 0,
+        Err(_) if mode == INTN_MODE_CHECKED => 0,
+        Err(_) => {
+            let name = match op {
+                BinOp::Add => "add",
+                BinOp::Sub => "sub",
+                BinOp::Mul => "mul",
+                BinOp::Div | BinOp::Rem => "div",
+                _ => "shift",
+            };
+            jet_trap_overflow(name);
+            0
+        }
+    }
+}
+
+extern "C" fn jet_jit_intn_to_string(value: i64, signed: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .alloc_string(jet_codegen::Comptime::MathLayout::integer_show(
+                value,
+                signed != 0,
+            ))
+    })
 }
 
 extern "C" fn jet_jit_print_i64(v: i64) {
@@ -634,13 +752,14 @@ extern "C" fn jet_jit_numeric_predicate(value: f64, op: i64) -> i8 {
     }
 }
 
-extern "C" fn jet_jit_numeric_bit_count(value: i64, op: i64) -> i64 {
-    match op {
-        0 => value.count_ones() as i64,
-        1 => value.count_zeros() as i64,
-        2 => value.leading_zeros() as i64,
-        _ => value.trailing_zeros() as i64,
-    }
+extern "C" fn jet_jit_numeric_bit_count(value: i64, op: i64, width: i64) -> i64 {
+    let method = match op {
+        0 => "count_ones",
+        1 => "count_zeros",
+        2 => "leading_zeros",
+        _ => "trailing_zeros",
+    };
+    jet_codegen::Comptime::MathLayout::integer_bit_count(value, width as u32, method).unwrap_or(0)
 }
 
 extern "C" fn jet_jit_struct_new(n: i64) -> i64 {
@@ -737,6 +856,10 @@ pub(crate) fn jit_result(rt: &JitRuntime, handle: i64) -> Option<JitResultValue>
         .ok()
         .and_then(|index| index.checked_sub(1))
         .and_then(|index| rt.results.get(index).copied())
+}
+
+pub(crate) fn jit_result_i64(rt: &JitRuntime, handle: i64) -> Option<i64> {
+    jit_result(rt, handle).map(|result| result.bits as i64)
 }
 
 extern "C" fn jet_jit_result_new_i64(ok: i8, value: i64) -> i64 {
@@ -937,6 +1060,8 @@ pub(crate) struct HostFns {
     pub(crate) sub_i64: FuncId,
     pub(crate) mul_i64: FuncId,
     pub(crate) div_i64: FuncId,
+    pub(crate) intn_binop: FuncId,
+    pub(crate) intn_to_string: FuncId,
     pub(crate) print_i64: FuncId,
     pub(crate) print_f64: FuncId,
     pub(crate) print_bool: FuncId,
@@ -1035,6 +1160,11 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_sub_i64", jet_jit_sub_i64 as *const u8);
     builder.symbol("jet_jit_mul_i64", jet_jit_mul_i64 as *const u8);
     builder.symbol("jet_jit_div_i64", jet_jit_div_i64 as *const u8);
+    builder.symbol("jet_jit_intn_binop", jet_jit_intn_binop as *const u8);
+    builder.symbol(
+        "jet_jit_intn_to_string",
+        jet_jit_intn_to_string as *const u8,
+    );
     builder.symbol("jet_jit_print_i64", jet_jit_print_i64 as *const u8);
     builder.symbol("jet_jit_print_f64", jet_jit_print_f64 as *const u8);
     builder.symbol("jet_jit_print_bool", jet_jit_print_bool as *const u8);
@@ -1227,6 +1357,11 @@ fn declare_host_fns(
     sig_bin_i64.params.push(AbiParam::new(types::I64));
     sig_bin_i64.params.push(AbiParam::new(types::I32));
     sig_bin_i64.returns.push(AbiParam::new(types::I64));
+    let mut sig_intn_binop = Signature::new(cc);
+    for _ in 0..7 {
+        sig_intn_binop.params.push(AbiParam::new(types::I64));
+    }
+    sig_intn_binop.returns.push(AbiParam::new(types::I64));
 
     let mut sig_i64 = Signature::new(cc);
     sig_i64.params.push(AbiParam::new(types::I64));
@@ -1404,6 +1539,8 @@ fn declare_host_fns(
         sub_i64: import("jet_jit_sub_i64", &sig_bin_i64)?,
         mul_i64: import("jet_jit_mul_i64", &sig_bin_i64)?,
         div_i64: import("jet_jit_div_i64", &sig_bin_i64)?,
+        intn_binop: import("jet_jit_intn_binop", &sig_intn_binop)?,
+        intn_to_string: import("jet_jit_intn_to_string", &sig_i64_i64_i64)?,
         print_i64: import("jet_jit_print_i64", &sig_i64)?,
         print_f64: import("jet_jit_print_f64", &sig_f64)?,
         print_bool: import("jet_jit_print_bool", &sig_i8)?,
@@ -1442,7 +1579,7 @@ fn declare_host_fns(
         distinct_range: import("jet_jit_distinct_range", &sig_i64_i64_i64_i64)?,
         distinct_range_result: import("jet_jit_distinct_range_result", &sig_i64_i64_i64_i64)?,
         numeric_predicate: import("jet_jit_numeric_predicate", &sig_f64_i64_i8)?,
-        numeric_bit_count: import("jet_jit_numeric_bit_count", &sig_i64_i64_i64)?,
+        numeric_bit_count: import("jet_jit_numeric_bit_count", &sig_i64_i64_i64_i64)?,
         struct_new: import("jet_jit_struct_new", &sig_struct_new)?,
         struct_assign: import("jet_jit_struct_assign", &sig_struct_assign)?,
         struct_get_i64: import("jet_jit_struct_get_i64", &sig_struct_get_i64)?,

@@ -54,6 +54,14 @@ pub(crate) fn jit_list_native_type(ty: &Type) -> bool {
     jit_list_int_type(ty) || jit_list_float_type(ty) || jit_list_string_type(ty)
 }
 
+fn jit_list_intn_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::List(inner) | Type::FixedList { elem: inner, .. }
+            if matches!(inner.as_ref(), Type::IntN { .. })
+    )
+}
+
 /// `[[Int]]` / `Iter<[Int]>` — flat_map identity receivers in iter_adapters.
 pub(crate) fn jit_list_of_int_list_type(ty: &Type) -> bool {
     matches!(ty, Type::List(inner) if jit_list_int_type(inner))
@@ -71,7 +79,7 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
         Type::List(inner) | Type::FixedList { elem: inner, .. }
             if matches!(
                 inner.as_ref(),
-                Type::Int | Type::Float | Type::String | Type::Char
+                Type::Int | Type::IntN { .. } | Type::Float | Type::String | Type::Char
             ) =>
         {
             Some(inner.as_ref().clone())
@@ -156,6 +164,10 @@ pub(crate) fn jit_map_string_type(ty: &Type) -> bool {
     matches!(ty, Type::Map { key, .. } if matches!(key.as_ref(), Type::String))
 }
 
+fn jit_map_intn_value_type(ty: &Type) -> bool {
+    matches!(ty, Type::Map { value, .. } if matches!(value.as_ref(), Type::IntN { .. }))
+}
+
 pub(crate) fn jit_list_task_int_type(ty: &Type) -> bool {
     if let Type::List(inner) = ty {
         if let Type::Apply { name, args } = inner.as_ref() {
@@ -166,8 +178,8 @@ pub(crate) fn jit_list_task_int_type(ty: &Type) -> bool {
 }
 
 pub(crate) fn jit_optional_scalar_type(ty: &Type) -> bool {
-    // Packed Option ABI (`0` = None, else bits+1): scalars and named enums
-    // (DataEvent / CSV row Option, etc.). Nested Option stays out to avoid
+    // Option carrier ABI: IntN uses result-arena handles; other scalars and
+    // named enums use the legacy packed carrier. Nested Option stays out to avoid
     // recursive jit_value_type → compound loops.
     matches!(
         ty,
@@ -385,6 +397,12 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             if module == "core.tasks" && method == "channel" {
                 return false;
             }
+            if module == "core.random"
+                && method == "weighted_pick"
+                && args.first().is_some_and(|items| jit_list_intn_type(&items.ty))
+            {
+                return false;
+            }
             // Other core modules retain their existing resident coverage. core.text
             // alone is exact above: unsupported methods cannot fail into fallback.
             resident_safe_expr_list(args, callees)
@@ -500,13 +518,19 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     TNumericOp::Predicate(name) => matches!(&recv.ty, Type::Float)
                         && matches!(name.as_str(), "is_nan" | "is_infinite" | "is_finite"),
                     TNumericOp::BitCount { method: name, width } => {
-                        (*width == 64 && matches!(&recv.ty, Type::Int))
+                        (matches!(&recv.ty, Type::IntN { bits, .. } if u32::from(*bits) == *width)
+                            || (*width == 64 && matches!(&recv.ty, Type::Int)))
                             && matches!(
                                 name.as_str(),
-                                "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros"
+                                "count_ones"
+                                    | "count_zeros"
+                                    | "leading_zeros"
+                                    | "trailing_zeros"
                             )
                     }
-                    TNumericOp::ToShow => matches!(&recv.ty, Type::Int | Type::Float),
+                    TNumericOp::ToShow => {
+                        matches!(&recv.ty, Type::Int | Type::IntN { .. } | Type::Float)
+                    },
                     TNumericOp::CastAs { dst_rust } => {
                         recv.ty.is_numeric()
                             && matches!(dst_rust.as_str(), "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64" | "f32" | "f64")
@@ -613,7 +637,10 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     && resident_safe_expr(lhs, callees)
                     && resident_safe_expr(rhs, callees);
             }
-            if *overflow && (!matches!(&lhs.ty, Type::Int) || !matches!(&rhs.ty, Type::Int)) {
+            if *overflow
+                && (!matches!(&lhs.ty, Type::Int | Type::IntN { .. })
+                    || !matches!(&rhs.ty, Type::Int | Type::IntN { .. }))
+            {
                 return false;
             }
             resident_safe_expr(lhs, callees) && resident_safe_expr(rhs, callees)
@@ -624,7 +651,10 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 && operands.iter().all(|e| resident_safe_expr(e, callees))
                 && ops.iter().enumerate().all(|(i, _)| {
                     hooks[i]
-                        || matches!(&operands[i].ty, Type::Int | Type::Float)
+                        || matches!(
+                            &operands[i].ty,
+                            Type::Int | Type::IntN { .. } | Type::Float
+                        )
                 })
                 && ops
                     .iter()
@@ -658,6 +688,19 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             ) && resident_safe_expr(a, callees)
                 && resident_safe_expr(b, callees)
                 && matches!(&expr.ty, Type::Option(inner) if jit_scalar_type(inner) || matches!(inner.as_ref(), Type::Named(_)|Type::Tuple(_)))
+        }
+        TExprKind::OverflowOpt {
+            prefix,
+            op,
+            lhs,
+            rhs,
+        } => {
+            matches!(prefix.as_str(), "wrapping" | "saturating" | "checked")
+                && matches!(*op, "add" | "sub" | "mul" | "div")
+                && matches!(&lhs.ty, Type::Int | Type::IntN { .. })
+                && matches!(&rhs.ty, Type::Int | Type::IntN { .. })
+                && resident_safe_expr(lhs, callees)
+                && resident_safe_expr(rhs, callees)
         }
         TExprKind::ClosureMethod { recv, op, args } => {
             resident_safe_closure_method(recv, op, args, callees)
@@ -709,6 +752,12 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             }
             THostCall::EnvSet { name, value, .. } => {
                 resident_safe_expr(name, callees) && resident_safe_expr(value, callees)
+            }
+            THostCall::NumericBounds { ty, member } => {
+                (jet_codegen::Comptime::MathLayout::integer_type_layout(ty).is_some()
+                    && matches!(member.as_str(), "MIN" | "MAX"))
+                    || (matches!(ty, Type::Float)
+                        && matches!(member.as_str(), "INFINITY" | "NAN" | "EPSILON"))
             }
             _ => false,
         },
@@ -939,12 +988,14 @@ fn resident_safe_builtin_op(
         }
         TBuiltinOp::GetList => {
             jit_list_native_type(&recv.ty)
+                && !jit_list_intn_type(&recv.ty)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Int)
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::GetMap => {
             jit_map_string_type(&recv.ty)
+                && !jit_map_intn_value_type(&recv.ty)
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
@@ -1145,7 +1196,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             clone_value,
         } => {
             let compound = op.as_ref().is_none_or(|op| match &value.ty {
-                Type::Int => matches!(
+                Type::Int | Type::IntN { .. } => matches!(
                     op,
                     BinOp::Add
                         | BinOp::Sub

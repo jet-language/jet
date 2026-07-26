@@ -12,7 +12,11 @@ use jet_codegen::Codegen::TIR::{
 use jet_foundation::AST::{BinOp, IncDecOp, PatSlot, Pattern, StrFormat, Type, UnOp};
 use std::collections::HashMap;
 
-use super::runtime_host::HostFns;
+use super::runtime_host::{
+    HostFns, INTN_MODE_CHECKED, INTN_MODE_SATURATING, INTN_MODE_TRAP, INTN_MODE_WRAPPING,
+    INTN_OP_ADD, INTN_OP_BIT_AND, INTN_OP_BIT_OR, INTN_OP_BIT_XOR, INTN_OP_DIV, INTN_OP_MUL,
+    INTN_OP_REM, INTN_OP_SHL, INTN_OP_SHR, INTN_OP_SUB,
+};
 use super::safety::{
     collect_select_arms_jit, flatten_string, jit_closure_elem_type, jit_list_float_type,
     jit_list_iter_elem_type, jit_list_native_type, jit_list_of_int_list_type, jit_list_record_type,
@@ -508,8 +512,7 @@ impl LowerCtx<'_, '_> {
 
                 self.b.switch_to_block(some_block);
                 self.b.seal_block(some_block);
-                let one = self.b.ins().iconst(types::I64, 1);
-                let payload = self.b.ins().isub(val, one);
+                let payload = self.unpack_option_payload(val, inner)?;
                 let encoded = self.lower_serde_encode_value(payload, inner)?;
                 self.b.ins().jump(merge, &[encoded]);
 
@@ -735,18 +738,7 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(ok_block);
         self.b.seal_block(ok_block);
         let payload = self.result_payload(inner_r, inner)?;
-        let bits = match clif_ty(inner) {
-            Some(ty) if ty == types::F64 => self.b.ins().bitcast(
-                types::I64,
-                Self::scalar_bitcast_memflags(),
-                payload,
-            ),
-            Some(ty) if ty == types::I8 => self.b.ins().uextend(types::I64, payload),
-            Some(ty) if ty == types::I32 => self.b.ins().uextend(types::I64, payload),
-            _ => payload,
-        };
-        let one = self.b.ins().iconst(types::I64, 1);
-        let present = self.b.ins().iadd(bits, one);
+        let present = self.pack_option_payload(payload, inner)?;
         let tag = self.b.ins().iconst(types::I8, 1);
         let host_ref = self
             .module
@@ -1813,7 +1805,12 @@ impl LowerCtx<'_, '_> {
                 let val = if let Some(op) = op {
                     let current = self.b.use_var(var);
                     let rhs = self.lower_expr(value)?;
-                    self.apply_binop_to_var(current, *op, rhs, &value.ty)?
+                    let arithmetic_ty = self
+                        .var_tys
+                        .get(&key)
+                        .cloned()
+                        .unwrap_or_else(|| value.ty.clone());
+                    self.apply_binop_to_var(current, *op, rhs, &arithmetic_ty)?
                 } else {
                     self.lower_expr(value)?
                 };
@@ -2981,6 +2978,33 @@ impl LowerCtx<'_, '_> {
                 let _ = ty;
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
+            THostCall::NumericBounds {
+                ty: Type::Float,
+                member,
+            } => {
+                let value = match member.as_str() {
+                    "INFINITY" => f64::INFINITY,
+                    "NAN" => f64::NAN,
+                    "EPSILON" => f64::EPSILON,
+                    _ => return Err("jit numeric bound unsupported".to_string()),
+                };
+                Ok(self.b.ins().f64const(value))
+            }
+            THostCall::NumericBounds { ty, member }
+                if matches!(member.as_str(), "MIN" | "MAX") =>
+            {
+                let (signed, bits) =
+                    jet_codegen::Comptime::MathLayout::integer_type_layout(ty)
+                        .ok_or_else(|| "jit numeric bound unsupported".to_string())?;
+                Ok(self.b.ins().iconst(
+                    types::I64,
+                    jet_codegen::Comptime::MathLayout::integer_bound(
+                        signed,
+                        bits,
+                        member == "MAX",
+                    ),
+                ))
+            }
             _ => Err("jit host/default/uninit/ct-lit unsupported".to_string()),
         }
     }
@@ -2999,6 +3023,17 @@ impl LowerCtx<'_, '_> {
         rhs_ty: &Type,
     ) -> Result<Value, String> {
         let rhs_ty = self.erase_distinct_ty(rhs_ty);
+        if let Type::IntN { signed, bits } = rhs_ty {
+            return self.lower_intn_values(
+                op,
+                INTN_MODE_TRAP,
+                current,
+                rhs,
+                signed,
+                bits,
+                signed,
+            );
+        }
         Ok(match (op, &rhs_ty) {
             (BinOp::Add, Type::Int) => self.b.ins().iadd(current, rhs),
             (BinOp::Sub, Type::Int) => self.b.ins().isub(current, rhs),
@@ -3110,11 +3145,16 @@ impl LowerCtx<'_, '_> {
                             _ => None,
                         }
                     }) {
-                        let string_elems = matches!(elem, Type::String);
+                        let kind = match elem {
+                            Type::String => 1,
+                            Type::IntN { signed: true, .. } => 2,
+                            Type::IntN { signed: false, .. } => 3,
+                            _ => 0,
+                        };
                         let flag = self
                             .b
                             .ins()
-                            .iconst(types::I64, if string_elems { 1 } else { 0 });
+                            .iconst(types::I64, kind);
                         let show_ref = self
                             .module
                             .declare_func_in_func(self.host.coll.list_show, self.b.func);
@@ -3124,6 +3164,22 @@ impl LowerCtx<'_, '_> {
                             .module
                             .declare_func_in_func(self.host.str_push_str, self.b.func);
                         self.b.ins().call(push_ref, &[buf_id, text]);
+                        continue;
+                    }
+                    if let Type::IntN { signed, .. } = &push_ty {
+                        let signed = self
+                            .b
+                            .ins()
+                            .iconst(types::I64, i64::from(*signed));
+                        let show = self
+                            .module
+                            .declare_func_in_func(self.host.intn_to_string, self.b.func);
+                        let call = self.b.ins().call(show, &[val, signed]);
+                        let text = self.b.inst_results(call)[0];
+                        let push = self
+                            .module
+                            .declare_func_in_func(self.host.str_push_str, self.b.func);
+                        self.b.ins().call(push, &[buf_id, text]);
                         continue;
                     }
                     let host_id = match &push_ty {
@@ -3791,6 +3847,21 @@ impl LowerCtx<'_, '_> {
                 Ok(match op {
                     UnOp::Neg => match &operand.ty {
                         Type::Int => self.b.ins().ineg(inner),
+                        Type::IntN {
+                            signed: true,
+                            bits,
+                        } => {
+                            let zero = self.b.ins().iconst(types::I64, 0);
+                            self.lower_intn_values(
+                                BinOp::Sub,
+                                INTN_MODE_TRAP,
+                                zero,
+                                inner,
+                                true,
+                                *bits,
+                                true,
+                            )?
+                        }
                         Type::Float => self.b.ins().fneg(inner),
                         other => {
                             return Err(format!("jit unary neg unsupported type: {other:?}"));
@@ -4747,10 +4818,22 @@ impl LowerCtx<'_, '_> {
                         "bytes" if args.len() == 1 => {
                             (self.host.random.bytes, vec![self.lower_expr(&args[0])?])
                         }
-                        "weighted_pick" if args.len() == 2 => (
-                            self.host.random.weighted_pick,
-                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
-                        ),
+                        "weighted_pick" if args.len() == 2 => {
+                            if matches!(
+                                &args[0].ty,
+                                Type::List(inner) | Type::FixedList { elem: inner, .. }
+                                    if matches!(inner.as_ref(), Type::IntN { .. })
+                            ) {
+                                return Err(
+                                    "jit random weighted_pick<IntN> needs typed Option lowering"
+                                        .to_string(),
+                                );
+                            }
+                            (
+                                self.host.random.weighted_pick,
+                                vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                            )
+                        }
                         "sample" if args.len() == 2 => (
                             self.host.random.sample,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
@@ -5187,8 +5270,22 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().brif(gt, ok_block, &[], fail_block, &[]);
                     self.b.switch_to_block(ok_block);
                     self.b.seal_block(ok_block);
-                    let one = self.b.ins().iconst(types::I64, 1);
-                    let val = self.b.ins().isub(status, one);
+                    let val = if matches!(&value.kind, TExprKind::OverflowOpt { .. }) {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.result_get_i64, self.b.func);
+                        let call = self.b.ins().call(host, &[status]);
+                        self.b.inst_results(call)[0]
+                    } else if let Type::Option(inner) = &value.ty {
+                        self.unpack_option_payload(status, inner)?
+                    } else if let Some(Type::Option(inner)) =
+                        Self::recover_core_return_ty(value)
+                    {
+                        self.unpack_option_payload(status, &inner)?
+                    } else {
+                        let one = self.b.ins().iconst(types::I64, 1);
+                        self.b.ins().isub(status, one)
+                    };
                     self.b.ins().jump(merge, &[val]);
                     self.b.switch_to_block(fail_block);
                     self.b.seal_block(fail_block);
@@ -5621,20 +5718,7 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::Present(inner) => {
                 let v = self.lower_expr(inner)?;
-                // Encode optional Some as value+1 (0 = None elsewhere). Option ABI is
-                // always i64; widen/bitcast non-i64 payloads before the add.
-                let bits = match clif_ty(&inner.ty) {
-                    Some(ty) if ty == types::F64 => self.b.ins().bitcast(
-                        types::I64,
-                        Self::scalar_bitcast_memflags(),
-                        v,
-                    ),
-                    Some(ty) if ty == types::I8 => self.b.ins().uextend(types::I64, v),
-                    Some(ty) if ty == types::I32 => self.b.ins().uextend(types::I64, v),
-                    _ => v,
-                };
-                let one = self.b.ins().iconst(types::I64, 1);
-                Ok(self.b.ins().iadd(bits, one))
+                self.pack_option_payload(v, &inner.ty)
             }
             TExprKind::Absent => Ok(self.b.ins().iconst(types::I64, 0)),
             TExprKind::Unit => Ok(self.b.ins().iconst(types::I64, 0)),
@@ -5885,8 +5969,47 @@ impl LowerCtx<'_, '_> {
                 }
                 Ok(self.b.inst_results(call)[0])
             }
-            TExprKind::OverflowOpt { .. } => {
-                Err("jit overflow opt-out expression unsupported".to_string())
+            TExprKind::OverflowOpt {
+                prefix,
+                op,
+                lhs,
+                rhs,
+            } => {
+                let (signed, bits) = match &lhs.ty {
+                    Type::IntN { signed, bits } => (*signed, *bits),
+                    Type::Int => (true, 64),
+                    _ => {
+                        return Err(
+                            "jit overflow opt-out needs fixed-width integers".to_string()
+                        )
+                    }
+                };
+                let op = match *op {
+                    "add" => BinOp::Add,
+                    "sub" => BinOp::Sub,
+                    "mul" => BinOp::Mul,
+                    "div" => BinOp::Div,
+                    _ => return Err("jit overflow opt-out operator unsupported".to_string()),
+                };
+                let mode = match prefix.as_str() {
+                    "wrapping" => INTN_MODE_WRAPPING,
+                    "saturating" => INTN_MODE_SATURATING,
+                    "checked" => INTN_MODE_CHECKED,
+                    _ => return Err("jit overflow opt-out mode unsupported".to_string()),
+                };
+                let left = self.lower_expr(lhs)?;
+                let right = self.lower_expr(rhs)?;
+                let right_signed =
+                    !matches!(&rhs.ty, Type::IntN { signed: false, .. });
+                self.lower_intn_values(
+                    op,
+                    mode,
+                    left,
+                    right,
+                    signed,
+                    bits,
+                    right_signed,
+                )
             }
             TExprKind::FnValue { .. } => Err("jit fn value unsupported".to_string()),
             TExprKind::ModuleCall { form, args } => match form {
@@ -6018,6 +6141,13 @@ impl LowerCtx<'_, '_> {
             args,
         } = &value.kind
         {
+            if matches!(
+                &recv.ty,
+                Type::List(inner) | Type::FixedList { elem: inner, .. }
+                    if matches!(inner.as_ref(), Type::IntN { .. })
+            ) {
+                return Err("jit List<IntN>.get needs typed Option lowering".to_string());
+            }
             let list = self.lower_expr(recv)?;
             let idx = self.lower_expr(&args[0])?;
             let host_ref = self
@@ -6033,6 +6163,12 @@ impl LowerCtx<'_, '_> {
             args,
         } = &value.kind
         {
+            if matches!(
+                &recv.ty,
+                Type::Map { value, .. } if matches!(value.as_ref(), Type::IntN { .. })
+            ) {
+                return Err("jit Map<_, IntN>.get needs typed Option lowering".to_string());
+            }
             let map = self.lower_expr(recv)?;
             let key = self.lower_expr(&args[0])?;
             let host_ref = self
@@ -6041,7 +6177,7 @@ impl LowerCtx<'_, '_> {
             let call = self.b.ins().call(host_ref, &[map, key]);
             return Ok(self.b.inst_results(call)[0]);
         }
-        // Already-packed Option ABI (`0` = None, else bits+1), e.g. core.math.checked_*.
+        // Already-carried Option ABI; IntN uses the result arena.
         if matches!(&value.ty, Type::Option(_)) {
             return self.lower_expr(value);
         }
@@ -6199,6 +6335,13 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::GetList => {
+                if matches!(
+                    &recv.ty,
+                    Type::List(inner) | Type::FixedList { elem: inner, .. }
+                        if matches!(inner.as_ref(), Type::IntN { .. })
+                ) {
+                    return Err("jit List<IntN>.get needs typed Option lowering".to_string());
+                }
                 let idx = self.lower_expr(&args[0])?;
                 let host_ref = self
                     .module
@@ -6250,6 +6393,12 @@ impl LowerCtx<'_, '_> {
                 Ok(removed)
             }
             TBuiltinOp::GetMap => {
+                if matches!(
+                    &recv.ty,
+                    Type::Map { value, .. } if matches!(value.as_ref(), Type::IntN { .. })
+                ) {
+                    return Err("jit Map<_, IntN>.get needs typed Option lowering".to_string());
+                }
                 let key = self.lower_expr(&args[0])?;
                 let host_ref = self
                     .module
@@ -6626,13 +6775,31 @@ impl LowerCtx<'_, '_> {
                     _ => return Err(format!("jit numeric bit query unsupported: {name}")),
                 };
                 let op = self.b.ins().iconst(types::I64, op);
+                let width = match op {
+                    _ => match &recv.ty {
+                        Type::IntN { bits, .. } => i64::from(*bits),
+                        _ => 64,
+                    },
+                };
+                let width = self.b.ins().iconst(types::I64, width);
                 let host = self
                     .module
                     .declare_func_in_func(self.host.numeric_bit_count, self.b.func);
-                let call = self.b.ins().call(host, &[value, op]);
+                let call = self.b.ins().call(host, &[value, op, width]);
                 Ok(self.b.inst_results(call)[0])
             }
             TNumericOp::ToShow => {
+                if let Type::IntN { signed, .. } = &recv.ty {
+                    let signed = self
+                        .b
+                        .ins()
+                        .iconst(types::I64, i64::from(*signed));
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.intn_to_string, self.b.func);
+                    let call = self.b.ins().call(host, &[value, signed]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 let begin = self
                     .module
                     .declare_func_in_func(self.host.str_begin, self.b.func);
@@ -6785,8 +6952,17 @@ impl LowerCtx<'_, '_> {
         Ok(dst)
     }
 
-    /// Pack a Present payload into the JIT Option i64 ABI (`0` = None, else `bits+1`).
+    /// Pack a Present payload into the JIT Option i64 ABI.
+    /// IntN uses a one-based result-arena handle; legacy payloads use `bits + 1`.
     fn pack_option_payload(&mut self, payload: Value, inner: &Type) -> Result<Value, String> {
+        if matches!(inner, Type::IntN { .. }) {
+            let ok = self.b.ins().iconst(types::I8, 1);
+            let host = self
+                .module
+                .declare_func_in_func(self.host.result_new_i64, self.b.func);
+            let call = self.b.ins().call(host, &[ok, payload]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
         let bits = match clif_ty(inner) {
             Some(ty) if ty == types::F64 => self.b.ins().bitcast(
                 types::I64,
@@ -6806,6 +6982,13 @@ impl LowerCtx<'_, '_> {
     }
 
     fn unpack_option_payload(&mut self, packed: Value, inner: &Type) -> Result<Value, String> {
+        if matches!(inner, Type::IntN { .. }) {
+            let host = self
+                .module
+                .declare_func_in_func(self.host.result_get_i64, self.b.func);
+            let call = self.b.ins().call(host, &[packed]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
         let one = self.b.ins().iconst(types::I64, 1);
         let bits = self.b.ins().isub(packed, one);
         match clif_ty(inner) {
@@ -7371,6 +7554,15 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::RngPick => Err("jit handle method unsupported".to_string()),
             THandleOp::RngWeightedPick => {
+                if matches!(
+                    &args[0].ty,
+                    Type::List(inner) | Type::FixedList { elem: inner, .. }
+                        if matches!(inner.as_ref(), Type::IntN { .. })
+                ) {
+                    return Err(
+                        "jit Rng.weighted_pick<IntN> needs typed Option lowering".to_string(),
+                    );
+                }
                 let items = self.lower_expr(&args[0])?;
                 let weights = self.lower_expr(&args[1])?;
                 let host = self
@@ -8143,6 +8335,20 @@ impl LowerCtx<'_, '_> {
                     (Type::Int, BinOp::Ge) => {
                         self.bool_from_icmp(IntCC::SignedGreaterThanOrEqual, vals[i], vals[i + 1])
                     }
+                    (Type::IntN { signed, .. }, op) => {
+                        let cc = match (signed, op) {
+                            (true, BinOp::Lt) => IntCC::SignedLessThan,
+                            (true, BinOp::Gt) => IntCC::SignedGreaterThan,
+                            (true, BinOp::Le) => IntCC::SignedLessThanOrEqual,
+                            (true, BinOp::Ge) => IntCC::SignedGreaterThanOrEqual,
+                            (false, BinOp::Lt) => IntCC::UnsignedLessThan,
+                            (false, BinOp::Gt) => IntCC::UnsignedGreaterThan,
+                            (false, BinOp::Le) => IntCC::UnsignedLessThanOrEqual,
+                            (false, BinOp::Ge) => IntCC::UnsignedGreaterThanOrEqual,
+                            _ => return Err("jit compare chain operator unsupported".to_string()),
+                        };
+                        self.bool_from_icmp(cc, vals[i], vals[i + 1])
+                    }
                     (Type::Float, BinOp::Lt) => {
                         self.bool_from_fcmp(FloatCC::LessThan, vals[i], vals[i + 1])
                     }
@@ -8355,6 +8561,51 @@ impl LowerCtx<'_, '_> {
     /// `lower_short_circuit`). Keyed on `(Type, BinOp)` — ancillary types, not
     /// a `TIR` enum — so the trailing `_` is a real unsupported-combination
     /// gap (e.g. no bitwise-on-float), not a hidden `TIR` variant.
+    fn lower_intn_values(
+        &mut self,
+        op: BinOp,
+        mode: i64,
+        left: Value,
+        right: Value,
+        signed: bool,
+        bits: u8,
+        right_signed: bool,
+    ) -> Result<Value, String> {
+        let op = match op {
+            BinOp::Add => INTN_OP_ADD,
+            BinOp::Sub => INTN_OP_SUB,
+            BinOp::Mul => INTN_OP_MUL,
+            BinOp::Div => INTN_OP_DIV,
+            BinOp::Rem => INTN_OP_REM,
+            BinOp::BitAnd => INTN_OP_BIT_AND,
+            BinOp::BitOr => INTN_OP_BIT_OR,
+            BinOp::BitXor => INTN_OP_BIT_XOR,
+            BinOp::Shl => INTN_OP_SHL,
+            BinOp::Shr => INTN_OP_SHR,
+            _ => return Err("jit fixed-width integer operation unsupported".to_string()),
+        };
+        let args = [
+            left,
+            right,
+            self.b.ins().iconst(types::I64, op),
+            self.b.ins().iconst(types::I64, mode),
+            self.b.ins().iconst(types::I64, i64::from(signed)),
+            self.b.ins().iconst(types::I64, i64::from(bits)),
+            self.b
+                .ins()
+                .iconst(types::I64, i64::from(right_signed)),
+        ];
+        let host = self
+            .module
+            .declare_func_in_func(self.host.intn_binop, self.b.func);
+        let call = self.b.ins().call(host, &args);
+        let result = self.b.inst_results(call)[0];
+        if mode != INTN_MODE_CHECKED {
+            self.emit_trap_check()?;
+        }
+        Ok(result)
+    }
+
     fn lower_binary(
         &mut self,
         op: BinOp,
@@ -8365,6 +8616,36 @@ impl LowerCtx<'_, '_> {
     ) -> Result<Value, String> {
         let l = self.lower_expr(lhs)?;
         let r = self.lower_expr(rhs)?;
+        let lhs_ty = self.expr_arith_type(lhs);
+        let _rhs_ty = self.expr_arith_type(rhs);
+        if let Type::IntN { signed, bits } = lhs_ty {
+            let right_signed = !matches!(&rhs.ty, Type::IntN { signed: false, .. });
+            let comparison = match op {
+                BinOp::Eq => Some(IntCC::Equal),
+                BinOp::Ne => Some(IntCC::NotEqual),
+                BinOp::Lt if signed => Some(IntCC::SignedLessThan),
+                BinOp::Gt if signed => Some(IntCC::SignedGreaterThan),
+                BinOp::Le if signed => Some(IntCC::SignedLessThanOrEqual),
+                BinOp::Ge if signed => Some(IntCC::SignedGreaterThanOrEqual),
+                BinOp::Lt => Some(IntCC::UnsignedLessThan),
+                BinOp::Gt => Some(IntCC::UnsignedGreaterThan),
+                BinOp::Le => Some(IntCC::UnsignedLessThanOrEqual),
+                BinOp::Ge => Some(IntCC::UnsignedGreaterThanOrEqual),
+                _ => None,
+            };
+            if let Some(cc) = comparison {
+                return Ok(self.bool_from_icmp(cc, l, r));
+            }
+            return self.lower_intn_values(
+                op,
+                INTN_MODE_TRAP,
+                l,
+                r,
+                signed,
+                bits,
+                right_signed,
+            );
+        }
         if overflow {
             let host_id = match op {
                 BinOp::Add => self.host.add_i64,
@@ -8380,8 +8661,6 @@ impl LowerCtx<'_, '_> {
             self.emit_trap_check()?;
             return Ok(result);
         }
-        let lhs_ty = self.expr_arith_type(lhs);
-        let _rhs_ty = self.expr_arith_type(rhs);
         if matches!(op, BinOp::Eq | BinOp::Ne) && matches!(lhs_ty, Type::Tuple(_)) {
             return self.lower_tuple_eq(op, &lhs_ty, l, r);
         }
@@ -8516,6 +8795,23 @@ impl LowerCtx<'_, '_> {
     /// — a `Type`, not a `TIR` variant, so its own `_ => Err(..)` is a real
     /// unsupported-print-type gap, not a hidden `TExprKind` case.
     fn emit_print(&mut self, inner: &TExpr) -> Result<(), String> {
+        if let Type::IntN { signed, .. } = &inner.ty {
+            let value = self.lower_expr(inner)?;
+            let signed = self
+                .b
+                .ins()
+                .iconst(types::I64, i64::from(*signed));
+            let show = self
+                .module
+                .declare_func_in_func(self.host.intn_to_string, self.b.func);
+            let call = self.b.ins().call(show, &[value, signed]);
+            let text = self.b.inst_results(call)[0];
+            let print = self
+                .module
+                .declare_func_in_func(self.host.print_str, self.b.func);
+            self.b.ins().call(print, &[text]);
+            return Ok(());
+        }
         let (host_id, arg) = match &inner.kind {
             TExprKind::IntLit(v, _) => (self.host.print_i64, self.b.ins().iconst(types::I64, *v)),
             TExprKind::FloatLit(v) => (self.host.print_f64, self.b.ins().f64const(*v)),
@@ -8539,23 +8835,30 @@ impl LowerCtx<'_, '_> {
                 }
                 // List / materialized Iter — same jet_show `[a, b, c]` AOT uses.
                 if let Some(elem) = jit_list_iter_elem_type(&print_ty) {
-                    let string_elems = matches!(elem, Type::String);
+                    let kind = match elem {
+                        Type::String => 1,
+                        Type::IntN { signed: true, .. } => 2,
+                        Type::IntN { signed: false, .. } => 3,
+                        _ => 0,
+                    };
                     let flag = self
                         .b
                         .ins()
-                        .iconst(types::I64, if string_elems { 1 } else { 0 });
+                        .iconst(types::I64, kind);
                     let host_ref = self
                         .module
                         .declare_func_in_func(self.host.coll.print_list, self.b.func);
                     self.b.ins().call(host_ref, &[val, flag]);
                     return Ok(());
                 }
-                // `T?` — packed `0` / `value+1`; show matches AOT Option jet_show.
+                // `T?` — IntN uses the result arena; legacy payloads use `value + 1`.
                 if let Type::Option(inner_ty) = &print_ty {
                     let kind = match inner_ty.as_ref() {
                         Type::Int => 0i64,
                         Type::String => 1,
                         Type::Float => 2,
+                        Type::IntN { signed: true, .. } => 3,
+                        Type::IntN { signed: false, .. } => 4,
                         _ => return Err("jit print type unsupported".to_string()),
                     };
                     let flag = self.b.ins().iconst(types::I64, kind);
@@ -8931,18 +9234,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(then_block);
         self.b.seal_block(then_block);
-        let one = self.b.ins().iconst(types::I64, 1);
-        let bits = self.b.ins().isub(packed, one);
-        let payload = match clif_ty(&inner_ty) {
-            Some(ty) if ty == types::F64 => self.b.ins().bitcast(
-                types::F64,
-                Self::scalar_bitcast_memflags(),
-                bits,
-            ),
-            Some(ty) if ty == types::I8 => self.b.ins().ireduce(types::I8, bits),
-            Some(ty) if ty == types::I32 => self.b.ins().ireduce(types::I32, bits),
-            _ => bits,
-        };
+        let payload = self.unpack_option_payload(packed, &inner_ty)?;
         let place = TIR::local_place(binding);
         let clif = clif_ty(&inner_ty).unwrap_or(types::I64);
         let old_var = self.vars.remove(&place);

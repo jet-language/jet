@@ -457,50 +457,58 @@ extern "C" fn jet_jit_list_sort_by_i64_keys(list: i64, keys: i64) {
 }
 
 /// Print `[T]` / materialized `Iter<T>` with the same `jet_show` shape AOT uses.
-/// `string_elems != 0` → elements are string handles; else raw i64.
-extern "C" fn jet_jit_print_list(list: i64, string_elems: i64) {
+/// `kind`: 0 = raw i64, 1 = string, 2 = signed IntN, 3 = unsigned IntN.
+extern "C" fn jet_jit_print_list(list: i64, kind: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        let text = list_show_text(rt, list, string_elems);
+        let text = list_show_text(rt, list, kind);
         rt.stdout.push_str(&text);
         rt.stdout.push('\n');
     });
 }
 
-fn list_show_text(rt: &crate::JitRuntime, list: i64, string_elems: i64) -> String {
+fn list_show_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
     let xs = rt
         .heap
         .clone_int_list(list)
         .unwrap_or_default();
     let mut parts = Vec::with_capacity(xs.len());
-    if string_elems != 0 {
+    if kind == 1 {
         for id in xs {
             parts.push(rt.heap.clone_string(id).unwrap_or_default());
         }
     } else {
         for v in xs {
-            parts.push(v.to_string());
+            parts.push(match kind {
+                2 | 3 => jet_codegen::Comptime::MathLayout::integer_show(v, kind == 2),
+                _ => v.to_string(),
+            });
         }
     }
     format!("[{}]", parts.join(", "))
 }
 
 /// JetShow `[T]` as a string handle for `{list}` interpolation.
-extern "C" fn jet_jit_list_show(list: i64, string_elems: i64) -> i64 {
+extern "C" fn jet_jit_list_show(list: i64, kind: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let text = list_show_text(rt, list, string_elems);
+        let text = list_show_text(rt, list, kind);
         rt.heap.alloc_string(text)
     })
 }
 
-/// Print `T?` using JIT packed Option encoding (`0` = None, else `value + 1`).
-/// `kind`: 0 = i64 payload, 1 = string handle, 2 = f64 bits (bitcast).
+/// Print `T?` using its JIT Option carrier.
+/// `kind`: 0 = packed i64, 1 = packed string, 2 = packed f64 bits,
+/// 3 = result-arena signed IntN, 4 = result-arena unsigned IntN.
 extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
     Concurrency::with_runtime_mut(|rt| {
         if packed == 0 {
             rt.stdout.push_str("null\n");
             return;
         }
-        let payload = packed - 1;
+        let payload = if kind >= 3 {
+            crate::runtime_host::jit_result_i64(rt, packed).unwrap_or_default()
+        } else {
+            packed - 1
+        };
         match kind {
             1 => {
                 let text = rt.heap.clone_string(payload).unwrap_or_default();
@@ -509,6 +517,11 @@ extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
             2 => {
                 rt.stdout
                     .push_str(&jet_rt::display_f64(f64::from_bits(payload as u64)));
+            }
+            3 | 4 => {
+                rt.stdout.push_str(
+                    &jet_codegen::Comptime::MathLayout::integer_show(payload, kind == 3),
+                );
             }
             _ => {
                 rt.stdout.push_str(&payload.to_string());

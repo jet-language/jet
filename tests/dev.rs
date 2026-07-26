@@ -3927,6 +3927,203 @@ fn place_windows_matches_resident_jit_and_aot_without_fallback() {
 }
 
 #[test]
+fn fixed_width_integers_match_interpreter_resident_jit_default_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let source = r#"
+fn i8_id(value: I8) -> I8 { return value }
+fn i16_id(value: I16) -> I16 { return value }
+fn i32_id(value: I32) -> I32 { return value }
+fn i64_id(value: I64) -> I64 { return value }
+fn u8_id(value: U8) -> U8 { return value }
+fn u16_id(value: U16) -> U16 { return value }
+fn u32_id(value: U32) -> U32 { return value }
+fn u64_id(value: U64) -> U64 { return value }
+fn pass_u64(value: U64?) -> (U64?) { return ~value }
+
+fn run() {
+    print(i8_id(I8.{-8}))
+    print(i16_id(I16.{-1600}))
+    print(i32_id(I32.{-320000}))
+    print(i64_id(-6400000000))
+    print(u8_id(U8.{8}))
+    print(u16_id(U16.{1600}))
+    print(u32_id(U32.{320000}))
+    maximum :: u64_id(U64.MAX)
+    print(maximum)
+    print("{maximum}")
+    print(maximum.to_string())
+    print(-i8_id(I8.{8}))
+    print(-i16_id(I16.{16}))
+    print(-i32_id(I32.{32}))
+    print(-i64_id(64))
+
+    print(i8_id(I8.{10}) + I8.{5})
+    print(i16_id(I16.{100}) - I16.{40})
+    print(i32_id(I32.{7}) * I32.{6})
+    print(i64_id(84) / 2)
+    print(i8_id(I8.{7}) % I8.{3})
+    flags :: u8_id(U8.{13})
+    mask :: U8.{10}
+    print(flags & mask)
+    combined := U8.{flags}
+    combined |= mask
+    print(combined)
+    print(flags ^ mask)
+    print(flags << 1)
+    print(flags >> 2)
+    print(u16_id(U16.MAX) > U16.{1})
+    print(u32_id(U32.MAX) > U32.{1})
+    print(maximum > U64.{1})
+    print(maximum >> 63)
+    print(flags.count_ones())
+    print(flags.count_zeros())
+    print(flags.leading_zeros())
+    print(flags.trailing_zeros())
+
+    i8_max :: I8.MAX
+    i8_one :: I8.{1}
+    i8_zero :: I8.{0}
+    print(wrapping(i8_max + i8_one))
+    print(saturating(i8_max + i8_one))
+    print(checked(i8_max + i8_zero) ?? i8_zero)
+    print(checked(i8_max + i8_one) ?? i8_zero)
+    i16_max :: I16.MAX
+    i16_one :: I16.{1}
+    i16_zero :: I16.{0}
+    print(wrapping(i16_max + i16_one))
+    print(saturating(i16_max + i16_one))
+    print(checked(i16_max + i16_zero) ?? i16_zero)
+    print(checked(i16_max + i16_one) ?? i16_zero)
+    i32_max :: I32.MAX
+    i32_one :: I32.{1}
+    i32_zero :: I32.{0}
+    print(wrapping(i32_max + i32_one))
+    print(saturating(i32_max + i32_one))
+    print(checked(i32_max + i32_zero) ?? i32_zero)
+    print(checked(i32_max + i32_one) ?? i32_zero)
+    i64_max :: I64.{9223372036854775807}
+    i64_one :: I64.{1}
+    i64_zero :: I64.{0}
+    print(wrapping(i64_max + i64_one))
+    print(saturating(i64_max + i64_one))
+    print(checked(i64_max + i64_zero) ?? i64_zero)
+    print(checked(i64_max + i64_one) ?? i64_zero)
+    u8_max :: U8.MAX
+    u8_one :: U8.{1}
+    u8_zero :: U8.{0}
+    print(wrapping(u8_max + u8_one))
+    print(saturating(u8_max + u8_one))
+    print(checked(u8_max + u8_zero) ?? u8_zero)
+    print(checked(u8_max + u8_one) ?? u8_zero)
+    u16_max :: U16.MAX
+    u16_one :: U16.{1}
+    u16_zero :: U16.{0}
+    print(wrapping(u16_max + u16_one))
+    print(saturating(u16_max + u16_one))
+    print(checked(u16_max + u16_zero) ?? u16_zero)
+    print(checked(u16_max + u16_one) ?? u16_zero)
+    u32_max :: U32.MAX
+    u32_one :: U32.{1}
+    u32_zero :: U32.{0}
+    print(wrapping(u32_max + u32_one))
+    print(saturating(u32_max + u32_one))
+    print(checked(u32_max + u32_zero) ?? u32_zero)
+    print(checked(u32_max + u32_one) ?? u32_zero)
+    u64_one :: U64.{1}
+    u64_zero :: U64.{0}
+    print(wrapping(maximum + u64_one))
+    print(saturating(maximum + u64_one))
+    print(checked(maximum + u64_zero) ?? u64_zero)
+    print(checked(maximum + u64_one) ?? u64_zero)
+    print(pass_u64(checked(maximum + u64_zero)))
+    print(pass_u64(checked(maximum + u64_one)))
+    print(pass_u64(checked(maximum + u64_zero)) ?? u64_zero)
+    print(checked(u64_zero - u64_one) ?? maximum)
+    print(checked(maximum / u64_one) ?? u64_zero)
+    print(checked(maximum / u64_zero) ?? u64_zero)
+    i8_negative :: I8.{-1}
+    print(checked(i8_negative + i8_zero) ?? i8_zero)
+}
+"#;
+    let expected = ProgramOutput::ran(
+        concat!(
+            "-8\n-1600\n-320000\n-6400000000\n8\n1600\n320000\n",
+            "18446744073709551615\n18446744073709551615\n18446744073709551615\n",
+            "-8\n-16\n-32\n-64\n15\n60\n42\n42\n1\n8\n15\n7\n26\n3\n",
+            "true\ntrue\ntrue\n1\n3\n5\n4\n0\n",
+            "-128\n127\n127\n0\n",
+            "-32768\n32767\n32767\n0\n",
+            "-2147483648\n2147483647\n2147483647\n0\n",
+            "-9223372036854775808\n9223372036854775807\n9223372036854775807\n0\n",
+            "0\n255\n255\n0\n",
+            "0\n65535\n65535\n0\n",
+            "0\n4294967295\n4294967295\n0\n",
+            "0\n18446744073709551615\n18446744073709551615\n0\n",
+            "18446744073709551615\nnull\n",
+            "18446744073709551615\n18446744073709551615\n",
+            "18446744073709551615\n0\n-1\n",
+        )
+            .into(),
+        String::new(),
+        0,
+    );
+    let dir =
+        std::env::temp_dir().join(format!("jet_fixed_width_integers_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("fixed_width_integers.jet");
+    fs::write(&file, source).unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let bundle = checked_bundle_from_path(&shown);
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "fixed-width integer fixture must be resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|reason| panic!("fixed-width integer fixture must JIT-compile: {reason}"));
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("fixed-width interpreter failed: {diags:?}"),
+    };
+    jet_jit::reset_jit_trace_for_test();
+    let resident = run_cranelift_without_fallback(source, "fixed_width_integers");
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "fixed-width fixture used deopt or fallback"
+    );
+    let default = match dev_iteration(&shown, false, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("fixed-width default run failed: {diags:?}"),
+    };
+    let aot = compiled_binary_output(&dir, "fixed_width_integers", 0, "fixed_width", &shown);
+
+    assert_eq!(interpreted, expected, "interpreter fixed-width drift");
+    assert_eq!(resident, expected, "resident JIT fixed-width drift");
+    assert_eq!(default, expected, "default fixed-width drift");
+    assert_eq!(aot, expected, "AOT fixed-width drift");
+    let _ = fs::remove_dir_all(&dir);
+
+    for stem in ["lowlevel/sized_integers", "types/typed_literal_head"] {
+        let example = example_path(stem);
+        assert_cranelift_three_way(&example, stem);
+    }
+}
+
+#[test]
 fn numeric_singleton_splits_match_resident_jit_and_aot_without_fallback() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
