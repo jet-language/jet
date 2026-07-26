@@ -20,9 +20,7 @@ use crate::Sema::CheckerCoreLib::{
     wrong_core_arity,
 };
 use crate::Sema::CheckerInfer::contains_tuple_type;
-use crate::Sema::Diagnostics::{
-    builtin_type_from_ident, collection_changed_in_loop, expr_root_ident, type_is_copy,
-};
+use crate::Sema::Diagnostics::{builtin_type_from_ident, expr_root_ident, type_is_copy};
 use crate::Sema::Effects::Effect;
 use crate::Syntax;
 
@@ -3518,57 +3516,7 @@ impl<'a> Checker<'a> {
             // `mut self` methods change the receiver: it must be changeable,
             // free of an active `for` borrow, and not aliased by an argument.
             if msig.self_conv == Some(AccessConvention::Write) {
-                if self.in_lambda_body {
-                    if let Some(root) = expr_root_ident(receiver) {
-                        self.inferred_lambda_mut_captures
-                            .insert(root.to_string());
-                    }
-                }
-                self.check_expr_change(
-                    receiver,
-                    &format!("be changed by `.{method}()`"),
-                    span,
-                );
-                if let Some(root) = expr_root_ident(receiver) {
-                    let root = root.to_string();
-                    if self.iter_borrowed.contains(&root) {
-                        self.diags.push(collection_changed_in_loop(&root, span));
-                    }
-                    if let Some(info) = self.lookup(&root) {
-                        if !info.mutable {
-                            let (what, fix) = if root == Syntax::KW_SELF {
-                                (
-                                    format!(
-                                        "`.{}()` edits `{}`, but this method has read access only",
-                                        method,
-                                        Syntax::KW_SELF
-                                    ),
-                                    format!(
-                                        "declare the enclosing method with `{}{}`",
-                                        Syntax::SIGIL_WRITE,
-                                        Syntax::KW_SELF
-                                    ),
-                                )
-                            } else {
-                                (
-                                    format!(
-                                        "cannot write to `{}` — it does not have edit access (`&`); required before calling `.{}()`",
-                                        root,
-                                        method
-                                    ),
-                                    format!("declare `{} {} ...`", root, Syntax::SIGIL_BIND_MUT),
-                                )
-                            };
-                            self.diags.push(Diagnostic::error(
-                                "E0202",
-                                what,
-                                "this method edits the value it's called on; write access (`&`) is required".to_string(),
-                                fix,
-                                Some(span),
-                            ));
-                        }
-                    }
-                }
+                self.check_mutating_method_receiver(receiver, method, span);
             }
             if msig.self_conv == Some(AccessConvention::Move) {
                 if let Expr::Ident(n, nspan) = &**receiver {

@@ -1954,6 +1954,7 @@ pub(crate) fn check_func_body_bundle(
         scopes: vec![HashMap::new()],
         concrete_unit_values: vec![HashMap::new()],
         moved: HashMap::new(),
+        suppress_partial_move_root_read: false,
         loop_depth: 0,
         loop_labels: Vec::new(),
         fx_direct: std::collections::BTreeSet::new(),

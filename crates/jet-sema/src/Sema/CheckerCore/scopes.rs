@@ -93,7 +93,7 @@ impl<'a> Checker<'a> {
             {
                 self.diags.push(already_defined(name, name_span));
             }
-            self.moved.remove(name);
+            self.clear_moved_binding(name);
             self.scopes
                 .last_mut()
                 .unwrap()

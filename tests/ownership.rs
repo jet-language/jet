@@ -379,6 +379,65 @@ fn run() {
 }
 
 #[test]
+fn move_lambda_capture_identity_matches_rust_2021_places() {
+    let disjoint_owned_field = r#"
+struct Pair { left: String, right: [Int] }
+fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn run() {
+    pair := Pair.{ left: "jet", right: [1, 2] }
+    both(() => { print(pair.left) }, pair.right)
+}
+"#;
+    jet::compile(disjoint_owned_field)
+        .expect("moving one captured field must leave a disjoint field usable");
+
+    let copy_field = r#"
+struct Pair { count: Int, values: [Int] }
+fn both(callback: fn(), pair: Pair) { callback(); print(pair.count) }
+fn run() {
+    pair := Pair.{ count: 2, values: [1, 2] }
+    both(() => { print(pair.count) }, pair)
+}
+"#;
+    jet::compile(copy_field).expect("capturing a Copy field must not move its owner");
+
+    let view_alias = r#"
+fn call(callback: fn()) { callback() }
+fn run() {
+    values := [1, 2]
+    first :: values[0..1]
+    call(() => { print(first.len()) })
+    print(values.len())
+}
+"#;
+    jet::compile(view_alias).expect("a closure captures a View alias, not its source owner");
+
+    let same_owned_field = r#"
+struct Pair { left: String, right: [Int] }
+fn both(callback: fn(), text: String) { callback(); print(text) }
+fn run() {
+    pair := Pair.{ left: "jet", right: [1, 2] }
+    both(() => { print(pair.left) }, pair.left)
+}
+"#;
+    let diags =
+        jet::compile(same_owned_field).expect_err("the moved captured field cannot be reused");
+    assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
+
+    let conflicting_view_alias = r#"
+fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn run() {
+    values := [1, 2]
+    first :: values[0..1]
+    both(&values, () => { print(first.len()) })
+}
+"#;
+    let diags = jet::compile(conflicting_view_alias)
+        .expect_err("a copied View alias still borrows its source place");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
 fn builtin_and_composite_receivers_use_the_call_access_frame() {
     let builtin = r#"
 fn run() {
@@ -652,6 +711,24 @@ fn run() {
 "#;
     let diags = jet::compile(reactive_root)
         .expect_err("reactive lowering clones the whole captured root");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn reactive_root_capture_replaces_existing_owner_projections() {
+    let src = r#"
+struct Pair { left: [Int], right: [Int] }
+fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    both(&pair.right, () => {
+        print(pair.left.len())
+        #Reactive { pair.right.push(4) }
+    })
+}
+"#;
+    let diags =
+        jet::compile(src).expect_err("Reactive clones the root after an earlier field capture");
     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
 }
 
@@ -1142,6 +1219,30 @@ fn main() {
             "E0505",
         ),
         (
+            "same_move_capture_field.rs",
+            r#"
+struct Pair { left: String, right: Vec<i64> }
+fn both<F: Fn()>(callback: F, text: String) { callback(); println!("{text}"); }
+fn main() {
+    let pair = Pair { left: "jet".to_string(), right: vec![1] };
+    both(move || println!("{}", pair.left), pair.left);
+}
+"#,
+            "E0382",
+        ),
+        (
+            "captured_view_vs_write.rs",
+            r#"
+fn both<F: Fn()>(values: &mut Vec<i64>, callback: F) { values.push(3); callback(); }
+fn main() {
+    let mut values = vec![1, 2];
+    let first = &values[0..1];
+    both(&mut values, move || println!("{}", first.len()));
+}
+"#,
+            "E0502",
+        ),
+        (
             "if_prefix.rs",
             r#"
 fn both(value: &mut i64, count: i64) { *value += count }
@@ -1264,6 +1365,40 @@ fn main() {
 }
 "#,
         ),
+        (
+            "move_owned_field.rs",
+            r#"
+struct Pair { left: String, right: Vec<i64> }
+fn both<F: Fn()>(callback: F, values: Vec<i64>) { callback(); println!("{}", values.len()); }
+fn main() {
+    let pair = Pair { left: "jet".to_string(), right: vec![1] };
+    both(move || println!("{}", pair.left), pair.right);
+}
+"#,
+        ),
+        (
+            "copy_field_owner.rs",
+            r#"
+struct Pair { count: i64, values: Vec<i64> }
+fn both<F: Fn()>(callback: F, pair: Pair) { callback(); println!("{}", pair.count); }
+fn main() {
+    let pair = Pair { count: 2, values: vec![1] };
+    both(move || println!("{}", pair.count), pair);
+}
+"#,
+        ),
+        (
+            "view_alias_capture.rs",
+            r#"
+fn call<F: Fn()>(callback: F) { callback(); }
+fn main() {
+    let values = vec![1, 2];
+    let first = &values[0..1];
+    call(move || println!("{}", first.len()));
+    println!("{}", values.len());
+}
+"#,
+        ),
     ];
     for (name, source) in cases {
         let path = root.join(name);
@@ -1365,6 +1500,35 @@ fn run() {
             "expected the shared call-place diagnostic: {diags:?}"
         );
     }
+}
+
+#[test]
+fn trait_object_mut_self_calls_use_receiver_change_rules_inside_callbacks() {
+    let rejected = r#"
+trait Edit {
+    fn change(&self)
+}
+fn call(callback: fn()) { callback() }
+fn invoke(editor: Edit) {
+    call(() => { editor.change() })
+}
+fn run() {}
+"#;
+    let diags = jet::compile(rejected)
+        .expect_err("a trait-object mut-self callback capture needs edit access");
+    assert!(diags.iter().any(|diag| diag.code == "E0202"), "{diags:?}");
+
+    let accepted = r#"
+trait Edit {
+    fn change(&self)
+}
+fn call(callback: fn()) { callback() }
+fn invoke(editor: &Edit) {
+    call(() => { editor.change() })
+}
+fn run() {}
+"#;
+    jet::compile(accepted).expect("an editable trait-object callback capture is valid");
 }
 
 #[test]

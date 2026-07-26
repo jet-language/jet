@@ -12,6 +12,9 @@ use std::collections::{HashMap, HashSet};
 #[derive(Clone)]
 struct EvaluatedAccess {
     place: ViewPlace,
+    capture_place: ViewPlace,
+    capture_ty: Option<Type>,
+    capture_is_view: bool,
     access: ViewAccess,
     span: Span,
     through_call: bool,
@@ -548,12 +551,15 @@ impl<'a> Checker<'a> {
         let Some(place) = self.place_from_expr(expr) else {
             return;
         };
-        if bound.contains(&place.owner.name) {
+        let capture_place = self.capture_place_from_expr(expr).unwrap_or_else(|| place.clone());
+        if bound.contains(&capture_place.owner.name) {
             return;
         }
         if let Some(existing) = out.iter_mut().find(|existing| {
             existing.place.owner == place.owner
                 && existing.place.projections == place.projections
+                && existing.capture_place.owner == capture_place.owner
+                && existing.capture_place.projections == capture_place.projections
         }) {
             if access == ViewAccess::Write {
                 existing.access = ViewAccess::Write;
@@ -563,6 +569,9 @@ impl<'a> Checker<'a> {
         }
         out.push(EvaluatedAccess {
             place,
+            capture_place,
+            capture_ty: self.place_expr_type(expr),
+            capture_is_view: expr_root_ident(expr).is_some_and(|name| self.is_view(name)),
             access,
             span: expr.span(),
             through_call: false,
@@ -613,6 +622,23 @@ impl<'a> Checker<'a> {
         };
         if Collections::builtin_method_mutates(&ty, method) {
             return ViewAccess::Write;
+        }
+        if let Type::TraitObject(names) = &ty {
+            return if names.iter().any(|name| {
+                self.trait_reg
+                    .traits
+                    .get(name)
+                    .and_then(|trait_info| trait_info.methods.get(method))
+                    .and_then(|sig| sig.params.first())
+                    .is_some_and(|receiver| {
+                        receiver.name == Syntax::KW_SELF
+                            && receiver.convention == AccessConvention::Write
+                    })
+            }) {
+                ViewAccess::Write
+            } else {
+                ViewAccess::Read
+            };
         }
         let type_name = match &ty {
             Type::Named(name) | Type::Apply { name, .. } => name,
@@ -718,20 +744,23 @@ impl<'a> Checker<'a> {
             .any(|event| event.access == ViewAccess::Write);
         let retains = !lambda.meta.escapes && has_capture_write;
         for event in &mut events {
-            let name = &event.place.owner.name;
+            let name = &event.capture_place.owner.name;
             if cloned.contains(name) {
                 // Lowering clones the whole source root before constructing
                 // the move closure; body projections and writes target the clone.
                 event.place.projections.clear();
                 event.access = ViewAccess::Read;
             } else if (!lambda.meta.needs_fn_mut || lambda.meta.escapes)
-                && self.lookup(name).is_some_and(|info| {
-                    !info.ty.is_scalar() && info.param_conv.is_none()
-                })
+                && !event.capture_is_view
+                && !event.capture_ty.as_ref().is_some_and(type_is_copy)
+                && self
+                    .lookup(name)
+                    .is_some_and(|info| info.param_conv.is_none())
             {
-                // A move closure consumes an implicit owned capture at
-                // construction. Model the whole named move, not a body loan.
-                event.place.projections.clear();
+                // Rust 2021 move closures capture the syntactic place precisely.
+                // Keep source-resolved places for loans, but move the field the
+                // generated closure captures rather than its whole owner.
+                event.place = event.capture_place.clone();
                 event.access = ViewAccess::Write;
                 event.moves_owner = true;
             }
@@ -1297,9 +1326,20 @@ impl<'a> Checker<'a> {
                         capture.through_call = false;
                         capture.moves_owner = false;
                         capture.place.projections.clear();
-                        if !out.iter().any(|event| {
+                        capture.capture_place = capture.place.clone();
+                        capture.capture_ty = self
+                            .lookup(&capture.place.owner.name)
+                            .map(|info| info.ty.clone());
+                        capture.capture_is_view = false;
+                        if let Some(existing) = out.iter_mut().find(|event| {
                             event.place.owner == capture.place.owner
+                                && event.place.projections.is_empty()
                         }) {
+                            existing.access = ViewAccess::Read;
+                            existing.through_call = false;
+                            existing.moves_owner = false;
+                        } else {
+                            out.retain(|event| event.place.owner != capture.place.owner);
                             out.push(capture);
                         }
                     }
@@ -1504,7 +1544,7 @@ impl<'a> Checker<'a> {
             if access.through_call {
                 self.record_call_place_access(access.place, access.access);
             } else if access.moves_owner {
-                self.mark_moved(access.place.owner.name, access.span);
+                self.mark_moved_place(access.place, access.span);
             }
         }
         self.record_call_result_views(expr);
@@ -1606,6 +1646,46 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Place Rust 2021 captures from the written closure expression. Unlike
+    /// `place_from_expr`, this deliberately does not chase a View alias to its
+    /// source; generated Rust captures the alias value itself.
+    fn capture_place_from_expr(&self, expr: &Expr) -> Option<ViewPlace> {
+        match expr {
+            Expr::Ident(name, _) => (self.lookup(name).is_some()
+                || self.consts.contains_key(name))
+            .then(|| ViewPlace {
+                owner: self.owner_id(name),
+                projections: Vec::new(),
+            }),
+            Expr::Field(base, field, _) => {
+                let mut place = self.capture_place_from_expr(base)?;
+                place.projections.push(ViewProjection::Field(field.clone()));
+                Some(place)
+            }
+            Expr::Index { base, index, span, .. } => {
+                let mut place = self.capture_place_from_expr(base)?;
+                place.projections.push(ViewProjection::Index {
+                    value: const_place_int(index),
+                    span: *span,
+                });
+                Some(place)
+            }
+            Expr::Slice { base, start, end, span } => {
+                let mut place = self.capture_place_from_expr(base)?;
+                place.projections.push(ViewProjection::Range {
+                    start: const_place_int(start),
+                    end: const_place_int(end),
+                    span: *span,
+                });
+                Some(place)
+            }
+            Expr::Place(inner, _, _) | Expr::Paren(inner, _) => {
+                self.capture_place_from_expr(inner)
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn is_view(&self, name: &str) -> bool {
         self.view_fact(name).is_some()
     }
@@ -1687,6 +1767,63 @@ impl<'a> Checker<'a> {
         }
         if let Some(place) = self.place_from_expr(expr) {
             self.check_place_change(&place, action, span);
+        }
+    }
+
+    pub(crate) fn check_mutating_method_receiver(
+        &mut self,
+        receiver: &Expr,
+        method: &str,
+        span: Span,
+    ) {
+        if self.in_lambda_body {
+            if let Some(root) = expr_root_ident(receiver) {
+                self.inferred_lambda_mut_captures
+                    .insert(root.to_string());
+            }
+        }
+        self.check_expr_change(receiver, &format!("be changed by `.{method}()`"), span);
+        let Some(root) = expr_root_ident(receiver).map(str::to_string) else {
+            return;
+        };
+        if self.iter_borrowed.contains(&root) {
+            self.diags.push(
+                crate::Sema::Diagnostics::collection_changed_in_loop(&root, span),
+            );
+        }
+        if let Some(info) = self.lookup(&root) {
+            if !info.mutable {
+                let (what, fix) = if root == Syntax::KW_SELF {
+                    (
+                        format!(
+                            "`.{}()` edits `{}`, but this method has read access only",
+                            method,
+                            Syntax::KW_SELF
+                        ),
+                        format!(
+                            "declare the enclosing method with `{}{}`",
+                            Syntax::SIGIL_WRITE,
+                            Syntax::KW_SELF
+                        ),
+                    )
+                } else {
+                    (
+                        format!(
+                            "cannot write to `{}` — it does not have edit access (`&`); required before calling `.{}()`",
+                            root, method
+                        ),
+                        format!("declare `{} {} ...`", root, Syntax::SIGIL_BIND_MUT),
+                    )
+                };
+                self.diags.push(Diagnostic::error(
+                    "E0202",
+                    what,
+                    "this method edits the value it's called on; write access (`&`) is required"
+                        .to_string(),
+                    fix,
+                    Some(span),
+                ));
+            }
         }
     }
 
@@ -2527,7 +2664,71 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn mark_moved(&mut self, name: String, span: Span) {
+    fn move_keys_overlap(left: &str, right: &str) -> bool {
+        Self::contains_place(left, right) || Self::contains_place(right, left)
+    }
+
+    fn contains_place(parent: &str, child: &str) -> bool {
+        child.strip_prefix(parent).is_some_and(|suffix| {
+            suffix.is_empty() || suffix.starts_with('.') || suffix.starts_with('[')
+        })
+    }
+
+    pub(crate) fn clear_moved_binding(&mut self, name: &str) {
+        self.moved
+            .retain(|place, _| !Self::contains_place(name, place));
+    }
+
+    pub(crate) fn reject_moved_expr_use(&mut self, expr: &Expr, span: Span) -> bool {
+        let Some(place) = self.capture_place_from_expr(expr) else {
+            return false;
+        };
+        let place_name = Self::place_name(&place);
+        let moved = if matches!(expr, Expr::Ident(..)) && self.suppress_partial_move_root_read {
+            self.moved
+                .get(&place_name)
+                .copied()
+                .map(|at| (place_name.clone(), at))
+        } else {
+            self.moved
+                .iter()
+                .filter(|(moved, _)| Self::move_keys_overlap(&place_name, moved))
+                .min_by_key(|(moved, _)| moved.len())
+                .map(|(moved, at)| (moved.clone(), *at))
+        };
+        let Some((moved_place, _moved_at)) = moved else {
+            return false;
+        };
+        let root = place.owner.name;
+        let moved_ty = self.lookup(&root).map(|info| info.ty.clone());
+        let fix = if moved_ty
+            .as_ref()
+            .is_some_and(|ty| self.is_resource_type(ty))
+        {
+            format!(
+                "acquire a new `{}` resource; closed resources cannot be copied or reused",
+                moved_ty.as_ref().map(Type::show).unwrap_or_default()
+            )
+        } else {
+            format!(
+                "give away a copy instead (`{}{}`) where it moved",
+                Syntax::SIGIL_COPY,
+                moved_place
+            )
+        };
+        self.diags.push(Diagnostic::error(
+            "E0121",
+            format!("`{moved_place}` was given away earlier, so it can't be used here"),
+            "after a value moves somewhere else, the old name no longer holds it".to_string(),
+            fix,
+            Some(span),
+        ));
+        self.moved.remove(&moved_place);
+        true
+    }
+
+    pub(crate) fn mark_moved_place(&mut self, place: ViewPlace, span: Span) {
+        let name = place.owner.name.clone();
         if !tracks_named_move(&name) {
             return;
         }
@@ -2547,7 +2748,17 @@ impl<'a> Checker<'a> {
                 return;
             }
         }
-        self.moved.insert(name, span);
+        self.moved.insert(Self::place_name(&place), span);
+    }
+
+    pub(crate) fn mark_moved(&mut self, name: String, span: Span) {
+        self.mark_moved_place(
+            ViewPlace {
+                owner: self.owner_id(&name),
+                projections: Vec::new(),
+            },
+            span,
+        );
     }
 
     pub(crate) fn non_name_write_argument_fix(&self, expr: &Expr) -> String {

@@ -716,6 +716,9 @@ impl<'a> Checker<'a> {
         }
         let mut call_access = self.call_access_frame();
         if let Some(receiver_param) = receiver_param {
+            if receiver_param.convention == AccessConvention::Write {
+                self.check_mutating_method_receiver(receiver, method, span);
+            }
             self.with_call_access(&mut call_access, |checker| {
                 if receiver_param.convention == AccessConvention::Write {
                     checker.record_call_receiver_reservation(receiver, receiver.span());

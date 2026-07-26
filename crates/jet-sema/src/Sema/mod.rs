@@ -1094,6 +1094,9 @@ pub(crate) struct Checker<'a> {
     concrete_unit_values: Vec<HashMap<String, f64>>,
     /// name -> span of the use that gave the value away.
     moved: HashMap<String, Span>,
+    /// Field inference reads its base only to discover its type. Suppress a
+    /// partial-root move report there; the complete field place is checked first.
+    suppress_partial_move_root_read: bool,
     loop_depth: usize,
     /// D-LOOPLABEL3=A: stack of `name :: loop` names; scope, innermost last.
     loop_labels: Vec<String>,
