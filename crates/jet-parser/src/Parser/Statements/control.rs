@@ -561,7 +561,7 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Caps {
             caps,
-            caps_span: marker.span,
+            caps_span: Span::new(marker.name_span.end, marker.span.end),
             body,
             span: Span::new(marker.span.start, end),
         })
@@ -601,7 +601,7 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Grant {
             caps,
-            caps_span: marker.span,
+            caps_span: Span::new(marker.name_span.end, marker.span.end),
             binding,
             binding_span,
             body,

@@ -53,9 +53,95 @@ fn rule_signature_bindings(
     let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
         return Ok(Vec::new());
     };
+    if marker.name == Syntax::KW_UNSAFE && marker.args.is_empty() {
+        return Ok(Vec::new());
+    }
     rule.signature
         .marker_argument_bindings(marker)
         .ok_or_else(|| crate::Policy::marker_argument_shape_error(&marker.name, marker.span))
+}
+
+struct RuleArgumentObservation {
+    ty: Option<crate::AST::Type>,
+    constant: Option<crate::Comptime::CtValue>,
+}
+
+fn validate_rule_arguments(
+    marker: &mut Marker,
+    mut observe: impl FnMut(
+        crate::Policy::RuleArgType,
+        &mut crate::AST::Expr,
+    ) -> RuleArgumentObservation,
+) -> Result<ValidatedRuleArguments, Diagnostic> {
+    let bindings = rule_signature_bindings(marker)?;
+    let marker_name = marker.name.clone();
+    let marker_span = marker.span;
+    let mut types = Vec::with_capacity(bindings.len());
+    let mut constants = Vec::with_capacity(bindings.len());
+    let mut mismatch = false;
+    for binding in &bindings {
+        let argument = &mut marker.args[binding.source_index];
+        let observation = if binding.ty == crate::Policy::RuleArgType::Ident
+            || binding.ty == crate::Policy::RuleArgType::Any
+                && marker_name != Syntax::ATTR_DEFAULT
+            || binding.ty == crate::Policy::RuleArgType::DurationOrString
+                && matches!(argument, crate::AST::Expr::UnitLit { .. })
+        {
+            RuleArgumentObservation {
+                ty: None,
+                constant: None,
+            }
+        } else if binding.ty == crate::Policy::RuleArgType::Bool
+            && marker_name == Syntax::ATTR_META
+            && matches!(argument, crate::AST::Expr::Ident(name, _)
+                if name == Syntax::META_FIELD_TUNABLE)
+        {
+            RuleArgumentObservation {
+                ty: Some(crate::AST::Type::Bool),
+                constant: None,
+            }
+        } else {
+            observe(binding.ty, argument)
+        };
+        let matches = match binding.ty {
+            crate::Policy::RuleArgType::Any => true,
+            crate::Policy::RuleArgType::String => {
+                matches!(observation.ty, Some(crate::AST::Type::String))
+            }
+            crate::Policy::RuleArgType::Ident => matches!(
+                argument,
+                crate::AST::Expr::Ident(..)
+                    | crate::AST::Expr::Field(..)
+                    | crate::AST::Expr::EnumLit { .. }
+            ),
+            crate::Policy::RuleArgType::Bool => {
+                matches!(observation.ty, Some(crate::AST::Type::Bool))
+            }
+            crate::Policy::RuleArgType::Int => {
+                matches!(observation.ty, Some(crate::AST::Type::Int))
+            }
+            crate::Policy::RuleArgType::DurationOrString => {
+                matches!(argument, crate::AST::Expr::UnitLit { .. })
+                    || matches!(observation.ty, Some(crate::AST::Type::String))
+                    || matches!(observation.ty, Some(crate::AST::Type::Named(ref name))
+                        if name == crate::Syntax::DURATION_TYPE)
+            }
+        };
+        mismatch |= !matches;
+        types.push(observation.ty);
+        constants.push(observation.constant);
+    }
+    if mismatch {
+        return Err(crate::Policy::marker_argument_shape_error(
+            &marker_name,
+            marker_span,
+        ));
+    }
+    Ok(ValidatedRuleArguments {
+        bindings,
+        types,
+        constants,
+    })
 }
 
 fn static_rule_site(site: Option<crate::Policy::RuleSite>) -> bool {
@@ -196,37 +282,8 @@ pub(crate) fn resolve_static_rule_products(
             ));
             continue;
         }
-        let bindings = match rule_signature_bindings(marker) {
-            Ok(bindings) => bindings,
-            Err(diagnostic) => {
-                diags.push(diagnostic);
-                invalid.insert(marker.name_span.start);
-                continue;
-            }
-        };
-        let mut types = Vec::with_capacity(bindings.len());
-        let mut constants = Vec::with_capacity(bindings.len());
-        let mut mismatch = false;
-        for binding in &bindings {
-            let expression = &marker.args[binding.source_index];
-            if binding.ty == crate::Policy::RuleArgType::Ident {
-                mismatch |= !matches!(
-                    expression,
-                    crate::AST::Expr::Ident(..)
-                        | crate::AST::Expr::Field(..)
-                        | crate::AST::Expr::EnumLit { .. }
-                );
-                types.push(None);
-                constants.push(None);
-                continue;
-            }
-            let needs_value = !matches!(binding.ty, crate::Policy::RuleArgType::Any)
-                || marker.name == Syntax::ATTR_DEFAULT;
-            if !needs_value {
-                types.push(None);
-                constants.push(None);
-                continue;
-            }
+        let mut evaluated_marker = marker.clone();
+        let arguments = match validate_rule_arguments(&mut evaluated_marker, |_, expression| {
             let value = crate::Comptime::evaluate_with_imports_opts_collecting(
                 expression,
                 &funcs,
@@ -238,10 +295,10 @@ pub(crate) fn resolve_static_rule_products(
                 0,
             );
             let Ok((value, _)) = value else {
-                mismatch |= binding.ty != crate::Policy::RuleArgType::Any;
-                types.push(None);
-                constants.push(None);
-                continue;
+                return RuleArgumentObservation {
+                    ty: None,
+                    constant: None,
+                };
             };
             let ty = match &value {
                 crate::Comptime::CtValue::Str(_) => Some(crate::AST::Type::String),
@@ -249,38 +306,17 @@ pub(crate) fn resolve_static_rule_products(
                 crate::Comptime::CtValue::Int(_) => Some(crate::AST::Type::Int),
                 _ => None,
             };
-            mismatch |= match binding.ty {
-                crate::Policy::RuleArgType::Any => false,
-                crate::Policy::RuleArgType::String => {
-                    !matches!(value, crate::Comptime::CtValue::Str(_))
-                }
-                crate::Policy::RuleArgType::Bool => {
-                    !matches!(value, crate::Comptime::CtValue::Bool(_))
-                }
-                crate::Policy::RuleArgType::Int => {
-                    !matches!(value, crate::Comptime::CtValue::Int(_))
-                }
-                crate::Policy::RuleArgType::DurationOrString => {
-                    !matches!(value, crate::Comptime::CtValue::Str(_))
-                        && !matches!(expression, crate::AST::Expr::UnitLit { .. })
-                }
-                crate::Policy::RuleArgType::Ident => false,
-            };
-            types.push(ty);
-            constants.push(Some(value));
-        }
-        if mismatch {
-            diags.push(crate::Policy::marker_argument_shape_error(
-                &marker.name,
-                marker.span,
-            ));
-            invalid.insert(marker.name_span.start);
-            continue;
-        }
-        let arguments = ValidatedRuleArguments {
-            bindings,
-            types,
-            constants,
+            RuleArgumentObservation {
+                ty,
+                constant: Some(value),
+            }
+        }) {
+            Ok(arguments) => arguments,
+            Err(diagnostic) => {
+                diags.push(diagnostic);
+                invalid.insert(marker.name_span.start);
+                continue;
+            }
         };
         if let Some(crate::Comptime::CtValue::Str(text)) =
             arguments.constant_for_source(0)
@@ -392,78 +428,29 @@ impl<'a> crate::Sema::Checker<'a> {
         marker: &mut Marker,
     ) -> Option<ValidatedRuleArguments> {
         crate::Policy::applied_rule(&marker.name)?;
-        let bindings = match rule_signature_bindings(marker) {
-            Ok(bindings) => bindings,
+        match validate_rule_arguments(marker, |ty, argument| {
+            let inferred = self.infer(argument);
+            let constant = if matches!(
+                ty,
+                crate::Policy::RuleArgType::String
+                    | crate::Policy::RuleArgType::Bool
+                    | crate::Policy::RuleArgType::Int
+            ) {
+                self.evaluate_constant(argument)
+            } else {
+                None
+            };
+            RuleArgumentObservation {
+                ty: inferred,
+                constant,
+            }
+        }) {
+            Ok(arguments) => Some(arguments),
             Err(diagnostic) => {
                 self.diags.push(diagnostic);
-                return None;
+                None
             }
-        };
-        let mut types = Vec::with_capacity(bindings.len());
-        let mut constants = Vec::with_capacity(bindings.len());
-        let mut mismatch = false;
-        for binding in &bindings {
-            let argument = &mut marker.args[binding.source_index];
-            let ty = match binding.ty {
-                crate::Policy::RuleArgType::Any => self.infer(argument),
-                crate::Policy::RuleArgType::Ident => None,
-                crate::Policy::RuleArgType::Bool
-                    if marker.name == Syntax::ATTR_META
-                        && matches!(argument, crate::AST::Expr::Ident(name, _) if name == Syntax::META_FIELD_TUNABLE) =>
-                {
-                    Some(crate::AST::Type::Bool)
-                }
-                crate::Policy::RuleArgType::DurationOrString
-                    if matches!(argument, crate::AST::Expr::UnitLit { .. }) =>
-                {
-                    None
-                }
-                _ => self.infer(argument),
-            };
-            let matches = match binding.ty {
-                crate::Policy::RuleArgType::Any => true,
-                crate::Policy::RuleArgType::String => {
-                    matches!(ty, Some(crate::AST::Type::String))
-                }
-                crate::Policy::RuleArgType::Ident => matches!(
-                    argument,
-                    crate::AST::Expr::Ident(..)
-                        | crate::AST::Expr::Field(..)
-                        | crate::AST::Expr::EnumLit { .. }
-                ),
-                crate::Policy::RuleArgType::Bool => {
-                    matches!(ty, Some(crate::AST::Type::Bool))
-                }
-                crate::Policy::RuleArgType::Int => {
-                    matches!(ty, Some(crate::AST::Type::Int))
-                }
-                crate::Policy::RuleArgType::DurationOrString => {
-                    matches!(argument, crate::AST::Expr::UnitLit { .. })
-                        || matches!(ty, Some(crate::AST::Type::String))
-                        || matches!(ty, Some(crate::AST::Type::Named(ref name)) if name == crate::Syntax::DURATION_TYPE)
-                }
-            };
-            mismatch |= !matches;
-            types.push(ty);
-            constants.push(match binding.ty {
-                crate::Policy::RuleArgType::String
-                | crate::Policy::RuleArgType::Bool
-                | crate::Policy::RuleArgType::Int => self.evaluate_constant(argument),
-                _ => None,
-            });
         }
-        if mismatch {
-            self.diags.push(crate::Policy::marker_argument_shape_error(
-                &marker.name,
-                marker.span,
-            ));
-            return None;
-        }
-        Some(ValidatedRuleArguments {
-            bindings,
-            types,
-            constants,
-        })
     }
 
     pub(crate) fn take_rule_fact(

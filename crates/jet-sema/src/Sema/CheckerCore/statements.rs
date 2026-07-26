@@ -2164,9 +2164,17 @@ impl<'a> Checker<'a> {
                         fields.iter_mut().enumerate()
                     {
                         let ty = if signature_checked {
-                            validated
-                                .as_ref()
-                                .and_then(|arguments| arguments.type_for_source(source_index))
+                            validated.as_ref().and_then(|arguments| {
+                                let binding = arguments
+                                    .bindings
+                                    .iter()
+                                    .find(|binding| binding.source_index == source_index)?;
+                                if binding.ty == crate::Policy::RuleArgType::Any {
+                                    self.infer(value_expr)
+                                } else {
+                                    arguments.type_for_source(source_index)
+                                }
+                            })
                         } else {
                             self.infer(value_expr)
                         };

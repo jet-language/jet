@@ -6,7 +6,7 @@ use super::TargetMarker;
 use super::helpers::format_version_segment;
 
 impl<'a> Parser<'a> {
-        fn policy_is_file_decl(&self) -> bool {
+        pub(in crate::Parser) fn policy_is_file_decl(&self) -> bool {
             let mut i = self.pos + 2;
             let mut depth = 0usize;
             while let Some(token) = self.toks.get(i) {
@@ -773,6 +773,10 @@ impl<'a> Parser<'a> {
                     },
                     TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
                     TokKind::KwFn => self.func().map(Item::Func),
+                    // Test and benchmark declarations own semantic Test/Bench
+                    // sites even when their surface begins with `fn`.
+                    TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
+                    TokKind::Hash if self.at_bench_def() => self.bench_def().map(Item::Bench),
                     TokKind::Hash if self.marker_sequence_leads_to_function() => {
                         self.func_with_marker_list().map(Item::Func)
                     }
@@ -1056,10 +1060,6 @@ impl<'a> Parser<'a> {
                             }
                         }
                     }
-                    // S43 (D-CASING1 follow-on): `#Test "name" { … }`.
-                    TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
-                    // D-BENCH1 + D-BENCH-MARKER1=A: `#Bench("name") { … }`.
-                    TokKind::Hash if self.at_bench_def() => self.bench_def().map(Item::Bench),
                     // D-S14-PAUSE: bare lowercase `test "name" { … }` teaching is paused.
                     TokKind::Ident(n)
                         if retired_s14_teaching_enabled()

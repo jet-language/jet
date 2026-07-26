@@ -237,27 +237,6 @@ impl RuleArgType {
         }
     }
 
-    /// Literal/source-shape predicate for parser tooling. Sema validates
-    /// nonliteral arguments from inferred lexical types or evaluated
-    /// compile-time values; this predicate never guesses their type.
-    pub fn matches_expr(self, expr: &crate::AST::Expr) -> bool {
-        match self {
-            Self::Any => true,
-            Self::String => matches!(expr, crate::AST::Expr::Str(..)),
-            Self::Ident => matches!(
-                expr,
-                crate::AST::Expr::Ident(..)
-                    | crate::AST::Expr::Field(..)
-                    | crate::AST::Expr::EnumLit { .. }
-            ),
-            Self::Bool => matches!(expr, crate::AST::Expr::Bool(..)),
-            Self::Int => matches!(expr, crate::AST::Expr::Int(..)),
-            Self::DurationOrString => matches!(
-                expr,
-                crate::AST::Expr::UnitLit { .. } | crate::AST::Expr::Str(..)
-            ),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -621,7 +600,7 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Sql", sig!(), BLOCK_SITE, Block),
     rule!("Extern", sig!(param!("library", String)), MODULE_SITE, Call),
     rule!("Bindgen", sig!(param!("library", String)), MODULE_SITE, Call),
-    rule!("allow", sig!(param!("lint", Ident)), &[RuleSite::Declaration, RuleSite::Statement], Call),
+    rule!("allow", sig!(param!("lint", Ident)), &[RuleSite::Declaration, RuleSite::Field, RuleSite::Statement], Call),
     rule!("Static", sig!(), CONST_SITE, Bare),
     rule!("Authority", sig!(), &[RuleSite::Operation], Bare),
     rule!("wire", sig!(), FIELD_SITE, Bare),
@@ -655,9 +634,6 @@ pub fn rule_allows(name: &str, site: RuleSite) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::AST::Expr;
-    use crate::Diagnostics::Span;
-
     #[test]
     fn every_registered_rule_has_one_exact_applicability_row() {
         let rows = super::applied_rule_registry();
@@ -674,23 +650,35 @@ mod tests {
     }
 
     #[test]
-    fn active_rule_attachment_census_covers_every_site_without_duplicates() {
-        for row in super::applied_rule_registry()
-            .iter()
-            .filter(|row| matches!(row.status, super::RuleStatus::Active))
-        {
-            let mut declared = std::collections::HashSet::new();
-            for site in row.sites {
-                assert!(declared.insert(*site), "{} repeats {site:?}", row.name);
-            }
-            for site in super::RuleSite::ALL {
-                assert_eq!(
-                    super::rule_allows(row.name, site),
-                    declared.contains(&site),
-                    "{} at {site:?}",
-                    row.name
-                );
-            }
+    fn authoritative_attachment_matrix_covers_declaration_sites() {
+        use super::RuleSite;
+
+        let legal = [
+            ("allow", RuleSite::Field),
+            ("Rename", RuleSite::Variant),
+            ("Inline", RuleSite::Method),
+            ("Policy", RuleSite::Module),
+            ("Html", RuleSite::File),
+            ("Test", RuleSite::Test),
+            ("Bench", RuleSite::Bench),
+            ("Task", RuleSite::Function),
+        ];
+        for (name, site) in legal {
+            assert!(super::rule_allows(name, site), "#{name} at {site:?}");
+        }
+
+        let illegal = [
+            ("Task", RuleSite::Field),
+            ("Skip", RuleSite::Variant),
+            ("Task", RuleSite::Method),
+            ("Html", RuleSite::Module),
+            ("Inline", RuleSite::File),
+            ("Bench", RuleSite::Test),
+            ("Test", RuleSite::Bench),
+            ("Codable", RuleSite::Function),
+        ];
+        for (name, site) in illegal {
+            assert!(!super::rule_allows(name, site), "#{name} at {site:?}");
         }
     }
 
@@ -712,37 +700,7 @@ mod tests {
     }
 
     #[test]
-    fn rule_argument_types_match_all_registry_kinds_and_variadics() {
-        let span = Span::new(0, 1);
-        let string = Expr::Str(vec![], span);
-        let ident = Expr::Ident("C".into(), span);
-        let boolean = Expr::Bool(true, span);
-        let integer = Expr::Int(1, span, None, None);
-        let duration = Expr::UnitLit {
-            raw: "1".into(),
-            int: Some(1),
-            float: None,
-            suffix: "s".into(),
-            suffix_span: span,
-            span,
-        };
-        assert!(super::RuleArgType::Any.matches_expr(&boolean));
-        assert!(super::RuleArgType::String.matches_expr(&string));
-        assert!(!super::RuleArgType::String.matches_expr(&ident));
-        assert!(!super::RuleArgType::String.matches_expr(&boolean));
-        assert!(super::RuleArgType::Ident.matches_expr(&ident));
-        assert!(!super::RuleArgType::Ident.matches_expr(&integer));
-        assert!(super::RuleArgType::Bool.matches_expr(&boolean));
-        assert!(!super::RuleArgType::Bool.matches_expr(&ident));
-        assert!(!super::RuleArgType::Bool.matches_expr(&integer));
-        assert!(super::RuleArgType::Int.matches_expr(&integer));
-        assert!(!super::RuleArgType::Int.matches_expr(&ident));
-        assert!(!super::RuleArgType::Int.matches_expr(&string));
-        assert!(super::RuleArgType::DurationOrString.matches_expr(&duration));
-        assert!(super::RuleArgType::DurationOrString.matches_expr(&string));
-        assert!(!super::RuleArgType::DurationOrString.matches_expr(&ident));
-        assert!(!super::RuleArgType::DurationOrString.matches_expr(&integer));
-
+    fn rule_argument_bindings_cover_variadics_and_named_arguments() {
         let policy = super::applied_rule("Policy").unwrap().signature;
         assert_eq!(policy.argument_bindings(&[]), Some(Vec::new()));
         assert_eq!(

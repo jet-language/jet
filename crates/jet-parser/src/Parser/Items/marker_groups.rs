@@ -318,6 +318,11 @@ impl<'a> Parser<'a> {
                     self.bump();
                 }
                 if self.at_marker_list() {
+                    if !markers.is_empty()
+                        && !self.bracket_group_allows_site(self.pos + 1, site)
+                    {
+                        break;
+                    }
                     let close_index = Self::skip_bracket_group(&self.toks, self.pos + 1)
                         .ok_or_else(|| Diagnostic::error(
                             "E0003",
@@ -333,18 +338,31 @@ impl<'a> Parser<'a> {
                     continue;
                 }
                 let Some(name) = self.marker_name_at(self.pos).map(str::to_string) else { break };
+                if !markers.is_empty()
+                    && crate::Policy::applied_rule(&name).is_some()
+                    && !crate::Policy::rule_allows(&name, site)
+                {
+                    break;
+                }
                 chunks += 1;
                 let marker = self.parse_rule_marker()?;
                 self.bind_rule_fact(marker.name_span, None, site);
                 if crate::Policy::applied_rule(&name).is_some()
                     && !crate::Policy::rule_allows(&name, site)
+                    && !(site == crate::Policy::RuleSite::Method
+                        && matches!(name.as_str(), Syntax::KW_TASK | Syntax::ATTR_EVERY))
                 {
                     return Err(Self::wrong_rule_site(&marker, site, noun));
                 }
                 sequence_end = marker.span.end;
                 markers.push(marker);
             }
-            if markers.len() > 1 && !(chunks == 1 && bracket_chunks == 1) {
+            let distinct_markers = markers
+                .iter()
+                .map(|marker| marker.name.as_str())
+                .collect::<std::collections::HashSet<_>>()
+                .len();
+            if distinct_markers > 1 && !(chunks == 1 && bracket_chunks == 1) {
                 let span = Span::new(sequence_start, sequence_end);
                 let mut diagnostic = Diagnostic::error(
                     "E0999",
@@ -494,6 +512,13 @@ impl<'a> Parser<'a> {
         }
 
         pub(in crate::Parser) fn marker_sequence_leads_to_function(&self) -> bool {
+            if self.at_test_def()
+                || self.at_bench_def()
+                || matches!(self.marker_name_at(self.pos), Some(name)
+                    if name == Syntax::ATTR_POLICY && self.policy_is_file_decl())
+            {
+                return false;
+            }
             let mut cursor = self.pos;
             let mut saw_marker = false;
             let mut all_file_only = true;
@@ -533,6 +558,9 @@ impl<'a> Parser<'a> {
                 saw_marker = true;
                 all_file_only &= file_only;
                 cursor = next;
+                if all_file_only {
+                    break;
+                }
             }
             while matches!(self.toks.get(cursor).map(|token| &token.kind), Some(TokKind::Semi)) {
                 cursor += 1;
@@ -650,6 +678,17 @@ impl<'a> Parser<'a> {
                 if crate::Policy::applied_rule(&marker.name).is_some()
                     && !crate::Policy::rule_allows(&marker.name, site)
                 {
+                    if site == crate::Policy::RuleSite::Method
+                        && matches!(marker.name.as_str(), Syntax::KW_TASK | Syntax::ATTR_EVERY)
+                    {
+                        return Err(Diagnostic::error(
+                            "E0925",
+                            "`#Task`/`#Every(…)` only mark a top-level function".to_string(),
+                            "a task needs a free-standing name for `jet run --task <name> <entry>` — a method has no such name, so it can't be one (D-JPK-TASKRUN1).".to_string(),
+                            "move this function to the top level, beside `fn run()`.".to_string(),
+                            Some(marker.span),
+                        ));
+                    }
                     return Err(Self::wrong_rule_site(
                         &marker,
                         site,
@@ -665,7 +704,10 @@ impl<'a> Parser<'a> {
                 {
                     match marker.name.as_str() {
                         Syntax::KW_PURE => {
-                            self.diags.push(Self::retired_effect_syntax(marker.span));
+                            self.diags.push(Self::retired_effect_syntax(Span::new(
+                                marker.span.start,
+                                marker.span.start + 1,
+                            )));
                             function.is_pure = true;
                         }
                         "InlineAlways" => {
@@ -704,6 +746,10 @@ impl<'a> Parser<'a> {
                         "remove the marker or move it to its registered site".to_string(),
                         Some(marker.span),
                     ));
+                }
+                if marker.name == Syntax::KW_UNSAFE && marker.args.is_empty() {
+                    self.apply_unsafe_function_marker(&mut function, &marker)?;
+                    unreachable!("a missing Unsafe reason always returns E3112");
                 }
                 self.validate_registered_rule_arguments(&marker)?;
                 let arguments = self.bound_registered_rule_arguments(&marker)?;

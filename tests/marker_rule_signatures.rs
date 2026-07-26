@@ -73,7 +73,76 @@ fn run() {}
     );
 
     let wrong = parse_codes("struct Bad { #Task fn work(self) {} }\nfn run() {}");
-    assert_eq!(wrong.iter().filter(|code| *code == "E0355").count(), 1);
+    assert_eq!(wrong.iter().filter(|code| *code == "E0925").count(), 1);
+}
+
+#[test]
+fn parser_binds_the_authoritative_declaration_site_matrix() {
+    let fixtures = [
+        (
+            "#allow(float_money) price: Float",
+            "struct Money { #allow(float_money) price: Float }\nfn run() {}",
+            jet::Policy::RuleSite::Field,
+        ),
+        (
+            "#Rename on enum variant",
+            "enum Status { #Rename(\"ready\") Ready }\nfn run() {}",
+            jet::Policy::RuleSite::Variant,
+        ),
+        (
+            "#Inline on method",
+            "struct Box { #Inline fn open(self) {} }\nfn run() {}",
+            jet::Policy::RuleSite::Method,
+        ),
+        (
+            "#Html on file",
+            "#Html(\"index.html\")\nfn run() {}",
+            jet::Policy::RuleSite::File,
+        ),
+        (
+            "#Test declaration",
+            "#Test(\"works\") {}\nfn run() {}",
+            jet::Policy::RuleSite::Test,
+        ),
+        (
+            "#Bench declaration",
+            "#Bench(\"fast\") {}\nfn run() {}",
+            jet::Policy::RuleSite::Bench,
+        ),
+        (
+            "#Task on function",
+            "#Task fn work() {}\nfn run() {}",
+            jet::Policy::RuleSite::Function,
+        ),
+    ];
+    for (label, source, expected_site) in fixtures {
+        let (tokens, lexer_diagnostics) = jet::Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{label}: {lexer_diagnostics:?}");
+        let program = jet::Parser::parse(&tokens)
+            .unwrap_or_else(|diagnostics| panic!("{label}: {diagnostics:?}"));
+        assert!(
+            program
+                .rule_facts
+                .iter()
+                .any(|application| application.site == Some(expected_site)),
+            "{label}: {:?}",
+            program.rule_facts
+        );
+    }
+
+    let (tokens, lexer_diagnostics) =
+        jet::Lexer::lex("#Policy(no_alloc)\nfn run() {}");
+    assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+    let program = jet::Parser::parse(&tokens)
+        .unwrap_or_else(|diagnostics| panic!("#Policy module declaration: {diagnostics:?}"));
+    assert!(
+        program
+            .policy_declarations
+            .iter()
+            .any(|declaration| declaration.scope == jet::Policy::PolicyScope::Module),
+        "#Policy module declaration: {:?}",
+        program.policy_declarations
+    );
 }
 
 #[test]
