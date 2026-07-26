@@ -123,6 +123,226 @@ include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
 
 #[test]
 fn direct_ws_consumers_include_client_core_first() {
+    fn raw_string_start(bytes: &[u8], index: usize) -> Option<(usize, usize)> {
+        let mut cursor = index;
+        if bytes.get(cursor) == Some(&b'b') {
+            cursor += 1;
+        }
+        if bytes.get(cursor) != Some(&b'r') {
+            return None;
+        }
+        cursor += 1;
+        let start = cursor;
+        while bytes.get(cursor) == Some(&b'#') {
+            cursor += 1;
+        }
+        (bytes.get(cursor) == Some(&b'"')).then_some((cursor + 1, cursor - start))
+    }
+
+    fn include_at(bytes: &[u8], index: usize) -> Option<(usize, String)> {
+        if bytes.get(index..index + "include".len()) != Some(b"include") {
+            return None;
+        }
+        if index != 0
+            && bytes
+                .get(index - 1)
+                .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+        {
+            return None;
+        }
+        let mut cursor = index + "include".len();
+        while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            cursor += 1;
+        }
+        if bytes.get(cursor) != Some(&b'!') {
+            return None;
+        }
+        cursor += 1;
+        while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            cursor += 1;
+        }
+        if bytes.get(cursor) != Some(&b'(') {
+            return None;
+        }
+        cursor += 1;
+        while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            cursor += 1;
+        }
+        if bytes.get(cursor) != Some(&b'"') {
+            return None;
+        }
+        cursor += 1;
+        let target_start = cursor;
+        while let Some(byte) = bytes.get(cursor) {
+            match byte {
+                b'\\' => cursor += 2,
+                b'"' => break,
+                b'\n' | b'\r' => return None,
+                _ => cursor += 1,
+            }
+        }
+        if bytes.get(cursor) != Some(&b'"') {
+            return None;
+        }
+        let target = std::str::from_utf8(bytes.get(target_start..cursor)?)
+            .ok()?
+            .replace('\\', "/");
+        cursor += 1;
+        while bytes.get(cursor).is_some_and(u8::is_ascii_whitespace) {
+            cursor += 1;
+        }
+        if bytes.get(cursor) != Some(&b')') {
+            return None;
+        }
+        cursor += 1;
+        if bytes.get(cursor) == Some(&b';') {
+            cursor += 1;
+        }
+        Some((cursor, target))
+    }
+
+    fn char_literal_end(bytes: &[u8], quote: usize) -> Option<usize> {
+        if bytes.get(quote) != Some(&b'\'') {
+            return None;
+        }
+        let mut cursor = quote + 1;
+        if bytes.get(cursor) == Some(&b'\\') {
+            cursor += 1;
+            match *bytes.get(cursor)? {
+                b'u' if bytes.get(cursor + 1) == Some(&b'{') => {
+                    cursor += 2;
+                    while bytes.get(cursor).is_some_and(|byte| *byte != b'}') {
+                        cursor += 1;
+                    }
+                    if bytes.get(cursor) != Some(&b'}') {
+                        return None;
+                    }
+                    cursor += 1;
+                }
+                b'x' => cursor += 3,
+                _ => cursor += 1,
+            }
+        } else {
+            let text = std::str::from_utf8(bytes.get(cursor..)?).ok()?;
+            cursor += text.chars().next()?.len_utf8();
+        }
+        (bytes.get(cursor) == Some(&b'\'')).then_some(cursor + 1)
+    }
+
+    fn actual_includes(text: &str) -> Vec<(usize, String)> {
+        let bytes = text.as_bytes();
+        let mut includes = Vec::new();
+        let mut index = 0;
+        let mut line = 1;
+        let mut block_depth = 0usize;
+        while index < bytes.len() {
+            if block_depth != 0 {
+                match bytes.get(index..index + 2) {
+                    Some(b"/*") => {
+                        block_depth += 1;
+                        index += 2;
+                    }
+                    Some(b"*/") => {
+                        block_depth -= 1;
+                        index += 2;
+                    }
+                    _ => {
+                        if bytes[index] == b'\n' {
+                            line += 1;
+                        }
+                        index += 1;
+                    }
+                }
+                continue;
+            }
+            match bytes.get(index..index + 2) {
+                Some(b"//") => {
+                    while bytes.get(index).is_some_and(|byte| *byte != b'\n') {
+                        index += 1;
+                    }
+                    continue;
+                }
+                Some(b"/*") => {
+                    block_depth = 1;
+                    index += 2;
+                    continue;
+                }
+                _ => {}
+            }
+            let char_quote = if bytes[index] == b'\'' {
+                Some(index)
+            } else if bytes[index] == b'b' && bytes.get(index + 1) == Some(&b'\'') {
+                Some(index + 1)
+            } else {
+                None
+            };
+            if let Some(end) = char_quote.and_then(|quote| char_literal_end(bytes, quote)) {
+                index = end;
+                continue;
+            }
+            if let Some((mut cursor, hashes)) = raw_string_start(bytes, index) {
+                loop {
+                    let Some(byte) = bytes.get(cursor) else {
+                        index = cursor;
+                        break;
+                    };
+                    if *byte == b'\n' {
+                        line += 1;
+                    }
+                    if *byte == b'"'
+                        && (0..hashes).all(|offset| {
+                            bytes.get(cursor + 1 + offset) == Some(&b'#')
+                        })
+                    {
+                        index = cursor + 1 + hashes;
+                        break;
+                    }
+                    cursor += 1;
+                }
+                continue;
+            }
+            let quote = if bytes[index] == b'"' {
+                Some(b'"')
+            } else if bytes[index] == b'b' && bytes.get(index + 1) == Some(&b'"') {
+                index += 1;
+                Some(b'"')
+            } else {
+                None
+            };
+            if let Some(quote) = quote {
+                index += 1;
+                while let Some(byte) = bytes.get(index) {
+                    if *byte == b'\\' {
+                        index += 2;
+                    } else {
+                        if *byte == b'\n' {
+                            line += 1;
+                        }
+                        index += 1;
+                        if *byte == quote {
+                            break;
+                        }
+                    }
+                }
+                continue;
+            }
+            if let Some((end, target)) = include_at(bytes, index) {
+                includes.push((line, target));
+                line += bytes[index..end]
+                    .iter()
+                    .filter(|byte| **byte == b'\n')
+                    .count();
+                index = end;
+                continue;
+            }
+            if bytes[index] == b'\n' {
+                line += 1;
+            }
+            index += 1;
+        }
+        includes
+    }
+
     fn collect_rs(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
         let mut entries = std::fs::read_dir(dir)
             .unwrap()
@@ -138,32 +358,55 @@ fn direct_ws_consumers_include_client_core_first() {
         }
     }
 
+    let hostile = r###"
+// include!("ignored/line/Ws.rs");
+/* include!("ignored/block/Ws.rs"); */
+const NORMAL: &str = "include!(\"ignored/normal/Ws.rs\");";
+const RAW: &str = r#"include!("ignored/raw/Ws.rs");"#;
+include!("kept/WsClient.rs");
+include!("kept/Ws.rs");
+"###;
+    assert_eq!(
+        actual_includes(hostile),
+        [
+            (6, "kept/WsClient.rs".to_string()),
+            (7, "kept/Ws.rs".to_string()),
+        ]
+    );
+
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut files = Vec::new();
     collect_rs(&root.join("crates"), &mut files);
     collect_rs(&root.join("tests"), &mut files);
     let mut consumers = Vec::new();
-    let include_prefix = ["include", "!("].concat();
-    let ws_suffix = ["/Ws", ".rs"].concat();
     for path in files {
         let text = std::fs::read_to_string(&path).unwrap();
-        if !text.lines().any(|line| {
-            line.trim_start().starts_with(&include_prefix) && line.contains(&ws_suffix)
-        }) {
-            continue;
+        let includes = actual_includes(&text);
+        for (index, (line, target)) in includes.iter().enumerate() {
+            if !target.ends_with("/Ws.rs") {
+                continue;
+            }
+            let Some((client_line, client_target)) = index
+                .checked_sub(1)
+                .and_then(|previous| includes.get(previous))
+            else {
+                panic!("{} omits WsClient.rs", path.display());
+            };
+            assert_eq!(
+                *client_line + 1,
+                *line,
+                "{} must include WsClient.rs on the line before Ws.rs",
+                path.display()
+            );
+            assert!(
+                client_target.ends_with("/WsClient.rs"),
+                "{} must include WsClient.rs immediately before Ws.rs",
+                path.display()
+            );
+            consumers.push(path.strip_prefix(root).unwrap().to_path_buf());
         }
-        let ws = text.find(&ws_suffix).unwrap();
-        let client_suffix = ["/WsClient", ".rs"].concat();
-        let client = text
-            .find(&client_suffix)
-            .unwrap_or_else(|| panic!("{} omits WsClient.rs", path.display()));
-        assert!(
-            client < ws,
-            "{} must include WsClient.rs before Ws.rs",
-            path.display()
-        );
-        consumers.push(path.strip_prefix(root).unwrap().to_path_buf());
     }
+    consumers.sort();
     assert_eq!(
         consumers,
         [
