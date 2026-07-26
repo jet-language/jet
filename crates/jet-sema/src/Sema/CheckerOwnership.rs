@@ -630,16 +630,16 @@ impl<'a> Checker<'a> {
             return ViewAccess::Write;
         }
         if let Type::TraitObject(names) = &ty {
-            return if names.iter().any(|name| {
+            let receiver = names.iter().find_map(|name| {
                 self.trait_reg
                     .traits
                     .get(name)
                     .and_then(|trait_info| trait_info.methods.get(method))
                     .and_then(|sig| sig.params.first())
-                    .is_some_and(|receiver| {
-                        receiver.name == Syntax::KW_SELF
-                            && receiver.convention == AccessConvention::Write
-                    })
+            });
+            return if receiver.is_some_and(|receiver| {
+                receiver.name == Syntax::KW_SELF
+                    && receiver.convention == AccessConvention::Write
             }) {
                 ViewAccess::Write
             } else {

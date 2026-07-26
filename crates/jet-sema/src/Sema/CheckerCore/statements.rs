@@ -1747,6 +1747,19 @@ impl<'a> Checker<'a> {
                             Some(*span),
                         ));
                     }
+                    let mut captures = crate::Sema::block_free_var_reads(body)
+                        .into_iter()
+                        .collect::<Vec<_>>();
+                    captures.sort();
+                    for name in captures {
+                        if self.is_view(&name) {
+                            self.report_view_escape(
+                                &name,
+                                "be captured by a reactive effect",
+                                *span,
+                            );
+                        }
+                    }
                     // The body runs later in its own move closure. Mutating a
                     // cloned reactive capture must not make an enclosing
                     // callback FnMut; only construction-time clone reads cross

@@ -881,6 +881,39 @@ fn run() {
 }
 
 #[test]
+fn reactive_capture_rejects_local_views_before_rustc() {
+    let source = r#"
+fn run() {
+    values := [1, 2]
+    first :: values[0..1]
+    #Reactive { print(first.len()) }
+}
+"#;
+    let diags =
+        jet::compile(source).expect_err("a stored reactive effect cannot capture a local View");
+    assert!(diags.iter().any(|diag| diag.code == "E2305"), "{diags:?}");
+
+    let root = common::unique_tmp("jet_reactive_view_capture");
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("main.jet");
+    fs::write(&path, source).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["build", path.to_str().unwrap()])
+        .current_dir(&root)
+        .output()
+        .expect("run the production build path");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "the frontend must reject the View capture");
+    assert_ne!(
+        output.status.code(),
+        Some(101),
+        "a reactive View capture leaked to rustc: {stderr}"
+    );
+    assert!(stderr.contains("E2305"), "wrong frontend diagnostic: {stderr}");
+    assert!(!stderr.contains("E0597"), "rustc lifetime error leaked: {stderr}");
+}
+
+#[test]
 fn move_lambda_construction_consumes_owned_nonscalar_captures() {
     for (source, expected) in [
         (r#"
@@ -1698,6 +1731,46 @@ fn invoke(editor: &Edit) {
 fn run() {}
 "#;
     jet::compile(accepted).expect("an editable trait-object callback capture is valid");
+}
+
+#[test]
+fn multi_trait_receiver_access_follows_first_match_dispatch_order() {
+    let read_first = r#"
+trait Inspect {
+    fn touch(self)
+}
+trait Edit {
+    fn touch(&self)
+}
+fn call(callback: fn()) { callback() }
+fn inspect_all(items: ...[Inspect, Edit]) {
+    loop item; items {
+        call(() => { item.touch() })
+    }
+}
+fn run() {}
+"#;
+    jet::compile(read_first)
+        .expect("the first matching read-self method controls dispatch and capture access");
+
+    let write_first = r#"
+trait Inspect {
+    fn touch(self)
+}
+trait Edit {
+    fn touch(&self)
+}
+fn call(callback: fn()) { callback() }
+fn edit_all(items: ...[Edit, Inspect]) {
+    loop item; items {
+        call(() => { item.touch() })
+    }
+}
+fn run() {}
+"#;
+    let diags = jet::compile(write_first)
+        .expect_err("the first matching write-self method needs edit access");
+    assert!(diags.iter().any(|diag| diag.code == "E0202"), "{diags:?}");
 }
 
 #[test]
