@@ -1072,6 +1072,17 @@ impl<'a> Checker<'a> {
                                     } else {
                                         self.report_string_view_boundary(e.span());
                                     }
+                                } else if let Some((_, place, _, access)) = self
+                                    .view_call_sources(e)
+                                    .into_iter()
+                                    .find(|(path, ..)| path.is_empty())
+                                {
+                                    self.check_named_view_return(
+                                        &place,
+                                        access,
+                                        Vec::new(),
+                                        e.span(),
+                                    );
                                 } else {
                                     self.report_string_view_boundary(e.span());
                                 }

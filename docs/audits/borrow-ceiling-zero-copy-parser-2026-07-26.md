@@ -21,7 +21,12 @@ through its wrapper. Generated Rust gives both token fields one hidden lifetime
 tied to the source parameter. No user-written lifetime syntax, raw reference
 field, fallback, or second view mechanism is present.
 
-The audit found no valid-code rejection in the ownership checker. The checker
-therefore needs no production change. Focused tests cover the successful port,
-a parser-owned source failure, hostile source replacement through the wrapper,
-and exact native output from the executable memory example.
+The audit found one valid-code rejection: returning one projected parser output
+as `View<str>` lost the aggregate output-slot provenance after inference wrapped
+the expression in `copy`. The checker now carries the existing provenance
+through that wrapper and field projection. This is a composition fix to
+D-MEM-VIEWRET1, not a new mechanism.
+
+Focused tests cover the successful port, a parser-owned source failure, hostile
+source replacement for each output slot in isolation, and exact native output
+from the executable memory example.

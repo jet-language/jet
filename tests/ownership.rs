@@ -1096,7 +1096,7 @@ fn run() {
 /// token still observes that storage.
 #[test]
 fn zero_copy_parser_blocks_source_replacement_while_token_is_live() {
-    for field in ["text", "rest"] {
+    for (projection, field) in [("parse_text", "text"), ("parse_rest", "rest")] {
         let src = r#"
 struct Token {
     text: View<str>,
@@ -1113,14 +1113,22 @@ fn parse(source: String) -> Token {
     return scan(source)
 }
 
+fn parse_text(source: String) -> View<str> {
+    return parse(source).text
+}
+
+fn parse_rest(source: String) -> View<str> {
+    return parse(source).rest
+}
+
 fn run() {
     source := "name:value"
-    token :: parse(source)
+    selected :: $PROJECTION(source)
     source = "other:data"
-    print(token.$FIELD)
+    print(selected)
 }
 "#
-        .replace("$FIELD", field);
+        .replace("$PROJECTION", projection);
         let diags =
             jet::compile(&src).expect_err("live parser views must keep caller storage stable");
         assert!(
