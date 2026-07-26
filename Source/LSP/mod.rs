@@ -38,16 +38,79 @@ pub(crate) use SymbolDB::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEST_PROJECT: AtomicU64 = AtomicU64::new(0);
+
+    /// Keep unit overlays outside the Jet checkout. A relative `test.jet`
+    /// discovers this repository's manifest and scans the full workspace.
+    struct TestProject {
+        root: std::path::PathBuf,
+        entry: String,
+    }
+
+    impl TestProject {
+        fn new() -> Self {
+            let root = loop {
+                let candidate = std::env::temp_dir().join(format!(
+                    "jet-lsp-unit-{}-{}",
+                    std::process::id(),
+                    NEXT_TEST_PROJECT.fetch_add(1, Ordering::Relaxed)
+                ));
+                match std::fs::create_dir(&candidate) {
+                    Ok(()) => break candidate,
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => panic!("create isolated LSP test project: {error}"),
+                }
+            };
+            let entry = root.join("test.jet").to_string_lossy().into_owned();
+            Self { root, entry }
+        }
+
+        fn entry(&self) -> &str {
+            &self.entry
+        }
+    }
+
+    impl Drop for TestProject {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn check_test_document(
+        text: &str,
+    ) -> (
+        TestProject,
+        Vec<crate::Diagnostics::Diagnostic>,
+        Option<crate::AST::ProgramBundle>,
+        jet_semindex::SemIndexEffectFacts,
+    ) {
+        let project = TestProject::new();
+        let (diagnostics, bundle, facts) = check_document_with_bundle(project.entry(), text);
+        (project, diagnostics, bundle, facts)
+    }
 
     #[test]
     fn old_binding_keyword_has_no_teaching_edit() {
         let src = "fn run() {\n    let x = 1\n}\n";
-        let diags = check_document("test.jet", src);
+        let (_, diags, _, _) = check_test_document(src);
         assert!(
             !diags.iter().any(|d| d.code == "E0009" || d.code == "E0985"),
             "old binding words should not produce migration diagnostics: {diags:?}"
         );
         assert!(!diags.is_empty(), "old binding words should still fail");
+    }
+
+    #[test]
+    fn test_document_context_does_not_discover_the_workspace() {
+        let (project, diagnostics, bundle, _) = check_test_document("fn run() {}\n");
+        assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+        let bundle = bundle.expect("bundle");
+        assert_eq!(bundle.project_root, project.root);
+        assert_eq!(bundle.modules.len(), 1);
+        assert_eq!(bundle.modules[0].display, project.entry());
+        assert!(!project.root.starts_with(env!("CARGO_MANIFEST_DIR")));
     }
 
     #[test]
@@ -63,7 +126,7 @@ mod tests {
     fn symbol_db_finds_function() {
         let src =
             "fn greet(name: String) {\n    print(name);\n}\nfn run() {\n    greet(\"world\");\n}\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (_, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
         assert!(db.defs.iter().any(|d| d.name == "greet"));
@@ -74,12 +137,12 @@ mod tests {
     #[test]
     fn hover_returns_function_signature() {
         let src = "fn add(a: Int, b: Int) -> Int { return a + b; }\nfn run() { r :: add(1, 2) }\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
         let (toks, _) = crate::Lexer::lex(src);
         // Hover over 'add' at offset 3 (the name span)
-        let hover = compute_hover(&db, &toks, src, "test.jet", 3);
+        let hover = compute_hover(&db, &toks, src, project.entry(), 3);
         assert!(hover.is_some(), "expected hover for 'add'");
         let h = hover.unwrap();
         assert!(h.contains("add"), "hover should mention the function name");
@@ -88,11 +151,11 @@ mod tests {
     #[test]
     fn rename_basic_function() {
         let src = "fn greet() {}\nfn run() { greet(); }\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
         let (toks, _) = crate::Lexer::lex(src);
-        let spans = compute_rename(&db, &toks, "test.jet", 3, "hello").expect("rename ok");
+        let spans = compute_rename(&db, &toks, project.entry(), 3, "hello").expect("rename ok");
         assert!(!spans.is_empty());
         assert!(spans.iter().any(|(_, sp)| sp.start <= 3 && 3 <= sp.end));
     }
@@ -100,42 +163,42 @@ mod tests {
     #[test]
     fn rename_rejects_keyword() {
         let src = "fn greet() {}\nfn run() { greet(); }\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
         let (toks, _) = crate::Lexer::lex(src);
-        assert!(compute_rename(&db, &toks, "test.jet", 3, "fn").is_err());
+        assert!(compute_rename(&db, &toks, project.entry(), 3, "fn").is_err());
     }
 
     #[test]
     fn rename_rejects_reserved_double_underscore_name() {
         let src = "fn greet() {}\nfn run() { greet(); }\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
         let (tokens, _) = crate::Lexer::lex(src);
-        assert!(compute_rename(&db, &tokens, "test.jet", 3, "__generated").is_err());
+        assert!(compute_rename(&db, &tokens, project.entry(), 3, "__generated").is_err());
     }
 
     #[test]
     fn rename_preserves_identifier_case_category() {
         let src = "fn greet() {}\nfn run() { greet(); }\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
         let (toks, _) = crate::Lexer::lex(src);
-        let err = compute_rename(&db, &toks, "test.jet", 3, "BadName").unwrap_err();
+        let err = compute_rename(&db, &toks, project.entry(), 3, "BadName").unwrap_err();
         assert!(err.contains("bad_name"), "{err}");
     }
 
     #[test]
     fn rename_uses_semantic_category_for_uncased_unicode_names() {
         let src = "fn 日本語() {}\nfn run() { 日本語(); }\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
         let (tokens, _) = crate::Lexer::lex(src);
-        assert!(compute_rename(&db, &tokens, "test.jet", 3, "new_name").is_ok());
-        let err = compute_rename(&db, &tokens, "test.jet", 3, "BadName").unwrap_err();
+        assert!(compute_rename(&db, &tokens, project.entry(), 3, "new_name").is_ok());
+        let err = compute_rename(&db, &tokens, project.entry(), 3, "BadName").unwrap_err();
         assert!(err.contains("bad_name"), "{err}");
     }
 
@@ -150,18 +213,30 @@ module holder<T> { pub struct Box { value: T } }
 module cache = holder<Int>
 fn run() {}
 "#;
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
         let (tokens, _) = crate::Lexer::lex(src);
         for name in ["UserId", "Count", "Length", "Door", "Open", "Wire", "Send"] {
-            let err = compute_rename(&db, &tokens, "test.jet", src.find(name).unwrap(), "bad_name")
-                .unwrap_err();
+            let err = compute_rename(
+                &db,
+                &tokens,
+                project.entry(),
+                src.find(name).unwrap(),
+                "bad_name",
+            )
+            .unwrap_err();
             assert!(err.contains("BadName"), "{name}: {err}");
         }
         for name in ["meter", "holder", "cache"] {
-            let err = compute_rename(&db, &tokens, "test.jet", src.find(name).unwrap(), "BadName")
-                .unwrap_err();
+            let err = compute_rename(
+                &db,
+                &tokens,
+                project.entry(),
+                src.find(name).unwrap(),
+                "BadName",
+            )
+            .unwrap_err();
             assert!(err.contains("bad_name"), "{name}: {err}");
         }
     }
@@ -178,10 +253,10 @@ fn run() {}
     #[test]
     fn inlay_hints_for_int_literal() {
         let src = "fn run() {\n    x :: 42\n    count := 0\n}\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
-        let hints = db.inlay_hints_for("test.jet");
+        let hints = db.inlay_hints_for(project.entry());
         assert!(
             hints.iter().any(|h| h.label.contains(": Int")),
             "expected : Int inlay hint for immutable binding"
@@ -195,10 +270,10 @@ fn run() {}
     #[test]
     fn completion_includes_keywords() {
         let src = "fn run() {\n    \n}\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
-        let items = compute_completions(&db, src, 14, "test.jet", None, None);
+        let items = compute_completions(&db, src, 14, project.entry(), None, None);
         // Keyword completions expose only Jet syntax.
         assert!(
             !items.iter().any(|i| i.label == "val"),
@@ -218,17 +293,17 @@ fn run() {}
     #[test]
     fn completion_hides_soft_public_names_until_explicitly_requested() {
         let src = "pub fn _helper() {}\nfn run() {}\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
         assert!(db.symbols.lookup("_helper").len() == 1);
         assert!(!db
             .symbols
-            .complete_visible_in("", None, Some("test.jet"))
+            .complete_visible_in("", None, Some(project.entry()))
             .iter()
             .any(|symbol| symbol.name == "_helper"));
         assert!(db
             .symbols
-            .complete_visible_in("_", None, Some("test.jet"))
+            .complete_visible_in("_", None, Some(project.entry()))
             .iter()
             .any(|symbol| symbol.name == "_helper"));
     }
@@ -236,18 +311,19 @@ fn run() {}
     #[test]
     fn hover_and_completion_use_same_semantic_fact() {
         let src = "/// Adds two values.\n/// Example: add(1, 2)\nfn add(a: Int, b: Int) -> Int { return a + b }\nfn run() {\n    \n}\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
         let symbol = db
             .symbols
-            .lookup_identity("fn:module:test.jet::add")
+            .lookup_identity(&format!("fn:module:{}::add", project.entry()))
             .expect("add fact");
         let (tokens, _) = crate::Lexer::lex(src);
         let hover_offset = src.find("\nfn add").unwrap() + 4;
-        let hover = compute_hover(&db, &tokens, src, "test.jet", hover_offset).expect("hover");
+        let hover =
+            compute_hover(&db, &tokens, src, project.entry(), hover_offset).expect("hover");
         let offset = src.rfind("    \n").unwrap() + 4;
-        let completion = compute_completions(&db, src, offset, "test.jet", None, None)
+        let completion = compute_completions(&db, src, offset, project.entry(), None, None)
             .into_iter()
             .find(|item| item.label == "add")
             .expect("add completion");
@@ -259,11 +335,11 @@ fn run() {}
     #[test]
     fn completion_uses_builtin_member_facts_for_list_local() {
         let src = "fn run() {\n    items :: [1, 2]\n    count :: items.len()\n}\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
         let offset = src.find("items.len").unwrap() + "items.l".len();
-        let items = compute_completions(&db, src, offset, "test.jet", None, None);
+        let items = compute_completions(&db, src, offset, project.entry(), None, None);
         let len = db.symbols.lookup_qualified("List.len").unwrap();
         assert!(items.iter().any(|item| {
             item.label == "len" && item.detail.as_deref() == Some(len.signature.as_str())
@@ -273,10 +349,10 @@ fn run() {}
     #[test]
     fn completion_catalogs_numeric_destination_methods() {
         let src = "fn run() {\n    value :: F32.from_float(1.0) ?? F32.from_int(0)\n}\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
         let offset = src.find("F32.from_f").unwrap() + "F32.from_f".len();
-        let items = compute_completions(&db, src, offset, "test.jet", None, None);
+        let items = compute_completions(&db, src, offset, project.entry(), None, None);
         assert!(items.iter().any(|item| {
             item.label == "from_float"
                 && item.detail.as_deref()
@@ -295,7 +371,7 @@ fn run() {
     money :: Credit.from_int(1)
 }
 "#;
-        let (diagnostics, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, diagnostics, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(
             &bundle.unwrap_or_else(|| panic!("bundle diagnostics: {diagnostics:#?}")),
             &facts,
@@ -306,7 +382,7 @@ fn run() {
             &db,
             src,
             token_site + "Token.from_u".len(),
-            "test.jet",
+            project.entry(),
             None,
             None,
         );
@@ -320,7 +396,7 @@ fn run() {
                 &db,
                 src,
                 unit_site + "Credit.from_i".len(),
-                "test.jet",
+                project.entry(),
                 None,
                 None,
             );
@@ -331,10 +407,10 @@ fn run() {
     #[test]
     fn completion_excludes_locals_from_other_functions() {
         let src = "fn first() {\n    hidden :: 1\n}\nfn second() {\n    \n}\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
         let offset = src.rfind("    \n").unwrap() + 4;
-        assert!(!compute_completions(&db, src, offset, "test.jet", None, None)
+        assert!(!compute_completions(&db, src, offset, project.entry(), None, None)
             .iter()
             .any(|item| item.label == "hidden"));
     }
@@ -342,7 +418,7 @@ fn run() {
     #[test]
     fn completion_respects_then_else_slot_boundaries() {
         let src = "fn run(flag: Bool) {\n    if flag {\n        then_only :: 1\n        print(then_only)\n    } else {\n        else_only :: 2\n        print(else_only)\n    }\n}\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
         let then_start = src.find("if flag {").unwrap() + "if flag {".len();
         let then_end = src.find("    } else {").unwrap() + 4;
@@ -359,11 +435,13 @@ fn run() {
                 && boundary.span.end == else_end
         }));
         let then_offset = src.find("print(then_only)").unwrap();
-        let then_items = compute_completions(&db, src, then_offset, "test.jet", None, None);
+        let then_items =
+            compute_completions(&db, src, then_offset, project.entry(), None, None);
         assert!(then_items.iter().any(|item| item.label == "then_only"));
         assert!(!then_items.iter().any(|item| item.label == "else_only"));
         let else_offset = src.find("print(else_only)").unwrap();
-        let else_items = compute_completions(&db, src, else_offset, "test.jet", None, None);
+        let else_items =
+            compute_completions(&db, src, else_offset, project.entry(), None, None);
         assert!(else_items.iter().any(|item| item.label == "else_only"));
         assert!(!else_items.iter().any(|item| item.label == "then_only"));
     }
@@ -371,10 +449,10 @@ fn run() {
     #[test]
     fn completion_keeps_then_local_out_of_empty_else() {
         let src = "fn run(flag: Bool) {\n    if flag {\n        then_only :: 1\n    } else {\n        \n    }\n}\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
         let offset = src.rfind("        \n").unwrap() + 8;
-        assert!(!compute_completions(&db, src, offset, "test.jet", None, None)
+        assert!(!compute_completions(&db, src, offset, project.entry(), None, None)
             .iter()
             .any(|item| item.label == "then_only"));
     }
@@ -382,7 +460,7 @@ fn run() {
     #[test]
     fn completion_sees_parameter_inside_empty_body() {
         let src = "fn inspect(value: Int) {\n    \n}\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
         let offset = src.find("    \n").unwrap() + 4;
         let scope = db
@@ -396,7 +474,7 @@ fn run() {
             .unwrap();
         assert_eq!(scope.span.start, src.find('{').unwrap() + 1);
         assert_eq!(scope.span.end, src.rfind('}').unwrap());
-        assert!(compute_completions(&db, src, offset, "test.jet", None, None)
+        assert!(compute_completions(&db, src, offset, project.entry(), None, None)
             .iter()
             .any(|item| item.label == "value"));
     }
@@ -404,7 +482,7 @@ fn run() {
     #[test]
     fn completion_sees_last_local_on_trailing_blank_line() {
         let src = "fn run() {\n    last_local :: 1\n    \n}\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let db = build_symbol_db(&bundle.expect("bundle"), &facts);
         let offset = src.rfind("    \n").unwrap() + 4;
         let scope = db
@@ -417,7 +495,7 @@ fn run() {
             .as_ref()
             .unwrap();
         assert_eq!(scope.span.end, src.rfind('}').unwrap());
-        assert!(compute_completions(&db, src, offset, "test.jet", None, None)
+        assert!(compute_completions(&db, src, offset, project.entry(), None, None)
             .iter()
             .any(|item| item.label == "last_local"));
     }
@@ -425,14 +503,14 @@ fn run() {
     #[test]
     fn slot_boundaries_ignore_comment_and_interpolation_braces() {
         let src = "fn run(flag: Bool) {\n    text :: \"flag={flag}\"\n    // comment braces: { }\n    \n}\n";
-        let (_, bundle, facts) = check_document_with_bundle("test.jet", src);
+        let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let expected_start = src.find('{').unwrap() + 1;
         let expected_end = src.rfind('}').unwrap();
         assert_eq!(bundle.modules[0].block_spans, vec![crate::Diagnostics::Span::new(expected_start, expected_end)]);
         let db = build_symbol_db(&bundle, &facts);
         let offset = src.rfind("    \n").unwrap() + 4;
-        assert!(compute_completions(&db, src, offset, "test.jet", None, None)
+        assert!(compute_completions(&db, src, offset, project.entry(), None, None)
             .iter()
             .any(|item| item.label == "text"));
     }
