@@ -119,6 +119,12 @@ pub(crate) fn enum_payload_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<Str
         return true;
     }
     match ty {
+        Type::Union(members) => {
+            !members.is_empty()
+                && members
+                    .iter()
+                    .all(|member| enum_payload_ty_covered(member, cx, seen))
+        }
         Type::Named(n) => {
             if cx.enum_variants.contains_key(n) {
                 enum_is_covered_inner(n, cx, seen)

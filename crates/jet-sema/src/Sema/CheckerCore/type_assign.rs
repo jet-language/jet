@@ -10,6 +10,26 @@ use crate::Sema::Diagnostics::{
 };
 use crate::Syntax;
 use super::helpers::no_any_type;
+
+fn union_member_has_open_shape(ty: &Type) -> bool {
+    match ty {
+        Type::TraitObject(_) | Type::Fn { .. } => true,
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::Tagged { inner, .. }
+        | Type::FixedList { elem: inner, .. } => union_member_has_open_shape(inner),
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            union_member_has_open_shape(key) || union_member_has_open_shape(value)
+        }
+        Type::Apply { args, .. } | Type::Union(args) => {
+            args.iter().any(union_member_has_open_shape)
+        }
+        Type::Tuple(fields) => fields.iter().any(|(_, field)| union_member_has_open_shape(field)),
+        _ => false,
+    }
+}
+
 impl<'a> Checker<'a> {
         pub(crate) fn check_declared_type(&mut self, ty: &Type, span: Span) {
             self.warn_soft_public_declared_type(ty, span);
@@ -388,12 +408,27 @@ impl<'a> Checker<'a> {
                 }
                 Type::Union(members) => {
                     // D-UNIONTYPE1=A: only concrete closed member types.
+                    let param_names_owned = self
+                        .type_param_scope
+                        .iter()
+                        .map(|p| p.name.clone())
+                        .collect::<Vec<_>>();
+                    let param_names = param_names_owned
+                        .iter()
+                        .map(String::as_str)
+                        .collect::<std::collections::HashSet<_>>();
                     for m in members {
-                        if matches!(m, Type::TraitObject(_) | Type::Fn { .. }) {
+                        let mut mentioned = std::collections::HashSet::new();
+                        crate::Generics::collect_type_param_mentions(
+                            m,
+                            &param_names,
+                            &mut mentioned,
+                        );
+                        if union_member_has_open_shape(m) || !mentioned.is_empty() {
                             self.diags.push(Diagnostic::error(
                                 "E0363",
                                 format!("`{}` can't be a union member", m.name()),
-                                "anonymous unions hold concrete closed types — not trait objects or function types".to_string(),
+                                "anonymous unions hold concrete closed types — not type parameters, trait objects, or function types".to_string(),
                                 "use a named enum when a member needs an open shape".to_string(),
                                 Some(span),
                             ));

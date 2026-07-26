@@ -203,6 +203,123 @@ b :: U8.{ 100 }
     assert_eq!(code, 70, "U8 overflow should trap (exit 70)");
 }
 
+#[test]
+fn unrelated_codable_does_not_require_union_codecs() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+struct Raw {
+    value: Int
+}
+
+fn hold(value: Int | Raw) -> Int | Raw {
+    return ~value
+}
+
+#Codable
+struct Encoded {
+    value: Int
+}
+
+fn run() {
+    raw :: Raw.{ value: 7 }
+    _ :: hold(raw)
+    print("ok")
+}
+"#;
+    let (code, stdout) = build_and_run("union_unrelated_codable", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "ok\n");
+}
+
+#[test]
+fn union_codec_emission_respects_derive_direction() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+use core.encoding.json as json
+
+struct WriteOnly {
+    marker: Int
+}
+
+impl WriteOnly.Encode {
+    fn encode(self) -> DataTree {
+        return DataTree.Text("write")
+    }
+}
+
+#Encode
+struct Output {
+    value: Int | WriteOnly
+}
+
+struct ReadOnly {
+    marker: Int
+}
+
+impl ReadOnly.Decode {
+    fn decode(tree: DataTree) -> ReadOnly ? DecodeError {
+        return Ok(ReadOnly.{ marker: 0 })
+    }
+}
+
+#Decode
+struct Input {
+    value: Int | ReadOnly
+}
+
+fn run() {
+    output :: Output.{ value: WriteOnly.{ marker: 1 } }
+    print(json.to_string(output))
+    _ :: json.decode<Input>("{{\"value\":7}}") ?? panic("input")
+    print("ok")
+}
+"#;
+    let (code, stdout) = build_and_run("union_codec_direction", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "{\"value\":\"write\"}\nok\n");
+}
+
+#[test]
+fn optional_union_null_and_enum_payload_round_trip() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+use core.encoding.json as json
+
+#Codable
+struct MaybeRow {
+    value: Int? | String
+}
+
+#Codable
+enum Envelope {
+    Value(Int | String)
+}
+
+fn run() {
+    decoded :: json.decode<MaybeRow>("{{\"value\":null}}") ?? panic("row")
+    print(json.to_string(decoded))
+
+    envelope :: Envelope.Value(7)
+    envelope_wire :: json.to_string(envelope)
+    print(envelope_wire)
+    back :: json.decode<Envelope>(envelope_wire) ?? panic("envelope")
+    print(json.to_string(back))
+}
+"#;
+    let (code, stdout) = build_and_run("union_codable_roundtrip", src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "{\"value\":null}\n{\"Value\":7}\n{\"Value\":7}\n"
+    );
+}
+
 // --- c109 Phase 2: control-flow loops ---------------------------------------
 
 /// Infinite `loop { … }` with a `break`, plus the `loop cond` while form. Both

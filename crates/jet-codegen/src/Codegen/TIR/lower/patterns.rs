@@ -730,8 +730,12 @@ pub(crate) fn lower_enum_arg(
         .boxed_edges
         .contains(&(type_name.to_string(), edge.to_string()));
     let _ = variant;
+    let mut value = lower_expr(e, cx, env);
+    if let Some(want) = payload_ty {
+        value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
+    }
     TEnumArg {
-        value: lower_expr(e, cx, env),
+        value,
         clone,
         boxed,
     }

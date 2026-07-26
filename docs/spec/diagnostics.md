@@ -316,6 +316,7 @@ renumbered, and no new `W` code may be allocated.
 | E0362 | sema  | a hooked compound assignment targets a nested field place not yet lowerable as one write (D-OPDEF1) |
 | E0363 | sema  | anonymous-union member is not a concrete closed type (D-UNIONTYPE1) |
 | E0364 | sema  | inclusive `0..xs.len()` indexes that same `xs` (D-RANGE-EXCL1=C) |
+| E0365 | sema  | repeated anonymous-union match member (D-UNIONTYPE1) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | guard table should use closed-enum subject dispatch (lint) |
 | E0401 | sema  | fallible value used where plain `T` expected |
@@ -1243,8 +1244,9 @@ already-freed arena), these track the views themselves.
 | E0360 | No `{symbol}` operator is defined for `{type}`. | User arithmetic dispatches only through the matching fixed operator trait hook; the compiler does not guess a method or fall through to rustc. | Implement the named `Type.Trait` hook, or call a named method instead. |
 | E0361 | `{hook}` calls itself through `{symbol}`. | The symbol inside its own hook dispatches directly back to that hook, so evaluation would recurse forever. | Combine the value's fields directly, or call a different named helper inside the hook. |
 | E0362 | Compound assignment can't target a nested operator field. | Hooked compound assignment must read and write one stable place exactly once; nested field places are not yet represented by the operator assignment spine. | Bind the inner value, update it, then assign the whole inner value back. |
-| E0363 | `{Type}` can't be a union member. | Anonymous unions (D-UNIONTYPE1=A) hold concrete closed member types only — not trait objects or function types. | Use a named enum when a member needs an open shape. |
+| E0363 | `{Type}` can't be a union member. | Anonymous unions (D-UNIONTYPE1=A) hold concrete closed member types only — not type parameters, trait objects, or function types. | Use a named enum when a member needs an open shape. |
 | E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop i, item; xs` — or `loop i; xs.indexes()` — or `0..<xs.len()`. |
+| E0365 | Arm `{Type}` is unreachable — that case is already handled. | Every earlier arm already covers this pattern. | Remove this arm or merge it with the one above. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 

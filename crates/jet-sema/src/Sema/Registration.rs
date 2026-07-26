@@ -169,10 +169,8 @@ impl<'a> Checker<'a> {
             );
         }
         if let Some(return_type) = &f.return_type {
-            self.warn_soft_public_declared_type(
-                return_type,
-                f.return_type_span.unwrap_or(f.name_span),
-            );
+            let return_type = self.resolve_type(return_type.clone());
+            self.check_declared_type(&return_type, f.return_type_span.unwrap_or(f.name_span));
         }
         for p in &f.params {
             // D-ANY-JAI1: the `...[TraitA, TraitB]` bound-list form parses `ty`

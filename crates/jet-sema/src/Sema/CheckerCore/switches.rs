@@ -421,16 +421,31 @@ impl<'a> Checker<'a> {
                                     .iter()
                                     .any(|c| variant.starts_with(&format!("{c}.")));
                             if already {
-                                self.diags.push(Diagnostic::lint(
-                                    "L0301",
-                                    format!(
-                                        "arm `{}` is unreachable — that case is already handled",
-                                        variant
-                                    ),
-                                    "every earlier arm already covers this pattern".to_string(),
-                                    "remove this arm or merge it with the one above".to_string(),
-                                    Some(pspan),
-                                ));
+                                let what = format!(
+                                    "arm `{}` is unreachable — that case is already handled",
+                                    variant
+                                );
+                                let why =
+                                    "every earlier arm already covers this pattern".to_string();
+                                let fix =
+                                    "remove this arm or merge it with the one above".to_string();
+                                if matches!(st, Type::Union(_)) {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0365",
+                                        what,
+                                        why,
+                                        fix,
+                                        Some(pspan),
+                                    ));
+                                } else {
+                                    self.diags.push(Diagnostic::lint(
+                                        "L0301",
+                                        what,
+                                        why,
+                                        fix,
+                                        Some(pspan),
+                                    ));
+                                }
                             } else {
                                 covered.insert(variant);
                             }
