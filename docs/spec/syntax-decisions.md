@@ -862,9 +862,10 @@ per-value reason keeps every discard auditable at its site. The
 result would also swallow the fallible call someone adds later.
 
 **Teaching & lint law**: `=` in a condition is E0322 with a "did you mean
-`==`?" fix (D-ASSIGNCOND1). Homoglyph confusable names lint L0503 default-on
-(D-CONFUSE1). Semantic-smell lints — float `==`, duplicate branches
-default-on; full always-true condition coverage is tracked by #343.
+`==`?" fix (D-ASSIGNCOND1). Identifier shapes use D-SHAPE-CASE1=C's
+zero-exception errors, not a parallel lint. Semantic-smell lints — float `==`,
+duplicate branches default-on; full always-true condition coverage is tracked
+by #343.
 
 ### Modules, visibility & imports
 
