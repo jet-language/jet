@@ -238,6 +238,33 @@ impl<'a> Checker<'a> {
             span: Span,
             ret: Option<Type>,
         ) -> Option<Type> {
+            let mut call_access = self.call_access_frame();
+            let receiver_borrow = Collections::builtin_receiver_borrow(recv_ty, method);
+            self.with_call_access(&mut call_access, |checker| {
+                match receiver_borrow {
+                    Collections::BuiltinReceiverBorrow::TwoPhaseWrite => {
+                        checker.record_call_receiver_reservation(receiver, span);
+                    }
+                    Collections::BuiltinReceiverBorrow::EagerWrite => checker
+                        .record_call_receiver_access(
+                            receiver,
+                            crate::AST::AccessConvention::Write,
+                            span,
+                        ),
+                    Collections::BuiltinReceiverBorrow::Read => checker
+                        .record_call_receiver_access(
+                            receiver,
+                            crate::AST::AccessConvention::Read,
+                            span,
+                        ),
+                    Collections::BuiltinReceiverBorrow::Move => checker
+                        .record_call_receiver_access(
+                            receiver,
+                            crate::AST::AccessConvention::Move,
+                            span,
+                        ),
+                }
+            });
             if Collections::builtin_needs_mut_receiver(recv_ty, method) {
                 if let Some(root) = expr_root_ident(receiver) {
                     let root = root.to_string();
@@ -350,7 +377,11 @@ impl<'a> Checker<'a> {
                             self.diags
                                 .push(wrong_core_arity("ids", 0, args.len(), span));
                             for a in args.iter_mut() {
-                                self.infer(&mut a.expr);
+                                self.with_call_access(&mut call_access, |checker| {
+                                    let inferred = checker.infer(&mut a.expr);
+                                    checker.check_call_argument_captures(&a.expr);
+                                    inferred
+                                });
                             }
                         }
                         let elem_ty = match recv_ty {
@@ -390,7 +421,11 @@ impl<'a> Checker<'a> {
                 && Syntax::DURATION_CONSTRUCTORS.contains(&method)
             {
                 for arg in args.iter_mut() {
-                    let got = self.infer(&mut arg.expr);
+                    let got = self.with_call_access(&mut call_access, |checker| {
+                        let inferred = checker.infer(&mut arg.expr);
+                        checker.check_call_argument_captures(&arg.expr);
+                        inferred
+                    });
                     if !matches!(got, Some(Type::Int | Type::Float)) {
                         self.diags.push(Diagnostic::error(
                             "E0108",
@@ -412,7 +447,13 @@ impl<'a> Checker<'a> {
                     "reduce" | "fold" | "scan"
                 ) {
                     let saved_exp = self.expected_type.take();
-                    let seed = args.first_mut().and_then(|arg| self.infer(&mut arg.expr));
+                    let seed = args.first_mut().and_then(|arg| {
+                        self.with_call_access(&mut call_access, |checker| {
+                            let inferred = checker.infer(&mut arg.expr);
+                            checker.check_call_argument_captures(&arg.expr);
+                            inferred
+                        })
+                    });
                     self.expected_type = saved_exp;
                     if let Some(seed_ty) = &seed {
                         if let Some(slot) = expected.first_mut() {
@@ -446,7 +487,11 @@ impl<'a> Checker<'a> {
                     let got = if i == 0 && inferred_seed.is_some() {
                         inferred_seed.clone()
                     } else {
-                        self.infer(&mut arg.expr)
+                        self.with_call_access(&mut call_access, |checker| {
+                            let inferred = checker.infer(&mut arg.expr);
+                            checker.check_call_argument_captures(&arg.expr);
+                            inferred
+                        })
                     };
                     self.expected_type = saved_exp;
                     self.lambda_escapes = saved_esc;
@@ -629,10 +674,15 @@ impl<'a> Checker<'a> {
                 }
             } else {
                 for a in args.iter_mut() {
-                    self.infer(&mut a.expr);
+                    self.with_call_access(&mut call_access, |checker| {
+                        let inferred = checker.infer(&mut a.expr);
+                        checker.check_call_argument_captures(&a.expr);
+                        inferred
+                    });
                 }
             }
             let _ = span;
+            self.activate_call_reservations(&call_access, span);
             refined_ret
         }
     

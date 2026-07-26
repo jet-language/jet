@@ -670,6 +670,20 @@ pub(crate) enum ViewAccess {
     Write,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct CallPlaceAccess {
+    place: ViewPlace,
+    access: ViewAccess,
+    /// Rust two-phase mutable receiver borrow: reads may occur while reserved,
+    /// but another write/reservation may not.
+    reserved: bool,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct CallAccessFrame {
+    accesses: Vec<CallPlaceAccess>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewOwnerOrigin {
     Local,
@@ -1080,6 +1094,9 @@ pub(crate) struct Checker<'a> {
     concrete_unit_values: Vec<HashMap<String, f64>>,
     /// name -> span of the use that gave the value away.
     moved: HashMap<String, Span>,
+    /// Field inference reads its base only to discover its type. Suppress a
+    /// partial-root move report there; the complete field place is checked first.
+    suppress_partial_move_root_read: bool,
     loop_depth: usize,
     /// D-LOOPLABEL3=A: stack of `name :: loop` names; scope, innermost last.
     loop_labels: Vec<String>,
@@ -1174,6 +1191,9 @@ pub(crate) struct Checker<'a> {
     /// with the existing statement-tail analysis, this makes local window
     /// conflicts end at last use instead of lexical scope end.
     views_used_in_stmt: HashSet<String>,
+    /// #1196: argument and receiver loans that remain active until their call
+    /// finishes. Nested calls see every outer frame.
+    call_access_frames: Vec<CallAccessFrame>,
     /// D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL2:
     /// `Type.{ uninit }` bindings not yet definitely written — maps name → the
     /// decl span. A read while still in this map is E0420 (write-before-read
@@ -1631,5 +1651,6 @@ pub fn block_free_var_reads(stmts: &[crate::AST::Stmt]) -> HashSet<String> {
     let mut read = HashSet::new();
     let mut mut_cap = HashSet::new();
     Captures::block_collect_captures(stmts, &mut bound, &mut read, &mut mut_cap);
+    read.extend(mut_cap);
     read
 }

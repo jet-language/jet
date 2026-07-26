@@ -1,9 +1,32 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Generics::is_type_var_name;
+use crate::Generics::{is_type_var_name, substitute_type};
+use crate::Collections;
 use crate::Syntax;
-use crate::AST::{AccessConvention, Expr, Lambda, LValue, Type, UnOp, VariantPayload};
+use crate::AST::{
+    AccessConvention, ElseBranch, Expr, ForKind, Lambda, LambdaBody, LValue, Pattern, Stmt, Type,
+    UnOp, VariantPayload,
+};
 use std::collections::{HashMap, HashSet};
+
+#[derive(Clone)]
+struct EvaluatedAccess {
+    place: ViewPlace,
+    capture_place: ViewPlace,
+    capture_ty: Option<Type>,
+    capture_is_view: bool,
+    access: ViewAccess,
+    span: Span,
+    through_call: bool,
+    moves_owner: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AccessWalkMode {
+    EvaluateNow,
+    ConstructCaptures,
+    CaptureRequirements,
+}
 
 fn const_place_int(expr: &Expr) -> Option<i64> {
     match expr {
@@ -427,6 +450,1163 @@ impl<'a> Checker<'a> {
         out
     }
 
+    pub(crate) fn call_access_frame(&self) -> CallAccessFrame {
+        CallAccessFrame::default()
+    }
+
+    /// Make one call's accumulated loans visible while its next expression is
+    /// checked. The frame lives in the caller between arguments and is always
+    /// restored by this closure boundary, including ordinary early returns.
+    pub(crate) fn with_call_access<T>(
+        &mut self,
+        frame: &mut CallAccessFrame,
+        check: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        self.call_access_frames.push(std::mem::take(frame));
+        let result = check(self);
+        *frame = self.call_access_frames.pop().unwrap_or_default();
+        result
+    }
+
+    /// Lambda bodies are deferred execution. Keep calls inside the body scoped
+    /// to that body; the enclosing call sees the post-inference capture summary.
+    pub(crate) fn with_deferred_call_access<T>(
+        &mut self,
+        check: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let active = std::mem::take(&mut self.call_access_frames);
+        let result = check(self);
+        self.call_access_frames = active;
+        result
+    }
+
+    fn check_call_place_access(
+        &mut self,
+        place: &ViewPlace,
+        access: ViewAccess,
+        span: Span,
+    ) {
+        self.check_call_place_access_kind(place, access, false, span);
+    }
+
+    fn check_call_place_access_kind(
+        &mut self,
+        place: &ViewPlace,
+        access: ViewAccess,
+        reserved: bool,
+        span: Span,
+    ) {
+        let conflict = self
+            .call_access_frames
+            .iter()
+            .flat_map(|frame| frame.accesses.iter())
+            .rev()
+            .find(|active| {
+                active.place.overlaps(place)
+                    && match (active.access, active.reserved, access, reserved) {
+                        (ViewAccess::Write, true, ViewAccess::Read, false) => false,
+                        (ViewAccess::Write, ..) | (_, _, ViewAccess::Write, _) => true,
+                        _ => false,
+                    }
+            })
+            .map(|active| active.access);
+        let Some(active) = conflict else {
+            return;
+        };
+        let name = Self::place_name(place);
+        self.diags.push(if active == ViewAccess::Write {
+            crate::Sema::Diagnostics::aliasing_while_mut(&name, span)
+        } else {
+            crate::Sema::Diagnostics::aliasing_mut_after_read(&name, span)
+        });
+    }
+
+    fn record_call_place_access(&mut self, place: ViewPlace, access: ViewAccess) {
+        self.call_access_frames
+            .last_mut()
+            .map(|frame| frame.accesses.push(CallPlaceAccess {
+                place,
+                access,
+                reserved: false,
+            }));
+    }
+
+    fn record_call_place_reservation(&mut self, place: ViewPlace) {
+        self.call_access_frames
+            .last_mut()
+            .map(|frame| frame.accesses.push(CallPlaceAccess {
+                place,
+                access: ViewAccess::Write,
+                reserved: true,
+            }));
+    }
+
+    fn push_evaluated_access(
+        &self,
+        expr: &Expr,
+        access: ViewAccess,
+        bound: &HashSet<String>,
+        out: &mut Vec<EvaluatedAccess>,
+    ) {
+        let Some(place) = self.place_from_expr(expr) else {
+            return;
+        };
+        let (capture_place, capture_ty) = self
+            .capture_place_info(expr)
+            .map(|(place, ty, _)| (place, ty))
+            .unwrap_or_else(|| (place.clone(), self.place_expr_type(expr)));
+        if bound.contains(&capture_place.owner.name) {
+            return;
+        }
+        if let Some(existing) = out.iter_mut().find(|existing| {
+            existing.place.owner == place.owner
+                && existing.place.projections == place.projections
+                && existing.capture_place.owner == capture_place.owner
+                && existing.capture_place.projections == capture_place.projections
+        }) {
+            if access == ViewAccess::Write {
+                existing.access = ViewAccess::Write;
+                existing.span = expr.span();
+            }
+            return;
+        }
+        out.push(EvaluatedAccess {
+            place,
+            capture_place,
+            capture_ty,
+            capture_is_view: expr_root_ident(expr).is_some_and(|name| self.is_view(name)),
+            access,
+            span: expr.span(),
+            through_call: false,
+            moves_owner: false,
+        });
+    }
+
+    fn place_expr_type(&self, expr: &Expr) -> Option<Type> {
+        match expr {
+            Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
+            Expr::Paren(inner, _) | Expr::Place(inner, _, _) => self.place_expr_type(inner),
+            Expr::Field(base, field, _) => self
+                .place_expr_type(base)
+                .and_then(|owner| self.projected_field_type(owner, field)),
+            Expr::Index { base, .. } => match self.place_expr_type(base)? {
+                Type::List(elem) | Type::FixedList { elem, .. } => Some(*elem),
+                Type::Map { value, .. } => Some(*value),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn projected_field_type(&self, mut owner: Type, field: &str) -> Option<Type> {
+        while let Type::Tagged { inner, .. } = owner {
+            owner = *inner;
+        }
+        let (name, subst) = match owner {
+            Type::Named(name) => (name, HashMap::new()),
+            Type::Apply { name, args } => {
+                let params = self.trait_reg.struct_params.get(&name)?;
+                let subst = params
+                    .iter()
+                    .zip(args)
+                    .map(|(param, arg)| (param.name.clone(), arg))
+                    .collect();
+                (name, subst)
+            }
+            _ => return None,
+        };
+        self.registry
+            .struct_fields(&name)?
+            .iter()
+            .find(|(candidate, _, _, _)| candidate == field)
+            .map(|(_, _, ty, _)| substitute_type(ty, &subst))
+    }
+
+    fn method_receiver_access(&self, receiver: &Expr, method: &str) -> ViewAccess {
+        let Some(ty) = self.place_expr_type(receiver) else {
+            return ViewAccess::Read;
+        };
+        if Collections::builtin_method_mutates(&ty, method) {
+            return ViewAccess::Write;
+        }
+        if let Type::TraitObject(names) = &ty {
+            let receiver = names.iter().find_map(|name| {
+                self.trait_reg
+                    .traits
+                    .get(name)
+                    .and_then(|trait_info| trait_info.methods.get(method))
+                    .and_then(|sig| sig.params.first())
+            });
+            return if receiver.is_some_and(|receiver| {
+                receiver.name == Syntax::KW_SELF
+                    && receiver.convention == AccessConvention::Write
+            }) {
+                ViewAccess::Write
+            } else {
+                ViewAccess::Read
+            };
+        }
+        let type_name = match &ty {
+            Type::Named(name) | Type::Apply { name, .. } => name,
+            _ => return ViewAccess::Read,
+        };
+        if self
+            .resolve_method_sig(type_name, method)
+            .is_some_and(|(_, sig)| sig.self_conv == Some(AccessConvention::Write))
+        {
+            ViewAccess::Write
+        } else {
+            ViewAccess::Read
+        }
+    }
+
+    fn collect_lvalue_access(
+        &self,
+        target: &LValue,
+        bound: &HashSet<String>,
+        out: &mut Vec<EvaluatedAccess>,
+    ) {
+        match target {
+            LValue::Local { name, name_span } => {
+                let target = Expr::Ident(name.clone(), *name_span);
+                self.push_evaluated_access(&target, ViewAccess::Write, bound, out);
+            }
+            LValue::Field { base, field, span } => {
+                let target = Expr::Field(base.clone(), field.clone(), *span);
+                self.push_evaluated_access(&target, ViewAccess::Write, bound, out);
+            }
+            LValue::Index {
+                base, index, span, ..
+            } => {
+                let target = Expr::Index {
+                    base: base.clone(),
+                    index: index.clone(),
+                    span: *span,
+                    kind: Default::default(),
+                };
+                self.push_evaluated_access(&target, ViewAccess::Write, bound, out);
+                self.collect_evaluated_expr_accesses(
+                    index,
+                    AccessWalkMode::EvaluateNow,
+                    bound,
+                    out,
+                );
+            }
+        }
+    }
+
+    fn collect_lambda_requirement_events(
+        &self,
+        lambda: &Lambda,
+        out: &mut Vec<EvaluatedAccess>,
+    ) {
+        let params = lambda
+            .params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect::<HashSet<_>>();
+        let mut events = Vec::new();
+        match &lambda.body {
+            LambdaBody::Expr(body) => self.collect_evaluated_expr_accesses(
+                body,
+                AccessWalkMode::CaptureRequirements,
+                &params,
+                &mut events,
+            ),
+            LambdaBody::Block(body) => {
+                let mut bound = params;
+                self.collect_evaluated_stmt_accesses(
+                    body,
+                    AccessWalkMode::CaptureRequirements,
+                    &mut bound,
+                    &mut events,
+                );
+            }
+        }
+        // `take` captures move at construction even when the body never names
+        // them. All other capture roots come from the binding-aware semantic
+        // walker above; the legacy name-only collector is not authoritative.
+        for (name, span) in &lambda.take_names {
+            let capture = Expr::Ident(name.clone(), *span);
+            self.push_evaluated_access(
+                &capture,
+                ViewAccess::Read,
+                &HashSet::new(),
+                &mut events,
+            );
+        }
+        let taken = lambda
+            .take_names
+            .iter()
+            .map(|(name, _)| name)
+            .collect::<HashSet<_>>();
+        let cloned = lambda
+            .meta
+            .cloned_captures
+            .iter()
+            .collect::<HashSet<_>>();
+        let has_capture_write = events
+            .iter()
+            .any(|event| event.access == ViewAccess::Write);
+        let retains = !lambda.meta.escapes && has_capture_write;
+        for event in &mut events {
+            let name = &event.capture_place.owner.name;
+            if cloned.contains(name) {
+                // Lowering clones the whole source root before constructing
+                // the move closure; body projections and writes target the clone.
+                event.place.projections.clear();
+                event.access = ViewAccess::Read;
+            } else if (!lambda.meta.needs_fn_mut || lambda.meta.escapes)
+                && !event.capture_is_view
+                && !event.capture_ty.as_ref().is_some_and(type_is_copy)
+                && self
+                    .lookup(name)
+                    .is_some_and(|info| info.param_conv.is_none())
+            {
+                // Rust 2021 move closures capture the syntactic place precisely.
+                // Keep source-resolved places for loans, but move the field the
+                // generated closure captures rather than its whole owner.
+                event.place = event.capture_place.clone();
+                event.access = ViewAccess::Write;
+                event.moves_owner = true;
+            }
+            event.through_call = (event.capture_is_view
+                || (retains && !taken.contains(name)))
+                && !event.moves_owner;
+        }
+        for event in events {
+            if let Some(existing) = out.iter_mut().find(|existing| {
+                existing.place.owner == event.place.owner
+                    && existing.place.projections == event.place.projections
+            }) {
+                if event.access == ViewAccess::Write {
+                    existing.access = ViewAccess::Write;
+                    existing.span = event.span;
+                }
+                existing.through_call |= event.through_call;
+                existing.moves_owner |= event.moves_owner;
+            } else {
+                out.push(event);
+            }
+        }
+    }
+
+    fn collect_evaluated_expr_accesses(
+        &self,
+        expr: &Expr,
+        mode: AccessWalkMode,
+        bound: &HashSet<String>,
+        out: &mut Vec<EvaluatedAccess>,
+    ) {
+        if let Expr::IncDec { operand, .. } = expr {
+            self.push_evaluated_access(operand, ViewAccess::Write, bound, out);
+            return;
+        }
+        if let Some(place) = self.place_from_expr(expr) {
+            if mode != AccessWalkMode::ConstructCaptures
+                && !bound.contains(&place.owner.name)
+            {
+                let access = if matches!(
+                    expr,
+                    Expr::Place(_, crate::AST::PlaceAccess::Write, _)
+                ) {
+                    ViewAccess::Write
+                } else {
+                    ViewAccess::Read
+                };
+                self.push_evaluated_access(expr, access, bound, out);
+            }
+            match expr {
+                Expr::Index { index, .. } => {
+                    self.collect_evaluated_expr_accesses(index, mode, bound, out);
+                }
+                Expr::Slice { start, end, .. } => {
+                    self.collect_evaluated_expr_accesses(start, mode, bound, out);
+                    self.collect_evaluated_expr_accesses(end, mode, bound, out);
+                }
+                _ => {}
+            }
+            return;
+        }
+        match expr {
+            Expr::Lambda(lambda) => {
+                if mode != AccessWalkMode::EvaluateNow {
+                    self.collect_lambda_requirement_events(lambda, out);
+                }
+            }
+            Expr::Call(call) => {
+                if mode == AccessWalkMode::CaptureRequirements {
+                    for arg in &call.args {
+                        self.collect_evaluated_expr_accesses(
+                            &arg.expr,
+                            mode,
+                            bound,
+                            out,
+                        );
+                    }
+                }
+            }
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
+                if mode == AccessWalkMode::CaptureRequirements {
+                    let access = self.method_receiver_access(receiver, method);
+                    self.push_evaluated_access(receiver, access, bound, out);
+                    for arg in args {
+                        self.collect_evaluated_expr_accesses(
+                            &arg.expr,
+                            mode,
+                            bound,
+                            out,
+                        );
+                    }
+                }
+            }
+            Expr::CallValue { callee, args, .. } => {
+                if mode == AccessWalkMode::CaptureRequirements {
+                    self.collect_evaluated_expr_accesses(callee, mode, bound, out);
+                    for arg in args {
+                        self.collect_evaluated_expr_accesses(
+                            &arg.expr,
+                            mode,
+                            bound,
+                            out,
+                        );
+                    }
+                }
+            }
+            Expr::Binary(_, left, right, _) => {
+                self.collect_evaluated_expr_accesses(left, mode, bound, out);
+                self.collect_evaluated_expr_accesses(right, mode, bound, out);
+            }
+            Expr::CompareChain { operands, .. } | Expr::ListLit(operands, _) => {
+                for operand in operands {
+                    self.collect_evaluated_expr_accesses(operand, mode, bound, out);
+                }
+            }
+            Expr::Unary(_, inner, _)
+            | Expr::Spread(inner, _)
+            | Expr::Deref(inner, _)
+            | Expr::RawOf(inner, _)
+            | Expr::Copy(inner, _)
+            | Expr::Place(inner, _, _)
+            | Expr::Tainted(inner, _, _)
+            | Expr::Present(inner, _)
+            | Expr::Ok(inner, _)
+            | Expr::Err(inner, _)
+            | Expr::Try(inner, _, _)
+            | Expr::Paren(inner, _) => {
+                self.collect_evaluated_expr_accesses(inner, mode, bound, out);
+            }
+            Expr::Field(base, _, _) | Expr::OptField { base, .. } => {
+                self.collect_evaluated_expr_accesses(base, mode, bound, out);
+            }
+            Expr::Index { base, index, .. } => {
+                self.collect_evaluated_expr_accesses(base, mode, bound, out);
+                self.collect_evaluated_expr_accesses(index, mode, bound, out);
+            }
+            Expr::Slice {
+                base, start, end, ..
+            } => {
+                self.collect_evaluated_expr_accesses(base, mode, bound, out);
+                self.collect_evaluated_expr_accesses(start, mode, bound, out);
+                self.collect_evaluated_expr_accesses(end, mode, bound, out);
+            }
+            Expr::MapLit(entries, _) => {
+                for (key, value) in entries {
+                    self.collect_evaluated_expr_accesses(key, mode, bound, out);
+                    self.collect_evaluated_expr_accesses(value, mode, bound, out);
+                }
+            }
+            Expr::StructLit { fields, .. } => {
+                for (_, _, value) in fields {
+                    self.collect_evaluated_expr_accesses(value, mode, bound, out);
+                }
+            }
+            Expr::TypedLit { body, .. } => {
+                body.for_each_expr(|value| {
+                    self.collect_evaluated_expr_accesses(value, mode, bound, out)
+                });
+            }
+            Expr::TupleLit(fields, _, _) => {
+                for (_, value) in fields {
+                    self.collect_evaluated_expr_accesses(value, mode, bound, out);
+                }
+            }
+            Expr::EnumLit { args, .. } => {
+                for arg in args {
+                    let value = match arg {
+                        crate::AST::EnumLitArg::Positional(value)
+                        | crate::AST::EnumLitArg::Named { expr: value, .. } => value,
+                    };
+                    self.collect_evaluated_expr_accesses(value, mode, bound, out);
+                }
+            }
+            Expr::Str(parts, _) => {
+                for part in parts {
+                    if let crate::AST::StrPart::Interp(value, _) = part {
+                        self.collect_evaluated_expr_accesses(value, mode, bound, out);
+                    }
+                }
+            }
+            Expr::PatternTest {
+                subject, pattern, ..
+            } => {
+                self.collect_evaluated_expr_accesses(subject, mode, bound, out);
+                self.collect_pattern_value_accesses(pattern, mode, bound, out);
+            }
+            Expr::OrFallback {
+                value, fallback, ..
+            } => {
+                self.collect_evaluated_expr_accesses(value, mode, bound, out);
+                match fallback {
+                    crate::AST::OrFallback::Value(value)
+                    | crate::AST::OrFallback::Return(Some(value), _) => {
+                        self.collect_evaluated_expr_accesses(value, mode, bound, out);
+                    }
+                    crate::AST::OrFallback::Panic { args, .. } => {
+                        for arg in args {
+                            self.collect_evaluated_expr_accesses(
+                                &arg.expr,
+                                mode,
+                                bound,
+                                out,
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Expr::If {
+                cond,
+                then_body,
+                then_value,
+                else_body,
+                else_value,
+                ..
+            } => {
+                self.collect_evaluated_expr_accesses(cond, mode, bound, out);
+                let mut then_bound = bound.clone();
+                if let Expr::PatternTest { pattern, .. } = cond.as_ref() {
+                    Self::bind_pattern_names(pattern, &mut then_bound);
+                }
+                self.collect_evaluated_stmt_accesses(
+                    then_body,
+                    mode,
+                    &mut then_bound,
+                    out,
+                );
+                self.collect_evaluated_expr_accesses(
+                    then_value,
+                    mode,
+                    &then_bound,
+                    out,
+                );
+                let mut else_bound = bound.clone();
+                self.collect_evaluated_stmt_accesses(
+                    else_body,
+                    mode,
+                    &mut else_bound,
+                    out,
+                );
+                self.collect_evaluated_expr_accesses(
+                    else_value,
+                    mode,
+                    &else_bound,
+                    out,
+                );
+            }
+            Expr::PtrFromAddr { addr, .. } => {
+                self.collect_evaluated_expr_accesses(addr, mode, bound, out);
+            }
+            Expr::FanOut { callee, items, .. } => {
+                self.collect_evaluated_expr_accesses(callee, mode, bound, out);
+                for item in items {
+                    self.collect_evaluated_expr_accesses(item, mode, bound, out);
+                }
+            }
+            Expr::StrMatchLit(..)
+            | Expr::BinMatchLit(..)
+            | Expr::Int(..)
+            | Expr::Float(..)
+            | Expr::Bool(..)
+            | Expr::Char(..)
+            | Expr::Ident(..)
+            | Expr::UnitLit { .. }
+            | Expr::Absent(..)
+            | Expr::Todo { .. }
+            | Expr::ReduceMarker(..)
+            | Expr::ComptimeSplice { .. }
+            | Expr::IncDec { .. } => {}
+        }
+    }
+
+    fn bind_pattern_names(pattern: &Pattern, bound: &mut HashSet<String>) {
+        match pattern {
+            Pattern::Ok { binding, .. }
+            | Pattern::Err { binding, .. }
+            | Pattern::Present { binding, .. } => {
+                bound.insert(binding.clone());
+            }
+            Pattern::Variant { bindings, .. } => {
+                for slot in bindings {
+                    if let crate::AST::PatSlot::Bind { name, .. } = slot {
+                        bound.insert(name.clone());
+                    }
+                }
+            }
+            Pattern::Struct { fields, .. } => {
+                for field in fields {
+                    if let crate::AST::StructPatField::Bind { local, .. } = field {
+                        bound.insert(local.clone());
+                    }
+                }
+            }
+            Pattern::Or(alts, _) => {
+                if let Some(first) = alts.first() {
+                    Self::bind_pattern_names(first, bound);
+                }
+            }
+            Pattern::StrMatch { parts, .. } => {
+                for part in parts {
+                    if let crate::AST::StrMatchPart::Hole { name, .. } = part {
+                        bound.insert(name.clone());
+                    }
+                }
+            }
+            Pattern::BinMatch { parts, .. } => {
+                for part in parts {
+                    if let crate::AST::BinMatchPart::Hole { name, .. } = part {
+                        bound.insert(name.clone());
+                    }
+                }
+            }
+            Pattern::Absent(_) | Pattern::Range { .. } => {}
+        }
+    }
+
+    fn collect_pattern_value_accesses(
+        &self,
+        pattern: &Pattern,
+        mode: AccessWalkMode,
+        bound: &HashSet<String>,
+        out: &mut Vec<EvaluatedAccess>,
+    ) {
+        match pattern {
+            Pattern::Struct { fields, .. } => {
+                for field in fields {
+                    if let crate::AST::StructPatField::Value { value, .. } = field {
+                        self.collect_evaluated_expr_accesses(value, mode, bound, out);
+                    }
+                }
+            }
+            Pattern::Or(alternatives, _) => {
+                for alternative in alternatives {
+                    self.collect_pattern_value_accesses(
+                        alternative,
+                        mode,
+                        bound,
+                        out,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn collect_if_stmt_accesses(
+        &self,
+        branch: &crate::AST::IfStmt,
+        mode: AccessWalkMode,
+        bound: &HashSet<String>,
+        out: &mut Vec<EvaluatedAccess>,
+    ) {
+        self.collect_evaluated_expr_accesses(&branch.cond, mode, bound, out);
+        let mut then_bound = bound.clone();
+        if let Expr::PatternTest { pattern, .. } = &branch.cond {
+            Self::bind_pattern_names(pattern, &mut then_bound);
+        }
+        self.collect_evaluated_stmt_accesses(
+            &branch.then_body,
+            mode,
+            &mut then_bound,
+            out,
+        );
+        match &branch.else_branch {
+            Some(ElseBranch::ElseIf(branch)) => {
+                self.collect_if_stmt_accesses(branch, mode, bound, out);
+            }
+            Some(ElseBranch::Else(body)) => {
+                let mut else_bound = bound.clone();
+                self.collect_evaluated_stmt_accesses(body, mode, &mut else_bound, out);
+            }
+            None => {}
+        }
+    }
+
+    fn collect_evaluated_stmt_accesses(
+        &self,
+        body: &[Stmt],
+        mode: AccessWalkMode,
+        bound: &mut HashSet<String>,
+        out: &mut Vec<EvaluatedAccess>,
+    ) {
+        for stmt in body {
+            match stmt {
+                Stmt::Expr(expr) | Stmt::Yield(expr, _) => {
+                    self.collect_evaluated_expr_accesses(expr, mode, bound, out);
+                }
+                Stmt::Val(binding) => {
+                    self.collect_evaluated_expr_accesses(&binding.init, mode, bound, out);
+                    if let Some(pattern) = &binding.pattern {
+                        for name in pattern.names() {
+                            bound.insert(name.local_name().to_string());
+                        }
+                    } else {
+                        bound.insert(binding.name.clone());
+                    }
+                }
+                Stmt::Assign { target, value, .. } => {
+                    self.collect_lvalue_access(target, bound, out);
+                    self.collect_evaluated_expr_accesses(value, mode, bound, out);
+                }
+                Stmt::Return(Some(expr), _) => {
+                    self.collect_evaluated_expr_accesses(expr, mode, bound, out);
+                }
+                Stmt::If(branch) => {
+                    self.collect_if_stmt_accesses(branch, mode, bound, out);
+                }
+                Stmt::While { cond, body, .. } => {
+                    self.collect_evaluated_expr_accesses(cond, mode, bound, out);
+                    let mut body_bound = bound.clone();
+                    self.collect_evaluated_stmt_accesses(
+                        body,
+                        mode,
+                        &mut body_bound,
+                        out,
+                    );
+                }
+                Stmt::For {
+                    var,
+                    var2,
+                    kind,
+                    body,
+                    ..
+                } => {
+                    match kind {
+                        ForKind::Range {
+                            start, end, step, ..
+                        } => {
+                            self.collect_evaluated_expr_accesses(start, mode, bound, out);
+                            self.collect_evaluated_expr_accesses(end, mode, bound, out);
+                            if let Some(step) = step {
+                                self.collect_evaluated_expr_accesses(
+                                    step, mode, bound, out,
+                                );
+                            }
+                        }
+                        ForKind::In { collection, step } => {
+                            self.collect_evaluated_expr_accesses(
+                                collection, mode, bound, out,
+                            );
+                            if let Some(step) = step {
+                                self.collect_evaluated_expr_accesses(
+                                    step, mode, bound, out,
+                                );
+                            }
+                        }
+                    }
+                    let mut body_bound = bound.clone();
+                    body_bound.insert(var.clone());
+                    if let Some((name, _)) = var2 {
+                        body_bound.insert(name.clone());
+                    }
+                    self.collect_evaluated_stmt_accesses(
+                        body,
+                        mode,
+                        &mut body_bound,
+                        out,
+                    );
+                }
+                Stmt::Switch {
+                    subject,
+                    arms,
+                    else_body,
+                    ..
+                } => {
+                    self.collect_evaluated_expr_accesses(subject, mode, bound, out);
+                    let mut switch_bound = bound.clone();
+                    switch_bound.insert(Syntax::KW_IT.to_string());
+                    for arm in arms {
+                        self.collect_evaluated_expr_accesses(
+                            &arm.cond,
+                            mode,
+                            &switch_bound,
+                            out,
+                        );
+                        let mut arm_bound = switch_bound.clone();
+                        if let Expr::PatternTest { pattern, .. } = &arm.cond {
+                            Self::bind_pattern_names(pattern, &mut arm_bound);
+                        }
+                        self.collect_evaluated_stmt_accesses(
+                            &arm.body,
+                            mode,
+                            &mut arm_bound,
+                            out,
+                        );
+                    }
+                    if let Some(else_body) = else_body {
+                        let mut else_bound = bound.clone();
+                        self.collect_evaluated_stmt_accesses(
+                            else_body,
+                            mode,
+                            &mut else_bound,
+                            out,
+                        );
+                    }
+                }
+                Stmt::CountedLoop {
+                    init,
+                    cond,
+                    step,
+                    body,
+                    ..
+                } => {
+                    self.collect_evaluated_expr_accesses(&init.init, mode, bound, out);
+                    let mut loop_bound = bound.clone();
+                    loop_bound.insert(init.name.clone());
+                    self.collect_evaluated_expr_accesses(cond, mode, &loop_bound, out);
+                    self.collect_evaluated_stmt_accesses(
+                        body,
+                        mode,
+                        &mut loop_bound,
+                        out,
+                    );
+                    if let Some(step) = step {
+                        self.collect_evaluated_stmt_accesses(
+                            std::slice::from_ref(step.as_ref()),
+                            mode,
+                            &mut loop_bound,
+                            out,
+                        );
+                    }
+                }
+                Stmt::Loop { body, .. }
+                | Stmt::Unsafe { body, .. }
+                | Stmt::Impure { body, .. }
+                | Stmt::Shield { body, .. }
+                | Stmt::DebugOnly { body, .. }
+                | Stmt::Region { body, .. }
+                | Stmt::Policy { body, .. }
+                | Stmt::TaskGroup { body, .. }
+                | Stmt::Layout { body, .. }
+                | Stmt::Caps { body, .. }
+                | Stmt::Grant { body, .. }
+                | Stmt::Transact { body, .. }
+                | Stmt::AssumeDet { body, .. }
+                | Stmt::Live { body, .. } => {
+                    let mut body_bound = bound.clone();
+                    self.collect_evaluated_stmt_accesses(
+                        body,
+                        mode,
+                        &mut body_bound,
+                        out,
+                    );
+                }
+                Stmt::Reactive { body, .. } => {
+                    let mut body_bound = bound.clone();
+                    let mut captures = Vec::new();
+                    self.collect_evaluated_stmt_accesses(
+                        body,
+                        AccessWalkMode::CaptureRequirements,
+                        &mut body_bound,
+                        &mut captures,
+                    );
+                    // Reactive registration clones every free capture. Body
+                    // writes run later against the clones; construction only
+                    // reads each source value now.
+                    for mut capture in captures {
+                        capture.access = ViewAccess::Read;
+                        capture.through_call = false;
+                        capture.moves_owner = false;
+                        capture.place.projections.clear();
+                        capture.capture_place = capture.place.clone();
+                        capture.capture_ty = self
+                            .lookup(&capture.place.owner.name)
+                            .map(|info| info.ty.clone());
+                        capture.capture_is_view = false;
+                        for existing in out
+                            .iter()
+                            .filter(|event| event.place.owner == capture.place.owner)
+                        {
+                            if existing.access == ViewAccess::Write {
+                                capture.access = ViewAccess::Write;
+                                capture.span = existing.span;
+                            }
+                            capture.through_call |= existing.through_call;
+                            capture.moves_owner |= existing.moves_owner;
+                        }
+                        out.retain(|event| event.place.owner != capture.place.owner);
+                        out.push(capture);
+                    }
+                }
+                Stmt::ContextBlock { fields, body, .. } => {
+                    for (_, expr, _) in fields {
+                        self.collect_evaluated_expr_accesses(expr, mode, bound, out);
+                    }
+                    let mut body_bound = bound.clone();
+                    self.collect_evaluated_stmt_accesses(
+                        body,
+                        mode,
+                        &mut body_bound,
+                        out,
+                    );
+                }
+                Stmt::ScopeMember { args, body, .. } => {
+                    for arg in args {
+                        self.collect_evaluated_expr_accesses(arg, mode, bound, out);
+                    }
+                    let mut body_bound = bound.clone();
+                    self.collect_evaluated_stmt_accesses(
+                        body,
+                        mode,
+                        &mut body_bound,
+                        out,
+                    );
+                }
+                // These forms erase before runtime evaluation. `Off` never
+                // runs; comptime bodies run in the separate interpreter.
+                Stmt::Off { .. }
+                | Stmt::ComptimeIf { .. }
+                | Stmt::ComptimeSwitch { .. }
+                | Stmt::ComptimeBlock { .. }
+                | Stmt::Break(_)
+                | Stmt::Continue(_)
+                | Stmt::BreakLabel(..)
+                | Stmt::ContinueLabel(..)
+                | Stmt::Return(None, _) => {}
+            }
+        }
+    }
+
+    fn check_transient_accesses(&mut self, accesses: Vec<EvaluatedAccess>) {
+        for access in accesses {
+            self.check_call_place_access(&access.place, access.access, access.span);
+        }
+    }
+
+
+    /// Rust activates a two-phase receiver borrow only after its arguments
+    /// finish evaluating. Only loans retained through the call can conflict at
+    /// that point; transient reads have already ended.
+    pub(crate) fn activate_call_reservations(
+        &mut self,
+        frame: &CallAccessFrame,
+        span: Span,
+    ) {
+        let conflicts: Vec<_> = frame
+            .accesses
+            .iter()
+            .filter(|access| access.reserved)
+            .filter_map(|reservation| {
+                frame
+                    .accesses
+                    .iter()
+                    .filter(|access| !access.reserved)
+                    .find(|access| access.place.overlaps(&reservation.place))
+                    .map(|access| (reservation.place.clone(), access.access))
+            })
+            .collect();
+        for (place, access) in conflicts {
+            let name = Self::place_name(&place);
+            self.diags.push(if access == ViewAccess::Read {
+                crate::Sema::Diagnostics::aliasing_mut_after_read(&name, span)
+            } else {
+                crate::Sema::Diagnostics::aliasing_while_mut(&name, span)
+            });
+        }
+    }
+
+    /// A nested call's frame ends when it returns, but a returned View keeps
+    /// the source loan alive as an argument of the enclosing call.
+    pub(crate) fn record_call_result_views(&mut self, expr: &Expr) {
+        let mut loans: Vec<(ViewPlace, ViewAccess)> = Vec::new();
+        for (_, place, _, access) in self.view_call_sources(expr) {
+            if let Some((_, seen_access)) = loans.iter_mut().find(|(seen, _)| {
+                seen.owner == place.owner
+                    && seen.projections == place.projections
+            }) {
+                if access == ViewAccess::Write {
+                    *seen_access = ViewAccess::Write;
+                }
+            } else {
+                loans.push((place, access));
+            }
+        }
+        for (place, access) in loans {
+            self.check_call_place_access(&place, access, expr.span());
+            self.record_call_place_access(place, access);
+        }
+    }
+
+    fn collect_call_projection_accesses(
+        &self,
+        expr: &Expr,
+        accesses: &mut Vec<EvaluatedAccess>,
+    ) {
+        match expr {
+            Expr::Index { base, index, .. } => {
+                self.collect_call_projection_accesses(base, accesses);
+                self.collect_evaluated_expr_accesses(
+                    index,
+                    AccessWalkMode::EvaluateNow,
+                    &HashSet::new(),
+                    accesses,
+                );
+            }
+            Expr::Slice {
+                base, start, end, ..
+            } => {
+                self.collect_call_projection_accesses(base, accesses);
+                self.collect_evaluated_expr_accesses(
+                    start,
+                    AccessWalkMode::EvaluateNow,
+                    &HashSet::new(),
+                    accesses,
+                );
+                self.collect_evaluated_expr_accesses(
+                    end,
+                    AccessWalkMode::EvaluateNow,
+                    &HashSet::new(),
+                    accesses,
+                );
+            }
+            Expr::Field(base, _, _)
+            | Expr::Place(base, _, _)
+            | Expr::Paren(base, _)
+            | Expr::Deref(base, _) => self.collect_call_projection_accesses(base, accesses),
+            _ => {}
+        }
+    }
+
+    /// Check one evaluated argument against every active outer/current call,
+    /// then retain exactly the borrow that generated Rust keeps until this call
+    /// returns. Call-form checkers supply only signature metadata.
+    pub(crate) fn check_call_argument_access(
+        &mut self,
+        arg: &crate::AST::CallArg,
+        param_conv: AccessConvention,
+        param_ty: &Type,
+        borrowed_read: bool,
+    ) {
+        let Some(place) = self.place_from_expr(&arg.expr) else {
+            let mut accesses = Vec::new();
+            self.collect_evaluated_expr_accesses(
+                &arg.expr,
+                AccessWalkMode::EvaluateNow,
+                &HashSet::new(),
+                &mut accesses,
+            );
+            self.check_transient_accesses(accesses);
+            return;
+        };
+        let mut projection_accesses = Vec::new();
+        self.collect_call_projection_accesses(&arg.expr, &mut projection_accesses);
+        self.check_transient_accesses(projection_accesses);
+        let access = if arg.convention == AccessConvention::Write {
+            ViewAccess::Write
+        } else {
+            ViewAccess::Read
+        };
+        self.check_call_place_access(&place, access, arg.expr.span());
+        let generated = if arg.convention == AccessConvention::Write {
+            Some(ViewAccess::Write)
+        } else if arg.convention == AccessConvention::Read
+            && param_conv == AccessConvention::Read
+            && borrowed_read
+            && !param_ty.is_scalar()
+        {
+            Some(ViewAccess::Read)
+        } else {
+            None
+        };
+        if let Some(access) = generated {
+            self.record_call_place_access(place, access);
+        }
+    }
+
+    /// Lambda bodies run later, but constructing a lambda evaluates its free
+    /// captures now. Only nonescaping FnMut closures retain capture borrows.
+    pub(crate) fn check_call_argument_captures(&mut self, expr: &Expr) {
+        let mut accesses = Vec::new();
+        self.collect_evaluated_expr_accesses(
+            expr,
+            AccessWalkMode::ConstructCaptures,
+            &HashSet::new(),
+            &mut accesses,
+        );
+        for access in accesses {
+            self.check_call_place_access(&access.place, access.access, access.span);
+            if access.through_call {
+                self.record_call_place_access(access.place, access.access);
+            } else if access.moves_owner {
+                self.mark_moved_place(access.place, access.span);
+            }
+        }
+        self.record_call_result_views(expr);
+    }
+
+    /// Receiver evaluation is a read even before method resolution. This catches
+    /// a nested receiver that overlaps an outer call's active write loan.
+    pub(crate) fn check_call_receiver_evaluation(&mut self, receiver: &Expr, span: Span) {
+        if let Some(place) = self.place_from_expr(receiver) {
+            let mut projection_accesses = Vec::new();
+            self.collect_call_projection_accesses(receiver, &mut projection_accesses);
+            self.check_transient_accesses(projection_accesses);
+            self.check_call_place_access(&place, ViewAccess::Read, span);
+        } else {
+            let mut accesses = Vec::new();
+            self.collect_evaluated_expr_accesses(
+                receiver,
+                AccessWalkMode::EvaluateNow,
+                &HashSet::new(),
+                &mut accesses,
+            );
+            self.check_transient_accesses(accesses);
+        }
+    }
+
+    pub(crate) fn record_call_receiver_access(
+        &mut self,
+        receiver: &Expr,
+        convention: AccessConvention,
+        span: Span,
+    ) {
+        let Some(place) = self.place_from_expr(receiver) else {
+            return;
+        };
+        let access = if convention == AccessConvention::Write {
+            ViewAccess::Write
+        } else {
+            ViewAccess::Read
+        };
+        self.check_call_place_access(&place, access, span);
+        if convention != AccessConvention::Move {
+            self.record_call_place_access(place, access);
+        }
+    }
+
+    pub(crate) fn record_call_receiver_reservation(&mut self, receiver: &Expr, span: Span) {
+        let Some(place) = self.place_from_expr(receiver) else {
+            return;
+        };
+        self.check_call_place_access_kind(&place, ViewAccess::Write, true, span);
+        self.record_call_place_reservation(place);
+    }
+
     pub(crate) fn place_from_expr(&self, expr: &Expr) -> Option<ViewPlace> {
         let mut output_path = Vec::new();
         if let Some(name) = named_view_field_path(expr, &mut output_path) {
@@ -470,9 +1650,52 @@ impl<'a> Checker<'a> {
                 });
                 Some(place)
             }
-            Expr::Place(inner, _, _) => self.place_from_expr(inner),
+            Expr::Place(inner, _, _) | Expr::Paren(inner, _) => self.place_from_expr(inner),
             _ => None,
         }
+    }
+
+    /// Rust 2021 capture prefix and its type from the written closure
+    /// expression. Indexing and slicing stop precision: fields before them are
+    /// capturable, while anything after them belongs to the captured container.
+    fn capture_place_info(&self, expr: &Expr) -> Option<(ViewPlace, Option<Type>, bool)> {
+        match expr {
+            Expr::Ident(name, _) => (self.lookup(name).is_some()
+                || self.consts.contains_key(name))
+            .then(|| {
+                (
+                    ViewPlace {
+                        owner: self.owner_id(name),
+                        projections: Vec::new(),
+                    },
+                    self.lookup(name).map(|info| info.ty.clone()),
+                    false,
+                )
+            }),
+            Expr::Field(base, field, _) => {
+                let (mut place, ty, stopped) = self.capture_place_info(base)?;
+                if stopped {
+                    return Some((place, ty, true));
+                }
+                place.projections.push(ViewProjection::Field(field.clone()));
+                let ty = ty.and_then(|owner| self.projected_field_type(owner, field));
+                Some((place, ty, false))
+            }
+            Expr::Index { base, .. } | Expr::Slice { base, .. } => self
+                .capture_place_info(base)
+                .map(|(place, ty, _)| (place, ty, true)),
+            Expr::Place(inner, _, _) | Expr::Paren(inner, _) => {
+                self.capture_place_info(inner)
+            }
+            _ => None,
+        }
+    }
+
+    /// Place Rust 2021 captures from the written closure expression. Unlike
+    /// `place_from_expr`, this deliberately does not chase a View alias to its
+    /// source; generated Rust captures the alias value itself.
+    fn capture_place_from_expr(&self, expr: &Expr) -> Option<ViewPlace> {
+        self.capture_place_info(expr).map(|(place, _, _)| place)
     }
 
     pub(crate) fn is_view(&self, name: &str) -> bool {
@@ -556,6 +1779,63 @@ impl<'a> Checker<'a> {
         }
         if let Some(place) = self.place_from_expr(expr) {
             self.check_place_change(&place, action, span);
+        }
+    }
+
+    pub(crate) fn check_mutating_method_receiver(
+        &mut self,
+        receiver: &Expr,
+        method: &str,
+        span: Span,
+    ) {
+        if self.in_lambda_body {
+            if let Some(root) = expr_root_ident(receiver) {
+                self.inferred_lambda_mut_captures
+                    .insert(root.to_string());
+            }
+        }
+        self.check_expr_change(receiver, &format!("be changed by `.{method}()`"), span);
+        let Some(root) = expr_root_ident(receiver).map(str::to_string) else {
+            return;
+        };
+        if self.iter_borrowed.contains(&root) {
+            self.diags.push(
+                crate::Sema::Diagnostics::collection_changed_in_loop(&root, span),
+            );
+        }
+        if let Some(info) = self.lookup(&root) {
+            if !info.mutable {
+                let (what, fix) = if root == Syntax::KW_SELF {
+                    (
+                        format!(
+                            "`.{}()` edits `{}`, but this method has read access only",
+                            method,
+                            Syntax::KW_SELF
+                        ),
+                        format!(
+                            "declare the enclosing method with `{}{}`",
+                            Syntax::SIGIL_WRITE,
+                            Syntax::KW_SELF
+                        ),
+                    )
+                } else {
+                    (
+                        format!(
+                            "cannot write to `{}` — it does not have edit access (`&`); required before calling `.{}()`",
+                            root, method
+                        ),
+                        format!("declare `{} {} ...`", root, Syntax::SIGIL_BIND_MUT),
+                    )
+                };
+                self.diags.push(Diagnostic::error(
+                    "E0202",
+                    what,
+                    "this method edits the value it's called on; write access (`&`) is required"
+                        .to_string(),
+                    fix,
+                    Some(span),
+                ));
+            }
         }
     }
 
@@ -669,8 +1949,28 @@ impl<'a> Checker<'a> {
         &mut self,
         init: &Expr,
     ) -> Vec<(Vec<String>, ViewPlace, ViewKind, ViewAccess)> {
-        if let Expr::Copy(inner, _) = init {
+        if let Expr::Copy(inner, _) | Expr::Paren(inner, _) = init {
             return self.view_call_sources(inner);
+        }
+        if let Expr::If {
+            then_value,
+            else_value,
+            ..
+        } = init
+        {
+            let mut sources = self.view_call_sources(then_value);
+            sources.extend(self.view_call_sources(else_value));
+            return sources;
+        }
+        if let Expr::OrFallback {
+            value, fallback, ..
+        } = init
+        {
+            let mut sources = self.view_call_sources(value);
+            if let crate::AST::OrFallback::Value(value) = fallback {
+                sources.extend(self.view_call_sources(value));
+            }
+            return sources;
         }
         if let Expr::Field(base, field, _) = init {
             let projected: Vec<_> = self
@@ -1376,7 +2676,80 @@ impl<'a> Checker<'a> {
         }
     }
 
-    pub(crate) fn mark_moved(&mut self, name: String, span: Span) {
+    fn move_keys_overlap(left: &str, right: &str) -> bool {
+        Self::contains_place(left, right) || Self::contains_place(right, left)
+    }
+
+    fn contains_place(parent: &str, child: &str) -> bool {
+        child.strip_prefix(parent).is_some_and(|suffix| {
+            suffix.is_empty() || suffix.starts_with('.') || suffix.starts_with('[')
+        })
+    }
+
+    pub(crate) fn clear_moved_binding(&mut self, name: &str) {
+        self.moved
+            .retain(|place, _| !Self::contains_place(name, place));
+    }
+
+    pub(crate) fn clear_moved_expr(&mut self, expr: &Expr) {
+        let Some(place) = self.capture_place_from_expr(expr) else {
+            return;
+        };
+        let place = Self::place_name(&place);
+        self.moved
+            .retain(|moved, _| !Self::contains_place(&place, moved));
+    }
+
+    pub(crate) fn reject_moved_expr_use(&mut self, expr: &Expr, span: Span) -> bool {
+        let Some(place) = self.capture_place_from_expr(expr) else {
+            return false;
+        };
+        let place_name = Self::place_name(&place);
+        let moved = if matches!(expr, Expr::Ident(..)) && self.suppress_partial_move_root_read {
+            self.moved
+                .get(&place_name)
+                .copied()
+                .map(|at| (place_name.clone(), at))
+        } else {
+            self.moved
+                .iter()
+                .filter(|(moved, _)| Self::move_keys_overlap(&place_name, moved))
+                .min_by_key(|(moved, _)| moved.len())
+                .map(|(moved, at)| (moved.clone(), *at))
+        };
+        let Some((moved_place, _moved_at)) = moved else {
+            return false;
+        };
+        let root = place.owner.name;
+        let moved_ty = self.lookup(&root).map(|info| info.ty.clone());
+        let fix = if moved_ty
+            .as_ref()
+            .is_some_and(|ty| self.is_resource_type(ty))
+        {
+            format!(
+                "acquire a new `{}` resource; closed resources cannot be copied or reused",
+                moved_ty.as_ref().map(Type::show).unwrap_or_default()
+            )
+        } else {
+            format!(
+                "give away a copy instead (`{}{}`) where it moved",
+                Syntax::SIGIL_COPY,
+                moved_place
+            )
+        };
+        self.diags.push(Diagnostic::error(
+            "E0121",
+            format!("`{moved_place}` was given away earlier, so it can't be used here"),
+            "after a value moves somewhere else, the old name no longer holds it".to_string(),
+            fix,
+            Some(span),
+        ));
+        self.moved.remove(&moved_place);
+        true
+    }
+
+    pub(crate) fn mark_moved_place(&mut self, place: ViewPlace, span: Span) {
+        let name = place.owner.name.clone();
         if !tracks_named_move(&name) {
             return;
         }
@@ -1396,7 +2769,17 @@ impl<'a> Checker<'a> {
                 return;
             }
         }
-        self.moved.insert(name, span);
+        self.moved.insert(Self::place_name(&place), span);
+    }
+
+    pub(crate) fn mark_moved(&mut self, name: String, span: Span) {
+        self.mark_moved_place(
+            ViewPlace {
+                owner: self.owner_id(&name),
+                projections: Vec::new(),
+            },
+            span,
+        );
     }
 
     pub(crate) fn non_name_write_argument_fix(&self, expr: &Expr) -> String {

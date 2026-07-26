@@ -778,37 +778,8 @@ impl<'a> Checker<'a> {
                     ));
                     return None;
                 }
-                if let Some(moved_at) = self.moved.get(name).copied() {
-                    let (line_note, _) = (moved_at, ());
-                    let _ = line_note;
-                    let moved_ty = self.lookup(name).map(|info| info.ty.clone());
-                    let fix = if moved_ty
-                        .as_ref()
-                        .is_some_and(|ty| self.is_resource_type(ty))
-                    {
-                        format!(
-                            "acquire a new `{}` resource; closed resources cannot be copied or reused",
-                            moved_ty.as_ref().map(Type::show).unwrap_or_default()
-                        )
-                    } else {
-                        format!(
-                            "give away a copy instead (`{}{}`) where it moved",
-                            Syntax::SIGIL_COPY,
-                            name
-                        )
-                    };
-                    self.diags.push(Diagnostic::error(
-                        "E0121",
-                        format!(
-                            "`{}` was given away earlier, so it can't be used here",
-                            name
-                        ),
-                        "after a value moves somewhere else, the old name no longer holds it"
-                            .to_string(),
-                        fix,
-                        Some(*span),
-                    ));
-                    self.moved.remove(name); // report once
+                let moved_expr = Expr::Ident(name.clone(), *span);
+                if self.reject_moved_expr_use(&moved_expr, *span) {
                     return None;
                 }
                 // D-UNINIT-SENTINEL2: reading a `Type.{ uninit }` binding before it is written.
@@ -1622,7 +1593,9 @@ impl<'a> Checker<'a> {
                     }),
                     _ => self.expected_type.clone(),
                 };
-                self.check_lambda(lam, expected.as_ref())
+                self.with_deferred_call_access(|checker| {
+                    checker.check_lambda(lam, expected.as_ref())
+                })
             }
             Expr::CallValue { callee, args, span } => self.infer_call_value(callee, args, *span),
             Expr::FanOut {
@@ -2577,6 +2550,10 @@ impl<'a> Checker<'a> {
         member: &str,
         span: Span,
     ) -> Option<Type> {
+        let field_expr = Expr::Field(inner.clone(), member.to_string(), span);
+        if self.reject_moved_expr_use(&field_expr, span) {
+            return None;
+        }
         if let Expr::Field(base, leaf, _) = &**inner {
             if let Expr::Ident(alias, _) = &**base {
                 if self.core_imports.get(alias).map(String::as_str) == Some("core.encoding") {
@@ -2655,7 +2632,11 @@ impl<'a> Checker<'a> {
             }
         }
         self.borrow_ctx = true;
-        let t = self.infer(inner)?;
+        let suppress = self.suppress_partial_move_root_read;
+        self.suppress_partial_move_root_read = true;
+        let t = self.infer(inner);
+        self.suppress_partial_move_root_read = suppress;
+        let t = t?;
         self.field_type(&t, member, span)
     }
 

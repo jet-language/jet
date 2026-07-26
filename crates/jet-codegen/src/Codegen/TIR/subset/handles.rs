@@ -191,7 +191,7 @@ pub(crate) fn router_register_in_subset(
 }
 
 pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Option<THandleOp> {
-    Some(match (handle, method, nargs) {
+    let op = match (handle, method, nargs) {
         ("FileReader", "read_line", 0) => THandleOp::FileReaderReadLine,
         ("FileWriter", "write_line", 1) => THandleOp::FileWriterWriteLine,
         ("FileWriter", "flush", 0) => THandleOp::FileWriterFlush,
@@ -469,7 +469,42 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         // block (user-type-aware via `cx.type_names`), NOT here — `handle_method_op`
         // has no `cx`, and a user struct may share a math name.
         _ => return None,
-    })
+    };
+    if matches!(
+        handle,
+        Syntax::CLOCK_TYPE | Syntax::RNG_TYPE | Syntax::SOLVER_TYPE
+    ) {
+        let emitted_borrow = match &op {
+            THandleOp::ClockTick
+            | THandleOp::ClockAdvance
+            | THandleOp::ClockWait
+            | THandleOp::RngInt
+            | THandleOp::RngFloat
+            | THandleOp::RngFloatRange
+            | THandleOp::RngBool
+            | THandleOp::RngBoolP
+            | THandleOp::RngNormal
+            | THandleOp::RngExponential
+            | THandleOp::RngBytes
+            | THandleOp::RngSplit
+            | THandleOp::RngPick
+            | THandleOp::RngWeightedPick
+            | THandleOp::RngSample
+            | THandleOp::RngShuffle
+            | THandleOp::SolverRequire => {
+                crate::Collections::BuiltinReceiverBorrow::EagerWrite
+            }
+            _ => crate::Collections::BuiltinReceiverBorrow::Read,
+        };
+        debug_assert_eq!(
+            crate::Collections::builtin_receiver_borrow(
+                &Type::Named(handle.to_string()),
+                method
+            ),
+            emitted_borrow
+        );
+    }
+    Some(op)
 }
 
 /// c109 Phase 13: the resolved return type of a covered handle method, read from the

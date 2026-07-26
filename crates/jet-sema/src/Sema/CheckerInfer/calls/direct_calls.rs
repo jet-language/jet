@@ -9,14 +9,13 @@ use crate::Sema::CheckerCoreLib::{
 };
 use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
 use crate::Sema::Diagnostics::{
-    aliasing_mut_after_read, aliasing_while_mut, edit_distance, is_cloneable, is_printable,
-    type_fix_hint, typed_text_mismatch,
+    edit_distance, is_cloneable, is_printable, type_fix_hint, typed_text_mismatch,
 };
 use crate::Sema::Effects::builtin_effect;
 use crate::Sema::FFI::e3211;
 use crate::Sema::substitute_param_refs;
 use crate::Syntax;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 impl<'a> Checker<'a> {
         /// Check a call. Returns:
         ///   None             — problem already reported
@@ -957,11 +956,24 @@ impl<'a> Checker<'a> {
                 .get(&call.name)
                 .cloned()
                 .unwrap_or_default();
+            let mut call_access = self.call_access_frame();
             let mut generic_subst = HashMap::new();
             let mut pre_inferred: Vec<Option<Type>> = Vec::new();
             if !fn_type_params.is_empty() {
-                for arg in call.args.iter_mut() {
-                    pre_inferred.push(self.infer(&mut arg.expr));
+                for (index, arg) in call.args.iter_mut().enumerate() {
+                    pre_inferred.push(self.with_call_access(&mut call_access, |checker| {
+                        if let Some((param_conv, param_ty)) = sig.params.get(index) {
+                            checker.check_call_argument_access(
+                                arg,
+                                *param_conv,
+                                param_ty,
+                                !sig.is_extern,
+                            );
+                        }
+                        let inferred = checker.infer(&mut arg.expr);
+                        checker.check_call_argument_captures(&arg.expr);
+                        inferred
+                    }));
                 }
                 let arg_types: Vec<Type> = pre_inferred.iter().filter_map(|t| t.clone()).collect();
                 if arg_types.len() == call.args.len() {
@@ -1003,18 +1015,7 @@ impl<'a> Checker<'a> {
             };
             let args_pre_inferred = !generic_subst.is_empty() && pre_inferred.len() == call.args.len();
     
-            let mut mut_borrowed: HashSet<String> = HashSet::new();
-            let mut read_borrowed: HashSet<String> = HashSet::new();
-    
             for (i, arg) in call.args.iter_mut().enumerate() {
-                if let Expr::Ident(name, span) = &arg.expr {
-                    if mut_borrowed.contains(name) {
-                        self.diags.push(aliasing_while_mut(name, *span));
-                    } else if arg.convention == AccessConvention::Write && read_borrowed.contains(name)
-                    {
-                        self.diags.push(aliasing_mut_after_read(name, *span));
-                    }
-                }
                 if !sig.is_extern {
                     if let Some((AccessConvention::Read, pty)) = effective_params.get(i) {
                         if !pty.is_scalar() {
@@ -1070,7 +1071,19 @@ impl<'a> Checker<'a> {
                 let arg_ty = if args_pre_inferred {
                     pre_inferred.get(i).and_then(|t| t.clone())
                 } else {
-                    self.infer(&mut arg.expr)
+                    self.with_call_access(&mut call_access, |checker| {
+                        if let Some((param_conv, param_ty)) = effective_params.get(i) {
+                            checker.check_call_argument_access(
+                                arg,
+                                *param_conv,
+                                param_ty,
+                                !sig.is_extern,
+                            );
+                        }
+                        let inferred = checker.infer(&mut arg.expr);
+                        checker.check_call_argument_captures(&arg.expr);
+                        inferred
+                    })
                 };
                 if sig.is_pure
                     && effective_params
@@ -1341,21 +1354,6 @@ impl<'a> Checker<'a> {
                 }
     
                 self.check_write_arg_change(arg);
-                if arg.convention == AccessConvention::Write {
-                    if let Expr::Ident(name, _) = &arg.expr {
-                        mut_borrowed.insert(name.clone());
-                    }
-                }
-                if let (Some((param_conv, param_ty)), Expr::Ident(name, _)) =
-                    (effective_params.get(i), &arg.expr)
-                {
-                    if matches!(param_conv, AccessConvention::Read)
-                        && arg.convention == AccessConvention::Read
-                        && !param_ty.is_scalar()
-                    {
-                        read_borrowed.insert(name.clone());
-                    }
-                }
     
                 if self.loop_depth > 0 {
                     if let Expr::Ident(name, span) = &arg.expr {
@@ -1385,7 +1383,6 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-    
             // D-ANY-JAI1: put the (already fully checked) trait-bounded variadic
             // tail back so codegen sees the real call shape.
             if let Some(tail) = bound_variadic_tail {

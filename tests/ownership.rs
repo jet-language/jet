@@ -1,5 +1,10 @@
 //! Tests for M2 ownership / borrow transpiler rules (SAFETY DEFAULTS).
 
+mod common;
+
+use std::fs;
+use std::process::Command;
+
 #[test]
 fn discard_binding_is_not_a_referenceable_local() {
     let src = r#"
@@ -236,6 +241,1574 @@ fn run() {
 "#;
     let diags = jet::compile(src).expect_err("should error");
     assert!(diags.iter().any(|d| d.code == "E0204"));
+}
+
+#[test]
+fn nested_call_argument_cannot_read_an_active_write_place() {
+    let src = r#"
+fn see(x: Int) -> Int { return x }
+fn both(a: &Int, b: Int) { a += b }
+
+fn run() {
+    x := 1
+    both(&x, see(x))
+}
+"#;
+    let diags = jet::compile(src).expect_err("nested read must fail in sema before rustc");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0204"),
+        "expected the call-alias diagnostic: {diags:?}"
+    );
+}
+
+#[test]
+fn composite_argument_cannot_read_an_active_write_place() {
+    let src = r#"
+fn both(a: &Int, b: Int) { a += b }
+
+fn run() {
+    x := 1
+    both(&x, x + 1)
+}
+"#;
+    let diags = jet::compile(src).expect_err("composite read must fail in sema before rustc");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0204"),
+        "expected the call-alias diagnostic: {diags:?}"
+    );
+}
+
+#[test]
+fn lambda_capture_cannot_read_an_active_write_place() {
+    let src = r#"
+fn both(a: &String, callback: fn() -> String) { print(a); print(callback()) }
+
+fn run() {
+    x := "jet"
+    both(&x, () => x)
+}
+"#;
+    let diags = jet::compile(src).expect_err("lambda capture must fail in sema before rustc");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0204"),
+        "expected the call-alias diagnostic: {diags:?}"
+    );
+}
+
+#[test]
+fn inferred_mutable_lambda_capture_stays_active_through_call() {
+    let src = r#"
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
+
+fn run() {
+    values := [1, 2]
+    both(() => values.push(3), values)
+}
+"#;
+    let diags =
+        jet::compile(src).expect_err("mutable lambda capture must remain active through the call");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0204"),
+        "expected the call-alias diagnostic: {diags:?}"
+    );
+}
+
+#[test]
+fn nested_lambda_forms_use_the_enclosing_call_access_frame() {
+    let composite = r#"
+struct Work { callback: fn() -> Int }
+fn both(values: &[Int], work: Work) { values.push(work.callback()) }
+
+fn run() {
+    values := [1, 2]
+    both(&values, Work.{ callback: () => values.len() })
+}
+"#;
+    let diags =
+        jet::compile(composite).expect_err("a lambda inside an aggregate must see the active write");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let immediate_callee = r#"
+fn both(values: &[Int], count: Int) { values.push(count) }
+
+fn run() {
+    values := [1, 2]
+    both(&values, (() => values.len())())
+}
+"#;
+    let diags = jet::compile(immediate_callee)
+        .expect_err("an immediate lambda callee must see the outer active write");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn move_and_fnmut_lambda_captures_have_exact_lifetimes_and_places() {
+    let copy_move = r#"
+fn both(callback: fn() -> Int, value: &Int) { value += callback() }
+fn run() {
+    value := 1
+    both(() => value, &value)
+}
+"#;
+    jet::compile(copy_move).expect("a read-only move closure copies a scalar before the write");
+
+    let disjoint = r#"
+struct Pair { left: [Int], right: [Int] }
+fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    both(() => pair.right.push(3), pair.left)
+}
+"#;
+    jet::compile(disjoint).expect("Rust 2021 captures disjoint struct fields separately");
+
+    let conflicting = r#"
+struct Pair { left: [Int], right: [Int] }
+fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    both(() => pair.right.push(3), pair.right)
+}
+"#;
+    let diags =
+        jet::compile(conflicting).expect_err("the same captured field must remain write-borrowed");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn move_lambda_capture_identity_matches_rust_2021_places() {
+    let disjoint_owned_field = r#"
+struct Pair { left: String, right: [Int] }
+fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn run() {
+    pair := Pair.{ left: "jet", right: [1, 2] }
+    both(() => { print(pair.left) }, pair.right)
+}
+"#;
+    jet::compile(disjoint_owned_field)
+        .expect("moving one captured field must leave a disjoint field usable");
+
+    let copy_field = r#"
+struct Pair { count: Int, values: [Int] }
+fn both(callback: fn(), pair: Pair) { callback(); print(pair.count) }
+fn run() {
+    pair := Pair.{ count: 2, values: [1, 2] }
+    both(() => { print(pair.count) }, pair)
+}
+"#;
+    jet::compile(copy_field).expect("capturing a Copy field must not move its owner");
+
+    let view_alias = r#"
+fn call(callback: fn()) { callback() }
+fn run() {
+    values := [1, 2]
+    first :: values[0..1]
+    call(() => { print(first.len()) })
+    print(values.len())
+}
+"#;
+    jet::compile(view_alias).expect("a closure captures a View alias, not its source owner");
+
+    let same_owned_field = r#"
+struct Pair { left: String, right: [Int] }
+fn both(callback: fn(), text: String) { callback(); print(text) }
+fn run() {
+    pair := Pair.{ left: "jet", right: [1, 2] }
+    both(() => { print(pair.left) }, pair.left)
+}
+"#;
+    let diags =
+        jet::compile(same_owned_field).expect_err("the moved captured field cannot be reused");
+    assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
+
+    let conflicting_view_alias = r#"
+fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn run() {
+    values := [1, 2]
+    first :: values[0..1]
+    both(&values, () => { print(first.len()) })
+}
+"#;
+    let diags = jet::compile(conflicting_view_alias)
+        .expect_err("a copied View alias still borrows its source place");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let reverse_view_alias = r#"
+fn both(callback: fn() -> Int, values: &[Int]) { values.push(callback()) }
+fn run() {
+    values := [1, 2]
+    first :: values[0..1]
+    both(() => first.len(), &values)
+}
+"#;
+    let diags = jet::compile(reverse_view_alias)
+        .expect_err("a closure keeps its copied View alias live across the whole call");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn move_lambda_index_and_slice_captures_stop_at_the_rust_prefix() {
+    for source in [
+        r#"
+fn call(callback: fn()) { callback() }
+fn run() {
+    values := [1, 2]
+    call(() => { print(values[0]) })
+    print(values.len())
+}
+"#,
+        r#"
+fn call(callback: fn()) { callback() }
+fn run() {
+    values := [1, 2]
+    call(() => { print(values[0..1].len()) })
+    print(values.len())
+}
+"#,
+    ] {
+        let diags =
+            jet::compile(source).expect_err("indexing cannot make a move capture element-precise");
+        assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
+    }
+
+    let field_before_index = r#"
+struct Pair { left: [Int], right: [Int] }
+fn call(callback: fn()) { callback() }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    call(() => { print(pair.left[0]) })
+    print(pair.right.len())
+}
+"#;
+    jet::compile(field_before_index)
+        .expect("Rust may capture the field prefix before an index");
+}
+
+#[test]
+fn moved_places_can_be_reinitialized_without_clearing_relatives() {
+    let whole = r#"
+fn consume(value: String) { print(value) }
+fn run() {
+    value := "jet"
+    consume(value)
+    value = "again"
+    print(value)
+}
+"#;
+    jet::compile(whole).expect("whole assignment reinitializes the moved binding");
+
+    let field = r#"
+struct Pair { left: String, right: [Int] }
+fn call(callback: fn()) { callback() }
+fn run() {
+    pair := Pair.{ left: "jet", right: [1] }
+    call(() => { print(pair.left) })
+    pair.left = "again"
+    print(pair.left)
+    print(pair.right.len())
+}
+"#;
+    jet::compile(field).expect("field assignment reinitializes the exact moved field");
+
+    let sibling = r#"
+struct Pair { left: String, right: [Int] }
+fn call(callback: fn()) { callback() }
+fn run() {
+    pair := Pair.{ left: "jet", right: [1] }
+    call(() => { print(pair.left) })
+    pair.right = [2]
+    print(pair.left)
+}
+"#;
+    let diags =
+        jet::compile(sibling).expect_err("assigning a sibling must not restore the moved field");
+    assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
+
+    let ancestor = r#"
+struct Pair { left: String, right: [Int] }
+fn call(callback: fn()) { callback() }
+fn run() {
+    pair := Pair.{ left: "jet", right: [1] }
+    call(() => { print(pair) })
+    pair.left = "again"
+}
+"#;
+    let diags =
+        jet::compile(ancestor).expect_err("assigning a field cannot restore a moved ancestor");
+    assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
+}
+
+#[test]
+fn builtin_and_composite_receivers_use_the_call_access_frame() {
+    let builtin = r#"
+fn run() {
+    values := [1, 2]
+    values.insert(0, values.remove(0))
+}
+"#;
+    let diags = jet::compile(builtin)
+        .expect_err("a nested builtin receiver must see the outer receiver write");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let composite = r#"
+fn both(value: &Int, count: Int) { value += count }
+fn run() {
+    value := 1
+    both(&value, [value].len())
+}
+"#;
+    let diags =
+        jet::compile(composite).expect_err("a composite receiver must evaluate inside the call");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn if_expression_prefix_reads_use_the_call_access_frame() {
+    let src = r#"
+fn both(value: &Int, count: Int) { value += count }
+fn run() {
+    value := 1
+    both(&value, if true { seen :: value; seen } else { 0 })
+}
+"#;
+    let diags =
+        jet::compile(src).expect_err("an if-expression prefix read must see the active write");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn deferred_lambda_capture_reports_once() {
+    let src = r#"
+fn see(value: String) -> String { return value }
+fn both(value: &String, callback: fn() -> String) { print(value); print(callback()) }
+fn run() {
+    value := "jet"
+    both(&value, () => see(value))
+}
+"#;
+    let diags = jet::compile(src).expect_err("the deferred capture conflicts with the active write");
+    assert_eq!(
+        diags.iter().filter(|diag| diag.code == "E0204").count(),
+        1,
+        "the post-inference capture summary must be the only report: {diags:?}"
+    );
+}
+
+#[test]
+fn evaluated_statement_accesses_are_scoped_and_mode_aware() {
+    let write = r#"
+fn both(values: [Int], count: Int) { print(values.len() + count) }
+fn run() {
+    values := [1, 2]
+    both(values, if true { values = [3]; 1 } else { 0 })
+}
+"#;
+    let diags =
+        jet::compile(write).expect_err("an if-prefix assignment must conflict with the read loan");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let shadow = r#"
+fn both(value: &Int, callback: fn(Int) -> Int) { value += callback(2) }
+fn run() {
+    value := 1
+    both(&value, (value: Int) => value)
+}
+"#;
+    jet::compile(shadow).expect("a lambda-local shadow must not capture the outer write-borrowed place");
+}
+
+#[test]
+fn lambda_capture_access_is_projection_specific_and_transitive() {
+    let mixed = r#"
+struct Pair { left: [Int], right: [Int] }
+fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    both(() => { print(pair.left.len()); pair.right.push(3) }, pair.left)
+}
+"#;
+    jet::compile(mixed).expect("reading left and mutating right keeps projection modes separate");
+
+    let conflict = r#"
+struct Pair { left: [Int], right: [Int] }
+fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    both(() => { print(pair.left.len()); pair.right.push(3) }, pair.right)
+}
+"#;
+    let diags = jet::compile(conflict).expect_err("the mutated projection remains write-borrowed");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let transitive = r#"
+fn both(value: &String, callback: fn() -> fn() -> String) {
+    print(value)
+    print(callback()())
+}
+fn run() {
+    value := "jet"
+    both(&value, () => () => value)
+}
+"#;
+    let diags =
+        jet::compile(transitive).expect_err("a nested closure capture is also an outer capture");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn composite_lambda_capture_walks_if_prefix_and_fallback_values() {
+    let if_prefix = r#"
+struct Work { callback: fn() -> Int }
+fn both(values: &[Int], work: Work) { values.push(work.callback()) }
+fn run() {
+    values := [1, 2]
+    both(&values, if true {
+        work :: Work.{ callback: () => values.len() }
+        work
+    } else {
+        Work.{ callback: () => 0 }
+    })
+}
+"#;
+    let diags =
+        jet::compile(if_prefix).expect_err("a lambda created in an if prefix must be summarized");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let fallback = r#"
+fn both(values: &[Int], callback: fn() -> Int) { values.push(callback()) }
+fn run() {
+    values := [1, 2]
+    both(&values, Val(() => values.len()) ?? () => 0)
+}
+"#;
+    let diags = jet::compile(fallback)
+        .expect_err("a lambda created through fallback evaluation must retain its capture");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn builtin_mut_receiver_uses_two_phase_reservation() {
+    let accepted = r#"
+fn run() {
+    values := [1, 2]
+    values.push(values.len())
+}
+"#;
+    jet::compile(accepted).expect("a shared argument read is allowed during receiver reservation");
+
+    let rejected = r#"
+fn run() {
+    values := [1, 2]
+    values.push(values.remove(0))
+}
+"#;
+    let diags =
+        jet::compile(rejected).expect_err("a nested write conflicts with receiver reservation");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    for eager in [
+        r#"
+fn run() {
+    values := [2, 1]
+    values.sort_by((value: Int) => value + values.len())
+}
+"#,
+        r#"
+fn run() {
+    clock := Clock.new(0)
+    clock.advance(clock.now())
+}
+"#,
+        r#"
+use core.solve as solve
+fn run() {
+    solver := solve.Solver.new(1)
+    solver.require(solver.failure_count() == 0)
+}
+"#,
+    ] {
+        let diags =
+            jet::compile(eager).expect_err("explicit-helper receiver borrows are eager");
+        assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+    }
+}
+
+#[test]
+fn semantic_capture_events_drive_retention_and_deferred_clone_modes() {
+    let field_write = r#"
+struct Bucket { values: [Int] }
+fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn run() {
+    bucket := Bucket.{ values: [1, 2] }
+    both(() => { bucket.values = [3] }, bucket.values)
+}
+"#;
+    let diags =
+        jet::compile(field_write).expect_err("a captured field assignment stays write-borrowed");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let user_method = r#"
+struct Bucket { values: [Int] }
+impl Bucket {
+    fn clear(&self) { self.values = [0] }
+}
+fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn run() {
+    bucket := Bucket.{ values: [1, 2] }
+    both(() => bucket.clear(), bucket.values)
+}
+"#;
+    let diags = jet::compile(user_method)
+        .expect_err("a captured user mutable receiver stays write-borrowed");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let reactive_clone = r#"
+fn both(callback: fn(), values: &[Int]) { callback(); values.push(4) }
+fn run() {
+    values := [1, 2]
+    both(() => {
+        #Reactive { values.push(3) }
+    }, &values)
+}
+"#;
+    let diags = jet::compile(reactive_clone)
+        .expect_err("the outer move closure consumes the reactive source before the later loan");
+    assert!(!diags.is_empty(), "expected a move or alias diagnostic");
+}
+
+#[test]
+fn pattern_value_tests_and_reactive_clones_use_runtime_capture_places() {
+    let pattern_value = r#"
+struct Incident { count: Int, label: String }
+fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn run() {
+    values := [1, 2]
+    changed := [0]
+    incident := Incident.{ count: 2, label: "jet" }
+    both(&values, () => {
+        changed.push(1)
+        if incident == {
+            .{ count: values.len(), label, .. } -> print(label)
+            else -> {}
+        }
+    })
+}
+"#;
+    let diags = jet::compile(pattern_value)
+        .expect_err("a struct-pattern value expression is evaluated before its arm");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let reactive_root = r#"
+struct Pair { left: [Int], right: [Int] }
+fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    changed := [0]
+    both(&pair.right, () => {
+        changed.push(1)
+        #Reactive { pair.left.push(3) }
+    })
+}
+"#;
+    let diags = jet::compile(reactive_root)
+        .expect_err("reactive lowering clones the whole captured root");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn reactive_root_capture_replaces_existing_owner_projections() {
+    let src = r#"
+struct Pair { left: [Int], right: [Int] }
+fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    both(&pair.right, () => {
+        print(pair.left.len())
+        #Reactive { pair.right.push(4) }
+    })
+}
+"#;
+    let diags =
+        jet::compile(src).expect_err("Reactive clones the root after an earlier field capture");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let write_then_reactive = r#"
+struct Pair { left: [Int], right: [Int] }
+fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    both(&pair.right, () => {
+        pair.left.push(4)
+        #Reactive { print(pair.right.len()) }
+    })
+}
+"#;
+    let diags = jet::compile(write_then_reactive)
+        .expect_err("Reactive coarsening must preserve an earlier mutable capture");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn reactive_codegen_clones_the_whole_root_before_running() {
+    let source = r#"
+struct Pair { left: [Int], right: [Int] }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    #Reactive {
+        pair.left.push(3)
+        print(pair.left.len())
+    }
+    print(pair.right.len())
+}
+"#;
+    let compiled = jet::compile(source).expect("direct Reactive cloning must remain valid");
+    assert!(
+        compiled
+            .rust
+            .contains("let mut _jet_cap_user_pair = (user_pair).clone();"),
+        "{}",
+        compiled.rust
+    );
+    if common::have_rustc() {
+        let (code, stdout, stderr) =
+            common::build_and_run("jet_reactive_capture", "whole_root", source);
+        assert_eq!(code, 0, "{stderr}");
+        assert_eq!(stdout, "2\n1\n");
+    }
+}
+
+#[test]
+fn reactive_capture_rejects_local_views_before_rustc() {
+    let source = r#"
+fn run() {
+    values := [1, 2]
+    first :: values[0..1]
+    #Reactive { print(first.len()) }
+}
+"#;
+    let diags =
+        jet::compile(source).expect_err("a stored reactive effect cannot capture a local View");
+    assert!(diags.iter().any(|diag| diag.code == "E2305"), "{diags:?}");
+
+    let root = common::unique_tmp("jet_reactive_view_capture");
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("main.jet");
+    fs::write(&path, source).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["build", path.to_str().unwrap()])
+        .current_dir(&root)
+        .output()
+        .expect("run the production build path");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "the frontend must reject the View capture");
+    assert_ne!(
+        output.status.code(),
+        Some(101),
+        "a reactive View capture leaked to rustc: {stderr}"
+    );
+    assert!(stderr.contains("E2305"), "wrong frontend diagnostic: {stderr}");
+    assert!(!stderr.contains("E0597"), "rustc lifetime error leaked: {stderr}");
+}
+
+#[test]
+fn move_lambda_construction_consumes_owned_nonscalar_captures() {
+    for (source, expected) in [
+        (r#"
+fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn run() {
+    values := [1, 2]
+    both(() => values.len(), values)
+}
+"#, "E0121"),
+        (r#"
+fn both(values: [Int], callback: fn()) { print(values.len()); callback() }
+fn run() {
+    values := [1, 2]
+    both(values, () => values.len())
+}
+"#, "E0204"),
+    ] {
+        let diags = jet::compile(source)
+            .expect_err("a move closure consumes its owned non-scalar capture");
+        assert!(
+            diags.iter().any(|diag| diag.code == expected),
+            "{expected}: {diags:?}"
+        );
+    }
+
+    let scalar_copy = r#"
+fn both(callback: fn(), value: Int) { callback(); print(value) }
+fn run() {
+    value := 2
+    both(() => { print(value) }, value)
+}
+"#;
+    jet::compile(scalar_copy).expect("Copy scalar captures remain usable");
+}
+
+#[test]
+fn semantic_capture_walker_covers_fallback_and_scope_member_arguments() {
+    let fallback = r#"
+fn missing() -> Int? { return null }
+fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn run() {
+    values := [1, 2]
+    both(&values, () => {
+        found :: missing() ?? panic("length {values.len()}")
+        print(found)
+    })
+}
+"#;
+    let diags =
+        jet::compile(fallback).expect_err("panic fallback arguments are closure captures");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let scope_member = r#"
+fn run() { print(0) }
+#Test("member argument capture walk") {
+    values := [1, 2]
+    .skip("length {values.len()}") { require(false) }
+}
+"#;
+    jet::compile(scope_member).expect("valid scope-member arguments remain walkable");
+}
+
+#[test]
+fn wrapped_and_branch_returned_views_stay_live_through_outer_calls() {
+    for view in [
+        "(first(values))",
+        "if true { first(values) } else { first(values) }",
+        "Val(first(values)) ?? first(values)",
+    ] {
+        let src = format!(
+            r#"
+fn first(values: [Int]) -> View<Int> {{
+    return values[0..1]
+}}
+fn both(view: View<Int>, values: &[Int]) {{
+    values.push(view[0])
+}}
+fn run() {{
+    values := [1, 2]
+    both({view}, &values)
+}}
+"#
+        );
+        let diags =
+            jet::compile(&src).expect_err("wrapped returned views retain their source loan");
+        assert!(diags.iter().any(|diag| diag.code == "E0204"), "{view}: {diags:?}");
+    }
+}
+
+#[test]
+fn return_fallback_view_does_not_reach_the_enclosing_call() {
+    let source = r#"
+struct View<T> { value: T }
+fn first(values: [Int]) -> View<Int> { return values[0..1] }
+fn both(view: View<Int>, values: &[Int]) { values.push(view[0]) }
+fn choose(other: [Int], values: &[Int]) -> View<Int> {
+    both(Val(first(other)) ?? return first(values), &values)
+    return first(other)
+}
+fn run() {
+    other := [1]
+    values := [2]
+    chosen :: choose(other, &values)
+    print(chosen[0])
+}
+"#;
+    jet::compile(source)
+        .expect("a return fallback exits before the enclosing call can run");
+}
+
+#[test]
+fn generic_constructor_nested_argument_sees_active_write_place() {
+    let src = r#"
+struct Pair<T> { value: T }
+impl Pair {
+    fn new(first: &T, second: T) -> Pair<T> {
+        return Pair<T>.{ value: second }
+    }
+}
+fn see(value: Int) -> Int { return value }
+
+fn run() {
+    x := 1
+    pair :: Pair.new(&x, see(x))
+    print(pair.value)
+}
+"#;
+    let diags =
+        jet::compile(src).expect_err("constructor pre-inference must fail in sema before rustc");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0204"),
+        "expected the call-alias diagnostic: {diags:?}"
+    );
+}
+
+#[test]
+fn dynamic_projection_operands_are_checked_but_not_retained() {
+    let hostile_index = r#"
+fn both(index: &Int, value: Int) { index += value }
+fn run() {
+    values := [10, 20]
+    index := 0
+    both(&index, values[index])
+}
+"#;
+    let diags = jet::compile(hostile_index)
+        .expect_err("dynamic index evaluation must fail in sema before rustc");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let hostile_slice = r#"
+fn both(end: &Int, values: [Int]) { end += values.len() }
+fn run() {
+    values := [10, 20]
+    end := 1
+    both(&end, values[0..end])
+}
+"#;
+    let diags = jet::compile(hostile_slice)
+        .expect_err("dynamic slice-bound evaluation must fail in sema before rustc");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let ordered = r#"
+fn both(value: Int, index: &Int) { index += value }
+fn run() {
+    values := [10, 20]
+    index := 0
+    both(values[index], &index)
+}
+"#;
+    jet::compile(ordered)
+        .expect("the index read finishes before the later write borrow is retained");
+}
+
+#[test]
+fn whole_place_alias_blocks_overlapping_write_argument() {
+    let src = r#"
+fn both(a: &[Int], b: [Int]) {
+    a[0] = b[0]
+}
+
+fn run() {
+    xs := [1, 2, 3]
+    alias :: xs
+    both(&xs, alias)
+}
+"#;
+    let diags =
+        jet::compile(src).expect_err("whole-place read alias must fail in sema before rustc");
+    let diag = diags.iter().find(|diag| diag.code == "E0204");
+    assert!(
+        diag.is_some(),
+        "expected the call-alias diagnostic: {diags:?}"
+    );
+    let diag = diag.unwrap();
+    assert!(
+        diag.what.starts_with("`xs`"),
+        "the alias must resolve through the view fact graph to its owner: {diag:?}"
+    );
+}
+
+#[test]
+fn rustc_oracle_rejects_the_hostile_borrow_shapes() {
+    if Command::new("rustc").arg("--version").output().is_err() {
+        return;
+    }
+    let root = common::unique_tmp("jet_call_place_rustc_oracle");
+    fs::create_dir_all(&root).unwrap();
+    let cases = [
+        (
+            "nested.rs",
+            r#"
+fn see(x: i64) -> i64 { x }
+fn both(a: &mut i64, b: i64) { *a += b }
+fn main() {
+    let mut x = 1;
+    both(&mut x, see(x));
+}
+"#,
+            "E0503",
+        ),
+        (
+            "alias.rs",
+            r#"
+fn both(a: &mut Vec<i64>, b: &Vec<i64>) { a[0] = b[0] }
+fn main() {
+    let mut xs = vec![1, 2, 3];
+    let alias = &xs;
+    both(&mut xs, alias);
+}
+"#,
+            "E0502",
+        ),
+        (
+            "lambda.rs",
+            r#"
+fn both<F: FnOnce() -> String>(a: &mut String, callback: F) {
+    println!("{a}");
+    println!("{}", callback());
+}
+fn main() {
+    let mut x = String::from("jet");
+    both(&mut x, move || x);
+}
+"#,
+            "E0505",
+        ),
+        (
+            "constructor.rs",
+            r#"
+struct Pair<T>(T);
+impl<T> Pair<T> {
+    fn new(_first: &mut T, second: T) -> Self { Self(second) }
+}
+fn see(value: i64) -> i64 { value }
+fn main() {
+    let mut x = 1;
+    let _ = Pair::new(&mut x, see(x));
+}
+"#,
+            "E0503",
+        ),
+        (
+            "mutable_capture_lifetime.rs",
+            r#"
+fn both<F: FnMut()>(mut callback: F, values: &Vec<i64>) {
+    callback();
+    println!("{}", values.len());
+}
+fn main() {
+    let mut values = vec![1, 2];
+    both(|| values.push(3), &values);
+}
+"#,
+            "E0502",
+        ),
+        (
+            "composite_lambda.rs",
+            r#"
+struct Work<F> { callback: F }
+fn both<F: Fn() -> usize>(values: &mut Vec<i64>, work: Work<F>) {
+    values.push((work.callback)() as i64);
+}
+fn main() {
+    let mut values = vec![1, 2];
+    both(&mut values, Work { callback: move || values.len() });
+}
+"#,
+            "E0505",
+        ),
+        (
+            "immediate_lambda_callee.rs",
+            r#"
+fn both(values: &mut Vec<i64>, count: usize) { values.push(count as i64) }
+fn main() {
+    let mut values = vec![1, 2];
+    both(&mut values, (move || values.len())());
+}
+"#,
+            "E0505",
+        ),
+        (
+            "conflicting_capture_field.rs",
+            r#"
+struct Pair { left: Vec<i64>, right: Vec<i64> }
+fn both<F: FnMut()>(mut callback: F, values: &Vec<i64>) {
+    callback();
+    println!("{}", values.len());
+}
+fn main() {
+    let mut pair = Pair { left: vec![1], right: vec![2] };
+    both(|| pair.right.push(3), &pair.right);
+}
+"#,
+            "E0502",
+        ),
+        (
+            "builtin_receiver.rs",
+            r#"
+fn main() {
+    let mut values = vec![1, 2];
+    values.insert(0, values.remove(0));
+}
+"#,
+            "E0499",
+        ),
+        (
+            "if_prefix_write.rs",
+            r#"
+fn both(values: &Vec<i64>, count: i64) { println!("{}", values.len() as i64 + count) }
+fn main() {
+    let mut values = vec![1, 2];
+    both(&values, { values = vec![3]; 1 });
+}
+"#,
+            "E0506",
+        ),
+        (
+            "transitive_lambda.rs",
+            r#"
+fn both<F, G>(value: &mut String, callback: F)
+where F: FnOnce() -> G, G: FnOnce() -> String
+{
+    println!("{value}");
+    println!("{}", callback()());
+}
+fn main() {
+    let mut value = String::from("jet");
+    both(&mut value, move || move || value);
+}
+"#,
+            "E0505",
+        ),
+        (
+            "eager_helper_receiver.rs",
+            r#"
+fn advance(clock: &mut i64, to: i64) { *clock = to; }
+fn now(clock: &i64) -> i64 { *clock }
+fn main() {
+    let mut clock = 0;
+    advance(&mut clock, now(&clock));
+}
+"#,
+            "E0502",
+        ),
+        (
+            "eager_sort_capture.rs",
+            r#"
+fn sort_by<F: Fn(i64) -> i64>(values: &mut Vec<i64>, key: F) {
+    values.sort_by_key(|value| key(*value));
+}
+fn main() {
+    let mut values = vec![2, 1];
+    sort_by(&mut values, |value| value + values.len() as i64);
+}
+"#,
+            "E0502",
+        ),
+        (
+            "wrapped_returned_view.rs",
+            r#"
+fn first(values: &Vec<i64>) -> &[i64] { &values[0..1] }
+fn both(view: &[i64], values: &mut Vec<i64>) { values.push(view[0]); }
+fn main() {
+    let mut values = vec![1, 2];
+    both((first(&values)), &mut values);
+}
+"#,
+            "E0502",
+        ),
+        (
+            "pattern_value_capture.rs",
+            r#"
+struct Incident { count: usize }
+fn both<F: FnMut()>(values: &mut Vec<i64>, mut callback: F) {
+    values.push(3);
+    callback();
+}
+fn main() {
+    let mut values = vec![1, 2];
+    let mut changed = vec![0];
+    let incident = Incident { count: 2 };
+    both(&mut values, || {
+        changed.push(1);
+        if incident.count == values.len() {}
+    });
+}
+"#,
+            "E0502",
+        ),
+        (
+            "reactive_whole_root_clone.rs",
+            r#"
+#[derive(Clone)]
+struct Pair { left: Vec<i64>, right: Vec<i64> }
+fn both<F: FnMut()>(values: &mut Vec<i64>, mut callback: F) {
+    values.push(3);
+    callback();
+}
+fn main() {
+    let mut pair = Pair { left: vec![1], right: vec![2] };
+    let mut changed = vec![0];
+    both(&mut pair.right, || {
+        changed.push(1);
+        let captured_pair = pair.clone();
+        let _effect = move || println!("{}", captured_pair.left.len());
+    });
+}
+"#,
+            "E0502",
+        ),
+        (
+            "move_capture_before_read.rs",
+            r#"
+fn both<F: Fn() -> usize>(callback: F, values: &Vec<i64>) {
+    println!("{} {}", callback(), values.len());
+}
+fn main() {
+    let values = vec![1, 2];
+    both(move || values.len(), &values);
+}
+"#,
+            "E0382",
+        ),
+        (
+            "read_before_move_capture.rs",
+            r#"
+fn both<F: Fn() -> usize>(values: &Vec<i64>, callback: F) {
+    println!("{} {}", values.len(), callback());
+}
+fn main() {
+    let values = vec![1, 2];
+    both(&values, move || values.len());
+}
+"#,
+            "E0505",
+        ),
+        (
+            "same_move_capture_field.rs",
+            r#"
+struct Pair { left: String, right: Vec<i64> }
+fn both<F: Fn()>(callback: F, text: String) { callback(); println!("{text}"); }
+fn main() {
+    let pair = Pair { left: "jet".to_string(), right: vec![1] };
+    both(move || println!("{}", pair.left), pair.left);
+}
+"#,
+            "E0382",
+        ),
+        (
+            "captured_view_vs_write.rs",
+            r#"
+fn both<F: Fn()>(values: &mut Vec<i64>, callback: F) { values.push(3); callback(); }
+fn main() {
+    let mut values = vec![1, 2];
+    let first = &values[0..1];
+    both(&mut values, move || println!("{}", first.len()));
+}
+"#,
+            "E0502",
+        ),
+        (
+            "captured_view_vs_later_write.rs",
+            r#"
+fn both<F: Fn() -> usize>(callback: F, values: &mut Vec<i64>) {
+    values.push(callback() as i64);
+}
+fn main() {
+    let mut values = vec![1, 2];
+    let first = &values[0..1];
+    both(move || first.len(), &mut values);
+}
+"#,
+            "E0502",
+        ),
+        (
+            "indexed_move_capture.rs",
+            r#"
+fn call<F: Fn()>(callback: F) { callback(); }
+fn main() {
+    let values = vec![1, 2];
+    call(move || println!("{}", values[0]));
+    println!("{}", values.len());
+}
+"#,
+            "E0382",
+        ),
+        (
+            "sliced_move_capture.rs",
+            r#"
+fn call<F: Fn()>(callback: F) { callback(); }
+fn main() {
+    let values = vec![1, 2];
+    call(move || println!("{}", values[0..1].len()));
+    println!("{}", values.len());
+}
+"#,
+            "E0382",
+        ),
+        (
+            "if_prefix.rs",
+            r#"
+fn both(value: &mut i64, count: i64) { *value += count }
+fn main() {
+    let mut value = 1;
+    both(&mut value, if true { let seen = value; seen } else { 0 });
+}
+"#,
+            "E0503",
+        ),
+        (
+            "composite_receiver.rs",
+            r#"
+fn both(value: &mut i64, count: usize) { *value += count as i64 }
+fn main() {
+    let mut value = 1;
+    both(&mut value, vec![value].len());
+}
+"#,
+            "E0503",
+        ),
+        (
+            "dynamic_index.rs",
+            r#"
+fn both(index: &mut usize, value: i64) { *index += value as usize }
+fn main() {
+    let values = [10, 20];
+    let mut index = 0;
+    both(&mut index, values[index]);
+}
+"#,
+            "E0503",
+        ),
+        (
+            "slice_bound.rs",
+            r#"
+fn both(end: &mut usize, values: &[i64]) { *end += values.len() }
+fn main() {
+    let values = [10, 20];
+    let mut end = 1;
+    both(&mut end, &values[0..end]);
+}
+"#,
+            "E0503",
+        ),
+    ];
+    for (name, source, expected) in cases {
+        let path = root.join(name);
+        fs::write(&path, source).unwrap();
+        let output = Command::new("rustc")
+            .arg("--edition=2021")
+            .arg(&path)
+            .arg("-o")
+            .arg(root.join(format!("{name}.bin")))
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains(expected),
+            "native oracle must reject {name} with {expected}: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn rustc_oracle_accepts_move_copy_and_disjoint_field_captures() {
+    if Command::new("rustc").arg("--version").output().is_err() {
+        return;
+    }
+    let root = common::unique_tmp("jet_call_place_rustc_positive_oracle");
+    fs::create_dir_all(&root).unwrap();
+    let cases = [
+        (
+            "copy_move.rs",
+            r#"
+fn both<F: Fn() -> i64>(callback: F, value: &mut i64) { *value += callback() }
+fn main() {
+    let mut value = 1;
+    both(move || value, &mut value);
+}
+"#,
+        ),
+        (
+            "disjoint_field.rs",
+            r#"
+struct Pair { left: Vec<i64>, right: Vec<i64> }
+fn both<F: FnMut()>(mut callback: F, values: &Vec<i64>) {
+    callback();
+    println!("{}", values.len());
+}
+fn main() {
+    let mut pair = Pair { left: vec![1], right: vec![2] };
+    both(|| pair.right.push(3), &pair.left);
+}
+"#,
+        ),
+        (
+            "two_phase_receiver.rs",
+            r#"
+fn main() {
+    let mut values = vec![1_i64, 2];
+    values.push(values.len() as i64);
+}
+"#,
+        ),
+        (
+            "mixed_projection_capture.rs",
+            r#"
+struct Pair { left: Vec<i64>, right: Vec<i64> }
+fn both<F: FnMut()>(mut callback: F, values: &Vec<i64>) {
+    callback();
+    println!("{}", values.len());
+}
+fn main() {
+    let mut pair = Pair { left: vec![1], right: vec![2] };
+    both(|| {
+        println!("{}", pair.left.len());
+        pair.right.push(3);
+    }, &pair.left);
+}
+"#,
+        ),
+        (
+            "move_owned_field.rs",
+            r#"
+struct Pair { left: String, right: Vec<i64> }
+fn both<F: Fn()>(callback: F, values: Vec<i64>) { callback(); println!("{}", values.len()); }
+fn main() {
+    let pair = Pair { left: "jet".to_string(), right: vec![1] };
+    both(move || println!("{}", pair.left), pair.right);
+}
+"#,
+        ),
+        (
+            "copy_field_owner.rs",
+            r#"
+struct Pair { count: i64, values: Vec<i64> }
+fn both<F: Fn()>(callback: F, pair: Pair) { callback(); println!("{}", pair.count); }
+fn main() {
+    let pair = Pair { count: 2, values: vec![1] };
+    both(move || println!("{}", pair.count), pair);
+}
+"#,
+        ),
+        (
+            "view_alias_capture.rs",
+            r#"
+fn call<F: Fn()>(callback: F) { callback(); }
+fn main() {
+    let values = vec![1, 2];
+    let first = &values[0..1];
+    call(move || println!("{}", first.len()));
+    println!("{}", values.len());
+}
+"#,
+        ),
+        (
+            "indexed_disjoint_field.rs",
+            r#"
+struct Pair { left: Vec<i64>, right: Vec<i64> }
+fn call<F: Fn()>(callback: F) { callback(); }
+fn main() {
+    let pair = Pair { left: vec![1], right: vec![2] };
+    call(move || println!("{}", pair.left[0]));
+    println!("{}", pair.right.len());
+}
+"#,
+        ),
+    ];
+    for (name, source) in cases {
+        let path = root.join(name);
+        fs::write(&path, source).unwrap();
+        let output = Command::new("rustc")
+            .arg("--edition=2021")
+            .arg(&path)
+            .arg("-o")
+            .arg(root.join(format!("{name}.bin")))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "native oracle must accept {name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn imported_call_uses_the_same_place_access_rule() {
+    let root = common::unique_tmp("jet_imported_call_place_access");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("helper.jet"),
+        "pub fn both(a: &Int, b: Int) { a += b }\n",
+    )
+    .unwrap();
+    let entry = root.join("main.jet");
+    let src = r#"
+use "./helper" as helper
+
+fn run() {
+    x := 1
+    helper.both(&x, x)
+}
+"#;
+    fs::write(&entry, src).unwrap();
+    let diags = jet::compile_with_path(src, entry.to_str().unwrap())
+        .expect_err("imported call alias must fail in sema before rustc");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0204"),
+        "expected the call-alias diagnostic: {diags:?}"
+    );
+}
+
+#[test]
+fn generic_method_trait_and_function_value_calls_share_place_access() {
+    let hostile = [
+        r#"
+fn both<T>(a: &T, b: T) { print(0) }
+fn run() {
+    value := 1
+    both(&value, value)
+}
+"#,
+        r#"
+struct Editor { id: Int }
+impl Editor {
+    fn clash(self, other: &Editor) { print(other.id) }
+}
+fn run() {
+    editor := Editor.{ id: 1 }
+    editor.clash(&editor)
+}
+"#,
+        r#"
+trait Edit {
+    fn clash(self, other: &Edit)
+}
+fn conflict(editor: &Edit) {
+    editor.clash(&editor)
+}
+fn run() {}
+"#,
+        r#"
+fn length(value: String) -> Int { return value.len() }
+fn both(value: &String, count: Int) { print(value); print(count) }
+fn run() {
+    callback :: length
+    value := "hello"
+    both(&value, callback(value))
+}
+"#,
+        r#"
+module helper {
+    pub fn both(a: &Int, b: Int) { a += b }
+}
+fn run() {
+    value := 1
+    helper.both(&value, value)
+}
+"#,
+    ];
+    for src in hostile {
+        let diags = jet::compile(src).expect_err("every call form must reject one aliased place");
+        assert!(
+            diags.iter().any(|diag| diag.code == "E0204"),
+            "expected the shared call-place diagnostic: {diags:?}"
+        );
+    }
+}
+
+#[test]
+fn trait_object_mut_self_calls_use_receiver_change_rules_inside_callbacks() {
+    let rejected = r#"
+trait Edit {
+    fn change(&self)
+}
+fn call(callback: fn()) { callback() }
+fn invoke(editor: Edit) {
+    call(() => { editor.change() })
+}
+fn run() {}
+"#;
+    let diags = jet::compile(rejected)
+        .expect_err("a trait-object mut-self callback capture needs edit access");
+    assert!(diags.iter().any(|diag| diag.code == "E0202"), "{diags:?}");
+
+    let accepted = r#"
+trait Edit {
+    fn change(&self)
+}
+fn call(callback: fn()) { callback() }
+fn invoke(editor: &Edit) {
+    call(() => { editor.change() })
+}
+fn run() {}
+"#;
+    jet::compile(accepted).expect("an editable trait-object callback capture is valid");
+}
+
+#[test]
+fn multi_trait_receiver_access_follows_first_match_dispatch_order() {
+    let read_first = r#"
+trait Inspect {
+    fn touch(self)
+}
+trait Edit {
+    fn touch(&self)
+}
+fn call(callback: fn()) { callback() }
+fn inspect_all(items: ...[Inspect, Edit]) {
+    loop item; items {
+        call(() => { item.touch() })
+    }
+}
+fn run() {}
+"#;
+    jet::compile(read_first)
+        .expect("the first matching read-self method controls dispatch and capture access");
+
+    let write_first = r#"
+trait Inspect {
+    fn touch(self)
+}
+trait Edit {
+    fn touch(&self)
+}
+fn call(callback: fn()) { callback() }
+fn edit_all(items: ...[Edit, Inspect]) {
+    loop item; items {
+        call(() => { item.touch() })
+    }
+}
+fn run() {}
+"#;
+    let diags = jet::compile(write_first)
+        .expect_err("the first matching write-self method needs edit access");
+    assert!(diags.iter().any(|diag| diag.code == "E0202"), "{diags:?}");
+}
+
+#[test]
+fn implicit_borrows_persist_but_finished_scalar_reads_do_not() {
+    let borrowed = r#"
+fn inspect_then_edit(values: [Int], edited: &[Int]) { print(values.len() + edited.len()) }
+fn run() {
+    values := [1, 2, 3]
+    inspect_then_edit(values, &values)
+}
+"#;
+    let diags = jet::compile(borrowed).expect_err("implicit read borrow must remain active");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let ordered = r#"
+fn read_then_edit(value: Int, edited: &Int) { edited += value }
+fn run() {
+    value := 1
+    read_then_edit(value, &value)
+}
+"#;
+    jet::compile(ordered).expect("a completed scalar read may precede a write borrow");
+}
+
+#[test]
+fn call_access_frames_do_not_leak_across_control_flow_or_disjoint_places() {
+    let src = r#"
+fn both(a: &Int, b: Int) { a += b }
+fn run() {
+    left := 1
+    right := 2
+    if true {
+        both(&left, right)
+    }
+    both(&right, left)
+}
+"#;
+    jet::compile(src).expect("separate calls on disjoint places must not share access frames");
 }
 
 /// E0209 liveness gate (was D-L0201): when the value is still used after the

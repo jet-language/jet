@@ -1,9 +1,8 @@
 use crate::AST::{AccessConvention, Expr, StrPart, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
-use crate::Sema::Diagnostics::{aliasing_mut_after_read, aliasing_while_mut, type_fix_hint};
+use crate::Sema::Diagnostics::type_fix_hint;
 use crate::Syntax;
-use std::collections::HashSet;
 impl<'a> Checker<'a> {
         pub(super) fn synthesized_string_arg(value: String, span: Span) -> crate::AST::CallArg {
             crate::AST::CallArg {
@@ -47,7 +46,15 @@ impl<'a> Checker<'a> {
             args: &mut [crate::AST::CallArg],
             span: Span,
         ) -> Option<Type> {
-            let callee_ty = self.infer(callee)?;
+            let mut call_access = self.call_access_frame();
+            let Some(callee_ty) = self.with_call_access(&mut call_access, |checker| {
+                checker.check_call_receiver_evaluation(callee, callee.span());
+                let inferred = checker.infer(callee);
+                checker.check_call_argument_captures(callee);
+                inferred
+            }) else {
+                return None;
+            };
             let Type::Fn {
                 params,
                 ret,
@@ -101,24 +108,23 @@ impl<'a> Checker<'a> {
                     Some(span),
                 ));
             }
-            let mut mut_borrowed = HashSet::new();
-            let mut read_borrowed = HashSet::new();
             for (i, arg) in args.iter_mut().enumerate() {
-                if let Expr::Ident(name, arg_span) = &arg.expr {
-                    if mut_borrowed.contains(name) {
-                        self.diags.push(aliasing_while_mut(name, *arg_span));
-                    } else if arg.convention == AccessConvention::Write
-                        && read_borrowed.contains(name)
-                    {
-                        self.diags.push(aliasing_mut_after_read(name, *arg_span));
-                    }
-                }
                 if let Some(param_ty) = params.get(i) {
                     let saved = self.expected_type.clone();
                     let saved_borrow = self.borrow_ctx;
                     self.expected_type = Some(param_ty.clone());
                     self.borrow_ctx = !param_ty.is_scalar();
-                    let got = self.infer(&mut arg.expr);
+                    let got = self.with_call_access(&mut call_access, |checker| {
+                        checker.check_call_argument_access(
+                            arg,
+                            AccessConvention::Read,
+                            param_ty,
+                            true,
+                        );
+                        let inferred = checker.infer(&mut arg.expr);
+                        checker.check_call_argument_captures(&arg.expr);
+                        inferred
+                    });
                     self.expected_type = saved;
                     self.borrow_ctx = saved_borrow;
                     if let Some(got) = got {
@@ -175,9 +181,6 @@ impl<'a> Checker<'a> {
                                     ));
                                 }
                             }
-                            mut_borrowed.insert(name.clone());
-                        } else if !param_ty.is_scalar() {
-                            read_borrowed.insert(name.clone());
                         }
                     }
                 } else {

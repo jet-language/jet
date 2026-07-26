@@ -1736,3 +1736,39 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
 pub fn builtin_needs_mut_receiver(recv_ty: &Type, method: &str) -> bool {
     builtin_method_mutates(recv_ty, method)
 }
+
+/// Generated Rust receiver-borrow form for a builtin call. This is shared by
+/// sema's call-loan timing and TIR lowering so the two cannot drift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinReceiverBorrow {
+    Read,
+    TwoPhaseWrite,
+    EagerWrite,
+    Move,
+}
+
+pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverBorrow {
+    if is_iter_type(recv_ty) {
+        BuiltinReceiverBorrow::Move
+    } else if !builtin_method_mutates(recv_ty, method) {
+        BuiltinReceiverBorrow::Read
+    } else if (matches!(recv_ty, Type::List(_))
+        && matches!(method, "remove" | "sort_by"))
+        || matches!(
+            recv_ty,
+            Type::Named(name)
+                if name == Syntax::CLOCK_TYPE
+                    || name == Syntax::RNG_TYPE
+                    || name == Syntax::SOLVER_TYPE
+        )
+    {
+        // TIR lowers these through helpers whose first argument is an explicit
+        // `&mut receiver`. Unlike Rust method-call syntax, that borrow is eager:
+        // it must reject receiver reads while later arguments are evaluated.
+        BuiltinReceiverBorrow::EagerWrite
+    } else {
+        // Ordinary Rust method-call syntax reserves `&mut self`, evaluates
+        // arguments, then activates the exclusive borrow.
+        BuiltinReceiverBorrow::TwoPhaseWrite
+    }
+}

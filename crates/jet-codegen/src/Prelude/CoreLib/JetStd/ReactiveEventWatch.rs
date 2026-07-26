@@ -302,8 +302,12 @@
 
     /// `reactive.effect(body)` — run `body` now, then re-run when a signal it read
     /// changes. The returned owner detaches on `unsubscribe()` or final-handle drop.
-    pub fn jet_reactive_effect<F: Fn() + Send + Sync + 'static>(body: F) -> JetReactiveEffect {
-        let observer = ReactiveObserver::new(Arc::new(body));
+    pub fn jet_reactive_effect<F: FnMut() + Send + 'static>(body: F) -> JetReactiveEffect {
+        let body = Mutex::new(body);
+        let observer = ReactiveObserver::new(Arc::new(move || {
+            let mut body = body.lock().unwrap_or_else(|e| e.into_inner());
+            (*body)();
+        }));
         observer.run();
         JetReactiveEffect {
             observer,
@@ -311,13 +315,13 @@
         }
     }
 
-    pub fn jet_reactive_effect_rooted<F: Fn() + Send + Sync + 'static>(body: F) {
+    pub fn jet_reactive_effect_rooted<F: FnMut() + Send + 'static>(body: F) {
         let effect = jet_reactive_effect(body);
         JET_REACTIVE_ROOT_EFFECTS.with(|effects| effects.borrow_mut().push(effect));
     }
 
     /// D-REACTCORE1: `#Reactive` scope marker with runtime-owned lifetime.
-    pub fn jet_reactive_scope<F: Fn() + Send + Sync + 'static>(body: F) {
+    pub fn jet_reactive_scope<F: FnMut() + Send + 'static>(body: F) {
         jet_reactive_effect_rooted(body);
     }
 

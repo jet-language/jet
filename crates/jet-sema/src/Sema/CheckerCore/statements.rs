@@ -359,7 +359,7 @@ impl<'a> Checker<'a> {
                                     Some(name_span),
                                 ));
                             }
-                            self.moved.remove(name);
+                            self.clear_moved_binding(name);
                             if let (Some(vt), false) =
                                 (vt.clone(), info.ty == Type::Named(String::new()))
                             {
@@ -751,7 +751,12 @@ impl<'a> Checker<'a> {
                                     return;
                                 }
                             }
+                            let suppress = self.suppress_partial_move_root_read;
+                            if !is_compound {
+                                self.suppress_partial_move_root_read = true;
+                            }
                             let base_ty = self.infer(base);
+                            self.suppress_partial_move_root_read = suppress;
                             // D-FIELDPOL1: `s.computed_field = v` — a computed field is
                             // never stored, so a plain assignment has nothing to write.
                             if let Some(bt) = &base_ty {
@@ -870,6 +875,11 @@ impl<'a> Checker<'a> {
                                         ));
                                     }
                                 }
+                            }
+                            if !is_compound && base_ty.is_some() {
+                                let target =
+                                    Expr::Field(base.clone(), field.clone(), *span);
+                                self.clear_moved_expr(&target);
                             }
                         }
                     }
@@ -1737,7 +1747,27 @@ impl<'a> Checker<'a> {
                             Some(*span),
                         ));
                     }
+                    let mut captures = crate::Sema::block_free_var_reads(body)
+                        .into_iter()
+                        .collect::<Vec<_>>();
+                    captures.sort();
+                    for name in captures {
+                        if self.is_view(&name) {
+                            self.report_view_escape(
+                                &name,
+                                "be captured by a reactive effect",
+                                *span,
+                            );
+                        }
+                    }
+                    // The body runs later in its own move closure. Mutating a
+                    // cloned reactive capture must not make an enclosing
+                    // callback FnMut; only construction-time clone reads cross
+                    // that callback boundary.
+                    let enclosing_mut_captures =
+                        std::mem::take(&mut self.inferred_lambda_mut_captures);
                     self.check_block(body, true);
+                    self.inferred_lambda_mut_captures = enclosing_mut_captures;
                 }
                 Stmt::Off { body, .. } => {
                     let moved = self.moved.clone();
