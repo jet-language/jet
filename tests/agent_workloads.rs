@@ -502,31 +502,77 @@ fn process_deadline_reaps_and_scratch_drop_cleans() {
 
 #[test]
 fn scratch_output_shape_rejects_arbitrary_build_residue() {
-    let scratch = Scratch::new("jet_agent_scratch_output_shape");
-    fs::create_dir(scratch.path.join("build")).unwrap();
-    fs::write(scratch.path.join("build/process_batch"), "declared artifact").unwrap();
+    fn valid_jet_scratch(prefix: &str) -> Scratch {
+        let scratch = Scratch::new(prefix);
+        fs::create_dir(scratch.path.join("build")).unwrap();
+        fs::write(scratch.path.join("build/process_batch"), "declared artifact").unwrap();
+        scratch
+    }
+
+    let cache_hit = valid_jet_scratch("jet_agent_scratch_cache_hit");
     assert_eq!(
-        scratch_output_violations("jet", &scratch.path, "process_batch"),
+        scratch_output_violations("jet", &cache_hit.path, "process_batch"),
         Vec::<String>::new()
     );
+
+    let cache_miss = valid_jet_scratch("jet_agent_scratch_cache_miss");
     fs::write(
-        scratch.path.join("build/process_batch.rs"),
+        cache_miss.path.join("build/process_batch.rs"),
         "declared generated Rust",
     )
     .unwrap();
     assert_eq!(
-        scratch_output_violations("jet", &scratch.path, "process_batch"),
+        scratch_output_violations("jet", &cache_miss.path, "process_batch"),
         Vec::<String>::new()
     );
 
-    fs::write(scratch.path.join("build/leak"), "undeclared residue").unwrap();
-    let violations = scratch_output_violations("jet", &scratch.path, "process_batch");
-    assert!(
-        violations
-            .iter()
-            .any(|violation| violation == "unexpected file: build/leak"),
-        "{violations:?}"
+    let build_leak = valid_jet_scratch("jet_agent_scratch_build_leak");
+    fs::write(build_leak.path.join("build/leak"), "undeclared residue").unwrap();
+    assert_eq!(
+        scratch_output_violations("jet", &build_leak.path, "process_batch"),
+        vec!["unexpected file: build/leak".to_string()]
     );
+
+    let root_leak = valid_jet_scratch("jet_agent_scratch_root_leak");
+    fs::write(root_leak.path.join("leak"), "undeclared residue").unwrap();
+    assert_eq!(
+        scratch_output_violations("jet", &root_leak.path, "process_batch"),
+        vec!["unexpected file: leak".to_string()]
+    );
+
+    let nested_leak = valid_jet_scratch("jet_agent_scratch_nested_leak");
+    fs::create_dir(nested_leak.path.join("build/nested")).unwrap();
+    fs::write(
+        nested_leak.path.join("build/nested/leak"),
+        "undeclared residue",
+    )
+    .unwrap();
+    assert_eq!(
+        scratch_output_violations("jet", &nested_leak.path, "process_batch"),
+        vec![
+            "unexpected directory: build/nested".to_string(),
+            "unexpected file: build/nested/leak".to_string(),
+        ]
+    );
+
+    let wrong_type = valid_jet_scratch("jet_agent_scratch_wrong_type");
+    fs::create_dir(wrong_type.path.join("build/process_batch.rs")).unwrap();
+    assert_eq!(
+        scratch_output_violations("jet", &wrong_type.path, "process_batch"),
+        vec!["unexpected directory: build/process_batch.rs".to_string()]
+    );
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+
+        let symlink_leak = valid_jet_scratch("jet_agent_scratch_symlink");
+        symlink("missing-target", symlink_leak.path.join("build/process_batch.rs")).unwrap();
+        assert_eq!(
+            scratch_output_violations("jet", &symlink_leak.path, "process_batch"),
+            vec!["unexpected symlink: build/process_batch.rs".to_string()]
+        );
+    }
 }
 
 #[test]
