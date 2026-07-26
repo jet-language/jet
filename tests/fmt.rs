@@ -636,6 +636,41 @@ fn parse(raw: String) -> Int ? String | Bool {
 }
 
 #[test]
+fn fmt_preserves_ambiguous_codable_union_source_order() {
+    for src in [
+        include_str!("ui/union_codable_ambiguous.jet"),
+        include_str!("ui/union_codable_enum_ambiguous.jet"),
+    ] {
+        let once = jet::format_source(src).expect("ambiguous Codable union should format");
+        assert_eq!(
+            once, src,
+            "invalid Codable union formatting must preserve source token order"
+        );
+        let twice =
+            jet::format_source(&once).expect("ambiguous Codable union output should re-format");
+        assert_eq!(
+            once, twice,
+            "ambiguous Codable union formatting must be idempotent"
+        );
+    }
+}
+
+#[test]
+fn fmt_still_canonicalizes_valid_codable_union() {
+    let src = "#Codable\nstruct Row {\n    value: String | Int\n}\n";
+    let once = jet::format_source(src).expect("valid Codable union should format");
+    assert!(
+        once.contains("value: Int | String"),
+        "valid Codable union should retain canonical member order:\n{once}"
+    );
+    let twice = jet::format_source(&once).expect("valid Codable union output should re-format");
+    assert_eq!(
+        once, twice,
+        "valid Codable union formatting must be idempotent"
+    );
+}
+
+#[test]
 fn fmt_preserves_named_payload_variant_dot_brace() {
     // D-UITREE1/D-DOTCTOR1: `.Variant.{ field: val }` — named-payload enum
     // construction reuses the struct dot-brace spelling. Must round-trip

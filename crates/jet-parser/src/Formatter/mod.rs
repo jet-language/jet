@@ -71,6 +71,7 @@ fn format_program_with_tokens(
         pending_blank: false,
         trailing_comment_limit: usize::MAX,
         pub_file: prog.pub_file,
+        items: &prog.items,
         policy_declarations: &prog.policy_declarations,
         applied_rules: &prog.applied_rules,
     };
@@ -274,6 +275,7 @@ struct Fmt<'a> {
     trailing_comment_limit: usize,
     /// D-VISDEFAULT2=A: file uses `#PubFile` public-by-default visibility.
     pub_file: bool,
+    items: &'a [Item],
     policy_declarations: &'a [crate::Policy::PolicyDeclaration],
     applied_rules: &'a [crate::AST::AppliedRuleApplication],
 }
@@ -765,6 +767,48 @@ impl<'a> Fmt<'a> {
     /// start offset; a `\n` in between means the chain was broken on purpose.
     fn chain_break_between(&self, from: usize, to: usize) -> bool {
         from <= to && self.src.get(from..to).is_some_and(|s| s.contains('\n'))
+    }
+
+    /// Return the exact type spelling through its next top-level terminator.
+    /// The AST canonicalizes union members during parsing, so this source
+    /// slice is the only retained order fact.
+    fn source_type_spelling(&self, start: usize) -> Option<&str> {
+        let first = self
+            .source_toks
+            .partition_point(|token| token.span.start < start);
+        let mut parens = 0usize;
+        let mut brackets = 0usize;
+        let mut angles = 0usize;
+        let mut end = start;
+        for token in &self.source_toks[first..] {
+            let top_level = parens == 0 && brackets == 0 && angles == 0;
+            if top_level
+                && matches!(
+                    token.kind,
+                    TokKind::Comma
+                        | TokKind::Semi
+                        | TokKind::LambdaArrow
+                        | TokKind::RParen
+                        | TokKind::RBrace
+                        | TokKind::Eof
+                )
+            {
+                break;
+            }
+            match token.kind {
+                TokKind::LineComment(_) | TokKind::BlockComment(_) => return None,
+                TokKind::LParen => parens += 1,
+                TokKind::RParen => parens = parens.saturating_sub(1),
+                TokKind::LBracket => brackets += 1,
+                TokKind::RBracket => brackets = brackets.saturating_sub(1),
+                TokKind::Lt => angles += 1,
+                TokKind::Gt => angles = angles.saturating_sub(1),
+                TokKind::Shr => angles = angles.saturating_sub(2),
+                _ => {}
+            }
+            end = token.span.end;
+        }
+        (end > start).then(|| &self.src[start..end])
     }
 
     fn end_block(&mut self) {

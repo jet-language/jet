@@ -10,7 +10,61 @@ enum EnumFmtEntry<'b> {
     Group(&'b EnumGroup),
 }
 
+fn has_ambiguous_decode_union(items: &[Item], ty: &Type) -> bool {
+    if let Type::Union(members) = ty {
+        let mut seen = Vec::new();
+        for member in members {
+            if let Some(shapes) = crate::AST::resolved_decode_wire_shapes(items, member) {
+                for shape in shapes {
+                    if seen.contains(&shape) {
+                        return true;
+                    }
+                    seen.push(shape);
+                }
+            }
+        }
+    }
+    match ty {
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::Tagged { inner, .. }
+        | Type::FixedList { elem: inner, .. } => has_ambiguous_decode_union(items, inner),
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            has_ambiguous_decode_union(items, key)
+                || has_ambiguous_decode_union(items, value)
+        }
+        Type::Fn { params, ret, .. } => {
+            params
+                .iter()
+                .any(|param| has_ambiguous_decode_union(items, param))
+                || ret
+                    .as_deref()
+                    .is_some_and(|ret| has_ambiguous_decode_union(items, ret))
+        }
+        Type::Apply { args, .. } | Type::Union(args) => args
+            .iter()
+            .any(|arg| has_ambiguous_decode_union(items, arg)),
+        Type::Tuple(fields) => fields
+            .iter()
+            .any(|(_, field)| has_ambiguous_decode_union(items, field)),
+        _ => false,
+    }
+}
+
 impl<'a> Fmt<'a> {
+    fn fmt_decode_type(&mut self, ty: &Type, span: Span, derives_decode: bool) {
+        let source_ty = (derives_decode && has_ambiguous_decode_union(self.items, ty))
+            .then(|| self.source_type_spelling(span.start))
+            .flatten()
+            .map(str::to_owned);
+        if let Some(source_ty) = source_ty {
+            self.write(&source_ty);
+        } else {
+            self.fmt_type(ty);
+        }
+    }
+
     pub(super) fn fmt_meta_attr(&mut self, meta: &MetaAttr) {
         self.write("#");
         self.fmt_meta_rule(meta);
@@ -843,13 +897,17 @@ impl<'a> Fmt<'a> {
         // Only `derive Name` lines the user wrote in the body re-emit here; derives
         // lifted from the `#[…]` list are already rendered above.
         let body_derives = Self::body_derive_lines(&s.derives, &s.type_markers);
+        let derives_decode = s
+            .derives
+            .iter()
+            .any(|(name, _)| name == crate::Generics::DECODE);
         self.with_indent(|f| {
             for (i, field) in s.fields.iter().enumerate() {
                 if i > 0 {
                     f.newline();
                 }
                 f.emit_leading(field.name_span.start);
-                f.fmt_field(field);
+                f.fmt_field(field, derives_decode);
             }
             for (i, trait_name) in body_derives.iter().enumerate() {
                 if i > 0 || !s.fields.is_empty() {
@@ -916,16 +974,20 @@ impl<'a> Fmt<'a> {
         self.write(" {");
         self.newline();
         let body_derives = Self::body_derive_lines(&e.derives, &e.type_markers);
+        let derives_decode = e
+            .derives
+            .iter()
+            .any(|(name, _)| name == crate::Generics::DECODE);
         self.with_indent(|f| {
             if e.groups.is_empty() {
                 for (i, v) in e.variants.iter().enumerate() {
                     if i > 0 {
                         f.newline();
                     }
-                    f.fmt_variant(v);
+                    f.fmt_variant(v, derives_decode);
                 }
             } else {
-                f.fmt_enum_grouped(e);
+                f.fmt_enum_grouped(e, derives_decode);
             }
             for (i, trait_name) in body_derives.iter().enumerate() {
                 if i > 0 || !e.variants.is_empty() {
@@ -956,25 +1018,25 @@ impl<'a> Fmt<'a> {
         self.end_block();
     }
 
-    fn fmt_variant(&mut self, v: &Variant) {
-        self.fmt_variant_name_and_payload(v, &v.name);
+    fn fmt_variant(&mut self, v: &Variant, derives_decode: bool) {
+        self.fmt_variant_name_and_payload(v, &v.name, derives_decode);
     }
 
     /// D-TAG1: emit grouped enum bodies from flat leaves + `groups` metadata.
-    fn fmt_enum_grouped(&mut self, e: &EnumDef) {
+    fn fmt_enum_grouped(&mut self, e: &EnumDef, derives_decode: bool) {
         let entries = Self::enum_entries_at_prefix(e, "");
         for (i, entry) in entries.iter().enumerate() {
             if i > 0 {
                 self.newline();
             }
             match entry {
-                EnumFmtEntry::Leaf(v) => self.fmt_variant(v),
-                EnumFmtEntry::Group(g) => self.fmt_enum_group(e, g),
+                EnumFmtEntry::Leaf(v) => self.fmt_variant(v, derives_decode),
+                EnumFmtEntry::Group(g) => self.fmt_enum_group(e, g, derives_decode),
             }
         }
     }
 
-    fn fmt_enum_group(&mut self, e: &EnumDef, g: &EnumGroup) {
+    fn fmt_enum_group(&mut self, e: &EnumDef, g: &EnumGroup, derives_decode: bool) {
         let short = g.path.rsplit('.').next().unwrap_or(g.path.as_str());
         self.write(short);
         self.write(" {");
@@ -989,16 +1051,21 @@ impl<'a> Fmt<'a> {
                 match entry {
                     EnumFmtEntry::Leaf(v) => {
                         let leaf = v.name.strip_prefix(&prefix).unwrap_or(&v.name);
-                        f.fmt_variant_name_and_payload(v, leaf);
+                        f.fmt_variant_name_and_payload(v, leaf, derives_decode);
                     }
-                    EnumFmtEntry::Group(sub) => f.fmt_enum_group(e, sub),
+                    EnumFmtEntry::Group(sub) => f.fmt_enum_group(e, sub, derives_decode),
                 }
             }
         });
         self.end_block();
     }
 
-    fn fmt_variant_name_and_payload(&mut self, v: &Variant, name: &str) {
+    fn fmt_variant_name_and_payload(
+        &mut self,
+        v: &Variant,
+        name: &str,
+        derives_decode: bool,
+    ) {
         // D-SERDE5: per-variant `#[Rename("x")]` markers sit inline before the name.
         if !v.serde_markers.is_empty() {
             if v.serde_markers.len() == 1 {
@@ -1019,9 +1086,9 @@ impl<'a> Fmt<'a> {
         self.write(name);
         match &v.payload {
             VariantPayload::Unit => {}
-            VariantPayload::Single(ty, _) => {
+            VariantPayload::Single(ty, span) => {
                 self.write("(");
-                self.fmt_type(ty);
+                self.fmt_decode_type(ty, *span, derives_decode);
                 self.write(")");
             }
             VariantPayload::Named(fields) => {
@@ -1032,7 +1099,7 @@ impl<'a> Fmt<'a> {
                     }
                     self.write(&fld.name);
                     self.write(": ");
-                    self.fmt_type(&fld.ty);
+                    self.fmt_decode_type(&fld.ty, fld.ty_span, derives_decode);
                 }
                 self.write(")");
             }
@@ -1243,7 +1310,7 @@ impl<'a> Fmt<'a> {
         }
     }
 
-    fn fmt_field(&mut self, field: &Field) {
+    fn fmt_field(&mut self, field: &Field, derives_decode: bool) {
         // D-SHAPE2: field rules share one inline `#[…]` group. Redact has a
         // dedicated semantic bit, so fold it back into the same group here.
         if field.redact || !field.serde_markers.is_empty() {
@@ -1269,7 +1336,7 @@ impl<'a> Fmt<'a> {
         self.fmt_pub_qualifier(field.is_pub, field.is_package_pub);
         self.write(&field.name);
         self.write(": ");
-        self.fmt_type(&field.ty);
+        self.fmt_decode_type(&field.ty, field.ty_span, derives_decode);
         // D-FIELDPOL1: `name: T => expr` — a computed field.
         if let Some(expr) = &field.computed {
             self.write(" => ");
