@@ -2617,8 +2617,8 @@ pub enum TNumericOp {
     /// `width` is the receiver's bit width (baked at lowering — TirBridge may
     /// evaluate before locals carry `IntN` types).
     BitCount { method: String, width: u32 },
-    /// `origin` on a Float receiver → debug provenance note or `"untracked"`.
-    Origin,
+    /// `origin` on a Float receiver → resolved binding note or `"untracked"`.
+    Origin(Option<String>),
     /// A widening / float-targeted / float-sourced conversion → `(({recv}) as {dst})`.
     CastAs { dst_rust: String },
     /// An integer-narrowing conversion → the checked `<{dst}>::try_from(...)` form

@@ -22,6 +22,9 @@ use std::rc::Rc;
 
 pub(crate) struct LowerEnv {
     pub(super) locals: HashMap<String, (TLocal, Option<Type>)>,
+    /// D-PROVENANCE1=B: source note for each exact `#Track` Float binding.
+    /// Copies and other bindings have no entry.
+    pub(super) tracked_float_origins: HashMap<String, String>,
     /// c109 Phase 8: the enclosing function's unmangled Jet name, used by a `?`
     /// (`TExprKind::Try`) to embed the trace-frame function name — exactly the value
     /// the AST path reads from `cx.current_fn` at emit time (set to `f.name`).
@@ -58,6 +61,7 @@ impl LowerEnv {
     pub(crate) fn new(fn_name: String) -> LowerEnv {
         LowerEnv {
             locals: HashMap::new(),
+            tracked_float_origins: HashMap::new(),
             fn_name,
             ret_ty: None,
             self_owner: None,
@@ -110,6 +114,13 @@ impl LowerEnv {
     /// can never be captured in generated Rust.
     pub(crate) fn bind(&mut self, name: &str, slot: TLocal, ty: Option<Type>) {
         self.locals.insert(name.to_string(), (slot, ty));
+        self.tracked_float_origins.remove(name);
+    }
+    pub(super) fn mark_tracked_float(&mut self, name: &str, origin: String) {
+        self.tracked_float_origins.insert(name.to_string(), origin);
+    }
+    pub(super) fn tracked_float_origin(&self, name: &str) -> Option<String> {
+        self.tracked_float_origins.get(name).cloned()
     }
     /// The structured slot for `name`. This is the single fact every engine
     /// resolves a local by; the Rust spellings below derive from it.

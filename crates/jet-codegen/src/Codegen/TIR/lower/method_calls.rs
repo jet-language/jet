@@ -73,6 +73,7 @@ use crate::Codegen::TIR::THandleOp;
 use crate::Codegen::TIR::THostCall;
 use crate::Codegen::TIR::TLocal;
 use crate::Codegen::TIR::TMethodRef;
+use crate::Codegen::TIR::TNumericOp;
 use crate::Codegen::TIR::TPreludeArg;
 use crate::Codegen::TIR::TStaticOwner;
 use crate::Codegen::TIR::tir_recv_jet_ty;
@@ -2348,6 +2349,13 @@ pub(crate) fn lower_method_call(
     if let Some(numeric_name) = recv_type {
         if let Some(recv_ty) = crate::AST::numeric_type_from_name(numeric_name) {
             if let Some(op) = resolve_numeric_op(method, numeric_name) {
+                let op = match op {
+                    TNumericOp::Origin(_) => TNumericOp::Origin(match receiver {
+                        Expr::Ident(name, _) => env.tracked_float_origin(name),
+                        _ => None,
+                    }),
+                    other => other,
+                };
                 let mut recv_t = lower_expr(receiver, cx, env);
                 // Sema's width is authoritative — Call/OrFallback lowering can
                 // fall back to Unit/Int and would silently widen bit queries.

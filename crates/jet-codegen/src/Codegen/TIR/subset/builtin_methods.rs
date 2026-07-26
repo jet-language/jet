@@ -358,7 +358,7 @@ pub(crate) fn resolve_numeric_op(method: &str, src_name: &str) -> Option<TNumeri
         return Some(TNumericOp::Predicate(method.to_string()));
     }
     if method == "origin" {
-        return Some(TNumericOp::Origin);
+        return Some(TNumericOp::Origin(None));
     }
     // Integer bit-population queries → `((recv).{method}() as i64)`.
     if let "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros" = method {

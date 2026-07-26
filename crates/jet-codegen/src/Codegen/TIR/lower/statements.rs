@@ -749,6 +749,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 TLocal::user(&binding_name)
             };
             env.bind(&b.name, slot, Some(ty));
+            if let Some(origin) = &track_origin {
+                env.mark_tracked_float(&b.name, origin.clone());
+            }
             if b.gc_promotion.is_some() || b.gc_transferred {
                 env.mark_gc(&b.name);
             }
@@ -760,7 +763,8 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 kw,
                 let_ty,
                 init,
-                track_origin,
+                // Kept empty while the shared TStmt constructors retain this field.
+                track_origin: None,
                 gc_promotion: b.gc_promotion.clone(),
                 gc_transferred: b.gc_transferred,
             }

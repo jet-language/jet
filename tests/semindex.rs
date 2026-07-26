@@ -306,6 +306,24 @@ fn run() {
 }
 
 #[test]
+fn tracked_float_symbol_exposes_its_binding_site() {
+    let src = "fn run() {\n    #Track speed :: 3.5\n    print(speed.origin())\n}\n";
+    let path = temp_fixture("tracked_float_binding.jet", src);
+    let symbols = open_symbols(&path).expect("tracked Float semantic symbols");
+    let speed = symbols
+        .lookup("speed")
+        .into_iter()
+        .find(|symbol| symbol.kind == SemanticSymbolKind::Local)
+        .expect("tracked Float local");
+    let span = speed.span.expect("tracked Float binding span");
+    let binding_start = src.find("speed ::").expect("binding name");
+
+    assert_eq!(speed.signature, "speed: Float");
+    assert_eq!(span.start, binding_start);
+    assert_eq!(&src[span.start..span.end], "speed");
+}
+
+#[test]
 fn semantic_symbols_keep_module_and_member_collisions_distinct() {
     let src = r#"
 module first {

@@ -6567,7 +6567,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[value]);
                 Ok(self.b.inst_results(call)[0])
             }
-            TNumericOp::Origin => Err("jit numeric origin unsupported".to_string()),
+            TNumericOp::Origin(_) => Err("jit numeric origin unsupported".to_string()),
         }
     }
 
