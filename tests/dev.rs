@@ -3891,6 +3891,42 @@ fn array_of_structs_field_mutation_three_way() {
 }
 
 #[test]
+fn place_windows_matches_resident_jit_and_aot_without_fallback() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let stem = "memory/place_windows";
+    let file = example_path(stem);
+    let expected = ProgramOutput::ran(golden_stdout(stem), String::new(), 0);
+    let RunOutcome::Problems(interpreter_diags) = dev_iteration(&file, false, true) else {
+        panic!("`{stem}` unexpectedly left its ratcheted interpreter boundary");
+    };
+    assert!(
+        interpreter_diags.iter().any(|diag| diag.code == "E2201"),
+        "`{stem}` interpreter boundary drifted: {interpreter_diags:?}"
+    );
+
+    let source = fs::read_to_string(&file).unwrap();
+    jet_jit::reset_jit_trace_for_test();
+    let resident = run_cranelift_without_fallback(&source, "place_windows");
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "`{stem}` did not execute in JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "`{stem}` used deopt or fallback"
+    );
+
+    let dir = std::env::temp_dir().join(format!("jet_place_windows_{}", std::process::id()));
+    let aot = compiled_binary_output(&dir, "place_windows", 0, stem, &file);
+    assert_eq!(resident, expected, "resident JIT drifted for `{stem}`");
+    assert_eq!(aot, expected, "AOT drifted for `{stem}`");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn resident_jit_safety_detail_smoke() {
     for stem in [
         "basics/compound",

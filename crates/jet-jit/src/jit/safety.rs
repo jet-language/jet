@@ -1338,16 +1338,19 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         TStmt::Region(body) | TStmt::Impure(body) | TStmt::Shield { body } => {
             body.iter().all(|s| resident_safe_stmt(s, callees))
         }
-        // JIT materializes split views as independent list slices / element copies.
+        // JIT models singleton split views as checked element/window handles.
+        // Range windows need relative end-bound enforcement before they can be
+        // resident-safe.
         TStmt::SplitViews {
             owner,
-            start: _,
-            end: _,
-            single: _,
+            single,
             ..
-        } => owner
-            .as_ref()
-            .is_none_or(|o| resident_safe_expr(o, callees)),
+        } => {
+            *single
+                && owner
+                    .as_ref()
+                    .is_none_or(|o| resident_safe_expr(o, callees))
+        }
         // Whole-value GC assign (`replace_all`): nested stmt is a plain assign
         // of a finite payload snapshot into the root Variable.
         TStmt::GcEdit {

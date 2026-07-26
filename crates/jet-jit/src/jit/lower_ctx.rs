@@ -1541,28 +1541,45 @@ impl LowerCtx<'_, '_> {
                 // shared list handle; write windows are `[list,start,end]` records
                 // (same ABI as ViewMutNew) so IndexAssign / deref Assign write through.
                 if let Some(owner_expr) = owner {
+                    let owner_ty = owner_expr.ty.clone();
                     let val = self.lower_expr(owner_expr)?;
                     let var = self.fresh_var(types::I64);
                     self.b.def_var(var, val);
                     self.vars.insert(root.clone(), var);
-                    self.var_tys
-                        .insert(root.clone(), Type::List(Box::new(Type::Int)));
+                    self.var_tys.insert(root.clone(), owner_ty);
                 }
                 let list_var = *self
                     .vars
                     .get(root)
                     .ok_or_else(|| format!("jit split views missing owner `{root}`"))?;
+                let elem_ty = match self.var_tys.get(root) {
+                    Some(Type::List(elem) | Type::FixedList { elem, .. }) => {
+                        elem.as_ref().clone()
+                    }
+                    other => {
+                        return Err(format!(
+                            "jit split views owner type unsupported: {other:?}"
+                        ));
+                    }
+                };
                 let list = self.b.use_var(list_var);
                 let start_v = self.b.ins().iconst(types::I64, *start);
                 let end_v = self.b.ins().iconst(types::I64, *end);
                 let line_c = self.b.ins().iconst(types::I32, *line as i64);
                 let (bound, bound_ty) = if *write {
+                    if *single {
+                        let get_ref = self
+                            .module
+                            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+                        self.b.ins().call(get_ref, &[list, start_v, line_c]);
+                        self.emit_trap_check()?;
+                    }
                     let handle = self.emit_view_mut_window(list, start_v, end_v)?;
                     (
                         handle,
                         Type::Apply {
                             name: "ViewMut".to_string(),
-                            args: vec![Type::Int],
+                            args: vec![elem_ty.clone()],
                         },
                     )
                 } else if *single {
@@ -1572,7 +1589,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(get_ref, &[list, start_v, line_c]);
                     let result = self.b.inst_results(call)[0];
                     self.emit_trap_check()?;
-                    (result, Type::Int)
+                    (result, elem_ty.clone())
                 } else {
                     let end_excl = self.b.ins().iconst(types::I64, *end + 1);
                     let slice_ref = self
@@ -1588,7 +1605,7 @@ impl LowerCtx<'_, '_> {
                         result,
                         Type::Apply {
                             name: "View".to_string(),
-                            args: vec![Type::Int],
+                            args: vec![elem_ty],
                         },
                     )
                 };
@@ -1639,42 +1656,63 @@ impl LowerCtx<'_, '_> {
             TStmt::Assign {
                 place, op, value, ..
             } => {
-                if op.is_none() {
-                    if let Some((base, field)) = structured_record_field_place(place) {
-                        let key = Self::local_key(base);
-                        if let (Some(var), Some(base_ty)) = (
-                            self.vars.get(&key).copied(),
-                            self.var_tys.get(&key).cloned(),
-                        ) {
-                            let type_name = record_type_key(&base_ty)
-                                .ok_or_else(|| format!("jit field assign recv type: {base_ty:?}"))?;
-                            let index = self
-                                .meta
-                                .struct_field_index(&type_name, field)
-                                .ok_or_else(|| format!("jit field `{field}` on `{type_name}`"))?;
-                            let field_ty = value.ty.clone();
-                            let host_id = match &field_ty {
-                                Type::Int => self.host.struct_set_i64,
-                                Type::Float => self.host.struct_set_f64,
-                                Type::Bool => self.host.struct_set_bool,
-                                Type::Char => self.host.struct_set_char,
-                                Type::String => self.host.struct_set_str,
-                                other if clif_ty(other) == Some(types::I64) => {
-                                    self.host.struct_set_i64
-                                }
-                                other => {
-                                    return Err(format!(
-                                        "jit field assignment type unsupported: {other:?}"
-                                    ));
-                                }
-                            };
-                            let handle = self.b.use_var(var);
-                            let index = self.b.ins().iconst(types::I64, index as i64);
-                            let value = self.lower_expr(value)?;
-                            let setter = self.module.declare_func_in_func(host_id, self.b.func);
-                            self.b.ins().call(setter, &[handle, index, value]);
-                            return Ok(());
-                        }
+                if let Some((base, field)) = structured_record_field_place(place) {
+                    let key = Self::local_key(base);
+                    if let (Some(var), Some(base_ty)) = (
+                        self.vars.get(&key).copied(),
+                        self.var_tys.get(&key).cloned(),
+                    ) {
+                        let mut handle = self.b.use_var(var);
+                        let record_ty = match &base_ty {
+                            Type::Apply { name, args }
+                                if name == "ViewMut" && args.len() == 1 =>
+                            {
+                                let (list, start, _) = self.unpack_view_mut(handle)?;
+                                let line = self.b.ins().iconst(types::I32, 1);
+                                let get = self
+                                    .module
+                                    .declare_func_in_func(self.host.coll.list_get, self.b.func);
+                                let call = self.b.ins().call(get, &[list, start, line]);
+                                handle = self.b.inst_results(call)[0];
+                                self.emit_trap_check()?;
+                                args[0].clone()
+                            }
+                            other => other.clone(),
+                        };
+                        let type_name = record_type_key(&record_ty)
+                            .ok_or_else(|| format!("jit field assign recv type: {record_ty:?}"))?;
+                        let index = self
+                            .meta
+                            .struct_field_index(&type_name, field)
+                            .ok_or_else(|| format!("jit field `{field}` on `{type_name}`"))?;
+                        let field_ty = value.ty.clone();
+                        let rhs = self.lower_expr(value)?;
+                        let assigned = if let Some(op) = op {
+                            let current =
+                                self.lower_record_field(handle, &type_name, field, &field_ty)?;
+                            self.apply_binop_to_var(current, *op, rhs, &field_ty)?
+                        } else {
+                            rhs
+                        };
+                        let host_id = match &field_ty {
+                            Type::Int => self.host.struct_set_i64,
+                            Type::Float => self.host.struct_set_f64,
+                            Type::Bool => self.host.struct_set_bool,
+                            Type::Char => self.host.struct_set_char,
+                            Type::String => self.host.struct_set_str,
+                            other if clif_ty(other) == Some(types::I64) => {
+                                self.host.struct_set_i64
+                            }
+                            other => {
+                                return Err(format!(
+                                    "jit field assignment type unsupported: {other:?}"
+                                ));
+                            }
+                        };
+                        let index = self.b.ins().iconst(types::I64, index as i64);
+                        let setter = self.module.declare_func_in_func(host_id, self.b.func);
+                        self.b.ins().call(setter, &[handle, index, assigned]);
+                        return Ok(());
                     }
                 }
                 let local = place.as_local().ok_or("jit assign to non-local place")?;
@@ -5337,8 +5375,22 @@ impl LowerCtx<'_, '_> {
             TExprKind::Field {
                 recv, field, ..
             } => {
-                let handle = self.lower_expr(recv)?;
-                let type_name = record_type_key(&recv.ty)
+                let mut handle = self.lower_expr(recv)?;
+                let record_ty = match &recv.ty {
+                    Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
+                        let (list, start, _) = self.unpack_view_mut(handle)?;
+                        let line = self.b.ins().iconst(types::I32, 1);
+                        let get = self
+                            .module
+                            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+                        let call = self.b.ins().call(get, &[list, start, line]);
+                        handle = self.b.inst_results(call)[0];
+                        self.emit_trap_check()?;
+                        args[0].clone()
+                    }
+                    other => other.clone(),
+                };
+                let type_name = record_type_key(&record_ty)
                     .or_else(|| self.method_struct.clone())
                     .ok_or("jit field recv type")?;
                 // TIR may leave CORE struct fields as Int when cx.struct_fields

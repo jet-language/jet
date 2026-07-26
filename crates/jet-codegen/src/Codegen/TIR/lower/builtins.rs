@@ -105,10 +105,11 @@ pub(super) fn lower_string_view_init(init: &Expr, cx: &Cx, env: &mut LowerEnv) -
 /// the receiver's resolved type — reproducing `emit_builtin_method`'s name+`rty`
 /// dispatch (Source/Codegen/Expression.rs) exactly. The Map-vs-List branch
 /// (`insert`/`remove`/`get`) and the String-vs-list branch (`len`) come from
-/// `tir_recv_jet_ty` (matching the AST's `rty`); a `None` or non-Map/non-String
-/// receiver falls to the list/else branch, byte-for-byte the AST default. Returns
-/// `None` for any name/shape the TIR does not lower (the caller stays on the AST
-/// path — the gate already excluded these, so this is a defensive belt).
+/// `tir_recv_jet_ty` (matching the AST's `rty`). Unknown receivers retain the
+/// AST's legacy list fallback, while known non-list receivers stay available to
+/// their typed lowering paths. Returns `None` for any name/shape the TIR does not
+/// lower (the caller stays on the AST path — the gate already excluded these, so
+/// this is a defensive belt).
 pub(crate) fn resolve_builtin_op(
     receiver: &Expr,
     method: &str,
@@ -123,6 +124,7 @@ pub(crate) fn resolve_builtin_op(
     }
     let rty = tir_recv_jet_ty(receiver, env);
     let is_string = matches!(rty, Some(Type::String));
+    let is_list = matches!(&rty, Some(Type::List(_)));
     let is_map = matches!(rty, Some(Type::Map { .. }));
     let is_set = matches!(&rty, Some(Type::Apply { name, .. }) if name == "Set");
     let is_sorted_set =
@@ -185,11 +187,13 @@ pub(crate) fn resolve_builtin_op(
                 TBuiltinOp::RemoveMap
             } else if is_lru {
                 TBuiltinOp::RemoveMap
-            } else {
+            } else if is_list || rty.is_none() {
                 // The list form embeds the *method-span* line for its bounds panic,
                 // exactly as `emit_builtin_method` reads `span_line_col(method_span.start)`.
                 let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0;
                 TBuiltinOp::RemoveList { line }
+            } else {
+                return None;
             }
         }
         ("get", 1) => {
