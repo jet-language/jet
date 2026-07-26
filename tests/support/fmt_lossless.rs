@@ -959,7 +959,12 @@ fn simple_union_members(tokens: &[Token], start: usize) -> Option<(Vec<&str>, us
         members.push(member);
         cursor += 2;
     }
-    (members.len() > 1).then_some((members, cursor))
+    (members.len() > 1
+        && matches!(
+            tokens.get(cursor).map(|token| &token.kind),
+            Some(TokKind::Comma | TokKind::Eq | TokKind::RBrace | TokKind::RParen)
+        ))
+    .then_some((members, cursor))
 }
 
 fn formatted_variant_pattern_dot(
@@ -1498,6 +1503,16 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
             "union order rule rejects struct field values",
             "fn run() { p :: Point.{x: left | right} }\n",
             "fn run() { p :: Point.{x: right | left} }\n",
+        ),
+        (
+            "union order rule rejects dotted member replacement",
+            "struct S { value: A | B.C }\n",
+            "struct S { value: B | A.C }\n",
+        ),
+        (
+            "union order rule rejects generic member replacement",
+            "struct S { value: A | B<C> }\n",
+            "struct S { value: B | A<C> }\n",
         ),
         (
             "union order rule preserves every member",
