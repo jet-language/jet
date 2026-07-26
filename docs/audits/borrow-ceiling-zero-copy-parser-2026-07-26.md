@@ -23,5 +23,5 @@ field, fallback, or second view mechanism is present.
 
 The audit found no valid-code rejection in the ownership checker. The checker
 therefore needs no production change. Focused tests cover the successful port,
-a parser-owned source failure, hostile source replacement, and compilation of
-the executable memory example.
+a parser-owned source failure, hostile source replacement through the wrapper,
+and exact native output from the executable memory example.

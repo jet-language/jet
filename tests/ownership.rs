@@ -1096,7 +1096,8 @@ fn run() {
 /// token still observes that storage.
 #[test]
 fn zero_copy_parser_blocks_source_replacement_while_token_is_live() {
-    let src = r#"
+    for field in ["text", "rest"] {
+        let src = r#"
 struct Token {
     text: View<str>,
     rest: View<str>
@@ -1108,33 +1109,44 @@ fn scan(source: String) -> Token {
     return Token.{ text: text, rest: rest }
 }
 
+fn parse(source: String) -> Token {
+    return scan(source)
+}
+
 fn run() {
     source := "name:value"
-    token :: scan(source)
+    token :: parse(source)
     source = "other:data"
-    print(token.text)
+    print(token.$FIELD)
 }
-"#;
-    let diags =
-        jet::compile(src).expect_err("live parser views must keep caller storage stable");
-    assert!(
-        diags.iter().any(|diag| diag.code == "E0212"),
-        "expected owner-invalidation error: {diags:?}"
-    );
+"#
+        .replace("$FIELD", field);
+        let diags =
+            jet::compile(&src).expect_err("live parser views must keep caller storage stable");
+        assert!(
+            diags.iter().any(|diag| diag.code == "E0212"),
+            "expected owner-invalidation error for token.{field}: {diags:?}"
+        );
+    }
 }
 
 /// #745: keep the user-facing zero-copy parser example on the same production
 /// parser, sema, TIR, and codegen path as hand-written source.
 #[test]
 fn zero_copy_parser_example_covers_production_pipeline() {
-    let src = include_str!("../examples/features/memory/returned_views.jet");
-    let out = jet::compile(src).expect("returned-views example must compile end to end");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "examples/features/memory/returned_views.jet"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("run the returned-views example through the production CLI");
     assert!(
-        out.rust.contains("pub struct user_Token<'__jet_view>")
-            && out.rust.contains("fn user_parse<'__jet_view>")
-            && out.rust.contains("-> user_Token<'__jet_view>"),
-        "example parser must lower with caller-owned view provenance: {}",
-        out.rust
+        output.status.success(),
+        "native parser example failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("example stdout must be UTF-8"),
+        "7\nexample.com\nname\nvalue\n"
     );
 }
 
