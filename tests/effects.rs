@@ -900,7 +900,7 @@ fn bump(x: &Int) -> Int ? Fail {
     }
     return Ok(0);
 }
-fn run() { a: Int := 0; n :: bump(&a) ?? (-1); print("{n}"); }
+fn run() { a := 0; n :: bump(&a) ?? (-1); print("{n}"); }
 "#;
     let rust = jet::compile(src).expect("compiles").rust;
     assert!(
