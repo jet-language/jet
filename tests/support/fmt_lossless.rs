@@ -125,6 +125,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/two_capability_markers.jet",
     "tests/ui/two_parse_errors.jet",
     "tests/ui/typed_binding_retired.jet",
+    "tests/ui/uninit_annotated_retired.jet",
     "tests/ui/uninit_marker_retired.jet",
     "tests/ui/uninit_no_type.jet",
     "tests/ui/unit_family_bad_denominator.jet",
@@ -138,6 +139,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/unit_family_zero_denominator.jet",
     "tests/ui/unit_family_zero_scale.jet",
     "tests/ui/unknown_char.jet",
+    "tests/ui/unsafe_fn_missing_reason.jet",
     "tests/ui/unsafe_forbidden/pkg.jet",
     "tests/ui/unsafe_missing_reason.jet",
     "tests/ui/unsafe_per_site/pkg.jet",
@@ -172,12 +174,13 @@ fn collect_matching_jet_files(dir: &PathBuf, out: &mut Vec<PathBuf>) {
 
 // The loss oracle is ordered and exact after these parser-equivalent rewrites:
 // top-level formatter ordering; marker-list grouping; `Type<T>.method()`;
-// external-method and task-block sugar; optional declaration/trailing commas;
-// redundant default file aliases. The comparator itself permits only formatter-
-// added arm blocks, bare-lambda parens, leading-dot variant patterns, struct
-// shorthand labels/separators, and a required default alias on a dotted module
-// import. No rule can reorder or discard an operand, operator, marker payload,
-// comment, or string interpolation.
+// external-method and task-block sugar; canonical anonymous-union member order;
+// optional declaration/trailing commas; redundant default file aliases. The
+// comparator itself permits only formatter-added arm blocks, bare-lambda parens,
+// leading-dot variant patterns, struct shorthand labels/separators, and a
+// required default alias on a dotted module import. No rule can reorder or
+// discard an expression operand, operator, marker payload, comment, or string
+// interpolation.
 fn canonical_tokens(src: &str, path: &std::path::Path) -> Vec<Token> {
     let (tokens, diagnostics) = jet::Lexer::lex(src);
     assert!(
@@ -774,6 +777,13 @@ fn ordered_token_diff(
             formatted_i += 1;
             continue;
         }
+        if let Some((next_original, next_formatted)) =
+            reordered_simple_union_type(original, original_i, formatted, formatted_i)
+        {
+            original_i = next_original;
+            formatted_i = next_formatted;
+            continue;
+        }
         if formatted_arm_block_opens(formatted, formatted_i)
             && !matches!(original.get(original_i).map(|t| &t.kind), Some(TokKind::LBrace))
         {
@@ -854,6 +864,46 @@ fn ordered_token_diff(
         ));
     }
     Ok(())
+}
+
+fn reordered_simple_union_type(
+    original: &[Token],
+    original_i: usize,
+    formatted: &[Token],
+    formatted_i: usize,
+) -> Option<(usize, usize)> {
+    if !matches!(
+        original_i.checked_sub(1).and_then(|i| original.get(i)).map(|token| &token.kind),
+        Some(TokKind::Colon)
+    ) || !matches!(
+        formatted_i.checked_sub(1).and_then(|i| formatted.get(i)).map(|token| &token.kind),
+        Some(TokKind::Colon)
+    ) {
+        return None;
+    }
+    let (mut original_members, next_original) =
+        simple_union_members(original, original_i)?;
+    let (mut formatted_members, next_formatted) =
+        simple_union_members(formatted, formatted_i)?;
+    original_members.sort();
+    formatted_members.sort();
+    (original_members == formatted_members).then_some((next_original, next_formatted))
+}
+
+fn simple_union_members(tokens: &[Token], start: usize) -> Option<(Vec<&str>, usize)> {
+    let TokKind::Ident(first) = &tokens.get(start)?.kind else {
+        return None;
+    };
+    let mut members = vec![first.as_str()];
+    let mut cursor = start + 1;
+    while matches!(tokens.get(cursor).map(|token| &token.kind), Some(TokKind::Pipe)) {
+        let TokKind::Ident(member) = &tokens.get(cursor + 1)?.kind else {
+            return None;
+        };
+        members.push(member);
+        cursor += 2;
+    }
+    (members.len() > 1).then_some((members, cursor))
 }
 
 fn formatted_variant_pattern_dot(
@@ -1076,6 +1126,20 @@ fn formatted_struct_separator(tokens: &[Token], index: usize) -> bool {
 
 #[test]
 fn fmt_is_lossless_on_supported_source_corpus() {
+    // The recursive parser's large expression frames exceed the default test
+    // thread stack on the nested XML corpus fixture. Isolate this one corpus
+    // worker without changing global test settings, and preserve its panic.
+    let worker = std::thread::Builder::new()
+        .name("fmt-lossless-corpus".into())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(run_supported_source_corpus)
+        .expect("start lossless formatter corpus worker");
+    if let Err(payload) = worker.join() {
+        std::panic::resume_unwind(payload);
+    }
+}
+
+fn run_supported_source_corpus() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let example_files = collect_jet_files_recursive(&root.join("examples"));
     let ui_files = collect_jet_files_recursive(&root.join("tests/ui"));
@@ -1265,6 +1329,11 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
             "fn run() { p :: Point.{x: 1 y: 2} }\n",
             "fn run() { p :: Point.{x: 1, y: 2} }\n",
         ),
+        (
+            "anonymous union member order",
+            "struct S { value: String | Char }\n",
+            "struct S { value: Char | String }\n",
+        ),
     ];
     for (name, original, formatted) in allowed {
         assert!(
@@ -1363,6 +1432,16 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
             "struct-literal separator rule does not remove commas",
             "fn run() { p :: Point.{x: 1, y: 2} }\n",
             "fn run() { p :: Point.{x: 1 y: 2} }\n",
+        ),
+        (
+            "union order rule requires a type annotation",
+            "fn run() { value :: left | right }\n",
+            "fn run() { value :: right | left }\n",
+        ),
+        (
+            "union order rule preserves every member",
+            "struct S { value: A | B }\n",
+            "struct S { value: A | C }\n",
         ),
     ];
     for (name, original, formatted) in paired_forbidden {
