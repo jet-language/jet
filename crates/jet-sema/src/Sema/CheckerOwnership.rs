@@ -14,6 +14,18 @@ fn const_place_int(expr: &Expr) -> Option<i64> {
     }
 }
 
+fn named_view_field_path(expr: &Expr, fields: &mut Vec<String>) -> Option<String> {
+    match expr {
+        Expr::Ident(name, _) => Some(name.clone()),
+        Expr::Field(base, field, _) => {
+            let name = named_view_field_path(base, fields)?;
+            fields.push(field.clone());
+            Some(name)
+        }
+        _ => None,
+    }
+}
+
 fn append_view_source_projections(
     place: &mut ViewPlace,
     projections: &[crate::AST::ViewSourceProjection],
@@ -416,19 +428,8 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn place_from_expr(&self, expr: &Expr) -> Option<ViewPlace> {
-        fn named_field_path(expr: &Expr, fields: &mut Vec<String>) -> Option<String> {
-            match expr {
-                Expr::Ident(name, _) => Some(name.clone()),
-                Expr::Field(base, field, _) => {
-                    let name = named_field_path(base, fields)?;
-                    fields.push(field.clone());
-                    Some(name)
-                }
-                _ => None,
-            }
-        }
         let mut output_path = Vec::new();
-        if let Some(name) = named_field_path(expr, &mut output_path) {
+        if let Some(name) = named_view_field_path(expr, &mut output_path) {
             if let Some(fact) = self.view_fact_at_path(&name, &output_path) {
                 let mut place = fact.place.clone();
                 place.projections.extend(
@@ -668,6 +669,36 @@ impl<'a> Checker<'a> {
         &mut self,
         init: &Expr,
     ) -> Vec<(Vec<String>, ViewPlace, ViewKind, ViewAccess)> {
+        if let Expr::Copy(inner, _) = init {
+            return self.view_call_sources(inner);
+        }
+        if let Expr::Field(base, field, _) = init {
+            let projected: Vec<_> = self
+                .view_call_sources(base)
+                .into_iter()
+                .filter_map(|(mut path, place, kind, access)| {
+                    (path.first() == Some(field)).then(|| {
+                        path.remove(0);
+                        (path, place, kind, access)
+                    })
+                })
+                .collect();
+            if !projected.is_empty() {
+                return projected;
+            }
+
+            let mut output_path = Vec::new();
+            if let Some(name) = named_view_field_path(init, &mut output_path) {
+                if let Some((kind, access)) = self
+                    .view_fact_at_path(&name, &output_path)
+                    .map(|fact| (fact.kind, fact.access))
+                {
+                    if let Some(place) = self.place_from_expr(init) {
+                        return vec![(Vec::new(), place, kind, access)];
+                    }
+                }
+            }
+        }
         if let Expr::Call(call) = init {
             let Some(sig) = self.funcs.get(&call.name) else {
                 return Vec::new();

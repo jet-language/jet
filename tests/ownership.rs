@@ -1024,6 +1024,140 @@ fn run() {
     jet::compile(src).expect("callee parameter 0 must map to wrapper parameter 0");
 }
 
+/// #745: a zero-copy parser can return multiple token windows into one
+/// caller-owned source. Both fields must keep parameter-0 provenance.
+#[test]
+fn zero_copy_parser_returns_token_and_remainder_views() {
+    let src = r#"
+struct Token {
+    text: View<str>,
+    rest: View<str>
+}
+
+fn scan(source: String) -> Token {
+    text :: source.before(":")
+    rest :: source.after(":")
+    return Token.{ text: text, rest: rest }
+}
+
+fn parse(source: String) -> Token {
+    return scan(source)
+}
+
+fn run() {
+    source := "name:value"
+    token :: parse(source)
+    print(token.text)
+    print(token.rest)
+}
+"#;
+    let out = jet::compile(src)
+        .expect("a parser token and remainder may borrow one caller-owned source");
+    assert!(
+        out.rust.contains("pub struct user_Token<'__jet_view>")
+            && out.rust.contains("pub user_text: &'__jet_view str")
+            && out.rust.contains("pub user_rest: &'__jet_view str")
+            && out.rust.contains("-> user_Token<'__jet_view>"),
+        "both parser views must share the hidden source lifetime: {}",
+        out.rust
+    );
+}
+
+/// #745: D-MEM-VIEWRET1 rejects a parser that returns windows into storage
+/// owned by the parser call.
+#[test]
+fn zero_copy_parser_rejects_locally_owned_source() {
+    let src = r#"
+struct Token {
+    text: View<str>,
+    rest: View<str>
+}
+
+fn parse_owned() -> Token {
+    source := "name:value"
+    text :: source.before(":")
+    rest :: source.after(":")
+    return Token.{ text: text, rest: rest }
+}
+
+fn run() {
+    print(parse_owned().text)
+}
+"#;
+    let diags =
+        jet::compile(src).expect_err("parser-owned storage cannot back returned token views");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E2307"),
+        "expected string-view owner error: {diags:?}"
+    );
+}
+
+/// #745: hostile caller code cannot replace parser input while a returned
+/// token still observes that storage.
+#[test]
+fn zero_copy_parser_blocks_source_replacement_while_token_is_live() {
+    for (projection, field) in [("parse_text", "text"), ("parse_rest", "rest")] {
+        let src = r#"
+struct Token {
+    text: View<str>,
+    rest: View<str>
+}
+
+fn scan(source: String) -> Token {
+    text :: source.before(":")
+    rest :: source.after(":")
+    return Token.{ text: text, rest: rest }
+}
+
+fn parse(source: String) -> Token {
+    return scan(source)
+}
+
+fn parse_text(source: String) -> View<str> {
+    return parse(source).text
+}
+
+fn parse_rest(source: String) -> View<str> {
+    return parse(source).rest
+}
+
+fn run() {
+    source := "name:value"
+    selected :: $PROJECTION(source)
+    source = "other:data"
+    print(selected)
+}
+"#
+        .replace("$PROJECTION", projection);
+        let diags =
+            jet::compile(&src).expect_err("live parser views must keep caller storage stable");
+        assert!(
+            diags.iter().any(|diag| diag.code == "E0212"),
+            "expected owner-invalidation error for token.{field}: {diags:?}"
+        );
+    }
+}
+
+/// #745: keep the user-facing zero-copy parser example on the same production
+/// parser, sema, TIR, and codegen path as hand-written source.
+#[test]
+fn zero_copy_parser_example_covers_production_pipeline() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", "examples/features/memory/returned_views.jet"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("run the returned-views example through the production CLI");
+    assert!(
+        output.status.success(),
+        "native parser example failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("example stdout must be UTF-8"),
+        "7\nexample.com\nname\nvalue\n"
+    );
+}
+
 #[test]
 fn returned_string_view_uses_parameter_provenance() {
     let src = r#"

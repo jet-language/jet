@@ -4,6 +4,11 @@ struct Domain {
     value: View<str>
 }
 
+struct Token {
+    text: View<str>,
+    rest: View<str>
+}
+
 fn first(values: [Int]) -> View<Int> {
     return values[0..1]
 }
@@ -13,9 +18,25 @@ fn domain(email: String) -> Domain {
     return Domain.{value: value}
 }
 
+// Both parser outputs borrow one caller-owned input. `parse` proves that
+// provenance composes through an ordinary wrapper call.
+fn scan(source: String) -> Token {
+    text :: source.before(":")
+    rest :: source.after(":")
+    return Token.{text: text, rest: rest}
+}
+
+fn parse(source: String) -> Token {
+    return scan(source)
+}
+
 fn run() {
     values := [7, 8]
     email := "user@example.com"
+    source := "name:value"
+    token :: parse(source)
     print(first(values)[0])
     print(domain(email).value)
+    print(token.text)
+    print(token.rest)
 }
