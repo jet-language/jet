@@ -725,6 +725,7 @@ impl<'a> Checker<'a> {
             &mut reads,
             &mut writes,
         );
+        writes.extend(lambda.meta.mut_captures.iter().cloned());
         reads.extend(writes.iter().cloned());
         for name in reads {
             let capture = Expr::Ident(name.clone(), lambda.span);

@@ -296,6 +296,27 @@ fn run() {
 }
 
 #[test]
+fn inferred_mutable_lambda_capture_stays_active_through_call() {
+    let src = r#"
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
+
+fn run() {
+    values := [1, 2]
+    both(() => values.push(3), values)
+}
+"#;
+    let diags =
+        jet::compile(src).expect_err("mutable lambda capture must remain active through the call");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0204"),
+        "expected the call-alias diagnostic: {diags:?}"
+    );
+}
+
+#[test]
 fn generic_constructor_nested_argument_sees_active_write_place() {
     let src = r#"
 struct Pair<T> { value: T }
@@ -445,6 +466,20 @@ fn main() {
 }
 "#,
             "E0503",
+        ),
+        (
+            "mutable_capture_lifetime.rs",
+            r#"
+fn both<F: FnMut()>(mut callback: F, values: &Vec<i64>) {
+    callback();
+    println!("{}", values.len());
+}
+fn main() {
+    let mut values = vec![1, 2];
+    both(|| values.push(3), &values);
+}
+"#,
+            "E0502",
         ),
         (
             "dynamic_index.rs",
