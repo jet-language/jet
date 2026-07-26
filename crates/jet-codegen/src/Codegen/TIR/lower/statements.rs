@@ -304,6 +304,32 @@ fn split_view_plan(stmts: &[Stmt], cx: &Cx) -> HashMap<usize, PlannedSplitView> 
     planned
 }
 
+/// A typed list head can reach lowering as a one-element `ListLit` after sema
+/// elaborates the head away. Preserve the asserted list shape:
+/// the value already has the exact expected list type, so the wrapper is not
+/// another list dimension.
+fn preserve_typed_list_shape(expr: TExpr, expected: &Type) -> TExpr {
+    if !matches!(expected, Type::List(_)) {
+        return expr;
+    }
+    match expr {
+        TExpr {
+            ty,
+            kind: TExprKind::ListLit(mut elems),
+        } => {
+            if elems.len() == 1 && elems[0].ty == *expected {
+                elems.pop().unwrap()
+            } else {
+                TExpr {
+                    ty,
+                    kind: TExprKind::ListLit(elems),
+                }
+            }
+        }
+        other => other,
+    }
+}
+
 pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
     if let Stmt::Assign { target, value, .. } = s {
         let root_name = match target {
@@ -598,6 +624,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 };
             }
             let mut init = lower_owned_expr(&b.init, cx, env);
+            if let Some(want) = &b.ty {
+                init = preserve_typed_list_shape(init, want);
+            }
             // D-FIXARR1: if the binding annotation is `[T#N]` and the init lowered as a
             // growable list (e.g. a plain list literal), re-tag the TExpr type so the emit
             // produces a Rust array literal `[e1, …]` instead of `vec![…]`.
