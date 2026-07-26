@@ -2397,9 +2397,7 @@ mod project_part_tests {
 
     #[test]
     fn code_actions_reject_non_scalar_extract_without_ownership_proof() {
-        // The semantic index does not yet prove `Clock` is Copy or give the
-        // read/write/take and return contract needed to preserve ownership.
-        // The refactor engine must fail closed instead of guessing from syntax.
+        // The semantic index does not prove `Clock` parameters are Copy.
         let clock =
             "fn run(left: Clock, right: Clock) {\n    same :: left == right\n    print(same)\n}\n";
         let clock_root = std::env::temp_dir().join(format!(
@@ -2439,6 +2437,45 @@ mod project_part_tests {
         );
         assert!(!inlined.contains("Inline `same`"), "{inlined}");
         let _ = std::fs::remove_dir_all(clock_root);
+
+        // This selection has no captured inputs and returns a non-scalar String.
+        // The engine must reject its function extraction instead of guessing an
+        // ownership contract for the returned value.
+        let string = "fn run() {\n    print((\"result\"))\n}\n";
+        let string_root = std::env::temp_dir().join(format!(
+            "jet-lsp-string-refactor-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&string_root);
+        std::fs::create_dir_all(&string_root).unwrap();
+        let string_path = string_root.join("main.jet").to_string_lossy().into_owned();
+        std::fs::write(&string_path, string).unwrap();
+        let string_uri = path_to_uri(&string_path);
+        let mut string_server = Server::new();
+        string_server
+            .workspace_roots
+            .push(string_root.to_string_lossy().into_owned());
+        string_server.docs.insert(
+            string_uri.clone(),
+            Document::new(string_path, string.to_string(), 1),
+        );
+        assert!(
+            string_server
+                .check_with_bundle(string_server.docs.get(&string_uri).unwrap())
+                .bundle
+                .is_some(),
+            "non-scalar result fixture must reach the semantic index"
+        );
+        let result = string.find("(\"result\")").unwrap();
+        let extraction = code_actions_for(
+            &string_server,
+            &string_uri,
+            string,
+            result,
+            result + "(\"result\")".len(),
+        );
+        assert!(!extraction.contains("Extract function"), "{extraction}");
+        let _ = std::fs::remove_dir_all(string_root);
     }
 
     #[test]
