@@ -63,13 +63,14 @@ mod tests {
                     Err(error) => panic!("create isolated LSP test project: {error}"),
                 }
             };
+            let entry = root.join("test.jet").to_string_lossy().into_owned();
+            let project = Self { root, entry };
             std::fs::write(
-                root.join(crate::Syntax::PAYLOAD_FILE),
+                project.root.join(crate::Syntax::PAYLOAD_FILE),
                 "identity: .{ name: \"lsp_unit\", version: \"0.1.0\" }\n",
             )
             .expect("write isolated LSP test manifest");
-            let entry = root.join("test.jet").to_string_lossy().into_owned();
-            Self { root, entry }
+            project
         }
 
         fn entry(&self) -> &str {
