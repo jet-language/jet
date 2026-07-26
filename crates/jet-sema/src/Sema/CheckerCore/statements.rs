@@ -1737,7 +1737,14 @@ impl<'a> Checker<'a> {
                             Some(*span),
                         ));
                     }
+                    // The body runs later in its own move closure. Mutating a
+                    // cloned reactive capture must not make an enclosing
+                    // callback FnMut; only construction-time clone reads cross
+                    // that callback boundary.
+                    let enclosing_mut_captures =
+                        std::mem::take(&mut self.inferred_lambda_mut_captures);
                     self.check_block(body, true);
+                    self.inferred_lambda_mut_captures = enclosing_mut_captures;
                 }
                 Stmt::Off { body, .. } => {
                     let moved = self.moved.clone();

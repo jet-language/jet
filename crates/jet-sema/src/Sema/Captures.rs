@@ -789,6 +789,13 @@ pub(crate) fn stmt_collect_captures(
                         mut_cap.insert(n.clone());
                     }
                 }
+            } else if let LValue::Field { base, .. } = target {
+                expr_collect_captures(base, bound, read, mut_cap);
+                if let Some(root) = expr_root_ident(base) {
+                    if !bound.contains(root) {
+                        mut_cap.insert(root.to_string());
+                    }
+                }
             }
             expr_collect_captures(value, bound, read, mut_cap);
         }
@@ -806,6 +813,22 @@ pub(crate) fn stmt_collect_captures(
             expr_collect_captures(cond, bound, read, mut_cap);
             let mut body_bound = bound.clone();
             block_collect_captures(body, &mut body_bound, read, mut_cap);
+        }
+        Stmt::Reactive { body, .. } => {
+            let mut body_bound = bound.clone();
+            let mut reactive_read = HashSet::new();
+            let mut reactive_mut = HashSet::new();
+            block_collect_captures(
+                body,
+                &mut body_bound,
+                &mut reactive_read,
+                &mut reactive_mut,
+            );
+            // Registration clones every free root. Mutations happen later
+            // against that clone, so the enclosing closure only reads roots
+            // while constructing the reactive effect.
+            reactive_read.extend(reactive_mut);
+            read.extend(reactive_read);
         }
         Stmt::For {
             var,
@@ -939,7 +962,6 @@ pub(crate) fn stmt_collect_captures(
         Stmt::Loop { body, .. }
         | Stmt::Unsafe { body, .. }
         | Stmt::Impure { body, .. }
-        | Stmt::Reactive { body, .. }
         | Stmt::Shield { body, .. }
         | Stmt::DebugOnly { body, .. }
         | Stmt::Region { body, .. }

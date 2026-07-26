@@ -590,7 +590,7 @@ fn run() {
     let user_method = r#"
 struct Bucket { values: [Int] }
 impl Bucket {
-    fn clear(&self) { self.values = [] }
+    fn clear(&self) { self.values = [0] }
 }
 fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
 fn run() {
@@ -611,8 +611,113 @@ fn run() {
     }, &values)
 }
 "#;
-    jet::compile(reactive_clone)
-        .expect("reactive registration clones captures instead of retaining body writes");
+    let diags = jet::compile(reactive_clone)
+        .expect_err("the outer move closure consumes the reactive source before the later loan");
+    assert!(!diags.is_empty(), "expected a move or alias diagnostic");
+}
+
+#[test]
+fn pattern_value_tests_and_reactive_clones_use_runtime_capture_places() {
+    let pattern_value = r#"
+struct Incident { count: Int, label: String }
+fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn run() {
+    values := [1, 2]
+    changed := [0]
+    incident := Incident.{ count: 2, label: "jet" }
+    both(&values, () => {
+        changed.push(1)
+        if incident == {
+            .{ count: values.len(), label, .. } -> print(label)
+            else -> {}
+        }
+    })
+}
+"#;
+    let diags = jet::compile(pattern_value)
+        .expect_err("a struct-pattern value expression is evaluated before its arm");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let reactive_root = r#"
+struct Pair { left: [Int], right: [Int] }
+fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    changed := [0]
+    both(&pair.right, () => {
+        changed.push(1)
+        #Reactive { pair.left.push(3) }
+    })
+}
+"#;
+    let diags = jet::compile(reactive_root)
+        .expect_err("reactive lowering clones the whole captured root");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn reactive_codegen_clones_the_whole_root_before_running() {
+    let source = r#"
+struct Pair { left: [Int], right: [Int] }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    #Reactive {
+        pair.left.push(3)
+        print(pair.left.len())
+    }
+    print(pair.right.len())
+}
+"#;
+    let compiled = jet::compile(source).expect("direct Reactive cloning must remain valid");
+    assert!(
+        compiled
+            .rust
+            .contains("let mut _jet_cap_user_pair = (user_pair).clone();"),
+        "{}",
+        compiled.rust
+    );
+    if common::have_rustc() {
+        let (code, stdout, stderr) =
+            common::build_and_run("jet_reactive_capture", "whole_root", source);
+        assert_eq!(code, 0, "{stderr}");
+        assert_eq!(stdout, "2\n1\n");
+    }
+}
+
+#[test]
+fn move_lambda_construction_consumes_owned_nonscalar_captures() {
+    for (source, expected) in [
+        (r#"
+fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn run() {
+    values := [1, 2]
+    both(() => values.len(), values)
+}
+"#, "E0121"),
+        (r#"
+fn both(values: [Int], callback: fn()) { print(values.len()); callback() }
+fn run() {
+    values := [1, 2]
+    both(values, () => values.len())
+}
+"#, "E0204"),
+    ] {
+        let diags = jet::compile(source)
+            .expect_err("a move closure consumes its owned non-scalar capture");
+        assert!(
+            diags.iter().any(|diag| diag.code == expected),
+            "{expected}: {diags:?}"
+        );
+    }
+
+    let scalar_copy = r#"
+fn both(callback: fn(), value: Int) { callback(); print(value) }
+fn run() {
+    value := 2
+    both(() => { print(value) }, value)
+}
+"#;
+    jet::compile(scalar_copy).expect("Copy scalar captures remain usable");
 }
 
 #[test]
@@ -667,6 +772,27 @@ fn run() {{
             jet::compile(&src).expect_err("wrapped returned views retain their source loan");
         assert!(diags.iter().any(|diag| diag.code == "E0204"), "{view}: {diags:?}");
     }
+}
+
+#[test]
+fn return_fallback_view_does_not_reach_the_enclosing_call() {
+    let source = r#"
+struct View<T> { value: T }
+fn first(values: [Int]) -> View<Int> { return values[0..1] }
+fn both(view: View<Int>, values: &[Int]) { values.push(view[0]) }
+fn choose(other: [Int], values: &[Int]) -> View<Int> {
+    both(Val(first(other)) ?? return first(values), &values)
+    return first(other)
+}
+fn run() {
+    other := [1]
+    values := [2]
+    chosen :: choose(other, &values)
+    print(chosen[0])
+}
+"#;
+    jet::compile(source)
+        .expect("a return fallback exits before the enclosing call can run");
 }
 
 #[test]
@@ -947,6 +1073,73 @@ fn main() {
 }
 "#,
             "E0502",
+        ),
+        (
+            "pattern_value_capture.rs",
+            r#"
+struct Incident { count: usize }
+fn both<F: FnMut()>(values: &mut Vec<i64>, mut callback: F) {
+    values.push(3);
+    callback();
+}
+fn main() {
+    let mut values = vec![1, 2];
+    let mut changed = vec![0];
+    let incident = Incident { count: 2 };
+    both(&mut values, || {
+        changed.push(1);
+        if incident.count == values.len() {}
+    });
+}
+"#,
+            "E0502",
+        ),
+        (
+            "reactive_whole_root_clone.rs",
+            r#"
+#[derive(Clone)]
+struct Pair { left: Vec<i64>, right: Vec<i64> }
+fn both<F: FnMut()>(values: &mut Vec<i64>, mut callback: F) {
+    values.push(3);
+    callback();
+}
+fn main() {
+    let mut pair = Pair { left: vec![1], right: vec![2] };
+    let mut changed = vec![0];
+    both(&mut pair.right, || {
+        changed.push(1);
+        let captured_pair = pair.clone();
+        let _effect = move || println!("{}", captured_pair.left.len());
+    });
+}
+"#,
+            "E0502",
+        ),
+        (
+            "move_capture_before_read.rs",
+            r#"
+fn both<F: Fn() -> usize>(callback: F, values: &Vec<i64>) {
+    println!("{} {}", callback(), values.len());
+}
+fn main() {
+    let values = vec![1, 2];
+    both(move || values.len(), &values);
+}
+"#,
+            "E0382",
+        ),
+        (
+            "read_before_move_capture.rs",
+            r#"
+fn both<F: Fn() -> usize>(values: &Vec<i64>, callback: F) {
+    println!("{} {}", values.len(), callback());
+}
+fn main() {
+    let values = vec![1, 2];
+    both(&values, move || values.len());
+}
+"#,
+            "E0505",
         ),
         (
             "if_prefix.rs",

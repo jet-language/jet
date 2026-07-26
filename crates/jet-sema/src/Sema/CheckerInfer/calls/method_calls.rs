@@ -3518,6 +3518,12 @@ impl<'a> Checker<'a> {
             // `mut self` methods change the receiver: it must be changeable,
             // free of an active `for` borrow, and not aliased by an argument.
             if msig.self_conv == Some(AccessConvention::Write) {
+                if self.in_lambda_body {
+                    if let Some(root) = expr_root_ident(receiver) {
+                        self.inferred_lambda_mut_captures
+                            .insert(root.to_string());
+                    }
+                }
                 self.check_expr_change(
                     receiver,
                     &format!("be changed by `.{method}()`"),

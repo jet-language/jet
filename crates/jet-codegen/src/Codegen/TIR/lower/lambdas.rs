@@ -342,8 +342,10 @@ pub(super) fn render_reactive_block_closure(stmts: &[Stmt], cx: &Cx, outer_env: 
     let mut prep = String::new();
     for name in &caps {
         let cap = format!("_jet_cap_{}", mangle(name));
+        // Reactive bodies may update their private clone on every rerun. The
+        // runtime serializes the resulting FnMut closure behind a Mutex.
         prep.push_str(&format!(
-            "let {} = ({}).clone();\n    ",
+            "let mut {} = ({}).clone();\n    ",
             cap,
             outer_env.place_of(name)
         ));

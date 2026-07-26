@@ -15,6 +15,7 @@ struct EvaluatedAccess {
     access: ViewAccess,
     span: Span,
     through_call: bool,
+    moves_owner: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -565,6 +566,7 @@ impl<'a> Checker<'a> {
             access,
             span: expr.span(),
             through_call: false,
+            moves_owner: false,
         });
     }
 
@@ -706,12 +708,35 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|(name, _)| name)
             .collect::<HashSet<_>>();
+        let cloned = lambda
+            .meta
+            .cloned_captures
+            .iter()
+            .collect::<HashSet<_>>();
         let has_capture_write = events
             .iter()
             .any(|event| event.access == ViewAccess::Write);
         let retains = !lambda.meta.escapes && has_capture_write;
         for event in &mut events {
-            event.through_call = retains && !taken.contains(&event.place.owner.name);
+            let name = &event.place.owner.name;
+            if cloned.contains(name) {
+                // Lowering clones the whole source root before constructing
+                // the move closure; body projections and writes target the clone.
+                event.place.projections.clear();
+                event.access = ViewAccess::Read;
+            } else if (!lambda.meta.needs_fn_mut || lambda.meta.escapes)
+                && self.lookup(name).is_some_and(|info| {
+                    !info.ty.is_scalar() && info.param_conv.is_none()
+                })
+            {
+                // A move closure consumes an implicit owned capture at
+                // construction. Model the whole named move, not a body loan.
+                event.place.projections.clear();
+                event.access = ViewAccess::Write;
+                event.moves_owner = true;
+            }
+            event.through_call =
+                retains && !taken.contains(name) && !event.moves_owner;
         }
         for event in events {
             if let Some(existing) = out.iter_mut().find(|existing| {
@@ -723,6 +748,7 @@ impl<'a> Checker<'a> {
                     existing.span = event.span;
                 }
                 existing.through_call |= event.through_call;
+                existing.moves_owner |= event.moves_owner;
             } else {
                 out.push(event);
             }
@@ -890,8 +916,11 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            Expr::PatternTest { subject, .. } => {
+            Expr::PatternTest {
+                subject, pattern, ..
+            } => {
                 self.collect_evaluated_expr_accesses(subject, mode, bound, out);
+                self.collect_pattern_value_accesses(pattern, mode, bound, out);
             }
             Expr::OrFallback {
                 value, fallback, ..
@@ -925,6 +954,9 @@ impl<'a> Checker<'a> {
             } => {
                 self.collect_evaluated_expr_accesses(cond, mode, bound, out);
                 let mut then_bound = bound.clone();
+                if let Expr::PatternTest { pattern, .. } = cond.as_ref() {
+                    Self::bind_pattern_names(pattern, &mut then_bound);
+                }
                 self.collect_evaluated_stmt_accesses(
                     then_body,
                     mode,
@@ -1020,6 +1052,35 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn collect_pattern_value_accesses(
+        &self,
+        pattern: &Pattern,
+        mode: AccessWalkMode,
+        bound: &HashSet<String>,
+        out: &mut Vec<EvaluatedAccess>,
+    ) {
+        match pattern {
+            Pattern::Struct { fields, .. } => {
+                for field in fields {
+                    if let crate::AST::StructPatField::Value { value, .. } = field {
+                        self.collect_evaluated_expr_accesses(value, mode, bound, out);
+                    }
+                }
+            }
+            Pattern::Or(alternatives, _) => {
+                for alternative in alternatives {
+                    self.collect_pattern_value_accesses(
+                        alternative,
+                        mode,
+                        bound,
+                        out,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn collect_if_stmt_accesses(
         &self,
         branch: &crate::AST::IfStmt,
@@ -1029,6 +1090,9 @@ impl<'a> Checker<'a> {
     ) {
         self.collect_evaluated_expr_accesses(&branch.cond, mode, bound, out);
         let mut then_bound = bound.clone();
+        if let Expr::PatternTest { pattern, .. } = &branch.cond {
+            Self::bind_pattern_names(pattern, &mut then_bound);
+        }
         self.collect_evaluated_stmt_accesses(
             &branch.then_body,
             mode,
@@ -1231,10 +1295,10 @@ impl<'a> Checker<'a> {
                     for mut capture in captures {
                         capture.access = ViewAccess::Read;
                         capture.through_call = false;
+                        capture.moves_owner = false;
+                        capture.place.projections.clear();
                         if !out.iter().any(|event| {
                             event.place.owner == capture.place.owner
-                                && event.place.projections
-                                    == capture.place.projections
                         }) {
                             out.push(capture);
                         }
@@ -1439,6 +1503,8 @@ impl<'a> Checker<'a> {
             self.check_call_place_access(&access.place, access.access, access.span);
             if access.through_call {
                 self.record_call_place_access(access.place, access.access);
+            } else if access.moves_owner {
+                self.mark_moved(access.place.owner.name, access.span);
             }
         }
         self.record_call_result_views(expr);
@@ -1752,12 +1818,8 @@ impl<'a> Checker<'a> {
         } = init
         {
             let mut sources = self.view_call_sources(value);
-            match fallback {
-                crate::AST::OrFallback::Value(value)
-                | crate::AST::OrFallback::Return(Some(value), _) => {
-                    sources.extend(self.view_call_sources(value));
-                }
-                _ => {}
+            if let crate::AST::OrFallback::Value(value) = fallback {
+                sources.extend(self.view_call_sources(value));
             }
             return sources;
         }

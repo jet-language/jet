@@ -1648,5 +1648,6 @@ pub fn block_free_var_reads(stmts: &[crate::AST::Stmt]) -> HashSet<String> {
     let mut read = HashSet::new();
     let mut mut_cap = HashSet::new();
     Captures::block_collect_captures(stmts, &mut bound, &mut read, &mut mut_cap);
+    read.extend(mut_cap);
     read
 }
