@@ -57,7 +57,6 @@ fn bind_resource_param(
                 kind: TExprKind::Local(TLocal::user(source_name)),
             })),
         },
-        track_origin: None,
                 gc_promotion: None,
                 gc_transferred: false,
     });

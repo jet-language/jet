@@ -1933,7 +1933,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kw: "let mut",
                 let_ty: crate::Codegen::TIR::TLetTy::Inferred,
                 init: empty,
-                track_origin: None,
                 gc_promotion: None,
                 gc_transferred: false,
             }];

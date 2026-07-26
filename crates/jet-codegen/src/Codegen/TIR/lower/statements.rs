@@ -527,7 +527,6 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                         ty: ty.clone(),
                         kind: TExprKind::Uninit,
                     },
-                    track_origin: None,
                 gc_promotion: None,
                 gc_transferred: false,
                 };
@@ -545,7 +544,6 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     kw: "let",
                     let_ty: TLetTy::Inferred,
                     init,
-                    track_origin: None,
                 gc_promotion: None,
                 gc_transferred: false,
                 };
@@ -567,7 +565,6 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     kw: "let",
                     let_ty: TLetTy::Inferred,
                     init,
-                    track_origin: None,
                 gc_promotion: None,
                 gc_transferred: false,
                 };
@@ -589,7 +586,6 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     kw: "let",
                     let_ty: TLetTy::StrView,
                     init,
-                    track_origin: None,
                 gc_promotion: None,
                 gc_transferred: false,
                 };
@@ -618,7 +614,6 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     kw: "let",
                     let_ty,
                     init,
-                    track_origin: None,
                 gc_promotion: None,
                 gc_transferred: false,
                 };
@@ -763,8 +758,6 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 kw,
                 let_ty,
                 init,
-                // Kept empty while the shared TStmt constructors retain this field.
-                track_origin: None,
                 gc_promotion: b.gc_promotion.clone(),
                 gc_transferred: b.gc_transferred,
             }
@@ -1085,7 +1078,6 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 kw: "let mut",
                 let_ty: TLetTy::Inferred,
                 init: init_val,
-                track_origin: None,
                 gc_promotion: None,
                 gc_transferred: false,
             });

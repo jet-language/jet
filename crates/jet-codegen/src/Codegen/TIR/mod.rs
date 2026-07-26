@@ -1398,9 +1398,6 @@ pub enum TStmt {
         kw: &'static str,
         let_ty: TLetTy,
         init: TExpr,
-        /// D-PROVENANCE1=B: if present, record this Float binding's origin after
-        /// initialization. Empty for every untracked/non-Float binding.
-        track_origin: Option<String>,
         /// D-OPTGC1=A: sema's complete automatic-promotion decision.
         gc_promotion: Option<crate::AST::GcPromotion>,
         gc_transferred: bool,
