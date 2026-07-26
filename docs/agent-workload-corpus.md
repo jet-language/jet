@@ -4,7 +4,7 @@ Card #769 owns this corpus. The corpus compares shipped Jet with Bash, Python, a
 
 ## Frozen contract
 
-`tests/agent_workloads/manifest.tsv` is the task authority. A row fixes the task ID, domain, case, outcome, input, authority, adapters, platforms, evidence, and Tower card.
+`tests/agent_workloads/manifest.tsv` is the task authority. A row fixes the task ID, domain, case, outcome, input, authority, adapters, platforms, evidence, and Tower cards.
 
 `tests/agent_workloads/SHA256SUMS` fixes all task inputs and declared outputs. The test compares the recursive file set with all checksum rows. An extra, missing, or changed file fails.
 
@@ -13,6 +13,8 @@ The completeness test also fixes each task ID, domain, case, and outcome in code
 Each adapter gets the same input root as its only argument. Each adapter starts in an empty scratch working directory and inherits ambient host authority. The runner does not restrict or measure network access or writes outside the input tree.
 
 The runner starts Jet through the integration-test `CARGO_BIN_EXE_jet` public CLI with `jet run --release`. The report records the CLI path, SHA-256 digest, and reported version. Corpus test evidence is not shipped product proof.
+
+Default `jet run` rejects this workload with E0956 because the dev lens cannot run `core.files.walk`. Card #688 owns that red gap.
 
 ## Scoring
 
@@ -46,6 +48,8 @@ No aggregate Jet rank exists until the corpus records all required metrics and a
 The first report records task success, source tokens, cold and warm wall time, output stability, platform, architecture, adapter versions, corpus evidence, and the canonical card. Agent tool calls, repair turns, peak memory, diagnostic quality, orphan processes, sandbox escapes, and cross-platform runs remain `not-recorded:#769`.
 
 Network access and external writes remain `unmeasured:#769`. The input-tree hash check only proves that an adapter did not change its declared input.
+
+The Linux AOT run is much slower than all three peers. The report keeps this loss red on card #666; it does not count it as parity.
 
 The focused integration test is the first CI tier:
 

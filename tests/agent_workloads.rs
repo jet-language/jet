@@ -9,7 +9,7 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const HEADER: &str = "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card";
+const HEADER: &str = "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards";
 const PROCESS_DEADLINE: Duration = Duration::from_secs(120);
 const EXPECTED_TASKS: &[(&str, &str, &str, &str)] = &[(
     "repository-marker-scan",
@@ -37,6 +37,7 @@ struct Task {
     platforms: String,
     evidence: String,
     tower_card: String,
+    loss_cards: String,
 }
 
 #[derive(Debug)]
@@ -88,7 +89,7 @@ fn read_tasks() -> Vec<Task> {
         .filter(|line| !line.is_empty())
         .map(|line| {
             let fields = line.split('\t').collect::<Vec<_>>();
-            assert_eq!(fields.len(), 12, "bad agent workload manifest row: {line}");
+            assert_eq!(fields.len(), 13, "bad agent workload manifest row: {line}");
             assert_eq!(fields[0], "1", "unsupported corpus version in: {line}");
             Task {
                 id: fields[1].into(),
@@ -102,6 +103,7 @@ fn read_tasks() -> Vec<Task> {
                 platforms: fields[9].into(),
                 evidence: fields[10].into(),
                 tower_card: fields[11].into(),
+                loss_cards: fields[12].into(),
             }
         })
         .collect()
@@ -314,6 +316,7 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
             "tests/agent_workloads.rs::equivalent_adapters_complete_repository_marker_scan"
         );
         assert_eq!(task.tower_card, "#769");
+        assert_eq!(task.loss_cards, "default-run=#688;wall-time=#666");
         assert!(corpus_root().join(&task.input).is_dir());
         assert!(corpus_root().join(&task.expected).is_file());
         for (_, source) in ADAPTERS {
@@ -458,12 +461,13 @@ fn equivalent_adapters_complete_repository_marker_scan() {
     );
 
     println!(
-        "machine\tos={}\tarch={}\tcorpus=1\ttask={}\tevidence={}\tcard={}\tjet_artifact={}\tjet_sha256={}",
+        "machine\tos={}\tarch={}\tcorpus=1\ttask={}\tevidence={}\tcard={}\tlosses=red:{}\tjet_artifact={}\tjet_sha256={}",
         std::env::consts::OS,
         std::env::consts::ARCH,
         task.id,
         task.evidence,
         task.tower_card,
+        task.loss_cards,
         jet_cli.display(),
         jet_artifact
     );
