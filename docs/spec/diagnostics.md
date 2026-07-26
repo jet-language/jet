@@ -358,7 +358,6 @@ renumbered, and no new `W` code may be allocated.
 | E0511 | sema  | `Expiring.force` bypasses fallible cache-expiry access — use `get(clock)` (D-TTLVAL1) |
 | L0501 | sema  | slice copy inside a loop (lint)           |
 | L0502 | sema  | float `==`/`!=` comparison is unreliable (D-SMELLLINT1) |
-| L0503 | sema  | visually confusable single-character names in one scope (`l`/`I`/`1`, `O`/`0`) (D-CONFUSE1) |
 | L0504 | sema  | money-like name holds `Float` instead of `Decimal` (D-DECIMAL1) |
 | L0505 | sema  | heap growth in a loop after `use core.mem` — consider an arena (c26) |
 | L0506 | sema  | hidden allocation inside `#Context` without an allocator (c26) |
