@@ -1751,9 +1751,8 @@ impl LowerCtx<'_, '_> {
                 // handle, not replace the local SSA pointer (AOT: `(*self) = …`).
                 // ViewMut / field-mut places use the same deref bit for element/
                 // field write-through.
-                if local.deref && op.is_none() {
+                if local.deref {
                     let dst = self.b.use_var(var);
-                    let src = self.lower_expr(value)?;
                     let view_elem_ty = match self.var_tys.get(&key) {
                         Some(Type::Apply { name, args })
                             if name == "ViewMut" && args.len() == 1 =>
@@ -1763,32 +1762,53 @@ impl LowerCtx<'_, '_> {
                         _ => None,
                     };
                     if let Some(elem_ty) = view_elem_ty {
+                        let direct_value = if op.is_none() {
+                            Some(self.lower_expr(value)?)
+                        } else {
+                            None
+                        };
                         let (list, start, _) = self.unpack_view_mut(dst)?;
                         let line = self.b.ins().iconst(types::I32, 1);
-                        let host_id = match elem_ty {
+                        let assigned = if let Some(op) = op {
+                            let get_id = match &elem_ty {
+                                Type::Float => self.host.coll.list_get_f64,
+                                _ => self.host.coll.list_get,
+                            };
+                            let get = self.module.declare_func_in_func(get_id, self.b.func);
+                            let call = self.b.ins().call(get, &[list, start, line]);
+                            let current = self.b.inst_results(call)[0];
+                            self.emit_trap_check()?;
+                            let rhs = self.lower_expr(value)?;
+                            self.apply_binop_to_var(current, *op, rhs, &elem_ty)?
+                        } else {
+                            direct_value
+                                .ok_or("jit direct ViewMut assignment missing value")?
+                        };
+                        let set_id = match &elem_ty {
                             Type::Float => self.host.coll.list_set_f64,
                             _ => self.host.coll.list_set,
                         };
-                        let set = self
-                            .module
-                            .declare_func_in_func(host_id, self.b.func);
-                        self.b.ins().call(set, &[list, start, src, line]);
+                        let set = self.module.declare_func_in_func(set_id, self.b.func);
+                        self.b.ins().call(set, &[list, start, assigned, line]);
                         self.emit_trap_check()?;
                         return Ok(());
                     }
-                    if self.var_tys.get(&key).is_some_and(Self::is_field_mut_ty) {
-                        let (structure, idx) = self.unpack_field_mut(dst)?;
-                        let set = self
+                    if op.is_none() {
+                        let src = self.lower_expr(value)?;
+                        if self.var_tys.get(&key).is_some_and(Self::is_field_mut_ty) {
+                            let (structure, idx) = self.unpack_field_mut(dst)?;
+                            let set = self
+                                .module
+                                .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+                            self.b.ins().call(set, &[structure, idx, src]);
+                            return Ok(());
+                        }
+                        let assign = self
                             .module
-                            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
-                        self.b.ins().call(set, &[structure, idx, src]);
+                            .declare_func_in_func(self.host.struct_assign, self.b.func);
+                        self.b.ins().call(assign, &[dst, src]);
                         return Ok(());
                     }
-                    let assign = self
-                        .module
-                        .declare_func_in_func(self.host.struct_assign, self.b.func);
-                    self.b.ins().call(assign, &[dst, src]);
-                    return Ok(());
                 }
                 let val = if let Some(op) = op {
                     let current = self.b.use_var(var);

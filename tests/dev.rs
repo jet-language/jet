@@ -3927,7 +3927,7 @@ fn place_windows_matches_resident_jit_and_aot_without_fallback() {
 }
 
 #[test]
-fn float_singleton_splits_match_resident_jit_and_aot_without_fallback() {
+fn numeric_singleton_splits_match_resident_jit_and_aot_without_fallback() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;
     }
@@ -3939,57 +3939,77 @@ fn run() {
     last :: &values[2]
     first = 4.5
     last = 6.5
+    first += 1.25
+    last += 0.25
     print(first)
     print(last)
     print(values[0])
     print(values[2])
+
+    counts := [1, 2, 3]
+    low :: &counts[0]
+    high :: &counts[2]
+    low += 4
+    high += 6
+    low &= 6
+    low <<= 1
+    high ^= 10
+    high |= 8
+    print(low)
+    print(high)
+    print(counts[0])
+    print(counts[2])
 }
 "#;
-    let expected = ProgramOutput::ran("4.5\n6.5\n4.5\n6.5\n".into(), String::new(), 0);
+    let expected = ProgramOutput::ran(
+        "5.75\n6.75\n5.75\n6.75\n8\n11\n8\n11\n".into(),
+        String::new(),
+        0,
+    );
     let dir =
-        std::env::temp_dir().join(format!("jet_float_singleton_splits_{}", std::process::id()));
+        std::env::temp_dir().join(format!("jet_numeric_singleton_splits_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
-    let file = dir.join("float_singleton_splits.jet");
+    let file = dir.join("numeric_singleton_splits.jet");
     fs::write(&file, source).unwrap();
     let shown = file.to_string_lossy().to_string();
     let bundle = checked_bundle_from_path(&shown);
     assert!(
         jet_jit::resident_jit_safe_bundle(&bundle),
-        "Float singleton split must stay resident-safe: {}",
+        "numeric singleton splits must stay resident-safe: {}",
         jet_jit::resident_jit_safe_bundle_detail(&bundle)
     );
     jet_jit::try_compile_bundle(&bundle)
-        .unwrap_or_else(|reason| panic!("Float singleton split must JIT-compile: {reason}"));
+        .unwrap_or_else(|reason| panic!("numeric singleton splits must JIT-compile: {reason}"));
 
     let RunOutcome::Problems(interpreter_diags) = dev_iteration(&shown, false, true) else {
-        panic!("Float singleton split unexpectedly left its interpreter boundary");
+        panic!("numeric singleton splits unexpectedly left their interpreter boundary");
     };
     assert!(
         interpreter_diags.iter().any(|diag| diag.code == "E2201"),
-        "Float singleton split interpreter boundary drifted: {interpreter_diags:?}"
+        "numeric singleton split interpreter boundary drifted: {interpreter_diags:?}"
     );
 
     jet_jit::reset_jit_trace_for_test();
-    let resident = run_cranelift_without_fallback(source, "float_singleton_splits");
+    let resident = run_cranelift_without_fallback(source, "numeric_singleton_splits");
     assert!(
         jet_jit::jit_executed_for_test(),
-        "Float singleton split did not execute in JIT"
+        "numeric singleton splits did not execute in JIT"
     );
     assert!(
         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-        "Float singleton split used deopt or fallback"
+        "numeric singleton splits used deopt or fallback"
     );
 
     let aot = compiled_binary_output(
         &dir,
-        "float_singleton_splits",
+        "numeric_singleton_splits",
         0,
-        "float_singleton_splits",
+        "numeric_singleton_splits",
         &shown,
     );
-    assert_eq!(resident, expected, "resident JIT Float singleton split drifted");
-    assert_eq!(aot, expected, "AOT Float singleton split drifted");
+    assert_eq!(resident, expected, "resident JIT numeric singleton split drifted");
+    assert_eq!(aot, expected, "AOT numeric singleton split drifted");
     let _ = fs::remove_dir_all(&dir);
 }
 

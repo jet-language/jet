@@ -1144,6 +1144,25 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             value,
             clone_value,
         } => {
+            let compound = op.as_ref().is_none_or(|op| match &value.ty {
+                Type::Int => matches!(
+                    op,
+                    BinOp::Add
+                        | BinOp::Sub
+                        | BinOp::Mul
+                        | BinOp::Div
+                        | BinOp::Rem
+                        | BinOp::BitAnd
+                        | BinOp::BitOr
+                        | BinOp::BitXor
+                        | BinOp::Shl
+                        | BinOp::Shr
+                ),
+                Type::Float => {
+                    matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
+                }
+                _ => false,
+            });
             let local = place.as_local().is_some_and(|local| {
                 local
                     .name
@@ -1151,7 +1170,10 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
             });
             let field = op.is_none() && structured_record_field_place(place);
-            !clone_value && (local || field) && resident_safe_expr(value, callees)
+            !clone_value
+                && compound
+                && (local || field)
+                && resident_safe_expr(value, callees)
         }
         TStmt::Return(ret) => ret.as_ref().is_none_or(|e| resident_safe_expr(e, callees)),
         TStmt::ExprStmt(e) => resident_safe_expr(e, callees),
