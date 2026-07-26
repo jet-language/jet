@@ -435,6 +435,110 @@ fn run() {
     let diags = jet::compile(conflicting_view_alias)
         .expect_err("a copied View alias still borrows its source place");
     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let reverse_view_alias = r#"
+fn both(callback: fn() -> Int, values: &[Int]) { values.push(callback()) }
+fn run() {
+    values := [1, 2]
+    first :: values[0..1]
+    both(() => first.len(), &values)
+}
+"#;
+    let diags = jet::compile(reverse_view_alias)
+        .expect_err("a closure keeps its copied View alias live across the whole call");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn move_lambda_index_and_slice_captures_stop_at_the_rust_prefix() {
+    for source in [
+        r#"
+fn call(callback: fn()) { callback() }
+fn run() {
+    values := [1, 2]
+    call(() => { print(values[0]) })
+    print(values.len())
+}
+"#,
+        r#"
+fn call(callback: fn()) { callback() }
+fn run() {
+    values := [1, 2]
+    call(() => { print(values[0..1].len()) })
+    print(values.len())
+}
+"#,
+    ] {
+        let diags =
+            jet::compile(source).expect_err("indexing cannot make a move capture element-precise");
+        assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
+    }
+
+    let field_before_index = r#"
+struct Pair { left: [Int], right: [Int] }
+fn call(callback: fn()) { callback() }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    call(() => { print(pair.left[0]) })
+    print(pair.right.len())
+}
+"#;
+    jet::compile(field_before_index)
+        .expect("Rust may capture the field prefix before an index");
+}
+
+#[test]
+fn moved_places_can_be_reinitialized_without_clearing_relatives() {
+    let whole = r#"
+fn consume(value: String) { print(value) }
+fn run() {
+    value := "jet"
+    consume(value)
+    value = "again"
+    print(value)
+}
+"#;
+    jet::compile(whole).expect("whole assignment reinitializes the moved binding");
+
+    let field = r#"
+struct Pair { left: String, right: [Int] }
+fn call(callback: fn()) { callback() }
+fn run() {
+    pair := Pair.{ left: "jet", right: [1] }
+    call(() => { print(pair.left) })
+    pair.left = "again"
+    print(pair.left)
+    print(pair.right.len())
+}
+"#;
+    jet::compile(field).expect("field assignment reinitializes the exact moved field");
+
+    let sibling = r#"
+struct Pair { left: String, right: [Int] }
+fn call(callback: fn()) { callback() }
+fn run() {
+    pair := Pair.{ left: "jet", right: [1] }
+    call(() => { print(pair.left) })
+    pair.right = [2]
+    print(pair.left)
+}
+"#;
+    let diags =
+        jet::compile(sibling).expect_err("assigning a sibling must not restore the moved field");
+    assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
+
+    let ancestor = r#"
+struct Pair { left: String, right: [Int] }
+fn call(callback: fn()) { callback() }
+fn run() {
+    pair := Pair.{ left: "jet", right: [1] }
+    call(() => { print(pair) })
+    pair.left = "again"
+}
+"#;
+    let diags =
+        jet::compile(ancestor).expect_err("assigning a field cannot restore a moved ancestor");
+    assert!(diags.iter().any(|diag| diag.code == "E0121"), "{diags:?}");
 }
 
 #[test]
@@ -729,6 +833,21 @@ fn run() {
 "#;
     let diags =
         jet::compile(src).expect_err("Reactive clones the root after an earlier field capture");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let write_then_reactive = r#"
+struct Pair { left: [Int], right: [Int] }
+fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    both(&pair.right, () => {
+        pair.left.push(4)
+        #Reactive { print(pair.right.len()) }
+    })
+}
+"#;
+    let diags = jet::compile(write_then_reactive)
+        .expect_err("Reactive coarsening must preserve an earlier mutable capture");
     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
 }
 
@@ -1243,6 +1362,44 @@ fn main() {
             "E0502",
         ),
         (
+            "captured_view_vs_later_write.rs",
+            r#"
+fn both<F: Fn() -> usize>(callback: F, values: &mut Vec<i64>) {
+    values.push(callback() as i64);
+}
+fn main() {
+    let mut values = vec![1, 2];
+    let first = &values[0..1];
+    both(move || first.len(), &mut values);
+}
+"#,
+            "E0502",
+        ),
+        (
+            "indexed_move_capture.rs",
+            r#"
+fn call<F: Fn()>(callback: F) { callback(); }
+fn main() {
+    let values = vec![1, 2];
+    call(move || println!("{}", values[0]));
+    println!("{}", values.len());
+}
+"#,
+            "E0382",
+        ),
+        (
+            "sliced_move_capture.rs",
+            r#"
+fn call<F: Fn()>(callback: F) { callback(); }
+fn main() {
+    let values = vec![1, 2];
+    call(move || println!("{}", values[0..1].len()));
+    println!("{}", values.len());
+}
+"#,
+            "E0382",
+        ),
+        (
             "if_prefix.rs",
             r#"
 fn both(value: &mut i64, count: i64) { *value += count }
@@ -1396,6 +1553,18 @@ fn main() {
     let first = &values[0..1];
     call(move || println!("{}", first.len()));
     println!("{}", values.len());
+}
+"#,
+        ),
+        (
+            "indexed_disjoint_field.rs",
+            r#"
+struct Pair { left: Vec<i64>, right: Vec<i64> }
+fn call<F: Fn()>(callback: F) { callback(); }
+fn main() {
+    let pair = Pair { left: vec![1], right: vec![2] };
+    call(move || println!("{}", pair.left[0]));
+    println!("{}", pair.right.len());
 }
 "#,
         ),

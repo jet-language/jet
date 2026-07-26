@@ -551,7 +551,10 @@ impl<'a> Checker<'a> {
         let Some(place) = self.place_from_expr(expr) else {
             return;
         };
-        let capture_place = self.capture_place_from_expr(expr).unwrap_or_else(|| place.clone());
+        let (capture_place, capture_ty) = self
+            .capture_place_info(expr)
+            .map(|(place, ty, _)| (place, ty))
+            .unwrap_or_else(|| (place.clone(), self.place_expr_type(expr)));
         if bound.contains(&capture_place.owner.name) {
             return;
         }
@@ -570,7 +573,7 @@ impl<'a> Checker<'a> {
         out.push(EvaluatedAccess {
             place,
             capture_place,
-            capture_ty: self.place_expr_type(expr),
+            capture_ty,
             capture_is_view: expr_root_ident(expr).is_some_and(|name| self.is_view(name)),
             access,
             span: expr.span(),
@@ -583,30 +586,9 @@ impl<'a> Checker<'a> {
         match expr {
             Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
             Expr::Paren(inner, _) | Expr::Place(inner, _, _) => self.place_expr_type(inner),
-            Expr::Field(base, field, _) => {
-                let mut owner = self.place_expr_type(base)?;
-                while let Type::Tagged { inner, .. } = owner {
-                    owner = *inner;
-                }
-                let (name, subst) = match owner {
-                    Type::Named(name) => (name, HashMap::new()),
-                    Type::Apply { name, args } => {
-                        let params = self.trait_reg.struct_params.get(&name)?;
-                        let subst = params
-                            .iter()
-                            .zip(args)
-                            .map(|(param, arg)| (param.name.clone(), arg))
-                            .collect();
-                        (name, subst)
-                    }
-                    _ => return None,
-                };
-                self.registry
-                    .struct_fields(&name)?
-                    .iter()
-                    .find(|(candidate, _, _, _)| candidate == field)
-                    .map(|(_, _, ty, _)| substitute_type(ty, &subst))
-            }
+            Expr::Field(base, field, _) => self
+                .place_expr_type(base)
+                .and_then(|owner| self.projected_field_type(owner, field)),
             Expr::Index { base, .. } => match self.place_expr_type(base)? {
                 Type::List(elem) | Type::FixedList { elem, .. } => Some(*elem),
                 Type::Map { value, .. } => Some(*value),
@@ -614,6 +596,30 @@ impl<'a> Checker<'a> {
             },
             _ => None,
         }
+    }
+
+    fn projected_field_type(&self, mut owner: Type, field: &str) -> Option<Type> {
+        while let Type::Tagged { inner, .. } = owner {
+            owner = *inner;
+        }
+        let (name, subst) = match owner {
+            Type::Named(name) => (name, HashMap::new()),
+            Type::Apply { name, args } => {
+                let params = self.trait_reg.struct_params.get(&name)?;
+                let subst = params
+                    .iter()
+                    .zip(args)
+                    .map(|(param, arg)| (param.name.clone(), arg))
+                    .collect();
+                (name, subst)
+            }
+            _ => return None,
+        };
+        self.registry
+            .struct_fields(&name)?
+            .iter()
+            .find(|(candidate, _, _, _)| candidate == field)
+            .map(|(_, _, ty, _)| substitute_type(ty, &subst))
     }
 
     fn method_receiver_access(&self, receiver: &Expr, method: &str) -> ViewAccess {
@@ -764,8 +770,9 @@ impl<'a> Checker<'a> {
                 event.access = ViewAccess::Write;
                 event.moves_owner = true;
             }
-            event.through_call =
-                retains && !taken.contains(name) && !event.moves_owner;
+            event.through_call = (event.capture_is_view
+                || (retains && !taken.contains(name)))
+                && !event.moves_owner;
         }
         for event in events {
             if let Some(existing) = out.iter_mut().find(|existing| {
@@ -1331,17 +1338,19 @@ impl<'a> Checker<'a> {
                             .lookup(&capture.place.owner.name)
                             .map(|info| info.ty.clone());
                         capture.capture_is_view = false;
-                        if let Some(existing) = out.iter_mut().find(|event| {
-                            event.place.owner == capture.place.owner
-                                && event.place.projections.is_empty()
-                        }) {
-                            existing.access = ViewAccess::Read;
-                            existing.through_call = false;
-                            existing.moves_owner = false;
-                        } else {
-                            out.retain(|event| event.place.owner != capture.place.owner);
-                            out.push(capture);
+                        for existing in out
+                            .iter()
+                            .filter(|event| event.place.owner == capture.place.owner)
+                        {
+                            if existing.access == ViewAccess::Write {
+                                capture.access = ViewAccess::Write;
+                                capture.span = existing.span;
+                            }
+                            capture.through_call |= existing.through_call;
+                            capture.moves_owner |= existing.moves_owner;
                         }
+                        out.retain(|event| event.place.owner != capture.place.owner);
+                        out.push(capture);
                     }
                 }
                 Stmt::ContextBlock { fields, body, .. } => {
@@ -1646,44 +1655,47 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Rust 2021 capture prefix and its type from the written closure
+    /// expression. Indexing and slicing stop precision: fields before them are
+    /// capturable, while anything after them belongs to the captured container.
+    fn capture_place_info(&self, expr: &Expr) -> Option<(ViewPlace, Option<Type>, bool)> {
+        match expr {
+            Expr::Ident(name, _) => (self.lookup(name).is_some()
+                || self.consts.contains_key(name))
+            .then(|| {
+                (
+                    ViewPlace {
+                        owner: self.owner_id(name),
+                        projections: Vec::new(),
+                    },
+                    self.lookup(name).map(|info| info.ty.clone()),
+                    false,
+                )
+            }),
+            Expr::Field(base, field, _) => {
+                let (mut place, ty, stopped) = self.capture_place_info(base)?;
+                if stopped {
+                    return Some((place, ty, true));
+                }
+                place.projections.push(ViewProjection::Field(field.clone()));
+                let ty = ty.and_then(|owner| self.projected_field_type(owner, field));
+                Some((place, ty, false))
+            }
+            Expr::Index { base, .. } | Expr::Slice { base, .. } => self
+                .capture_place_info(base)
+                .map(|(place, ty, _)| (place, ty, true)),
+            Expr::Place(inner, _, _) | Expr::Paren(inner, _) => {
+                self.capture_place_info(inner)
+            }
+            _ => None,
+        }
+    }
+
     /// Place Rust 2021 captures from the written closure expression. Unlike
     /// `place_from_expr`, this deliberately does not chase a View alias to its
     /// source; generated Rust captures the alias value itself.
     fn capture_place_from_expr(&self, expr: &Expr) -> Option<ViewPlace> {
-        match expr {
-            Expr::Ident(name, _) => (self.lookup(name).is_some()
-                || self.consts.contains_key(name))
-            .then(|| ViewPlace {
-                owner: self.owner_id(name),
-                projections: Vec::new(),
-            }),
-            Expr::Field(base, field, _) => {
-                let mut place = self.capture_place_from_expr(base)?;
-                place.projections.push(ViewProjection::Field(field.clone()));
-                Some(place)
-            }
-            Expr::Index { base, index, span, .. } => {
-                let mut place = self.capture_place_from_expr(base)?;
-                place.projections.push(ViewProjection::Index {
-                    value: const_place_int(index),
-                    span: *span,
-                });
-                Some(place)
-            }
-            Expr::Slice { base, start, end, span } => {
-                let mut place = self.capture_place_from_expr(base)?;
-                place.projections.push(ViewProjection::Range {
-                    start: const_place_int(start),
-                    end: const_place_int(end),
-                    span: *span,
-                });
-                Some(place)
-            }
-            Expr::Place(inner, _, _) | Expr::Paren(inner, _) => {
-                self.capture_place_from_expr(inner)
-            }
-            _ => None,
-        }
+        self.capture_place_info(expr).map(|(place, _, _)| place)
     }
 
     pub(crate) fn is_view(&self, name: &str) -> bool {
@@ -2677,6 +2689,15 @@ impl<'a> Checker<'a> {
     pub(crate) fn clear_moved_binding(&mut self, name: &str) {
         self.moved
             .retain(|place, _| !Self::contains_place(name, place));
+    }
+
+    pub(crate) fn clear_moved_expr(&mut self, expr: &Expr) {
+        let Some(place) = self.capture_place_from_expr(expr) else {
+            return;
+        };
+        let place = Self::place_name(&place);
+        self.moved
+            .retain(|moved, _| !Self::contains_place(&place, moved));
     }
 
     pub(crate) fn reject_moved_expr_use(&mut self, expr: &Expr, span: Span) -> bool {

@@ -359,7 +359,7 @@ impl<'a> Checker<'a> {
                                     Some(name_span),
                                 ));
                             }
-                            self.moved.remove(name);
+                            self.clear_moved_binding(name);
                             if let (Some(vt), false) =
                                 (vt.clone(), info.ty == Type::Named(String::new()))
                             {
@@ -751,7 +751,12 @@ impl<'a> Checker<'a> {
                                     return;
                                 }
                             }
+                            let suppress = self.suppress_partial_move_root_read;
+                            if !is_compound {
+                                self.suppress_partial_move_root_read = true;
+                            }
                             let base_ty = self.infer(base);
+                            self.suppress_partial_move_root_read = suppress;
                             // D-FIELDPOL1: `s.computed_field = v` — a computed field is
                             // never stored, so a plain assignment has nothing to write.
                             if let Some(bt) = &base_ty {
@@ -870,6 +875,11 @@ impl<'a> Checker<'a> {
                                         ));
                                     }
                                 }
+                            }
+                            if !is_compound && base_ty.is_some() {
+                                let target =
+                                    Expr::Field(base.clone(), field.clone(), *span);
+                                self.clear_moved_expr(&target);
                             }
                         }
                     }
