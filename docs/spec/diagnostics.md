@@ -316,6 +316,7 @@ renumbered, and no new `W` code may be allocated.
 | E0362 | sema  | a hooked compound assignment targets a nested field place not yet lowerable as one write (D-OPDEF1) |
 | E0363 | sema  | anonymous-union member is not a concrete closed type (D-UNIONTYPE1) |
 | E0364 | sema  | inclusive `0..xs.len()` indexes that same `xs` (D-RANGE-EXCL1=C) |
+| E0365 | sema  | repeated anonymous-union match member (D-UNIONTYPE1) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | guard table should use closed-enum subject dispatch (lint) |
 | E0401 | sema  | fallible value used where plain `T` expected |
@@ -934,7 +935,7 @@ block reserved for M6.
 | E2408 | `#Flatten` on `{field}` needs a struct-typed field. | Flatten splices another struct's keys into this object (D-SERDE5), so the field must itself be a `#Codable` struct — not a primitive, list, or map. | Give `{field}` a `#Codable` struct type, or drop `#Flatten`. |
 | E2409 | `#RenameAll({style})` isn't a known casing style. | The wire-casing menu is the closed typed set `camel`/`snake`/`pascal`/`kebab`/`screaming` (D-SERDE3); anything else is rejected so a typo fails at compile time, not on the wire. | Pick one of `camel` / `snake` / `pascal` / `kebab` / `screaming`. |
 | E2410 | `E2410: missing required field `{field}`` (runtime `DecodeError`). | Decoding into a `#Codable`/`#Decode` type found no wire value for a required field and the field has no `#Default` and isn't optional (D-SERDE5). | Mark the field optional (`T?`), give it `#Default`/`#Default(value)`, or fix the input so the key is present. Compose with `??` to supply a fallback. |
-| E2411 | `{Type}` can't be serialized / decoded. | Only types that opt in with `#Codable`/`#Encode`/`#Decode` (and whose fields all have a wire form) can cross the wire; a field holding a non-Codable type, closure, or handle has nothing to (de)serialize (D-SERDE1). | Add `#Codable`/`#Encode`/`#Decode` to the offending type, or remove it from the encoded value (e.g. `#Skip`). |
+| E2411 | `{Type}` can't be serialized / decoded, or a union member has no compiler-known wire shape. | Only types that opt in with `#Codable`/`#Encode`/`#Decode` (and whose fields all have a wire form) can cross the wire. Anonymous-union decoding also needs each member's outer wire shape; a custom or imported decoder does not declare one (D-SERDE1, D-UNIONTYPE1). | Add a compiler-derived codec, use a configured tagged enum or `#CodableAsBase` distinct type for a union member, or remove the unsupported type from the encoded value (for example, with `#Skip`). |
 | E2412 | `E2412: unknown field `{field}`` (runtime `DecodeError`). | The struct is marked `#DenyUnknownFields` (D-SERDE8) and the input carried a key the struct doesn't declare, so decoding fails fast instead of silently dropping it. | Remove `#DenyUnknownFields` to ignore extra keys (the lenient default), add the field, or fix the producer. |
 | E2413 | retired (D-SERDE12) — generic `#Codable` is first-class; the derive auto-injects `Encode`/`Decode` bounds on the wire-reaching type params (D-SERDE9/D-SERDE10). A non-codable type argument fails at the use site (E0905), not the definition. | — | — |
 | E2414 | `#Default(...)` on `{field}` must be a compile-time constant. | A decode default fills a missing field, so it is baked into the program and its value has to be known at compile time (D-SERDE5, Card #131). An argument that can only be computed at runtime — an impure call, a non-deterministic value — has no fixed value to bake, and both the compiled binary and `jet dev` must agree (R12). | Use a literal or a `comptime`-evaluable expression, e.g. `#Default(8080)`, `#Default(Color.Red)`, or `#Default([1, 2])`. |
@@ -1243,8 +1244,9 @@ already-freed arena), these track the views themselves.
 | E0360 | No `{symbol}` operator is defined for `{type}`. | User arithmetic dispatches only through the matching fixed operator trait hook; the compiler does not guess a method or fall through to rustc. | Implement the named `Type.Trait` hook, or call a named method instead. |
 | E0361 | `{hook}` calls itself through `{symbol}`. | The symbol inside its own hook dispatches directly back to that hook, so evaluation would recurse forever. | Combine the value's fields directly, or call a different named helper inside the hook. |
 | E0362 | Compound assignment can't target a nested operator field. | Hooked compound assignment must read and write one stable place exactly once; nested field places are not yet represented by the operator assignment spine. | Bind the inner value, update it, then assign the whole inner value back. |
-| E0363 | `{Type}` can't be a union member. | Anonymous unions (D-UNIONTYPE1=A) hold concrete closed member types only — not trait objects or function types. | Use a named enum when a member needs an open shape. |
+| E0363 | `{Type}` can't be a union member. | Anonymous unions (D-UNIONTYPE1=A) hold concrete closed member types only — not type parameters, trait objects, or function types. | Use a named enum when a member needs an open shape. |
 | E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop i, item; xs` — or `loop i; xs.indexes()` — or `0..<xs.len()`. |
+| E0365 | Arm `{Type}` is unreachable — that case is already handled. | Every earlier arm already covers this pattern. | Remove this arm or merge it with the one above. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 

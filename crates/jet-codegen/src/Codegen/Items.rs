@@ -949,7 +949,7 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
     for item in items {
         walk_item(item, &mut seen, &mut unions);
     }
-    let want_codec = program_wants_union_codec(items);
+    let (encode_unions, decode_unions) = union_codec_needs(items);
     for members in unions {
         let name = crate::AST::union_enum_name(&members);
         let empty = std::collections::HashSet::new();
@@ -993,79 +993,174 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
         out.push_str(&format!(
             "impl JetDisplay for user_{name} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n"
         ));
-        if !want_codec {
-            continue;
-        }
-        // D-UNIONTYPE1=A: Codable encode/decode by member wire shape.
-        out.push_str(&format!(
-            "impl user_Encode for user_{name} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{\n        match self {{\n"
-        ));
-        for m in &members {
-            let tag = crate::AST::union_member_tag(m);
+        if encode_unions.contains(&name) {
             out.push_str(&format!(
-                "            Self::{tag}(v) => user_Encode::jet_encode(v),\n"
+                "impl user_Encode for user_{name} {{\n    fn jet_encode(&self) -> jet_std::DataTree {{\n        match self {{\n"
             ));
+            for m in &members {
+                let tag = crate::AST::union_member_tag(m);
+                out.push_str(&format!(
+                    "            Self::{tag}(v) => user_Encode::jet_encode(v),\n"
+                ));
+            }
+            out.push_str("        }\n    }\n}\n\n");
         }
-        out.push_str("        }\n    }\n}\n\n");
-        out.push_str(&format!(
-            "impl user_Decode for user_{name} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {{\n        match __t {{\n"
-        ));
-        for m in &members {
-            let tag = crate::AST::union_member_tag(m);
-            let rust = cx.rust_type(m);
-            let shape_pat = match union_member_datatree_pat(m) {
-                Some(p) => p,
-                None => continue,
-            };
+        if decode_unions.contains(&name) {
             out.push_str(&format!(
-                "            {shape_pat} => Ok(Self::{tag}(<{rust} as user_Decode>::jet_decode(__t)?)),\n"
+                "impl user_Decode for user_{name} {{\n    fn jet_decode(__t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {{\n        match __t {{\n"
             ));
+            for m in &members {
+                let tag = crate::AST::union_member_tag(m);
+                let rust = cx.rust_type(m);
+                let Some(shape_pat) = union_member_datatree_pat(items, m) else {
+                    continue;
+                };
+                out.push_str(&format!(
+                    "            {shape_pat} => Ok(Self::{tag}(<{rust} as user_Decode>::jet_decode(__t)?)),\n"
+                ));
+            }
+            out.push_str(
+                "            _ => Err(jet_std::DecodeError::new(\"no matching union member\")),\n        }\n    }\n}\n\n",
+            );
         }
-        out.push_str(
-            "            _ => Err(jet_std::DecodeError::new(\"no matching union member\")),\n        }\n    }\n}\n\n",
-        );
     }
 }
 
-fn program_wants_union_codec(items: &[Item]) -> bool {
-    items.iter().any(|item| match item {
-        Item::Struct(s) => s.derives.iter().any(|(n, _)| {
-            matches!(
-                n.as_str(),
-                crate::Generics::ENCODE | crate::Generics::DECODE | "Codable"
-            )
-        }),
-        Item::Enum(e) => e.derives.iter().any(|(n, _)| {
-            matches!(
-                n.as_str(),
-                crate::Generics::ENCODE | crate::Generics::DECODE | "Codable"
-            )
-        }),
-        Item::Impl(i) => i.trait_name.as_deref().is_some_and(|n| {
-            matches!(n, crate::Generics::ENCODE | crate::Generics::DECODE)
-        }),
-        Item::CodeModule(m) => m
-            .body
-            .as_ref()
-            .is_some_and(|b| program_wants_union_codec(b)),
-        _ => false,
+fn union_codec_needs(
+    items: &[Item],
+) -> (
+    std::collections::BTreeSet<String>,
+    std::collections::BTreeSet<String>,
+) {
+    fn collect(
+        ty: &Type,
+        encode: bool,
+        decode: bool,
+        encodes: &mut std::collections::BTreeSet<String>,
+        decodes: &mut std::collections::BTreeSet<String>,
+    ) {
+        if let Type::Union(members) = ty {
+            let name = crate::AST::union_enum_name(members);
+            if encode {
+                encodes.insert(name.clone());
+            }
+            if decode {
+                decodes.insert(name);
+            }
+        }
+        match ty {
+            Type::List(inner)
+            | Type::Shared(inner)
+            | Type::Option(inner)
+            | Type::Tagged { inner, .. }
+            | Type::FixedList { elem: inner, .. } => {
+                collect(inner, encode, decode, encodes, decodes)
+            }
+            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                collect(key, encode, decode, encodes, decodes);
+                collect(value, encode, decode, encodes, decodes);
+            }
+            Type::Apply { args, .. } | Type::Union(args) => {
+                for arg in args {
+                    collect(arg, encode, decode, encodes, decodes);
+                }
+            }
+            Type::Tuple(fields) => {
+                for (_, field) in fields {
+                    collect(field, encode, decode, encodes, decodes);
+                }
+            }
+            Type::Fn { params, ret, .. } => {
+                for param in params {
+                    collect(param, encode, decode, encodes, decodes);
+                }
+                if let Some(ret) = ret {
+                    collect(ret, encode, decode, encodes, decodes);
+                }
+            }
+            _ => {}
+        }
+    }
+    fn walk_items(
+        items: &[Item],
+        encodes: &mut std::collections::BTreeSet<String>,
+        decodes: &mut std::collections::BTreeSet<String>,
+    ) {
+        for item in items {
+            match item {
+                Item::Struct(s) => {
+                    let encode = s
+                        .derives
+                        .iter()
+                        .any(|(name, _)| matches!(name.as_str(), crate::Generics::ENCODE | "Codable"));
+                    let decode = s
+                        .derives
+                        .iter()
+                        .any(|(name, _)| matches!(name.as_str(), crate::Generics::DECODE | "Codable"));
+                    for field in &s.fields {
+                        if !field
+                            .serde_markers
+                            .iter()
+                            .any(|marker| marker.name == crate::Syntax::ATTR_SKIP)
+                        {
+                            collect(&field.ty, encode, decode, encodes, decodes);
+                        }
+                    }
+                }
+                Item::Enum(e) => {
+                    let encode = e
+                        .derives
+                        .iter()
+                        .any(|(name, _)| matches!(name.as_str(), crate::Generics::ENCODE | "Codable"));
+                    let decode = e
+                        .derives
+                        .iter()
+                        .any(|(name, _)| matches!(name.as_str(), crate::Generics::DECODE | "Codable"));
+                    for variant in &e.variants {
+                        match &variant.payload {
+                            VariantPayload::Single(ty, _) => {
+                                collect(ty, encode, decode, encodes, decodes)
+                            }
+                            VariantPayload::Named(fields) => {
+                                for field in fields {
+                                    collect(&field.ty, encode, decode, encodes, decodes);
+                                }
+                            }
+                            VariantPayload::Unit => {}
+                        }
+                    }
+                }
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body {
+                        walk_items(body, encodes, decodes);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut encodes = std::collections::BTreeSet::new();
+    let mut decodes = std::collections::BTreeSet::new();
+    walk_items(items, &mut encodes, &mut decodes);
+    (encodes, decodes)
+}
+
+fn union_member_datatree_pat(items: &[Item], ty: &Type) -> Option<String> {
+    crate::AST::resolved_decode_wire_shapes(items, ty).map(|shapes| {
+        shapes
+            .into_iter()
+            .map(|shape| match shape {
+                crate::AST::SerdeWireShape::Null => "jet_std::DataTree::Null",
+                crate::AST::SerdeWireShape::Int => "jet_std::DataTree::Int(_)",
+                crate::AST::SerdeWireShape::Float => "jet_std::DataTree::Float(_)",
+                crate::AST::SerdeWireShape::Bool => "jet_std::DataTree::Bool(_)",
+                crate::AST::SerdeWireShape::Text => "jet_std::DataTree::Text(_)",
+                crate::AST::SerdeWireShape::Array => "jet_std::DataTree::Array(_)",
+                crate::AST::SerdeWireShape::Object => "jet_std::DataTree::Object(_)",
+            })
+            .collect::<Vec<_>>()
+            .join(" | ")
     })
-}
-
-fn union_member_datatree_pat(ty: &Type) -> Option<&'static str> {
-    match ty {
-        Type::Int | Type::IntN { .. } => Some("jet_std::DataTree::Int(_)"),
-        Type::Float | Type::Float32 => Some("jet_std::DataTree::Float(_)"),
-        Type::Bool => Some("jet_std::DataTree::Bool(_)"),
-        Type::String | Type::Char => Some("jet_std::DataTree::Text(_)"),
-        Type::Named(n) if n == "Decimal" => Some("jet_std::DataTree::Text(_)"),
-        Type::List(_) | Type::FixedList { .. } => Some("jet_std::DataTree::Array(_)"),
-        Type::Map { .. } | Type::Named(_) | Type::Apply { .. } | Type::Tuple(_) => {
-            Some("jet_std::DataTree::Object(_)")
-        }
-        Type::Option(inner) => union_member_datatree_pat(inner),
-        _ => None,
-    }
 }
 
 pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {

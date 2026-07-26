@@ -203,6 +203,151 @@ b :: U8.{ 100 }
     assert_eq!(code, 70, "U8 overflow should trap (exit 70)");
 }
 
+#[test]
+fn unrelated_codable_does_not_require_union_codecs() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+struct Raw {
+    value: Int
+}
+
+fn hold(value: Int | Raw) -> Int | Raw {
+    return ~value
+}
+
+#Codable
+struct Encoded {
+    value: Int
+}
+
+fn run() {
+    raw :: Raw.{ value: 7 }
+    _ :: hold(raw)
+    print("ok")
+}
+"#;
+    let (code, stdout) = build_and_run("union_unrelated_codable", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "ok\n");
+}
+
+#[test]
+fn union_codec_emission_respects_derive_direction() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+use core.encoding.json as json
+
+struct WriteOnly {
+    marker: Int
+}
+
+impl WriteOnly.Encode {
+    fn encode(self) -> DataTree {
+        return DataTree.Text("write")
+    }
+}
+
+#Encode
+struct Output {
+    value: Int | WriteOnly
+}
+
+#Decode
+struct ReadOnly {
+    marker: Int
+}
+
+#Decode
+struct Input {
+    value: Int | ReadOnly
+}
+
+fn run() {
+    output :: Output.{ value: WriteOnly.{ marker: 1 } }
+    print(json.to_string(output))
+    _ :: json.decode<Input>("{{\"value\":7}}") ?? panic("input")
+    print("ok")
+}
+"#;
+    let (code, stdout) = build_and_run("union_codec_direction", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "{\"value\":\"write\"}\nok\n");
+}
+
+#[test]
+fn optional_union_null_and_enum_payload_round_trip() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+use core.encoding.json as json
+
+#Codable
+struct MaybeRow {
+    value: Int? | String
+}
+
+#Codable
+enum Envelope {
+    Value(Int | String)
+}
+
+fn run() {
+    decoded :: json.decode<MaybeRow>("{{\"value\":null}}") ?? panic("row")
+    print(json.to_string(decoded))
+
+    envelope :: Envelope.Value(7)
+    envelope_wire :: json.to_string(envelope)
+    print(envelope_wire)
+    back :: json.decode<Envelope>(envelope_wire) ?? panic("envelope")
+    print(json.to_string(back))
+}
+"#;
+    let (code, stdout) = build_and_run("union_codable_roundtrip", src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "{\"value\":null}\n{\"Value\":7}\n{\"Value\":7}\n"
+    );
+}
+
+#[test]
+fn codable_union_distinct_member_uses_base_wire_shape() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+use core.encoding.json as json
+
+#CodableAsBase
+Usd :: distinct Int
+
+#Codable
+struct Row {
+    value: Usd | String
+}
+
+fn run() {
+    row :: Row.{ value: Usd.from_int(7) }
+    wire :: json.to_string(row)
+    print(wire)
+    decoded :: json.decode<Row>(wire) ?? panic("row")
+    decoded_value :: decoded.value
+    if decoded_value == {
+        Usd(value) -> print(value.raw())
+        String(value) -> print(value)
+    }
+}
+"#;
+    let (code, stdout) = build_and_run("union_codable_distinct", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "{\"value\":7}\n7\n");
+}
+
 // --- c109 Phase 2: control-flow loops ---------------------------------------
 
 /// Infinite `loop { … }` with a `break`, plus the `loop cond` while form. Both

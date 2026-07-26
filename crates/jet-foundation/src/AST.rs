@@ -29,7 +29,8 @@ pub use items::{
     TestDef, BenchDef, MaturityTag, Func, InlineForeign, ContractClause, StateTransition, EveryMarker,
     EveryArg, EverySchedule, EveryScheduleError, Param, StructLayout, CEnumTag,
     Marker, StructDef, TypeAliasDef, DistinctDef, QuantityKind, UnitFamilyDef, UnitFamilyMember, UnitRatio, EnumDef,
-    EnumGroup, Variant, VariantPayload, VariantField, ImplDef, Field,
+    EnumGroup, Variant, VariantPayload, VariantField, ImplDef, Field, SerdeWireShape,
+    resolved_decode_wire_shapes,
 };
 
 #[path = "AST/patterns.rs"]

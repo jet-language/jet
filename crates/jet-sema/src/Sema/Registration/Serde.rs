@@ -222,7 +222,9 @@ fn expand_builtin_enum_serde(
                     _ => {
                         let wire = serde_enum_variant_key(v);
                         let candidate = format!("candidate_{variant_index}");
-                        object_arms.push_str(&format!("{candidate}: DataTree := (~tree).field({wire:?}) ?? DataTree.Null\n"));
+                        object_arms.push_str(&format!(
+                            "{candidate} := (~tree).field({wire:?}) ?? DataTree.Null\n"
+                        ));
                         match &v.payload {
                             crate::AST::VariantPayload::Single(t, _) => {
                                 let decoded = format!("decoded_{variant_index}");

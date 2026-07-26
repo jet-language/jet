@@ -2,7 +2,7 @@
 
 use super::{
     build_cx_items, bundle_extern_funcs, populate_cx_from_bundle, register_foreign_enum_variants,
-    update_cloneability_with_foreign_types, mangle, user_type_rust, Cx, TIR,
+    update_cloneability_with_foreign_types, mangle, mangle_variant, user_type_rust, Cx, TIR,
 };
 use crate::Diagnostics::Span;
 use crate::Sema::CompileMode;
@@ -327,7 +327,7 @@ fn validate_web_func_tir(
                 &tir.web_param_reconstructions,
             )
                 && (tir.ret.is_none() || web_stmts_guarantee_return(&tir.body))
-                && web_wasm_abi_supported(f, &tir)
+                && web_wasm_abi_supported(f, &tir, bundle)
         };
         if supported {
             cx.current_type_params.borrow_mut().clear();
@@ -349,9 +349,21 @@ fn web_stmts_guarantee_return(stmts: &[TIR::TStmt]) -> bool {
         TIR::TStmt::If { then_body, else_body: Some(else_body), .. } => {
             web_stmts_guarantee_return(then_body) && web_stmts_guarantee_return(else_body)
         }
+        TIR::TStmt::EnumMatch {
+            arms, else_body, ..
+        } => {
+            arms.iter().all(|arm| web_stmts_guarantee_return(&arm.body))
+                && else_body
+                    .as_ref()
+                    .is_none_or(|body| web_stmts_guarantee_return(body))
+        }
         TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) => web_stmts_guarantee_return(body),
         _ => false,
     })
+}
+
+fn web_variant_pattern_supported(pattern: &TIR::TPattern) -> bool {
+    matches!(pattern.pattern, crate::AST::Pattern::Variant { .. })
 }
 
 fn is_list_int(ty: &Type) -> bool {
@@ -371,14 +383,15 @@ fn is_map_string_int(ty: &Type) -> bool {
     )
 }
 
-fn web_wasm_abi_supported(f: &Func, tir: &TIR::TFunc) -> bool {
-    let ty_supported = if f.web_marker == Some(WebPartitionMarker::WasmExport) {
-        wasm_export_ty
-    } else {
-        wasm_ty
-    };
-    flattened_web_params(tir)
-        .iter().all(|(_, ty)| ty_supported(ty).is_some())
+fn web_wasm_abi_supported(f: &Func, tir: &TIR::TFunc, bundle: &ProgramBundle) -> bool {
+    let params_supported = flattened_web_params(tir).iter().all(|(_, ty)| {
+        if f.web_marker == Some(WebPartitionMarker::WasmExport) {
+            wasm_export_ty(ty).is_some()
+        } else {
+            wasm_internal_ty(ty, bundle).is_some()
+        }
+    });
+    params_supported
         // D-JSBIND1: String / [Int] / [String] / [String: Int] params/returns
         // cross the export boundary as packed (ptr,len) u64 ownership transfers.
         && f.return_type
@@ -388,7 +401,11 @@ fn web_wasm_abi_supported(f: &Func, tir: &TIR::TFunc) -> bool {
                     || is_list_int(ty)
                     || is_list_string(ty)
                     || is_map_string_int(ty)
-                    || wasm_export_ty(ty).is_some()
+                    || if f.web_marker == Some(WebPartitionMarker::WasmExport) {
+                        wasm_export_ty(ty).is_some()
+                    } else {
+                        wasm_internal_ty(ty, bundle).is_some()
+                    }
             })
             .unwrap_or(true)
 }
@@ -432,6 +449,29 @@ fn web_wasm_stmts_supported(
             web_wasm_expr_supported(collection, bundle, file_prefix, reconstructions)
                 && web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
         }
+        TIR::TStmt::EnumMatch {
+            scrutinee,
+            arms,
+            else_body,
+            ..
+        } => {
+            web_wasm_expr_supported(scrutinee, bundle, file_prefix, reconstructions)
+                && arms.iter().all(|arm| {
+                    web_variant_pattern_supported(&arm.pattern)
+                        && web_wasm_stmts_supported(
+                            &arm.body,
+                            bundle,
+                            file_prefix,
+                            reconstructions,
+                        )
+                })
+                && else_body.as_ref().is_none_or(|body| {
+                    web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+                })
+        }
+        TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) => {
+            web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+        }
         _ => false,
     })
 }
@@ -444,7 +484,20 @@ fn web_wasm_expr_supported(
 ) -> bool {
     match &expr.kind {
         TIR::TExprKind::IntLit(..) | TIR::TExprKind::FloatLit(_) | TIR::TExprKind::BoolLit(_) | TIR::TExprKind::Local(_) => true,
-        TIR::TExprKind::StrLit(parts) => parts.iter().all(|part| matches!(part, TIR::TStrPart::Lit(_))),
+        TIR::TExprKind::StrLit(parts) => parts.iter().all(|part| match part {
+            TIR::TStrPart::Lit(_) => true,
+            TIR::TStrPart::Interp(value, _) => {
+                matches!(
+                    value.ty,
+                    Type::Int
+                        | Type::IntN { .. }
+                        | Type::Float
+                        | Type::Float32
+                        | Type::Bool
+                        | Type::String
+                ) && web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)
+            }
+        }),
         TIR::TExprKind::Binary { lhs, rhs, .. } => web_wasm_expr_supported(lhs, bundle, file_prefix, reconstructions) && web_wasm_expr_supported(rhs, bundle, file_prefix, reconstructions),
         TIR::TExprKind::Unary { operand, .. }
         | TIR::TExprKind::Clone(operand)
@@ -452,15 +505,24 @@ fn web_wasm_expr_supported(
         | TIR::TExprKind::Print(operand) => {
             web_wasm_expr_supported(operand, bundle, file_prefix, reconstructions)
         }
-        TIR::TExprKind::Field { recv, field, boxed: false } => {
-            let TIR::TExprKind::Local(local) = &recv.kind else { return false };
-            reconstructions.iter().any(|r| {
-                r.local.rust_name() == local.rust_name()
-                    && r.fields
-                        .iter()
-                        .any(|(fname, _, _)| web_recon_field_matches(fname, field))
-            })
+        TIR::TExprKind::Borrow { place, .. } => {
+            web_wasm_expr_supported(place, bundle, file_prefix, reconstructions)
         }
+        TIR::TExprKind::Field { recv, boxed: false, .. } => {
+            web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions)
+        }
+        TIR::TExprKind::StructLit { fields, .. } => fields
+            .iter()
+            .all(|(_, value, _)| web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)),
+        TIR::TExprKind::EnumLit { payload, .. } => match payload {
+            TIR::TEnumPayload::Unit => true,
+            TIR::TEnumPayload::Positional(args) => args.iter().all(|arg| {
+                web_wasm_expr_supported(&arg.value, bundle, file_prefix, reconstructions)
+            }),
+            TIR::TEnumPayload::Named(fields) => fields.iter().all(|(_, arg)| {
+                web_wasm_expr_supported(&arg.value, bundle, file_prefix, reconstructions)
+            }),
+        },
         TIR::TExprKind::Index {
             base,
             index,
@@ -504,6 +566,21 @@ fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
         TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => web_expr_supported(cond) && web_stmts_supported(then_body) && else_body.as_deref().map(web_stmts_supported).unwrap_or(true),
         TIR::TStmt::Range { start, end, step, body, .. } => web_expr_supported(start) && web_expr_supported(end) && step.as_ref().map(web_expr_supported).unwrap_or(true) && web_stmts_supported(body),
         TIR::TStmt::ForIn { collection, body, .. } => web_expr_supported(collection) && web_stmts_supported(body),
+        TIR::TStmt::EnumMatch {
+            scrutinee,
+            arms,
+            else_body,
+            ..
+        } => {
+            web_expr_supported(scrutinee)
+                && arms.iter().all(|arm| {
+                    web_variant_pattern_supported(&arm.pattern)
+                        && web_stmts_supported(&arm.body)
+                })
+                && else_body
+                    .as_ref()
+                    .is_none_or(|body| web_stmts_supported(body))
+        }
         TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) => web_stmts_supported(body),
         _ => false,
     })
@@ -553,9 +630,19 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::StrLit(parts) => parts.iter().all(|p| match p { TIR::TStrPart::Lit(_) => true, TIR::TStrPart::Interp(e, _) => web_expr_supported(e) }),
         E::Binary { lhs, rhs, .. } => web_expr_supported(lhs) && web_expr_supported(rhs),
         E::Unary { operand, .. } | E::Clone(operand) | E::MaterializeView(operand) | E::DistinctRaw(operand) | E::Print(operand) => web_expr_supported(operand),
+        E::Borrow { place, .. } => web_expr_supported(place),
         E::DistinctCtor { arg, .. } => web_expr_supported(arg),
         E::Field { recv, .. } => web_expr_supported(recv),
         E::StructLit { fields, .. } => fields.iter().all(|(_, e, _)| web_expr_supported(e)),
+        E::EnumLit { payload, .. } => match payload {
+            TIR::TEnumPayload::Unit => true,
+            TIR::TEnumPayload::Positional(args) => {
+                args.iter().all(|arg| web_expr_supported(&arg.value))
+            }
+            TIR::TEnumPayload::Named(fields) => {
+                fields.iter().all(|(_, arg)| web_expr_supported(&arg.value))
+            }
+        },
         E::ListLit(elements) => elements.iter().all(web_expr_supported),
         E::MapLit(entries) => entries
             .iter()
@@ -977,10 +1064,6 @@ fn web_recon_rust_type(ty: &Type) -> String {
     }
 }
 
-fn web_recon_field_matches(fname: &str, field: &str) -> bool {
-    fname == field || fname == mangle(field) || field == mangle(fname)
-}
-
 fn js_abi_call_args(
     bundle: &ProgramBundle,
     name: &str,
@@ -1033,6 +1116,201 @@ fn js_abi_call_args(
         }
         _ => vec![name.to_string()],
     }
+}
+
+fn find_named_web_type(items: &[Item], name: &str) -> bool {
+    items.iter().any(|item| match item {
+        Item::Struct(def) => def.name == name && def.type_params.is_empty(),
+        Item::Enum(def) => def.name == name && def.type_params.is_empty(),
+        Item::CodeModule(module) => module
+            .body
+            .as_ref()
+            .is_some_and(|body| find_named_web_type(body, name)),
+        _ => false,
+    })
+}
+
+fn collect_wasm_unions(
+    ty: &Type,
+    unions: &mut std::collections::BTreeMap<String, Vec<Type>>,
+) {
+    if let Type::Union(members) = ty {
+        unions
+            .entry(crate::AST::union_enum_name(members))
+            .or_insert_with(|| members.clone());
+    }
+    match ty {
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::Tagged { inner, .. }
+        | Type::FixedList { elem: inner, .. } => collect_wasm_unions(inner, unions),
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            collect_wasm_unions(key, unions);
+            collect_wasm_unions(value, unions);
+        }
+        Type::Apply { args, .. } | Type::Union(args) => {
+            for arg in args {
+                collect_wasm_unions(arg, unions);
+            }
+        }
+        Type::Tuple(fields) => {
+            for (_, field) in fields {
+                collect_wasm_unions(field, unions);
+            }
+        }
+        Type::Fn { params, ret, .. } => {
+            for param in params {
+                collect_wasm_unions(param, unions);
+            }
+            if let Some(ret) = ret {
+                collect_wasm_unions(ret, unions);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_item_wasm_unions(
+    items: &[Item],
+    unions: &mut std::collections::BTreeMap<String, Vec<Type>>,
+) {
+    for item in items {
+        match item {
+            Item::Struct(def) => {
+                for field in &def.fields {
+                    collect_wasm_unions(&field.ty, unions);
+                }
+            }
+            Item::Enum(def) => {
+                for variant in &def.variants {
+                    match &variant.payload {
+                        crate::AST::VariantPayload::Single(ty, _) => {
+                            collect_wasm_unions(ty, unions)
+                        }
+                        crate::AST::VariantPayload::Named(fields) => {
+                            for field in fields {
+                                collect_wasm_unions(&field.ty, unions);
+                            }
+                        }
+                        crate::AST::VariantPayload::Unit => {}
+                    }
+                }
+            }
+            Item::Func(func) => {
+                for param in &func.params {
+                    collect_wasm_unions(&param.ty, unions);
+                }
+                if let Some(ret) = &func.return_type {
+                    collect_wasm_unions(ret, unions);
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    collect_item_wasm_unions(body, unions);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn emit_wasm_named_types(items: &[Item], bundle: &ProgramBundle, out: &mut String) {
+    for item in items {
+        match item {
+            Item::Struct(def) if def.type_params.is_empty() => {
+                let fields = def
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        Some(format!(
+                            "    {}: {},\n",
+                            mangle(&field.name),
+                            wasm_internal_ty(&field.ty, bundle)?
+                        ))
+                    })
+                    .collect::<Option<Vec<_>>>()
+                    .map(|parts| parts.concat());
+                if let Some(fields) = fields {
+                    out.push_str(&format!(
+                        "#[derive(Clone)]\nstruct {} {{\n{fields}}}\n\n",
+                        user_type_rust(&def.name)
+                    ));
+                }
+            }
+            Item::Enum(def) if def.type_params.is_empty() => {
+                let variants = def
+                    .variants
+                    .iter()
+                    .map(|variant| {
+                        let head = mangle_variant(&variant.name);
+                        Some(match &variant.payload {
+                            crate::AST::VariantPayload::Unit => format!("    {head},\n"),
+                            crate::AST::VariantPayload::Single(ty, _) => format!(
+                                "    {head}({}),\n",
+                                wasm_internal_ty(ty, bundle)?
+                            ),
+                            crate::AST::VariantPayload::Named(fields) => format!(
+                                "    {head} {{ {} }},\n",
+                                fields
+                                    .iter()
+                                    .map(|field| Some(format!(
+                                        "{}: {}",
+                                        mangle(&field.name),
+                                        wasm_internal_ty(&field.ty, bundle)?
+                                    )))
+                                    .collect::<Option<Vec<_>>>()?
+                                    .join(", ")
+                            ),
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()
+                    .map(|parts| parts.concat());
+                if let Some(variants) = variants {
+                    out.push_str(&format!(
+                        "#[derive(Clone)]\nenum {} {{\n{variants}}}\n\n",
+                        user_type_rust(&def.name)
+                    ));
+                }
+            }
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    emit_wasm_named_types(body, bundle, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn emit_wasm_user_types(bundle: &ProgramBundle, out: &mut String) -> WebEmitResult<()> {
+    let mut unions = std::collections::BTreeMap::new();
+    for module in &bundle.modules {
+        collect_item_wasm_unions(&module.items, &mut unions);
+    }
+    for (name, members) in unions {
+        let variants = members
+            .iter()
+            .map(|member| {
+                Some(format!(
+                    "    {}({}),\n",
+                    crate::AST::union_member_tag(member),
+                    wasm_internal_ty(member, bundle)?
+                ))
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(|parts| parts.concat());
+        if let Some(variants) = variants {
+            out.push_str(&format!(
+                "#[derive(Clone)]\nenum {} {{\n{variants}}}\n\n",
+                user_type_rust(&name)
+            ));
+        }
+    }
+    for module in &bundle.modules {
+        emit_wasm_named_types(&module.items, bundle, out);
+    }
+    Ok(())
 }
 
 fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<String> {
@@ -1290,6 +1568,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
              }\n\n",
         );
     }
+    emit_wasm_user_types(bundle, &mut out)?;
     let mut emitted_structs = std::collections::HashSet::new();
     for f in &wasm_funcs {
         for reconstruction in &f.tir.web_param_reconstructions {
@@ -1299,7 +1578,8 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
             }
             out.push_str(&format!("struct {} {{\n", rust_type));
             for (field, _, ty) in &reconstruction.fields {
-                let rust_ty = wasm_ty(ty).ok_or_else(|| web_emit_error(f))?;
+                let rust_ty =
+                    wasm_internal_ty(ty, bundle).ok_or_else(|| web_emit_error(f))?;
                 out.push_str(&format!("    {field}: {rust_ty},\n"));
             }
             out.push_str("}\n\n");
@@ -1315,7 +1595,7 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
     Ok(out)
 }
 
-fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut String, funcs: &[FuncWeb]) -> WebEmitResult<()> {
+fn emit_wasm_fn(bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut String, funcs: &[FuncWeb]) -> WebEmitResult<()> {
     let string_ret = matches!(f.return_type.as_ref(), Some(Type::String));
     let list_ret = f.return_type.as_ref().is_some_and(is_list_int);
     let list_string_ret = f.return_type.as_ref().is_some_and(is_list_string);
@@ -1434,7 +1714,7 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
                 .iter()
                 .find(|r| r.local.rust_name() == *name)
                 .map(|r| web_recon_rust_type(&r.ty))
-                .or_else(|| wasm_param_rust_ty(ty, *conv).map(str::to_string));
+                .or_else(|| wasm_param_rust_ty(ty, *conv, bundle));
             rust_ty.map(|t| format!("{name}: {t}"))
         })
         .collect::<Option<Vec<_>>>()
@@ -1442,7 +1722,10 @@ fn emit_wasm_fn(_bundle: &ProgramBundle, f: &FuncWeb, export: bool, out: &mut St
     out.push_str(&params.join(", "));
     out.push(')');
     if let Some(ret) = &f.return_type {
-        out.push_str(&format!(" -> {} ", wasm_ty(ret).ok_or_else(|| web_emit_error(f))?));
+        out.push_str(&format!(
+            " -> {} ",
+            wasm_internal_ty(ret, bundle).ok_or_else(|| web_emit_error(f))?
+        ));
     }
     out.push_str("{\n");
     out.push_str(&format!("    // jet:source-map source={}\n", f.source_name));
@@ -1477,48 +1760,65 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
     }
 }
 
+fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
+    Some(match ty {
+        Type::Option(inner) => format!("Option<{}>", wasm_internal_ty(inner, bundle)?),
+        Type::Union(members) => user_type_rust(&crate::AST::union_enum_name(members)),
+        Type::Named(name) if bundle.modules.iter().any(|module| {
+            find_named_web_type(&module.items, name)
+        }) => user_type_rust(name),
+        _ => wasm_ty(ty)?.to_string(),
+    })
+}
+
 /// Rust param type matching TIR `param_place` borrow rules (Read String → &String).
-fn wasm_param_rust_ty(ty: &Type, conv: AccessConvention) -> Option<&'static str> {
+fn wasm_param_rust_ty(
+    ty: &Type,
+    conv: AccessConvention,
+    bundle: &ProgramBundle,
+) -> Option<String> {
+    let owned = wasm_internal_ty(ty, bundle)?;
     match (conv, ty) {
-        (AccessConvention::Read, Type::String) => Some("&String"),
-        (AccessConvention::Write, Type::String) => Some("&mut String"),
-        (AccessConvention::Move, Type::String) => Some("String"),
+        (AccessConvention::Read, Type::String) => Some("&String".to_string()),
+        (AccessConvention::Write, Type::String) => Some("&mut String".to_string()),
+        (AccessConvention::Move, Type::String) => Some("String".to_string()),
         (AccessConvention::Read, Type::List(inner))
             if matches!(**inner, Type::Int | Type::IntN { .. }) =>
         {
-            Some("&Vec<i64>")
+            Some("&Vec<i64>".to_string())
         }
         (AccessConvention::Write, Type::List(inner))
             if matches!(**inner, Type::Int | Type::IntN { .. }) =>
         {
-            Some("&mut Vec<i64>")
+            Some("&mut Vec<i64>".to_string())
         }
         (AccessConvention::Move, Type::List(inner))
             if matches!(**inner, Type::Int | Type::IntN { .. }) =>
         {
-            Some("Vec<i64>")
+            Some("Vec<i64>".to_string())
         }
         (AccessConvention::Read, Type::List(inner)) if matches!(**inner, Type::String) => {
-            Some("&Vec<String>")
+            Some("&Vec<String>".to_string())
         }
         (AccessConvention::Write, Type::List(inner)) if matches!(**inner, Type::String) => {
-            Some("&mut Vec<String>")
+            Some("&mut Vec<String>".to_string())
         }
         (AccessConvention::Move, Type::List(inner)) if matches!(**inner, Type::String) => {
-            Some("Vec<String>")
+            Some("Vec<String>".to_string())
         }
         (AccessConvention::Read, ty) if is_map_string_int(ty) => {
-            Some("&std::collections::BTreeMap<String, i64>")
+            Some("&std::collections::BTreeMap<String, i64>".to_string())
         }
         (AccessConvention::Write, ty) if is_map_string_int(ty) => {
-            Some("&mut std::collections::BTreeMap<String, i64>")
+            Some("&mut std::collections::BTreeMap<String, i64>".to_string())
         }
         (AccessConvention::Move, ty) if is_map_string_int(ty) => {
-            Some("std::collections::BTreeMap<String, i64>")
+            Some("std::collections::BTreeMap<String, i64>".to_string())
         }
-        (AccessConvention::Read, t) if t.is_scalar() => wasm_ty(t),
-        (AccessConvention::Read, _) => None,
-        _ => wasm_ty(ty),
+        (AccessConvention::Read, t) if t.is_scalar() => Some(owned),
+        (AccessConvention::Read, _) => Some(format!("&{owned}")),
+        (AccessConvention::Write, _) => Some(format!("&mut {owned}")),
+        (AccessConvention::Move, _) => Some(owned),
     }
 }
 
@@ -1553,6 +1853,88 @@ fn wasm_export_ty(ty: &Type) -> Option<&'static str> {
         ty if is_map_string_int(ty) => Some("u64"),
         _ => wasm_ty(ty),
     }
+}
+
+fn wasm_enum_head(enum_type: &str, variant: &str) -> String {
+    let variant = if enum_type.starts_with("__JetUnion_") {
+        variant.to_string()
+    } else {
+        mangle_variant(variant)
+    };
+    format!("{}::{variant}", user_type_rust(enum_type))
+}
+
+fn wasm_emit_enum_arg(
+    arg: &TIR::TEnumArg,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> Result<String, ()> {
+    let mut value = wasm_emit_expr(&arg.value, funcs, file_prefix, reconstructions)?;
+    if arg.clone {
+        value = format!("({value}).clone()");
+    }
+    if arg.boxed {
+        value = format!("Box::new({value})");
+    }
+    Ok(value)
+}
+
+fn wasm_emit_call_arg(
+    arg: &TIR::TCallArg,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> Result<String, ()> {
+    let mut value = wasm_emit_expr(&arg.value, funcs, file_prefix, reconstructions)?;
+    if arg.clone || arg.arc_clone {
+        value = format!("({value}).clone()");
+    }
+    if arg.widen_to_vec {
+        value = format!("({value}).to_vec()");
+    }
+    if let Some(Type::Union(members)) = &arg.widen_to_union {
+        value = format!(
+            "{}({value})",
+            wasm_enum_head(
+                &crate::AST::union_enum_name(members),
+                &crate::AST::union_member_tag(&arg.value.ty),
+            )
+        );
+    }
+    if arg.fn_coerce.is_some() {
+        return Err(());
+    }
+    if arg.borrow {
+        value = format!("&({value})");
+    } else if arg.mut_borrow {
+        value = format!("&mut ({value})");
+    }
+    Ok(value)
+}
+
+fn wasm_variant_pattern(pattern: &TIR::TPattern) -> Result<String, ()> {
+    let crate::AST::Pattern::Variant {
+        variant, bindings, ..
+    } = &pattern.pattern
+    else {
+        return Err(());
+    };
+    let owner = pattern.enum_type.as_deref().ok_or(())?;
+    let head = wasm_enum_head(owner, variant);
+    if bindings.is_empty() {
+        return Ok(head);
+    }
+    let slots = bindings
+        .iter()
+        .map(|slot| match slot {
+            crate::AST::PatSlot::Wildcard => "_".to_string(),
+            crate::AST::PatSlot::Bind { name, .. } => mangle(name),
+            crate::AST::PatSlot::Range { lo, hi } => format!("_ @ {lo}..={hi}"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(format!("{head}({slots})"))
 }
 
 fn emit_wasm_body(
@@ -1653,6 +2035,60 @@ fn emit_wasm_body(
                     }
                 }
             }
+            TIR::TStmt::EnumMatch {
+                scrutinee,
+                clone_subject,
+                arms,
+                else_body,
+                fallthrough,
+            } => {
+                let mut subject =
+                    wasm_emit_expr(scrutinee, funcs, file_prefix, reconstructions)?;
+                if *clone_subject {
+                    subject = format!("({subject}).clone()");
+                }
+                out.push_str(&format!("{pad}match {subject} {{\n"));
+                for arm in arms {
+                    out.push_str(&format!(
+                        "{pad}    {} => {{\n",
+                        wasm_variant_pattern(&arm.pattern)?
+                    ));
+                    emit_wasm_body(
+                        &arm.body,
+                        out,
+                        indent + 2,
+                        funcs,
+                        file_prefix,
+                        reconstructions,
+                    )?;
+                    out.push_str(&format!("{pad}    }},\n"));
+                }
+                if let Some(body) = else_body {
+                    out.push_str(&format!("{pad}    _ => {{\n"));
+                    emit_wasm_body(
+                        body,
+                        out,
+                        indent + 2,
+                        funcs,
+                        file_prefix,
+                        reconstructions,
+                    )?;
+                    out.push_str(&format!("{pad}    }},\n"));
+                } else if *fallthrough {
+                    out.push_str(&format!(
+                        "{pad}    _ => unreachable!(\"jet: exhaustiveness bug\"),\n"
+                    ));
+                }
+                out.push_str(&format!("{pad}}}\n"));
+            }
+            TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) => emit_wasm_body(
+                body,
+                out,
+                indent,
+                funcs,
+                file_prefix,
+                reconstructions,
+            )?,
             TIR::TStmt::Return(None) => out.push_str(&format!("{pad}return;\n")),
             TIR::TStmt::LineMarker(line) => {
                 out.push_str(&format!("{pad}// jet:line {line}\n"));
@@ -1674,13 +2110,33 @@ fn wasm_emit_expr(
         TIR::TExprKind::FloatLit(n) => n.to_string(),
         TIR::TExprKind::BoolLit(b) => b.to_string(),
         TIR::TExprKind::StrLit(parts) => {
-            let mut value = String::new();
-            for part in parts {
-                let TIR::TStrPart::Lit(text) = part else { return Err(()) };
-                value.push_str(text);
+            if parts.len() == 1 {
+                if let TIR::TStrPart::Lit(text) = &parts[0] {
+                    return Ok(format!("{}.to_string()", json_quote(text)));
+                }
             }
-            // Owned String — export returns and Jet String locals need String, not &str.
-            format!("{}.to_string()", json_quote(&value))
+            let mut value = String::from("{ let mut _jet_s = String::new(); ");
+            for part in parts {
+                match part {
+                    TIR::TStrPart::Lit(text) if !text.is_empty() => {
+                        value.push_str(&format!("_jet_s.push_str({}); ", json_quote(text)));
+                    }
+                    TIR::TStrPart::Lit(_) => {}
+                    TIR::TStrPart::Interp(interp, format) => {
+                        let spec = match format {
+                            crate::AST::StrFormat::Display => "{}",
+                            crate::AST::StrFormat::Debug => "{:?}",
+                        };
+                        value.push_str(&format!(
+                            "_jet_s.push_str(&format!({:?}, {})); ",
+                            spec,
+                            wasm_emit_expr(interp, funcs, file_prefix, reconstructions)?
+                        ));
+                    }
+                }
+            }
+            value.push_str("_jet_s }");
+            value
         }
         TIR::TExprKind::Local(local) => local.rust_place(),
         TIR::TExprKind::Binary { op, lhs, rhs, .. } => format!(
@@ -1694,22 +2150,79 @@ fn wasm_emit_expr(
             "({}).clone()",
             wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
         ),
+        TIR::TExprKind::Borrow { place, mutable } => {
+            let place = wasm_emit_expr(place, funcs, file_prefix, reconstructions)?;
+            if *mutable {
+                format!("&mut ({place})")
+            } else {
+                format!("&({place})")
+            }
+        }
         TIR::TExprKind::MaterializeView(inner) => format!(
             "({}).to_string()",
             wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
         ),
         TIR::TExprKind::Print(inner) => format!("println!(\"{{}}\", {})", wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?),
         TIR::TExprKind::Field { recv, field, boxed: false } => {
-            let TIR::TExprKind::Local(local) = &recv.kind else { return Err(()) };
-            if !reconstructions.iter().any(|r| {
-                r.local.rust_name() == local.rust_name()
-                    && r.fields
-                        .iter()
-                        .any(|(fname, _, _)| web_recon_field_matches(fname, field))
-            }) {
+            format!(
+                "({}).{}",
+                wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?,
+                mangle(field)
+            )
+        }
+        TIR::TExprKind::StructLit { fields, .. } => {
+            let Type::Named(name) = &expr.ty else {
                 return Err(());
+            };
+            format!(
+                "{} {{ {} }}",
+                user_type_rust(name),
+                fields
+                    .iter()
+                    .map(|(field, value, boxed)| {
+                        let mut value =
+                            wasm_emit_expr(value, funcs, file_prefix, reconstructions)?;
+                        if *boxed {
+                            value = format!("Box::new({value})");
+                        }
+                        Ok(format!("{}: {value}", mangle(field)))
+                    })
+                    .collect::<Result<Vec<_>, ()>>()?
+                    .join(", ")
+            )
+        }
+        TIR::TExprKind::EnumLit {
+            enum_type,
+            variant,
+            payload,
+        } => {
+            let head = wasm_enum_head(enum_type, variant);
+            match payload {
+                TIR::TEnumPayload::Unit => head,
+                TIR::TEnumPayload::Positional(args) => format!(
+                    "{head}({})",
+                    args.iter()
+                        .map(|arg| wasm_emit_enum_arg(
+                            arg,
+                            funcs,
+                            file_prefix,
+                            reconstructions
+                        ))
+                        .collect::<Result<Vec<_>, _>>()?
+                        .join(", ")
+                ),
+                TIR::TEnumPayload::Named(fields) => format!(
+                    "{head} {{ {} }}",
+                    fields
+                        .iter()
+                        .map(|(field, arg)| Ok(format!(
+                            "{field}: {}",
+                            wasm_emit_enum_arg(arg, funcs, file_prefix, reconstructions)?
+                        )))
+                        .collect::<Result<Vec<_>, ()>>()?
+                        .join(", ")
+                ),
             }
-            format!("({}).{}", wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?, web_name(field))
         }
         TIR::TExprKind::Index {
             base,
@@ -1729,7 +2242,7 @@ fn wasm_emit_expr(
                 return Err(());
             }
             let symbol = format!("jet_wasm_{key}");
-            format!("{symbol}({})", args.iter().map(|a| wasm_emit_expr(&a.value, funcs, file_prefix, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
+            format!("{symbol}({})", args.iter().map(|a| wasm_emit_call_arg(a, funcs, file_prefix, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
         }
         TIR::TExprKind::ModuleCall { form, args } => {
             let key = match form {
@@ -1741,7 +2254,7 @@ fn wasm_emit_expr(
             let mut callees = funcs.iter().filter(|f| f.key == key && f.bucket == WebBucket::Wasm);
             callees.next().ok_or(())?;
             if callees.next().is_some() { return Err(()); }
-            format!("jet_wasm_{key}({})", args.iter().map(|a| wasm_emit_expr(&a.value, funcs, file_prefix, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
+            format!("jet_wasm_{key}({})", args.iter().map(|a| wasm_emit_call_arg(a, funcs, file_prefix, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
         }
         _ => return Err(()),
     })
@@ -2173,6 +2686,50 @@ fn emit_tir_js_body(
                 emit_tir_js_body(body, out, funcs, file_prefix, indent + 1)?;
                 out.push_str(&format!("{pad}}}\n"));
             }
+            TIR::TStmt::EnumMatch {
+                scrutinee,
+                arms,
+                else_body,
+                fallthrough,
+                ..
+            } => {
+                out.push_str(&format!(
+                    "{pad}{{\n{pad}  const __jet_match = {};\n{pad}  switch (__jet_match.tag) {{\n",
+                    tir_js_expr(scrutinee, funcs, file_prefix)?
+                ));
+                for arm in arms {
+                    let crate::AST::Pattern::Variant {
+                        variant, bindings, ..
+                    } = &arm.pattern.pattern
+                    else {
+                        return Err(());
+                    };
+                    out.push_str(&format!(
+                        "{pad}    case {}: {{\n",
+                        json_quote(variant)
+                    ));
+                    for (index, slot) in bindings.iter().enumerate() {
+                        if let crate::AST::PatSlot::Bind { name, .. } = slot {
+                            out.push_str(&format!(
+                                "{pad}      const {} = __jet_match.values[{index}];\n",
+                                web_name(name)
+                            ));
+                        }
+                    }
+                    emit_tir_js_body(&arm.body, out, funcs, file_prefix, indent + 3)?;
+                    out.push_str(&format!("{pad}      break;\n{pad}    }}\n"));
+                }
+                if let Some(body) = else_body {
+                    out.push_str(&format!("{pad}    default: {{\n"));
+                    emit_tir_js_body(body, out, funcs, file_prefix, indent + 3)?;
+                    out.push_str(&format!("{pad}      break;\n{pad}    }}\n"));
+                } else if *fallthrough {
+                    out.push_str(&format!(
+                        "{pad}    default: throw new Error(\"jet: exhaustiveness bug\");\n"
+                    ));
+                }
+                out.push_str(&format!("{pad}  }}\n{pad}}}\n"));
+            }
             TIR::TStmt::Inline(inner) | TIR::TStmt::Region(inner) => emit_tir_js_body(inner, out, funcs, file_prefix, indent)?,
             _ => return Err(()),
         }
@@ -2181,7 +2738,27 @@ fn emit_tir_js_body(
 }
 
 fn tir_call_args(args: &[TIR::TCallArg], funcs: &[FuncWeb], file_prefix: Option<&str>) -> Result<String, ()> {
-    Ok(args.iter().map(|a| tir_js_expr(&a.value, funcs, file_prefix)).collect::<Result<Vec<_>, _>>()?.join(", "))
+    Ok(args
+        .iter()
+        .map(|arg| {
+            let value = tir_js_expr(&arg.value, funcs, file_prefix)?;
+            if matches!(arg.widen_to_union, Some(Type::Union(_))) {
+                Ok(format!(
+                    "{{ tag: {}, values: [{value}] }}",
+                    json_quote(&crate::AST::union_member_tag(&arg.value.ty))
+                ))
+            } else if members_are_unused(arg) {
+                Ok(value)
+            } else {
+                Err(())
+            }
+        })
+        .collect::<Result<Vec<_>, ()>>()?
+        .join(", "))
+}
+
+fn members_are_unused(arg: &TIR::TCallArg) -> bool {
+    arg.fn_coerce.is_none() && !arg.widen_to_vec
 }
 
 fn tir_plain_args(args: &[TIR::TExpr], funcs: &[FuncWeb], file_prefix: Option<&str>) -> Result<Vec<String>, ()> {
@@ -2233,9 +2810,30 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         E::Binary { op, lhs, rhs, .. } => format!("({} {} {})", tir_js_expr(lhs, funcs, file_prefix)?, binop(op), tir_js_expr(rhs, funcs, file_prefix)?),
         E::Unary { op, operand } => format!("({}{})", unop(op), tir_js_expr(operand, funcs, file_prefix)?),
         E::Clone(inner) | E::MaterializeView(inner) | E::DistinctRaw(inner) => tir_js_expr(inner, funcs, file_prefix)?,
+        E::Borrow { place, .. } => tir_js_expr(place, funcs, file_prefix)?,
         E::DistinctCtor { arg, .. } => tir_js_expr(arg, funcs, file_prefix)?,
         E::Field { recv, field, .. } => format!("{}.{}", tir_js_expr(recv, funcs, file_prefix)?, web_name(field)),
         E::StructLit { fields, .. } => format!("({{ {} }})", fields.iter().map(|(n, v, _)| Ok(format!("{}: {}", web_name(n), tir_js_expr(v, funcs, file_prefix)?))).collect::<Result<Vec<_>, ()>>()?.join(", ")),
+        E::EnumLit {
+            variant, payload, ..
+        } => {
+            let values = match payload {
+                TIR::TEnumPayload::Unit => Vec::new(),
+                TIR::TEnumPayload::Positional(args) => args
+                    .iter()
+                    .map(|arg| tir_js_expr(&arg.value, funcs, file_prefix))
+                    .collect::<Result<Vec<_>, _>>()?,
+                TIR::TEnumPayload::Named(fields) => fields
+                    .iter()
+                    .map(|(_, arg)| tir_js_expr(&arg.value, funcs, file_prefix))
+                    .collect::<Result<Vec<_>, _>>()?,
+            };
+            format!(
+                "{{ tag: {}, values: [{}] }}",
+                json_quote(variant),
+                values.join(", ")
+            )
+        }
         E::ListLit(elements) => format!("[{}]", elements.iter().map(|element| tir_js_expr(element, funcs, file_prefix)).collect::<Result<Vec<_>, _>>()?.join(", ")),
         E::MapLit(entries) => format!(
             "new Map([{}])",

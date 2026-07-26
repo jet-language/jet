@@ -3007,7 +3007,7 @@ fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {
         Type::FixedList { elem, len, .. } => format!("[{}; {}]", rust_type(elem, user_types), len),
         Type::Tagged { inner, .. } => rust_type(inner, user_types),
         // D-UNIONTYPE1=A: anonymous unions are not a C-FFI surface type.
-        Type::Union(_) => "Box<dyn std::any::Any>".to_string(),
+        Type::Union(_) => unreachable!("anonymous unions are rejected by FFI sema"),
     }
 }
 

@@ -1626,6 +1626,26 @@ Error [E3202]: Type `Ptr<Int>` cannot cross the C boundary here.
     assert_eq!(rendered, expected);
 }
 
+#[test]
+fn anonymous_union_is_rejected_before_c_ffi_codegen() {
+    let root = common::unique_tmp("jet_cffi_union_reject");
+    fs::create_dir_all(&root).unwrap();
+    let main = root.join("main.jet");
+    let src = r#"
+use c.union_boundary as c
+#Extern module c.union_boundary {
+    fn consume(value: Int | String) -> Int = "consume"
+}
+fn run() { print(0) }
+"#;
+    fs::write(&main, src).unwrap();
+    let diags = jet::check_with_path(main.to_str().unwrap());
+    assert!(
+        diags.iter().any(|d| d.code == "E3203"),
+        "union must be rejected by sema before package-model codegen: {diags:?}"
+    );
+}
+
 // ============================================================================
 // Section: Rust extern-crate FFI bridge, M7 (was tests/ffi.rs)
 //

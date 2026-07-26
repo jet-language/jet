@@ -126,6 +126,21 @@ pub(crate) fn e2411(ty: &str, encode: bool, span: Span) -> Diagnostic {
     )
 }
 
+fn e2411_unknown_union_shape(union_ty: &str, member: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E2411",
+        format!(
+            "union `{union_ty}` can't be decoded — `{member}` has no compiler-known wire shape"
+        ),
+        format!(
+            "`{member}` uses a custom or imported decoder; anonymous unions need each member's outer wire shape before codegen"
+        ),
+        "use a compiler-derived codec, a configured tagged enum, or a #CodableAsBase distinct type"
+            .to_string(),
+        Some(span),
+    )
+}
+
 /// E2415 (D-UNIONTYPE1=A): two Codable union members share a primary wire shape,
 /// so decode cannot pick a unique member without declaration-order guessing.
 pub(crate) fn e2415(union_ty: &str, a: &str, b: &str, shape: &str, span: Span) -> Diagnostic {
@@ -138,19 +153,73 @@ pub(crate) fn e2415(union_ty: &str, a: &str, b: &str, shape: &str, span: Span) -
     )
 }
 
-/// Primary DataTree kind a type encodes as (for union decode dispatch).
-pub(crate) fn union_wire_shape(ty: &Type) -> Option<&'static str> {
+fn validate_union_decode_shapes(
+    items: &[crate::AST::Item],
+    ty: &Type,
+    span: Span,
+    out: &mut Vec<Diagnostic>,
+) {
+    fn label(ty: &Type) -> String {
+        ty.show().trim_matches('`').to_string()
+    }
+
+    if let Type::Union(members) = ty {
+        let mut seen: Vec<(crate::AST::SerdeWireShape, &Type)> = Vec::new();
+        for member in members {
+            let Some(shapes) = crate::AST::resolved_decode_wire_shapes(items, member) else {
+                out.push(e2411_unknown_union_shape(
+                    &ty.show(),
+                    &label(member),
+                    span,
+                ));
+                continue;
+            };
+            for shape in shapes {
+                if let Some((_, previous)) = seen.iter().find(|(known, _)| *known == shape) {
+                    out.push(e2415(
+                        &ty.show(),
+                        &label(previous),
+                        &label(member),
+                        shape.name(),
+                        span,
+                    ));
+                } else {
+                    seen.push((shape, member));
+                }
+            }
+        }
+    }
     match ty {
-        Type::Int | Type::IntN { .. } => Some("Int"),
-        Type::Float | Type::Float32 => Some("Float"),
-        Type::Bool => Some("Bool"),
-        Type::String | Type::Char => Some("Text"),
-        Type::Named(n) if n == "Decimal" => Some("Text"),
-        Type::List(_) | Type::FixedList { .. } => Some("Array"),
-        Type::Map { .. } | Type::Named(_) | Type::Apply { .. } | Type::Tuple(_) => Some("Object"),
-        Type::Option(inner) => union_wire_shape(inner),
-        Type::Union(_) | Type::Shared(_) | Type::Result { .. } | Type::Fn { .. }
-        | Type::TraitObject(_) | Type::Tagged { .. } => None,
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::Tagged { inner, .. }
+        | Type::FixedList { elem: inner, .. } => {
+            validate_union_decode_shapes(items, inner, span, out)
+        }
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            validate_union_decode_shapes(items, key, span, out);
+            validate_union_decode_shapes(items, value, span, out);
+        }
+        Type::Apply { args, .. } | Type::Union(args) => {
+            for arg in args {
+                validate_union_decode_shapes(items, arg, span, out);
+            }
+        }
+        Type::Tuple(fields) => {
+            for (_, field) in fields {
+                validate_union_decode_shapes(items, field, span, out);
+            }
+        }
+        Type::Fn { params, ret, .. } => {
+            for param in params {
+                validate_union_decode_shapes(items, param, span, out);
+            }
+            if let Some(ret) = ret {
+                validate_union_decode_shapes(items, ret, span, out);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -405,30 +474,8 @@ pub(crate) fn validate_serde_items(
                 if dec && !is_decodable_ty(&f.ty, reg) {
                     out.push(e2411(&f.ty.show(), false, f.name_span));
                 }
-                // D-UNIONTYPE1=A: reject Codable union fields with ambiguous wire shapes.
                 if dec {
-                    if let Type::Union(members) = &f.ty {
-                        let mut seen: Vec<(&str, &Type)> = Vec::new();
-                        for m in members {
-                            let Some(shape) = union_wire_shape(m) else {
-                                out.push(e2411(&f.ty.show(), false, f.name_span));
-                                continue;
-                            };
-                            if let Some((prev_shape, prev_ty)) =
-                                seen.iter().find(|(s, _)| *s == shape)
-                            {
-                                out.push(e2415(
-                                    &f.ty.show(),
-                                    &prev_ty.show(),
-                                    &m.show(),
-                                    prev_shape,
-                                    f.name_span,
-                                ));
-                            } else {
-                                seen.push((shape, m));
-                            }
-                        }
-                    }
+                    validate_union_decode_shapes(items, &f.ty, f.name_span, &mut out);
                 }
             }
         }
@@ -445,6 +492,9 @@ pub(crate) fn validate_serde_items(
                     }
                     if dec && !is_decodable_ty(t, reg) {
                         out.push(e2411(&t.show(), false, v.name_span));
+                    }
+                    if dec {
+                        validate_union_decode_shapes(items, t, v.name_span, &mut out);
                     }
                 }
             }

@@ -1,0 +1,7 @@
+Error [E2415]: union `I32 | Int` can't be decoded — `I32 (a 32-bit whole number, -2147483648 to 2147483647)` and `Int (a whole number)` share wire shape `Int`
+  --> tests/ui/union_codable_enum_ambiguous.jet:3:5
+    |
+  3 |     Value(Int | I32)
+    |     ^^^^^
+ Why: anonymous-union decode picks a member by wire shape; two members with the same shape would force an arbitrary order
+ Fix: use a named enum with an explicit tag, or change the members so each has a distinct wire shape

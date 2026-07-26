@@ -112,6 +112,15 @@ fn build_web_project(stem: &str, files: &[(&str, &str)]) -> PathBuf {
     dir
 }
 
+#[test]
+fn anonymous_unions_build_for_web() {
+    let shown = "examples/features/types/anonymous_unions.jet";
+    let src = fs::read_to_string(shown).unwrap();
+    let dir = build_web_fixture("anonymous_unions", &src, shown);
+    let wasm_rust = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(wasm_rust.contains("__JetUnion_Int_String"));
+}
+
 fn run_web_app(dir: &PathBuf) -> String {
     let node = Command::new("node")
         .current_dir(dir.join("build"))
