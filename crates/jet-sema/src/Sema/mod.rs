@@ -670,6 +670,17 @@ pub(crate) enum ViewAccess {
     Write,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct CallPlaceAccess {
+    place: ViewPlace,
+    access: ViewAccess,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct CallAccessFrame {
+    accesses: Vec<CallPlaceAccess>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewOwnerOrigin {
     Local,
@@ -1174,6 +1185,9 @@ pub(crate) struct Checker<'a> {
     /// with the existing statement-tail analysis, this makes local window
     /// conflicts end at last use instead of lexical scope end.
     views_used_in_stmt: HashSet<String>,
+    /// #1196: argument and receiver loans that remain active until their call
+    /// finishes. Nested calls see every outer frame.
+    call_access_frames: Vec<CallAccessFrame>,
     /// D-UNINIT1 engine, reused unchanged by D-UNINIT-SENTINEL2:
     /// `Type.{ uninit }` bindings not yet definitely written — maps name → the
     /// decl span. A read while still in this map is E0420 (write-before-read

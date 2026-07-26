@@ -1,5 +1,10 @@
 //! Tests for M2 ownership / borrow transpiler rules (SAFETY DEFAULTS).
 
+mod common;
+
+use std::fs;
+use std::process::Command;
+
 #[test]
 fn discard_binding_is_not_a_referenceable_local() {
     let src = r#"
@@ -236,6 +241,241 @@ fn run() {
 "#;
     let diags = jet::compile(src).expect_err("should error");
     assert!(diags.iter().any(|d| d.code == "E0204"));
+}
+
+#[test]
+fn nested_call_argument_cannot_read_an_active_write_place() {
+    let src = r#"
+fn see(x: Int) -> Int { return x }
+fn both(a: &Int, b: Int) { a += b }
+
+fn run() {
+    x := 1
+    both(&x, see(x))
+}
+"#;
+    let diags = jet::compile(src).expect_err("nested read must fail in sema before rustc");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0204"),
+        "expected the call-alias diagnostic: {diags:?}"
+    );
+}
+
+#[test]
+fn composite_argument_cannot_read_an_active_write_place() {
+    let src = r#"
+fn both(a: &Int, b: Int) { a += b }
+
+fn run() {
+    x := 1
+    both(&x, x + 1)
+}
+"#;
+    let diags = jet::compile(src).expect_err("composite read must fail in sema before rustc");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0204"),
+        "expected the call-alias diagnostic: {diags:?}"
+    );
+}
+
+#[test]
+fn whole_place_alias_blocks_overlapping_write_argument() {
+    let src = r#"
+fn both(a: &[Int], b: [Int]) {
+    a[0] = b[0]
+}
+
+fn run() {
+    xs := [1, 2, 3]
+    alias :: xs
+    both(&xs, alias)
+}
+"#;
+    let diags =
+        jet::compile(src).expect_err("whole-place read alias must fail in sema before rustc");
+    let diag = diags.iter().find(|diag| diag.code == "E0204");
+    assert!(
+        diag.is_some(),
+        "expected the call-alias diagnostic: {diags:?}"
+    );
+    let diag = diag.unwrap();
+    assert!(
+        diag.what.starts_with("`xs`"),
+        "the alias must resolve through the view fact graph to its owner: {diag:?}"
+    );
+}
+
+#[test]
+fn rustc_oracle_rejects_the_hostile_borrow_shapes() {
+    if Command::new("rustc").arg("--version").output().is_err() {
+        return;
+    }
+    let root = common::unique_tmp("jet_call_place_rustc_oracle");
+    fs::create_dir_all(&root).unwrap();
+    let cases = [
+        (
+            "nested.rs",
+            r#"
+fn see(x: i64) -> i64 { x }
+fn both(a: &mut i64, b: i64) { *a += b }
+fn main() {
+    let mut x = 1;
+    both(&mut x, see(x));
+}
+"#,
+            "E0503",
+        ),
+        (
+            "alias.rs",
+            r#"
+fn both(a: &mut Vec<i64>, b: &Vec<i64>) { a[0] = b[0] }
+fn main() {
+    let mut xs = vec![1, 2, 3];
+    let alias = &xs;
+    both(&mut xs, alias);
+}
+"#,
+            "E0502",
+        ),
+    ];
+    for (name, source, expected) in cases {
+        let path = root.join(name);
+        fs::write(&path, source).unwrap();
+        let output = Command::new("rustc")
+            .arg("--edition=2021")
+            .arg(&path)
+            .arg("-o")
+            .arg(root.join(format!("{name}.bin")))
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !output.status.success() && stderr.contains(expected),
+            "native oracle must reject {name} with {expected}: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn imported_call_uses_the_same_place_access_rule() {
+    let root = common::unique_tmp("jet_imported_call_place_access");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("helper.jet"),
+        "pub fn both(a: &Int, b: Int) { a += b }\n",
+    )
+    .unwrap();
+    let entry = root.join("main.jet");
+    let src = r#"
+use "./helper" as helper
+
+fn run() {
+    x := 1
+    helper.both(&x, x)
+}
+"#;
+    fs::write(&entry, src).unwrap();
+    let diags = jet::compile_with_path(src, entry.to_str().unwrap())
+        .expect_err("imported call alias must fail in sema before rustc");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0204"),
+        "expected the call-alias diagnostic: {diags:?}"
+    );
+}
+
+#[test]
+fn generic_method_trait_and_function_value_calls_share_place_access() {
+    let hostile = [
+        r#"
+fn both<T>(a: &T, b: T) { print(0) }
+fn run() {
+    value := 1
+    both(&value, value)
+}
+"#,
+        r#"
+struct Editor { id: Int }
+impl Editor {
+    fn clash(self, other: &Editor) { print(other.id) }
+}
+fn run() {
+    editor := Editor.{ id: 1 }
+    editor.clash(&editor)
+}
+"#,
+        r#"
+trait Edit {
+    fn clash(self, other: &Edit)
+}
+fn conflict(editor: &Edit) {
+    editor.clash(&editor)
+}
+fn run() {}
+"#,
+        r#"
+fn length(value: String) -> Int { return value.len() }
+fn both(value: &String, count: Int) { print(value); print(count) }
+fn run() {
+    callback :: length
+    value := "hello"
+    both(&value, callback(value))
+}
+"#,
+        r#"
+module helper {
+    pub fn both(a: &Int, b: Int) { a += b }
+}
+fn run() {
+    value := 1
+    helper.both(&value, value)
+}
+"#,
+    ];
+    for src in hostile {
+        let diags = jet::compile(src).expect_err("every call form must reject one aliased place");
+        assert!(
+            diags.iter().any(|diag| diag.code == "E0204"),
+            "expected the shared call-place diagnostic: {diags:?}"
+        );
+    }
+}
+
+#[test]
+fn implicit_borrows_persist_but_finished_scalar_reads_do_not() {
+    let borrowed = r#"
+fn inspect_then_edit(values: [Int], edited: &[Int]) { print(values.len() + edited.len()) }
+fn run() {
+    values := [1, 2, 3]
+    inspect_then_edit(values, &values)
+}
+"#;
+    let diags = jet::compile(borrowed).expect_err("implicit read borrow must remain active");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let ordered = r#"
+fn read_then_edit(value: Int, edited: &Int) { edited += value }
+fn run() {
+    value := 1
+    read_then_edit(value, &value)
+}
+"#;
+    jet::compile(ordered).expect("a completed scalar read may precede a write borrow");
+}
+
+#[test]
+fn call_access_frames_do_not_leak_across_control_flow_or_disjoint_places() {
+    let src = r#"
+fn both(a: &Int, b: Int) { a += b }
+fn run() {
+    left := 1
+    right := 2
+    if true {
+        both(&left, right)
+    }
+    both(&right, left)
+}
+"#;
+    jet::compile(src).expect("separate calls on disjoint places must not share access frames");
 }
 
 /// E0209 liveness gate (was D-L0201): when the value is still used after the

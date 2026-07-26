@@ -427,6 +427,274 @@ impl<'a> Checker<'a> {
         out
     }
 
+    pub(crate) fn call_access_frame(&self) -> CallAccessFrame {
+        CallAccessFrame::default()
+    }
+
+    /// Make one call's accumulated loans visible while its next expression is
+    /// checked. The frame lives in the caller between arguments and is always
+    /// restored by this closure boundary, including ordinary early returns.
+    pub(crate) fn with_call_access<T>(
+        &mut self,
+        frame: &mut CallAccessFrame,
+        check: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        self.call_access_frames.push(std::mem::take(frame));
+        let result = check(self);
+        *frame = self.call_access_frames.pop().unwrap_or_default();
+        result
+    }
+
+    fn check_call_place_access(
+        &mut self,
+        place: &ViewPlace,
+        access: ViewAccess,
+        span: Span,
+    ) {
+        let conflict = self
+            .call_access_frames
+            .iter()
+            .flat_map(|frame| frame.accesses.iter())
+            .rev()
+            .find(|active| {
+                active.place.overlaps(place)
+                    && (active.access == ViewAccess::Write || access == ViewAccess::Write)
+            })
+            .map(|active| active.access);
+        let Some(active) = conflict else {
+            return;
+        };
+        let name = Self::place_name(place);
+        self.diags.push(if active == ViewAccess::Write {
+            crate::Sema::Diagnostics::aliasing_while_mut(&name, span)
+        } else {
+            crate::Sema::Diagnostics::aliasing_mut_after_read(&name, span)
+        });
+    }
+
+    fn record_call_place_access(&mut self, place: ViewPlace, access: ViewAccess) {
+        self.call_access_frames
+            .last_mut()
+            .map(|frame| frame.accesses.push(CallPlaceAccess { place, access }));
+    }
+
+    /// Collect the maximal places read while evaluating a value expression.
+    /// Nested calls own their argument metadata and check themselves while the
+    /// enclosing call frame is active.
+    fn collect_call_value_reads(&self, expr: &Expr, reads: &mut Vec<(ViewPlace, Span)>) {
+        if let Some(place) = self.place_from_expr(expr) {
+            if !reads.iter().any(|(seen, _)| {
+                seen.owner == place.owner && seen.projections == place.projections
+            }) {
+                reads.push((place, expr.span()));
+            }
+            match expr {
+                Expr::Index { index, .. } => self.collect_call_value_reads(index, reads),
+                Expr::Slice { start, end, .. } => {
+                    self.collect_call_value_reads(start, reads);
+                    self.collect_call_value_reads(end, reads);
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        match expr {
+            Expr::Call(_) | Expr::MethodCall { .. } | Expr::CallValue { .. } => {}
+            Expr::Binary(_, left, right, _) => {
+                self.collect_call_value_reads(left, reads);
+                self.collect_call_value_reads(right, reads);
+            }
+            Expr::CompareChain { operands, .. } | Expr::ListLit(operands, _) => {
+                for operand in operands {
+                    self.collect_call_value_reads(operand, reads);
+                }
+            }
+            Expr::Unary(_, inner, _)
+            | Expr::Spread(inner, _)
+            | Expr::Deref(inner, _)
+            | Expr::RawOf(inner, _)
+            | Expr::Copy(inner, _)
+            | Expr::Place(inner, _, _)
+            | Expr::Tainted(inner, _, _)
+            | Expr::Present(inner, _)
+            | Expr::Ok(inner, _)
+            | Expr::Err(inner, _)
+            | Expr::Try(inner, _, _)
+            | Expr::Paren(inner, _)
+            | Expr::IncDec { operand: inner, .. } => {
+                self.collect_call_value_reads(inner, reads);
+            }
+            Expr::Field(base, _, _) | Expr::OptField { base, .. } => {
+                self.collect_call_value_reads(base, reads);
+            }
+            Expr::Index { base, index, .. } => {
+                self.collect_call_value_reads(base, reads);
+                self.collect_call_value_reads(index, reads);
+            }
+            Expr::Slice {
+                base, start, end, ..
+            } => {
+                self.collect_call_value_reads(base, reads);
+                self.collect_call_value_reads(start, reads);
+                self.collect_call_value_reads(end, reads);
+            }
+            Expr::MapLit(entries, _) => {
+                for (key, value) in entries {
+                    self.collect_call_value_reads(key, reads);
+                    self.collect_call_value_reads(value, reads);
+                }
+            }
+            Expr::StructLit { fields, .. } => {
+                for (_, _, value) in fields {
+                    self.collect_call_value_reads(value, reads);
+                }
+            }
+            Expr::TypedLit { body, .. } => {
+                body.for_each_expr(|value| self.collect_call_value_reads(value, reads));
+            }
+            Expr::TupleLit(fields, _, _) => {
+                for (_, value) in fields {
+                    self.collect_call_value_reads(value, reads);
+                }
+            }
+            Expr::EnumLit { args, .. } => {
+                for arg in args {
+                    let value = match arg {
+                        crate::AST::EnumLitArg::Positional(value)
+                        | crate::AST::EnumLitArg::Named { expr: value, .. } => value,
+                    };
+                    self.collect_call_value_reads(value, reads);
+                }
+            }
+            Expr::Str(parts, _) => {
+                for part in parts {
+                    if let crate::AST::StrPart::Interp(value, _) = part {
+                        self.collect_call_value_reads(value, reads);
+                    }
+                }
+            }
+            Expr::PatternTest { subject, .. } => {
+                self.collect_call_value_reads(subject, reads);
+            }
+            Expr::OrFallback {
+                value, fallback, ..
+            } => {
+                self.collect_call_value_reads(value, reads);
+                match fallback {
+                    crate::AST::OrFallback::Value(value)
+                    | crate::AST::OrFallback::Return(Some(value), _) => {
+                        self.collect_call_value_reads(value, reads);
+                    }
+                    crate::AST::OrFallback::Panic { args, .. } => {
+                        for arg in args {
+                            self.collect_call_value_reads(&arg.expr, reads);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Expr::If {
+                cond,
+                then_value,
+                else_value,
+                ..
+            } => {
+                self.collect_call_value_reads(cond, reads);
+                self.collect_call_value_reads(then_value, reads);
+                self.collect_call_value_reads(else_value, reads);
+            }
+            Expr::PtrFromAddr { addr, .. } => self.collect_call_value_reads(addr, reads),
+            Expr::FanOut { callee, items, .. } => {
+                self.collect_call_value_reads(callee, reads);
+                for item in items {
+                    self.collect_call_value_reads(item, reads);
+                }
+            }
+            Expr::StrMatchLit(_, _)
+            | Expr::BinMatchLit(_, _)
+            | Expr::Int(_, _, _, _)
+            | Expr::Float(_, _, _)
+            | Expr::Bool(_, _)
+            | Expr::Char(_, _)
+            | Expr::Ident(_, _)
+            | Expr::UnitLit { .. }
+            | Expr::Absent(_)
+            | Expr::Todo { .. }
+            | Expr::ReduceMarker(_, _)
+            | Expr::Lambda(_)
+            | Expr::ComptimeSplice { .. } => {}
+        }
+    }
+
+    /// Check one evaluated argument against every active outer/current call,
+    /// then retain exactly the borrow that generated Rust keeps until this call
+    /// returns. Call-form checkers supply only signature metadata.
+    pub(crate) fn check_call_argument_access(
+        &mut self,
+        arg: &crate::AST::CallArg,
+        param_conv: AccessConvention,
+        param_ty: &Type,
+        borrowed_read: bool,
+    ) {
+        let Some(place) = self.place_from_expr(&arg.expr) else {
+            let mut reads = Vec::new();
+            self.collect_call_value_reads(&arg.expr, &mut reads);
+            for (place, span) in reads {
+                self.check_call_place_access(&place, ViewAccess::Read, span);
+            }
+            return;
+        };
+        let access = if arg.convention == AccessConvention::Write {
+            ViewAccess::Write
+        } else {
+            ViewAccess::Read
+        };
+        self.check_call_place_access(&place, access, arg.expr.span());
+        let generated = if arg.convention == AccessConvention::Write {
+            Some(ViewAccess::Write)
+        } else if arg.convention == AccessConvention::Read
+            && param_conv == AccessConvention::Read
+            && borrowed_read
+            && !param_ty.is_scalar()
+        {
+            Some(ViewAccess::Read)
+        } else {
+            None
+        };
+        if let Some(access) = generated {
+            self.record_call_place_access(place, access);
+        }
+    }
+
+    /// Receiver evaluation is a read even before method resolution. This catches
+    /// a nested receiver that overlaps an outer call's active write loan.
+    pub(crate) fn check_call_receiver_evaluation(&mut self, receiver: &Expr, span: Span) {
+        if let Some(place) = self.place_from_expr(receiver) {
+            self.check_call_place_access(&place, ViewAccess::Read, span);
+        }
+    }
+
+    pub(crate) fn record_call_receiver_access(
+        &mut self,
+        receiver: &Expr,
+        convention: AccessConvention,
+        span: Span,
+    ) {
+        let Some(place) = self.place_from_expr(receiver) else {
+            return;
+        };
+        let access = if convention == AccessConvention::Write {
+            ViewAccess::Write
+        } else {
+            ViewAccess::Read
+        };
+        self.check_call_place_access(&place, access, span);
+        if convention != AccessConvention::Move {
+            self.record_call_place_access(place, access);
+        }
+    }
+
     pub(crate) fn place_from_expr(&self, expr: &Expr) -> Option<ViewPlace> {
         let mut output_path = Vec::new();
         if let Some(name) = named_view_field_path(expr, &mut output_path) {
@@ -470,7 +738,7 @@ impl<'a> Checker<'a> {
                 });
                 Some(place)
             }
-            Expr::Place(inner, _, _) => self.place_from_expr(inner),
+            Expr::Place(inner, _, _) | Expr::Paren(inner, _) => self.place_from_expr(inner),
             _ => None,
         }
     }

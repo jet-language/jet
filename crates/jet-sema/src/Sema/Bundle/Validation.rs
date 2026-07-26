@@ -1998,6 +1998,7 @@ pub(crate) fn check_func_body_bundle(
         view_facts: Default::default(),
         return_view_provenance: None,
         views_used_in_stmt: Default::default(),
+        call_access_frames: Vec::new(),
         uninit: HashMap::new(),
         borrow_ctx: false,
         allow_fixed_constructor: false,

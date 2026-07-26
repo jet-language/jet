@@ -21,8 +21,7 @@ use crate::Sema::CheckerCoreLib::{
 };
 use crate::Sema::CheckerInfer::contains_tuple_type;
 use crate::Sema::Diagnostics::{
-    aliasing_while_mut, builtin_type_from_ident, collection_changed_in_loop, expr_root_ident,
-    type_is_copy,
+    builtin_type_from_ident, collection_changed_in_loop, expr_root_ident, type_is_copy,
 };
 use crate::Sema::Effects::Effect;
 use crate::Syntax;
@@ -100,6 +99,7 @@ impl<'a> Checker<'a> {
             recv_type_out: &mut Option<String>,
             resolved_ret_out: &mut Option<Type>,
         ) -> Option<Type> {
+            self.check_call_receiver_evaluation(receiver, span);
             // D-SHAPE-PLACE1=A: `.view(a..b)` is retired. Keep the parser's
             // range-shaped recovery long enough to point at the old spelling,
             // but never admit it to the type system.
@@ -3372,7 +3372,7 @@ impl<'a> Checker<'a> {
                         .traits
                         .get(tn)
                         .and_then(|t| t.methods.get(method))
-                        .map(|msig| (tn, msig))
+                        .map(|msig| (tn.clone(), msig.clone()))
                 });
                 if let Some((trait_name, msig)) = sig {
                     self.record_open_memory_dispatch(
@@ -3380,14 +3380,17 @@ impl<'a> Checker<'a> {
                         "trait-object dispatch has no sealed target set",
                     );
                     self.record_edge(
-                        crate::Sema::effect_key(Some(trait_name), method),
+                        crate::Sema::effect_key(Some(&trait_name), method),
                         span,
                     );
                     *recv_type_out = Some(trait_name.clone());
-                    let ret = msig.return_type.clone();
-                    for arg in args.iter_mut() {
-                        self.infer(&mut arg.expr);
-                    }
+                    let ret = self.check_trait_method_args(
+                        method,
+                        &msig,
+                        receiver,
+                        args,
+                        span,
+                    );
                     return ret;
                 }
                 // Keep the original single-trait wording byte-for-byte (it's snapshot-
@@ -3559,11 +3562,6 @@ impl<'a> Checker<'a> {
                             ));
                         }
                     }
-                    for arg in args.iter() {
-                        if matches!(&arg.expr, Expr::Ident(n, _) if *n == root) {
-                            self.diags.push(aliasing_while_mut(&root, arg.expr.span()));
-                        }
-                    }
                 }
             }
             if msig.self_conv == Some(AccessConvention::Move) {
@@ -3600,7 +3598,15 @@ impl<'a> Checker<'a> {
                     self.mark_moved(n.clone(), *nspan);
                 }
             }
-            self.check_method_args(&type_name, method, &msig, args, span, None)?;
+            self.check_method_args(
+                &type_name,
+                method,
+                &msig,
+                Some(receiver),
+                args,
+                span,
+                None,
+            )?;
             let ret = msig.return_type.clone().map(|t| self.resolve_type(t));
             *resolved_ret_out = ret.clone();
             ret

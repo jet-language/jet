@@ -81,6 +81,7 @@ impl<'a> Checker<'a> {
                     Some(span),
                 ));
             }
+            let mut call_access = self.call_access_frame();
             for (arg, (pconv, pty)) in args.iter_mut().zip(sig.params.iter()) {
                 if matches!(pconv, AccessConvention::Read) && !pty.is_scalar() {
                     self.borrow_ctx = true;
@@ -88,7 +89,10 @@ impl<'a> Checker<'a> {
                 // D-SG9: a fixed-width literal argument adopts the parameter's width.
                 let saved = self.expected_type.clone();
                 self.expected_type = Some(pty.clone());
-                let aty = self.infer(&mut arg.expr);
+                let aty = self.with_call_access(&mut call_access, |checker| {
+                    checker.check_call_argument_access(arg, *pconv, pty, true);
+                    checker.infer(&mut arg.expr)
+                });
                 self.expected_type = saved;
                 if let Some(aty) = aty {
                     let arg_span = arg.expr.span();
@@ -178,6 +182,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(soft_public_use(name, span));
                 }
                 let sig = target.funcs.get(name).unwrap().clone();
+                let mut call_access = self.call_access_frame();
                 let type_params = target.trait_reg.fn_params.get(name).cloned().unwrap_or_default();
                 let mut subst = HashMap::new();
                 let mut pre_inferred = Vec::new();
@@ -200,8 +205,18 @@ impl<'a> Checker<'a> {
                         }
                     }
                 } else if !type_params.is_empty() {
-                    for arg in args.iter_mut() {
-                        pre_inferred.push(self.infer(&mut arg.expr));
+                    for (index, arg) in args.iter_mut().enumerate() {
+                        pre_inferred.push(self.with_call_access(&mut call_access, |checker| {
+                            if let Some((param_conv, param_ty)) = sig.params.get(index) {
+                                checker.check_call_argument_access(
+                                    arg,
+                                    *param_conv,
+                                    param_ty,
+                                    !sig.is_extern,
+                                );
+                            }
+                            checker.infer(&mut arg.expr)
+                        }));
                     }
                     let arg_types = pre_inferred.iter().filter_map(|ty| ty.clone()).collect::<Vec<_>>();
                     if arg_types.len() == args.len() {
@@ -290,7 +305,17 @@ impl<'a> Checker<'a> {
                     let aty = pre_inferred
                         .get(index)
                         .cloned()
-                        .unwrap_or_else(|| self.infer(&mut arg.expr));
+                        .unwrap_or_else(|| {
+                            self.with_call_access(&mut call_access, |checker| {
+                                checker.check_call_argument_access(
+                                    arg,
+                                    *pconv,
+                                    pty,
+                                    !sig.is_extern,
+                                );
+                                checker.infer(&mut arg.expr)
+                            })
+                        });
                     self.expected_type = saved;
                     if sig.is_pure
                         && crate::Sema::Diagnostics::is_clock_type(pty)
