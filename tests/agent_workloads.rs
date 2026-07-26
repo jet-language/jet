@@ -11,17 +11,37 @@ use std::time::{Duration, Instant};
 
 const HEADER: &str = "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards";
 const PROCESS_DEADLINE: Duration = Duration::from_secs(120);
-const EXPECTED_TASKS: &[(&str, &str, &str, &str)] = &[(
-    "repository-marker-scan",
-    "repository-search-and-edit",
-    "success",
-    "exit=0;stdout=exact",
-)];
+const EXPECTED_TASKS: &[(&str, &str, &str, &str)] = &[
+    (
+        "repository-marker-scan",
+        "repository-search-and-edit",
+        "success",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "incident-report-success",
+        "data-cleanup-and-report-generation",
+        "success",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "incident-report-malformed",
+        "data-cleanup-and-report-generation",
+        "malformed-input",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "incident-report-partial",
+        "data-cleanup-and-report-generation",
+        "partial-failure",
+        "exit=0;stdout=exact",
+    ),
+];
 const ADAPTERS: &[(&str, &str)] = &[
-    ("jet", "repository_marker_scan.jet"),
-    ("bash", "repository_marker_scan.bash"),
-    ("python", "repository_marker_scan.py"),
-    ("node", "repository_marker_scan.mjs"),
+    ("jet", "jet"),
+    ("bash", "bash"),
+    ("python", "py"),
+    ("node", "mjs"),
 ];
 
 #[derive(Debug)]
@@ -79,6 +99,16 @@ struct BoundedOutput {
 
 fn corpus_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/agent_workloads")
+}
+
+fn adapter_stem(task_id: &str) -> &'static str {
+    if task_id == "repository-marker-scan" {
+        "repository_marker_scan"
+    } else if task_id.starts_with("incident-report-") {
+        "incident_report"
+    } else {
+        panic!("task has no adapter source: {task_id}")
+    }
 }
 
 fn read_tasks() -> Vec<Task> {
@@ -216,6 +246,16 @@ fn tree_hashes(root: &Path) -> BTreeMap<String, String> {
     out
 }
 
+fn input_hashes(input: &Path) -> BTreeMap<String, String> {
+    if input.is_dir() {
+        return tree_hashes(input);
+    }
+    BTreeMap::from([(
+        input.file_name().unwrap().to_string_lossy().into_owned(),
+        jet::SHA256::sha256_hex(&fs::read(input).unwrap()),
+    )])
+}
+
 fn fixture_files(root: &Path) -> BTreeSet<String> {
     fn walk(corpus: &Path, dir: &Path, out: &mut BTreeSet<String>) {
         for entry in fs::read_dir(dir).unwrap() {
@@ -313,15 +353,17 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
         );
         assert_eq!(
             task.evidence,
-            "tests/agent_workloads.rs::equivalent_adapters_complete_repository_marker_scan"
+            "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks"
         );
         assert_eq!(task.tower_card, "#769");
         assert_eq!(task.loss_cards, "default-run=#688;wall-time=#666");
-        assert!(corpus_root().join(&task.input).is_dir());
+        assert!(corpus_root().join(&task.input).exists());
         assert!(corpus_root().join(&task.expected).is_file());
-        for (_, source) in ADAPTERS {
+        let stem = adapter_stem(&task.id);
+        for (_, extension) in ADAPTERS {
+            let source = format!("{stem}.{extension}");
             assert!(
-                corpus_root().join("adapters").join(source).is_file(),
+                corpus_root().join("adapters").join(&source).is_file(),
                 "missing adapter {source}"
             );
         }
@@ -329,7 +371,7 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
 
     let sums = fs::read_to_string(corpus_root().join("SHA256SUMS")).unwrap();
     let verified = verify_checksum_closure(&corpus_root(), &sums).unwrap();
-    assert_eq!(verified, 4, "all inputs and declared outputs must be frozen");
+    assert_eq!(verified, 10, "all inputs and declared outputs must be frozen");
 }
 
 #[test]
@@ -371,15 +413,11 @@ fn process_deadline_reaps_and_scratch_drop_cleans() {
 }
 
 #[test]
-fn equivalent_adapters_complete_repository_marker_scan() {
+fn equivalent_adapters_complete_declared_tasks() {
     if std::env::consts::OS == "windows" {
         panic!("Bash is explicitly unavailable as a native Windows adapter; this task cannot pass");
     }
 
-    let task = read_tasks().into_iter().next().unwrap();
-    let input = corpus_root().join(&task.input);
-    let expected = fs::read(corpus_root().join(&task.expected)).unwrap();
-    let before = tree_hashes(&input);
     let jet_cli = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
     let jet_artifact = jet::SHA256::sha256_hex(&fs::read(&jet_cli).unwrap());
     let versions = BTreeMap::from([
@@ -392,97 +430,115 @@ fn equivalent_adapters_complete_repository_marker_scan() {
         ("node", command_version(Path::new("node"), "--version", "node")),
     ]);
 
-    let mut measurements = Vec::new();
-    let mut declared_outputs = Vec::new();
-    for &(adapter, source_name) in ADAPTERS {
-        let scratch = Scratch::new("jet_agent_workload");
-        let source = corpus_root().join("adapters").join(source_name);
-        let cold = run_bounded(
-            adapter_command(
+    for task in read_tasks() {
+        let input = corpus_root().join(&task.input);
+        let expected = fs::read(corpus_root().join(&task.expected)).unwrap();
+        let before = input_hashes(&input);
+        let stem = adapter_stem(&task.id);
+        let mut measurements = Vec::new();
+        let mut declared_outputs = Vec::new();
+        for &(adapter, extension) in ADAPTERS {
+            let scratch = Scratch::new("jet_agent_workload");
+            let source = corpus_root()
+                .join("adapters")
+                .join(format!("{stem}.{extension}"));
+            let cold = run_bounded(
+                adapter_command(
+                    adapter,
+                    &source,
+                    &jet_cli,
+                    &input,
+                    &scratch.path,
+                ),
                 adapter,
-                &source,
-                &jet_cli,
-                &input,
-                &scratch.path,
-            ),
-            adapter,
-            PROCESS_DEADLINE,
-        );
-        let warm = run_bounded(
-            adapter_command(
+                PROCESS_DEADLINE,
+            );
+            let warm = run_bounded(
+                adapter_command(
+                    adapter,
+                    &source,
+                    &jet_cli,
+                    &input,
+                    &scratch.path,
+                ),
                 adapter,
-                &source,
-                &jet_cli,
-                &input,
-                &scratch.path,
-            ),
-            adapter,
-            PROCESS_DEADLINE,
+                PROCESS_DEADLINE,
+            );
+            assert!(!cold.timed_out, "{} {adapter} cold run timed out", task.id);
+            assert!(!warm.timed_out, "{} {adapter} warm run timed out", task.id);
+            assert_eq!(
+                cold.output.status.code(),
+                Some(0),
+                "{} {adapter} cold exit drifted:\n{}",
+                task.id,
+                String::from_utf8_lossy(&cold.output.stderr)
+            );
+            assert_eq!(
+                cold.output.stdout, expected,
+                "{} {adapter} cold stdout drifted",
+                task.id
+            );
+            assert_eq!(
+                warm.output.status.code(),
+                Some(0),
+                "{} {adapter} warm exit drifted",
+                task.id
+            );
+            assert_eq!(
+                warm.output.stdout, cold.output.stdout,
+                "{} {adapter} output was unstable",
+                task.id
+            );
+            assert_eq!(
+                input_hashes(&input),
+                before,
+                "{} {adapter} changed its read-only input authority",
+                task.id
+            );
+            declared_outputs.push(cold.output.stdout);
+            measurements.push(Measurement {
+                adapter,
+                source_tokens: source_tokens(&source),
+                cold: cold.elapsed,
+                warm: warm.elapsed,
+                version: versions[adapter].clone(),
+                cold_stderr_bytes: cold.output.stderr.len(),
+                cold_stderr_sha256: jet::SHA256::sha256_hex(&cold.output.stderr),
+                warm_stderr_bytes: warm.output.stderr.len(),
+                warm_stderr_sha256: jet::SHA256::sha256_hex(&warm.output.stderr),
+            });
+        }
+        assert!(
+            declared_outputs.windows(2).all(|pair| pair[0] == pair[1]),
+            "{} adapters disagreed on the declared outcome",
+            task.id
         );
-        assert!(!cold.timed_out, "{adapter} cold run timed out");
-        assert!(!warm.timed_out, "{adapter} warm run timed out");
-        assert_eq!(
-            cold.output.status.code(),
-            Some(0),
-            "{adapter} cold exit drifted:\n{}",
-            String::from_utf8_lossy(&cold.output.stderr)
-        );
-        assert_eq!(cold.output.stdout, expected, "{adapter} cold stdout drifted");
-        assert_eq!(
-            warm.output.status.code(),
-            Some(0),
-            "{adapter} warm exit drifted"
-        );
-        assert_eq!(
-            warm.output.stdout, cold.output.stdout,
-            "{adapter} output was unstable"
-        );
-        assert_eq!(
-            tree_hashes(&input),
-            before,
-            "{adapter} changed its read-only input authority"
-        );
-        declared_outputs.push(cold.output.stdout);
-        measurements.push(Measurement {
-            adapter,
-            source_tokens: source_tokens(&source),
-            cold: cold.elapsed,
-            warm: warm.elapsed,
-            version: versions[adapter].clone(),
-            cold_stderr_bytes: cold.output.stderr.len(),
-            cold_stderr_sha256: jet::SHA256::sha256_hex(&cold.output.stderr),
-            warm_stderr_bytes: warm.output.stderr.len(),
-            warm_stderr_sha256: jet::SHA256::sha256_hex(&warm.output.stderr),
-        });
-    }
-    assert!(
-        declared_outputs.windows(2).all(|pair| pair[0] == pair[1]),
-        "adapters disagreed on the declared outcome"
-    );
 
-    println!(
-        "machine\tos={}\tarch={}\tcorpus=1\ttask={}\tevidence={}\tcard={}\tlosses=red:{}\tjet_artifact={}\tjet_sha256={}",
-        std::env::consts::OS,
-        std::env::consts::ARCH,
-        task.id,
-        task.evidence,
-        task.tower_card,
-        task.loss_cards,
-        jet_cli.display(),
-        jet_artifact
-    );
-    for result in &measurements {
         println!(
-            "result\tadapter={}\tsuccess=true\tsource_tokens={}\tcold_ns={}\twarm_ns={}\toutput_stable=true\tversion={}\tcold_stderr_bytes={}\tcold_stderr_sha256={}\twarm_stderr_bytes={}\twarm_stderr_sha256={}\tagent_tool_calls=not-recorded:#769\trepair_turns=not-recorded:#769\tpeak_memory=not-recorded:#769\tdiagnostic_quality=not-recorded:#769\torphan_processes=not-recorded:#769\tsandbox_escapes=not-recorded:#769\tnetwork=unmeasured:#769\texternal_writes=unmeasured:#769\tcross_platform=not-run:#769",
-            result.adapter,
-            result.source_tokens,
-            result.cold.as_nanos(),
-            result.warm.as_nanos(),
-            result.version.replace('\t', " "),
-            result.cold_stderr_bytes,
-            result.cold_stderr_sha256,
-            result.warm_stderr_bytes,
-            result.warm_stderr_sha256
+            "machine\tos={}\tarch={}\tcorpus=1\ttask={}\tevidence={}\tcard={}\tlosses=red:{}\tjet_artifact={}\tjet_sha256={}",
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            task.id,
+            task.evidence,
+            task.tower_card,
+            task.loss_cards,
+            jet_cli.display(),
+            jet_artifact
         );
+        for result in &measurements {
+            println!(
+                "result\ttask={}\tadapter={}\tsuccess=true\tsource_tokens={}\tcold_ns={}\twarm_ns={}\toutput_stable=true\tversion={}\tcold_stderr_bytes={}\tcold_stderr_sha256={}\twarm_stderr_bytes={}\twarm_stderr_sha256={}\tagent_tool_calls=not-recorded:#769\trepair_turns=not-recorded:#769\tpeak_memory=not-recorded:#769\tdiagnostic_quality=not-recorded:#769\torphan_processes=not-recorded:#769\tsandbox_escapes=not-recorded:#769\tnetwork=unmeasured:#769\texternal_writes=unmeasured:#769\tcross_platform=not-run:#769",
+                task.id,
+                result.adapter,
+                result.source_tokens,
+                result.cold.as_nanos(),
+                result.warm.as_nanos(),
+                result.version.replace('\t', " "),
+                result.cold_stderr_bytes,
+                result.cold_stderr_sha256,
+                result.warm_stderr_bytes,
+                result.warm_stderr_sha256
+            );
+        }
     }
 }

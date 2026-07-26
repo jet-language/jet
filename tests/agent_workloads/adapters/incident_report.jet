@@ -1,0 +1,62 @@
+use core.files as fs
+use core.io as io
+
+struct Incident {
+    service: String
+    status: String
+}
+
+fn run() {
+    args :: io.args()
+    if args.len() != 2 {
+        panic("usage: incident_report INPUT_FILE")
+    }
+    input :: args.get(1) ?? panic("missing input file")
+    text :: fs.read(input) ?? panic("cannot read input")
+    incidents := [Incident].{}
+    services := [String].{}
+    rejects := [String].{}
+    line_number := 0
+    loop line; text.split("\n") {
+        line_number += 1
+        if line_number != 1 && line != "" {
+            fields :: line.split("\t").to_list()
+            if fields.len() != 3 {
+                rejects.push("reject|{line_number}|field-count")
+            } else if fields.get(0) == .Val(service) {
+                if fields.get(1) == .Val(status) {
+                    if status != "ok" && status != "error" {
+                        rejects.push("reject|{line_number}|status")
+                    } else if service == "" {
+                        rejects.push("reject|{line_number}|service")
+                    } else {
+                        if !services.contains(service) {
+                            services.push(~service)
+                        }
+                        incidents.push(Incident.{ service: service, status: status })
+                    }
+                }
+            }
+        }
+    }
+    services.sort()
+    print("accepted|{incidents.len()}")
+    print("rejected|{rejects.len()}")
+    loop reject; rejects {
+        print(reject)
+    }
+    loop service; services {
+        ok := 0
+        errors := 0
+        loop incident; incidents {
+            if incident.service == service {
+                if incident.status == "ok" {
+                    ok += 1
+                } else {
+                    errors += 1
+                }
+            }
+        }
+        print("{service}|ok={ok}|error={errors}")
+    }
+}
