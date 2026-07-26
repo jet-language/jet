@@ -524,7 +524,8 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             type_name == "BigInt"
                 && matches!(
                     (func.as_str(), args.len()),
-                    ("from_int" | "from_str", 1) | ("add" | "sub" | "mul", 2)
+                    ("from_int" | "from_str" | "to_string", 1)
+                        | ("add" | "sub" | "mul", 2)
                 )
                 && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }

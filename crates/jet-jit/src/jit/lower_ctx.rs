@@ -5562,6 +5562,7 @@ impl LowerCtx<'_, '_> {
                     "add" => self.host.num.bigint_add,
                     "sub" => self.host.num.bigint_sub,
                     "mul" => self.host.num.bigint_mul,
+                    "to_string" => self.host.num.bigint_to_string,
                     _ => return Err(format!("jit precise numeric builtin unsupported: {func}")),
                 };
                 let arg_vals: Result<Vec<_>, _> = args.iter().map(|a| self.lower_expr(a)).collect();

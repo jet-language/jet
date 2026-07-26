@@ -2611,7 +2611,16 @@ fn bigint_example_matches_interpreter_resident_jit_default_dev_and_aot() {
     };
 
     let source = fs::read_to_string(file).unwrap();
+    jet_jit::reset_jit_trace_for_test();
     let resident = run_cranelift_without_fallback(&source, "bigint_example");
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "BigInt example must execute as native JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "BigInt example must not use interpreter deopt or fallback"
+    );
     let default = match dev_iteration(file, false, false) {
         RunOutcome::Ran { stdout, stderr, exit_code } => {
             ProgramOutput::ran(stdout, stderr, exit_code)
@@ -3639,10 +3648,12 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
     };
 
     let mut backend = CraneliftBackend::new();
-    let jit = match backend.run(&bundle, false) {
-        RunOutcome::Ran { stdout, .. } => stdout,
-        RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
-    };
+    let jit = jet_jit::with_program_args(&[file.to_string()], || {
+        match backend.run(&bundle, false) {
+            RunOutcome::Ran { stdout, .. } => stdout,
+            RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
+        }
+    });
     assert_eq!(
         jit, interpreted,
         "JIT vs interpreter divergence for `{stem}`"
@@ -3875,6 +3886,15 @@ fn resident_jit_safe_string_method_chain() {
 /// a ratchet baseline: any coverage movement is deliberate and reviewed.
 #[test]
 fn jit_coverage_audit() {
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(jit_coverage_audit_inner)
+        .expect("JIT coverage audit thread")
+        .join()
+        .expect("JIT coverage audit thread panicked");
+}
+
+fn jit_coverage_audit_inner() {
     let (covered, gaps) = collect_jit_coverage();
     if std::env::var("JET_DUMP_JIT_GAPS").as_deref() == Ok("1") {
         let mut out = String::from(
