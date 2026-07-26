@@ -1024,6 +1024,120 @@ fn run() {
     jet::compile(src).expect("callee parameter 0 must map to wrapper parameter 0");
 }
 
+/// #745: a zero-copy parser can return multiple token windows into one
+/// caller-owned source. Both fields must keep parameter-0 provenance.
+#[test]
+fn zero_copy_parser_returns_token_and_remainder_views() {
+    let src = r#"
+struct Token {
+    text: View<str>,
+    rest: View<str>
+}
+
+fn scan(source: String) -> Token {
+    text :: source.before(":")
+    rest :: source.after(":")
+    return Token.{ text: text, rest: rest }
+}
+
+fn parse(source: String) -> Token {
+    return scan(source)
+}
+
+fn run() {
+    source := "name:value"
+    token :: parse(source)
+    print(token.text)
+    print(token.rest)
+}
+"#;
+    let out = jet::compile(src)
+        .expect("a parser token and remainder may borrow one caller-owned source");
+    assert!(
+        out.rust.contains("pub struct user_Token<'__jet_view>")
+            && out.rust.contains("pub user_text: &'__jet_view str")
+            && out.rust.contains("pub user_rest: &'__jet_view str")
+            && out.rust.contains("-> user_Token<'__jet_view>"),
+        "both parser views must share the hidden source lifetime: {}",
+        out.rust
+    );
+}
+
+/// #745: D-MEM-VIEWRET1 rejects a parser that returns windows into storage
+/// owned by the parser call.
+#[test]
+fn zero_copy_parser_rejects_locally_owned_source() {
+    let src = r#"
+struct Token {
+    text: View<str>,
+    rest: View<str>
+}
+
+fn parse_owned() -> Token {
+    source := "name:value"
+    text :: source.before(":")
+    rest :: source.after(":")
+    return Token.{ text: text, rest: rest }
+}
+
+fn run() {
+    print(parse_owned().text)
+}
+"#;
+    let diags =
+        jet::compile(src).expect_err("parser-owned storage cannot back returned token views");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E2307"),
+        "expected string-view owner error: {diags:?}"
+    );
+}
+
+/// #745: hostile caller code cannot replace parser input while a returned
+/// token still observes that storage.
+#[test]
+fn zero_copy_parser_blocks_source_replacement_while_token_is_live() {
+    let src = r#"
+struct Token {
+    text: View<str>,
+    rest: View<str>
+}
+
+fn scan(source: String) -> Token {
+    text :: source.before(":")
+    rest :: source.after(":")
+    return Token.{ text: text, rest: rest }
+}
+
+fn run() {
+    source := "name:value"
+    token :: scan(source)
+    source = "other:data"
+    print(token.text)
+}
+"#;
+    let diags =
+        jet::compile(src).expect_err("live parser views must keep caller storage stable");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0212"),
+        "expected owner-invalidation error: {diags:?}"
+    );
+}
+
+/// #745: keep the user-facing zero-copy parser example on the same production
+/// parser, sema, TIR, and codegen path as hand-written source.
+#[test]
+fn zero_copy_parser_example_covers_production_pipeline() {
+    let src = include_str!("../examples/features/memory/returned_views.jet");
+    let out = jet::compile(src).expect("returned-views example must compile end to end");
+    assert!(
+        out.rust.contains("pub struct user_Token<'__jet_view>")
+            && out.rust.contains("fn user_parse<'__jet_view>")
+            && out.rust.contains("-> user_Token<'__jet_view>"),
+        "example parser must lower with caller-owned view provenance: {}",
+        out.rust
+    );
+}
+
 #[test]
 fn returned_string_view_uses_parameter_provenance() {
     let src = r#"
