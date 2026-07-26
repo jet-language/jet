@@ -872,13 +872,9 @@ fn reordered_simple_union_type(
     formatted: &[Token],
     formatted_i: usize,
 ) -> Option<(usize, usize)> {
-    if !matches!(
-        original_i.checked_sub(1).and_then(|i| original.get(i)).map(|token| &token.kind),
-        Some(TokKind::Colon)
-    ) || !matches!(
-        formatted_i.checked_sub(1).and_then(|i| formatted.get(i)).map(|token| &token.kind),
-        Some(TokKind::Colon)
-    ) {
+    if !simple_union_type_annotation(original, original_i)
+        || !simple_union_type_annotation(formatted, formatted_i)
+    {
         return None;
     }
     let (mut original_members, next_original) =
@@ -888,6 +884,66 @@ fn reordered_simple_union_type(
     original_members.sort();
     formatted_members.sort();
     (original_members == formatted_members).then_some((next_original, next_formatted))
+}
+
+fn simple_union_type_annotation(tokens: &[Token], start: usize) -> bool {
+    let Some(colon) = start.checked_sub(1) else {
+        return false;
+    };
+    if !matches!(tokens.get(colon).map(|token| &token.kind), Some(TokKind::Colon)) {
+        return false;
+    }
+
+    let mut awaiting_struct_body = false;
+    let mut awaiting_fn_params = false;
+    let mut struct_scopes = Vec::new();
+    let mut fn_param_scopes = Vec::new();
+    let mut brace_depth = 0usize;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    for token in &tokens[..colon] {
+        match token.kind {
+            TokKind::KwStruct => awaiting_struct_body = true,
+            TokKind::KwFn => awaiting_fn_params = true,
+            TokKind::LBrace => {
+                brace_depth += 1;
+                if awaiting_struct_body {
+                    struct_scopes.push((brace_depth, paren_depth, bracket_depth));
+                    awaiting_struct_body = false;
+                }
+            }
+            TokKind::RBrace => {
+                if struct_scopes
+                    .last()
+                    .is_some_and(|scope| scope.0 == brace_depth)
+                {
+                    struct_scopes.pop();
+                }
+                brace_depth -= 1;
+            }
+            TokKind::LParen => {
+                paren_depth += 1;
+                if awaiting_fn_params {
+                    fn_param_scopes.push((brace_depth, paren_depth, bracket_depth));
+                    awaiting_fn_params = false;
+                }
+            }
+            TokKind::RParen => {
+                if fn_param_scopes
+                    .last()
+                    .is_some_and(|scope| scope.1 == paren_depth)
+                {
+                    fn_param_scopes.pop();
+                }
+                paren_depth -= 1;
+            }
+            TokKind::LBracket => bracket_depth += 1,
+            TokKind::RBracket => bracket_depth -= 1,
+            _ => {}
+        }
+    }
+    let scope = (brace_depth, paren_depth, bracket_depth);
+    struct_scopes.last() == Some(&scope) || fn_param_scopes.last() == Some(&scope)
 }
 
 fn simple_union_members(tokens: &[Token], start: usize) -> Option<(Vec<&str>, usize)> {
@@ -1437,6 +1493,11 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
             "union order rule requires a type annotation",
             "fn run() { value :: left | right }\n",
             "fn run() { value :: right | left }\n",
+        ),
+        (
+            "union order rule rejects struct field values",
+            "fn run() { p :: Point.{x: left | right} }\n",
+            "fn run() { p :: Point.{x: right | left} }\n",
         ),
         (
             "union order rule preserves every member",
