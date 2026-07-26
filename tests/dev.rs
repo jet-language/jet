@@ -3769,6 +3769,105 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
 }
 
 #[test]
+fn comptime_scalar_examples_match_interpreter_resident_jit_and_aot() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    for stem in ["comptime/comptime_core", "comptime/comptime_tiers"] {
+        let file = example_path(stem);
+        let expected = ProgramOutput::ran(golden_stdout(stem), String::new(), 0);
+        let interpreted = match dev_iteration(&file, false, true) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => ProgramOutput::ran(stdout, stderr, exit_code),
+            RunOutcome::Problems(diags) => {
+                panic!("interpreter failed `{stem}`: {diags:?}")
+            }
+        };
+
+        let source = fs::read_to_string(&file).unwrap();
+        jet_jit::reset_jit_trace_for_test();
+        let resident = run_cranelift_without_fallback(&source, &stem.replace('/', "_"));
+        assert!(jet_jit::jit_executed_for_test(), "`{stem}` did not execute in JIT");
+        assert!(
+            !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+            "`{stem}` used deopt or fallback"
+        );
+
+        let dir = std::env::temp_dir().join(format!(
+            "jet_comptime_scalar_{}_{}",
+            stem.replace('/', "_"),
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let aot = compiled_binary_output(&dir, "comptime_scalar", 0, stem, &file);
+
+        assert_eq!(interpreted, expected, "interpreter drifted for `{stem}`");
+        assert_eq!(resident, expected, "resident JIT drifted for `{stem}`");
+        assert_eq!(aot, expected, "AOT drifted for `{stem}`");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    let source = r#"
+comptime f32_nan = F32.NAN
+comptime f32_inf = F32.INFINITY
+comptime f32_neg_inf = F32.NEG_INFINITY
+comptime f64_nan = Float.NAN
+comptime f64_inf = Float.INFINITY
+comptime f64_neg_inf = Float.NEG_INFINITY
+
+fn run() {
+    print(f32_nan)
+    print(f32_inf)
+    print(f32_neg_inf)
+    print(f64_nan)
+    print(f64_inf)
+    print(f64_neg_inf)
+}
+"#;
+    let expected = ProgramOutput::ran("NaN\ninf\n-inf\nNaN\ninf\n-inf\n".into(), "".into(), 0);
+    let dir =
+        std::env::temp_dir().join(format!("jet_comptime_nonfinite_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("comptime_nonfinite.jet");
+    fs::write(&file, source).unwrap();
+    let shown = file.to_string_lossy().to_string();
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("interpreter failed nonfinite scalars: {diags:?}"),
+    };
+    jet_jit::reset_jit_trace_for_test();
+    let resident = run_cranelift_without_fallback(source, "comptime_nonfinite");
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "nonfinite scalar fixture used deopt or fallback"
+    );
+    let aot = compiled_binary_output(
+        &dir,
+        "comptime_nonfinite",
+        0,
+        "comptime_nonfinite",
+        &shown,
+    );
+
+    assert_eq!(interpreted, expected);
+    assert_eq!(resident, expected);
+    assert_eq!(aot, expected);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn generic_modules_full_example_matches_resident_jit_and_aot() {
     // Corpus gate classifies this stem as frontend_rejected (E0857); skip three-way.
     if frontend_rejected_stems().contains("modules/generic_modules") {

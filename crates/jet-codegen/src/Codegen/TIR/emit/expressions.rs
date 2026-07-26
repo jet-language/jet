@@ -1,4 +1,4 @@
-use crate::AST::{BinOp, Type, UnOp};
+use crate::AST::{BinOp, CtFloat, Type, UnOp};
 use crate::Codegen::Cx;
 use crate::Codegen::mangle;
 use crate::Codegen::user_type_rust;
@@ -430,9 +430,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // D-FLOATW1: emit `f32` suffix when the sema-resolved width is F32.
         TExprKind::FloatLit(v) => {
             if matches!(&e.ty, Type::Float32) {
-                format!("{:?}f32", v)
+                CtFloat::f32(*v as f32).serialize()
             } else {
-                format!("{:?}f64", v)
+                CtFloat::f64(*v).serialize()
             }
         }
         TExprKind::BoolLit(b) => b.to_string(),

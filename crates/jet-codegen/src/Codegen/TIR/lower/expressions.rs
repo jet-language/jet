@@ -282,11 +282,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // c109 Phase 24: a comptime CONST inlines its pre-rendered value FIRST (the
             // AST `emit_expr` Ident arm returns `cx.consts[name]` before any env/fn-value
             // check — so a const takes precedence even over a same-named local, matching
-            // byte-for-byte). The `ty` is a placeholder (never read — see `ConstInline`).
+            // byte-for-byte). The evaluated value supplies the total scalar type so an
+            // inlined F32 keeps its width in every TIR consumer.
             if cx.consts.contains_key(name) {
+                let value = cx.const_values.get(name);
                 return TExpr {
-                    ty: env.ty_of(name).unwrap_or(Type::Int),
-                    kind: lower_comptime_scalar(cx.const_values.get(name))
+                    ty: value
+                        .map(crate::AST::CtValue::jet_type)
+                        .or_else(|| env.ty_of(name))
+                        .unwrap_or(Type::Int),
+                    kind: lower_comptime_scalar(value)
                         .unwrap_or_else(|| TExprKind::ConstRef(name.clone())),
                 };
             }
