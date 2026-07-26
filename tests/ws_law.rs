@@ -122,6 +122,58 @@ include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/Ws.rs");
 include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
 
 #[test]
+fn direct_ws_consumers_include_client_core_first() {
+    fn collect_rs(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+        let mut entries = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        entries.sort();
+        for path in entries {
+            if path.is_dir() {
+                collect_rs(&path, files);
+            } else if path.extension().and_then(|part| part.to_str()) == Some("rs") {
+                files.push(path);
+            }
+        }
+    }
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    collect_rs(&root.join("crates"), &mut files);
+    collect_rs(&root.join("tests"), &mut files);
+    let mut consumers = Vec::new();
+    let include_prefix = ["include", "!("].concat();
+    let ws_suffix = ["/Ws", ".rs"].concat();
+    for path in files {
+        let text = std::fs::read_to_string(&path).unwrap();
+        if !text.lines().any(|line| {
+            line.trim_start().starts_with(&include_prefix) && line.contains(&ws_suffix)
+        }) {
+            continue;
+        }
+        let ws = text.find(&ws_suffix).unwrap();
+        let client_suffix = ["/WsClient", ".rs"].concat();
+        let client = text
+            .find(&client_suffix)
+            .unwrap_or_else(|| panic!("{} omits WsClient.rs", path.display()));
+        assert!(
+            client < ws,
+            "{} must include WsClient.rs before Ws.rs",
+            path.display()
+        );
+        consumers.push(path.strip_prefix(root).unwrap().to_path_buf());
+    }
+    assert_eq!(
+        consumers,
+        [
+            std::path::PathBuf::from("tests/http_server_lifecycle.rs"),
+            std::path::PathBuf::from("tests/ws_law.rs"),
+        ]
+    );
+}
+
+#[test]
 fn accept_key_matches_rfc6455_example() {
     // RFC6455 section 1.3 example.
     assert_eq!(

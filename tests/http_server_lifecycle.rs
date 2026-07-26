@@ -118,6 +118,7 @@ include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpMessage.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpRoute.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpClient.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpServer.rs");
+include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/Ws.rs");
 include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
 
