@@ -970,7 +970,9 @@ impl<'a> Checker<'a> {
                                 !sig.is_extern,
                             );
                         }
-                        checker.infer(&mut arg.expr)
+                        let inferred = checker.infer(&mut arg.expr);
+                        checker.check_call_argument_captures(&arg.expr);
+                        inferred
                     }));
                 }
                 let arg_types: Vec<Type> = pre_inferred.iter().filter_map(|t| t.clone()).collect();
@@ -1078,7 +1080,9 @@ impl<'a> Checker<'a> {
                                 !sig.is_extern,
                             );
                         }
-                        checker.infer(&mut arg.expr)
+                        let inferred = checker.infer(&mut arg.expr);
+                        checker.check_call_argument_captures(&arg.expr);
+                        inferred
                     })
                 };
                 if sig.is_pure

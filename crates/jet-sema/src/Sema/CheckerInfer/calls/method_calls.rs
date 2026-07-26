@@ -3606,6 +3606,7 @@ impl<'a> Checker<'a> {
                 args,
                 span,
                 None,
+                None,
             )?;
             let ret = msig.return_type.clone().map(|t| self.resolve_type(t));
             *resolved_ret_out = ret.clone();

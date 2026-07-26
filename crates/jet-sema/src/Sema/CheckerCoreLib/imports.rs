@@ -91,7 +91,9 @@ impl<'a> Checker<'a> {
                 self.expected_type = Some(pty.clone());
                 let aty = self.with_call_access(&mut call_access, |checker| {
                     checker.check_call_argument_access(arg, *pconv, pty, true);
-                    checker.infer(&mut arg.expr)
+                    let inferred = checker.infer(&mut arg.expr);
+                    checker.check_call_argument_captures(&arg.expr);
+                    inferred
                 });
                 self.expected_type = saved;
                 if let Some(aty) = aty {
@@ -215,7 +217,9 @@ impl<'a> Checker<'a> {
                                     !sig.is_extern,
                                 );
                             }
-                            checker.infer(&mut arg.expr)
+                            let inferred = checker.infer(&mut arg.expr);
+                            checker.check_call_argument_captures(&arg.expr);
+                            inferred
                         }));
                     }
                     let arg_types = pre_inferred.iter().filter_map(|ty| ty.clone()).collect::<Vec<_>>();
@@ -313,7 +317,9 @@ impl<'a> Checker<'a> {
                                     pty,
                                     !sig.is_extern,
                                 );
-                                checker.infer(&mut arg.expr)
+                                let inferred = checker.infer(&mut arg.expr);
+                                checker.check_call_argument_captures(&arg.expr);
+                                inferred
                             })
                         });
                     self.expected_type = saved;

@@ -279,6 +279,86 @@ fn run() {
 }
 
 #[test]
+fn lambda_capture_cannot_read_an_active_write_place() {
+    let src = r#"
+fn both(a: &String, callback: fn() -> String) { print(a); print(callback()) }
+
+fn run() {
+    x := "jet"
+    both(&x, () => x)
+}
+"#;
+    let diags = jet::compile(src).expect_err("lambda capture must fail in sema before rustc");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0204"),
+        "expected the call-alias diagnostic: {diags:?}"
+    );
+}
+
+#[test]
+fn generic_constructor_nested_argument_sees_active_write_place() {
+    let src = r#"
+struct Pair<T> { value: T }
+impl Pair {
+    fn new(first: &T, second: T) -> Pair<T> {
+        return Pair<T>.{ value: second }
+    }
+}
+fn see(value: Int) -> Int { return value }
+
+fn run() {
+    x := 1
+    pair :: Pair.new(&x, see(x))
+    print(pair.value)
+}
+"#;
+    let diags =
+        jet::compile(src).expect_err("constructor pre-inference must fail in sema before rustc");
+    assert!(
+        diags.iter().any(|diag| diag.code == "E0204"),
+        "expected the call-alias diagnostic: {diags:?}"
+    );
+}
+
+#[test]
+fn dynamic_projection_operands_are_checked_but_not_retained() {
+    let hostile_index = r#"
+fn both(index: &Int, value: Int) { index += value }
+fn run() {
+    values := [10, 20]
+    index := 0
+    both(&index, values[index])
+}
+"#;
+    let diags = jet::compile(hostile_index)
+        .expect_err("dynamic index evaluation must fail in sema before rustc");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let hostile_slice = r#"
+fn both(end: &Int, values: [Int]) { end += values.len() }
+fn run() {
+    values := [10, 20]
+    end := 1
+    both(&end, values[0..end])
+}
+"#;
+    let diags = jet::compile(hostile_slice)
+        .expect_err("dynamic slice-bound evaluation must fail in sema before rustc");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let ordered = r#"
+fn both(value: Int, index: &Int) { index += value }
+fn run() {
+    values := [10, 20]
+    index := 0
+    both(values[index], &index)
+}
+"#;
+    jet::compile(ordered)
+        .expect("the index read finishes before the later write borrow is retained");
+}
+
+#[test]
 fn whole_place_alias_blocks_overlapping_write_argument() {
     let src = r#"
 fn both(a: &[Int], b: [Int]) {
@@ -336,6 +416,59 @@ fn main() {
 }
 "#,
             "E0502",
+        ),
+        (
+            "lambda.rs",
+            r#"
+fn both<F: FnOnce() -> String>(a: &mut String, callback: F) {
+    println!("{a}");
+    println!("{}", callback());
+}
+fn main() {
+    let mut x = String::from("jet");
+    both(&mut x, move || x);
+}
+"#,
+            "E0505",
+        ),
+        (
+            "constructor.rs",
+            r#"
+struct Pair<T>(T);
+impl<T> Pair<T> {
+    fn new(_first: &mut T, second: T) -> Self { Self(second) }
+}
+fn see(value: i64) -> i64 { value }
+fn main() {
+    let mut x = 1;
+    let _ = Pair::new(&mut x, see(x));
+}
+"#,
+            "E0503",
+        ),
+        (
+            "dynamic_index.rs",
+            r#"
+fn both(index: &mut usize, value: i64) { *index += value as usize }
+fn main() {
+    let values = [10, 20];
+    let mut index = 0;
+    both(&mut index, values[index]);
+}
+"#,
+            "E0503",
+        ),
+        (
+            "slice_bound.rs",
+            r#"
+fn both(end: &mut usize, values: &[i64]) { *end += values.len() }
+fn main() {
+    let values = [10, 20];
+    let mut end = 1;
+    both(&mut end, &values[0..end]);
+}
+"#,
+            "E0503",
         ),
     ];
     for (name, source, expected) in cases {

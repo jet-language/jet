@@ -230,6 +230,7 @@ impl<'a> Checker<'a> {
             })
         }
         .unwrap_or_default();
+        let mut call_access = self.call_access_frame();
         let mut pre_inferred = None;
         if method == "new" && type_args.is_empty() {
             if !declared.is_empty() {
@@ -246,7 +247,22 @@ impl<'a> Checker<'a> {
                     let saved_expected = self.expected_type.take();
                     let actual = args
                         .iter_mut()
-                        .map(|arg| self.infer(&mut arg.expr))
+                        .enumerate()
+                        .map(|(index, arg)| {
+                            self.with_call_access(&mut call_access, |checker| {
+                                if let Some((param_conv, param_ty)) = msig.params.get(index) {
+                                    checker.check_call_argument_access(
+                                        arg,
+                                        *param_conv,
+                                        param_ty,
+                                        true,
+                                    );
+                                }
+                                let inferred = checker.infer(&mut arg.expr);
+                                checker.check_call_argument_captures(&arg.expr);
+                                inferred
+                            })
+                        })
                         .collect::<Vec<_>>();
                     self.expected_type = saved_expected;
                     if actual.iter().all(Option::is_some) {
@@ -342,6 +358,7 @@ impl<'a> Checker<'a> {
             args,
             span,
             pre_inferred.as_deref(),
+            Some(call_access),
         )
     }
 
@@ -354,6 +371,7 @@ impl<'a> Checker<'a> {
         args: &mut Vec<crate::AST::CallArg>,
         span: Span,
         pre_inferred: Option<&[Option<Type>]>,
+        call_access: Option<CallAccessFrame>,
     ) -> Option<Type> {
         let _ = (type_name, method, span);
         let expected_args = if sig.self_conv.is_some() {
@@ -457,7 +475,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        let mut call_access = self.call_access_frame();
+        let mut call_access = call_access.unwrap_or_else(|| self.call_access_frame());
         if let (Some(receiver), Some(convention)) = (receiver, sig.self_conv) {
             self.with_call_access(&mut call_access, |checker| {
                 checker.record_call_receiver_access(receiver, convention, span);
@@ -492,22 +510,23 @@ impl<'a> Checker<'a> {
                 if matches!(param_conv, AccessConvention::Read) && !param_ty.is_scalar() {
                     self.borrow_ctx = true;
                 }
-                let arg_ty = self.with_call_access(&mut call_access, |checker| {
-                    checker.check_call_argument_access(arg, *param_conv, param_ty, true);
-                    if let Some(ty) = pre_inferred
-                        .and_then(|types| types.get(arg_idx))
-                        .cloned()
-                        .flatten()
-                    {
-                        Some(ty)
-                    } else {
+                let pre_inferred_ty = pre_inferred
+                    .and_then(|types| types.get(arg_idx))
+                    .cloned()
+                    .flatten();
+                let arg_ty = if pre_inferred_ty.is_some() {
+                    pre_inferred_ty
+                } else {
+                    self.with_call_access(&mut call_access, |checker| {
+                        checker.check_call_argument_access(arg, *param_conv, param_ty, true);
                         let saved_expected = checker.expected_type.clone();
                         checker.expected_type = Some(param_ty.clone());
                         let inferred = checker.infer(&mut arg.expr);
                         checker.expected_type = saved_expected;
+                        checker.check_call_argument_captures(&arg.expr);
                         inferred
-                    }
-                });
+                    })
+                };
                 if let Some(arg_ty) = arg_ty {
                     let reported = self.check_type_assignable(param_ty, &arg_ty, arg.expr.span());
                     if !reported && arg_ty != *param_ty {
@@ -708,7 +727,9 @@ impl<'a> Checker<'a> {
             self.expected_type = Some(param.ty.clone());
             let arg_ty = self.with_call_access(&mut call_access, |checker| {
                 checker.check_call_argument_access(arg, param.convention, &param.ty, true);
-                checker.infer(&mut arg.expr)
+                let inferred = checker.infer(&mut arg.expr);
+                checker.check_call_argument_captures(&arg.expr);
+                inferred
             });
             self.expected_type = saved_expected;
             if let Some(arg_ty) = arg_ty {

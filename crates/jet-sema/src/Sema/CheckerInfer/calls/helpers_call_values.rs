@@ -119,7 +119,9 @@ impl<'a> Checker<'a> {
                             param_ty,
                             true,
                         );
-                        checker.infer(&mut arg.expr)
+                        let inferred = checker.infer(&mut arg.expr);
+                        checker.check_call_argument_captures(&arg.expr);
+                        inferred
                     });
                     self.expected_type = saved;
                     self.borrow_ctx = saved_borrow;

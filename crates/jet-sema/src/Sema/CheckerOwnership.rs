@@ -627,6 +627,33 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn collect_call_projection_reads(&self, expr: &Expr, reads: &mut Vec<(ViewPlace, Span)>) {
+        match expr {
+            Expr::Index { base, index, .. } => {
+                self.collect_call_projection_reads(base, reads);
+                self.collect_call_value_reads(index, reads);
+            }
+            Expr::Slice {
+                base, start, end, ..
+            } => {
+                self.collect_call_projection_reads(base, reads);
+                self.collect_call_value_reads(start, reads);
+                self.collect_call_value_reads(end, reads);
+            }
+            Expr::Field(base, _, _)
+            | Expr::Place(base, _, _)
+            | Expr::Paren(base, _)
+            | Expr::Deref(base, _) => self.collect_call_projection_reads(base, reads),
+            _ => {}
+        }
+    }
+
+    fn check_call_transient_reads(&mut self, reads: Vec<(ViewPlace, Span)>) {
+        for (place, span) in reads {
+            self.check_call_place_access(&place, ViewAccess::Read, span);
+        }
+    }
+
     /// Check one evaluated argument against every active outer/current call,
     /// then retain exactly the borrow that generated Rust keeps until this call
     /// returns. Call-form checkers supply only signature metadata.
@@ -640,11 +667,12 @@ impl<'a> Checker<'a> {
         let Some(place) = self.place_from_expr(&arg.expr) else {
             let mut reads = Vec::new();
             self.collect_call_value_reads(&arg.expr, &mut reads);
-            for (place, span) in reads {
-                self.check_call_place_access(&place, ViewAccess::Read, span);
-            }
+            self.check_call_transient_reads(reads);
             return;
         };
+        let mut projection_reads = Vec::new();
+        self.collect_call_projection_reads(&arg.expr, &mut projection_reads);
+        self.check_call_transient_reads(projection_reads);
         let access = if arg.convention == AccessConvention::Write {
             ViewAccess::Write
         } else {
@@ -667,10 +695,61 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Lambda bodies run later, but constructing a lambda evaluates its free
+    /// captures now. Nonescaping closures keep their capture loans for the
+    /// enclosing call; escaping closures move/clone them during construction.
+    pub(crate) fn check_call_argument_captures(&mut self, expr: &Expr) {
+        let lambda = match expr {
+            Expr::Lambda(lambda) => lambda,
+            Expr::Paren(inner, _) => {
+                self.check_call_argument_captures(inner);
+                return;
+            }
+            _ => return,
+        };
+        let params = lambda
+            .params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect::<HashSet<_>>();
+        let taken = lambda
+            .take_names
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<HashSet<_>>();
+        let mut reads = HashSet::new();
+        let mut writes = HashSet::new();
+        crate::Sema::Captures::lambda_collect_captures(
+            &lambda.body,
+            &params,
+            &mut reads,
+            &mut writes,
+        );
+        reads.extend(writes.iter().cloned());
+        for name in reads {
+            let capture = Expr::Ident(name.clone(), lambda.span);
+            let Some(place) = self.place_from_expr(&capture) else {
+                continue;
+            };
+            let access = if writes.contains(&name) {
+                ViewAccess::Write
+            } else {
+                ViewAccess::Read
+            };
+            self.check_call_place_access(&place, access, lambda.span);
+            if !lambda.meta.escapes && !taken.contains(&name) {
+                self.record_call_place_access(place, access);
+            }
+        }
+    }
+
     /// Receiver evaluation is a read even before method resolution. This catches
     /// a nested receiver that overlaps an outer call's active write loan.
     pub(crate) fn check_call_receiver_evaluation(&mut self, receiver: &Expr, span: Span) {
         if let Some(place) = self.place_from_expr(receiver) {
+            let mut projection_reads = Vec::new();
+            self.collect_call_projection_reads(receiver, &mut projection_reads);
+            self.check_call_transient_reads(projection_reads);
             self.check_call_place_access(&place, ViewAccess::Read, span);
         }
     }
