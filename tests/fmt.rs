@@ -56,6 +56,21 @@ use std::path::PathBuf;
 #[path = "support/fmt_lossless.rs"]
 mod fmt_lossless;
 
+#[test]
+fn fmt_rejects_retired_annotated_uninit_binding() {
+    let src = include_str!("ui/uninit_annotated_retired.jet");
+    let parsed = jet::Compiler::parse_source(src);
+    assert!(
+        parsed.diagnostics.iter().any(|diagnostic| diagnostic.code == "E0003"),
+        "retired annotated binding must remain an ordinary parse error: {:?}",
+        parsed.diagnostics
+    );
+    assert!(
+        jet::format_source(src).is_err(),
+        "formatter must reject the parser-invalid retired annotated binding"
+    );
+}
+
 fn collect_jet_files(dir: &PathBuf) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for entry in fs::read_dir(dir).unwrap() {
