@@ -1,12 +1,28 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Generics::is_type_var_name;
+use crate::Generics::{is_type_var_name, substitute_type};
+use crate::Collections;
 use crate::Syntax;
 use crate::AST::{
-    AccessConvention, ElseBranch, Expr, Lambda, LambdaBody, LValue, Stmt, Type, UnOp,
-    VariantPayload,
+    AccessConvention, ElseBranch, Expr, ForKind, Lambda, LambdaBody, LValue, Pattern, Stmt, Type,
+    UnOp, VariantPayload,
 };
 use std::collections::{HashMap, HashSet};
+
+#[derive(Clone)]
+struct EvaluatedAccess {
+    place: ViewPlace,
+    access: ViewAccess,
+    span: Span,
+    through_call: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AccessWalkMode {
+    EvaluateNow,
+    ConstructCaptures,
+    CaptureRequirements,
+}
 
 fn const_place_int(expr: &Expr) -> Option<i64> {
     match expr {
@@ -466,6 +482,16 @@ impl<'a> Checker<'a> {
         access: ViewAccess,
         span: Span,
     ) {
+        self.check_call_place_access_kind(place, access, false, span);
+    }
+
+    fn check_call_place_access_kind(
+        &mut self,
+        place: &ViewPlace,
+        access: ViewAccess,
+        reserved: bool,
+        span: Span,
+    ) {
         let conflict = self
             .call_access_frames
             .iter()
@@ -473,7 +499,11 @@ impl<'a> Checker<'a> {
             .rev()
             .find(|active| {
                 active.place.overlaps(place)
-                    && (active.access == ViewAccess::Write || access == ViewAccess::Write)
+                    && match (active.access, active.reserved, access, reserved) {
+                        (ViewAccess::Write, true, ViewAccess::Read, false) => false,
+                        (ViewAccess::Write, ..) | (_, _, ViewAccess::Write, _) => true,
+                        _ => false,
+                    }
             })
             .map(|active| active.access);
         let Some(active) = conflict else {
@@ -490,39 +520,321 @@ impl<'a> Checker<'a> {
     fn record_call_place_access(&mut self, place: ViewPlace, access: ViewAccess) {
         self.call_access_frames
             .last_mut()
-            .map(|frame| frame.accesses.push(CallPlaceAccess { place, access }));
+            .map(|frame| frame.accesses.push(CallPlaceAccess {
+                place,
+                access,
+                reserved: false,
+            }));
     }
 
-    /// Collect the maximal places read while evaluating a value expression.
-    /// Nested calls own their argument metadata and check themselves while the
-    /// enclosing call frame is active.
-    fn collect_call_value_reads(&self, expr: &Expr, reads: &mut Vec<(ViewPlace, Span)>) {
-        if let Some(place) = self.place_from_expr(expr) {
-            if !reads.iter().any(|(seen, _)| {
-                seen.owner == place.owner && seen.projections == place.projections
+    fn record_call_place_reservation(&mut self, place: ViewPlace) {
+        self.call_access_frames
+            .last_mut()
+            .map(|frame| frame.accesses.push(CallPlaceAccess {
+                place,
+                access: ViewAccess::Write,
+                reserved: true,
+            }));
+    }
+
+    fn push_evaluated_access(
+        &self,
+        expr: &Expr,
+        access: ViewAccess,
+        bound: &HashSet<String>,
+        out: &mut Vec<EvaluatedAccess>,
+    ) {
+        let Some(place) = self.place_from_expr(expr) else {
+            return;
+        };
+        if bound.contains(&place.owner.name) {
+            return;
+        }
+        if let Some(existing) = out.iter_mut().find(|existing| {
+            existing.place.owner == place.owner
+                && existing.place.projections == place.projections
+        }) {
+            if access == ViewAccess::Write {
+                existing.access = ViewAccess::Write;
+                existing.span = expr.span();
+            }
+            return;
+        }
+        out.push(EvaluatedAccess {
+            place,
+            access,
+            span: expr.span(),
+            through_call: false,
+        });
+    }
+
+    fn place_expr_type(&self, expr: &Expr) -> Option<Type> {
+        match expr {
+            Expr::Ident(name, _) => self.lookup(name).map(|info| info.ty.clone()),
+            Expr::Paren(inner, _) | Expr::Place(inner, _, _) => self.place_expr_type(inner),
+            Expr::Field(base, field, _) => {
+                let mut owner = self.place_expr_type(base)?;
+                while let Type::Tagged { inner, .. } = owner {
+                    owner = *inner;
+                }
+                let (name, subst) = match owner {
+                    Type::Named(name) => (name, HashMap::new()),
+                    Type::Apply { name, args } => {
+                        let params = self.trait_reg.struct_params.get(&name)?;
+                        let subst = params
+                            .iter()
+                            .zip(args)
+                            .map(|(param, arg)| (param.name.clone(), arg))
+                            .collect();
+                        (name, subst)
+                    }
+                    _ => return None,
+                };
+                self.registry
+                    .struct_fields(&name)?
+                    .iter()
+                    .find(|(candidate, _, _, _)| candidate == field)
+                    .map(|(_, _, ty, _)| substitute_type(ty, &subst))
+            }
+            Expr::Index { base, .. } => match self.place_expr_type(base)? {
+                Type::List(elem) | Type::FixedList { elem, .. } => Some(*elem),
+                Type::Map { value, .. } => Some(*value),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn method_receiver_access(&self, receiver: &Expr, method: &str) -> ViewAccess {
+        let Some(ty) = self.place_expr_type(receiver) else {
+            return ViewAccess::Read;
+        };
+        if Collections::builtin_method_mutates(&ty, method) {
+            return ViewAccess::Write;
+        }
+        let type_name = match &ty {
+            Type::Named(name) | Type::Apply { name, .. } => name,
+            _ => return ViewAccess::Read,
+        };
+        if self
+            .resolve_method_sig(type_name, method)
+            .is_some_and(|(_, sig)| sig.self_conv == Some(AccessConvention::Write))
+        {
+            ViewAccess::Write
+        } else {
+            ViewAccess::Read
+        }
+    }
+
+    fn collect_lvalue_access(
+        &self,
+        target: &LValue,
+        bound: &HashSet<String>,
+        out: &mut Vec<EvaluatedAccess>,
+    ) {
+        match target {
+            LValue::Local { name, name_span } => {
+                let target = Expr::Ident(name.clone(), *name_span);
+                self.push_evaluated_access(&target, ViewAccess::Write, bound, out);
+            }
+            LValue::Field { base, field, span } => {
+                let target = Expr::Field(base.clone(), field.clone(), *span);
+                self.push_evaluated_access(&target, ViewAccess::Write, bound, out);
+            }
+            LValue::Index {
+                base, index, span, ..
+            } => {
+                let target = Expr::Index {
+                    base: base.clone(),
+                    index: index.clone(),
+                    span: *span,
+                    kind: Default::default(),
+                };
+                self.push_evaluated_access(&target, ViewAccess::Write, bound, out);
+                self.collect_evaluated_expr_accesses(
+                    index,
+                    AccessWalkMode::EvaluateNow,
+                    bound,
+                    out,
+                );
+            }
+        }
+    }
+
+    fn collect_lambda_requirement_events(
+        &self,
+        lambda: &Lambda,
+        out: &mut Vec<EvaluatedAccess>,
+    ) {
+        let params = lambda
+            .params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect::<HashSet<_>>();
+        let mut reads = HashSet::new();
+        let mut writes = HashSet::new();
+        crate::Sema::Captures::lambda_collect_captures(
+            &lambda.body,
+            &params,
+            &mut reads,
+            &mut writes,
+        );
+        writes.extend(lambda.meta.mut_captures.iter().cloned());
+        reads.extend(writes.iter().cloned());
+        let mut events = Vec::new();
+        match &lambda.body {
+            LambdaBody::Expr(body) => self.collect_evaluated_expr_accesses(
+                body,
+                AccessWalkMode::CaptureRequirements,
+                &params,
+                &mut events,
+            ),
+            LambdaBody::Block(body) => {
+                let mut bound = params;
+                self.collect_evaluated_stmt_accesses(
+                    body,
+                    AccessWalkMode::CaptureRequirements,
+                    &mut bound,
+                    &mut events,
+                );
+            }
+        }
+        events.retain(|event| reads.contains(&event.place.owner.name));
+        for name in reads {
+            if !events.iter().any(|event| event.place.owner.name == name) {
+                let capture = Expr::Ident(name.clone(), lambda.span);
+                let access = if writes.contains(&name) {
+                    ViewAccess::Write
+                } else {
+                    ViewAccess::Read
+                };
+                self.push_evaluated_access(
+                    &capture,
+                    access,
+                    &HashSet::new(),
+                    &mut events,
+                );
+            }
+        }
+        let taken = lambda
+            .take_names
+            .iter()
+            .map(|(name, _)| name)
+            .collect::<HashSet<_>>();
+        let retains = !lambda.meta.escapes && !lambda.meta.mut_captures.is_empty();
+        for event in &mut events {
+            event.through_call = retains && !taken.contains(&event.place.owner.name);
+        }
+        for event in events {
+            if let Some(existing) = out.iter_mut().find(|existing| {
+                existing.place.owner == event.place.owner
+                    && existing.place.projections == event.place.projections
             }) {
-                reads.push((place, expr.span()));
+                if event.access == ViewAccess::Write {
+                    existing.access = ViewAccess::Write;
+                    existing.span = event.span;
+                }
+                existing.through_call |= event.through_call;
+            } else {
+                out.push(event);
+            }
+        }
+    }
+
+    fn collect_evaluated_expr_accesses(
+        &self,
+        expr: &Expr,
+        mode: AccessWalkMode,
+        bound: &HashSet<String>,
+        out: &mut Vec<EvaluatedAccess>,
+    ) {
+        if let Expr::IncDec { operand, .. } = expr {
+            self.push_evaluated_access(operand, ViewAccess::Write, bound, out);
+            return;
+        }
+        if let Some(place) = self.place_from_expr(expr) {
+            if mode != AccessWalkMode::ConstructCaptures
+                && !bound.contains(&place.owner.name)
+            {
+                let access = if matches!(
+                    expr,
+                    Expr::Place(_, crate::AST::PlaceAccess::Write, _)
+                ) {
+                    ViewAccess::Write
+                } else {
+                    ViewAccess::Read
+                };
+                self.push_evaluated_access(expr, access, bound, out);
             }
             match expr {
-                Expr::Index { index, .. } => self.collect_call_value_reads(index, reads),
+                Expr::Index { index, .. } => {
+                    self.collect_evaluated_expr_accesses(index, mode, bound, out);
+                }
                 Expr::Slice { start, end, .. } => {
-                    self.collect_call_value_reads(start, reads);
-                    self.collect_call_value_reads(end, reads);
+                    self.collect_evaluated_expr_accesses(start, mode, bound, out);
+                    self.collect_evaluated_expr_accesses(end, mode, bound, out);
                 }
                 _ => {}
             }
             return;
         }
-
         match expr {
-            Expr::Call(_) | Expr::MethodCall { .. } | Expr::CallValue { .. } => {}
+            Expr::Lambda(lambda) => {
+                if mode != AccessWalkMode::EvaluateNow {
+                    self.collect_lambda_requirement_events(lambda, out);
+                }
+            }
+            Expr::Call(call) => {
+                if mode == AccessWalkMode::CaptureRequirements {
+                    for arg in &call.args {
+                        self.collect_evaluated_expr_accesses(
+                            &arg.expr,
+                            mode,
+                            bound,
+                            out,
+                        );
+                    }
+                }
+            }
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
+                if mode == AccessWalkMode::CaptureRequirements {
+                    let access = self.method_receiver_access(receiver, method);
+                    self.push_evaluated_access(receiver, access, bound, out);
+                    for arg in args {
+                        self.collect_evaluated_expr_accesses(
+                            &arg.expr,
+                            mode,
+                            bound,
+                            out,
+                        );
+                    }
+                }
+            }
+            Expr::CallValue { callee, args, .. } => {
+                if mode == AccessWalkMode::CaptureRequirements {
+                    self.collect_evaluated_expr_accesses(callee, mode, bound, out);
+                    for arg in args {
+                        self.collect_evaluated_expr_accesses(
+                            &arg.expr,
+                            mode,
+                            bound,
+                            out,
+                        );
+                    }
+                }
+            }
             Expr::Binary(_, left, right, _) => {
-                self.collect_call_value_reads(left, reads);
-                self.collect_call_value_reads(right, reads);
+                self.collect_evaluated_expr_accesses(left, mode, bound, out);
+                self.collect_evaluated_expr_accesses(right, mode, bound, out);
             }
             Expr::CompareChain { operands, .. } | Expr::ListLit(operands, _) => {
                 for operand in operands {
-                    self.collect_call_value_reads(operand, reads);
+                    self.collect_evaluated_expr_accesses(operand, mode, bound, out);
                 }
             }
             Expr::Unary(_, inner, _)
@@ -536,41 +848,42 @@ impl<'a> Checker<'a> {
             | Expr::Ok(inner, _)
             | Expr::Err(inner, _)
             | Expr::Try(inner, _, _)
-            | Expr::Paren(inner, _)
-            | Expr::IncDec { operand: inner, .. } => {
-                self.collect_call_value_reads(inner, reads);
+            | Expr::Paren(inner, _) => {
+                self.collect_evaluated_expr_accesses(inner, mode, bound, out);
             }
             Expr::Field(base, _, _) | Expr::OptField { base, .. } => {
-                self.collect_call_value_reads(base, reads);
+                self.collect_evaluated_expr_accesses(base, mode, bound, out);
             }
             Expr::Index { base, index, .. } => {
-                self.collect_call_value_reads(base, reads);
-                self.collect_call_value_reads(index, reads);
+                self.collect_evaluated_expr_accesses(base, mode, bound, out);
+                self.collect_evaluated_expr_accesses(index, mode, bound, out);
             }
             Expr::Slice {
                 base, start, end, ..
             } => {
-                self.collect_call_value_reads(base, reads);
-                self.collect_call_value_reads(start, reads);
-                self.collect_call_value_reads(end, reads);
+                self.collect_evaluated_expr_accesses(base, mode, bound, out);
+                self.collect_evaluated_expr_accesses(start, mode, bound, out);
+                self.collect_evaluated_expr_accesses(end, mode, bound, out);
             }
             Expr::MapLit(entries, _) => {
                 for (key, value) in entries {
-                    self.collect_call_value_reads(key, reads);
-                    self.collect_call_value_reads(value, reads);
+                    self.collect_evaluated_expr_accesses(key, mode, bound, out);
+                    self.collect_evaluated_expr_accesses(value, mode, bound, out);
                 }
             }
             Expr::StructLit { fields, .. } => {
                 for (_, _, value) in fields {
-                    self.collect_call_value_reads(value, reads);
+                    self.collect_evaluated_expr_accesses(value, mode, bound, out);
                 }
             }
             Expr::TypedLit { body, .. } => {
-                body.for_each_expr(|value| self.collect_call_value_reads(value, reads));
+                body.for_each_expr(|value| {
+                    self.collect_evaluated_expr_accesses(value, mode, bound, out)
+                });
             }
             Expr::TupleLit(fields, _, _) => {
                 for (_, value) in fields {
-                    self.collect_call_value_reads(value, reads);
+                    self.collect_evaluated_expr_accesses(value, mode, bound, out);
                 }
             }
             Expr::EnumLit { args, .. } => {
@@ -579,31 +892,36 @@ impl<'a> Checker<'a> {
                         crate::AST::EnumLitArg::Positional(value)
                         | crate::AST::EnumLitArg::Named { expr: value, .. } => value,
                     };
-                    self.collect_call_value_reads(value, reads);
+                    self.collect_evaluated_expr_accesses(value, mode, bound, out);
                 }
             }
             Expr::Str(parts, _) => {
                 for part in parts {
                     if let crate::AST::StrPart::Interp(value, _) = part {
-                        self.collect_call_value_reads(value, reads);
+                        self.collect_evaluated_expr_accesses(value, mode, bound, out);
                     }
                 }
             }
             Expr::PatternTest { subject, .. } => {
-                self.collect_call_value_reads(subject, reads);
+                self.collect_evaluated_expr_accesses(subject, mode, bound, out);
             }
             Expr::OrFallback {
                 value, fallback, ..
             } => {
-                self.collect_call_value_reads(value, reads);
+                self.collect_evaluated_expr_accesses(value, mode, bound, out);
                 match fallback {
                     crate::AST::OrFallback::Value(value)
                     | crate::AST::OrFallback::Return(Some(value), _) => {
-                        self.collect_call_value_reads(value, reads);
+                        self.collect_evaluated_expr_accesses(value, mode, bound, out);
                     }
                     crate::AST::OrFallback::Panic { args, .. } => {
                         for arg in args {
-                            self.collect_call_value_reads(&arg.expr, reads);
+                            self.collect_evaluated_expr_accesses(
+                                &arg.expr,
+                                mode,
+                                bound,
+                                out,
+                            );
                         }
                     }
                     _ => {}
@@ -617,100 +935,431 @@ impl<'a> Checker<'a> {
                 else_value,
                 ..
             } => {
-                self.collect_call_value_reads(cond, reads);
-                self.collect_call_stmt_reads(then_body, reads);
-                self.collect_call_value_reads(then_value, reads);
-                self.collect_call_stmt_reads(else_body, reads);
-                self.collect_call_value_reads(else_value, reads);
+                self.collect_evaluated_expr_accesses(cond, mode, bound, out);
+                let mut then_bound = bound.clone();
+                self.collect_evaluated_stmt_accesses(
+                    then_body,
+                    mode,
+                    &mut then_bound,
+                    out,
+                );
+                self.collect_evaluated_expr_accesses(
+                    then_value,
+                    mode,
+                    &then_bound,
+                    out,
+                );
+                let mut else_bound = bound.clone();
+                self.collect_evaluated_stmt_accesses(
+                    else_body,
+                    mode,
+                    &mut else_bound,
+                    out,
+                );
+                self.collect_evaluated_expr_accesses(
+                    else_value,
+                    mode,
+                    &else_bound,
+                    out,
+                );
             }
-            Expr::PtrFromAddr { addr, .. } => self.collect_call_value_reads(addr, reads),
+            Expr::PtrFromAddr { addr, .. } => {
+                self.collect_evaluated_expr_accesses(addr, mode, bound, out);
+            }
             Expr::FanOut { callee, items, .. } => {
-                self.collect_call_value_reads(callee, reads);
+                self.collect_evaluated_expr_accesses(callee, mode, bound, out);
                 for item in items {
-                    self.collect_call_value_reads(item, reads);
+                    self.collect_evaluated_expr_accesses(item, mode, bound, out);
                 }
             }
-            Expr::StrMatchLit(_, _)
-            | Expr::BinMatchLit(_, _)
-            | Expr::Int(_, _, _, _)
-            | Expr::Float(_, _, _)
-            | Expr::Bool(_, _)
-            | Expr::Char(_, _)
-            | Expr::Ident(_, _)
+            Expr::StrMatchLit(..)
+            | Expr::BinMatchLit(..)
+            | Expr::Int(..)
+            | Expr::Float(..)
+            | Expr::Bool(..)
+            | Expr::Char(..)
+            | Expr::Ident(..)
             | Expr::UnitLit { .. }
-            | Expr::Absent(_)
+            | Expr::Absent(..)
             | Expr::Todo { .. }
-            | Expr::ReduceMarker(_, _)
-            | Expr::Lambda(_)
-            | Expr::ComptimeSplice { .. } => {}
+            | Expr::ReduceMarker(..)
+            | Expr::ComptimeSplice { .. }
+            | Expr::IncDec { .. } => {}
         }
     }
 
-    fn collect_call_stmt_reads(&self, body: &[Stmt], reads: &mut Vec<(ViewPlace, Span)>) {
-        for stmt in body {
-            match stmt {
-                Stmt::Expr(expr) | Stmt::Yield(expr, _) => {
-                    self.collect_call_value_reads(expr, reads);
-                }
-                Stmt::Val(binding) => self.collect_call_value_reads(&binding.init, reads),
-                Stmt::Assign { target, value, .. } => {
-                    match target {
-                        LValue::Index { base, index, .. } => {
-                            self.collect_call_value_reads(base, reads);
-                            self.collect_call_value_reads(index, reads);
-                        }
-                        LValue::Field { base, .. } => {
-                            self.collect_call_value_reads(base, reads);
-                        }
-                        LValue::Local { .. } => {}
-                    }
-                    self.collect_call_value_reads(value, reads);
-                }
-                Stmt::Return(Some(expr), _) => self.collect_call_value_reads(expr, reads),
-                Stmt::If(branch) => self.collect_call_if_reads(branch, reads),
-                _ => {}
+    fn bind_pattern_names(pattern: &Pattern, bound: &mut HashSet<String>) {
+        match pattern {
+            Pattern::Ok { binding, .. }
+            | Pattern::Err { binding, .. }
+            | Pattern::Present { binding, .. } => {
+                bound.insert(binding.clone());
             }
+            Pattern::Variant { bindings, .. } => {
+                for slot in bindings {
+                    if let crate::AST::PatSlot::Bind { name, .. } = slot {
+                        bound.insert(name.clone());
+                    }
+                }
+            }
+            Pattern::Struct { fields, .. } => {
+                for field in fields {
+                    if let crate::AST::StructPatField::Bind { local, .. } = field {
+                        bound.insert(local.clone());
+                    }
+                }
+            }
+            Pattern::Or(alts, _) => {
+                if let Some(first) = alts.first() {
+                    Self::bind_pattern_names(first, bound);
+                }
+            }
+            Pattern::StrMatch { parts, .. } => {
+                for part in parts {
+                    if let crate::AST::StrMatchPart::Hole { name, .. } = part {
+                        bound.insert(name.clone());
+                    }
+                }
+            }
+            Pattern::BinMatch { parts, .. } => {
+                for part in parts {
+                    if let crate::AST::BinMatchPart::Hole { name, .. } = part {
+                        bound.insert(name.clone());
+                    }
+                }
+            }
+            Pattern::Absent(_) | Pattern::Range { .. } => {}
         }
     }
 
-    fn collect_call_if_reads(
+    fn collect_if_stmt_accesses(
         &self,
         branch: &crate::AST::IfStmt,
-        reads: &mut Vec<(ViewPlace, Span)>,
+        mode: AccessWalkMode,
+        bound: &HashSet<String>,
+        out: &mut Vec<EvaluatedAccess>,
     ) {
-        self.collect_call_value_reads(&branch.cond, reads);
-        self.collect_call_stmt_reads(&branch.then_body, reads);
+        self.collect_evaluated_expr_accesses(&branch.cond, mode, bound, out);
+        let mut then_bound = bound.clone();
+        self.collect_evaluated_stmt_accesses(
+            &branch.then_body,
+            mode,
+            &mut then_bound,
+            out,
+        );
         match &branch.else_branch {
-            Some(ElseBranch::ElseIf(branch)) => self.collect_call_if_reads(branch, reads),
-            Some(ElseBranch::Else(body)) => self.collect_call_stmt_reads(body, reads),
+            Some(ElseBranch::ElseIf(branch)) => {
+                self.collect_if_stmt_accesses(branch, mode, bound, out);
+            }
+            Some(ElseBranch::Else(body)) => {
+                let mut else_bound = bound.clone();
+                self.collect_evaluated_stmt_accesses(body, mode, &mut else_bound, out);
+            }
             None => {}
         }
     }
 
-    fn collect_call_projection_reads(&self, expr: &Expr, reads: &mut Vec<(ViewPlace, Span)>) {
+    fn collect_evaluated_stmt_accesses(
+        &self,
+        body: &[Stmt],
+        mode: AccessWalkMode,
+        bound: &mut HashSet<String>,
+        out: &mut Vec<EvaluatedAccess>,
+    ) {
+        for stmt in body {
+            match stmt {
+                Stmt::Expr(expr) | Stmt::Yield(expr, _) => {
+                    self.collect_evaluated_expr_accesses(expr, mode, bound, out);
+                }
+                Stmt::Val(binding) => {
+                    self.collect_evaluated_expr_accesses(&binding.init, mode, bound, out);
+                    if let Some(pattern) = &binding.pattern {
+                        for name in pattern.names() {
+                            bound.insert(name.local_name().to_string());
+                        }
+                    } else {
+                        bound.insert(binding.name.clone());
+                    }
+                }
+                Stmt::Assign { target, value, .. } => {
+                    self.collect_lvalue_access(target, bound, out);
+                    self.collect_evaluated_expr_accesses(value, mode, bound, out);
+                }
+                Stmt::Return(Some(expr), _) => {
+                    self.collect_evaluated_expr_accesses(expr, mode, bound, out);
+                }
+                Stmt::If(branch) => {
+                    self.collect_if_stmt_accesses(branch, mode, bound, out);
+                }
+                Stmt::While { cond, body, .. } => {
+                    self.collect_evaluated_expr_accesses(cond, mode, bound, out);
+                    let mut body_bound = bound.clone();
+                    self.collect_evaluated_stmt_accesses(
+                        body,
+                        mode,
+                        &mut body_bound,
+                        out,
+                    );
+                }
+                Stmt::For {
+                    var,
+                    var2,
+                    kind,
+                    body,
+                    ..
+                } => {
+                    match kind {
+                        ForKind::Range {
+                            start, end, step, ..
+                        } => {
+                            self.collect_evaluated_expr_accesses(start, mode, bound, out);
+                            self.collect_evaluated_expr_accesses(end, mode, bound, out);
+                            if let Some(step) = step {
+                                self.collect_evaluated_expr_accesses(
+                                    step, mode, bound, out,
+                                );
+                            }
+                        }
+                        ForKind::In { collection, step } => {
+                            self.collect_evaluated_expr_accesses(
+                                collection, mode, bound, out,
+                            );
+                            if let Some(step) = step {
+                                self.collect_evaluated_expr_accesses(
+                                    step, mode, bound, out,
+                                );
+                            }
+                        }
+                    }
+                    let mut body_bound = bound.clone();
+                    body_bound.insert(var.clone());
+                    if let Some((name, _)) = var2 {
+                        body_bound.insert(name.clone());
+                    }
+                    self.collect_evaluated_stmt_accesses(
+                        body,
+                        mode,
+                        &mut body_bound,
+                        out,
+                    );
+                }
+                Stmt::Switch {
+                    subject,
+                    arms,
+                    else_body,
+                    ..
+                } => {
+                    self.collect_evaluated_expr_accesses(subject, mode, bound, out);
+                    let mut switch_bound = bound.clone();
+                    switch_bound.insert(Syntax::KW_IT.to_string());
+                    for arm in arms {
+                        self.collect_evaluated_expr_accesses(
+                            &arm.cond,
+                            mode,
+                            &switch_bound,
+                            out,
+                        );
+                        let mut arm_bound = switch_bound.clone();
+                        if let Expr::PatternTest { pattern, .. } = &arm.cond {
+                            Self::bind_pattern_names(pattern, &mut arm_bound);
+                        }
+                        self.collect_evaluated_stmt_accesses(
+                            &arm.body,
+                            mode,
+                            &mut arm_bound,
+                            out,
+                        );
+                    }
+                    if let Some(else_body) = else_body {
+                        let mut else_bound = bound.clone();
+                        self.collect_evaluated_stmt_accesses(
+                            else_body,
+                            mode,
+                            &mut else_bound,
+                            out,
+                        );
+                    }
+                }
+                Stmt::CountedLoop {
+                    init,
+                    cond,
+                    step,
+                    body,
+                    ..
+                } => {
+                    self.collect_evaluated_expr_accesses(&init.init, mode, bound, out);
+                    let mut loop_bound = bound.clone();
+                    loop_bound.insert(init.name.clone());
+                    self.collect_evaluated_expr_accesses(cond, mode, &loop_bound, out);
+                    self.collect_evaluated_stmt_accesses(
+                        body,
+                        mode,
+                        &mut loop_bound,
+                        out,
+                    );
+                    if let Some(step) = step {
+                        self.collect_evaluated_stmt_accesses(
+                            std::slice::from_ref(step.as_ref()),
+                            mode,
+                            &mut loop_bound,
+                            out,
+                        );
+                    }
+                }
+                Stmt::Loop { body, .. }
+                | Stmt::Unsafe { body, .. }
+                | Stmt::Impure { body, .. }
+                | Stmt::Shield { body, .. }
+                | Stmt::DebugOnly { body, .. }
+                | Stmt::Region { body, .. }
+                | Stmt::Policy { body, .. }
+                | Stmt::TaskGroup { body, .. }
+                | Stmt::Layout { body, .. }
+                | Stmt::Caps { body, .. }
+                | Stmt::Grant { body, .. }
+                | Stmt::Transact { body, .. }
+                | Stmt::AssumeDet { body, .. }
+                | Stmt::Live { body, .. } => {
+                    let mut body_bound = bound.clone();
+                    self.collect_evaluated_stmt_accesses(
+                        body,
+                        mode,
+                        &mut body_bound,
+                        out,
+                    );
+                }
+                Stmt::Reactive { body, .. } => {
+                    let mut body_bound = bound.clone();
+                    self.collect_evaluated_stmt_accesses(
+                        body,
+                        AccessWalkMode::CaptureRequirements,
+                        &mut body_bound,
+                        out,
+                    );
+                }
+                Stmt::ContextBlock { fields, body, .. } => {
+                    for (_, expr, _) in fields {
+                        self.collect_evaluated_expr_accesses(expr, mode, bound, out);
+                    }
+                    let mut body_bound = bound.clone();
+                    self.collect_evaluated_stmt_accesses(
+                        body,
+                        mode,
+                        &mut body_bound,
+                        out,
+                    );
+                }
+                Stmt::ScopeMember { args, body, .. } => {
+                    for arg in args {
+                        self.collect_evaluated_expr_accesses(arg, mode, bound, out);
+                    }
+                    let mut body_bound = bound.clone();
+                    self.collect_evaluated_stmt_accesses(
+                        body,
+                        mode,
+                        &mut body_bound,
+                        out,
+                    );
+                }
+                // These forms erase before runtime evaluation. `Off` never
+                // runs; comptime bodies run in the separate interpreter.
+                Stmt::Off { .. }
+                | Stmt::ComptimeIf { .. }
+                | Stmt::ComptimeSwitch { .. }
+                | Stmt::ComptimeBlock { .. }
+                | Stmt::Break(_)
+                | Stmt::Continue(_)
+                | Stmt::BreakLabel(..)
+                | Stmt::ContinueLabel(..)
+                | Stmt::Return(None, _) => {}
+            }
+        }
+    }
+
+    fn check_transient_accesses(&mut self, accesses: Vec<EvaluatedAccess>) {
+        for access in accesses {
+            self.check_call_place_access(&access.place, access.access, access.span);
+        }
+    }
+
+
+    /// Rust activates a two-phase receiver borrow only after its arguments
+    /// finish evaluating. Only loans retained through the call can conflict at
+    /// that point; transient reads have already ended.
+    pub(crate) fn activate_call_reservations(
+        &mut self,
+        frame: &CallAccessFrame,
+        span: Span,
+    ) {
+        let conflicts: Vec<_> = frame
+            .accesses
+            .iter()
+            .filter(|access| access.reserved)
+            .filter_map(|reservation| {
+                frame
+                    .accesses
+                    .iter()
+                    .filter(|access| !access.reserved)
+                    .find(|access| access.place.overlaps(&reservation.place))
+                    .map(|access| (reservation.place.clone(), access.access))
+            })
+            .collect();
+        for (place, access) in conflicts {
+            let name = Self::place_name(&place);
+            self.diags.push(if access == ViewAccess::Read {
+                crate::Sema::Diagnostics::aliasing_mut_after_read(&name, span)
+            } else {
+                crate::Sema::Diagnostics::aliasing_while_mut(&name, span)
+            });
+        }
+    }
+
+    /// A nested call's frame ends when it returns, but a returned View keeps
+    /// the source loan alive as an argument of the enclosing call.
+    pub(crate) fn record_call_result_views(&mut self, expr: &Expr) {
+        for (_, place, _, access) in self.view_call_sources(expr) {
+            self.check_call_place_access(&place, access, expr.span());
+            self.record_call_place_access(place, access);
+        }
+    }
+
+    fn collect_call_projection_accesses(
+        &self,
+        expr: &Expr,
+        accesses: &mut Vec<EvaluatedAccess>,
+    ) {
         match expr {
             Expr::Index { base, index, .. } => {
-                self.collect_call_projection_reads(base, reads);
-                self.collect_call_value_reads(index, reads);
+                self.collect_call_projection_accesses(base, accesses);
+                self.collect_evaluated_expr_accesses(
+                    index,
+                    AccessWalkMode::EvaluateNow,
+                    &HashSet::new(),
+                    accesses,
+                );
             }
             Expr::Slice {
                 base, start, end, ..
             } => {
-                self.collect_call_projection_reads(base, reads);
-                self.collect_call_value_reads(start, reads);
-                self.collect_call_value_reads(end, reads);
+                self.collect_call_projection_accesses(base, accesses);
+                self.collect_evaluated_expr_accesses(
+                    start,
+                    AccessWalkMode::EvaluateNow,
+                    &HashSet::new(),
+                    accesses,
+                );
+                self.collect_evaluated_expr_accesses(
+                    end,
+                    AccessWalkMode::EvaluateNow,
+                    &HashSet::new(),
+                    accesses,
+                );
             }
             Expr::Field(base, _, _)
             | Expr::Place(base, _, _)
             | Expr::Paren(base, _)
-            | Expr::Deref(base, _) => self.collect_call_projection_reads(base, reads),
+            | Expr::Deref(base, _) => self.collect_call_projection_accesses(base, accesses),
             _ => {}
-        }
-    }
-
-    fn check_call_transient_reads(&mut self, reads: Vec<(ViewPlace, Span)>) {
-        for (place, span) in reads {
-            self.check_call_place_access(&place, ViewAccess::Read, span);
         }
     }
 
@@ -725,14 +1374,19 @@ impl<'a> Checker<'a> {
         borrowed_read: bool,
     ) {
         let Some(place) = self.place_from_expr(&arg.expr) else {
-            let mut reads = Vec::new();
-            self.collect_call_value_reads(&arg.expr, &mut reads);
-            self.check_call_transient_reads(reads);
+            let mut accesses = Vec::new();
+            self.collect_evaluated_expr_accesses(
+                &arg.expr,
+                AccessWalkMode::EvaluateNow,
+                &HashSet::new(),
+                &mut accesses,
+            );
+            self.check_transient_accesses(accesses);
             return;
         };
-        let mut projection_reads = Vec::new();
-        self.collect_call_projection_reads(&arg.expr, &mut projection_reads);
-        self.check_call_transient_reads(projection_reads);
+        let mut projection_accesses = Vec::new();
+        self.collect_call_projection_accesses(&arg.expr, &mut projection_accesses);
+        self.check_transient_accesses(projection_accesses);
         let access = if arg.convention == AccessConvention::Write {
             ViewAccess::Write
         } else {
@@ -755,326 +1409,42 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn collect_lambda_capture_places(
-        &self,
-        expr: &Expr,
-        roots: &HashSet<String>,
-        places: &mut Vec<(String, ViewPlace, Span)>,
-    ) {
-        if let Some(place) = self.place_from_expr(expr) {
-            let root = place.owner.name.clone();
-            if roots.contains(&root)
-                && !places.iter().any(|(_, seen, _)| {
-                    seen.owner == place.owner && seen.projections == place.projections
-                })
-            {
-                places.push((root, place, expr.span()));
-            }
-            match expr {
-                Expr::Index { index, .. } => {
-                    self.collect_lambda_capture_places(index, roots, places);
-                }
-                Expr::Slice { start, end, .. } => {
-                    self.collect_lambda_capture_places(start, roots, places);
-                    self.collect_lambda_capture_places(end, roots, places);
-                }
-                _ => {}
-            }
-            return;
-        }
-        match expr {
-            Expr::Call(call) => {
-                for arg in &call.args {
-                    self.collect_lambda_capture_places(&arg.expr, roots, places);
-                }
-            }
-            Expr::MethodCall { receiver, args, .. } => {
-                self.collect_lambda_capture_places(receiver, roots, places);
-                for arg in args {
-                    self.collect_lambda_capture_places(&arg.expr, roots, places);
-                }
-            }
-            Expr::CallValue { callee, args, .. } => {
-                self.collect_lambda_capture_places(callee, roots, places);
-                for arg in args {
-                    self.collect_lambda_capture_places(&arg.expr, roots, places);
-                }
-            }
-            Expr::Binary(_, left, right, _) => {
-                self.collect_lambda_capture_places(left, roots, places);
-                self.collect_lambda_capture_places(right, roots, places);
-            }
-            Expr::CompareChain { operands, .. } | Expr::ListLit(operands, _) => {
-                for operand in operands {
-                    self.collect_lambda_capture_places(operand, roots, places);
-                }
-            }
-            Expr::Unary(_, inner, _)
-            | Expr::Spread(inner, _)
-            | Expr::Deref(inner, _)
-            | Expr::RawOf(inner, _)
-            | Expr::Copy(inner, _)
-            | Expr::Place(inner, _, _)
-            | Expr::Tainted(inner, _, _)
-            | Expr::Present(inner, _)
-            | Expr::Ok(inner, _)
-            | Expr::Err(inner, _)
-            | Expr::Try(inner, _, _)
-            | Expr::Paren(inner, _)
-            | Expr::IncDec { operand: inner, .. } => {
-                self.collect_lambda_capture_places(inner, roots, places);
-            }
-            Expr::MapLit(entries, _) => {
-                for (key, value) in entries {
-                    self.collect_lambda_capture_places(key, roots, places);
-                    self.collect_lambda_capture_places(value, roots, places);
-                }
-            }
-            Expr::StructLit { fields, .. } => {
-                for (_, _, value) in fields {
-                    self.collect_lambda_capture_places(value, roots, places);
-                }
-            }
-            Expr::TypedLit { body, .. } => {
-                body.for_each_expr(|value| {
-                    self.collect_lambda_capture_places(value, roots, places)
-                });
-            }
-            Expr::TupleLit(fields, _, _) => {
-                for (_, value) in fields {
-                    self.collect_lambda_capture_places(value, roots, places);
-                }
-            }
-            Expr::EnumLit { args, .. } => {
-                for arg in args {
-                    let value = match arg {
-                        crate::AST::EnumLitArg::Positional(value)
-                        | crate::AST::EnumLitArg::Named { expr: value, .. } => value,
-                    };
-                    self.collect_lambda_capture_places(value, roots, places);
-                }
-            }
-            Expr::Str(parts, _) => {
-                for part in parts {
-                    if let crate::AST::StrPart::Interp(value, _) = part {
-                        self.collect_lambda_capture_places(value, roots, places);
-                    }
-                }
-            }
-            Expr::If {
-                cond,
-                then_body,
-                then_value,
-                else_body,
-                else_value,
-                ..
-            } => {
-                self.collect_lambda_capture_places(cond, roots, places);
-                self.collect_lambda_capture_places_in_stmts(then_body, roots, places);
-                self.collect_lambda_capture_places(then_value, roots, places);
-                self.collect_lambda_capture_places_in_stmts(else_body, roots, places);
-                self.collect_lambda_capture_places(else_value, roots, places);
-            }
-            Expr::PatternTest { subject, .. } => {
-                self.collect_lambda_capture_places(subject, roots, places);
-            }
-            Expr::OrFallback {
-                value, fallback, ..
-            } => {
-                self.collect_lambda_capture_places(value, roots, places);
-                if let crate::AST::OrFallback::Value(value)
-                | crate::AST::OrFallback::Return(Some(value), _) = fallback
-                {
-                    self.collect_lambda_capture_places(value, roots, places);
-                }
-            }
-            Expr::PtrFromAddr { addr, .. } => {
-                self.collect_lambda_capture_places(addr, roots, places);
-            }
-            Expr::FanOut { callee, items, .. } => {
-                self.collect_lambda_capture_places(callee, roots, places);
-                for item in items {
-                    self.collect_lambda_capture_places(item, roots, places);
-                }
-            }
-            Expr::Field(..)
-            | Expr::OptField { .. }
-            | Expr::Index { .. }
-            | Expr::Slice { .. }
-            | Expr::Lambda(_)
-            | Expr::StrMatchLit(..)
-            | Expr::BinMatchLit(..)
-            | Expr::Int(..)
-            | Expr::Float(..)
-            | Expr::Bool(..)
-            | Expr::Char(..)
-            | Expr::Ident(..)
-            | Expr::UnitLit { .. }
-            | Expr::Absent(..)
-            | Expr::Todo { .. }
-            | Expr::ReduceMarker(..)
-            | Expr::ComptimeSplice { .. } => {}
-        }
-    }
-
-    fn collect_lambda_capture_places_in_stmts(
-        &self,
-        body: &[Stmt],
-        roots: &HashSet<String>,
-        places: &mut Vec<(String, ViewPlace, Span)>,
-    ) {
-        for stmt in body {
-            match stmt {
-                Stmt::Expr(expr) | Stmt::Yield(expr, _) => {
-                    self.collect_lambda_capture_places(expr, roots, places);
-                }
-                Stmt::Val(binding) => {
-                    self.collect_lambda_capture_places(&binding.init, roots, places);
-                }
-                Stmt::Assign { target, value, .. } => {
-                    match target {
-                        LValue::Index { base, index, .. } => {
-                            self.collect_lambda_capture_places(base, roots, places);
-                            self.collect_lambda_capture_places(index, roots, places);
-                        }
-                        LValue::Field { base, .. } => {
-                            self.collect_lambda_capture_places(base, roots, places);
-                        }
-                        LValue::Local { name, name_span } => {
-                            let target = Expr::Ident(name.clone(), *name_span);
-                            self.collect_lambda_capture_places(&target, roots, places);
-                        }
-                    }
-                    self.collect_lambda_capture_places(value, roots, places);
-                }
-                Stmt::Return(Some(expr), _) => {
-                    self.collect_lambda_capture_places(expr, roots, places);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    fn check_one_call_lambda_capture(&mut self, lambda: &Lambda) {
-        let params = lambda
-            .params
-            .iter()
-            .map(|param| param.name.clone())
-            .collect::<HashSet<_>>();
-        let taken = lambda
-            .take_names
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect::<HashSet<_>>();
-        let mut reads = HashSet::new();
-        let mut writes = HashSet::new();
-        crate::Sema::Captures::lambda_collect_captures(
-            &lambda.body,
-            &params,
-            &mut reads,
-            &mut writes,
-        );
-        writes.extend(lambda.meta.mut_captures.iter().cloned());
-        reads.extend(writes.iter().cloned());
-        let mut places = Vec::new();
-        match &lambda.body {
-            LambdaBody::Expr(body) => {
-                self.collect_lambda_capture_places(body, &reads, &mut places);
-            }
-            LambdaBody::Block(body) => {
-                self.collect_lambda_capture_places_in_stmts(body, &reads, &mut places);
-            }
-        }
-        for name in &reads {
-            if !places.iter().any(|(root, _, _)| root == name) {
-                let capture = Expr::Ident(name.clone(), lambda.span);
-                if let Some(place) = self.place_from_expr(&capture) {
-                    places.push((name.clone(), place, lambda.span));
-                }
-            }
-        }
-        let retains_borrows = !lambda.meta.escapes && !lambda.meta.mut_captures.is_empty();
-        for (name, place, span) in places {
-            let access = if writes.contains(&name) {
-                ViewAccess::Write
-            } else {
-                ViewAccess::Read
-            };
-            self.check_call_place_access(&place, access, span);
-            if retains_borrows && !taken.contains(&name) {
-                self.record_call_place_access(place, access);
-            }
-        }
-    }
-
     /// Lambda bodies run later, but constructing a lambda evaluates its free
     /// captures now. Only nonescaping FnMut closures retain capture borrows.
     pub(crate) fn check_call_argument_captures(&mut self, expr: &Expr) {
-        match expr {
-            Expr::Lambda(lambda) => self.check_one_call_lambda_capture(lambda),
-            Expr::Paren(inner, _)
-            | Expr::Spread(inner, _)
-            | Expr::Tainted(inner, _, _)
-            | Expr::Present(inner, _)
-            | Expr::Ok(inner, _)
-            | Expr::Err(inner, _) => self.check_call_argument_captures(inner),
-            Expr::ListLit(values, _) => {
-                for value in values {
-                    self.check_call_argument_captures(value);
-                }
+        let mut accesses = Vec::new();
+        self.collect_evaluated_expr_accesses(
+            expr,
+            AccessWalkMode::ConstructCaptures,
+            &HashSet::new(),
+            &mut accesses,
+        );
+        for access in accesses {
+            self.check_call_place_access(&access.place, access.access, access.span);
+            if access.through_call {
+                self.record_call_place_access(access.place, access.access);
             }
-            Expr::MapLit(entries, _) => {
-                for (key, value) in entries {
-                    self.check_call_argument_captures(key);
-                    self.check_call_argument_captures(value);
-                }
-            }
-            Expr::StructLit { fields, .. } => {
-                for (_, _, value) in fields {
-                    self.check_call_argument_captures(value);
-                }
-            }
-            Expr::TypedLit { body, .. } => {
-                body.for_each_expr(|value| self.check_call_argument_captures(value));
-            }
-            Expr::TupleLit(fields, _, _) => {
-                for (_, value) in fields {
-                    self.check_call_argument_captures(value);
-                }
-            }
-            Expr::EnumLit { args, .. } => {
-                for arg in args {
-                    let value = match arg {
-                        crate::AST::EnumLitArg::Positional(value)
-                        | crate::AST::EnumLitArg::Named { expr: value, .. } => value,
-                    };
-                    self.check_call_argument_captures(value);
-                }
-            }
-            Expr::If {
-                then_value,
-                else_value,
-                ..
-            } => {
-                self.check_call_argument_captures(then_value);
-                self.check_call_argument_captures(else_value);
-            }
-            _ => {}
         }
+        self.record_call_result_views(expr);
     }
 
     /// Receiver evaluation is a read even before method resolution. This catches
     /// a nested receiver that overlaps an outer call's active write loan.
     pub(crate) fn check_call_receiver_evaluation(&mut self, receiver: &Expr, span: Span) {
         if let Some(place) = self.place_from_expr(receiver) {
-            let mut projection_reads = Vec::new();
-            self.collect_call_projection_reads(receiver, &mut projection_reads);
-            self.check_call_transient_reads(projection_reads);
+            let mut projection_accesses = Vec::new();
+            self.collect_call_projection_accesses(receiver, &mut projection_accesses);
+            self.check_transient_accesses(projection_accesses);
             self.check_call_place_access(&place, ViewAccess::Read, span);
         } else {
-            let mut reads = Vec::new();
-            self.collect_call_value_reads(receiver, &mut reads);
-            self.check_call_transient_reads(reads);
+            let mut accesses = Vec::new();
+            self.collect_evaluated_expr_accesses(
+                receiver,
+                AccessWalkMode::EvaluateNow,
+                &HashSet::new(),
+                &mut accesses,
+            );
+            self.check_transient_accesses(accesses);
         }
     }
 
@@ -1096,6 +1466,14 @@ impl<'a> Checker<'a> {
         if convention != AccessConvention::Move {
             self.record_call_place_access(place, access);
         }
+    }
+
+    pub(crate) fn record_call_receiver_reservation(&mut self, receiver: &Expr, span: Span) {
+        let Some(place) = self.place_from_expr(receiver) else {
+            return;
+        };
+        self.check_call_place_access_kind(&place, ViewAccess::Write, true, span);
+        self.record_call_place_reservation(place);
     }
 
     pub(crate) fn place_from_expr(&self, expr: &Expr) -> Option<ViewPlace> {

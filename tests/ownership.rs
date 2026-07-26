@@ -435,6 +435,119 @@ fn run() {
 }
 
 #[test]
+fn evaluated_statement_accesses_are_scoped_and_mode_aware() {
+    let write = r#"
+fn both(values: [Int], count: Int) { print(values.len() + count) }
+fn run() {
+    values := [1, 2]
+    both(values, if true { values = [3]; 1 } else { 0 })
+}
+"#;
+    let diags =
+        jet::compile(write).expect_err("an if-prefix assignment must conflict with the read loan");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let shadow = r#"
+fn both(value: &Int, callback: fn(Int) -> Int) { value += callback(2) }
+fn run() {
+    value := 1
+    both(&value, (value: Int) => value)
+}
+"#;
+    jet::compile(shadow).expect("a lambda-local shadow must not capture the outer write-borrowed place");
+}
+
+#[test]
+fn lambda_capture_access_is_projection_specific_and_transitive() {
+    let mixed = r#"
+struct Pair { left: [Int], right: [Int] }
+fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    both(() => { print(pair.left.len()); pair.right.push(3) }, pair.left)
+}
+"#;
+    jet::compile(mixed).expect("reading left and mutating right keeps projection modes separate");
+
+    let conflict = r#"
+struct Pair { left: [Int], right: [Int] }
+fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn run() {
+    pair := Pair.{ left: [1], right: [2] }
+    both(() => { print(pair.left.len()); pair.right.push(3) }, pair.right)
+}
+"#;
+    let diags = jet::compile(conflict).expect_err("the mutated projection remains write-borrowed");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let transitive = r#"
+fn both(value: &String, callback: fn() -> fn() -> String) {
+    print(value)
+    print(callback()())
+}
+fn run() {
+    value := "jet"
+    both(&value, () => () => value)
+}
+"#;
+    let diags =
+        jet::compile(transitive).expect_err("a nested closure capture is also an outer capture");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn composite_lambda_capture_walks_if_prefix_and_fallback_values() {
+    let if_prefix = r#"
+struct Work { callback: fn() -> Int }
+fn both(values: &[Int], work: Work) { values.push(work.callback()) }
+fn run() {
+    values := [1, 2]
+    both(&values, if true {
+        work :: Work.{ callback: () => values.len() }
+        work
+    } else {
+        Work.{ callback: () => 0 }
+    })
+}
+"#;
+    let diags =
+        jet::compile(if_prefix).expect_err("a lambda created in an if prefix must be summarized");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let fallback = r#"
+fn both(values: &[Int], callback: fn() -> Int) { values.push(callback()) }
+fn run() {
+    values := [1, 2]
+    both(&values, Val(() => values.len()) ?? () => 0)
+}
+"#;
+    let diags = jet::compile(fallback)
+        .expect_err("a lambda created through fallback evaluation must retain its capture");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
+fn builtin_mut_receiver_uses_two_phase_reservation() {
+    let accepted = r#"
+fn run() {
+    values := [1, 2]
+    values.push(values.len())
+}
+"#;
+    jet::compile(accepted).expect("a shared argument read is allowed during receiver reservation");
+
+    let rejected = r#"
+fn run() {
+    values := [1, 2]
+    values.push(values.remove(0))
+}
+"#;
+    let diags =
+        jet::compile(rejected).expect_err("a nested write conflicts with receiver reservation");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+}
+
+#[test]
 fn generic_constructor_nested_argument_sees_active_write_place() {
     let src = r#"
 struct Pair<T> { value: T }
@@ -650,6 +763,33 @@ fn main() {
             "E0499",
         ),
         (
+            "if_prefix_write.rs",
+            r#"
+fn both(values: &Vec<i64>, count: i64) { println!("{}", values.len() as i64 + count) }
+fn main() {
+    let mut values = vec![1, 2];
+    both(&values, { values = vec![3]; 1 });
+}
+"#,
+            "E0506",
+        ),
+        (
+            "transitive_lambda.rs",
+            r#"
+fn both<F, G>(value: &mut String, callback: F)
+where F: FnOnce() -> G, G: FnOnce() -> String
+{
+    println!("{value}");
+    println!("{}", callback()());
+}
+fn main() {
+    let mut value = String::from("jet");
+    both(&mut value, move || move || value);
+}
+"#,
+            "E0505",
+        ),
+        (
             "if_prefix.rs",
             r#"
 fn both(value: &mut i64, count: i64) { *value += count }
@@ -743,6 +883,32 @@ fn both<F: FnMut()>(mut callback: F, values: &Vec<i64>) {
 fn main() {
     let mut pair = Pair { left: vec![1], right: vec![2] };
     both(|| pair.right.push(3), &pair.left);
+}
+"#,
+        ),
+        (
+            "two_phase_receiver.rs",
+            r#"
+fn main() {
+    let mut values = vec![1_i64, 2];
+    values.push(values.len() as i64);
+}
+"#,
+        ),
+        (
+            "mixed_projection_capture.rs",
+            r#"
+struct Pair { left: Vec<i64>, right: Vec<i64> }
+fn both<F: FnMut()>(mut callback: F, values: &Vec<i64>) {
+    callback();
+    println!("{}", values.len());
+}
+fn main() {
+    let mut pair = Pair { left: vec![1], right: vec![2] };
+    both(|| {
+        println!("{}", pair.left.len());
+        pair.right.push(3);
+    }, &pair.left);
 }
 "#,
         ),

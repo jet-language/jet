@@ -153,6 +153,9 @@ pub(crate) fn resolve_builtin_op(
     );
     // D-HOLE1: `.zip` on `T?` (vs. `[T].zip`).
     let is_option = matches!(rty, Some(Type::Option(_)));
+    let receiver_borrow = rty
+        .as_ref()
+        .map(|ty| crate::Collections::builtin_receiver_borrow(ty, method));
     Some(match (method, args.len()) {
         ("len", 0) => {
             if is_string {
@@ -183,6 +186,10 @@ pub(crate) fn resolve_builtin_op(
             } else if is_lru {
                 TBuiltinOp::RemoveMap
             } else {
+                debug_assert_eq!(
+                    receiver_borrow,
+                    Some(crate::Collections::BuiltinReceiverBorrow::EagerWrite)
+                );
                 // The list form embeds the *method-span* line for its bounds panic,
                 // exactly as `emit_builtin_method` reads `span_line_col(method_span.start)`.
                 let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0;

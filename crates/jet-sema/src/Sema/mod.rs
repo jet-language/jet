@@ -674,6 +674,9 @@ pub(crate) enum ViewAccess {
 pub(crate) struct CallPlaceAccess {
     place: ViewPlace,
     access: ViewAccess,
+    /// Rust two-phase mutable receiver borrow: reads may occur while reserved,
+    /// but another write/reservation may not.
+    reserved: bool,
 }
 
 #[derive(Debug, Default)]

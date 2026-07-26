@@ -478,7 +478,11 @@ impl<'a> Checker<'a> {
         let mut call_access = call_access.unwrap_or_else(|| self.call_access_frame());
         if let (Some(receiver), Some(convention)) = (receiver, sig.self_conv) {
             self.with_call_access(&mut call_access, |checker| {
-                checker.record_call_receiver_access(receiver, convention, span);
+                if convention == AccessConvention::Write {
+                    checker.record_call_receiver_reservation(receiver, span);
+                } else {
+                    checker.record_call_receiver_access(receiver, convention, span);
+                }
             });
         }
 
@@ -677,6 +681,7 @@ impl<'a> Checker<'a> {
                 arg_idx += 1;
             }
         }
+        self.activate_call_reservations(&call_access, span);
         sig.return_type.clone()
     }
 
@@ -712,11 +717,15 @@ impl<'a> Checker<'a> {
         let mut call_access = self.call_access_frame();
         if let Some(receiver_param) = receiver_param {
             self.with_call_access(&mut call_access, |checker| {
-                checker.record_call_receiver_access(
-                    receiver,
-                    receiver_param.convention,
-                    receiver.span(),
-                );
+                if receiver_param.convention == AccessConvention::Write {
+                    checker.record_call_receiver_reservation(receiver, receiver.span());
+                } else {
+                    checker.record_call_receiver_access(
+                        receiver,
+                        receiver_param.convention,
+                        receiver.span(),
+                    );
+                }
             });
         }
         for (arg, param) in args.iter_mut().zip(params) {
@@ -751,6 +760,7 @@ impl<'a> Checker<'a> {
             }
             self.check_write_arg_change(arg);
         }
+        self.activate_call_reservations(&call_access, span);
         sig.return_type.clone()
     }
 

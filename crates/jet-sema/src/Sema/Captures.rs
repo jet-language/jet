@@ -729,7 +729,36 @@ pub(crate) fn expr_collect_captures(
                 }
             }
         }
-        Expr::Lambda(_) => {}
+        Expr::Lambda(lambda) => {
+            // Constructing a nested closure is an access performed by the
+            // outer closure. Propagate only names not already bound by the
+            // outer body; locals/parameters are owned by that outer closure.
+            let params = lambda
+                .params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect::<HashSet<_>>();
+            let mut nested_read = HashSet::new();
+            let mut nested_write = HashSet::new();
+            lambda_collect_captures(
+                &lambda.body,
+                &params,
+                &mut nested_read,
+                &mut nested_write,
+            );
+            nested_read.extend(lambda.take_names.iter().map(|(name, _)| name.clone()));
+            for name in nested_read {
+                if !bound.contains(&name) {
+                    read.insert(name);
+                }
+            }
+            for name in nested_write {
+                if !bound.contains(&name) {
+                    mut_cap.insert(name.clone());
+                    read.insert(name);
+                }
+            }
+        }
         Expr::Paren(inner, _) => expr_collect_captures(inner, bound, read, mut_cap),
         _ => {}
     }

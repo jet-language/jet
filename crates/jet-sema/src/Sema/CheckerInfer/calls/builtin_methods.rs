@@ -239,15 +239,31 @@ impl<'a> Checker<'a> {
             ret: Option<Type>,
         ) -> Option<Type> {
             let mut call_access = self.call_access_frame();
-            let receiver_convention = if Collections::builtin_needs_mut_receiver(recv_ty, method) {
-                crate::AST::AccessConvention::Write
-            } else if Collections::is_iter_type(recv_ty) {
-                crate::AST::AccessConvention::Move
-            } else {
-                crate::AST::AccessConvention::Read
-            };
+            let receiver_borrow = Collections::builtin_receiver_borrow(recv_ty, method);
             self.with_call_access(&mut call_access, |checker| {
-                checker.record_call_receiver_access(receiver, receiver_convention, span);
+                match receiver_borrow {
+                    Collections::BuiltinReceiverBorrow::TwoPhaseWrite => {
+                        checker.record_call_receiver_reservation(receiver, span);
+                    }
+                    Collections::BuiltinReceiverBorrow::EagerWrite => checker
+                        .record_call_receiver_access(
+                            receiver,
+                            crate::AST::AccessConvention::Write,
+                            span,
+                        ),
+                    Collections::BuiltinReceiverBorrow::Read => checker
+                        .record_call_receiver_access(
+                            receiver,
+                            crate::AST::AccessConvention::Read,
+                            span,
+                        ),
+                    Collections::BuiltinReceiverBorrow::Move => checker
+                        .record_call_receiver_access(
+                            receiver,
+                            crate::AST::AccessConvention::Move,
+                            span,
+                        ),
+                }
             });
             if Collections::builtin_needs_mut_receiver(recv_ty, method) {
                 if let Some(root) = expr_root_ident(receiver) {
@@ -666,6 +682,7 @@ impl<'a> Checker<'a> {
                 }
             }
             let _ = span;
+            self.activate_call_reservations(&call_access, span);
             refined_ret
         }
     
