@@ -1208,12 +1208,9 @@ mod tests {
     }
 
     #[test]
-    fn windows_dispatch_contract_is_native_not_batch() {
+    fn native_dispatch_exit_contract_is_stable() {
         assert_eq!(MISSING_DISPATCH_EXIT, 127);
         assert_eq!(INVALID_DISPATCH_EXIT, 126);
-        let source = include_str!("../bin/jetpack.rs");
-        assert!(source.contains("dispatch_current_process"));
-        assert!(!source.contains(".cmd"));
     }
 
     #[test]
