@@ -1752,9 +1752,19 @@ pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverB
         BuiltinReceiverBorrow::Move
     } else if !builtin_method_mutates(recv_ty, method) {
         BuiltinReceiverBorrow::Read
-    } else if matches!(recv_ty, Type::List(_)) && method == "remove" {
-        // TIR lowers this to `jet_list_remove(&mut receiver, ...)`, whose
-        // explicit `&mut` is evaluated eagerly rather than two-phase.
+    } else if (matches!(recv_ty, Type::List(_))
+        && matches!(method, "remove" | "sort_by"))
+        || matches!(
+            recv_ty,
+            Type::Named(name)
+                if name == Syntax::CLOCK_TYPE
+                    || name == Syntax::RNG_TYPE
+                    || name == Syntax::SOLVER_TYPE
+        )
+    {
+        // TIR lowers these through helpers whose first argument is an explicit
+        // `&mut receiver`. Unlike Rust method-call syntax, that borrow is eager:
+        // it must reject receiver reads while later arguments are evaluated.
         BuiltinReceiverBorrow::EagerWrite
     } else {
         // Ordinary Rust method-call syntax reserves `&mut self`, evaluates

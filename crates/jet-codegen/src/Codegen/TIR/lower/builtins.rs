@@ -156,7 +156,7 @@ pub(crate) fn resolve_builtin_op(
     let receiver_borrow = rty
         .as_ref()
         .map(|ty| crate::Collections::builtin_receiver_borrow(ty, method));
-    Some(match (method, args.len()) {
+    let op = match (method, args.len()) {
         ("len", 0) => {
             if is_string {
                 TBuiltinOp::LenString
@@ -186,10 +186,6 @@ pub(crate) fn resolve_builtin_op(
             } else if is_lru {
                 TBuiltinOp::RemoveMap
             } else {
-                debug_assert_eq!(
-                    receiver_borrow,
-                    Some(crate::Collections::BuiltinReceiverBorrow::EagerWrite)
-                );
                 // The list form embeds the *method-span* line for its bounds panic,
                 // exactly as `emit_builtin_method` reads `span_line_col(method_span.start)`.
                 let line = crate::Diagnostics::span_line_col(&cx.src, method_span.start).0;
@@ -409,7 +405,50 @@ pub(crate) fn resolve_builtin_op(
         ("peek_front", 0) => TBuiltinOp::DequePeekFront,
         ("peek_back", 0) => TBuiltinOp::DequePeekBack,
         _ => return None,
-    })
+    };
+    let emitted_borrow = if is_iter {
+        crate::Collections::BuiltinReceiverBorrow::Move
+    } else {
+        match &op {
+            // Explicit helper call: `jet_list_remove(&mut receiver, ...)`.
+            TBuiltinOp::RemoveList { .. } => {
+                crate::Collections::BuiltinReceiverBorrow::EagerWrite
+            }
+            // Native method syntax receives Rust's two-phase `&mut self`.
+            TBuiltinOp::Push
+            | TBuiltinOp::Pop
+            | TBuiltinOp::InsertMap
+            | TBuiltinOp::AddNewMap
+            | TBuiltinOp::InsertList
+            | TBuiltinOp::RemoveMap
+            | TBuiltinOp::Reverse
+            | TBuiltinOp::Sort
+            | TBuiltinOp::Clear
+            | TBuiltinOp::SetInsert
+            | TBuiltinOp::SetRemove
+            | TBuiltinOp::SortedSetInsert
+            | TBuiltinOp::SortedSetRemove
+            | TBuiltinOp::BitSetAdd
+            | TBuiltinOp::BitSetRemove
+            | TBuiltinOp::BagAdd
+            | TBuiltinOp::BagRemove
+            | TBuiltinOp::LruPut
+            | TBuiltinOp::LruAddNew
+            | TBuiltinOp::LruGet
+            | TBuiltinOp::ByteBufferWrite { .. }
+            | TBuiltinOp::DequePushFront
+            | TBuiltinOp::DequePushBack
+            | TBuiltinOp::DequePopFront
+            | TBuiltinOp::DequePopBack => {
+                crate::Collections::BuiltinReceiverBorrow::TwoPhaseWrite
+            }
+            _ => crate::Collections::BuiltinReceiverBorrow::Read,
+        }
+    };
+    if let Some(receiver_borrow) = receiver_borrow {
+        debug_assert_eq!(receiver_borrow, emitted_borrow);
+    }
+    Some(op)
 }
 
 /// c109 Phase 9: the resolved return type of a built-in collection/string method,
@@ -443,7 +482,7 @@ pub(crate) fn resolve_closure_op(
     // The lambda arg's FnMut fact (the AST checks `args[0]` for map/each).
     let fn_mut =
         matches!(args.first().map(|a| &a.expr), Some(Expr::Lambda(l)) if l.meta.needs_fn_mut);
-    match method {
+    let op = match method {
         "map" => {
             // D-HOLE1: `.map` on `T?` uses Rust's native `Option::map` directly —
             // never the mutable-list form.
@@ -532,7 +571,14 @@ pub(crate) fn resolve_closure_op(
         }
         // The gate (`is_closure_method`) admits only the names above.
         _ => unreachable!("non-closure method in resolve_closure_op (gate)"),
+    };
+    if matches!(op, TClosureOp::SortBy) {
+        debug_assert_eq!(
+            crate::Collections::builtin_receiver_borrow(recv_ty, method),
+            crate::Collections::BuiltinReceiverBorrow::EagerWrite
+        );
     }
+    op
 }
 
 /// c109 Phase 11: TIR-local reproduction of codegen's `list_carries_trait`

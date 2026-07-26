@@ -671,16 +671,6 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|param| param.name.clone())
             .collect::<HashSet<_>>();
-        let mut reads = HashSet::new();
-        let mut writes = HashSet::new();
-        crate::Sema::Captures::lambda_collect_captures(
-            &lambda.body,
-            &params,
-            &mut reads,
-            &mut writes,
-        );
-        writes.extend(lambda.meta.mut_captures.iter().cloned());
-        reads.extend(writes.iter().cloned());
         let mut events = Vec::new();
         match &lambda.body {
             LambdaBody::Expr(body) => self.collect_evaluated_expr_accesses(
@@ -699,29 +689,27 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        events.retain(|event| reads.contains(&event.place.owner.name));
-        for name in reads {
-            if !events.iter().any(|event| event.place.owner.name == name) {
-                let capture = Expr::Ident(name.clone(), lambda.span);
-                let access = if writes.contains(&name) {
-                    ViewAccess::Write
-                } else {
-                    ViewAccess::Read
-                };
-                self.push_evaluated_access(
-                    &capture,
-                    access,
-                    &HashSet::new(),
-                    &mut events,
-                );
-            }
+        // `take` captures move at construction even when the body never names
+        // them. All other capture roots come from the binding-aware semantic
+        // walker above; the legacy name-only collector is not authoritative.
+        for (name, span) in &lambda.take_names {
+            let capture = Expr::Ident(name.clone(), *span);
+            self.push_evaluated_access(
+                &capture,
+                ViewAccess::Read,
+                &HashSet::new(),
+                &mut events,
+            );
         }
         let taken = lambda
             .take_names
             .iter()
             .map(|(name, _)| name)
             .collect::<HashSet<_>>();
-        let retains = !lambda.meta.escapes && !lambda.meta.mut_captures.is_empty();
+        let has_capture_write = events
+            .iter()
+            .any(|event| event.access == ViewAccess::Write);
+        let retains = !lambda.meta.escapes && has_capture_write;
         for event in &mut events {
             event.through_call = retains && !taken.contains(&event.place.owner.name);
         }
@@ -1230,12 +1218,27 @@ impl<'a> Checker<'a> {
                 }
                 Stmt::Reactive { body, .. } => {
                     let mut body_bound = bound.clone();
+                    let mut captures = Vec::new();
                     self.collect_evaluated_stmt_accesses(
                         body,
                         AccessWalkMode::CaptureRequirements,
                         &mut body_bound,
-                        out,
+                        &mut captures,
                     );
+                    // Reactive registration clones every free capture. Body
+                    // writes run later against the clones; construction only
+                    // reads each source value now.
+                    for mut capture in captures {
+                        capture.access = ViewAccess::Read;
+                        capture.through_call = false;
+                        if !out.iter().any(|event| {
+                            event.place.owner == capture.place.owner
+                                && event.place.projections
+                                    == capture.place.projections
+                        }) {
+                            out.push(capture);
+                        }
+                    }
                 }
                 Stmt::ContextBlock { fields, body, .. } => {
                     for (_, expr, _) in fields {
@@ -1317,7 +1320,20 @@ impl<'a> Checker<'a> {
     /// A nested call's frame ends when it returns, but a returned View keeps
     /// the source loan alive as an argument of the enclosing call.
     pub(crate) fn record_call_result_views(&mut self, expr: &Expr) {
+        let mut loans: Vec<(ViewPlace, ViewAccess)> = Vec::new();
         for (_, place, _, access) in self.view_call_sources(expr) {
+            if let Some((_, seen_access)) = loans.iter_mut().find(|(seen, _)| {
+                seen.owner == place.owner
+                    && seen.projections == place.projections
+            }) {
+                if access == ViewAccess::Write {
+                    *seen_access = ViewAccess::Write;
+                }
+            } else {
+                loans.push((place, access));
+            }
+        }
+        for (place, access) in loans {
             self.check_call_place_access(&place, access, expr.span());
             self.record_call_place_access(place, access);
         }
@@ -1718,8 +1734,32 @@ impl<'a> Checker<'a> {
         &mut self,
         init: &Expr,
     ) -> Vec<(Vec<String>, ViewPlace, ViewKind, ViewAccess)> {
-        if let Expr::Copy(inner, _) = init {
+        if let Expr::Copy(inner, _) | Expr::Paren(inner, _) = init {
             return self.view_call_sources(inner);
+        }
+        if let Expr::If {
+            then_value,
+            else_value,
+            ..
+        } = init
+        {
+            let mut sources = self.view_call_sources(then_value);
+            sources.extend(self.view_call_sources(else_value));
+            return sources;
+        }
+        if let Expr::OrFallback {
+            value, fallback, ..
+        } = init
+        {
+            let mut sources = self.view_call_sources(value);
+            match fallback {
+                crate::AST::OrFallback::Value(value)
+                | crate::AST::OrFallback::Return(Some(value), _) => {
+                    sources.extend(self.view_call_sources(value));
+                }
+                _ => {}
+            }
+            return sources;
         }
         if let Expr::Field(base, field, _) = init {
             let projected: Vec<_> = self

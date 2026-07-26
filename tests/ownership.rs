@@ -545,6 +545,128 @@ fn run() {
     let diags =
         jet::compile(rejected).expect_err("a nested write conflicts with receiver reservation");
     assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    for eager in [
+        r#"
+fn run() {
+    values := [2, 1]
+    values.sort_by((value: Int) => value + values.len())
+}
+"#,
+        r#"
+fn run() {
+    clock := Clock.new(0)
+    clock.advance(clock.now())
+}
+"#,
+        r#"
+use core.solve as solve
+fn run() {
+    solver := solve.Solver.new(1)
+    solver.require(solver.failure_count() == 0)
+}
+"#,
+    ] {
+        let diags =
+            jet::compile(eager).expect_err("explicit-helper receiver borrows are eager");
+        assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+    }
+}
+
+#[test]
+fn semantic_capture_events_drive_retention_and_deferred_clone_modes() {
+    let field_write = r#"
+struct Bucket { values: [Int] }
+fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn run() {
+    bucket := Bucket.{ values: [1, 2] }
+    both(() => { bucket.values = [3] }, bucket.values)
+}
+"#;
+    let diags =
+        jet::compile(field_write).expect_err("a captured field assignment stays write-borrowed");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let user_method = r#"
+struct Bucket { values: [Int] }
+impl Bucket {
+    fn clear(&self) { self.values = [] }
+}
+fn both(callback: fn(), values: [Int]) { callback(); print(values.len()) }
+fn run() {
+    bucket := Bucket.{ values: [1, 2] }
+    both(() => bucket.clear(), bucket.values)
+}
+"#;
+    let diags = jet::compile(user_method)
+        .expect_err("a captured user mutable receiver stays write-borrowed");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let reactive_clone = r#"
+fn both(callback: fn(), values: &[Int]) { callback(); values.push(4) }
+fn run() {
+    values := [1, 2]
+    both(() => {
+        #Reactive { values.push(3) }
+    }, &values)
+}
+"#;
+    jet::compile(reactive_clone)
+        .expect("reactive registration clones captures instead of retaining body writes");
+}
+
+#[test]
+fn semantic_capture_walker_covers_fallback_and_scope_member_arguments() {
+    let fallback = r#"
+fn missing() -> Int? { return null }
+fn both(values: &[Int], callback: fn()) { values.push(3); callback() }
+fn run() {
+    values := [1, 2]
+    both(&values, () => {
+        found :: missing() ?? panic("length {values.len()}")
+        print(found)
+    })
+}
+"#;
+    let diags =
+        jet::compile(fallback).expect_err("panic fallback arguments are closure captures");
+    assert!(diags.iter().any(|diag| diag.code == "E0204"), "{diags:?}");
+
+    let scope_member = r#"
+fn run() { print(0) }
+#Test("member argument capture walk") {
+    values := [1, 2]
+    .skip("length {values.len()}") { require(false) }
+}
+"#;
+    jet::compile(scope_member).expect("valid scope-member arguments remain walkable");
+}
+
+#[test]
+fn wrapped_and_branch_returned_views_stay_live_through_outer_calls() {
+    for view in [
+        "(first(values))",
+        "if true { first(values) } else { first(values) }",
+        "Val(first(values)) ?? first(values)",
+    ] {
+        let src = format!(
+            r#"
+fn first(values: [Int]) -> View<Int> {{
+    return values[0..1]
+}}
+fn both(view: View<Int>, values: &[Int]) {{
+    values.push(view[0])
+}}
+fn run() {{
+    values := [1, 2]
+    both({view}, &values)
+}}
+"#
+        );
+        let diags =
+            jet::compile(&src).expect_err("wrapped returned views retain their source loan");
+        assert!(diags.iter().any(|diag| diag.code == "E0204"), "{view}: {diags:?}");
+    }
 }
 
 #[test]
@@ -788,6 +910,43 @@ fn main() {
 }
 "#,
             "E0505",
+        ),
+        (
+            "eager_helper_receiver.rs",
+            r#"
+fn advance(clock: &mut i64, to: i64) { *clock = to; }
+fn now(clock: &i64) -> i64 { *clock }
+fn main() {
+    let mut clock = 0;
+    advance(&mut clock, now(&clock));
+}
+"#,
+            "E0502",
+        ),
+        (
+            "eager_sort_capture.rs",
+            r#"
+fn sort_by<F: Fn(i64) -> i64>(values: &mut Vec<i64>, key: F) {
+    values.sort_by_key(|value| key(*value));
+}
+fn main() {
+    let mut values = vec![2, 1];
+    sort_by(&mut values, |value| value + values.len() as i64);
+}
+"#,
+            "E0502",
+        ),
+        (
+            "wrapped_returned_view.rs",
+            r#"
+fn first(values: &Vec<i64>) -> &[i64] { &values[0..1] }
+fn both(view: &[i64], values: &mut Vec<i64>) { values.push(view[0]); }
+fn main() {
+    let mut values = vec![1, 2];
+    both((first(&values)), &mut values);
+}
+"#,
+            "E0502",
         ),
         (
             "if_prefix.rs",
