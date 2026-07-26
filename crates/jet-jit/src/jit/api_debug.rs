@@ -285,6 +285,7 @@ fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
             }
             TStmt::Loop { body, .. }
             | TStmt::Region(body)
+            | TStmt::Impure(body)
             | TStmt::Unsafe(body)
             | TStmt::Inline(body)
             | TStmt::DebugOnly(body)

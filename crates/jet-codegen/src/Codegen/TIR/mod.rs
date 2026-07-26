@@ -1692,6 +1692,10 @@ pub enum TStmt {
     /// `#Unsafe` region, so the emitted `unsafe { … }` is always 1:1 with a source gate.
     /// Body bindings use the `unsafe` block's child lexical env.
     Unsafe(Vec<TStmt>),
+    /// D-CTEFFECT1: an explicit `#Impure("reason") { … }` policy gate.
+    /// AOT/JIT execute a plain lexical block; comptime evaluation raises its
+    /// impurity depth only while evaluating this body.
+    Impure(Vec<TStmt>),
     /// D-REACTCORE1: `#Reactive { … }` — register a reactive effect at this point.
     Reactive {
         closure: String,
@@ -2257,6 +2261,10 @@ pub enum TExprKind {
         recv: Box<TExpr>,
         method: TMethodRef,
         args: Vec<TCallArg>,
+        /// First source argument when it is one plain string literal. The
+        /// comptime BuildContext host surface uses this to preserve the
+        /// auditability rule for `b.find("glob")`.
+        source_first_string_literal: Option<String>,
         /// Hidden source bridge for generic arithmetic trait dispatch. User
         /// methods keep their two-argument surface; primitive impls receive
         /// the Jet operator line through the synthetic trait's default helper.
@@ -2307,6 +2315,7 @@ pub enum TExprKind {
         module: String,
         method: String,
         args: Vec<TExpr>,
+        source_span: crate::Diagnostics::Span,
         /// D-FIXARR1: per-argument `[T#N]` to `[T]` widening, resolved from the
         /// authoritative Core signature during lowering.
         widen_to_vec: Vec<bool>,

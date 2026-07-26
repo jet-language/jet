@@ -1692,6 +1692,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             recv: Box::new(recv),
                             method: crate::Codegen::TIR::TMethodRef::inherent(member),
                             args: vec![],
+                            source_first_string_literal: None,
                             operator_line: None,
                         },
                     };

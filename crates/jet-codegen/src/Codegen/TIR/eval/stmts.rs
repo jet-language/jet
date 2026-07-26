@@ -240,9 +240,17 @@ impl EvalCtx<'_> {
                 }
                 Ok(Flow::Normal)
             }
-            TStmt::Inline(body) | TStmt::DebugOnly(body) | TStmt::Unsafe(body) | TStmt::Region(body) => {
-                self.exec_stmts(body, scope)
+            TStmt::Impure(body) => {
+                let previous = self.impure_depth;
+                self.impure_depth = previous.saturating_add(1);
+                let result = self.exec_stmts(body, scope);
+                self.impure_depth = previous;
+                result
             }
+            TStmt::Inline(body)
+            | TStmt::DebugOnly(body)
+            | TStmt::Unsafe(body)
+            | TStmt::Region(body) => self.exec_stmts(body, scope),
             TStmt::LineMarker(_) => Ok(Flow::Normal),
             TStmt::DeferClose { .. } => Ok(Flow::Normal),
             TStmt::ForIn {

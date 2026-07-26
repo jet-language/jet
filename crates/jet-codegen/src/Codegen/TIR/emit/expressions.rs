@@ -661,6 +661,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             method,
             args,
             operator_line,
+            ..
         } => {
             let method_rust = method.rust();
             let arg_str = emit_tir_call_args(args, cx);
@@ -1070,6 +1071,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             method,
             args,
             widen_to_vec,
+            ..
         } => emit_tir_core_call(module, method, args, widen_to_vec, &e.ty, cx),
         TExprKind::Binary {
             op,

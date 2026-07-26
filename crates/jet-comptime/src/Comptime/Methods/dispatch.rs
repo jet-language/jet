@@ -89,6 +89,36 @@ pub(crate) fn is_pure_tier2_call(module: &str, method: &str) -> bool {
     )
 }
 
+pub fn is_tier2_core_call(module: &str, method: &str, repl_mode: bool) -> bool {
+    (matches!(
+        module,
+        "core.files"
+            | "core.env"
+            | "core.io"
+            | "core.exec"
+            | "core.net"
+            | "core.tls"
+            | "core.process"
+    ) && !is_pure_tier2_call(module, method))
+        || (repl_mode && module == "core.random" && method != "rng")
+}
+
+pub fn vault_comptime_denied(module: &str, method: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1265",
+        format!("`{module}.{method}()` can't be reached from a build-time context"),
+        "module-field/comptime evaluation runs before secrets are ever decrypted; \
+         a repo's encrypted store is only ever opened at ordinary runtime, and — \
+         unlike the Tier-2 comptime effect gate — there is no `#Impure` escape hatch \
+         here."
+            .to_string(),
+        "move the secret read out of comptime/module-field evaluation and into \
+         ordinary runtime code."
+            .to_string(),
+        Some(span),
+    )
+}
+
 fn sorted_descending(mut items: Vec<CtValue>, span: Span) -> Result<Vec<CtValue>, Diagnostic> {
     let mut sort_error = None;
     items.sort_by(|left, right| match cmp(right.clone(), left.clone(), span) {
@@ -253,7 +283,15 @@ fn check_embed_path(builtin: &str, arg: &CallArg, span: Span) -> Result<String, 
         },
         _ => return Err(embed_path_err(builtin, "literal", span)),
     };
-    let p = std::path::Path::new(&path);
+    check_literal_embed_path(builtin, &path, span)
+}
+
+pub(crate) fn check_literal_embed_path(
+    builtin: &str,
+    path: &str,
+    span: Span,
+) -> Result<String, Diagnostic> {
+    let p = std::path::Path::new(path);
     if p.is_absolute() {
         return Err(embed_path_err(builtin, "absolute", span));
     }
@@ -262,10 +300,10 @@ fn check_embed_path(builtin: &str, arg: &CallArg, span: Span) -> Result<String, 
     {
         return Err(embed_path_err(builtin, "escape", span));
     }
-    Ok(path)
+    Ok(path.to_string())
 }
 
-fn embed_path_err(builtin: &str, kind: &str, span: Span) -> Diagnostic {
+pub(crate) fn embed_path_err(builtin: &str, kind: &str, span: Span) -> Diagnostic {
     let noun = if builtin == crate::Syntax::BUILTIN_FIND {
         "glob"
     } else {
@@ -296,7 +334,11 @@ fn embed_path_err(builtin: &str, kind: &str, span: Span) -> Diagnostic {
     Diagnostic::error("E0957", msg, why, fix, Some(span))
 }
 
-fn find_glob(base_dir: &Path, glob: &str, span: Span) -> Result<Vec<String>, Diagnostic> {
+pub(crate) fn find_glob(
+    base_dir: &Path,
+    glob: &str,
+    span: Span,
+) -> Result<Vec<String>, Diagnostic> {
     let pattern = normalize_rel(glob);
     let segments = split_rel(&pattern);
     let root_rel = static_glob_prefix(&segments);
@@ -340,6 +382,88 @@ fn find_glob(base_dir: &Path, glob: &str, span: Span) -> Result<Vec<String>, Dia
         )
     })?;
     Ok(out)
+}
+
+pub fn eval_locked_find(
+    base_dir: &Path,
+    glob: &str,
+    mut embed_inputs: Option<&mut Vec<crate::AST::ComptimeInput>>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let builtin = crate::Syntax::BUILTIN_FIND;
+    let mut matches = find_glob(base_dir, glob, span)?;
+    matches.sort();
+    for rel in &matches {
+        let bytes = std::fs::read(base_dir.join(rel)).map_err(|error| {
+            Diagnostic::error(
+                "E0955",
+                format!("`{builtin}` can't open `{rel}`"),
+                format!("{error} (matched while expanding `{glob}`)"),
+                "check the glob and remove unreadable files from its match set".to_string(),
+                Some(span),
+            )
+        })?;
+        if let Some(inputs) = embed_inputs.as_deref_mut() {
+            inputs.push(crate::AST::ComptimeInput {
+                path: rel.clone(),
+                hash: crate::SHA256::sha256_hex(&bytes),
+            });
+        }
+    }
+    Ok(CtValue::List(
+        matches.into_iter().map(CtValue::Str).collect(),
+    ))
+}
+
+pub fn eval_build_embed(
+    args: &[CtValue],
+    base_dir: &Path,
+    embed_inputs: Option<&mut Vec<crate::AST::ComptimeInput>>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let rel = match args.first() {
+        Some(CtValue::Str(path)) => path,
+        _ => return Err(unsupported("`b.embed` requires a path string", span)),
+    };
+    let path = Path::new(rel);
+    if args.len() != 1
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(Diagnostic::error(
+            "E0957",
+            format!("`b.embed` path `{rel}` escapes the build root"),
+            "locked build inputs must stay beneath the selected source directory".to_string(),
+            "use a relative path returned by `b.find`, without `..`".to_string(),
+            Some(span),
+        ));
+    }
+    let bytes = std::fs::read(base_dir.join(path)).map_err(|error| {
+        Diagnostic::error(
+            "E0955",
+            format!("`b.embed` cannot open `{rel}`"),
+            error.to_string(),
+            "check the locked relative path".to_string(),
+            Some(span),
+        )
+    })?;
+    if let Some(inputs) = embed_inputs {
+        inputs.push(crate::AST::ComptimeInput {
+            path: rel.clone(),
+            hash: crate::SHA256::sha256_hex(&bytes),
+        });
+    }
+    String::from_utf8(bytes).map(CtValue::Str).map_err(|_| {
+        Diagnostic::error(
+            "E0955",
+            format!("`b.embed` cannot decode `{rel}` as text"),
+            "the embedded file is not valid UTF-8".to_string(),
+            "embed a UTF-8 text file".to_string(),
+            Some(span),
+        )
+    })
 }
 
 fn normalize_rel(path: &str) -> String {
@@ -546,6 +670,79 @@ fn integer_width_from_name(name: &str) -> Option<u32> {
     crate::AST::numeric_type_from_name(name)
         .as_ref()
         .and_then(integer_width_from_type)
+}
+
+/// D-CTEFFECT1 Tier-1 / D-NETDEP1=A: evaluate a sha256-pinned text fetch and
+/// record its lock input. Shared by AST and canonical TIR evaluation.
+pub fn eval_net_fetch(
+    args: &[CtValue],
+    embed_inputs: Option<&mut Vec<crate::AST::ComptimeInput>>,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let url = match args.first() {
+        Some(CtValue::Str(s)) => s.clone(),
+        _ => {
+            return Err(Diagnostic::error(
+                "E3414",
+                "fetch: first argument must be a string URL".to_string(),
+                "`core.net.fetch` expects a string URL as its first argument".to_string(),
+                "pass a string literal: `net.fetch('https://example.com/data.txt', sha256: '…')`"
+                    .to_string(),
+                Some(span),
+            ))
+        }
+    };
+    let expected = match args.get(1) {
+        Some(CtValue::Str(s)) => s.clone(),
+        _ => {
+            return Err(Diagnostic::error(
+                "E3414",
+                "fetch: `sha256:` argument missing or not a string".to_string(),
+                "`core.net.fetch` requires a `sha256:` labelled argument for content verification"
+                    .to_string(),
+                "add `sha256: '<64-hex-chars>'` as the second argument".to_string(),
+                Some(span),
+            ))
+        }
+    };
+
+    let bytes = jet_net::fetch(&url).map_err(|error| {
+        Diagnostic::error(
+            error.diagnostic_code(),
+            error.diagnostic_what(&url),
+            error.diagnostic_why(&url),
+            error.diagnostic_fix(),
+            Some(span),
+        )
+    })?;
+    let actual = crate::SHA256::sha256_hex(&bytes);
+    if actual != expected {
+        return Err(Diagnostic::error(
+            "E3413",
+            format!("fetch: sha256 mismatch for `{url}`"),
+            format!("expected `{expected}` but content hashes to `{actual}`"),
+            "update the `sha256:` pin to match the content, or verify the URL is correct"
+                .to_string(),
+            Some(span),
+        ));
+    }
+    let content = String::from_utf8(bytes).map_err(|_| {
+        Diagnostic::error(
+            "E3414",
+            format!("fetch: content at `{url}` is not valid UTF-8"),
+            "the downloaded bytes could not be decoded as UTF-8 text".to_string(),
+            "binary content is not supported by comptime fetch; use `embed_bytes` for binary data"
+                .to_string(),
+            Some(span),
+        )
+    })?;
+    if let Some(inputs) = embed_inputs {
+        inputs.push(crate::AST::ComptimeInput {
+            path: format!("url:{url}"),
+            hash: actual,
+        });
+    }
+    Ok(CtValue::Str(content))
 }
 
 impl<'a> Interp<'a> {
@@ -1284,27 +1481,7 @@ impl<'a> Interp<'a> {
                 span,
             ));
         }
-        let mut matches = find_glob(self.base_dir, &glob, span)?;
-        matches.sort();
-        for rel in &matches {
-            let full = self.base_dir.join(rel);
-            let bytes = std::fs::read(&full).map_err(|e| {
-                Diagnostic::error(
-                    "E0955",
-                    format!("`{builtin}` can't open `{rel}`"),
-                    format!("{} (matched while expanding `{glob}`)", e),
-                    "check the glob and remove unreadable files from its match set".to_string(),
-                    Some(span),
-                )
-            })?;
-            self.embed_inputs.push(crate::AST::ComptimeInput {
-                path: rel.clone(),
-                hash: crate::SHA256::sha256_hex(&bytes),
-            });
-        }
-        Ok(CtValue::List(
-            matches.into_iter().map(CtValue::Str).collect(),
-        ))
+        eval_locked_find(self.base_dir, &glob, Some(&mut self.embed_inputs), span)
     }
 
     /// Shared `embed_file`/`embed_bytes` front half: validate the path (E0957)
@@ -1342,84 +1519,6 @@ impl<'a> Interp<'a> {
                 Some(span),
             )),
         }
-    }
-
-    /// D-CTEFFECT1 Tier-1 / D-NETDEP1=A: `core.net.fetch(url, sha256:)`.
-    ///
-    /// **Stub — backend pending.** D-NETDEP1=A ratified `ureq`/`minreq` as the
-    /// HTTP backend (runtime-side, in a `jet-net/` workspace member; I6 holds).
-    /// This stub preserves the correct Tier-1 routing (no `#Impure` gate) so
-    /// the architecture is in place; replace the `E3412` body below with the
-    /// real download once the workspace member is wired.
-    ///
-    /// When implemented:
-    ///   1. Validate `url` (arg 0) and `expected_sha256` (arg 1 / labelled `sha256:`).
-    ///   2. Download via the `jet-net` crate's blocking fetch.
-    ///   3. `sha256_hex(bytes)` → compare; mismatch → **E3413**.
-    ///   4. Unreachable / general fetch error → **E3414**; TLS client failures
-    ///      reachable through HTTPS → **E4201**–**E4203**.
-    ///   5. Push `ComptimeInput { path: "url:{url}", hash: actual }` to `embed_inputs`.
-    ///   6. Return `CtValue::Str(content)` (non-UTF-8 content needs its own code).
-    fn eval_net_fetch(&mut self, args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-        let url = match args.first() {
-            Some(CtValue::Str(s)) => s.clone(),
-            _ => return Err(Diagnostic::error(
-                "E3414",
-                "fetch: first argument must be a string URL".to_string(),
-                "`core.net.fetch` expects a string URL as its first argument".to_string(),
-                "pass a string literal: `net.fetch('https://example.com/data.txt', sha256: '…')`"
-                    .to_string(),
-                Some(span),
-            )),
-        };
-        let expected = match args.get(1) {
-            Some(CtValue::Str(s)) => s.clone(),
-            _ => return Err(Diagnostic::error(
-                "E3414",
-                "fetch: `sha256:` argument missing or not a string".to_string(),
-                "`core.net.fetch` requires a `sha256:` labelled argument for content verification"
-                    .to_string(),
-                "add `sha256: '<64-hex-chars>'` as the second argument".to_string(),
-                Some(span),
-            )),
-        };
-
-        let bytes = jet_net::fetch(&url).map_err(|e| {
-            Diagnostic::error(
-                e.diagnostic_code(),
-                e.diagnostic_what(&url),
-                e.diagnostic_why(&url),
-                e.diagnostic_fix(),
-                Some(span),
-            )
-        })?;
-
-        let actual = crate::SHA256::sha256_hex(&bytes);
-        if actual != expected {
-            return Err(Diagnostic::error(
-                "E3413",
-                format!("fetch: sha256 mismatch for `{url}`"),
-                format!("expected `{expected}` but content hashes to `{actual}`"),
-                "update the `sha256:` pin to match the content, or verify the URL is correct"
-                    .to_string(),
-                Some(span),
-            ));
-        }
-
-        let content = String::from_utf8(bytes).map_err(|_| Diagnostic::error(
-            "E3414",
-            format!("fetch: content at `{url}` is not valid UTF-8"),
-            "the downloaded bytes could not be decoded as UTF-8 text".to_string(),
-            "binary content is not supported by comptime fetch; use `embed_bytes` for binary data".to_string(),
-            Some(span),
-        ))?;
-
-        self.embed_inputs.push(crate::AST::ComptimeInput {
-            path: format!("url:{url}"),
-            hash: actual,
-        });
-
-        Ok(CtValue::Str(content))
     }
 
     /// c139: write `new_value` back to the place `target` reads from — the

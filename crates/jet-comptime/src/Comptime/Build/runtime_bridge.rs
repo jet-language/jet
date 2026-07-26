@@ -8,10 +8,11 @@ use super::handles::{
 use super::plan_graph::BuildPlan;
 use super::provenance_toolchains::{BuildProvenance, ProbeSpec, ToolchainSpec};
 use super::targets::TargetSpec;
-use crate::AST::CtValue;
+use crate::AST::{ComptimeInput, CtValue};
 use crate::Diagnostics::{Diagnostic, Span};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::path::Path;
 
 #[derive(Debug)]
 struct ProgramBuildSession {
@@ -79,7 +80,8 @@ pub fn finish_program_build(context: &CtValue, returned: &CtValue) -> Result<(Bu
     Ok((plan, session.diagnostics))
 }
 
-pub(crate) fn eval_program_build_method(
+#[doc(hidden)]
+pub fn eval_program_build_method(
     receiver: &CtValue,
     method: &str,
     args: Vec<CtValue>,
@@ -94,6 +96,51 @@ pub(crate) fn eval_program_build_method(
             .ok_or_else(|| build_diag("build context expired", span))?;
         eval_session_method(id, session, method, args, span, in_impure_gate)
     }))
+}
+
+#[doc(hidden)]
+pub fn eval_program_build_input_method(
+    receiver: &CtValue,
+    method: &str,
+    args: &[CtValue],
+    first_string_literal: Option<&str>,
+    base_dir: &Path,
+    embed_inputs: Option<&mut Vec<ComptimeInput>>,
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    build_session_id(receiver)?;
+    match method {
+        "find" => Some(
+            (|| {
+                if args.len() != 1 {
+                    return Err(build_diag("`b.find` requires exactly one glob", span));
+                }
+                let builtin = crate::Syntax::BUILTIN_FIND;
+                let glob = first_string_literal.ok_or_else(|| {
+                    crate::Comptime::Methods::embed_path_err(builtin, "literal", span)
+                })?;
+                let glob =
+                    crate::Comptime::Methods::check_literal_embed_path(builtin, glob, span)?;
+                crate::Comptime::Methods::eval_locked_find(
+                    base_dir,
+                    &glob,
+                    embed_inputs,
+                    span,
+                )
+            })(),
+        ),
+        "embed" => Some(crate::Comptime::Methods::eval_build_embed(
+            args,
+            base_dir,
+            embed_inputs,
+            span,
+        )),
+        "fetch" => Some(
+            crate::Comptime::Methods::eval_net_fetch(args, embed_inputs, span)
+                .map(|value| CtValue::ResOk(Box::new(value))),
+        ),
+        _ => None,
+    }
 }
 
 fn eval_session_method(

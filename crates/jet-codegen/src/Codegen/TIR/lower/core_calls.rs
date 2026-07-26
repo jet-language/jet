@@ -14,6 +14,7 @@ use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::unit_type;
+use crate::Diagnostics::Span;
 use std::collections::HashMap;
 
 /// c109 Phase 13: lower a closure-taking core call (`tasks.spawn`/`http.serve`/
@@ -41,6 +42,7 @@ pub(super) fn core_module_path_from_receiver(
 pub(crate) fn lower_core_closure_call(
     module: &str,
     method: &str,
+    source_span: Span,
     args: &[crate::AST::CallArg],
     cx: &Cx,
     env: &mut LowerEnv,
@@ -119,6 +121,7 @@ pub(crate) fn lower_core_closure_call(
                             kind: TExprKind::Lambda(Box::new(pred)),
                         },
                     ],
+                    source_span,
                     widen_to_vec: vec![false, false],
                 },
             });
@@ -139,6 +142,7 @@ pub(crate) fn lower_core_closure_call(
                             kind: TExprKind::Lambda(Box::new(key)),
                         },
                     ],
+                    source_span,
                     widen_to_vec: vec![false, false],
                 },
             });
@@ -164,6 +168,7 @@ pub(crate) fn lower_core_closure_call(
                             kind: TExprKind::Lambda(Box::new(value)),
                         },
                     ],
+                    source_span,
                     widen_to_vec: vec![false, false, false],
                 },
             });
@@ -206,6 +211,7 @@ pub(crate) fn lower_core_closure_call(
                             kind: TExprKind::Lambda(Box::new(right_key)),
                         },
                     ],
+                    source_span,
                     widen_to_vec: vec![false, false, false, false],
                 },
             });
@@ -241,6 +247,7 @@ pub(crate) fn lower_core_closure_call(
                             kind: TExprKind::Lambda(Box::new(value)),
                         },
                     ],
+                    source_span,
                     widen_to_vec: vec![false, false, false, false],
                 },
             });
@@ -269,6 +276,7 @@ pub(crate) fn lower_core_closure_call(
                             kind: TExprKind::Lambda(Box::new(closure)),
                         },
                     ],
+                    source_span,
                     widen_to_vec: vec![false, false],
                 },
             });

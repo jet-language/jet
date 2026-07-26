@@ -1259,7 +1259,7 @@ fn emit_tir_stmt(
                 pad, cx.root_prefix, closure
             ));
         }
-        TStmt::Region(body) => {
+        TStmt::Region(body) | TStmt::Impure(body) => {
             out.push_str(&format!("{}{{\n", pad));
             emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
             out.push_str(&format!("{}}}\n", pad));

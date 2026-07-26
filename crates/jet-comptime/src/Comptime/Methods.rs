@@ -15,6 +15,11 @@ pub use core_calls::{apply_core_call, apply_impure_core_call, display_core_pure_
 pub use dispatch::apply_dollar_splices;
 /// Public for TirBridge `Rng.shuffle(&list)` write-back (#777).
 pub use dispatch::apply_seeded_rng_method;
+pub use dispatch::{
+    eval_build_embed, eval_locked_find, eval_net_fetch, is_tier2_core_call,
+    vault_comptime_denied,
+};
+pub(crate) use dispatch::{check_literal_embed_path, embed_path_err};
 
 pub(super) fn apply_pool(
     recv: &crate::AST::CtValue,

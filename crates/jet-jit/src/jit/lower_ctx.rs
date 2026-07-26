@@ -2677,7 +2677,7 @@ impl LowerCtx<'_, '_> {
                     self.dead = true;
                 }
             }
-            TStmt::Region(body) => {
+            TStmt::Region(body) | TStmt::Impure(body) => {
                 self.lower_stmts_scoped(body)?;
             }
             TStmt::DebugOnly(body) => {

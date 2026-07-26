@@ -1280,10 +1280,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let mut scoped = clone_env(env);
             TStmt::Unsafe(lower_stmts(body, cx, &mut scoped))
         }
-        // D-CTEFFECT1: `#Impure` erases to a plain block at codegen (comptime-only gate, I3).
+        // D-CTEFFECT1: preserve the policy gate for canonical comptime evaluation.
+        // AOT/JIT still execute its body as a plain lexical block.
         Stmt::Impure { body, .. } => {
             let mut scoped = clone_env(env);
-            TStmt::Region(lower_stmts(body, cx, &mut scoped))
+            TStmt::Impure(lower_stmts(body, cx, &mut scoped))
         }
         // D-REACTCORE1: `#Reactive { … }` lowers to `jet_reactive_effect(closure)`.
         // Clone outer captures into the closure (same as a stored lambda).

@@ -1,4 +1,4 @@
-use crate::AST::{AccessConvention, Expr, Type};
+use crate::AST::{AccessConvention, Expr, StrPart, Type};
 use crate::Codegen::alloc_handle_rust_type;
 use crate::Codegen::Cx;
 use crate::Codegen::is_db_value_type_name;
@@ -85,6 +85,17 @@ use crate::Diagnostics::Span;
 use crate::Syntax;
 use std::collections::HashSet;
 
+fn first_string_literal_arg(args: &[crate::AST::CallArg]) -> Option<String> {
+    let first = args.first()?;
+    let Expr::Str(parts, _) = &first.expr else {
+        return None;
+    };
+    match parts.as_slice() {
+        [StrPart::Lit(value)] => Some(value.clone()),
+        _ => None,
+    }
+}
+
 /// A prelude/host static-call owner whose path is prefixed by the generated
 /// crate root (`{root}jet_std::…`).
 fn reduce_op_name(expr: &Expr) -> Option<String> {
@@ -102,6 +113,20 @@ fn reduce_op_name(expr: &Expr) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn is_fragment_build_context(receiver: &Expr, cx: &Cx) -> bool {
+    if !super::is_eval_fragment() {
+        return false;
+    }
+    let Expr::Ident(name, _) = receiver else {
+        return false;
+    };
+    matches!(
+        cx.const_values.get(name),
+        Some(crate::Comptime::CtValue::Struct { type_name, .. })
+            if type_name == crate::Syntax::TYPE_BUILD_CONTEXT
+    )
 }
 
 fn rooted_owner(path: impl Into<String>) -> TStaticOwner {
@@ -309,6 +334,7 @@ pub(crate) fn lower_method_call(
                 recv: Box::new(recv),
                 method: TMethodRef::bare(method),
                 args: targs,
+                source_first_string_literal: first_string_literal_arg(args),
                 operator_line: matches!(method, "add" | "sub" | "mul" | "div")
                     .then(|| crate::Diagnostics::span_line_col(&cx.src, method_span.start).0 as u32),
             },
@@ -351,7 +377,7 @@ pub(crate) fn lower_method_call(
         let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
         let widen_to_vec = core_widen_to_vec(module, helper, &targs);
         return TExpr { ty: resolved_ret.cloned().unwrap_or_else(unit_type), kind: TExprKind::CoreCall {
-            module: module.to_string(), method: helper.to_string(), args: targs, widen_to_vec,
+            module: module.to_string(), method: helper.to_string(), args: targs, source_span: method_span, widen_to_vec,
         }};
     }
     if let Some(kind) = recv_type
@@ -380,7 +406,7 @@ pub(crate) fn lower_method_call(
             let args = vec![recv];
             let widen_to_vec = core_widen_to_vec("jet.crypto", helper, &args);
             return TExpr { ty: resolved_ret.cloned().unwrap_or_else(unit_type), kind: TExprKind::CoreCall {
-                module: "jet.crypto".to_string(), method: helper.to_string(), args, widen_to_vec,
+                module: "jet.crypto".to_string(), method: helper.to_string(), args, source_span: method_span, widen_to_vec,
             }};
         }
     }
@@ -1039,7 +1065,7 @@ pub(crate) fn lower_method_call(
     // D-ENV-MUTATE1=A: current editions retain `env.set -> Void`, but invalid
     // runtime strings must produce existing E3001 at the Jet call span. Lower
     // this compatibility wrapper with all panic facts resolved before emit.
-    if method == "set" && args.len() == 2 {
+    if method == "set" && args.len() == 2 && !super::is_eval_fragment() {
         if let Expr::Ident(alias, _) = receiver {
             if !env.locals.contains_key(alias)
                 && cx.core_imports.get(alias).is_some_and(|module| module == "core.env")
@@ -1072,7 +1098,9 @@ pub(crate) fn lower_method_call(
     if let Expr::Ident(alias, _) = receiver {
         if !env.locals.contains_key(alias) {
             if let Some(module) = cx.core_imports.get(alias).cloned() {
-                if let Some(t) = lower_core_closure_call(&module, method, args, cx, env) {
+                if let Some(t) =
+                    lower_core_closure_call(&module, method, method_span, args, cx, env)
+                {
                     return t;
                 }
                 let targs: Vec<TExpr> =
@@ -1106,6 +1134,7 @@ pub(crate) fn lower_method_call(
                         module,
                         method: method.to_string(),
                         args: targs,
+                        source_span: method_span,
                         widen_to_vec,
                     },
                 };
@@ -1130,6 +1159,7 @@ pub(crate) fn lower_method_call(
                         module: submodule,
                         method: method.to_string(),
                         args: targs,
+                        source_span: method_span,
                         widen_to_vec,
                     },
                 };
@@ -2256,6 +2286,12 @@ pub(crate) fn lower_method_call(
                 .and_then(|argument| reduce_op_name(&argument.expr))
                 .is_some();
         let skip_closure = reduce_value
+            || (method == "find" && is_fragment_build_context(receiver, cx))
+            || (super::is_eval_fragment()
+                && matches!(
+                    &recv_ty,
+                    Type::Named(name) if name == crate::Syntax::TYPE_BUILD_CONTEXT
+                ))
             || matches!(
                 &recv_ty,
                 Type::Named(name)
@@ -3015,6 +3051,7 @@ pub(crate) fn lower_method_call(
                     module: "core.perf".to_string(),
                     method: method.to_string(),
                     args: targs,
+                    source_span: method_span,
                     widen_to_vec,
                 },
             };
@@ -3473,6 +3510,7 @@ pub(crate) fn lower_method_call(
                     recv: Box::new(recv),
                     method: TMethodRef::bare(method),
                     args: targs,
+                    source_first_string_literal: first_string_literal_arg(args),
                     operator_line: None,
                 },
             };
@@ -3528,6 +3566,7 @@ pub(crate) fn lower_method_call(
                     recv: Box::new(recv_lowered),
                     method: TMethodRef::bare(method),
                     args: targs,
+                    source_first_string_literal: first_string_literal_arg(args),
                     operator_line: None,
                 },
             };
@@ -3592,6 +3631,7 @@ pub(crate) fn lower_method_call(
             recv: Box::new(recv),
             method: method_ref,
             args: targs,
+            source_first_string_literal: first_string_literal_arg(args),
             operator_line: None,
         },
     }
