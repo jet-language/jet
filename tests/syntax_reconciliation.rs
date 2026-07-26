@@ -223,6 +223,7 @@ fn datatree_name_check_distinguishes_prose_and_type_names() {
             .collect::<Vec<_>>(),
         [8]
     );
+    assert_eq!(markdown_data_name_lines("```jet\nvalue: Data")[0].0, 2);
 
     let lawful_source = "// Data is retired\ntext :: \"Data\"\n/* Data */\nvalue: DataTree";
     assert!(source_identifier_offsets(lawful_source, "Data").is_empty());
@@ -768,13 +769,7 @@ fn markdown_data_name_lines(text: &str) -> Vec<(usize, &str)> {
                 marker == *open_marker && len >= *open_len && rest.trim().is_empty()
             }) {
                 let (_, _, start_line, source) = fence.take().unwrap();
-                for offset in source_identifier_offsets(&source, "Data") {
-                    let line_no =
-                        start_line + source[..offset].bytes().filter(|byte| *byte == b'\n').count();
-                    if !lines.iter().any(|(existing, _)| *existing == line_no) {
-                        lines.push((line_no, source_lines[line_no - 1]));
-                    }
-                }
+                append_fence_data_lines(&source, start_line, &source_lines, &mut lines);
             } else {
                 let (_, _, _, source) = fence.as_mut().unwrap();
                 source.push_str(line);
@@ -786,7 +781,25 @@ fn markdown_data_name_lines(text: &str) -> Vec<(usize, &str)> {
             lines.push((index + 1, line));
         }
     }
+    if let Some((_, _, start_line, source)) = fence {
+        append_fence_data_lines(&source, start_line, &source_lines, &mut lines);
+    }
     lines
+}
+
+fn append_fence_data_lines<'a>(
+    source: &str,
+    start_line: usize,
+    source_lines: &[&'a str],
+    lines: &mut Vec<(usize, &'a str)>,
+) {
+    for offset in source_identifier_offsets(source, "Data") {
+        let line_no =
+            start_line + source[..offset].bytes().filter(|byte| *byte == b'\n').count();
+        if !lines.iter().any(|(existing, _)| *existing == line_no) {
+            lines.push((line_no, source_lines[line_no - 1]));
+        }
+    }
 }
 
 fn markdown_fence(line: &str) -> Option<(u8, usize, &str)> {
