@@ -156,6 +156,30 @@ fn run() {
             TExprKind::StrLit(parts)
                 if matches!(parts.as_slice(), [TStrPart::Lit(text)] if text == "ready")
         ));
+
+        let (tokens, diagnostics) = crate::Lexer::lex("fn run() {}");
+        assert!(diagnostics.is_empty());
+        let program = crate::Parser::parse(&tokens).unwrap();
+        let cx = build_cx(&program, "fn run() {}", "test.jet");
+        for (ty, value, expected) in [
+            (Type::Float32, f64::NAN, "f32::NAN"),
+            (Type::Float32, f64::INFINITY, "f32::INFINITY"),
+            (Type::Float32, f64::NEG_INFINITY, "f32::NEG_INFINITY"),
+            (Type::Float, f64::NAN, "f64::NAN"),
+            (Type::Float, f64::INFINITY, "f64::INFINITY"),
+            (Type::Float, f64::NEG_INFINITY, "f64::NEG_INFINITY"),
+        ] {
+            assert_eq!(
+                emit_tir_expr(
+                    &TExpr {
+                        ty,
+                        kind: TExprKind::FloatLit(value),
+                    },
+                    &cx,
+                ),
+                expected
+            );
+        }
     }
 
     #[test]

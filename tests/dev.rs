@@ -3811,6 +3811,60 @@ fn comptime_scalar_examples_match_interpreter_resident_jit_and_aot() {
         assert_eq!(aot, expected, "AOT drifted for `{stem}`");
         let _ = fs::remove_dir_all(&dir);
     }
+
+    let source = r#"
+comptime f32_nan = F32.NAN
+comptime f32_inf = F32.INFINITY
+comptime f32_neg_inf = F32.NEG_INFINITY
+comptime f64_nan = Float.NAN
+comptime f64_inf = Float.INFINITY
+comptime f64_neg_inf = Float.NEG_INFINITY
+
+fn run() {
+    print(f32_nan)
+    print(f32_inf)
+    print(f32_neg_inf)
+    print(f64_nan)
+    print(f64_inf)
+    print(f64_neg_inf)
+}
+"#;
+    let expected = ProgramOutput::ran("NaN\ninf\n-inf\nNaN\ninf\n-inf\n".into(), "".into(), 0);
+    let dir =
+        std::env::temp_dir().join(format!("jet_comptime_nonfinite_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("comptime_nonfinite.jet");
+    fs::write(&file, source).unwrap();
+    let shown = file.to_string_lossy().to_string();
+
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("interpreter failed nonfinite scalars: {diags:?}"),
+    };
+    jet_jit::reset_jit_trace_for_test();
+    let resident = run_cranelift_without_fallback(source, "comptime_nonfinite");
+    assert!(jet_jit::jit_executed_for_test());
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "nonfinite scalar fixture used deopt or fallback"
+    );
+    let aot = compiled_binary_output(
+        &dir,
+        "comptime_nonfinite",
+        0,
+        "comptime_nonfinite",
+        &shown,
+    );
+
+    assert_eq!(interpreted, expected);
+    assert_eq!(resident, expected);
+    assert_eq!(aot, expected);
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
