@@ -19,6 +19,12 @@ const EXPECTED_TASKS: &[(&str, &str, &str, &str)] = &[
         "exit=0;stdout=exact",
     ),
     (
+        "git-diff-review",
+        "build-test-debug-and-git",
+        "mixed-change",
+        "exit=0;stdout=exact",
+    ),
+    (
         "incident-report-success",
         "data-cleanup-and-report-generation",
         "success",
@@ -122,6 +128,8 @@ fn corpus_root() -> PathBuf {
 fn adapter_stem(task_id: &str) -> &'static str {
     if task_id == "repository-marker-scan" {
         "repository_marker_scan"
+    } else if task_id == "git-diff-review" {
+        "git_diff_review"
     } else if task_id.starts_with("incident-report-") {
         "incident_report"
     } else if task_id.starts_with("process-batch-") {
@@ -375,21 +383,26 @@ fn scratch_output_violations(
 
     let mut actual = BTreeMap::new();
     walk(path, path, &mut actual);
-    let expected = if adapter == "jet" {
-        BTreeMap::from([
-            ("build".to_string(), "directory"),
-            (format!("build/{jet_artifact_name}"), "file"),
-        ])
+    let (required, optional) = if adapter == "jet" {
+        (
+            BTreeMap::from([
+                ("build".to_string(), "directory"),
+                (format!("build/{jet_artifact_name}"), "file"),
+            ]),
+            BTreeMap::from([(format!("build/{jet_artifact_name}.rs"), "file")]),
+        )
     } else {
-        BTreeMap::new()
+        (BTreeMap::new(), BTreeMap::new())
     };
     let mut violations = actual
         .iter()
-        .filter(|(entry, kind)| expected.get(*entry) != Some(*kind))
+        .filter(|(entry, kind)| {
+            required.get(*entry) != Some(*kind) && optional.get(*entry) != Some(*kind)
+        })
         .map(|(entry, kind)| format!("unexpected {kind}: {entry}"))
         .collect::<Vec<_>>();
     violations.extend(
-        expected
+        required
             .iter()
             .filter(|(entry, kind)| actual.get(*entry) != Some(*kind))
             .map(|(entry, kind)| format!("missing {kind}: {entry}")),
@@ -446,7 +459,7 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
 
     let sums = fs::read_to_string(corpus_root().join("SHA256SUMS")).unwrap();
     let verified = verify_checksum_closure(&corpus_root(), &sums).unwrap();
-    assert_eq!(verified, 16, "all inputs and declared outputs must be frozen");
+    assert_eq!(verified, 23, "all inputs and declared outputs must be frozen");
 }
 
 #[test]
@@ -496,6 +509,15 @@ fn scratch_output_shape_rejects_arbitrary_build_residue() {
         scratch_output_violations("jet", &scratch.path, "process_batch"),
         Vec::<String>::new()
     );
+    fs::write(
+        scratch.path.join("build/process_batch.rs"),
+        "declared generated Rust",
+    )
+    .unwrap();
+    assert_eq!(
+        scratch_output_violations("jet", &scratch.path, "process_batch"),
+        Vec::<String>::new()
+    );
 
     fs::write(scratch.path.join("build/leak"), "undeclared residue").unwrap();
     let violations = scratch_output_violations("jet", &scratch.path, "process_batch");
@@ -524,6 +546,7 @@ fn equivalent_adapters_complete_declared_tasks() {
         ),
         ("node", command_version(Path::new("node"), "--version", "node")),
     ]);
+    let git_version = command_version(Path::new("git"), "--version", "git");
 
     for task in read_tasks() {
         let input = corpus_root().join(&task.input);
@@ -593,7 +616,8 @@ fn equivalent_adapters_complete_declared_tasks() {
             let jet_artifact_name = source.file_stem().unwrap().to_string_lossy();
             // This must run before Scratch::drop so adapter residue cannot be
             // mistaken for successful cleanup. Jet may leave only its exact
-            // public AOT artifact; no adapter gets a broad path exception.
+            // public AOT cache-hit or cache-miss shape; no adapter gets a broad
+            // path exception.
             assert_eq!(
                 scratch_output_violations(adapter, &scratch.path, &jet_artifact_name),
                 Vec::<String>::new(),
@@ -620,7 +644,7 @@ fn equivalent_adapters_complete_declared_tasks() {
         );
 
         println!(
-            "machine\tos={}\tarch={}\tcorpus=1\ttask={}\tevidence={}\tcard={}\tlosses=red:{}\tjet_artifact={}\tjet_sha256={}",
+            "machine\tos={}\tarch={}\tcorpus=1\ttask={}\tevidence={}\tcard={}\tlosses=red:{}\tjet_artifact={}\tjet_sha256={}\tgit_version={}",
             std::env::consts::OS,
             std::env::consts::ARCH,
             task.id,
@@ -628,7 +652,8 @@ fn equivalent_adapters_complete_declared_tasks() {
             task.tower_card,
             task.loss_cards,
             jet_cli.display(),
-            jet_artifact
+            jet_artifact,
+            git_version.replace('\t', " ")
         );
         for result in &measurements {
             println!(
