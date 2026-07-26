@@ -107,8 +107,7 @@ const FORBIDDEN: &[&str] = &[
 
 const OLD_BINDING_CODES: &[&str] = &["E0009", "E0010", "E0985"];
 const OLD_BINDING_WORDS: &[&str] = &["let", "val", "var", "set"];
-const SYNTAX_STATUS_MATRIX: &str =
-    "docs/plans/epoch-3/syntax-law-source-status-matrix-2026-07-07.md";
+const SYNTAX_STATUS_MATRIX: &str = "docs/archive/syntax-law-source-status-matrix-2026-07-07.md";
 const DATATREE_NORMATIVE_SURFACES: &[&str] = &[
     "docs/spec/syntax-decisions.md",
     "docs/spec/encoding-decisions.md",
@@ -181,8 +180,8 @@ fn pipe_family_has_no_stale_flow_reservation() {
     assert!(syntax.contains("`|=` remains bitwise-or-assign under S17"));
 
     for path in [
-        "docs/proposals/language-shape-constitution.md",
-        "docs/proposals/language-shape-research.md",
+        "docs/spec/spec.md",
+        "docs/archive/language-shape-research.md",
     ] {
         let text = fs::read_to_string(path).unwrap();
         assert!(text.contains("D-SHAPE-PIPE1=C"), "{path} lacks the ratified outcome");
@@ -204,7 +203,13 @@ fn dynamic_encoding_surface_uses_datatree_name() {
         let text = fs::read_to_string(relative).unwrap_or_else(|error| {
             panic!("cannot read DataTree inventory surface {relative}: {error}")
         });
+        let markdown = Path::new(relative).extension().is_some_and(|ext| ext == "md");
+        let mut in_code_fence = false;
         for (index, line) in text.lines().enumerate() {
+            if markdown && line.trim_start().starts_with("```") {
+                in_code_fence = !in_code_fence;
+                continue;
+            }
             let historical = [
                 "retired `Data`",
                 "old `Data`",
@@ -215,12 +220,8 @@ fn dynamic_encoding_surface_uses_datatree_name() {
             ]
             .iter()
             .any(|label| line.contains(label));
-            let bare_dynamic_name = line.match_indices("Data").any(|(at, _)| {
-                let before = line[..at].chars().next_back();
-                let after = line[at + "Data".len()..].chars().next();
-                !before.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-                    && !after.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-            });
+            let bare_dynamic_name =
+                contains_prohibited_data_name(line, markdown, in_code_fence);
             if bare_dynamic_name && !historical {
                 failures.push(format!("{relative}:{}: {}", index + 1, line.trim()));
             }
@@ -231,6 +232,31 @@ fn dynamic_encoding_surface_uses_datatree_name() {
         "current dynamic-encoding surfaces must use `DataTree`; label historical `Data` references explicitly:\n{}",
         failures.join("\n")
     );
+}
+
+#[test]
+fn datatree_name_check_distinguishes_prose_and_type_names() {
+    for lawful in [
+        "| `conn.send_text(text)` | Data frames; client frames are masked |",
+        "| Data ownership | Official UCD inputs are checked in. |",
+    ] {
+        assert!(!contains_prohibited_data_name(lawful, true, false));
+    }
+    assert!(contains_prohibited_data_name(
+        "the dynamic type is `Data`",
+        true,
+        false
+    ));
+    assert!(contains_prohibited_data_name(
+        "fn decode(tree: Data)",
+        true,
+        true
+    ));
+    assert!(!contains_prohibited_data_name(
+        "fn decode(tree: DataTree)",
+        false,
+        false
+    ));
 }
 
 #[test]
@@ -735,6 +761,23 @@ fn allowed_old_binding_reference(path: &Path, text: &str, line: &str) -> bool {
     s.ends_with("Source/LSP/mod.rs")
         && text.contains("fn old_binding_keyword_has_no_teaching_edit")
         && (line.contains("let x = 1") || line.contains("E0009") || line.contains("E0985"))
+}
+
+fn contains_identifier(line: &str, identifier: &str) -> bool {
+    line.match_indices(identifier).any(|(at, _)| {
+        let before = line[..at].chars().next_back();
+        let after = line[at + identifier.len()..].chars().next();
+        !before.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+            && !after.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    })
+}
+
+fn contains_prohibited_data_name(line: &str, markdown: bool, in_code_fence: bool) -> bool {
+    if markdown && !in_code_fence {
+        line.contains("`Data`")
+    } else {
+        contains_identifier(line, "Data")
+    }
 }
 
 fn files(path: &Path) -> Vec<PathBuf> {
