@@ -2140,10 +2140,14 @@ pub(crate) fn lower_method_call(
     // the pragmatic vehicle, same as the concurrency/Sql/Html escapes nearby.
     {
         let recv_peek = tir_recv_jet_ty(receiver, env);
-        // Sema sets `recv_type` to `"Pool"`/`"Shared"` explicitly for these calls
-        // (unlike Task/Sender, whose method names alone are globally unambiguous —
-        // `add`/`remove`/`ids`/`read`/`edit` collide with Set/List/Map names).
-        let is_pool = recv_type.as_deref() == Some("Pool");
+        // Sema normally sets `recv_type` to `"Pool"`/`"Shared"` explicitly for
+        // these calls. Comptime fragments can omit that name while retaining the
+        // resolved receiver type, so recognize `Pool<T>` from either source.
+        let is_pool = recv_type.as_deref() == Some("Pool")
+            || matches!(
+                &recv_peek,
+                Some(Type::Apply { name, .. }) if name == "Pool"
+            );
         let is_shared = recv_type.as_deref() == Some("Shared");
         let is_expiring_secret = recv_type.as_deref() == Some("ExpiringSecret");
         if is_pool && matches!(method, "add" | "remove" | "ids") && args.len() <= 1 {

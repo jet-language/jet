@@ -472,6 +472,10 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     || jit_list_record_type(&base.ty)
                     || jit_list_iter_elem_type(&base.ty).is_some()
                     || jit_closure_elem_type(&base.ty).is_some())
+                    && !matches!(
+                        &base.ty,
+                        Type::Apply { name, .. } if name == "ViewMut"
+                    )
                     && matches!(&index.ty, Type::Int)
                     && resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
@@ -550,7 +554,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                         || matches!(
                             &base.ty,
                             Type::Apply { name, args }
-                                if matches!(name.as_str(), "View" | "ViewMut")
+                                if name == "View"
                                     && args.len() == 1
                                     && record_type_key(&args[0]).is_some()
                         ))
@@ -1140,6 +1144,25 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             value,
             clone_value,
         } => {
+            let compound = op.as_ref().is_none_or(|op| match &value.ty {
+                Type::Int => matches!(
+                    op,
+                    BinOp::Add
+                        | BinOp::Sub
+                        | BinOp::Mul
+                        | BinOp::Div
+                        | BinOp::Rem
+                        | BinOp::BitAnd
+                        | BinOp::BitOr
+                        | BinOp::BitXor
+                        | BinOp::Shl
+                        | BinOp::Shr
+                ),
+                Type::Float => {
+                    matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
+                }
+                _ => false,
+            });
             let local = place.as_local().is_some_and(|local| {
                 local
                     .name
@@ -1147,7 +1170,10 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
             });
             let field = op.is_none() && structured_record_field_place(place);
-            !clone_value && (local || field) && resident_safe_expr(value, callees)
+            !clone_value
+                && compound
+                && (local || field)
+                && resident_safe_expr(value, callees)
         }
         TStmt::Return(ret) => ret.as_ref().is_none_or(|e| resident_safe_expr(e, callees)),
         TStmt::ExprStmt(e) => resident_safe_expr(e, callees),
@@ -1238,6 +1264,10 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 (jit_list_native_type(&base.ty)
                     || jit_list_iter_elem_type(&base.ty).is_some()
                     || jit_closure_elem_type(&base.ty).is_some())
+                    && !matches!(
+                        &base.ty,
+                        Type::Apply { name, .. } if name == "ViewMut"
+                    )
                     && matches!(&index.ty, Type::Int)
                     && matches!(&value.ty, Type::Int | Type::Float | Type::String | Type::Char)
                     && resident_safe_expr(base, callees)
@@ -1338,16 +1368,24 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         TStmt::Region(body) | TStmt::Impure(body) | TStmt::Shield { body } => {
             body.iter().all(|s| resident_safe_stmt(s, callees))
         }
-        // JIT materializes split views as independent list slices / element copies.
+        // JIT models singleton split views as checked element/window handles.
+        // Range windows need relative end-bound enforcement before they can be
+        // resident-safe.
         TStmt::SplitViews {
             owner,
-            start: _,
-            end: _,
-            single: _,
+            single,
+            elem_ty,
             ..
-        } => owner
-            .as_ref()
-            .is_none_or(|o| resident_safe_expr(o, callees)),
+        } => {
+            *single
+                && elem_ty.as_ref().is_some_and(|ty| {
+                    matches!(ty, Type::Int | Type::Float | Type::String)
+                        || record_type_key(ty).is_some()
+                })
+                && owner
+                    .as_ref()
+                    .is_none_or(|o| resident_safe_expr(o, callees))
+        }
         // Whole-value GC assign (`replace_all`): nested stmt is a plain assign
         // of a finite payload snapshot into the root Variable.
         TStmt::GcEdit {
