@@ -508,6 +508,11 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
             _ => None,
         };
     }
+    // D-BROWSER-AUTO1=A: profile and timeout only validate deterministic
+    // values. Connecting and all handle I/O remain Net effects.
+    if module == "core.browser" && matches!(method, "profile" | "timeout") {
+        return None;
+    }
     Some(match module {
         "core.files" => Effect::Fs,
         // D-BROWSER-AUTO1=A: browser automation is a versioned network protocol.

@@ -355,6 +355,7 @@ pub fn run_named_func(
     args: Vec<CtValue>,
     sink: &mut DevSink,
 ) -> Result<CtValue, Diagnostic> {
+    let _browser_session = browser::SessionGuard::new();
     let funcs = program_funcs(program);
     let func = funcs.get(name).copied().ok_or_else(|| {
         Diagnostic::error(

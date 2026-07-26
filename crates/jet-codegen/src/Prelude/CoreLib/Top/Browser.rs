@@ -65,6 +65,7 @@ struct JetBrowserState {
     conn: JetWsConn,
     next_id: i64,
     closed: bool,
+    session_started: bool,
     timeout_ms: i64,
     profile: String,
     cdp: bool,
@@ -245,7 +246,7 @@ fn jet_browser_capture_event(
 }
 
 fn jet_browser_profile_allows(profile: &str, method: &str) -> bool {
-    let common = [
+    const BIDI_2024_11: &[&str] = &[
         "session.status",
         "session.new",
         "session.end",
@@ -254,32 +255,36 @@ fn jet_browser_profile_allows(profile: &str, method: &str) -> bool {
         "browser.removeUserContext",
         "browsingContext.create",
         "browsingContext.close",
+        "browsingContext.getTree",
         "browsingContext.navigate",
+        "browsingContext.reload",
         "browsingContext.locateNodes",
+        "browsingContext.captureScreenshot",
         "input.performActions",
+        "input.releaseActions",
+        "input.setFiles",
+        "network.addIntercept",
+        "network.continueRequest",
+        "network.failRequest",
+        "network.provideResponse",
+        "network.removeIntercept",
+        "script.callFunction",
+        "script.disown",
+        "script.evaluate",
+        "script.getRealms",
         "goog:cdp.sendCommand",
     ];
-    if common.contains(&method) {
-        return true;
-    }
-    let prefix = method.split_once('.').map(|(prefix, _)| prefix).unwrap_or("");
     match profile {
-        "bidi-2024.11" => matches!(
-            prefix,
-            "session" | "browser" | "browsingContext" | "input" | "script" | "network" | "log"
-        ),
-        "bidi-2025.5" => matches!(
-            prefix,
-            "session"
-                | "browser"
-                | "browsingContext"
-                | "input"
-                | "script"
-                | "network"
-                | "log"
-                | "permissions"
-                | "webExtension"
-        ),
+        "bidi-2024.11" => BIDI_2024_11.contains(&method),
+        "bidi-2025.5" => {
+            BIDI_2024_11.contains(&method)
+                || matches!(
+                    method,
+                    "permissions.setPermission"
+                        | "webExtension.install"
+                        | "webExtension.uninstall"
+                )
+        }
         _ => false,
     }
 }
@@ -295,6 +300,9 @@ fn jet_browser_command_with_timeout(
         return Err(JetBrowserError::new("closed"));
     }
     if !jet_browser_profile_allows(&state.profile, method) {
+        return Err(JetBrowserError::new("unsupported protocol"));
+    }
+    if method == "goog:cdp.sendCommand" && !state.cdp {
         return Err(JetBrowserError::new("unsupported protocol"));
     }
     let deadline =
@@ -383,6 +391,7 @@ fn jet_browser_connect_profile(
             conn,
             next_id: 1,
             closed: false,
+            session_started: false,
             timeout_ms: timeout.milliseconds,
             profile: profile.name.clone(),
             cdp: false,
@@ -396,7 +405,10 @@ fn jet_browser_connect_profile(
         "session.status",
         jet_browser_object(Vec::new()),
     )?;
-    if !matches!(jet_browser_get(&status, "ready"), Some(jet_std::Json::Boolean(_)))
+    if !matches!(
+        jet_browser_get(&status, "ready"),
+        Some(jet_std::Json::Boolean(true))
+    )
         || !matches!(jet_browser_get(&status, "message"), Some(jet_std::Json::Text(_)))
     {
         return Err(JetBrowserError::new("protocol"));
@@ -415,7 +427,10 @@ fn jet_browser_connect_profile(
         .ok_or_else(|| JetBrowserError::new("protocol"))?;
     let cdp = jet_browser_get(capabilities, "goog:cdp")
         .is_some_and(|value| matches!(value, jet_std::Json::Boolean(true)));
-    browser.state.borrow_mut().cdp = cdp;
+    let mut state = browser.state.borrow_mut();
+    state.cdp = cdp;
+    state.session_started = true;
+    drop(state);
     Ok(browser)
 }
 
@@ -485,9 +500,13 @@ fn jet_browser_protocol(
     browser: &JetBrowser,
     kind: &String,
 ) -> Result<JetBrowserProtocol, JetBrowserError> {
+    let state = browser.state.borrow();
+    if state.closed {
+        return Err(JetBrowserError::new("closed"));
+    }
     let supported = match kind.as_str() {
         "bidi" => true,
-        "cdp" => browser.state.borrow().cdp,
+        "cdp" => state.cdp,
         _ => false,
     };
     if !supported {
@@ -506,9 +525,16 @@ fn jet_browser_trace(browser: &JetBrowser) -> JetBrowserTrace {
 }
 
 fn jet_browser_close(browser: &JetBrowser) -> Result<(), JetBrowserError> {
-    if browser.state.borrow().closed {
+    let state = browser.state.borrow();
+    if state.closed {
         return Ok(());
     }
+    if !state.session_started {
+        drop(state);
+        browser.state.borrow_mut().closed = true;
+        return Ok(());
+    }
+    drop(state);
     jet_browser_command(browser, "session.end", jet_browser_object(Vec::new()))?;
     browser.state.borrow_mut().closed = true;
     Ok(())
@@ -608,6 +634,10 @@ fn jet_browser_page_close(page: &JetBrowserPage) -> Result<(), JetBrowserError> 
 
 fn jet_browser_page_state_close(page: &JetBrowserPageState) -> Result<(), JetBrowserError> {
     if page.closed.get() {
+        return Ok(());
+    }
+    if page.context.closed.get() {
+        page.closed.set(true);
         return Ok(());
     }
     jet_browser_command(
