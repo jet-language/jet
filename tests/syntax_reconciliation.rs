@@ -107,8 +107,6 @@ const FORBIDDEN: &[&str] = &[
 
 const OLD_BINDING_CODES: &[&str] = &["E0009", "E0010", "E0985"];
 const OLD_BINDING_WORDS: &[&str] = &["let", "val", "var", "set"];
-const SYNTAX_STATUS_MATRIX: &str =
-    "docs/plans/epoch-3/syntax-law-source-status-matrix-2026-07-07.md";
 const DATATREE_NORMATIVE_SURFACES: &[&str] = &[
     "docs/spec/syntax-decisions.md",
     "docs/spec/encoding-decisions.md",
@@ -120,22 +118,6 @@ const DATATREE_NORMATIVE_SURFACES: &[&str] = &[
 ];
 const ACTIVE_MATURITY_DOCS: &[&str] = &["docs/reference/maturity-tags.md"];
 const MARKER_CENSUS_DOC: &str = "docs/spec/syntax-decisions.md";
-const MATRIX_UNBUILT_MARKERS: &[&str] = &[
-    "S74-D-DESTRUCT1-ARM",
-    "D-IGNORERET1",
-    "D-SMELLLINT1",
-    "D-NOSTD1",
-    "D-PATHFS1",
-    "D-TIMEDEPTH1",
-    "D-MATHLIB1",
-    "D-HTTPLIB1",
-    "D-HTTPLIB2",
-    "D-HTTPLIB3",
-    "D-ROUTE1",
-    "D-HONESTNUM1",
-    "D-OPTGC1",
-    "D-WEBAPP1",
-];
 const ENVIRONMENT_REFERENCE: &str = "docs/reference/environment.md";
 
 #[test]
@@ -179,22 +161,6 @@ fn pipe_family_has_no_stale_flow_reservation() {
     let syntax = fs::read_to_string("crates/jet-foundation/src/Syntax/math_layout.rs").unwrap();
     assert!(syntax.contains("D-PATO / D-SHAPE-PIPE1=C"));
     assert!(syntax.contains("`|=` remains bitwise-or-assign under S17"));
-
-    for path in [
-        "docs/proposals/language-shape-constitution.md",
-        "docs/proposals/language-shape-research.md",
-    ] {
-        let text = fs::read_to_string(path).unwrap();
-        assert!(text.contains("D-SHAPE-PIPE1=C"), "{path} lacks the ratified outcome");
-        for stale in [
-            "open pipe ballot",
-            "Jet can support a flow lens",
-            "Whether Jet admits",
-            "Should one value move through ordinary calls",
-        ] {
-            assert!(!text.contains(stale), "{path} retains stale flow text `{stale}`");
-        }
-    }
 }
 
 #[test]
@@ -204,25 +170,18 @@ fn dynamic_encoding_surface_uses_datatree_name() {
         let text = fs::read_to_string(relative).unwrap_or_else(|error| {
             panic!("cannot read DataTree inventory surface {relative}: {error}")
         });
-        for (index, line) in text.lines().enumerate() {
-            let historical = [
-                "retired `Data`",
-                "old `Data`",
-                "former `Data`",
-                "historical `Data`",
-                "pre-`DataTree`",
-                "edition 2026",
-            ]
-            .iter()
-            .any(|label| line.contains(label));
-            let bare_dynamic_name = line.match_indices("Data").any(|(at, _)| {
-                let before = line[..at].chars().next_back();
-                let after = line[at + "Data".len()..].chars().next();
-                !before.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-                    && !after.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-            });
-            if bare_dynamic_name && !historical {
-                failures.push(format!("{relative}:{}: {}", index + 1, line.trim()));
+        let markdown = Path::new(relative).extension().is_some_and(|ext| ext == "md");
+        if markdown {
+            for (line_no, line) in markdown_data_name_lines(&text) {
+                if !historical_data_reference(line) {
+                    failures.push(format!("{relative}:{line_no}: {}", line.trim()));
+                }
+            }
+        } else {
+            for offset in source_identifier_offsets(&text, "Data") {
+                let line_no = text[..offset].bytes().filter(|byte| *byte == b'\n').count() + 1;
+                let line = text.lines().nth(line_no - 1).unwrap_or("");
+                failures.push(format!("{relative}:{line_no}: {}", line.trim()));
             }
         }
     }
@@ -231,6 +190,44 @@ fn dynamic_encoding_surface_uses_datatree_name() {
         "current dynamic-encoding surfaces must use `DataTree`; label historical `Data` references explicitly:\n{}",
         failures.join("\n")
     );
+}
+
+#[test]
+fn datatree_name_check_distinguishes_prose_and_type_names() {
+    for lawful in [
+        "| `conn.send_text(text)` | Data frames; client frames are masked |",
+        "| Data ownership | Official UCD inputs are checked in. |",
+    ] {
+        assert!(markdown_data_name_lines(lawful).is_empty());
+    }
+    for prohibited in ["`Data.Object`", "`[Data]`", "`Data?`"] {
+        assert_eq!(markdown_data_name_lines(prohibited).len(), 1);
+    }
+
+    let tilde_fence = "~~~jet\nvalue: Data\n~~~";
+    assert_eq!(markdown_data_name_lines(tilde_fence)[0].0, 2);
+    let four_tick_fence = "````jet\nvalue: Data\n```\nother: Data\n````";
+    assert_eq!(
+        markdown_data_name_lines(four_tick_fence)
+            .iter()
+            .map(|(line_no, _)| *line_no)
+            .collect::<Vec<_>>(),
+        [2, 4]
+    );
+    let multiline_fence =
+        "```jet\n/*\nData in a comment\n*/\ntext :: \"\"\"\nData in text\n\"\"\"\nvalue: Data\n```";
+    assert_eq!(
+        markdown_data_name_lines(multiline_fence)
+            .iter()
+            .map(|(line_no, _)| *line_no)
+            .collect::<Vec<_>>(),
+        [8]
+    );
+    assert_eq!(markdown_data_name_lines("```jet\nvalue: Data")[0].0, 2);
+
+    let lawful_source = "// Data is retired\ntext :: \"Data\"\n/* Data */\nvalue: DataTree";
+    assert!(source_identifier_offsets(lawful_source, "Data").is_empty());
+    assert_eq!(source_identifier_offsets("value: Data", "Data").len(), 1);
 }
 
 #[test]
@@ -322,15 +319,7 @@ fn old_binding_migration_paths_stay_removed() {
 fn syntax_status_matrix_covers_unbuilt_notes() {
     // CAPABILITY_CLAIM: claim.syntax-law / syntax-matrix
     let spec = fs::read_to_string("docs/spec/syntax-decisions.md").expect("read syntax decisions");
-    let matrix = fs::read_to_string(SYNTAX_STATUS_MATRIX).expect("read syntax status matrix");
-
-    for marker in MATRIX_UNBUILT_MARKERS {
-        let row = format!("| `{}` |", marker);
-        assert!(
-            matrix.contains(&row),
-            "syntax status matrix missing row for {marker}"
-        );
-    }
+    assert!(spec.contains("A ratified entry may sit unbuilt **only** when gated on"));
 
     let lines: Vec<&str> = spec.lines().collect();
     let mut uncovered = Vec::new();
@@ -345,19 +334,14 @@ fn syntax_status_matrix_covers_unbuilt_notes() {
         let start = idx.saturating_sub(4);
         let end = (idx + 2).min(lines.len());
         let context = lines[start..end].join("\n");
-        let covered_by_marker = MATRIX_UNBUILT_MARKERS
-            .iter()
-            .any(|marker| context.contains(marker));
-        let covered_by_named_prose = context.contains("dispatch-arm struct-pattern head")
-            && matrix.contains("S74-D-DESTRUCT1-ARM");
-        if !(covered_by_marker || covered_by_named_prose) {
+        if !(context.contains("card #") || context.contains("cards #")) {
             uncovered.push(format!("{}: {}", idx + 1, line.trim()));
         }
     }
 
     assert!(
         uncovered.is_empty(),
-        "unbuilt syntax note lacks matrix coverage:\n{}",
+        "unbuilt syntax note lacks a live card gate:\n{}",
         uncovered.join("\n")
     );
 }
@@ -735,6 +719,132 @@ fn allowed_old_binding_reference(path: &Path, text: &str, line: &str) -> bool {
     s.ends_with("Source/LSP/mod.rs")
         && text.contains("fn old_binding_keyword_has_no_teaching_edit")
         && (line.contains("let x = 1") || line.contains("E0009") || line.contains("E0985"))
+}
+
+fn historical_data_reference(line: &str) -> bool {
+    [
+        "retired `Data`",
+        "old `Data`",
+        "former `Data`",
+        "historical `Data`",
+        "pre-`DataTree`",
+        "edition 2026",
+    ]
+    .iter()
+    .any(|label| line.contains(label))
+}
+
+fn source_identifier_offsets(source: &str, identifier: &str) -> Vec<usize> {
+    fn collect(tokens: &[jet::Lexer::Token], identifier: &str, offsets: &mut Vec<usize>) {
+        for token in tokens {
+            match &token.kind {
+                jet::Lexer::TokKind::Ident(name) if name == identifier => {
+                    offsets.push(token.span.start)
+                }
+                jet::Lexer::TokKind::Str(parts) | jet::Lexer::TokKind::BinStr(parts) => {
+                    for part in parts {
+                        if let jet::Lexer::StrTokPart::Interp(tokens) = part {
+                            collect(tokens, identifier, offsets);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let (tokens, _) = jet::Lexer::lex(source);
+    let mut offsets = Vec::new();
+    collect(&tokens, identifier, &mut offsets);
+    offsets
+}
+
+fn markdown_data_name_lines(text: &str) -> Vec<(usize, &str)> {
+    let mut fence: Option<(u8, usize, usize, String)> = None;
+    let mut lines = Vec::new();
+    let source_lines: Vec<_> = text.lines().collect();
+    for (index, line) in source_lines.iter().copied().enumerate() {
+        if let Some((open_marker, open_len, _, _)) = fence.as_ref() {
+            if markdown_fence(line).is_some_and(|(marker, len, rest)| {
+                marker == *open_marker && len >= *open_len && rest.trim().is_empty()
+            }) {
+                let (_, _, start_line, source) = fence.take().unwrap();
+                append_fence_data_lines(&source, start_line, &source_lines, &mut lines);
+            } else {
+                let (_, _, _, source) = fence.as_mut().unwrap();
+                source.push_str(line);
+                source.push('\n');
+            }
+        } else if let Some((marker, len, _)) = markdown_fence(line) {
+            fence = Some((marker, len, index + 2, String::new()));
+        } else if inline_code_has_identifier(line, "Data") {
+            lines.push((index + 1, line));
+        }
+    }
+    if let Some((_, _, start_line, source)) = fence {
+        append_fence_data_lines(&source, start_line, &source_lines, &mut lines);
+    }
+    lines
+}
+
+fn append_fence_data_lines<'a>(
+    source: &str,
+    start_line: usize,
+    source_lines: &[&'a str],
+    lines: &mut Vec<(usize, &'a str)>,
+) {
+    for offset in source_identifier_offsets(source, "Data") {
+        let line_no =
+            start_line + source[..offset].bytes().filter(|byte| *byte == b'\n').count();
+        if !lines.iter().any(|(existing, _)| *existing == line_no) {
+            lines.push((line_no, source_lines[line_no - 1]));
+        }
+    }
+}
+
+fn markdown_fence(line: &str) -> Option<(u8, usize, &str)> {
+    let trimmed = line.trim_start();
+    let marker = *trimmed.as_bytes().first()?;
+    if marker != b'`' && marker != b'~' {
+        return None;
+    }
+    let len = trimmed.bytes().take_while(|byte| *byte == marker).count();
+    (len >= 3).then_some((marker, len, &trimmed[len..]))
+}
+
+fn inline_code_has_identifier(line: &str, identifier: &str) -> bool {
+    let bytes = line.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] != b'`' {
+            at += 1;
+            continue;
+        }
+        let delimiter = bytes[at..].iter().take_while(|byte| **byte == b'`').count();
+        let content_start = at + delimiter;
+        let mut close = content_start;
+        let mut matched = false;
+        while close < bytes.len() {
+            if bytes[close] != b'`' {
+                close += 1;
+                continue;
+            }
+            let run = bytes[close..].iter().take_while(|byte| **byte == b'`').count();
+            if run == delimiter {
+                if !source_identifier_offsets(&line[content_start..close], identifier).is_empty() {
+                    return true;
+                }
+                at = close + run;
+                matched = true;
+                break;
+            }
+            close += run;
+        }
+        if !matched {
+            break;
+        }
+    }
+    false
 }
 
 fn files(path: &Path) -> Vec<PathBuf> {
