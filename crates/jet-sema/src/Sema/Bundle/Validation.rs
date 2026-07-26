@@ -2034,7 +2034,7 @@ pub(crate) fn check_func_body_bundle(
         (f.is_replayable, crate::Syntax::ATTR_REPLAYABLE, f.replayable_span.unwrap_or(f.name_span)),
         (f.is_must_use, crate::Syntax::ATTR_MUST_USE, f.must_use_span.unwrap_or(f.name_span)),
         (f.is_inline, crate::Syntax::CONTRACT_INLINE, f.inline_span.unwrap_or(f.name_span)),
-        (f.is_inline_always, crate::Syntax::CONTRACT_INLINE_ALWAYS, f.inline_span.unwrap_or(f.name_span)),
+        (f.is_inline_always, crate::Syntax::CONTRACT_INLINE, f.inline_span.unwrap_or(f.name_span)),
         (f.is_reactive, crate::Syntax::KW_REACTIVE, f.name_span),
     ] {
         if active && !crate::Policy::rule_allows(name, crate::Policy::RuleSite::Function) {
@@ -2065,7 +2065,7 @@ pub(crate) fn check_func_body_bundle(
     if f.is_pure {
         ck.diags.extend(check_pure_fn(f, &st.funcs));
     }
-    // D-METHODMACRO1=A: the local half of the `#InlineAlways` check (self-
+    // D-METHODMACRO1=A: the local half of the `#Inline(Always)` check (self-
     // recursion E0917 + size ceiling E0919); roll this function's
     // address-taken names into the whole-program accumulator so the E0918
     // pass after the full bundle check can see them.

@@ -10,7 +10,7 @@
 //! visible in this build (D-METADERIVE1=A user derives are a legal, dynamic
 //! addition to the contract vocabulary, not typos).
 //!
-//! `Debug` is deliberately never flagged here on the `@` plane: E0922
+//! A retired `Debug` registry row is deliberately not flagged here: E0922
 //! (`crates/jet-foundation/src/Traits.rs`) already owns that retired name
 //! end to end, with its own text. Duplicating it here would double-report.
 
@@ -19,51 +19,27 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use std::collections::HashSet;
 
-/// D-MARK-DEBUG1=A: owned by E0922 already; never re-flag it here.
-const DEBUG_OWNED_ELSEWHERE: &str = "Debug";
-
-/// Retired marker spellings that get a targeted fix instead of a bare
-/// nearest-match guess — each one used to mean something and now means
-/// nothing, so "did you mean" would be misleading.
-fn retired_marker_fix(name: &str) -> Option<&'static str> {
-    match name {
-        "Wasm" => Some(
-            "write `#Target(Wasm)` instead — one target-rule family covers every backend \
-             (D-MARK-TARGET1=A).",
-        ),
-        "Js" => Some(
-            "write `#Target(Js)` instead — one target-rule family covers every backend \
-             (D-MARK-TARGET1=A).",
-        ),
-        "Suppress" => Some(
-            "call `.drop(\"reason\")` on the unused value instead — it's the one discard \
-             spelling (D-MARK-DISCARD1=A).",
-        ),
-        "Uninit" => Some(
-            "give the field a real initial value — stored uninitialized-sentinel fields were \
-             retired outright (D-UNINIT-SENTINEL1).",
-        ),
-        "Ref" => Some(
-            "hold an owned value instead — stored-reference fields were deleted outright \
-             (D-MEM1/S3).",
-        ),
-        _ => None,
-    }
-}
-
 /// E0927: `name` isn't a registered applied rule. `vocab` supplies nearest
 /// spelling suggestions.
 fn e0927_unknown_marker(name: &str, vocab: &[String], span: Span) -> Diagnostic {
-    if let Some(fix) = retired_marker_fix(name) {
+    if let Some(crate::Policy::AppliedRule {
+        status: crate::Policy::RuleStatus::Retired { replacement },
+        ..
+    }) = crate::Policy::applied_rule(name)
+    {
+        let fix = if replacement.starts_with('#') || replacement.starts_with('.') {
+            format!("write `{replacement}` instead")
+        } else {
+            replacement.to_string()
+        };
         return Diagnostic::error(
             "E0927",
-            format!("`#{name}` is retired — it no longer does anything"),
+            format!("`#{name}` is retired"),
             format!(
-                "`#{name}` used to be a real rule; it was removed and nothing takes \
-                 its place under that name, so writing it here silently did nothing before \
-                 this check existed."
+                "the registry keeps this old spelling only to teach its replacement; \
+                 it no longer applies a rule"
             ),
-            fix.to_string(),
+            fix,
             Some(span),
         );
     }
@@ -91,15 +67,20 @@ fn is_legal_rule_name(name: &str, known_derive_names: &HashSet<String>) -> bool 
 /// Check one marker against its sigil's plane. Returns `None` when it's
 /// legal, or already reported elsewhere:
 /// - a name known on the OTHER plane already got E0062/E0063 from the
-///   parser (`check_marker_plane` in `jet-parser`) — never double-report.
+///   parser's shared marker reader — never double-report.
 /// - `#Debug` is E0922's job (see module docs).
 fn check_one(m: &Marker, known_derive_names: &HashSet<String>) -> Option<Diagnostic> {
-    if m.name == DEBUG_OWNED_ELSEWHERE || is_legal_rule_name(&m.name, known_derive_names) {
+    let e0922_owns_debug = crate::Policy::applied_rule(&m.name).is_some_and(|row| {
+        row.name == "Debug"
+            && matches!(row.status, crate::Policy::RuleStatus::Retired { .. })
+    });
+    if e0922_owns_debug || is_legal_rule_name(&m.name, known_derive_names) {
         return None;
     }
-    let vocab: Vec<String> = Syntax::APPLIED_RULES
+    let vocab: Vec<String> = crate::Policy::APPLIED_RULES
         .iter()
-        .map(|s| s.to_string())
+        .filter(|row| matches!(row.status, crate::Policy::RuleStatus::Active))
+        .map(|row| row.name.to_string())
         .chain(known_derive_names.iter().cloned())
         .collect();
     Some(e0927_unknown_marker(&m.name, &vocab, m.name_span))

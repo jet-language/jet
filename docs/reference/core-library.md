@@ -1174,7 +1174,7 @@ s: F32x4 :: v + w
     print(s.to_array())             // [11.0, 22.0, 33.0, 44.0]
     print(v[2])                     // 3.0
     print(v.sum())                  // 10.0
-    print(v.reduce(#Max))           // 4.0
+    print(v.reduce(.Max))           // 4.0
     print(F32x4.splat(7.0).to_array())   // [7.0, 7.0, 7.0, 7.0]
 }
 ```
@@ -1186,7 +1186,7 @@ s: F32x4 :: v + w
 | `v[i]` | Read lane `i` (bounds-checked) |
 | `+` `-` `*` `/` | Element-wise across all lanes |
 | `v.sum()` `v.product()` `v.min()` `v.max()` | Named reductions → lane scalar |
-| `v.reduce(#Add)` `#Mul` `#Min` `#Max` | General reduce by op marker |
+| `v.reduce(.Add)` `.Mul` `.Min` `.Max` `.Avg` | General reduce by `ReduceOp` value |
 | `v.to_array()` | Round-trip out to `[F32#4]` / `[F64#2]` |
 
 ---

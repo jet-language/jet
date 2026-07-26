@@ -142,7 +142,7 @@ fn visit_gate(target: Span, gate_span: Span, is_function: bool, reason: Option<&
         } else {
             ("this `#Unsafe` block has no reason", "every gated region records why it can't break memory safety", "add the reason: `#Unsafe(\"why this is safe\") { … }`")
         };
-        result.diagnostics.push(Diagnostic::lint("L3101", what.to_string(), why.to_string(), fix.to_string(), Some(gate_span)));
+        result.diagnostics.push(Diagnostic::error("E3112", what.to_string(), why.to_string(), fix.to_string(), Some(gate_span)));
     }
 
     let mut gate = UnsafeGateInspection {

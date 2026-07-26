@@ -3828,7 +3828,7 @@ build: { staging: Build.{ optimize: basic } }
 // ── D-EXPANDCLI1 (card #183): `jet inspect expand` transparency command ────
 
 /// Fixture exercising the `inline` lens: an `#Inline` fn and an
-/// `#InlineAlways` method.
+/// `#Inline(Always)` method.
 fn expand_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/expand_facts.jet")
 }

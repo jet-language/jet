@@ -95,7 +95,7 @@ pub(crate) fn emit_tir_toplevel(tir: &TFunc, cx: &Cx, out: &mut String) {
     } else {
         ""
     };
-    // D-METHODMACRO1=A: `#Inline`/`#InlineAlways` lower to a Rust `#[inline]`/
+    // D-METHODMACRO1=A: `#Inline`/`#Inline(Always)` lower to a Rust `#[inline]`/
     // `#[inline(always)]` attribute right above the signature. `is_inline_always`
     // is only ever `true` here once sema has confirmed the function can actually
     // inline (E0917/E0918/E0919 would have failed the build otherwise) — I3:
@@ -280,7 +280,7 @@ pub(crate) fn emit_tir_method(
     // prefix sits between `pub ` and `fn`, exactly as `emit_method` (`pub {unsafe_kw}fn`).
     // I1: emitted ONLY for a source `#Unsafe fn` (`tir.is_unsafe`).
     let unsafe_kw = if tir.is_unsafe { "unsafe " } else { "" };
-    // D-METHODMACRO1=A: `#Inline`/`#InlineAlways` on a method — same attribute,
+    // D-METHODMACRO1=A: `#Inline`/`#Inline(Always)` on a method — same attribute,
     // indented to the method's own line (see `emit_tir_toplevel` for the free-
     // function form).
     let inline_attr = if tir.is_inline_always {

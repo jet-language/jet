@@ -136,7 +136,7 @@ out :: Vec3.{ scale * a }
 }
 
 /// D-SIMD2: SIMD lane construction, element-wise operators, splat, lane index,
-/// reductions (named + `reduce(#Op)`), and the `[F32#4]` array bridge.
+/// reductions (named + `reduce(.Op)`), and the `[F32#4]` array bridge.
 #[test]
 fn simd_lanes_ops_and_reductions() {
     if !have_rustc() {
@@ -150,8 +150,9 @@ s :: F32x4.{ v + w }
     print(s.to_array())
     print(v[2])
     print(v.sum())
-    print(v.reduce(#Max))
-    print(v.reduce(#Mul))
+    print(v.reduce(.Max))
+    print(v.reduce(.Mul))
+    print(v.reduce(.Avg))
     print(F32x4.splat(5.0).to_array())
 d :: F64x2.from_array([1.5, 2.5])
     print(d.sum())
@@ -161,7 +162,7 @@ d :: F64x2.from_array([1.5, 2.5])
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "[11.0, 22.0, 33.0, 44.0]\n3.0\n10.0\n4.0\n24.0\n[5.0, 5.0, 5.0, 5.0]\n4.0\n"
+        "[11.0, 22.0, 33.0, 44.0]\n3.0\n10.0\n4.0\n24.0\n2.5\n[5.0, 5.0, 5.0, 5.0]\n4.0\n"
     );
 }
 

@@ -429,11 +429,8 @@ pub enum Expr {
         /// The expected type, as a display string — filled by sema.
         expected_type: Option<String>,
     },
-    /// D-SIMD2 (ratified 2026-06-24): a reduce-op marker `#Add`/`#Mul`/`#Min`/`#Max`,
-    /// valid ONLY as the sole argument to a SIMD lane `.reduce(#Op)`. The string is
-    /// the marker name (without `#`). Sema validates the marker set and that it sits
-    /// in a `reduce` arg; codegen lowers it as part of the reduce call (the marker
-    /// node never emits on its own).
+    /// Internal teaching node for a retired `#Add`/`#Mul`/`#Min`/`#Max`
+    /// reduce selector. Canonical calls retain a typed `ReduceOp` enum literal.
     ReduceMarker(String, Span),
     /// S31: `subject == pattern` (stored as dedicated node for sema/codegen).
     PatternTest {

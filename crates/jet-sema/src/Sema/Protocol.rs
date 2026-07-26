@@ -84,7 +84,7 @@ fn generate_protocol_source(decl: &ProtocolDecl) -> String {
 
     out.push_str(&format!("impl {client} {{\n"));
     out.push_str(&format!(
-        "    #{}(_ -> S0) fn client() -> {client} {{\n        return {client}.{{ _token: 0 }}\n    }}\n\n",
+        "    #{}(_, S0) fn client() -> {client} {{\n        return {client}.{{ _token: 0 }}\n    }}\n\n",
         Syntax::KW_TRANSITION
     ));
     for (idx, msg) in decl.messages.iter().enumerate() {
@@ -99,7 +99,7 @@ fn generate_protocol_source(decl: &ProtocolDecl) -> String {
 
     out.push_str(&format!("impl {server} {{\n"));
     out.push_str(&format!(
-        "    #{}(_ -> S0) fn server() -> {server} {{\n        return {server}.{{ _token: 0 }}\n    }}\n\n",
+        "    #{}(_, S0) fn server() -> {server} {{\n        return {server}.{{ _token: 0 }}\n    }}\n\n",
         Syntax::KW_TRANSITION
     ));
     for (idx, msg) in decl.messages.iter().enumerate() {
@@ -132,13 +132,13 @@ fn append_send_method(
     };
     if terminal {
         out.push_str(&format!(
-            "    #{}({from} -> {to}) fn {}(self: ^{handle}{param_suffix}) {{\n        return\n    }}\n\n",
+            "    #{}({from}, {to}) fn {}(self: ^{handle}{param_suffix}) {{\n        return\n    }}\n\n",
             Syntax::KW_TRANSITION,
             msg.name,
         ));
     } else {
         out.push_str(&format!(
-            "    #{}({from} -> {to}) fn {}(self: ^{handle}{param_suffix}) -> {handle} ? Error {{\n        return Ok(self)\n    }}\n\n",
+            "    #{}({from}, {to}) fn {}(self: ^{handle}{param_suffix}) -> {handle} ? Error {{\n        return Ok(self)\n    }}\n\n",
             Syntax::KW_TRANSITION,
             msg.name,
         ));
@@ -158,12 +158,12 @@ fn append_recv_method(
     let method = format!("recv_{}", msg.name);
     if terminal {
         out.push_str(&format!(
-            "    #{}({from} -> {to}) fn {method}(self: ^{handle}) {{\n        return\n    }}\n\n",
+            "    #{}({from}, {to}) fn {method}(self: ^{handle}) {{\n        return\n    }}\n\n",
             Syntax::KW_TRANSITION,
         ));
     } else {
         out.push_str(&format!(
-            "    #{}({from} -> {to}) fn {method}(self: ^{handle}) -> {handle} ? Error {{\n        return Ok(self)\n    }}\n\n",
+            "    #{}({from}, {to}) fn {method}(self: ^{handle}) -> {handle} ? Error {{\n        return Ok(self)\n    }}\n\n",
             Syntax::KW_TRANSITION,
         ));
     }

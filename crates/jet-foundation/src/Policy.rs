@@ -159,15 +159,34 @@ pub fn explain(policy: &EffectivePolicy) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuleSite { Package, File, Module, Function, Block, Statement, Expression, Type, Impl, Declaration, Constant, Field, Parameter, Test, Bench, Operation }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppliedRule {
     pub name: &'static str,
+    /// Typed source signature shown by parser diagnostics and `jet explain`.
+    pub signature: &'static str,
     /// Non-empty only for rules that participate in lexical policy inheritance.
     pub policy_scopes: &'static [PolicyScope],
     /// Exact sound attachment sites for non-inheriting rules.
     pub sites: &'static [RuleSite],
+    pub form: RuleForm,
+    pub status: RuleStatus,
     pub inherits: bool,
     pub resolution: RuleResolution,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuleForm {
+    Bare,
+    Call,
+    BareOrCall,
+    Block,
+    Prefix,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuleStatus {
+    Active,
+    Retired { replacement: &'static str },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,73 +204,146 @@ const FIELD_SITE: &[RuleSite] = &[RuleSite::Field];
 const CONST_SITE: &[RuleSite] = &[RuleSite::Constant];
 const EXPR_SITE: &[RuleSite] = &[RuleSite::Expression];
 
-/// Exact applicability row for every compiler-registered `#Rule`, plus the two
-/// conceptual authority/wire groups whose concrete spellings have their own rows.
-pub fn applied_rule_registry() -> Vec<AppliedRule> {
-    let mut rows = crate::Syntax::APPLIED_RULES.iter().map(|&name| {
-        let (policy_scopes, sites, inherits) = match name {
-            "Policy" => (ALL_SCOPES, &[RuleSite::Package, RuleSite::Module, RuleSite::Function, RuleSite::Block][..], true),
-            "Unsafe" => (NO_POLICY_SCOPES, &[RuleSite::Function, RuleSite::Block, RuleSite::Operation][..], false),
-            "Grant" => (NO_POLICY_SCOPES, &[RuleSite::Block, RuleSite::Operation][..], false),
-            "Tainted" => (NO_POLICY_SCOPES, &[RuleSite::Expression, RuleSite::Operation][..], false),
-            "Sanitizer" | "Pure" | "Pre" | "Post" | "Inline" | "InlineAlways" | "Task" | "Every" | "Replayable" | "WasmExport" | "State" | "Transition" | "FFI" => (NO_POLICY_SCOPES, FUNCTION_SITE, false),
-            "MustUse" => (NO_POLICY_SCOPES, &[RuleSite::Function, RuleSite::Type][..], false),
-            "Codable" | "Encode" | "Decode" | "PublishedSchema" | "Summarize" | "Comparable" | "Numeric" | "Printable" | "CodableAsBase" | "Cli" | "Patchable" | "UnitFamily" | "SingleUse" | "Invariant" | "Layout" => (NO_POLICY_SCOPES, TYPE_SITE, false),
-            "Redact" | "Rename" | "Skip" | "Default" | "Flatten" => (NO_POLICY_SCOPES, FIELD_SITE, false),
-            "RenameAll" | "DenyUnknownFields" | "Tag" | "Untagged" => (NO_POLICY_SCOPES, TYPE_SITE, false),
-            "Persist" | "Track" | "Local" | "Shared" => (NO_POLICY_SCOPES, DECLARATION_SITE, false),
-            "Meta" => (NO_POLICY_SCOPES, &[RuleSite::Function, RuleSite::Declaration, RuleSite::Constant][..], false),
-            "Doc" | "Flag" => (NO_POLICY_SCOPES, FIELD_SITE, false),
-            "Todo" => (NO_POLICY_SCOPES, EXPR_SITE, false),
-            "Shield" | "Impure" | "Caps" | "Transact" | "Region" | "Live" | "Nondeterministic" | "Context" => (NO_POLICY_SCOPES, BLOCK_SITE, false),
-            "Reactive" => (NO_POLICY_SCOPES, &[RuleSite::Function, RuleSite::Block][..], false),
-            "Off" | "DebugOnly" => (NO_POLICY_SCOPES, STATEMENT_SITE, false),
-            "Test" => (NO_POLICY_SCOPES, &[RuleSite::Test][..], false),
-            "Bench" => (NO_POLICY_SCOPES, &[RuleSite::Bench][..], false),
-            "Target" => (NO_POLICY_SCOPES, &[RuleSite::File, RuleSite::Module, RuleSite::Function][..], false),
-            "Html" | "PubFile" | "NoPrelude" => (NO_POLICY_SCOPES, FILE_SITE, false),
-            "Sql" => (NO_POLICY_SCOPES, BLOCK_SITE, false),
-            "Abi" => (NO_POLICY_SCOPES, FUNCTION_SITE, false),
-            "Extern" | "Bindgen" => (NO_POLICY_SCOPES, MODULE_SITE, false),
-            "allow" => (NO_POLICY_SCOPES, &[RuleSite::Declaration, RuleSite::Statement][..], false),
-            "static" | "inline" => (NO_POLICY_SCOPES, CONST_SITE, false),
-            "Add" | "Mul" | "Min" | "Max" => (NO_POLICY_SCOPES, EXPR_SITE, false),
-            _ => crate::ice!(None, "APPLIED_RULES entry `{name}` lacks an applicability row"),
-        };
-        AppliedRule { name, policy_scopes, sites, inherits, resolution: if inherits { RuleResolution::Tighten } else { RuleResolution::SiteBound } }
-    }).collect::<Vec<_>>();
-    rows.push(AppliedRule { name: "Authority", policy_scopes: NO_POLICY_SCOPES, sites: &[RuleSite::Operation], inherits: false, resolution: RuleResolution::SiteBound });
-    rows.push(AppliedRule { name: "wire", policy_scopes: NO_POLICY_SCOPES, sites: FIELD_SITE, inherits: false, resolution: RuleResolution::SiteBound });
-    rows
+macro_rules! rule {
+    ($name:expr, $sig:expr, $sites:expr, $form:ident) => {
+        AppliedRule {
+            name: $name,
+            signature: $sig,
+            policy_scopes: NO_POLICY_SCOPES,
+            sites: $sites,
+            form: RuleForm::$form,
+            status: RuleStatus::Active,
+            inherits: false,
+            resolution: RuleResolution::SiteBound,
+        }
+    };
+    (retired $name:expr, $sig:expr, $sites:expr, $form:ident, $replacement:expr) => {
+        AppliedRule {
+            name: $name,
+            signature: $sig,
+            policy_scopes: NO_POLICY_SCOPES,
+            sites: $sites,
+            form: RuleForm::$form,
+            status: RuleStatus::Retired { replacement: $replacement },
+            inherits: false,
+            resolution: RuleResolution::SiteBound,
+        }
+    };
 }
 
-pub fn applied_rule(name: &str) -> Option<AppliedRule> {
-    applied_rule_registry().into_iter().find(|row| row.name == name)
+/// D-MARKSIG1=A: the sole compiler registry for active and retired markers.
+/// Parser, sema, formatter, LSP, highlighting, explain, and retirement
+/// diagnostics read these rows.
+pub const APPLIED_RULES: &[AppliedRule] = &[
+    AppliedRule {
+        name: "Policy",
+        signature: "(setting: PolicySetting, ...)",
+        policy_scopes: ALL_SCOPES,
+        sites: &[RuleSite::Package, RuleSite::Module, RuleSite::Function, RuleSite::Block],
+        form: RuleForm::Call,
+        status: RuleStatus::Active,
+        inherits: true,
+        resolution: RuleResolution::Tighten,
+    },
+    rule!("Unsafe", "(reason: String, obligations: ObligationMode = .None)", &[RuleSite::Function, RuleSite::Block, RuleSite::Operation], Call),
+    rule!("Grant", "(capability: Capability, ...)", &[RuleSite::Block, RuleSite::Operation], Call),
+    rule!("Tainted", "(kind: TaintKind = .Input)", &[RuleSite::Expression, RuleSite::Operation], BareOrCall),
+    rule!("Sanitizer", "()", FUNCTION_SITE, Bare),
+    rule!("Pure", "()", FUNCTION_SITE, Bare),
+    rule!("Pre", "(condition: Bool, message: String)", FUNCTION_SITE, Call),
+    rule!("Post", "(condition: Bool, message: String)", FUNCTION_SITE, Call),
+    rule!("Inline", "(mode: InlineMode = .Hint)", &[RuleSite::Function, RuleSite::Constant], BareOrCall),
+    rule!("Task", "()", FUNCTION_SITE, Bare),
+    rule!("Every", "(schedule: Duration | String)", FUNCTION_SITE, Call),
+    rule!("Replayable", "()", FUNCTION_SITE, Bare),
+    rule!("WasmExport", "()", FUNCTION_SITE, Bare),
+    rule!("State", "(state: State)", FUNCTION_SITE, Call),
+    rule!("Transition", "(from: State, to: State)", FUNCTION_SITE, Call),
+    rule!("FFI", "(language: FfiLanguage)", FUNCTION_SITE, Call),
+    rule!("Abi", "(name: Abi)", FUNCTION_SITE, Call),
+    rule!("MustUse", "()", &[RuleSite::Function, RuleSite::Type], Bare),
+    rule!("Codable", "()", TYPE_SITE, Bare),
+    rule!("Encode", "()", TYPE_SITE, Bare),
+    rule!("Decode", "()", TYPE_SITE, Bare),
+    rule!("PublishedSchema", "()", TYPE_SITE, Bare),
+    rule!("Summarize", "()", TYPE_SITE, Bare),
+    rule!("Comparable", "()", TYPE_SITE, Bare),
+    rule!("Numeric", "()", TYPE_SITE, Bare),
+    rule!("Printable", "()", TYPE_SITE, Bare),
+    rule!("CodableAsBase", "()", TYPE_SITE, Bare),
+    rule!("Cli", "()", TYPE_SITE, Bare),
+    rule!("Patchable", "()", TYPE_SITE, Bare),
+    rule!("UnitFamily", "(family: Ident, base: Ident = first member)", TYPE_SITE, Call),
+    rule!("SingleUse", "()", TYPE_SITE, Bare),
+    rule!("Invariant", "(condition: String)", TYPE_SITE, Call),
+    rule!("Layout", "(kind: Layout, tag: IntType = I32)", TYPE_SITE, Call),
+    rule!("RenameAll", "(case: NamingCase)", TYPE_SITE, Call),
+    rule!("DenyUnknownFields", "()", TYPE_SITE, Bare),
+    rule!("Tag", "(field: String)", TYPE_SITE, Call),
+    rule!("Untagged", "()", TYPE_SITE, Bare),
+    rule!("Redact", "()", FIELD_SITE, Bare),
+    rule!("Rename", "(name: String)", FIELD_SITE, Call),
+    rule!("Skip", "()", FIELD_SITE, Bare),
+    rule!("Default", "(value: T = T.default)", FIELD_SITE, BareOrCall),
+    rule!("Flatten", "()", FIELD_SITE, Bare),
+    rule!("Doc", "(text: String)", FIELD_SITE, Call),
+    rule!("Flag", "()", FIELD_SITE, Bare),
+    rule!("Persist", "()", DECLARATION_SITE, Bare),
+    rule!("Track", "()", DECLARATION_SITE, Bare),
+    rule!("Local", "()", DECLARATION_SITE, Bare),
+    rule!("Shared", "()", DECLARATION_SITE, Bare),
+    rule!("Meta", "(category: String = \"\", tunable: Bool = false, maturity: Maturity = .Tested)", &[RuleSite::Function, RuleSite::Declaration, RuleSite::Constant], Call),
+    rule!("Todo", "()", EXPR_SITE, Bare),
+    rule!("Shield", "()", BLOCK_SITE, Block),
+    rule!("Impure", "(reason: String)", BLOCK_SITE, Block),
+    rule!("Caps", "(capability: Capability, ...)", BLOCK_SITE, Block),
+    rule!("Transact", "(name: Ident)", BLOCK_SITE, Block),
+    rule!("Region", "(name: Ident)", BLOCK_SITE, Block),
+    rule!("Live", "()", BLOCK_SITE, Block),
+    rule!("Nondeterministic", "(reason: String)", BLOCK_SITE, Block),
+    rule!("Context", "(allocator: Allocator = default, logger: Logger = default, deadline: Int = default)", BLOCK_SITE, Block),
+    rule!("Reactive", "()", &[RuleSite::Function, RuleSite::Block], Block),
+    rule!("Off", "()", STATEMENT_SITE, Prefix),
+    rule!("DebugOnly", "()", STATEMENT_SITE, Prefix),
+    rule!("Test", "(name: String)", &[RuleSite::Test], Block),
+    rule!("Bench", "(name: String)", &[RuleSite::Bench], Block),
+    rule!("Target", "(target: Target)", &[RuleSite::File, RuleSite::Module, RuleSite::Function], Call),
+    rule!("Html", "(path: String)", FILE_SITE, Call),
+    rule!("PubFile", "()", FILE_SITE, Bare),
+    rule!("NoPrelude", "()", FILE_SITE, Bare),
+    rule!("Sql", "()", BLOCK_SITE, Block),
+    rule!("Extern", "(library: String)", MODULE_SITE, Call),
+    rule!("Bindgen", "(library: String)", MODULE_SITE, Call),
+    rule!("allow", "(lint: Ident)", &[RuleSite::Declaration, RuleSite::Statement], Call),
+    rule!("Static", "()", CONST_SITE, Bare),
+    rule!("Authority", "()", &[RuleSite::Operation], Bare),
+    rule!("wire", "()", FIELD_SITE, Bare),
+    rule!(retired "InlineAlways", "()", FUNCTION_SITE, Bare, "#Inline(Always)"),
+    rule!(retired "static", "()", CONST_SITE, Bare, "#Static"),
+    rule!(retired "inline", "()", CONST_SITE, Bare, "#Inline"),
+    rule!(retired "Add", "()", EXPR_SITE, Bare, ".Add"),
+    rule!(retired "Mul", "()", EXPR_SITE, Bare, ".Mul"),
+    rule!(retired "Min", "()", EXPR_SITE, Bare, ".Min"),
+    rule!(retired "Max", "()", EXPR_SITE, Bare, ".Max"),
+    rule!(retired "Audit", "(reason: String)", &[RuleSite::Function, RuleSite::Block], Call, "#Unsafe(reason)"),
+    rule!(retired "Debug", "()", TYPE_SITE, Bare, "remove the marker; Debug derives automatically"),
+    rule!(retired "Wasm", "()", FUNCTION_SITE, Bare, "#Target(Wasm)"),
+    rule!(retired "Js", "()", FUNCTION_SITE, Bare, "#Target(Js)"),
+    rule!(retired "Suppress", "(reason: String)", BLOCK_SITE, Block, ".drop(\"reason\")"),
+    rule!(retired "Uninit", "()", FIELD_SITE, Bare, "give the field a real initial value — stored uninitialized-sentinel fields were retired outright (D-UNINIT-SENTINEL1)"),
+    rule!(retired "Ref", "()", FIELD_SITE, Bare, "use an owned value"),
+];
+
+pub fn applied_rule_registry() -> &'static [AppliedRule] {
+    APPLIED_RULES
+}
+
+pub fn applied_rule(name: &str) -> Option<&'static AppliedRule> {
+    APPLIED_RULES.iter().find(|row| row.name == name)
 }
 
 pub fn rule_allows(name: &str, site: RuleSite) -> bool {
     applied_rule(name).is_some_and(|row| row.sites.contains(&site))
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuleDeclaration { pub rule: String, pub site: RuleSite, pub span: Span, pub target: Span }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EffectiveRule { pub rule: String, pub provenance: Vec<RuleDeclaration> }
-
-/// Resolve an applied rule while retaining its complete declaration chain.
-/// Site-bound rules reject widening to a different target instead of inheriting.
-pub fn resolve_applied_rule(rule: &str, declarations: impl IntoIterator<Item = RuleDeclaration>) -> Result<Option<EffectiveRule>, Span> {
-    let Some(row) = applied_rule(rule) else { return Ok(None) };
-    let mut provenance = Vec::new();
-    let mut target = None;
-    for declaration in declarations.into_iter().filter(|d| d.rule == rule) {
-        if !row.sites.contains(&declaration.site) { return Err(declaration.span); }
-        if !row.inherits && target.is_some_and(|prior| prior != declaration.target) { return Err(declaration.span); }
-        target = Some(declaration.target);
-        provenance.push(declaration);
-    }
-    Ok((!provenance.is_empty()).then(|| EffectiveRule { rule: rule.to_string(), provenance }))
 }
 
 #[cfg(test)]
@@ -259,9 +351,10 @@ mod tests {
     #[test]
     fn every_registered_rule_has_one_exact_applicability_row() {
         let rows = super::applied_rule_registry();
-        for name in crate::Syntax::APPLIED_RULES {
-            assert_eq!(rows.iter().filter(|row| row.name == *name).count(), 1, "{name}");
-            assert!(!rows.iter().find(|row| row.name == *name).unwrap().sites.is_empty(), "{name}");
+        for row in rows {
+            assert_eq!(rows.iter().filter(|candidate| candidate.name == row.name).count(), 1, "{}", row.name);
+            assert!(!row.sites.is_empty(), "{}", row.name);
+            assert!(!row.signature.is_empty(), "{}", row.name);
         }
     }
 

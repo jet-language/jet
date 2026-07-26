@@ -40,7 +40,6 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/generated_cffi_e3207.jet",
     "tests/ui/if_expr_missing_else.jet",
     "tests/ui/impl_colon_separator.jet",
-    "tests/ui/inline_conflicting_markers.jet",
     "tests/ui/int_too_big.jet",
     "tests/ui/interp_empty.jet",
     "tests/ui/interp_unclosed.jet",
@@ -66,6 +65,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/manifest_version_conflict/lib_v1/pkg.jet",
     "tests/ui/manifest_version_conflict/lib_v2/pkg.jet",
     "tests/ui/manifest_version_conflict/pkg.jet",
+    "tests/ui/marker_argument_shape.jet",
     "tests/ui/marker_experimental_at.jet",
     "tests/ui/marker_experimental_hash.jet",
     "tests/ui/marker_hardened_at.jet",
@@ -108,6 +108,8 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/schedule_every_without_task.jet",
     "tests/ui/schedule_task_on_method.jet",
     "tests/ui/shield_arguments.jet",
+    "tests/ui/single_bracket_marker.jet",
+    "tests/ui/stacked_type_markers.jet",
     "tests/ui/string_lone_brace.jet",
     "tests/ui/subjectless_guard_direct_nesting.jet",
     "tests/ui/subjectless_guard_value_missing_else.jet",
@@ -135,6 +137,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/unit_family_zero_scale.jet",
     "tests/ui/unknown_char.jet",
     "tests/ui/unsafe_forbidden/pkg.jet",
+    "tests/ui/unsafe_missing_reason.jet",
     "tests/ui/unsafe_per_site/pkg.jet",
     "tests/ui/unterminated_block_comment.jet",
     "tests/ui/unterminated_string.jet",
@@ -1416,5 +1419,3 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         );
     }
 }
-
-

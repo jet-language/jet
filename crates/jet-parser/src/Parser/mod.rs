@@ -88,7 +88,12 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
     if p.diags.is_empty() {
         return Ok(prog);
     }
-    if for_fmt && p.diags.iter().all(|d| is_teaching_parse_diag(&d.code)) {
+    if for_fmt
+        && p.diags.iter().all(|d| {
+            is_teaching_parse_diag(&d.code)
+                || (d.code == "E0927" && d.what.contains("retired"))
+        })
+    {
         Ok(prog)
     } else {
         Err(p.diags)

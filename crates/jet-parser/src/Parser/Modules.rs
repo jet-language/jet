@@ -674,7 +674,7 @@ impl<'a> Parser<'a> {
             // D-MUSTUSE1 / D-MARKERMOVE1: `#MustUse fn` inside a module body (old
             // `#MustUse fn` spelling is E0062, taught inside `func()`).
             TokKind::Hash if self.at_must_use_fn() => self.func().map(Item::Func),
-            // D-STATE1: `#State(S) fn` / `#Transition(From -> To) fn` in a module.
+            // D-STATE1: `#State(S) fn` / `#Transition(From, To) fn` in a module.
             TokKind::Hash if self.at_state_fn() || self.at_transition_fn() => {
                 self.func().map(Item::Func)
             }

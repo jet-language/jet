@@ -211,14 +211,14 @@ pub(crate) fn math_method_arg_ty(name: &str, method: &str) -> Option<Type> {
         (_, "matmul") => Some(self_ty),
         ("Mat3", "transform") => Some(Type::Named("Vec3".to_string())),
         ("Mat4", "transform") => Some(Type::Named("Vec4".to_string())),
-        // `reduce(#Op)` takes a reduce-op marker, checked specially by the caller.
+        // `reduce(.Op)` takes a ReduceOp value, checked specially by the caller.
         _ => None,
     }
 }
 
-/// D-SIMD2: the closed set of reduce-op markers accepted by `v.reduce(#Op)`.
+/// D-REDUCE-VALUE1=A: Core ReduceOp values accepted by `v.reduce(.Op)`.
 pub(crate) fn simd_reduce_markers() -> &'static [&'static str] {
-    &["Add", "Mul", "Min", "Max"]
+    crate::Syntax::REDUCE_OP_VALUES
 }
 
 /// D-SIMD2 / D-LINALG1: type-check a binary operator between two math values.

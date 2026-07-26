@@ -1280,7 +1280,7 @@ pub(crate) struct Checker<'a> {
     /// body — see `CheckerInfer/expr.rs`'s `Expr::Ident` arm, the single spot
     /// that resolves a bare name to a global function's signature. Rolled up
     /// into a whole-program accumulator (`check_func_body`'s
-    /// `global_addr_taken` parameter) so `#InlineAlways` (E0918) can be
+    /// `global_addr_taken` parameter) so `#Inline(Always)` (E0918) can be
     /// checked once every function has run through here.
     inline_addr_taken: HashSet<String>,
 }

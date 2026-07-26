@@ -274,7 +274,10 @@ fn active_maturity_docs_use_meta_field_only() {
 
 #[test]
 fn proposal_marker_census_matches_syntax_registry() {
-    let rules = jet::Syntax::APPLIED_RULES.len();
+    let rules = jet::Policy::APPLIED_RULES
+        .iter()
+        .filter(|row| matches!(row.status, jet::Policy::RuleStatus::Active))
+        .count();
     assert!(rules > 0, "applied-rule registry must be non-empty");
     assert_eq!(
         jet::Syntax::RULE_PREFIX,
@@ -430,12 +433,16 @@ fn marker_plane_matrix_covers_current_marker_families() {
     );
 
     let mut unique = std::collections::BTreeSet::new();
-    for rule in jet::Syntax::APPLIED_RULES {
+    for row in jet::Policy::APPLIED_RULES
+        .iter()
+        .filter(|row| matches!(row.status, jet::Policy::RuleStatus::Active))
+    {
+        let rule = row.name;
         assert!(
             !rule.starts_with(['#', '@']),
             "registered applied-rule names are bare; RULE_PREFIX owns the `#` plane: {rule}"
         );
-        assert!(unique.insert(*rule), "duplicate applied rule `{rule}`");
+        assert!(unique.insert(rule), "duplicate applied rule `{rule}`");
     }
     for rule in [
         "PubFile",

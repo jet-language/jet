@@ -6,17 +6,17 @@
 //!   - `#State(S) fn m(self, …)` — a **require-state** guard: `m` is valid only
 //!     when its receiver is currently in state `S`. Calling it in any other state
 //!     is **E0150**. The state is unchanged by the call.
-//!   - `#Transition(From -> To) fn m(self, …) -> T` — a **transition**: it consumes
+//!   - `#Transition(From, To) fn m(self, …) -> T` — a **transition**: it consumes
 //!     a value in state `From` and yields one in state `To`. A call requires the
 //!     receiver be in `From` (E0150 otherwise) and **advances** it to `To`. The
 //!     from-state may be `_` (an *entry* transition: a constructor that produces the
-//!     initial state from nothing — e.g. `#Transition(_ -> Pending) fn new() -> R`).
+//!     initial state from nothing — e.g. `#Transition(_, Pending) fn new() -> R`).
 //!
 //! D-STATE-DECL (ratified 2026-06-25, option B): states are declared in a dedicated
 //! block `state TypeName { Pending, Confirmed, CheckedIn }`. When present:
-//!   - `#State(X)` / `#Transition(A -> B)` on `TypeName::*` must reference declared
+//!   - `#State(X)` / `#Transition(A, B)` on `TypeName::*` must reference declared
 //!     state names; an unknown name is **E0151** (typo against the set).
-//!   - A declared state with no outgoing `#Transition(S -> …)` is a dead-end warning
+//!   - A declared state with no outgoing `#Transition(S, …)` is a dead-end warning
 //!     **L0151** (a half-built machine still compiles).
 //!   - The set erases (compile-time only, no runtime discriminant).
 //!
@@ -37,7 +37,7 @@ pub struct StateTable {
     /// `Type::method` → required state (`#State(S)`). The receiver must be in this
     /// state at the call.
     requires: HashMap<String, String>,
-    /// `Type::method` → (from-state, to-state) for a `#Transition(From -> To)`.
+    /// `Type::method` → (from-state, to-state) for a `#Transition(From, To)`.
     /// `from` is `None` for an entry transition.
     transitions: HashMap<String, (Option<String>, String)>,
     /// Free-function name → required state / transition (typestate on a free fn
@@ -49,7 +49,7 @@ pub struct StateTable {
     /// seed `r`'s initial state.
     entry_ctors: HashMap<String, String>,
     /// D-STATE-DECL: type name → declared state labels with their spans. When a type
-    /// has a `state TypeName { … }` block, every `#State(X)` / `#Transition(A -> B)`
+    /// has a `state TypeName { … }` block, every `#State(X)` / `#Transition(A, B)`
     /// marker on its methods must reference a name from this set (else E0151).
     declared: HashMap<String, Vec<(String, Span)>>,
 }
@@ -95,10 +95,10 @@ impl StateTable {
         }
     }
 
-    /// D-STATE-DECL: validate that every `#State(X)` / `#Transition(A -> B)` marker
+    /// D-STATE-DECL: validate that every `#State(X)` / `#Transition(A, B)` marker
     /// on methods of a type that has a `state TypeName { … }` declaration references
     /// a state in the declared set. Unknown state → E0151. Also warns (L0151) about
-    /// declared states with no outgoing `#Transition(S -> …)` (dead-end states).
+    /// declared states with no outgoing `#Transition(S, …)` (dead-end states).
     pub fn validate_declarations(&self, items: &[Item], diags: &mut Vec<Diagnostic>) {
         for (type_name, decl_states) in &self.declared {
             let state_names: HashSet<&str> = decl_states.iter().map(|(n, _)| n.as_str()).collect();
@@ -702,7 +702,7 @@ fn join_after(
 }
 
 /// Run the typestate pass over one function body. The receiver's incoming state is
-/// seeded from a `#State(S)`/`#Transition(S -> _)` marker on `self` so a method body
+/// seeded from a `#State(S)`/`#Transition(S, _)` marker on `self` so a method body
 /// that itself transitions starts from the declared state.
 pub fn check_func_state(f: &Func, tbl: &StateTable) -> Vec<Diagnostic> {
     let mut ctx = StateCtx::new(tbl);
@@ -757,7 +757,7 @@ pub fn check_items_state(items: &[Item], tbl: &StateTable, diags: &mut Vec<Diagn
     }
 }
 
-/// E0151 (D-STATE-DECL): a `#State(X)` or `#Transition(A -> B)` marker references a
+/// E0151 (D-STATE-DECL): a `#State(X)` or `#Transition(A, B)` marker references a
 /// state name that is not in the `state TypeName { … }` declaration for that type.
 /// Includes a typo suggestion when the edit distance is ≤ 2.
 pub fn e0151(state: &str, type_name: &str, candidates: &[&str], span: Span) -> Diagnostic {
@@ -781,7 +781,7 @@ pub fn e0151(state: &str, type_name: &str, candidates: &[&str], span: Span) -> D
     )
 }
 
-/// L0151 (D-STATE-DECL): a declared state has no outgoing `#Transition(S -> …)`,
+/// L0151 (D-STATE-DECL): a declared state has no outgoing `#Transition(S, …)`,
 /// making it a dead end — a value in this state can never advance further.
 /// This is a warning (not an error) so a half-built machine still compiles.
 pub fn l0151(state: &str, type_name: &str, span: Span) -> Diagnostic {
@@ -789,11 +789,11 @@ pub fn l0151(state: &str, type_name: &str, span: Span) -> Diagnostic {
         "L0151",
         format!("`{state}` (in `state {type_name}`) has no outgoing transition"),
         format!(
-            "typestate (D-STATE-DECL): a state with no `#Transition({state} -> …)` is a dead end — \
+            "typestate (D-STATE-DECL): a state with no `#Transition({state}, …)` is a dead end — \
              a value that reaches `{state}` can never advance to another state"
         ),
         format!(
-            "add `#Transition({state} -> NextState) fn …` on `{type_name}`, or remove `{state}` from the declaration"
+            "add `#Transition({state}, NextState) fn …` on `{type_name}`, or remove `{state}` from the declaration"
         ),
         Some(span),
     )

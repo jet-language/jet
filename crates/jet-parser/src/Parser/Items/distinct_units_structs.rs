@@ -1,4 +1,4 @@
-use super::super::{Diagnostic, Parser, Span, Syntax, TokKind, describe, string_literal_value};
+use super::super::{Diagnostic, Parser, Span, Syntax, TokKind, describe};
 use super::helpers::parse_invariant_bounds;
 
 impl<'a> Parser<'a> {
@@ -109,6 +109,9 @@ impl<'a> Parser<'a> {
             let mut is_codable_as_base = false;
             let mut codable_as_base_span = None;
             let mut invariant_range = None;
+            let mut invariant = None;
+            let mut type_markers = Vec::new();
+            let mut marker_count = 0usize;
             loop {
                 while matches!(self.peek().kind, TokKind::Semi) {
                     self.bump();
@@ -118,13 +121,26 @@ impl<'a> Parser<'a> {
                 {
                     break;
                 }
-                self.bump(); // consume `@`
+                let sigil_span = self.bump().span;
                 let (attr, attr_span) = self.expect_ident("after the marker sigil")?;
+                marker_count += 1;
                 if attr == Syntax::ATTR_INVARIANT {
-                    let (lo, hi, span) = self.parse_invariant_range(attr_span)?;
+                    let mut marker = self.finish_rule_marker(attr, attr_span)?;
+                    marker.span.start = sigil_span.start;
+                    let (lo, hi, span, text) = self.parse_invariant_range(marker.clone())?;
                     invariant_range = Some((lo, hi, span));
+                    invariant = Some((text, span));
+                    type_markers.push(marker);
                     continue;
                 }
+                type_markers.push(crate::AST::Marker {
+                    name: attr.clone(),
+                    name_span: attr_span,
+                    args: Vec::new(),
+                    arg_labels: Vec::new(),
+                    span: Span::new(sigil_span.start, attr_span.end),
+                    ct: None,
+                });
                 if attr == Syntax::ATTR_NUMERIC {
                     is_numeric = true;
                 } else if attr == Syntax::CONTRACT_BUNDLE_COMPARABLE {
@@ -137,6 +153,33 @@ impl<'a> Parser<'a> {
                     is_codable_as_base = true;
                     codable_as_base_span = Some(attr_span);
                 }
+            }
+            if marker_count > 1 {
+                let span = Span::new(
+                    type_markers[0].span.start,
+                    type_markers.last().unwrap().span.end,
+                );
+                let mut diagnostic = Diagnostic::error(
+                    "E0999",
+                    "multiple markers belong in one bracket list".to_string(),
+                    "two or more markers use one `#[A, B]` group".to_string(),
+                    "replace the bare stack with one bracket list".to_string(),
+                    Some(span),
+                );
+                if type_markers.iter().all(|marker| marker.args.is_empty()) {
+                    diagnostic.edit = Some(crate::Diagnostics::TextEdit {
+                        span,
+                        new_text: format!(
+                            "#[{}]",
+                            type_markers
+                                .iter()
+                                .map(|marker| marker.name.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ),
+                    });
+                }
+                self.diags.push(diagnostic);
             }
             while matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
@@ -254,6 +297,7 @@ impl<'a> Parser<'a> {
             Ok(crate::AST::DistinctDef {
                 is_pub,
                 is_package_pub,
+                type_markers,
                 is_numeric,
                 is_comparable,
                 comparable_span,
@@ -267,6 +311,7 @@ impl<'a> Parser<'a> {
                 base,
                 base_span,
                 range,
+                invariant,
                 span: Span::new(start.start, end),
             })
         }
@@ -297,28 +342,24 @@ impl<'a> Parser<'a> {
         /// D-REFINE1: first shipped `#Invariant` prover accepts a quoted linear
         /// integer range over the reserved value name:
         /// `#Invariant("value >= 0 && value < 4")`.
-        fn parse_invariant_range(&mut self, attr_span: Span) -> Result<(i64, i64, Span), Diagnostic> {
-            let open = self.peek().span;
-            self.expect(TokKind::LParen, "after `#Invariant`")?;
-            let text_span = self.peek().span;
-            let text = match &self.peek().kind {
-                TokKind::Str(parts) => string_literal_value(parts)?,
-                other => {
-                    return Err(Diagnostic::error(
-                        "E0003",
-                        format!("expected invariant text, found {}", describe(other)),
-                        "`#Invariant` takes a quoted linear integer bound over `value`".to_string(),
-                        "write `#Invariant(\"value >= 0 && value < 10\")`".to_string(),
-                        Some(self.peek().span),
-                    ));
-                }
+        pub(in crate::Parser) fn parse_invariant_range(
+            &mut self,
+            marker: crate::AST::Marker,
+        ) -> Result<(i64, i64, Span, String), Diagnostic> {
+            if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
+                return Err(Self::marker_argument_shape_error(Syntax::ATTR_INVARIANT, marker.span));
+            }
+            let text = match &marker.args[0] {
+                crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+                    crate::AST::StrPart::Lit(text) => text.clone(),
+                    crate::AST::StrPart::Interp(..) => return Err(Self::marker_argument_shape_error(Syntax::ATTR_INVARIANT, marker.span)),
+                },
+                _ => return Err(Self::marker_argument_shape_error(Syntax::ATTR_INVARIANT, marker.span)),
             };
-            self.bump();
-            let close = self.peek().span;
-            self.expect(TokKind::RParen, "after the invariant text")?;
-            let span = Span::new(open.start, close.end);
+            let span = marker.span;
+            let text_span = marker.args[0].span();
             match parse_invariant_bounds(&text) {
-                Some((lo, hi)) if lo <= hi => Ok((lo, hi, span)),
+                Some((lo, hi)) if lo <= hi => Ok((lo, hi, span, text)),
                 Some((lo, hi)) => Err(Diagnostic::error(
                     "E0137",
                     format!("this invariant range is empty — {} is after {}", lo, hi),
@@ -331,7 +372,7 @@ impl<'a> Parser<'a> {
                     "`#Invariant` only supports linear integer bounds over `value`".to_string(),
                     "the first D-REFINE1 prover accepts comparisons joined with `&&`".to_string(),
                     "write `value >= lo && value < hi`, `lo <= value && value <= hi`, or `value == n`".to_string(),
-                    Some(attr_span),
+                    Some(span),
                 )),
             }
         }
@@ -378,31 +419,35 @@ impl<'a> Parser<'a> {
             is_pub: bool,
             is_package_pub: bool,
         ) -> Result<crate::AST::UnitFamilyDef, Diagnostic> {
-            let start = self.peek().span;
-            self.expect(TokKind::Hash, "before `UnitFamily`")?;
-            // consume the `UnitFamily` marker ident
-            let (marker, _) = self.expect_ident("after `@`")?;
-            debug_assert_eq!(marker, Syntax::ATTR_UNIT_FAMILY);
-            self.expect(TokKind::LParen, "after `#UnitFamily`")?;
-            let (family, family_span) = self.expect_ident("as the unit family name")?;
-            let base = if matches!(self.peek().kind, TokKind::Comma) {
-                self.bump();
-                let (field, field_span) = self.expect_ident("after the family name")?;
+            let marker = self.parse_rule_marker()?;
+            if marker.args.is_empty() || marker.args.len() > 2 || marker.arg_labels[0].is_some() {
+                return Err(Self::marker_argument_shape_error(Syntax::ATTR_UNIT_FAMILY, marker.span));
+            }
+            let crate::AST::Expr::Ident(family, family_span) = &marker.args[0] else {
+                return Err(Self::marker_argument_shape_error(Syntax::ATTR_UNIT_FAMILY, marker.span));
+            };
+            let family = family.clone();
+            let family_span = *family_span;
+            let base = if let Some(value) = marker.args.get(1) {
+                let Some((field, field_span)) = marker.arg_labels[1].as_ref() else {
+                    return Err(Self::marker_argument_shape_error(Syntax::ATTR_UNIT_FAMILY, marker.span));
+                };
                 if field != Syntax::UNIT_FAMILY_BASE_FIELD {
                     return Err(Diagnostic::error(
                         "E0003",
                         format!("unknown unit-family field `{field}`"),
                         "scaled and affine families name one canonical base".to_string(),
                         "write `base: member_name`".to_string(),
-                        Some(field_span),
+                        Some(*field_span),
                     ));
                 }
-                self.expect(TokKind::Colon, "after `base`")?;
-                Some(self.expect_ident("as the canonical base member")?)
+                let crate::AST::Expr::Ident(base, base_span) = value else {
+                    return Err(Self::marker_argument_shape_error(Syntax::ATTR_UNIT_FAMILY, value.span()));
+                };
+                Some((base.clone(), *base_span))
             } else {
                 None
             };
-            self.expect(TokKind::RParen, "after the unit family name")?;
             self.expect(TokKind::LBrace, "to open the unit family member list")?;
             let mut members = Vec::new();
             while !matches!(self.peek().kind, TokKind::RBrace | TokKind::Eof) {
@@ -516,7 +561,7 @@ impl<'a> Parser<'a> {
                 family_span,
                 base,
                 members,
-                span: Span::new(start.start, end),
+                span: Span::new(marker.span.start, end),
             })
         }
 
@@ -590,40 +635,41 @@ impl<'a> Parser<'a> {
             &mut self,
             outer_is_pub: bool,
         ) -> Result<crate::AST::Item, Diagnostic> {
-            let attr_start = self.peek().span;
-            self.bump(); // consume `@`
-            let (attr_name, attr_name_span) = self.expect_ident("after `@`")?;
-            debug_assert_eq!(attr_name, Syntax::ATTR_LAYOUT);
-            self.expect(TokKind::LParen, "after `#Layout`")?;
-            let (variant, variant_span) = self.expect_ident("inside `#Layout(…)`")?;
-            let mut tag_width = None;
-            if variant == Syntax::LAYOUT_C && matches!(self.peek().kind, TokKind::Comma) {
-                self.bump();
-                let (label, label_span) = if matches!(self.peek().kind, TokKind::KwTag) {
-                    let span = self.bump().span;
-                    ("tag".to_string(), span)
-                } else {
-                    self.expect_ident("after `,` in `#Layout(c, …)`")?
-                };
-                if label != "tag" {
-                    return Err(Diagnostic::error("E1105", format!("`{label}` isn't a C enum layout option"),
-                        "D-REPRC2 supports only the enum tag width override here.".to_string(),
-                        "Write `#Layout(c, tag: U8)` or use `#Layout(c)`.".to_string(), Some(label_span)));
-                }
-                self.expect(TokKind::Colon, "after `tag` in `#Layout(c, tag: …)`")?;
-                tag_width = Some(self.expect_ident("for the C enum tag width")?);
+            let marker = self.parse_rule_marker()?;
+            if marker.args.is_empty() || marker.args.len() > 2 {
+                return Err(Self::marker_argument_shape_error(Syntax::ATTR_LAYOUT, marker.span));
             }
-            // D-SOA2B: partial columnar (`#layout(columnar: x, y)`) is deferred — a
-            // `:` after the variant is the partial form. Reject with a clear message.
-            if variant == Syntax::LAYOUT_COLUMNAR && matches!(&self.peek().kind, TokKind::Colon) {
-                let colon_span = self.peek().span;
+            if marker.arg_labels[0].as_ref().is_some_and(|(label, _)| label == Syntax::LAYOUT_COLUMNAR) {
                 return Err(Diagnostic::error(
                     "E1109",
                     "partial `#Layout(columnar: …)` isn't supported yet".to_string(),
                     "v1 supports whole-struct columnar only — every field becomes a column".to_string(),
                     "write `#Layout(columnar)` to convert the whole struct".to_string(),
-                    Some(Span::new(variant_span.start, colon_span.end)),
+                    marker.arg_labels[0].as_ref().map(|(_, span)| *span),
                 ));
+            }
+            if marker.arg_labels[0].is_some() {
+                return Err(Self::marker_argument_shape_error(Syntax::ATTR_LAYOUT, marker.span));
+            }
+            let crate::AST::Expr::Ident(variant, variant_span) = &marker.args[0] else {
+                return Err(Self::marker_argument_shape_error(Syntax::ATTR_LAYOUT, marker.span));
+            };
+            let variant = variant.clone();
+            let variant_span = *variant_span;
+            let mut tag_width = None;
+            if let Some(value) = marker.args.get(1) {
+                let Some((label, label_span)) = marker.arg_labels[1].as_ref() else {
+                    return Err(Self::marker_argument_shape_error(Syntax::ATTR_LAYOUT, marker.span));
+                };
+                if label != "tag" {
+                    return Err(Diagnostic::error("E1105", format!("`{label}` isn't a C enum layout option"),
+                        "D-REPRC2 supports only the enum tag width override here.".to_string(),
+                        "Write `#Layout(c, tag: U8)` or use `#Layout(c)`.".to_string(), Some(*label_span)));
+                }
+                let crate::AST::Expr::Ident(width, width_span) = value else {
+                    return Err(Self::marker_argument_shape_error(Syntax::ATTR_LAYOUT, value.span()));
+                };
+                tag_width = Some((width.clone(), *width_span));
             }
             let layout = match variant.as_str() {
                 v if v == Syntax::LAYOUT_C => Some(crate::AST::StructLayout::C),
@@ -647,9 +693,7 @@ impl<'a> Parser<'a> {
                     ));
                 }
             };
-            let attr_end = self.peek().span;
-            self.expect(TokKind::RParen, "to close `#Layout(…)`")?;
-            let attr_span = Span::new(attr_start.start, attr_end.end);
+            let attr_span = marker.span;
             // Consume optional semicolons (newline-inserted) before `struct`/`pub`.
             while matches!(&self.peek().kind, TokKind::Semi) {
                 self.bump();
@@ -661,7 +705,6 @@ impl<'a> Parser<'a> {
                 } else {
                     false
                 };
-            let _ = attr_name_span;
             if matches!(self.peek().kind, TokKind::KwEnum) {
                 if layout != Some(crate::AST::StructLayout::C) {
                     return Err(Diagnostic::error("E1105", "Only C layout applies to enums.".to_string(),
@@ -670,8 +713,19 @@ impl<'a> Parser<'a> {
                 }
                 let mut def = self.enum_def_after_pub(is_pub, false)?;
                 let mut args = vec![crate::AST::Expr::Ident("c".to_string(), variant_span)];
-                if let Some((width, span)) = tag_width { args.push(crate::AST::Expr::Ident(width, span)); }
-                def.type_markers.push(crate::AST::Marker { name: Syntax::ATTR_LAYOUT.to_string(), name_span: attr_name_span, args, span: attr_span, ct: None });
+                let mut arg_labels = vec![None];
+                if let Some((width, span)) = tag_width {
+                    args.push(crate::AST::Expr::Ident(width, span));
+                    arg_labels.push(Some(("tag".to_string(), variant_span)));
+                }
+                def.type_markers.push(crate::AST::Marker {
+                    name: Syntax::ATTR_LAYOUT.to_string(),
+                    name_span: marker.name_span,
+                    args,
+                    arg_labels,
+                    span: attr_span,
+                    ct: None,
+                });
                 Ok(crate::AST::Item::Enum(def))
             } else {
                 if tag_width.is_some() {
@@ -914,8 +968,20 @@ impl<'a> Parser<'a> {
                     self.bump();
                     continue;
                 }
-                // D-SHAPE2: field rules share one `#[…]` group.
-                if self.at_marker_list() {
+                let is_method = matches!(self.peek().kind, TokKind::KwFn)
+                    || (matches!(self.peek().kind, TokKind::KwPub)
+                        && matches!(self.peek2().kind, TokKind::KwFn))
+                    || self.at_pure_fn()
+                    || self.at_sanitizer_fn()
+                    || self.at_inline_fn()
+                    || self.at_state_fn()
+                    || self.at_transition_fn();
+                if is_method {
+                    methods.push(self.method_in_type()?);
+                    continue;
+                }
+                // D-SHAPE2: one field rule is bare; two or more share `#[…]`.
+                if self.at_marker_list() || matches!(self.peek().kind, TokKind::Hash) {
                     let field_markers = self.parse_field_markers()?;
                     let mut f = self.field()?;
                     let mut redact = false;
@@ -944,21 +1010,9 @@ impl<'a> Parser<'a> {
                     validate_block = stmts;
                     validate_span = Some(span);
                 } else {
-                    let is_method = matches!(self.peek().kind, TokKind::KwFn)
-                        || (matches!(self.peek().kind, TokKind::KwPub)
-                            && matches!(self.peek2().kind, TokKind::KwFn))
-                        || self.at_pure_fn()
-                        || self.at_sanitizer_fn()
-                        || self.at_inline_fn()
-                        || self.at_state_fn()
-                        || self.at_transition_fn();
-                    if is_method {
-                        methods.push(self.method_in_type()?);
-                    } else {
-                        fields.push(self.field()?);
-                        if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
-                            self.bump();
-                        }
+                    fields.push(self.field()?);
+                    if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+                        self.bump();
                     }
                 }
             }

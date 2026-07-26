@@ -595,7 +595,7 @@ pub(crate) fn lower_delegation_method(f: &Func, field: &str, cx: &Cx) -> TFunc {
         is_main: false,
         line: cov_line(cx, f.name_span.start),
         // A delegation method has no body and never carries `#Unsafe fn` (sema rejects it).
-        // Same for `#Inline`/`#InlineAlways` — a delegation method is pure forwarding,
+        // Same for `#Inline`/`#Inline(Always)` — a delegation method is pure forwarding,
         // never parsed with an inline marker.
         is_unsafe: false,
         is_pure: false,

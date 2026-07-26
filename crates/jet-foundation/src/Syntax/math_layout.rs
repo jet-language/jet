@@ -1,7 +1,7 @@
 /// D-SIMD1/D-SIMD2 (ratified 2026-06-24): the built-in portable SIMD lane types.
 /// `F32x4` is four `F32` lanes, `F64x2` is two `F64` lanes. Constructor
 /// `F32x4(a,b,c,d)`, splat `F32x4.splat(x)`, lane index `v[i]`, element-wise
-/// `+`/`-`/`*`/`/`, reduce `v.sum()` / `v.reduce(#Max)`, and the `[F32#4]` bridge
+/// `+`/`-`/`*`/`/`, reduce `v.sum()` / `v.reduce(.Max)`, and the `[F32#4]` bridge
 /// `from_array`/`to_array`. A closed compiler-provided family (no user `+`); ops
 /// lower to a scalar-array fallback (the pinned stable rustc has no `std::simd`),
 /// memory-safe by construction (I1) — no `std::simd`-feature gate, no intrinsics.
@@ -455,7 +455,7 @@ pub const ATTR_AUDIT: &str = "Audit"; // retired, D-UNSAFE2
                                       // `outer.break()` / `outer.next()` target them. Retired `@`
                                       // prefix and suffix forms emit E0988.
                                       // D-ATTR3 = B (ratified 2026-06-19): `@` stays for labels; attributes use `#`.
-                                      // D-QUAL4=A (ratified 2026-06-26): `#Marker T` is a value-tag qualifier in type
+                                      // D-QUAL4=A (ratified 2026-06-26): `#TagName T` is a value-tag qualifier in type
                                       // position. Transparent to type identity (the underlying type is still `T`).
                                       // Documented intent only; does not affect codegen or runtime behaviour.
                                       // Parser: `TokKind::Hash` followed by PascalCase ident → `Type::Tagged { marker, inner }`.
@@ -644,7 +644,7 @@ pub fn schedule_duration_suffix_nanos(suffix: &str) -> Option<u128> {
     }
 }
 
-/// D-DOTSCOPE1: the scope-member vocabulary a `#Marker { }` block declares, or
+/// D-DOTSCOPE1: the scope-member vocabulary an applied-rule block declares, or
 /// `None` if the marker declares no members. Each marker that grows a member
 /// vocabulary is added here (an API decision, not a syntax one — the `.name { }`
 /// grammar is fixed). `#Test` is the only marker with members today; `#Bench`
@@ -661,3 +661,6 @@ pub fn scope_members(marker: &str) -> Option<&'static [&'static str]> {
         _ => None,
     }
 }
+/// D-REDUCE-VALUE1=A: closed Core enum used by SIMD lane reduction.
+pub const TYPE_REDUCE_OP: &str = "ReduceOp"; // D-REDUCE-VALUE1
+pub const REDUCE_OP_VALUES: &[&str] = &["Add", "Mul", "Min", "Max", "Avg"]; // D-REDUCE-VALUE1

@@ -1,4 +1,4 @@
-// D-STATE-DECL: a `#State(X)` or `#Transition(A -> B)` marker that references a
+// D-STATE-DECL: a `#State(X)` or `#Transition(A, B)` marker that references a
 // state name not declared in `state TypeName { … }` is E0151. Here `#State(Stuffed)`
 // on `Crate::get` references `Stuffed`, but the `state Crate` block only declares
 // `Full` and `Empty`. Close enough to `Full` to get a typo suggestion.
@@ -9,7 +9,7 @@ struct Crate {
 }
 
 impl Crate {
-    #Transition(_ -> Full) fn fill(data: Int) -> Crate {
+    #Transition(_, Full) fn fill(data: Int) -> Crate {
         return Crate.{data: data}
     }
 

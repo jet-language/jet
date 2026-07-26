@@ -1,4 +1,4 @@
-use super::super::{Diagnostic, Func, Parser, Span, StrTokPart, Syntax, TokKind, describe};
+use super::super::{Diagnostic, Func, Parser, Span, Syntax, TokKind};
 use super::TargetMarker;
 
 impl<'a> Parser<'a> {
@@ -19,19 +19,64 @@ impl<'a> Parser<'a> {
             self.diags.push(Self::retired_effect_syntax(span));
         }
     
-        /// D-METHODMACRO1=A (I7/R3 chokepoint): consume a `#Inline`/`#InlineAlways`
-        /// prefix already confirmed present by `at_inline_fn`. Returns `true` when
-        /// the marker was `InlineAlways` (`false` for the soft `Inline` hint),
-        /// plus its span.
+        pub(in crate::Parser) fn marker_argument_shape_error(name: &str, span: Span) -> Diagnostic {
+            let expected = crate::Policy::applied_rule(name)
+                .map(|row| row.signature)
+                .unwrap_or("()");
+            Diagnostic::error(
+                "E0930",
+                format!("`#{name}` arguments do not match `{name}{expected}`"),
+                "marker arguments use the same call grammar and typed signature as function arguments"
+                    .to_string(),
+                format!("match the registered signature `{name}{expected}`"),
+                Some(span),
+            )
+        }
+
+        pub(super) fn retired_inline_always(name: &str) -> bool {
+            crate::Policy::applied_rule(name).is_some_and(|row| {
+                matches!(
+                    row.status,
+                    crate::Policy::RuleStatus::Retired {
+                        replacement: "#Inline(Always)"
+                    }
+                )
+            })
+        }
+
+        /// D-INLINE-PARAM1=A: consume `#Inline`, `#Inline(Always)`, or its
+        /// retired predecessor.
         fn bump_inline_marker(&mut self) -> Result<(bool, Span), Diagnostic> {
             let start = self.peek().span;
-            self.bump(); // `@`
-            let (name, name_span) = self.expect_ident("after the marker sigil")?;
-            let is_always = name == Syntax::CONTRACT_INLINE_ALWAYS;
-            Ok((is_always, Span::new(start.start, name_span.end)))
+            let marker = self.parse_rule_marker()?;
+            let span = Span::new(start.start, marker.span.end);
+            if Self::retired_inline_always(&marker.name) {
+                self.diags.push(Diagnostic::error(
+                    "E0927",
+                    "`#InlineAlways` is retired".to_string(),
+                    "one `#Inline` marker now carries both the hint and checked-promise modes"
+                        .to_string(),
+                    "write `#Inline(Always)`".to_string(),
+                    Some(span),
+                ));
+                return Ok((true, span));
+            }
+            if marker.args.is_empty() {
+                return Ok((false, span));
+            }
+            if marker.args.len() != 1
+                || !matches!(&marker.args[0], crate::AST::Expr::Ident(mode, _) if mode == "Always")
+                || marker.arg_labels[0].is_some()
+            {
+                return Err(Self::marker_argument_shape_error(
+                    Syntax::CONTRACT_INLINE,
+                    marker.span,
+                ));
+            }
+            Ok((true, span))
         }
     
-        /// D-METHODMACRO1=A: parse the `#Inline`/`#InlineAlways` marker slot —
+        /// D-METHODMACRO1=A: parse the `#Inline`/`#Inline(Always)` marker slot —
         /// zero or one marker, with a second one (either name, either order)
         /// rejected as E0920 (pick one). Shared by `func()` and `method_in_type()`.
         pub(super) fn parse_inline_marker(&mut self) -> Result<(bool, bool, Option<Span>), Diagnostic> {
@@ -39,31 +84,7 @@ impl<'a> Parser<'a> {
                 return Ok((false, false, None));
             }
             let (is_always, span) = self.bump_inline_marker()?;
-            let (mut is_inline, mut is_inline_always) = (!is_always, is_always);
-            let mut span = Some(span);
-            if self.at_inline_fn() {
-                let (is_always2, span2) = self.bump_inline_marker()?;
-                self.diags
-                    .push(Self::e0920_conflicting_inline_markers(span2));
-                is_inline = !is_always2;
-                is_inline_always = is_always2;
-                span = Some(span2);
-            }
-            Ok((is_inline, is_inline_always, span))
-        }
-    
-        /// E0920: both `#Inline` and `#InlineAlways` were written on the same
-        /// function/method declaration.
-        pub(super) fn e0920_conflicting_inline_markers(span: Span) -> Diagnostic {
-            Diagnostic::error(
-                "E0920",
-                "a function can't be both `#Inline` and `#InlineAlways`".to_string(),
-                "`#Inline` is a soft hint the compiler may ignore; `#InlineAlways` is a checked \
-                 promise it must honor or reject — one declaration can't carry both meanings."
-                    .to_string(),
-                "keep one: `#Inline` to suggest inlining, `#InlineAlways` to require it.".to_string(),
-                Some(span),
-            )
+            Ok((!is_always, is_always, Some(span)))
         }
     
         pub(in crate::Parser) fn func(&mut self) -> Result<Func, Diagnostic> {
@@ -99,10 +120,10 @@ impl<'a> Parser<'a> {
             } else {
                 false
             };
-            // D-METHODMACRO1=A: `#Inline fn` / `#InlineAlways fn` — checked inline
+            // D-METHODMACRO1=A: `#Inline fn` / `#Inline(Always) fn` — checked inline
             // contracts (E0920 if both are written).
             let (is_inline, is_inline_always, inline_span) = self.parse_inline_marker()?;
-            // D-STATE1: `#State(S) fn …` / `#Transition(From -> To) fn …` typestate
+            // D-STATE1: `#State(S) fn …` / `#Transition(From, To) fn …` typestate
             // markers. Each appears at most once before `fn`; either may precede the
             // (already-consumed) `#Pure`/`#Sanitizer` slots or follow them.
             let mut state_requires = None;
@@ -234,23 +255,26 @@ impl<'a> Parser<'a> {
             &mut self,
             kw: &str,
         ) -> Result<crate::AST::ContractClause, Diagnostic> {
-            let start = self.peek().span;
-            self.bump(); // `@`
-            self.expect_ident("after the marker sigil")?;
-            self.expect(TokKind::LParen, &format!("after `#{kw}`"))?;
-            let cond = self.expr_no_struct_lit()?;
-            self.expect(
-                TokKind::Comma,
-                &format!("between the condition and message in `#{kw}(…)`"),
-            )?;
-            let (message, message_span) = self.expect_marker_name(kw)?;
-            let end = self.peek().span;
-            self.expect(TokKind::RParen, &format!("to close `#{kw}(…)`"))?;
+            let start = self.peek().span.start;
+            let marker = self.parse_rule_marker()?;
+            if marker.name != kw || marker.args.len() != 2 || marker.arg_labels.iter().any(Option::is_some) {
+                return Err(Self::marker_argument_shape_error(kw, marker.span));
+            }
+            let cond = marker.args[0].clone();
+            let (message, message_span) = match &marker.args[1] {
+                crate::AST::Expr::Str(parts, span) if parts.len() == 1 => match &parts[0] {
+                    crate::AST::StrPart::Lit(message) => (message.clone(), *span),
+                    crate::AST::StrPart::Interp(..) => {
+                        return Err(Self::marker_argument_shape_error(kw, *span));
+                    }
+                },
+                other => return Err(Self::marker_argument_shape_error(kw, other.span())),
+            };
             Ok(crate::AST::ContractClause {
                 cond,
                 message,
                 message_span,
-                span: Span::new(start.start, end.end),
+                span: Span::new(start, marker.span.end),
             })
         }
     
@@ -271,43 +295,21 @@ impl<'a> Parser<'a> {
         /// D-HTMLPAIR1 (ratified 2026-07-01, c134): parse `#Html("path.html")` — the file's
         /// explicit companion host page for `--target=web` builds.
         pub(super) fn parse_html_marker(&mut self) -> Result<String, Diagnostic> {
-            self.bump(); // `@`
-            self.bump(); // `Html`
-            self.expect(TokKind::LParen, "after `#Html`")?;
-            let parts = match &self.peek().kind {
-                TokKind::Str(parts) => parts.clone(),
-                other => {
-                    return Err(Diagnostic::error(
-                        "E0003",
-                        format!(
-                            "expected a path in quotes inside `#Html(…)`, found {}",
-                            describe(other)
-                        ),
-                        "the companion host page is a fixed file path".to_string(),
-                        "write `#Html(\"index.html\")`".to_string(),
-                        Some(self.peek().span),
-                    ));
-                }
-            };
-            let span = self.bump().span;
-            self.expect(TokKind::RParen, "to close `#Html(…)`")?;
-            if parts.len() != 1 {
-                return Err(Diagnostic::error(
-                    "E0003",
-                    "an `#Html(…)` path must be one piece of quoted text".to_string(),
-                    "paths are fixed labels, not interpolated messages".to_string(),
-                    "write `#Html(\"index.html\")`".to_string(),
-                    Some(span),
-                ));
+            let marker = self.parse_rule_marker()?;
+            if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
+                return Err(Self::marker_argument_shape_error(Syntax::ATTR_HTML, marker.span));
             }
-            match &parts[0] {
-                StrTokPart::Lit(s) => Ok(s.clone()),
-                StrTokPart::Interp(_) => Err(Diagnostic::error(
-                    "E0003",
-                    "an `#Html(…)` path can't contain `{ }` interpolation".to_string(),
-                    "paths are fixed labels".to_string(),
-                    "write `#Html(\"index.html\")`".to_string(),
-                    Some(span),
+            match &marker.args[0] {
+                crate::AST::Expr::Str(parts, span) if parts.len() == 1 => match &parts[0] {
+                    crate::AST::StrPart::Lit(s) => Ok(s.clone()),
+                    crate::AST::StrPart::Interp(..) => Err(Self::marker_argument_shape_error(
+                        Syntax::ATTR_HTML,
+                        *span,
+                    )),
+                },
+                other => Err(Self::marker_argument_shape_error(
+                    Syntax::ATTR_HTML,
+                    other.span(),
                 )),
             }
         }
@@ -316,38 +318,45 @@ impl<'a> Parser<'a> {
         /// (a partition ceiling) or `#Target(Web)` (this file's default CLI
         /// backend — a different axis, same marker).
         pub(in crate::Parser) fn parse_web_target_marker(&mut self) -> Result<TargetMarker, Diagnostic> {
-            self.bump(); // `@`
-            self.bump(); // `Target`
-            self.expect(TokKind::LParen, "after `#Target`")?;
-            let (name, name_span) = self.expect_ident(
-                "the partition name inside `#Target(…)` (`Wasm`, `Js`, `Web`, or `Os.Linux`/`Os.Macos`/`Os.Windows`)",
-            )?;
+            let marker = self.parse_rule_marker()?;
+            if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
+                return Err(Self::marker_argument_shape_error(
+                    Syntax::ATTR_TARGET,
+                    marker.span,
+                ));
+            }
             // D-OSTARGET1=A: `#Target(Os.Linux|Os.Macos|Os.Windows)` — the second,
             // mutually-exclusive axis (native platform gating on an `impl`).
-            if name == crate::Syntax::TARGET_OS_NAMESPACE {
-                self.expect(TokKind::Dot, "after `Os` inside `#Target(Os. … )`")?;
-                let (os_name, os_span) = self.expect_ident(
-                    "the OS name inside `#Target(Os. … )` (`Linux`, `Macos`, or `Windows`)",
-                )?;
-                self.expect(TokKind::RParen, "to close `#Target(…)`")?;
-                return crate::Syntax::OsTarget::parse(&os_name)
-                    .map(TargetMarker::Os)
-                    .ok_or_else(|| {
-                        Diagnostic::error(
-                            "E0003",
-                            format!("`#Target(Os.{os_name})` is not a known native OS"),
-                            "native OS targets are `Os.Linux`, `Os.Macos`, or `Os.Windows`".to_string(),
-                            format!(
-                                "write `#Target(Os.{})`, `#Target(Os.{})`, or `#Target(Os.{})`",
-                                Syntax::TARGET_OS_LINUX,
-                                Syntax::TARGET_OS_MACOS,
-                                Syntax::TARGET_OS_WINDOWS,
-                            ),
-                            Some(os_span),
-                        )
-                    });
+            if let crate::AST::Expr::Field(base, os_name, os_span) = &marker.args[0] {
+                if matches!(
+                    base.as_ref(),
+                    crate::AST::Expr::Ident(namespace, _)
+                        if namespace == crate::Syntax::TARGET_OS_NAMESPACE
+                ) {
+                    return crate::Syntax::OsTarget::parse(&os_name)
+                        .map(TargetMarker::Os)
+                        .ok_or_else(|| {
+                            Diagnostic::error(
+                                "E0003",
+                                format!("`#Target(Os.{os_name})` is not a known native OS"),
+                                "native OS targets are `Os.Linux`, `Os.Macos`, or `Os.Windows`".to_string(),
+                                format!(
+                                    "write `#Target(Os.{})`, `#Target(Os.{})`, or `#Target(Os.{})`",
+                                    Syntax::TARGET_OS_LINUX,
+                                    Syntax::TARGET_OS_MACOS,
+                                    Syntax::TARGET_OS_WINDOWS,
+                                ),
+                                Some(*os_span),
+                            )
+                        });
+                }
             }
-            self.expect(TokKind::RParen, "to close `#Target(…)`")?;
+            let crate::AST::Expr::Ident(name, name_span) = &marker.args[0] else {
+                return Err(Self::marker_argument_shape_error(
+                    Syntax::ATTR_TARGET,
+                    marker.span,
+                ));
+            };
             if name == crate::Syntax::WEB_TARGET_DEFAULT_WEB {
                 return Ok(TargetMarker::DefaultWeb);
             }
@@ -365,7 +374,7 @@ impl<'a> Parser<'a> {
                         Syntax::WEB_BUCKET_JS,
                         Syntax::WEB_TARGET_DEFAULT_WEB,
                     ),
-                    Some(name_span),
+                    Some(*name_span),
                 )
                 })
         }
@@ -407,11 +416,7 @@ impl<'a> Parser<'a> {
                     if matches!(self.peek5().kind, TokKind::RParen)
                         && self.token_after_web_marker_is_fn(5)
                     {
-                        self.bump(); // `@`
-                        self.bump(); // `Target`
-                        self.bump(); // `(`
-                        self.bump(); // `Wasm` / `Js`
-                        self.bump(); // `)`
+                        let _ = self.parse_web_target_marker()?;
                         return Ok(Some(marker));
                     }
                 }
@@ -421,40 +426,40 @@ impl<'a> Parser<'a> {
     
         /// D-STATE1: parse `#State(StateName)` and return `(name, marker_span)`.
         pub(super) fn parse_state_require_marker(&mut self) -> Result<(String, Span), Diagnostic> {
-            let start = self.bump().span.start; // `@`
-            self.bump(); // `State`
-            self.expect(TokKind::LParen, "after `#State`")?;
-            let (name, _) = self.expect_ident("the required state inside `#State(…)`")?;
-            let end = self.peek().span.end;
-            self.expect(TokKind::RParen, "to close `#State(…)`")?;
-            Ok((name, Span::new(start, end)))
+            let start = self.peek().span.start;
+            let marker = self.parse_rule_marker()?;
+            if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
+                return Err(Self::marker_argument_shape_error(Syntax::KW_STATE, marker.span));
+            }
+            let crate::AST::Expr::Ident(name, _) = &marker.args[0] else {
+                return Err(Self::marker_argument_shape_error(Syntax::KW_STATE, marker.span));
+            };
+            Ok((name.clone(), Span::new(start, marker.span.end)))
         }
     
-        /// D-STATE1: parse `#Transition(From -> To)`. `From` may be the wildcard `_`
+        /// D-MARKSIG1=A: parse `#Transition(From, To)`. `From` may be the wildcard `_`
         /// (an entry transition → `from = None`).
         pub(super) fn parse_transition_marker(&mut self) -> Result<crate::AST::StateTransition, Diagnostic> {
-            let start = self.bump().span.start; // `@`
-            self.bump(); // `Transition`
-            self.expect(TokKind::LParen, "after `#Transition`")?;
-            // From-state: `_` (entry) or a state-tag ident.
-            let from = if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::STATE_ENTRY) {
-                self.bump();
-                None
-            } else {
-                let (n, _) = self.expect_ident("the from-state inside `#Transition(…)`")?;
-                Some(n)
+            let start = self.peek().span.start;
+            let marker = self.parse_rule_marker()?;
+            if marker.args.len() != 2 || marker.arg_labels.iter().any(Option::is_some) {
+                return Err(Self::marker_argument_shape_error(
+                    Syntax::KW_TRANSITION,
+                    marker.span,
+                ));
+            }
+            let from = match &marker.args[0] {
+                crate::AST::Expr::Ident(name, _) if name == Syntax::STATE_ENTRY => None,
+                crate::AST::Expr::Ident(name, _) => Some(name.clone()),
+                _ => return Err(Self::marker_argument_shape_error(Syntax::KW_TRANSITION, marker.span)),
             };
-            self.expect(
-                TokKind::Arrow,
-                "between the from- and to-state in `#Transition(From -> To)`",
-            )?;
-            let (to, _) = self.expect_ident("the to-state inside `#Transition(…)`")?;
-            let end = self.peek().span.end;
-            self.expect(TokKind::RParen, "to close `#Transition(…)`")?;
+            let crate::AST::Expr::Ident(to, _) = &marker.args[1] else {
+                return Err(Self::marker_argument_shape_error(Syntax::KW_TRANSITION, marker.span));
+            };
             Ok(crate::AST::StateTransition {
                 from,
-                to,
-                span: Span::new(start, end),
+                to: to.clone(),
+                span: Span::new(start, marker.span.end),
             })
         }
 
@@ -464,40 +469,37 @@ impl<'a> Parser<'a> {
         /// (`EveryArg::resolve`, E0926 on a bad value) — matching D-UNITLIT1's
         /// own parse-raw/sema-resolves split for `Expr::UnitLit`.
         pub(super) fn parse_every_marker(&mut self) -> Result<crate::AST::EveryMarker, Diagnostic> {
-            let start = self.bump().span.start; // `@`
-            self.bump(); // `Every`
-            self.expect(TokKind::LParen, "after `#Every`")?;
-            let arg = match self.peek().kind.clone() {
-                TokKind::UnitNumber { int, float, suffix, .. } => {
-                    let tok_span = self.bump().span;
-                    let suffix_span = Span::new(tok_span.end - suffix.len(), tok_span.end);
+            let start = self.peek().span.start;
+            let marker = self.parse_rule_marker()?;
+            if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
+                return Err(Self::marker_argument_shape_error(Syntax::ATTR_EVERY, marker.span));
+            }
+            let arg = match &marker.args[0] {
+                crate::AST::Expr::UnitLit { int, float, suffix, suffix_span, .. } => {
                     crate::AST::EveryArg::Duration {
-                        int,
-                        float,
-                        suffix,
-                        suffix_span,
+                        int: *int,
+                        float: *float,
+                        suffix: suffix.clone(),
+                        suffix_span: *suffix_span,
                     }
                 }
-                TokKind::Str(parts) => {
-                    let tok_span = self.bump().span;
+                crate::AST::Expr::Str(parts, tok_span) => {
                     if parts.len() != 1 {
-                        return Err(Self::e0926_bad_every_arg(tok_span));
+                        return Err(Self::e0926_bad_every_arg(*tok_span));
                     }
                     match &parts[0] {
-                        StrTokPart::Lit(s) => crate::AST::EveryArg::WallClock {
+                        crate::AST::StrPart::Lit(s) => crate::AST::EveryArg::WallClock {
                             text: s.clone(),
-                            text_span: tok_span,
+                            text_span: *tok_span,
                         },
-                        StrTokPart::Interp(_) => return Err(Self::e0926_bad_every_arg(tok_span)),
+                        crate::AST::StrPart::Interp(..) => return Err(Self::e0926_bad_every_arg(*tok_span)),
                     }
                 }
-                _ => return Err(Self::e0926_bad_every_arg(self.peek().span)),
+                other => return Err(Self::e0926_bad_every_arg(other.span())),
             };
-            let end = self.peek().span.end;
-            self.expect(TokKind::RParen, "to close `#Every(…)`")?;
             Ok(crate::AST::EveryMarker {
                 arg,
-                span: Span::new(start, end),
+                span: Span::new(start, marker.span.end),
             })
         }
 

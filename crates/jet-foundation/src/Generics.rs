@@ -452,6 +452,12 @@ pub fn e0915(type_show: &str, span: Span) -> Diagnostic {
 /// forms; auto-derive never writes into `derives`, see
 /// `Traits::compute_auto_derives`).
 pub fn e0922(span: Span) -> Diagnostic {
+    let fix = crate::Policy::applied_rule("Debug")
+        .and_then(|row| match row.status {
+            crate::Policy::RuleStatus::Retired { replacement } => Some(replacement),
+            crate::Policy::RuleStatus::Active => None,
+        })
+        .unwrap_or("remove the marker");
     Diagnostic::error(
         "E0922",
         "`Debug` derives automatically — writing it explicitly is retired".to_string(),
@@ -459,10 +465,8 @@ pub fn e0922(span: Span) -> Diagnostic {
          D-MARK-DEBUG1 retired the explicit opt-in spelling so there's exactly one way to \
          get it (I8)."
             .to_string(),
-        "remove `Debug` here — printing already works via `{value#Debug}` interpolation; \
-         implement `Debug` by hand (`impl T.Debug { fn debug(self) -> String { … } }`) only \
-         if you need custom output."
-            .to_string(),
+        format!("{fix}; printing already works via `{{value#Debug}}` interpolation; implement \
+                 `Debug` by hand only if you need custom output"),
         Some(span),
     )
 }

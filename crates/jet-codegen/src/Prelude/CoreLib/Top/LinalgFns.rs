@@ -74,6 +74,9 @@ fn jet_math_F32x4_reduce_min(v: &jet_std::F32x4) -> f32 {
 fn jet_math_F32x4_reduce_max(v: &jet_std::F32x4) -> f32 {
     jet_math_F32x4_max(v)
 }
+fn jet_math_F32x4_reduce_avg(v: &jet_std::F32x4) -> f32 {
+    jet_math_F32x4_sum(v) / 4.0
+}
 
 fn jet_math_F64x2_sum(v: &jet_std::F64x2) -> f64 {
     v.0.iter().sum()
@@ -98,6 +101,9 @@ fn jet_math_F64x2_reduce_min(v: &jet_std::F64x2) -> f64 {
 }
 fn jet_math_F64x2_reduce_max(v: &jet_std::F64x2) -> f64 {
     jet_math_F64x2_max(v)
+}
+fn jet_math_F64x2_reduce_avg(v: &jet_std::F64x2) -> f64 {
+    jet_math_F64x2_sum(v) / 2.0
 }
 
 // Vectors.
@@ -270,4 +276,3 @@ fn jet_math_Mat4_transpose(m: &jet_std::Mat4) -> jet_std::Mat4 {
     }
     jet_std::Mat4(r)
 }
-

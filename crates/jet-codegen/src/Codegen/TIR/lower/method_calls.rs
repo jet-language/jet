@@ -86,6 +86,23 @@ use std::collections::HashSet;
 
 /// A prelude/host static-call owner whose path is prefixed by the generated
 /// crate root (`{root}jet_std::…`).
+fn reduce_op_name(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::ReduceMarker(name, _) => Some(name.clone()),
+        Expr::EnumLit {
+            type_name,
+            variant,
+            args,
+            ..
+        } if (type_name.is_empty() || type_name == crate::Syntax::TYPE_REDUCE_OP)
+            && args.is_empty() =>
+        {
+            Some(variant.clone())
+        }
+        _ => None,
+    }
+}
+
 fn rooted_owner(path: impl Into<String>) -> TStaticOwner {
     TStaticOwner::Prelude {
         rooted: true,
@@ -2175,16 +2192,19 @@ pub(crate) fn lower_method_call(
     // arg. Resolve the receiver-type + Fn-vs-FnMut dispatch HERE into a total
     // `TClosureOp` (reproducing `emit_builtin_method`'s closure arms, incl. its
     // `expr_jet_ty(receiver)` Map/trait-object branches), so emit makes no decision.
-    // SIMD/linalg `.reduce(#Op)` is MathMethod (below), not a collection fold —
+    // SIMD/linalg `.reduce(.Op)` is MathMethod (below), not a collection fold —
     // skip when the lowered receiver is a math value type.
     if recv_type.is_none() && crate::Collections::is_closure_method(method) {
         let recv_t = lower_expr(receiver, cx, env);
         let recv_ast_ty = tir_recv_jet_ty(receiver, env);
         let recv_ty = recv_ast_ty.unwrap_or_else(|| recv_t.ty.clone());
-        // `#Add/#Mul/#Min/#Max` reduce on SIMD is MathMethod, never collection fold.
-        let reduce_marker = method == "reduce"
-            && matches!(args.first().map(|a| &a.expr), Some(Expr::ReduceMarker(..)));
-        let skip_closure = reduce_marker
+        // A `ReduceOp` value on SIMD is MathMethod, never collection fold.
+        let reduce_value = method == "reduce"
+            && args
+                .first()
+                .and_then(|argument| reduce_op_name(&argument.expr))
+                .is_some();
+        let skip_closure = reduce_value
             || matches!(
                 &recv_ty,
                 Type::Named(name)
@@ -2193,15 +2213,15 @@ pub(crate) fn lower_method_call(
         if skip_closure {
             if let Type::Named(handle) = &recv_ty {
                 let is_reduce = method == "reduce"
-                    && (crate::Sema::is_simd_lane_type(handle) || reduce_marker);
+                    && (crate::Sema::is_simd_lane_type(handle) || reduce_value);
                 if is_reduce
                     || crate::Sema::math_method_return(handle, method, args.len()).is_some()
                 {
                     let (reduce_op, value_args): (Option<String>, Vec<TExpr>) = if is_reduce {
-                        let op = match args.first().map(|a| &a.expr) {
-                            Some(Expr::ReduceMarker(name, _)) => name.clone(),
-                            _ => "Add".to_string(),
-                        };
+                        let op = args
+                            .first()
+                            .and_then(|argument| reduce_op_name(&argument.expr))
+                            .unwrap_or_else(|| "Add".to_string());
                         (Some(op), Vec::new())
                     } else {
                         (
@@ -2425,10 +2445,10 @@ pub(crate) fn lower_method_call(
             if is_reduce || crate::Sema::math_method_return(handle, method, args.len()).is_some() {
                 let recv_t = lower_expr(receiver, cx, env);
                 let (reduce_op, value_args): (Option<String>, Vec<TExpr>) = if is_reduce {
-                    let op = match args.first().map(|a| &a.expr) {
-                        Some(Expr::ReduceMarker(name, _)) => name.clone(),
-                        _ => "Add".to_string(),
-                    };
+                    let op = args
+                        .first()
+                        .and_then(|argument| reduce_op_name(&argument.expr))
+                        .unwrap_or_else(|| "Add".to_string());
                     (Some(op), Vec::new())
                 } else {
                     (

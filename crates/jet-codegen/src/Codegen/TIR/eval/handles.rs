@@ -271,8 +271,8 @@ pub(super) fn eval_handle(
         } => {
             let mut argv = args.to_vec();
             if let Some(op) = reduce_op {
-                // Lowering resolves `#Add/#Mul/#Min/#Max` into `reduce_op` and
-                // drops the marker arg — restore it for MathLayout::apply_method.
+                // Lowering resolves the `ReduceOp` value into `reduce_op` and drops
+                // the source arg — restore it for MathLayout::apply_method.
                 argv.insert(0, CtValue::Str(op.clone()));
             }
             apply_method(recv, method, argv, span)
@@ -406,4 +406,3 @@ fn duration_new(
         })),
     })
 }
-

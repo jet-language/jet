@@ -486,8 +486,20 @@ impl<'a> Parser<'a> {
                     self.bump();
                     continue;
                 }
-                // D-SHAPE2: field rules share one `#[…]` group.
-                if self.at_marker_list() {
+                let is_method = matches!(self.peek().kind, TokKind::KwFn)
+                    || (matches!(self.peek().kind, TokKind::KwPub)
+                        && matches!(self.peek2().kind, TokKind::KwFn))
+                    || self.at_pure_fn()
+                    || self.at_sanitizer_fn()
+                    || self.at_inline_fn()
+                    || self.at_state_fn()
+                    || self.at_transition_fn();
+                if is_method {
+                    methods.push(self.method_in_type()?);
+                    continue;
+                }
+                // D-MARK-STACK1: one field rule is bare; two or more share `#[…]`.
+                if self.at_marker_list() || matches!(self.peek().kind, TokKind::Hash) {
                     let field_markers = self.parse_field_markers()?;
                     let mut f = self.field()?;
                     let mut redact = false;
@@ -516,21 +528,9 @@ impl<'a> Parser<'a> {
                     validate_block = stmts;
                     validate_span = Some(span);
                 } else {
-                    let is_method = matches!(self.peek().kind, TokKind::KwFn)
-                        || (matches!(self.peek().kind, TokKind::KwPub)
-                            && matches!(self.peek2().kind, TokKind::KwFn))
-                        || self.at_pure_fn()
-                        || self.at_sanitizer_fn()
-                        || self.at_inline_fn()
-                        || self.at_state_fn()
-                        || self.at_transition_fn();
-                    if is_method {
-                        methods.push(self.method_in_type()?);
-                    } else {
-                        fields.push(self.field()?);
-                        if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
-                            self.bump();
-                        }
+                    fields.push(self.field()?);
+                    if matches!(self.peek().kind, TokKind::Comma | TokKind::Semi) {
+                        self.bump();
                     }
                 }
             }

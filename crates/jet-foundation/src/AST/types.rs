@@ -222,7 +222,7 @@ pub enum Type {
     /// D-SG9/S42: 32-bit float. The default 64-bit float is spelled `Float`
     /// (and `F64`) and lives in `Type::Float`; only `F32` is a `Float32`.
     Float32,
-    /// D-QUAL4=A: value-tag type qualifier — `#Marker T` in signature/binding
+    /// D-QUAL4=A: value-tag type qualifier — `#TagName T` in signature/binding
     /// position. Transparent to type identity (the tag is a flow annotation only,
     /// not a structural difference); sema treats it as `inner` for all purposes.
     Tagged {

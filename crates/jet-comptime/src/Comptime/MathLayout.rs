@@ -284,6 +284,7 @@ fn reduce_op(name: &str, lanes: &[f64], op: &str) -> Option<f64> {
         "Mul" | "product" => lanes.iter().copied().product(),
         "Min" => lanes.iter().copied().fold(f64::INFINITY, f64::min),
         "Max" => lanes.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        "Avg" => lanes.iter().sum::<f64>() / lanes.len() as f64,
         _ => return None,
     };
     Some(if f32 { (acc as f32) as f64 } else { acc })
@@ -303,7 +304,7 @@ pub(super) fn apply_method(
             reduce_op(name, &vals, "sum").unwrap_or(0.0),
         )),
         // AOT exposes product/min/max as named methods; same reduce_op as
-        // `reduce(#Mul/#Min/#Max)` so comptime/REPL stay byte-identical.
+        // `reduce(.Mul/.Min/.Max/.Avg)` so comptime/REPL stay byte-identical.
         ("product", 0) => Ok(float_value(
             name,
             reduce_op(name, &vals, "product").unwrap_or(0.0),
@@ -322,7 +323,7 @@ pub(super) fn apply_method(
                 CtValue::Str(s) => s.as_str(),
                 _ => {
                     return Some(Err(unsupported(
-                        "reduce expects #Add/#Mul/#Min/#Max",
+                        "reduce expects .Add/.Mul/.Min/.Max/.Avg",
                         span,
                     )))
                 }

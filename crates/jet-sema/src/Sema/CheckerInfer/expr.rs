@@ -1569,7 +1569,7 @@ impl<'a> Checker<'a> {
                 self.check_pattern_test(subject, pattern, *span);
                 Some(Type::Bool)
             }
-            // D-SIMD2: a reduce-op marker is only meaningful inside `v.reduce(#Op)`.
+            // D-REDUCE-VALUE1: this node exists only to teach retired `#Op` calls.
             // The reduce method consumes it before reaching here; a bare/misplaced
             // marker is a usage error.
             Expr::ReduceMarker(name, span) => {
@@ -1578,7 +1578,7 @@ impl<'a> Checker<'a> {
                     format!("`#{}` is only valid inside a lane `.reduce(…)`", name),
                     "a reduce-op marker names the fold operation; it isn't a value on its own"
                         .to_string(),
-                    "write `v.reduce(#Add)` / `#Mul` / `#Min` / `#Max`".to_string(),
+                    "write `v.reduce(.Add)`, `.Mul`, `.Min`, `.Max`, or `.Avg`".to_string(),
                     Some(*span),
                 ));
                 None

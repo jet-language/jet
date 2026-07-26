@@ -130,51 +130,47 @@ impl<'a> Parser<'a> {
             let (is_unsafe, unsafe_reason, unsafe_span) = if matches!(self.peek().kind, TokKind::Hash)
                 && matches!(self.peek2().kind, TokKind::KwUnsafe)
             {
-                let start = self.peek().span;
-                self.bump(); // `#`
-                self.bump(); // `Unsafe`
-                let marker_span = Span::new(start.start, self.toks[self.pos - 1].span.end);
-                let mut reason = None;
-                if matches!(self.peek().kind, TokKind::LParen) {
-                    self.bump(); // `(`
-                    let (value, _) = self.expect_plain_string(
-                        "for the safety reason",
-                        "`#Unsafe` takes one piece of quoted text explaining why the function is safe to call",
-                        "write: #Unsafe(\"caller must ensure …\") #FFI(asm) fn …",
-                    )?;
-                    reason = Some(value);
-                    self.expect(TokKind::RParen, "after the safety reason")?;
-                    if matches!(self.peek().kind, TokKind::Semi) {
-                        self.bump();
+                let marker = self.parse_rule_marker()?;
+                let reason = match marker.args.as_slice() {
+                    [] => return Err(Diagnostic::error(
+                        "E3112",
+                        "an `#Unsafe` function needs a reason".to_string(),
+                        "every unsafe function records why callers can rely on its unchecked contract".to_string(),
+                        "write `#Unsafe(\"why this is safe\") #FFI(asm) fn …`".to_string(),
+                        Some(marker.span),
+                    )),
+                    [crate::AST::Expr::Str(parts, _)]
+                        if marker.arg_labels[0].is_none() && parts.len() == 1 =>
+                    {
+                        match &parts[0] {
+                            crate::AST::StrPart::Lit(value) => Some(value.clone()),
+                            crate::AST::StrPart::Interp(..) => return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, marker.span)),
+                        }
                     }
+                    _ => return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, marker.span)),
+                };
+                if matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
                 }
-                (true, reason, Some(marker_span))
+                (true, reason, Some(marker.span))
             } else {
                 (false, None, None)
             };
 
             // `#FFI(<lang>)`
-            let ffi_start = self.peek().span;
-            self.expect(TokKind::Hash, "before `FFI`")?;
-            let ffi_ident_span = self.peek().span;
-            match &self.peek().kind {
-                TokKind::Ident(n) if n == Syntax::ATTR_FFI => {
-                    self.bump();
-                }
-                other => {
-                    return Err(Diagnostic::error(
-                        "E0003",
-                        format!("expected `{}` after `#`, found {}", Syntax::ATTR_FFI, describe(other)),
-                        "the inline foreign tier is written `#FFI(<lang>) fn` — `#FFI(c)`, `#FFI(cpp)`, `#FFI(asm)`".to_string(),
-                        "write: #FFI(c) fn name(...) -> T { \"\"\"<foreign source>\"\"\" }".to_string(),
-                        Some(ffi_ident_span),
-                    ));
-                }
+            let ffi = self.parse_rule_marker()?;
+            if ffi.name != Syntax::ATTR_FFI
+                || ffi.args.len() != 1
+                || ffi.arg_labels[0].is_some()
+            {
+                return Err(Self::marker_argument_shape_error(Syntax::ATTR_FFI, ffi.span));
             }
-            self.expect(TokKind::LParen, "after `#FFI` to name the foreign language")?;
-            let (lang, lang_span) = self.expect_ident("for the foreign language name in `#FFI(<lang>)`")?;
-            self.expect(TokKind::RParen, "after the foreign language name")?;
-            let marker_span = Span::new(ffi_start.start, self.toks[self.pos - 1].span.end);
+            let crate::AST::Expr::Ident(lang, lang_span) = &ffi.args[0] else {
+                return Err(Self::marker_argument_shape_error(Syntax::ATTR_FFI, ffi.span));
+            };
+            let lang = lang.clone();
+            let lang_span = *lang_span;
+            let marker_span = ffi.span;
             // A synthetic `;` may separate the marker line from `fn`/`pub`.
             while matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
@@ -342,44 +338,53 @@ impl<'a> Parser<'a> {
         }
     
         /// D-UNSAFE2 (ratified 2026-06-22, opt B): parse `#Unsafe("reason") fn …`
-        /// or bare `#Unsafe fn …` (reason-less; L3101 fires in sema). The body is
+        /// D-UNSAFE-REASON1=A: bare `#Unsafe fn …` is E3112. The body is
         /// checked like any other fn; the contract is enforced at call sites (E3103).
         pub(super) fn unsafe_fn(&mut self) -> Result<Func, Diagnostic> {
-            let start = self.peek().span;
-            self.expect(TokKind::Hash, "before `Unsafe`")?;
-            self.expect_kw(TokKind::KwUnsafe, "to mark a whole-function contract")?;
-            let marker_span = Span::new(start.start, self.toks[self.pos - 1].span.end);
-            let mut reason = None;
+            let marker = self.parse_rule_marker()?;
+            let marker_span = marker.span;
             let mut obligation_mode = None;
-            if matches!(self.peek().kind, TokKind::LParen) {
-                self.bump(); // `(`
-                if matches!(self.peek().kind, TokKind::Str(_)) {
-                    let (value, _) = self.expect_plain_string(
-                        "for the safety reason",
-                        "`#Unsafe` takes quoted text explaining why the function is safe to call",
-                        "write: #Unsafe(\"caller must ensure …\") fn …",
-                    )?;
-                    reason = Some(value);
-                    if matches!(self.peek().kind, TokKind::Comma) { self.bump(); }
+            if marker.args.is_empty() {
+                return Err(Diagnostic::error(
+                    "E3112",
+                    "an `#Unsafe` function needs a reason".to_string(),
+                    "every unsafe function records why callers can rely on its unchecked contract"
+                        .to_string(),
+                    "write `#Unsafe(\"why this is safe\") fn …`".to_string(),
+                    Some(marker_span),
+                ));
+            }
+            let reason = match (&marker.args[0], &marker.arg_labels[0]) {
+                (crate::AST::Expr::Str(parts, _), None) if parts.len() == 1 => {
+                    match &parts[0] {
+                        crate::AST::StrPart::Lit(value) => Some(value.clone()),
+                        crate::AST::StrPart::Interp(..) => return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, marker.span)),
+                    }
                 }
-                if !matches!(self.peek().kind, TokKind::RParen) {
-                    let (field, field_span) = self.expect_ident("for the `#Unsafe` option")?;
-                    if field != "obligations" { return Err(Diagnostic::error("E3108", format!("`{field}` is not an unsafe-gate option"), "per-site control has one typed field: `obligations`".to_string(), "write `obligations: .Track` or `obligations: .Skip`".to_string(), Some(field_span))); }
-                    self.expect(TokKind::Colon, "after `obligations`")?;
-                    self.expect(TokKind::Dot, "before the obligation mode")?;
-                    let (mode, mode_span) = self.expect_ident("after `obligations: .`")?;
-                    obligation_mode = Some(match mode.as_str() {
-                        "Track" => crate::Policy::PolicyValue::UnsafeTrack,
-                        "Skip" => crate::Policy::PolicyValue::UnsafeSkip,
-                        _ => return Err(Diagnostic::error("E3108", format!("`.{mode}` is not a per-site obligation mode"), "a gate either tracks typed obligations or explicitly skips them when policy permits".to_string(), "write `.Track` or `.Skip`".to_string(), Some(mode_span))),
-                    });
-                }
-                self.expect(TokKind::RParen, "after the safety reason")?;
-                // S6-R: when `#Unsafe("reason")` is on its own line above `fn`,
-                // the lexer inserts a synthetic `;` after `)`. Skip it.
-                if matches!(self.peek().kind, TokKind::Semi) {
-                    self.bump();
-                }
+                _ => return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, marker.span)),
+            };
+            if marker.args.len() > 2 {
+                return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, marker.span));
+            }
+            if let Some(value) = marker.args.get(1) {
+                let Some((field, field_span)) = marker.arg_labels[1].as_ref() else {
+                    return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, marker.span));
+                };
+                if field != "obligations" { return Err(Diagnostic::error("E3108", format!("`{field}` is not an unsafe-gate option"), "per-site control has one typed field: `obligations`".to_string(), "write `obligations: .Track` or `obligations: .Skip`".to_string(), Some(*field_span))); }
+                let (mode, mode_span) = match value {
+                    crate::AST::Expr::EnumLit { type_name, variant, args, span }
+                        if type_name.is_empty() && args.is_empty() => (variant, span),
+                    _ => return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, value.span())),
+                };
+                obligation_mode = Some(match mode.as_str() {
+                    "Track" => crate::Policy::PolicyValue::UnsafeTrack,
+                    "Skip" => crate::Policy::PolicyValue::UnsafeSkip,
+                    _ => return Err(Diagnostic::error("E3108", format!("`.{mode}` is not a per-site obligation mode"), "a gate either tracks typed obligations or explicitly skips them when policy permits".to_string(), "write `.Track` or `.Skip`".to_string(), Some(*mode_span))),
+                });
+            }
+            // S6-R: a marker on its own line gets a synthetic separator.
+            if matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
             }
             let (is_pub, is_package_pub) = self.parse_item_visibility();
             self.expect_kw(TokKind::KwFn, "after `#Unsafe`")?;

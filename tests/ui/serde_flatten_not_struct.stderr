@@ -23,9 +23,9 @@ count: tree.decode<Int>()?,
  Fix: report this compiler bug; built-in derives must emit valid ordinary Jet
 
 Error [E2408]: `#[Flatten]` on `count` needs a struct-typed field
-  --> tests/ui/serde_flatten_not_struct.jet:5:16
+  --> tests/ui/serde_flatten_not_struct.jet:5:14
     |
-  5 |     #[Flatten] count: Int
-    |                ^^^^^
+  5 |     #Flatten count: Int
+    |              ^^^^^
  Why: flatten splices another struct's keys into this object, so the field must be a `#[Codable]` struct — not a primitive, list, or map
  Fix: give `count` a `#[Codable]` struct type, or drop `#[Flatten]`

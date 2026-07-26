@@ -21,12 +21,24 @@ impl<'a> Parser<'a> {
         }
         /// D-MARK-SCOPE1: parse one source `#Policy(...)` declaration list.
         pub(in crate::Parser) fn policy_decl(&mut self, scope: crate::Policy::PolicyScope) -> Result<Vec<crate::Policy::PolicyDeclaration>, Diagnostic> {
-            let start = self.bump().span; // consume `@`
-            self.bump(); // `Policy`
-            self.expect(TokKind::LParen, "after `#Policy`")?;
+            let marker = self.parse_rule_marker()?;
+            let marker_span = marker.span;
             let mut out = Vec::new();
-            loop {
-                let (name, name_span) = self.expect_ident("inside `#Policy(...)`")?;
+            for expr in marker.args {
+                let (name, name_span, limit) = match expr {
+                    crate::AST::Expr::Ident(name, span) => (name, span, None),
+                    crate::AST::Expr::Call(mut call) if call.args.len() == 1 => {
+                        let argument = call.args.pop().unwrap();
+                        let crate::AST::Expr::Int(value, _, _, _) = argument.expr else {
+                            return Err(Self::marker_argument_shape_error(Syntax::ATTR_POLICY, marker_span));
+                        };
+                        if argument.label.is_some() {
+                            return Err(Self::marker_argument_shape_error(Syntax::ATTR_POLICY, marker_span));
+                        }
+                        (call.name, call.name_span, Some(value))
+                    }
+                    other => return Err(Self::marker_argument_shape_error(Syntax::ATTR_POLICY, other.span())),
+                };
                 let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
                     let site_bound = crate::Policy::applied_rule(&name).is_some_and(|row| !row.inherits);
                     return Err(Diagnostic::error(
@@ -40,22 +52,15 @@ impl<'a> Parser<'a> {
                 let value = match key {
                     crate::Policy::PolicyKey::NoAlloc | crate::Policy::PolicyKey::ZeroRc | crate::Policy::PolicyKey::ScopedGc | crate::Policy::PolicyKey::ExplicitUnits => crate::Policy::PolicyValue::Enabled,
                     crate::Policy::PolicyKey::ArenaBounded => {
-                        self.expect(TokKind::LParen, &format!("after `{name}`"))?;
-                        let TokKind::Int(n, _) = self.peek().kind else { return Err(Diagnostic::error("E0355", format!("`{name}` needs a byte ceiling"), "a memory threshold must have a positive compile-time limit".to_string(), format!("write `{name}(65536)`"), Some(self.peek().span))); };
+                        let Some(n) = limit else { return Err(Diagnostic::error("E0355", format!("`{name}` needs a byte ceiling"), "a memory threshold must have a positive compile-time limit".to_string(), format!("write `{name}(65536)`"), Some(name_span))); };
                         let value = n as u64;
                         if value == 0 { return Err(Diagnostic::error("E0355", format!("`{name}` needs a positive byte ceiling"), "zero cannot bound a usable memory region".to_string(), format!("write `{name}(65536)`"), Some(self.peek().span))); }
-                        self.bump(); self.expect(TokKind::RParen, "after the byte ceiling")?;
                         crate::Policy::PolicyValue::Limit(value)
                     }
                     crate::Policy::PolicyKey::Unsafe => return Err(Diagnostic::error("E0355", "`unsafe` is not a source policy".to_string(), "package policy may forbid unsafe, but source code can authorize it only at an audited `#Unsafe` site".to_string(), "use `#Unsafe(\"reason\")` at the operation, or `policy: .{ unsafe: .Forbid }` in `package.jet`".to_string(), Some(name_span))),
                 };
-                out.push(crate::Policy::PolicyDeclaration { key, value, scope, span: Span::new(start.start, self.toks[self.pos - 1].span.end), target: None, source: "<source>".to_string() });
-                if matches!(self.peek().kind, TokKind::Comma) { self.bump(); continue; }
-                break;
+                out.push(crate::Policy::PolicyDeclaration { key, value, scope, span: marker_span, target: None, source: "<source>".to_string() });
             }
-            self.expect(TokKind::RParen, "after the policy list")?;
-            let end = self.toks[self.pos - 1].span.end;
-            for declaration in &mut out { declaration.span = Span::new(start.start, end); }
             Ok(out)
         }
     
@@ -334,7 +339,7 @@ impl<'a> Parser<'a> {
     
         /// U11 (D-JPK-SCRIPTDEP1=A): parse `#<version>` on `use pkg#version;` — a
         /// dotted numeric selector (`1`, `1.4`, `1.4.2`, …). `#` is already
-        /// `TokKind::Hash` (the same token `#Marker`/`[T#N]` use); the selector
+        /// `TokKind::Hash` (the same token applied rules and `[T#N]` use); the selector
         /// itself isn't its own lexer token, so it's rebuilt segment-by-segment
         /// from the `Int`/`Float` tokens the number lexer already produced
         /// (`1.4.2` lexes as `Float(1.4)`, `Dot`, `Int(2)`). One known edge case:
@@ -642,6 +647,9 @@ impl<'a> Parser<'a> {
                     },
                     TokKind::KwExtern => self.extern_rust_block().map(Item::ExternRust),
                     TokKind::KwFn => self.func().map(Item::Func),
+                    TokKind::Hash if self.marker_list_leads_to_function() => {
+                        self.func_with_marker_list().map(Item::Func)
+                    }
                     TokKind::Ident(_)
                         if matches!(self.peek2().kind, TokKind::Colon)
                             && matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::TYPE_OUTPUT)
@@ -680,9 +688,9 @@ impl<'a> Parser<'a> {
                     // D-MUSTUSE1 / D-MARKERMOVE1: `#MustUse fn name(…)` — result cannot be
                     // silently ignored (old `#MustUse` spelling is E0062, taught in `func()`).
                     TokKind::Hash if self.at_must_use_fn() => self.func().map(Item::Func),
-                    // D-METHODMACRO1=A: `#Inline fn name(…)` / `#InlineAlways fn name(…)`.
+                    // D-METHODMACRO1=A: `#Inline fn name(…)` / `#Inline(Always) fn name(…)`.
                     TokKind::Hash if self.at_inline_fn() => self.func().map(Item::Func),
-                    // D-STATE1: `#State(S) fn` / `#Transition(From -> To) fn` typestate
+                    // D-STATE1: `#State(S) fn` / `#Transition(From, To) fn` typestate
                     // markers on a free function.
                     TokKind::Hash if self.at_state_fn() || self.at_transition_fn() => {
                         self.func().map(Item::Func)
@@ -1067,7 +1075,11 @@ impl<'a> Parser<'a> {
                     // binding that survives a `jet dev` hot reload.
                     TokKind::Hash if self.at_persist_const() => self.const_def().map(Item::Const),
                     TokKind::Hash
-                        if matches!(&self.peek2().kind, TokKind::Ident(n) if n == "static" || n == "inline") =>
+                        if matches!(
+                            &self.peek2().kind,
+                            TokKind::Ident(n)
+                                if matches!(n.as_str(), "Static" | "Inline" | "static" | "inline")
+                        ) =>
                     {
                         self.const_def().map(Item::Const)
                     }

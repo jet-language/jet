@@ -954,7 +954,7 @@ pub struct TFunc {
     /// D-METHODMACRO1=A: `#Inline fn` — emits `#[inline]`. Soft hint; sema never
     /// rejects it.
     pub is_inline: bool,
-    /// D-METHODMACRO1=A: `#InlineAlways fn` — emits `#[inline(always)]`. Only ever
+    /// D-METHODMACRO1=A: `#Inline(Always) fn` — emits `#[inline(always)]`. Only ever
     /// `true` here once sema has confirmed the function can actually inline
     /// (E0917/E0918/E0919 would have failed the build otherwise) — I3: sema
     /// decides, codegen just emits.

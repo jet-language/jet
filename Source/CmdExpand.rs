@@ -5,7 +5,7 @@
 //! I2/I3: this never runs a second analysis and never asks rustc. Every fact
 //! comes straight off the checked `ProgramBundle` (`Func::is_inline` /
 //! `is_inline_always` — present on a bundle that compiled at all means the
-//! `#InlineAlways` promise already held, E0917/E0918/E0919 would have fired
+//! `#Inline(Always)` promise already held, E0917/E0918/E0919 would have fired
 //! otherwise).
 
 use std::path::{Path, PathBuf};
@@ -30,7 +30,7 @@ struct Lens {
 const LENSES: &[Lens] = &[
     Lens {
         name: "inline",
-        summary: "#Inline / #InlineAlways contracts (D-METHODMACRO1)",
+        summary: "#Inline / #Inline(Always) contracts (D-METHODMACRO1)",
         render: render_inline,
     },
     Lens {
@@ -191,7 +191,7 @@ fn render_web(_bundle: &ProgramBundle, facts: &SemIndexEffectFacts) -> Vec<Strin
     graph.explain_lines()
 }
 
-/// D-METHODMACRO1=A: every `#Inline`/`#InlineAlways` fn or method in the
+/// D-METHODMACRO1=A: every `#Inline`/`#Inline(Always)` fn or method in the
 /// bundle, and the Rust attribute codegen emits for it. Functions with
 /// neither marker produce no line (the ballot: don't dump everything).
 fn render_inline(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts) -> Vec<String> {
@@ -210,18 +210,18 @@ fn render_inline(bundle: &ProgramBundle, _facts: &SemIndexEffectFacts) -> Vec<St
     out
 }
 
-/// Walk one item list for `#Inline`/`#InlineAlways` functions and methods,
+/// Walk one item list for `#Inline`/`#Inline(Always)` functions and methods,
 /// recursing into struct/enum trait-impl blocks and inline code modules
 /// (D-MOD2) so nothing declared inside one is missed.
 type InlineRow = (String, jet::Diagnostics::Span, &'static str, &'static str);
 
-/// One `#Inline`/`#InlineAlways` fn or method: its qualified name, marker
+/// One `#Inline`/`#Inline(Always)` fn or method: its qualified name, marker
 /// span, contract label, and the Rust attribute codegen emits. `None` for
 /// neither marker (the ballot: don't dump every function, only the ones
 /// carrying a contract).
 fn inline_row(f: &jet::AST::Func, owner: Option<&str>) -> Option<InlineRow> {
     let (contract, attr) = if f.is_inline_always {
-        ("#InlineAlways", "#[inline(always)]")
+        ("#Inline(Always)", "#[inline(always)]")
     } else if f.is_inline {
         ("#Inline", "#[inline]")
     } else {

@@ -62,7 +62,7 @@ pub const KW_SANITIZER: &str = "Sanitizer";
 pub const KW_STATE: &str = "State";
 
 /// D-STATE1 (ratified 2026-06-22, option A): the typestate **transition** fn
-/// modifier — `#Transition(Pending -> Confirmed) fn confirm(self) -> Reservation`.
+/// modifier — `#Transition(Pending, Confirmed) fn confirm(self) -> Reservation`.
 /// Declares a function that consumes a value in state `Pending` and yields one in
 /// state `Confirmed` (the ratified mechanism: "a fn takes the old state tag and
 /// returns the next"). The from-state may be `_` for an **entry** transition (a
@@ -77,7 +77,7 @@ pub const KW_TRANSITION: &str = "Transition";
 /// Declares the bounded set of states for a type, tied to the type by name. The set
 /// erases at runtime (pure compile-time, no discriminant). A dead-end state (no
 /// outgoing `#Transition`) is a warning (L0151). A state referenced in `#State(X)` or
-/// `#Transition(A -> B)` that is not in the declared set is E0151. Contextual: the
+/// `#Transition(A, B)` that is not in the declared set is E0151. Contextual: the
 /// word `state` stays usable as an ordinary identifier outside a top-level declaration
 /// position (like `migration`). Declaration family sibling of `tag`/`struct`/`enum`.
 pub const KW_STATE_DECL: &str = "state"; // D-STATE-DECL
@@ -93,7 +93,7 @@ pub const KW_PROTOCOL: &str = "protocol"; // D-PROTO1, D-PROTO2
 pub const PROTO_CLIENT: &str = "client"; // D-PROTO2
 pub const PROTO_SERVER: &str = "server"; // D-PROTO2
 
-/// D-STATE1: the entry-transition placeholder — `#Transition(_ -> Pending)` means
+/// D-STATE1: the entry-transition placeholder — `#Transition(_, Pending)` means
 /// "from no prior state". Reuses the existing `_` wildcard glyph.
 pub const STATE_ENTRY: &str = "_";
 
@@ -296,7 +296,7 @@ pub const FOREIGN_AWAIT: &str = "await";
 pub const FOREIGN_MUTEX: &str = "Mutex";
 pub const FOREIGN_LOCK: &str = "lock";
 
-/// D-VERDICT-732-1: applied-rule prefix — `#Marker` / `#[a, b]`.
+/// D-VERDICT-732-1: applied-rule prefix — bare `#Name` or list `#[a, b]`.
 pub const ATTR_PREFIX: &str = "#";
 
 /// S82 / D-VERDICT-732-1 (ratified): multi-attribute list delimiters after `#`.

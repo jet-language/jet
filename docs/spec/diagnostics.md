@@ -222,7 +222,7 @@ renumbered, and no new `W` code may be allocated.
 | E0148 | sema  | a str-match pattern used in an `if == {}` table with no `else` arm (D-PARSESTR1) |
 | E0149 | sema  | a runtime `String` used where `Sql`/`Html` is expected (D-TYPEDTEXT1) |
 | E0150 | sema  | typestate: an operation is called on a value in the wrong state (D-STATE1) |
-| E0151 | sema  | typestate: `#State(X)` or `#Transition(A -> B)` references a state not in the `state TypeName { … }` declaration (D-STATE-DECL) |
+| E0151 | sema  | typestate: `#State(X)` or `#Transition(A, B)` references a state not in the `state TypeName { … }` declaration (D-STATE-DECL) |
 | E0153 | sema  | protocol expansion failed to parse a generated handle fragment (D-PROTO1) |
 | E0160 | sema  | `++`/`--` operand is not an assignable lvalue (D-INCR1) |
 | E0161 | sema  | `++`/`--` on an immutable binding or read-only parameter (D-INCR1) |
@@ -232,7 +232,7 @@ renumbered, and no new `W` code may be allocated.
 | E0805 | sema  | `yield` used outside a function declared `-> Stream<T>` (D-STREAMYIELD1) |
 | E0806 | sema  | a generator's `return` carries a value (D-STREAMYIELD1) |
 | E0807 | sema  | a `yield`ed value's type doesn't match the stream's element type (D-STREAMYIELD1) |
-| L0151 | sema  | typestate: a declared state has no outgoing `#Transition(S -> …)` — a dead-end state (D-STATE-DECL, warning) |
+| L0151 | sema  | typestate: a declared state has no outgoing `#Transition(S, …)` — a dead-end state (D-STATE-DECL, warning) |
 | E0201 | sema  | `take` (`^`) required; value can't be copied |
 | E0202 | sema  | `mut` (`&`) required at call site — write access not granted |
 | E0203 | sema  | `take` on a non-consuming parameter       |
@@ -431,7 +431,8 @@ renumbered, and no new `W` code may be allocated.
 | E3109 | load  | configured organization unsafe-policy input is unreadable or malformed; compilation fails closed |
 | E3110 | sema  | invalid swizzle lane on vector/SIMD type (D-SWIZZLE1) |
 | E3111 | sema  | overlapping write swizzle repeats a lane (D-SWIZZLE1) |
-| L3101 | sema  | `#Unsafe` block/function missing its reason argument — add `#Unsafe("…")` (D-UNSAFE2, D-UNSAFE-REASON1) |
+| E3112 | parse/sema | `#Unsafe` block/function missing its required reason argument (D-UNSAFE2, D-UNSAFE-REASON1=A) |
+| L3101 | retired | bare `#Unsafe` is now hard error E3112 (D-UNSAFE-REASON1=A) |
 | L3102 | sema  | `#Impure` block missing its reason argument — write `#Impure("…") { … }` (D-CTEFFECT1) |
 | E3201 | jet   | C library `<lib>` not found (hangar + pkg-config) |
 | E3202 | sema  | pointer/gated type crosses C boundary outside `#Unsafe` / `core.mem` |
@@ -505,15 +506,16 @@ renumbered, and no new `W` code may be allocated.
 | E0914 | sema  | unknown interpolation selector after `@` (D-DISPLAYDBG2) |
 | E0915 | sema  | bare `{value}` on a type without `Display` (D-DISPLAY-SHAPE) |
 | E0916 | sema  | auto-derived `Debug` blocked by a non-debuggable field (D-DEBUG-REDACT) — *defined, not yet emitted* |
-| E0917 | sema  | `#InlineAlways fn` calls itself — inlining a recursive call has no fixed expansion (D-METHODMACRO1) |
-| E0918 | sema  | `#InlineAlways fn` had its address taken (stored, returned, or passed as a callback) instead of being called directly (D-METHODMACRO1) |
-| E0919 | sema  | `#InlineAlways fn` body exceeds the statement ceiling `#InlineAlways` enforces (D-METHODMACRO1) |
-| E0920 | parse | a function/method written with both `#Inline` and `#InlineAlways` (D-METHODMACRO1) |
+| E0917 | sema  | `#Inline(Always) fn` calls itself — inlining a recursive call has no fixed expansion (D-METHODMACRO1) |
+| E0918 | sema  | `#Inline(Always) fn` had its address taken instead of being called directly (D-METHODMACRO1) |
+| E0919 | sema  | `#Inline(Always) fn` body exceeds the checked promise's statement ceiling (D-METHODMACRO1) |
+| E0920 | retired | `#InlineAlways` condensed into `#Inline(Always)`; one marker cannot conflict with itself |
 | E0921 | sema  | a reachable call violates an effective `no_alloc`, `zero_rc`, or `arena_bounded(N)` memory fact; reports the source operation, full call path, effective declaration, and declaration provenance (D-MEM-FACTS1) |
 | E0922 | sema  | explicit `Debug` derive (`#Debug`, `#[.., Debug]`, body `derive Debug;`) — `Debug` auto-derives, the opt-in spelling is retired (D-MARK-DEBUG1=A) |
 | E0925 | parse | `#Task`/`#Every(…)` written somewhere D-SCHEDULE1 doesn't place them — a method, or `#Every(…)` without `#Task` (card #505) |
 | E0926 | sema  | `#Every(…)`'s argument isn't a valid schedule — bad duration unit, non-positive duration, or malformed/out-of-range `"HH:MM"` (D-SCHEDULE1, card #505) |
 | E0927 | sema  | a `#Name`/`#Name` marker isn't in the registered vocabulary for its plane — a typo, or a spelling no longer supported (card #518) |
+| E0930 | parse | marker arguments do not match the typed signature in the shared marker registry (D-MARKSIG1=A) |
 | E0928 | sema  | `#Task fn` reused a reserved lifecycle verb (`run`/`dev`/`build`/`test`) (D-JPK-TASKRUN1, card #476) |
 | E0951 | sema  | comptime code reaches an impure operation (shows call path) |
 | E0952 | sema  | comptime budget exhausted (fuel) |
@@ -953,7 +955,7 @@ is fixed).
 | E2501 | `{method}` is not available on a {direction} file handle. | `files.open` returns a read-only handle; `files.create`/`files.append` return a write-only handle. Calling a write method on a reader (or a read method on a writer) is a type error. | Use the correct handle type for the operation: `files.open` to read, `files.create`/`files.append` to write. |
 | E2502 | A line stream can only be used directly in a loop. | `.lines()` hands back a lazy line reader meant to be iterated in place; storing it in a name would let it leave the loop, where it has no use. (The boundary is enforced in sema so codegen never has to lower a stray line stream — c109/I3.) | Iterate it directly: `loop line; handle.lines() { … }`. |
 | L2501 | (reserved) `fs.read` loads the whole file into memory at once. | For large files this can exhaust memory; streaming reads use bounded space. | Use `files.open(path)?` and `loop line; handle.lines() { … }` to stream line-by-line. Not emitted yet. |
-| E2510 | `#{op}` isn't a reduce operation (or a reduce marker used outside `.reduce`). | A SIMD lane reduction (D-SIMD2) folds the lanes with one of a fixed set of operations, named by a marker so the fold is explicit; only `#Add`/`#Mul`/`#Min`/`#Max` are reduce operations, and the marker is meaningful only as the sole argument to `.reduce(…)`. | Use `v.reduce(#Add)` / `#Mul` / `#Min` / `#Max`, or the named reductions `v.sum()` / `v.product()` / `v.min()` / `v.max()`. |
+| E2510 | `.ReduceOp` is not a reduce operation, or a retired `#Op` spelling was used. | SIMD reduction takes one typed `ReduceOp` value: `.Add`, `.Mul`, `.Min`, `.Max`, or `.Avg`. | Pass a listed dot value, or use `v.sum()` / `v.product()` / `v.min()` / `v.max()`. |
 | E2511 | operator `{op}` isn't defined between `{lhs}` and `{rhs}`. | Operator overloading is blessed on the closed built-in math family ONLY (D-SIMD2/D-LINALG1): element-wise `+`/`-` (and `/` for lanes), `*` (element-wise, or matrix×vector), and `==`/`!=` — both sides must be the same lane/vector type (or a matrix and its matching vector). | Match the operand types, or use a named method like `.dot()`/`.cross()`/`.matmul()`. |
 | E3110 | lane `{lane}` isn't valid on `{type}`. | Swizzle members name lanes with `x`/`y`/`z`/`w`; each type exposes only its lane count (`Vec2`: x/y, `Vec3`: x/y/z, …). | Use only the lanes defined for `{type}`. |
 | E3111 | write swizzle `{pattern}` repeats a lane on `{type}`. | Each lane may be written at most once — overlapping patterns like `v.xx` have no single meaning (D-SWIZZLE1). | Assign each lane once, e.g. `v.xy = …` instead of `v.xx = …`. |
@@ -1023,7 +1025,7 @@ wrong passphrase, type mismatch after authentication, and authenticated tamper
 all collapse to `OpenFailed`; backend prose and secret material never cross the
 projection. File-envelope cancellation remains internal task control and is not
 a public `FileCryptoError` variant. Handled errors are ordinary values.
-| E2710 | `` `derive T.{Trait}` body failed while expanding `#[{Trait}]` on `{Type}` ``. | The user-authored derive body ran at compile time (D-METADERIVE1=A, D-CTCODEGEN1=A) and threw a comptime error — typically an undefined name, a bad method call, or a type mismatch in the body. The span points at the `#[Trait]` rule on the struct that triggered expansion. | Fix the `derive T.{Trait}` body: check that every name it references is bound in scope, every method it calls is valid on the reflected type, and every `emit()` argument is a `String`. |
+| E2710 | `` `derive T.{Trait}` body failed while expanding `#{Trait}` on `{Type}` ``. | The user-authored derive body ran at compile time (D-METADERIVE1=A, D-CTCODEGEN1=A) and threw a comptime error — typically an undefined name, a bad method call, or a type mismatch in the body. The span points at the `#{Trait}` rule on the struct that triggered expansion. | Fix the `derive T.{Trait}` body: check that every name it references is bound in scope, every method it calls is valid on the reflected type, and every `emit()` argument is a `String`. |
 | E2711 | Derive orphan rule: neither `` `derive T.{Trait}` `` nor `` `{Type}` `` is local. | A generated implementation has a clear local owner only when its derive provider or target type lives in the entry module (D-METADERIVE1=A). Two imported sides leave the entry package owning neither contract. | Define `derive T.{Trait}` or `{Type}` in the entry module. |
 | E2712 | *retired by D-CTBLOCKEXPOSE1* (was: `$` splice outside comptime context). | Runtime `$name` splices are allowed when a comptime value is in scope. | Define the value with `comptime name = ...`, or remove the `$` prefix. |
 | E2713 | There is no comptime value named `{name}`. | `$name` splices a value that was computed by a `comptime` binding or `comptime {}` block. | Define `comptime {name} = ...` before using `$name`. |
@@ -1071,12 +1073,12 @@ Quality workflows: doctests, snapshot testing, `todo` typed holes, `jet bench`, 
 
 ## Scope member diagnostics (D-DOTSCOPE1)
 
-Inside a `#Marker { }` block a statement-position `.name { … }` / `.name(args) { … }` resolves against that marker's declared vocabulary. `#Test`'s members are `.setup`, `.expect_fail`, `.timeout`, `.skip`.
+Inside an applied-rule block a statement-position `.name { … }` / `.name(args) { … }` resolves against that rule's declared vocabulary. `#Test`'s members are `.setup`, `.expect_fail`, `.timeout`, `.skip`.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E0614 | `.{name}` isn't a member of `#{marker}`. | Inside a marker block a `.name { … }` statement must name one of that marker's declared members. `#{marker}` understands: {list}. | Use one of the listed members, or remove the block. |
-| E0615 | `.{name}` only works inside a marker block that declares it. | A leading-dot member statement resolves against the enclosing `#Marker`'s vocabulary; out here there is no such block. | Move it inside a `#Test("…") { … }` block, or write an ordinary statement. |
+| E0615 | `.{name}` only works inside a marker block that declares it. | A leading-dot member statement resolves against the enclosing applied rule's vocabulary; out here there is no such block. | Move it inside a `#Test("…") { … }` block, or write an ordinary statement. |
 | E0616 | `.setup` must be the first statement in the test. | `.setup` marks the test's initialization; anything before it would run first. | Move `.setup { … }` to the top of the block. |
 | E0617 | this scope member has the wrong arguments. | Each member has a fixed shape: `.timeout(500ms)` takes one duration, `.setup`/`.expect_fail` take none, `.skip` takes an optional reason string. | Match the member's shape, e.g. `.timeout(500ms) { … }` or `.skip("reason") { … }`. |
 | E0618 | scope members can't be nested. | Each member is a top-level region of the marker block; nesting one inside another member or a control block has no meaning. | Move the member out to the top level of the block. |
@@ -1186,7 +1188,8 @@ operations that can violate memory safety. Ordinary Jet never reaches these.
 | E3107 | `{operation}` is missing unsafe obligations: `{obligations}`. | Effective `.Obligations` policy requires a typed proof immediately after each low-level operation. | Add `assert valid_ptr, aligned, no_alias`, reduced to the operation-specific required subset. |
 | E3108 | Invalid unsafe option or obligation assertion. | Unsafe proof vocabulary is closed and site-bound. | Use only `obligations: .Track`/`.Skip` and `valid_ptr`, `aligned`, `no_alias` inside `#Unsafe`. |
 | E3109 | Configured organization unsafe policy cannot be used. | Admin policy never fails open when its explicit input is unreadable or malformed. | Fix `JET_ORG_UNSAFE_POLICY` and its manifest-shaped `policy: .{ unsafe: .Obligations }` file, or remove the variable. |
-| L3101 | This `#Unsafe` block/function has no reason. | Every gated region/function records, in one line, why it can't break memory safety. | Add the reason: `#Unsafe("why this is safe") { … }` or `#Unsafe("why this is safe") fn ...`. |
+| E3112 | This `#Unsafe` block/function has no reason. | Every gated region/function must record why it cannot break memory safety; the audit sentence is mandatory. | Add the reason: `#Unsafe("why this is safe") { … }` or `#Unsafe("why this is safe") fn ...`. |
+| L3101 | Retired by D-UNSAFE-REASON1=A. | A missing unsafe reason is now hard error E3112. | Follow E3112. |
 | L3102 | This `#Impure` block has no reason. | Every comptime effect gate records, in one line, why ambient I/O is needed. | Add the reason: `#Impure("reading build config") { … }`. |
 
 ## Comptime effect tiers (D-CTEFFECT1)
@@ -1337,7 +1340,7 @@ Error [E0731]: `Reviewed` is a tag, but `derive` needs a trait
 ## Typestate diagnostics (D-STATE1 / D-STATE-DECL / D-STATE-REQ / D-STATE-TRANS)
 
 A value moves through named **states**. Operations declare the state they need with
-`#State(S)` and the state they advance the value to with `#Transition(From -> To)`.
+`#State(S)` and the state they advance the value to with `#Transition(From, To)`.
 Calling an operation on a value in the wrong state is **E0150**, caught at compile
 time. States are compile-time facts threaded through each function; they **erase in
 codegen** (zero runtime cost). When the checker cannot follow a value's state
@@ -1352,7 +1355,7 @@ state Reservation { Pending, Confirmed, CheckedIn }
 
 When a `state TypeName { … }` block is present, every `#State(X)` / `#Transition(A
 -> B)` marker on `TypeName` methods must reference a name from the declared set
-(unknown name = **E0151**). A declared state with no outgoing `#Transition(S -> …)`
+(unknown name = **E0151**). A declared state with no outgoing `#Transition(S, …)`
 is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
 
 | Code | What | Why | Fix |
@@ -1365,7 +1368,7 @@ is a **dead-end** warning (**L0151**) — a half-built machine still compiles.
 | E0162 | `` `++`/`--` is not defined for {type} ``. | Increment and decrement work on integer types only (D-INCR1). | On `Float`, use `+= 1.0` / `-= 1.0`; otherwise use `+= 1` / `-= 1` on an integer binding. |
 | E0163 | increment and decrement can't target an indexed slot. | Write the full update: `map[key] = map[key] + 1` (D-INCR1). | Use `+= 1` on a name, or assign through `=` with the whole right-hand side. |
 | E0154 | after `{from} ->` expected `{expected}`, found `{to}`. | Protocol messages (D-PROTO2): each line must be `client -> server: Msg(…)` or `server -> client: Msg(…)` — other endpoint pairs are not part of the ratified spelling. | Write `client -> server: …` or `server -> client: …`. |
-| L0151 | `{state}` (in `state {type}`) has no outgoing transition. | Typestate (D-STATE-DECL): a state with no `#Transition({state} -> …)` is a dead end — a value that reaches it can never advance further. | Add `#Transition({state} -> NextState) fn …`, or remove `{state}` from the declaration. |
+| L0151 | `{state}` (in `state {type}`) has no outgoing transition. | Typestate (D-STATE-DECL): a state with no `#Transition({state}, …)` is a dead end — a value that reaches it can never advance further. | Add `#Transition({state}, NextState) fn …`, or remove `{state}` from the declaration. |
 
 `check_in` requires a `Confirmed` reservation, but the value is still `Pending`:
 
@@ -1732,44 +1735,43 @@ diagnostic.
 |------|-----|-----|
 | `` `{type}` can't auto-derive `Debug` because field `{field}` isn't debuggable ``. | Auto-derived `Debug` requires every non-`#[Redact]` field to be debuggable. | Mark `{field}` with `#[Redact]`, change its type, or implement `Debug` manually for `{type}`. |
 
-### E0917 — `#InlineAlways` self-recursive (D-METHODMACRO1)
+### E0917 — `#Inline(Always)` self-recursive (D-METHODMACRO1)
 
-`#InlineAlways` is a checked promise, not a hint (`#Inline` is the hint): if the
+`#Inline(Always)` is a checked promise, not a hint (`#Inline` is the hint): if the
 compiler can't literally inline every call, that's a compile error naming why,
 never a silent miss. A function that calls itself has no fixed expansion.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `{name}` calls itself, so `#InlineAlways` cannot expand it ``. | Inlining a recursive call would either loop forever at compile time or require an artificial depth cutoff — neither is a real inline. | Drop `#InlineAlways` (use `#Inline` as a hint), or restructure the function to be non-recursive. |
+| `` `{name}` calls itself, so `#Inline(Always)` cannot expand it ``. | Inlining a recursive call would either loop forever at compile time or require an artificial depth cutoff — neither is a real inline. | Drop `#Inline(Always)` (use `#Inline` as a hint), or restructure the function to be non-recursive. |
 
 Coverage: direct self-recursion only (a function calling itself by name).
-Mutual recursion between two `#InlineAlways` functions is not checked.
+Mutual recursion between two `#Inline(Always)` functions is not checked.
 
-### E0918 — `#InlineAlways` address taken (D-METHODMACRO1)
+### E0918 — `#Inline(Always)` address taken (D-METHODMACRO1)
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `{name}` cannot be inlined: its address is taken ``. | `#InlineAlways` promises every call to `{name}` expands in place — but `{name}` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at. | Drop `#InlineAlways`, or call `{name}` directly instead of through a value. |
+| `` `{name}` cannot be inlined: its address is taken ``. | `#Inline(Always)` promises every call to `{name}` expands in place — but `{name}` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at. | Drop `#Inline(Always)`, or call `{name}` directly instead of through a value. |
 
 Methods can't trigger E0918 — Jet's grammar has no way to read a method's bare
 name as a value, so this only ever fires for top-level functions.
 
-### E0919 — `#InlineAlways` too large (D-METHODMACRO1)
+### E0919 — `#Inline(Always)` too large (D-METHODMACRO1)
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `{name}` is too large for `#InlineAlways` ``. | Its body has `{n}` statements — over the 40-statement ceiling `#InlineAlways` enforces so a promised inline doesn't quietly bloat every call site. | Drop `#InlineAlways` (use `#Inline` as a hint the compiler is free to ignore), or split the function so the hot part is small enough to inline. |
+| `` `{name}` is too large for `#Inline(Always)` ``. | Its body has `{n}` statements — over the 40-statement ceiling `#Inline(Always)` enforces so a promised inline doesn't quietly bloat every call site. | Drop `#Inline(Always)` (use `#Inline` as a hint the compiler is free to ignore), or split the function so the hot part is small enough to inline. |
 
 The ceiling is a statement count (`INLINE_ALWAYS_MAX_STMTS = 40` in
 `crates/jet-sema/src/Sema/CheckerInline.rs`), counted transitively through
 nested blocks (`if`/`loop`/dispatch/etc.) but not through a nested lambda
 literal's body (a separate closure, not inline text of the function).
 
-### E0920 — conflicting `#Inline`/`#InlineAlways` markers (D-METHODMACRO1)
+### E0920 — retired by D-INLINE-PARAM1=A
 
-| What | Why | Fix |
-|------|-----|-----|
-| a function can't be both `#Inline` and `#InlineAlways`. | `#Inline` is a soft hint the compiler may ignore; `#InlineAlways` is a checked promise it must honor or reject — one declaration can't carry both meanings. | Keep one: `#Inline` to suggest inlining, `#InlineAlways` to require it. |
+The checked form is now `#Inline(Always)`, so conflicting inline markers cannot
+be expressed.
 
 ### E0921 — transitive memory-fact violation (D-MEM-FACTS1)
 
@@ -1838,7 +1840,7 @@ this check, an unrecognized name (a typo, or a spelling that used to mean
 something and was later retired) silently compiled to nothing. E0927 closes
 that gap: every marker name is checked against the registered vocabulary for
 the single `APPLIED_RULES` registry
-(`crates/jet-foundation/src/Syntax/markers.rs`) plus any
+(`crates/jet-foundation/src/Policy.rs`) plus any
 `derive T.Name { … }` provider in the build (D-METADERIVE1=A user derives are
 a legal, dynamic addition — never flagged). A leading `#Rule` is E0063
 (D-VERDICT-732-1); E0927 only fires once that plane error does not explain it.
@@ -1852,7 +1854,7 @@ them:
 | `` `#Wasm`/`#Js` is retired — it no longer does anything ``. | the per-backend target markers were folded into one family. | Write `#Target(Wasm)` or `#Target(Js)` instead (D-MARK-TARGET1=A). |
 | `` `#Suppress` is retired — it no longer does anything ``. | a block-scoped suppression marker isn't the discard mechanism anymore. | Call `.drop("reason")` on the unused value instead (D-MARK-DISCARD1=A). |
 | `` `#Uninit` is retired — it no longer does anything ``. | stored uninitialized-sentinel fields were removed outright. | Give the field a real initial value (D-UNINIT-SENTINEL1). |
-| `` `#Ref`/`#Ref` is retired — it no longer does anything ``. | stored-reference fields were deleted outright. | Hold an owned value instead (D-MEM1/S3). |
+| `` `#Ref` is retired — it no longer does anything ``. | stored-reference fields were deleted outright. | Hold an owned value instead (D-MEM1/S3). |
 
 Anything else unrecognized gets an ordinary "did you mean `X`?" (edit
 distance ≤ 2 against the plane's vocabulary) or, with no close match, a
@@ -1861,6 +1863,12 @@ pointer to `docs/spec/syntax-decisions.md`.
 | What | Why | Fix |
 |------|-----|-----|
 | `` `#Name` isn't a known marker ``. | markers are a closed, registered vocabulary (I7), not any PascalCase word. | Fix the spelling (`did you mean`), or check `docs/spec/syntax-decisions.md` for the full marker list. |
+
+### E0930 — marker argument shape (D-MARKSIG1=A)
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `#Rule` expects `{signature}` ``. | Every marker declares one typed signature and uses the ordinary call-argument grammar. | Match the shown positional and named parameters. |
 
 ### E0928 — `#Task fn` reused a reserved lifecycle verb (D-JPK-TASKRUN1, card #476)
 

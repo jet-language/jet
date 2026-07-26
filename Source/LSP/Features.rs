@@ -1315,7 +1315,7 @@ fn marker_kind_after(tokens: &[Token], idx: usize) -> Option<MarkerKind> {
 fn marker_kind_for(prefix: &Token, tokens: &[Token], name_idx: usize) -> Option<MarkerKind> {
     let name = marker_name(tokens, name_idx)?;
     match prefix.kind {
-        TokKind::Hash if crate::Syntax::APPLIED_RULES.contains(&name) => {
+        TokKind::Hash if crate::Syntax::is_applied_rule(name) => {
             Some(MarkerKind::Rule)
         }
         _ => None,

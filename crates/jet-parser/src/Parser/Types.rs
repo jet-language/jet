@@ -443,7 +443,7 @@ impl<'a> Parser<'a> {
                 self.diags.push(Self::retired_effect_syntax(start));
                 self.fn_type(Some(bound))?
             }
-            // D-QUAL4=A: `#Marker Type` — a value-tag prefix on a type. The marker
+            // D-QUAL4=A: `#TagName Type` — a value-tag prefix on a type. The marker
             // must be a PascalCase ident (not `Pure`/`(` which are fn-effect bounds).
             TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if !n.is_empty() && n.chars().next().map_or(false, |c| c.is_uppercase())) =>
             {

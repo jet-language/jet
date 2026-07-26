@@ -131,7 +131,7 @@ fn reject_all(body: &[Stmt], diags: &mut Vec<Diagnostic>) {
                 "`.{}` only works inside a marker block that declares it",
                 name
             ),
-            "a leading-dot member statement resolves against the enclosing `#Marker`'s vocabulary — here there is no such block".to_string(),
+            "a leading-dot member statement resolves against the enclosing applied rule's vocabulary — here there is no such block".to_string(),
             format!(
                 "move it inside a `#{}(\"…\") {{ … }}` block, or write an ordinary statement",
                 Syntax::KW_TEST

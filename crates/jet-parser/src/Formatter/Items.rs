@@ -97,12 +97,7 @@ impl<'a> Fmt<'a> {
                 self.write(&text);
                 self.skip_verbatim_comments(cm.span.end);
             }
-            // D-DIST1: distinct type declarations are emitted verbatim.
-            Item::Distinct(d) => {
-                let text = self.src[d.span.start..d.span.end].to_string();
-                self.write(&text);
-                self.skip_verbatim_comments(d.span.end);
-            }
+            Item::Distinct(d) => self.fmt_distinct(d),
             // D-TYPEALIAS1: type alias declarations are emitted verbatim.
             Item::TypeAlias(a) => {
                 let text = self.src[a.span.start..a.span.end].to_string();
@@ -337,6 +332,37 @@ impl<'a> Fmt<'a> {
         }
     }
 
+    fn fmt_distinct(&mut self, d: &crate::AST::DistinctDef) {
+        if d.type_markers.len() == 1 {
+            self.write("#");
+            self.fmt_marker(&d.type_markers[0]);
+            self.write(" ");
+        } else if !d.type_markers.is_empty() {
+            self.write("#[");
+            for (index, marker) in d.type_markers.iter().enumerate() {
+                if index > 0 {
+                    self.write(", ");
+                }
+                self.fmt_marker(marker);
+            }
+            self.write("] ");
+        }
+        self.fmt_pub_qualifier(d.is_pub, d.is_package_pub);
+        self.write(&d.name);
+        self.write(" :: distinct ");
+        self.fmt_type(&d.base);
+        if d.invariant.is_none() {
+            if let Some((low, high, _)) = d.range {
+                self.write("(");
+                self.write(&low.to_string());
+                self.write("..");
+                self.write(&high.to_string());
+                self.write(")");
+            }
+        }
+        self.write(";");
+    }
+
     fn fmt_type_params(&mut self, params: &[TypeParam]) {
         self.write(&crate::Generics::format_type_params(params));
     }
@@ -354,9 +380,10 @@ impl<'a> Fmt<'a> {
             for (i, a) in m.args.iter().enumerate() {
                 if i > 0 {
                     self.write(", ");
-                    if m.name == Syntax::ATTR_LAYOUT && i == 1 {
-                        self.write("tag: ");
-                    }
+                }
+                if let Some((label, _)) = m.arg_labels.get(i).and_then(Option::as_ref) {
+                    self.write(label);
+                    self.write(": ");
                 }
                 self.fmt_expr(a, Prec::OrFallback);
             }
@@ -517,10 +544,30 @@ impl<'a> Fmt<'a> {
         // markers precede `pub`/`fn`, `#Task` first (the parser accepts
         // either order; fmt canonicalizes on one so round-tripping is
         // idempotent).
-        if f.is_task {
+        let grouped_schedule = f.is_task && f.every.is_some();
+        if grouped_schedule {
+            self.write(&format!("#[{}, {}(", Syntax::KW_TASK, Syntax::ATTR_EVERY));
+            match &f.every.as_ref().expect("grouped schedule has Every").arg {
+                crate::AST::EveryArg::Duration { int, float, suffix, .. } => {
+                    if let Some(n) = int {
+                        self.write(&n.to_string());
+                    } else if let Some(v) = float {
+                        self.write(&fmt_float(*v));
+                    }
+                    self.write(suffix);
+                }
+                crate::AST::EveryArg::WallClock { text, .. } => {
+                    self.write("\"");
+                    self.write(&escape_str_lit(text));
+                    self.write("\"");
+                }
+            }
+            self.write(")] ");
+        } else if f.is_task {
             self.write(&format!("#{} ", Syntax::KW_TASK));
         }
-        if let Some(every) = &f.every {
+        if !grouped_schedule {
+            if let Some(every) = &f.every {
             self.write(&format!("#{}(", Syntax::ATTR_EVERY));
             match &every.arg {
                 crate::AST::EveryArg::Duration { int, float, suffix, .. } => {
@@ -537,22 +584,23 @@ impl<'a> Fmt<'a> {
                     self.write("\"");
                 }
             }
-            self.write(") ");
+                self.write(") ");
+            }
         }
         // D-MUSTUSE1 (c18iwxqx): `#MustUse fn` / method precedes `pub`/`fn`.
         if f.is_must_use {
             self.write(&format!("#{} ", Syntax::ATTR_MUST_USE));
         }
-        // D-METHODMACRO1=A: `#Inline`/`#InlineAlways` precedes `pub`/`fn`, in
+        // D-INLINE-PARAM1=A: `#Inline`/`#Inline(Always)` precedes `pub`/`fn`, in
         // the same slot the parser checks (after `#MustUse`/`#Pure`/
         // `#Sanitizer`, before the typestate markers).
         if f.is_inline_always {
-            self.write(&format!("#{} ", Syntax::CONTRACT_INLINE_ALWAYS));
+            self.write(&format!("#{}(Always) ", Syntax::CONTRACT_INLINE));
         } else if f.is_inline {
             self.write(&format!("#{} ", Syntax::CONTRACT_INLINE));
         }
         // D-STATE1: typestate markers precede `pub`/`fn`. `#State(S)` is the
-        // require-state guard; `#Transition(From -> To)` is the transition (the
+        // require-state guard; `#Transition(From, To)` is the transition (the
         // from-state is `_` for an entry transition). Round-tripped verbatim so
         // `jet fmt` never drops a typestate contract.
         if let Some((state, _)) = &f.state_requires {
@@ -561,7 +609,7 @@ impl<'a> Fmt<'a> {
         if let Some(tr) = &f.state_transition {
             let from = tr.from.as_deref().unwrap_or(Syntax::STATE_ENTRY);
             self.write(&format!(
-                "#{}({} -> {}) ",
+                "#{}({}, {}) ",
                 Syntax::KW_TRANSITION,
                 from,
                 tr.to
@@ -571,19 +619,47 @@ impl<'a> Fmt<'a> {
         // precede `pub`/`fn`, one call-shaped marker per clause, in source
         // order — same inline-marker convention as the typestate markers
         // above (not each on its own line: I8, one marker-placement rule).
+        let grouped_contracts = f.pre.len() + f.post.len() > 1;
+        if grouped_contracts {
+            self.write("#[");
+        }
+        let mut contract_index = 0usize;
         for clause in &f.pre {
-            self.write(&format!("#{}(", Syntax::CONTRACT_PRE));
+            if grouped_contracts && contract_index > 0 {
+                self.write(", ");
+            }
+            if !grouped_contracts {
+                self.write("#");
+            }
+            self.write(&format!("{}(", Syntax::CONTRACT_PRE));
             self.fmt_expr(&clause.cond, Prec::OrFallback);
             self.write(", \"");
             self.write(&clause.message.replace('\\', "\\\\").replace('"', "\\\""));
-            self.write("\") ");
+            self.write("\")");
+            if !grouped_contracts {
+                self.write(" ");
+            }
+            contract_index += 1;
         }
         for clause in &f.post {
-            self.write(&format!("#{}(", Syntax::CONTRACT_POST));
+            if grouped_contracts && contract_index > 0 {
+                self.write(", ");
+            }
+            if !grouped_contracts {
+                self.write("#");
+            }
+            self.write(&format!("{}(", Syntax::CONTRACT_POST));
             self.fmt_expr(&clause.cond, Prec::OrFallback);
             self.write(", \"");
             self.write(&clause.message.replace('\\', "\\\\").replace('"', "\\\""));
-            self.write("\") ");
+            self.write("\")");
+            if !grouped_contracts {
+                self.write(" ");
+            }
+            contract_index += 1;
+        }
+        if grouped_contracts {
+            self.write("] ");
         }
         if top_level {
             self.fmt_pub_qualifier(f.is_pub, f.is_package_pub);
@@ -901,14 +977,20 @@ impl<'a> Fmt<'a> {
     fn fmt_variant_name_and_payload(&mut self, v: &Variant, name: &str) {
         // D-SERDE5: per-variant `#[Rename("x")]` markers sit inline before the name.
         if !v.serde_markers.is_empty() {
-            self.write("#[");
-            for (i, m) in v.serde_markers.iter().enumerate() {
-                if i > 0 {
-                    self.write(", ");
+            if v.serde_markers.len() == 1 {
+                self.write("#");
+                self.fmt_marker(&v.serde_markers[0]);
+                self.write(" ");
+            } else {
+                self.write("#[");
+                for (i, m) in v.serde_markers.iter().enumerate() {
+                    if i > 0 {
+                        self.write(", ");
+                    }
+                    self.fmt_marker(m);
                 }
-                self.fmt_marker(m);
+                self.write("] ");
             }
-            self.write("] ");
         }
         self.write(name);
         match &v.payload {
@@ -1052,8 +1134,8 @@ impl<'a> Fmt<'a> {
         }
         for attr in &c.attrs {
             match attr {
-                ConstAttr::ForceStatic => self.write("#static "),
-                ConstAttr::ForceInline => self.write("#inline "),
+                ConstAttr::ForceStatic => self.write("#Static "),
+                ConstAttr::ForceInline => self.write("#Inline "),
             }
         }
         self.write("const ");
@@ -1142,7 +1224,10 @@ impl<'a> Fmt<'a> {
         // dedicated semantic bit, so fold it back into the same group here.
         if field.redact || !field.serde_markers.is_empty() {
             self.write(Syntax::RULE_PREFIX);
-            self.write("[");
+            let count = usize::from(field.redact) + field.serde_markers.len();
+            if count > 1 {
+                self.write("[");
+            }
             if field.redact {
                 self.write(Syntax::ATTR_REDACT);
             }
@@ -1152,7 +1237,10 @@ impl<'a> Fmt<'a> {
                 }
                 self.fmt_marker(marker);
             }
-            self.write("] ");
+            if count > 1 {
+                self.write("]");
+            }
+            self.write(" ");
         }
         self.fmt_pub_qualifier(field.is_pub, field.is_package_pub);
         self.write(&field.name);

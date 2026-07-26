@@ -906,6 +906,9 @@ impl<'a> Checker<'a> {
         if let Some(v) = core_event_variants(enum_name) {
             return Some(v);
         }
+        if let Some(v) = core_reduce_op_variants(enum_name) {
+            return Some(v);
+        }
         if let Some(v) = core_net_control_variants(enum_name) {
             return Some(v);
         }

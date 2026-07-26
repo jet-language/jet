@@ -27,9 +27,9 @@ impl<'a> Parser<'a> {
                     self.bump();
                     continue;
                 }
-                // D-SERDE5/7: `#[Rename("x")]` on a variant — variant-level serde markers.
-                if self.at_marker_list() {
-                    let variant_markers = self.parse_marker_groups()?;
+                // D-SERDE5/7 + D-SHAPE2: one bare marker or one multi-marker list.
+                if self.at_marker_list() || matches!(self.peek().kind, TokKind::Hash) {
+                    let variant_markers = self.parse_field_markers()?;
                     self.variant_entry("", &mut variants, &mut groups, variant_markers)?;
                     if matches!(self.peek().kind, TokKind::Semi) {
                         self.bump();
@@ -157,8 +157,9 @@ impl<'a> Parser<'a> {
                     self.bump();
                     continue;
                 }
-                let entry_markers = if self.at_marker_list() {
-                    self.parse_marker_groups()?
+                let entry_markers =
+                    if self.at_marker_list() || matches!(self.peek().kind, TokKind::Hash) {
+                    self.parse_field_markers()?
                 } else {
                     Vec::new()
                 };
@@ -477,7 +478,7 @@ impl<'a> Parser<'a> {
             matches!(self.peek().kind, TokKind::Hash) && matches!(self.peek2().kind, TokKind::LBracket)
         }
     
-        /// D-ATTR1/D-MARKER-CANON1: a PascalCase `#Marker` immediately before `struct`/`enum`.
+        /// D-ATTR1/D-MARKER-CANON1: a PascalCase applied rule immediately before `struct`/`enum`.
         pub(in crate::Parser) fn at_single_type_marker(&self) -> bool {
             if !matches!(self.peek().kind, TokKind::Hash) {
                 return false;
@@ -522,7 +523,7 @@ impl<'a> Parser<'a> {
             )
         }
     
-        /// After a `#Marker` (and optional `(args)`), does the next real token start a type?
+        /// After an applied rule (and optional `(args)`), does the next real token start a type?
         fn type_marker_prefix_leads_to_type_def(&self, mut i: usize) -> bool {
             if i >= self.toks.len() {
                 return false;
@@ -600,7 +601,7 @@ impl<'a> Parser<'a> {
         /// `toks[i]` is the `[` opening a `#[…]`/`#[…]` marker-bracket group;
         /// returns the index just past its matching `]`, or `None` if
         /// unterminated.
-        fn skip_bracket_group(toks: &[Token], mut i: usize) -> Option<usize> {
+        pub(super) fn skip_bracket_group(toks: &[Token], mut i: usize) -> Option<usize> {
             debug_assert!(matches!(toks[i].kind, TokKind::LBracket));
             let mut depth = 0usize;
             loop {

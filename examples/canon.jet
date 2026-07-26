@@ -126,25 +126,25 @@ fn show_uninit() -> Int {
     return n
 }
 
-// --- inline contracts: `#Inline` / `#InlineAlways` ------------------------
-// D-METHODMACRO1=A: `#Inline` is a soft hint; `#InlineAlways` is a checked
+// --- inline contracts: `#Inline` / `#Inline(Always)` ----------------------
+// D-INLINE-PARAM1=A: `#Inline` is a soft hint; `#Inline(Always)` is a checked
 // promise the compiler proves or refuses to build.
 #Inline fn square(x: Int) -> Int {
     return x * x
 }
 
-#InlineAlways fn twice(x: Int) -> Int {
+#Inline(Always) fn twice(x: Int) -> Int {
     return x * 2
 }
 
-// --- typed CLI args: `#Cli` struct + `#[Doc(...)]` fields -----------------
+// --- typed CLI args: `#Cli` struct + `#Doc(...)` fields -----------------
 // D-CLIFLAG1=A: an entry function's `#Cli` parameter type IS the CLI spec.
 // Constructed by hand here (not run as the CLI entry point) to keep this
 // file's single `fn run()` the one program entry.
 #Cli
 struct ServeArgs {
     #[Doc("port to listen on"), Default(3000)] port: Int
-    #[Doc("print extra detail")] verbose: Bool
+    #Doc("print extra detail") verbose: Bool
 }
 
 // --- stream parsing: `Reader.over` / `Cursor.over` / `take_pattern` -------

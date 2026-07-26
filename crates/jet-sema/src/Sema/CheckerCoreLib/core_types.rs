@@ -198,7 +198,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "CSVReader" | "CSVWriter" | "XMLReader" | "XMLWriter"
         | "CBORReader" | "CBORWriter"
         // D-SIMD2 / D-LINALG1: built-in SIMD lane + linear-algebra value types.
-        | "F32x4" | "F64x2"
+        | "F32x4" | "F64x2" | "ReduceOp"
         | "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
         // D-LAYOUT1 / D-LAYOUT-GATES1 (GATE 2, ratified 2026-06-28/29): the
         // built-in constraint-layout value types.
@@ -936,6 +936,24 @@ pub(crate) fn core_event_variants(
         ].into_iter().collect()),
         _ => None,
     }
+}
+
+/// D-REDUCE-VALUE1=A: the closed Core enum passed to SIMD `reduce`.
+pub(crate) fn core_reduce_op_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    if enum_name != Syntax::TYPE_REDUCE_OP {
+        return None;
+    }
+    let zero = Span::new(0, 0);
+    Some(
+        ["Add", "Mul", "Min", "Max", "Avg"]
+            .into_iter()
+            .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
+            .collect(),
+    )
 }
 
 /// D-TERM1 (ratified 2026-06-22): synthesised variant table for the `Key` enum.

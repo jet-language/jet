@@ -821,7 +821,7 @@ fn fmt_preserves_single_line_if_expr_branch() {
 //
 // `fmt_is_idempotent_on_examples` only checks that fmt(fmt(x)) == fmt(x); it does
 // NOT catch a formatter that silently drops a token on the FIRST pass (the lost
-// `#[Rename]`/`#Codable`/turbofish bug). These tests assert that the load-bearing
+// `#Rename`/`#Codable`/turbofish bug). These tests assert that the load-bearing
 // surface tokens SURVIVE one fmt pass, then that the result is stable.
 
 /// Assert every needle appears in `format_source(src)`, then that fmt is stable.
@@ -872,14 +872,14 @@ fn run() {
 
 #[test]
 fn fmt_keeps_codable_and_field_rename_and_turbofish() {
-    // The exact c-fmt regression: `#Codable` (contract plane) / `#[Rename("…")]`
+    // The exact c-fmt regression: `#Codable` / `#Rename("…")`
     // (directive/serde plane, D-MARKERMOVE1=B), and a method-call turbofish
     // `decode<Order>` must all survive.
     let src = "\
 #Codable
 struct Order {
     id: Int
-    #[Rename(\"customer\")] who: String
+    #Rename(\"customer\") who: String
 }
 
 fn run() {
@@ -890,19 +890,41 @@ fn run() {
 ";
     assert_fmt_keeps(
         src,
-        &["#Codable", "#[Rename(\"customer\")]", "decode<Order>"],
+        &["#Codable", "#Rename(\"customer\")", "decode<Order>"],
         "codable + rename + turbofish",
     );
 }
 
 #[test]
+fn fmt_rewrites_marker_stacking_to_one_shape_and_is_stable() {
+    let single = jet::format_source("#[Codable]\nstruct Invoice { id: Int }\n")
+        .expect("fmt should recover a single-item marker list");
+    assert!(
+        single.contains("#Codable\nstruct Invoice"),
+        "fmt must remove brackets around one marker:\n{single}"
+    );
+    let single_twice = jet::format_source(&single).expect("canonical single marker should parse");
+    assert_eq!(single, single_twice, "single-marker rewrite must be stable");
+
+    let stacked = jet::format_source("#Task #Every(5min) fn prune() {\n}\n")
+        .expect("fmt should recover a bare marker stack");
+    assert!(
+        stacked.contains("#[Task, Every(5min)] fn prune"),
+        "fmt must combine a bare stack into one marker list:\n{stacked}"
+    );
+    let stacked_twice =
+        jet::format_source(&stacked).expect("canonical marker list should parse");
+    assert_eq!(stacked, stacked_twice, "marker-list rewrite must be stable");
+}
+
+#[test]
 fn fmt_keeps_cli_doc_and_default_field_markers() {
-    // D-SHAPE2: every field rule shares one `#[…]` group.
+    // D-SHAPE2: two field rules share one `#[…]` group; one stays bare.
     let src = "\
 #Cli
 struct ServeArgs {
     #[Doc(\"port to listen on\"), Default(3000)] port: Int
-    #[Doc(\"print extra detail\")] verbose: Bool
+    #Doc(\"print extra detail\") verbose: Bool
 }
 
 fn run(args: ServeArgs) {
@@ -913,7 +935,7 @@ fn run(args: ServeArgs) {
     assert_fmt_keeps(
         src,
         &["#[Doc(\"port to listen on\"), Default(3000)]", "#Cli"],
-        "cli #[Doc] + #[Default] field markers",
+        "cli #Doc + #Default field markers",
     );
     assert_fmt_stable(src, "cli doc/default field markers");
 }
@@ -1052,13 +1074,13 @@ fn fmt_keeps_enum_variant_rename_and_tag() {
 #Codable
 #Tag(\"type\")
 enum Shape {
-    #[Rename(\"circle\")] Circle(Float)
+    #Rename(\"circle\") Circle(Float)
     Square(Float)
 }
 ";
     assert_fmt_keeps(
         src,
-        &["#[Codable, Tag(\"type\")]", "#[Rename(\"circle\")]"],
+        &["#[Codable, Tag(\"type\")]", "#Rename(\"circle\")"],
         "enum tag + variant rename",
     );
 }
@@ -1075,18 +1097,18 @@ fn fmt_keeps_replayable_marker() {
 
 #[test]
 fn fmt_keeps_typestate_markers() {
-    // D-STATE1: the `#State(S)` require-state guard and `#Transition(From -> To)`
-    // transition markers (including the entry form `_ -> To`) must survive fmt —
+    // D-STATE1: the `#State(S)` require-state guard and `#Transition(From, To)`
+    // transition markers (including the entry form `_, To`) must survive fmt —
     // dropping a typestate contract would silently change what the checker enforces.
     let src = "\
 struct Reservation {
     guest: String
 
-    #Transition(_ -> Pending) fn book(guest: String) -> Reservation {
+    #Transition(_, Pending) fn book(guest: ^String) -> Reservation {
         return Reservation.{guest: guest}
     }
 
-    #Transition(Pending -> Confirmed) fn pay(self: ^Reservation) -> Reservation {
+    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -> Reservation {
         return self
     }
 
@@ -1098,8 +1120,8 @@ struct Reservation {
     assert_fmt_keeps(
         src,
         &[
-            "#Transition(_ -> Pending)",
-            "#Transition(Pending -> Confirmed)",
+            "#Transition(_, Pending)",
+            "#Transition(Pending, Confirmed)",
             "#State(Confirmed)",
         ],
         "typestate markers",
@@ -1713,7 +1735,7 @@ fn run() {
 
 #[test]
 fn fmt_value_tag_type_d_qual4_stability() {
-    // D-QUAL4=A: `#Marker T` in type position must survive fmt unchanged.
+    // D-QUAL4=A: `#TagName T` in type position must survive fmt unchanged.
     let src = "\
 fn process(input: #Tainted String) -> String {
     return \"{input}-clean\"
@@ -2006,9 +2028,9 @@ fn fmt_preserves_capbundle_markers() {
     // verbatim from source span, but the span must actually start at the
     // first marker, not the type name).
     let src = "\
-#Numeric #Comparable Usd :: distinct Int;
+#[Numeric, Comparable] Usd :: distinct Int;
 
-#Printable #CodableAsBase CustomerId :: distinct Int;
+#[Printable, CodableAsBase] CustomerId :: distinct Int;
 
 fn run() {
     a :: Usd.from_int(100)
@@ -2026,7 +2048,7 @@ fn fmt_preserves_contracts() {
     // marker uses (`#State(…)`, `#Transition(…)`, `#Pure`, `#MustUse`, …;
     // I8: one way to mean it), not one clause per line.
     let src = "\
-#Pre(cents > 0, \"cents must be positive\") #Post(result > cents, \"result must exceed cents\") fn add_fee(cents: Int) -> Int {
+#[Pre(cents > 0, \"cents must be positive\"), Post(result > cents, \"result must exceed cents\")] fn add_fee(cents: Int) -> Int {
     return cents + 5
 }
 
@@ -2203,7 +2225,7 @@ fn run() {
 
 #[test]
 fn fmt_preserves_inline_contracts() {
-    // D-METHODMACRO1=A: `#Inline`/`#InlineAlways` precede `pub`/`fn` on a free
+    // D-METHODMACRO1=A: `#Inline`/`#Inline(Always)` precede `pub`/`fn` on a free
     // function and on a method — both must round-trip byte-for-byte (own-
     // CLAUDE-memory rule: new syntax needs a formatter round-trip test, not
     // just a parser).
@@ -2212,14 +2234,14 @@ fn fmt_preserves_inline_contracts() {
     return x * x
 }
 
-#InlineAlways fn double(x: Int) -> Int {
+#Inline(Always) fn double(x: Int) -> Int {
     return x * 2
 }
 
 struct Meters {
     value: Int
 
-    #InlineAlways fn plus(self, other: Int) -> Int {
+    #Inline(Always) fn plus(self, other: Int) -> Int {
         return self.value + other
     }
 }
@@ -2500,11 +2522,11 @@ fn fmt_preserves_schedule_markers() {
     // — same inline-marker convention as `#Reactive`/`#Sanitizer`/
     // `#Replayable`/`#State(…)` (one space-separated line before `fn`).
     let src = "\
-#Task #Every(5min) fn prune_sessions() {
+#[Task, Every(5min)] fn prune_sessions() {
     print(\"pruning\")
 }
 
-#Task #Every(\"03:00\") fn nightly_backup() {
+#[Task, Every(\"03:00\")] fn nightly_backup() {
     print(\"backing up\")
 }
 

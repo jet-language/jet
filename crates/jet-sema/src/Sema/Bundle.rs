@@ -1167,7 +1167,7 @@ fn check_bundle_opts_for_output_inner(
                                             diags.push(Diagnostic::error(
                                                 "E2710",
                                                 format!(
-                                                    "`derive T.{}` generated invalid Jet while expanding `#[{}]` on `{}`",
+                                                    "`derive T.{}` generated invalid Jet while expanding `#{}` on `{}`",
                                                     derive_name, derive_name, s.name
                                                 ),
                                                 format!(
@@ -1188,7 +1188,7 @@ fn check_bundle_opts_for_output_inner(
                                                 diags.push(Diagnostic::error(
                                                     "E2710",
                                                     format!(
-                                                        "`derive T.{}` generated invalid Jet while expanding `#[{}]` on `{}`",
+                                                        "`derive T.{}` generated invalid Jet while expanding `#{}` on `{}`",
                                                         derive_name, derive_name, s.name
                                                     ),
                                                     format!(
@@ -1202,11 +1202,11 @@ fn check_bundle_opts_for_output_inner(
                                     }
                                 }
                                 // E2710: derive body failed at comptime. Wrap with context
-                                // pointing at the #[TraitName] trigger on the struct.
+                                // pointing at the #TraitName trigger on the struct.
                             Err(inner) => diags.push(Diagnostic::error(
                                     "E2710",
                                     format!(
-                                        "`derive T.{}` body failed while expanding `#[{}]` on `{}`",
+                                        "`derive T.{}` body failed while expanding `#{}` on `{}`",
                                         derive_name, derive_name, s.name
                                     ),
                                     inner.what.clone(),
@@ -1916,7 +1916,7 @@ fn check_bundle_opts_for_output_inner(
     let mut module_pending_diagnostics = Vec::new();
     // D-METHODMACRO1=A: top-level function names whose address was taken
     // anywhere in the bundle, accumulated across every module below; the
-    // `#InlineAlways` address-taken pass (E0918) runs after the loop, once
+    // `#Inline(Always)` address-taken pass (E0918) runs after the loop, once
     // this set is complete across the whole bundle.
     let mut global_addr_taken: HashSet<String> = HashSet::new();
     for (idx, module) in bundle.modules.iter_mut().enumerate() {

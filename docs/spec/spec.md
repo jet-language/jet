@@ -3093,8 +3093,8 @@ time the bundle compiled at all) — the same side-channel `jet inspect semindex
 
 **Floor lenses (this card):**
 
-- `inline` (D-METHODMACRO1) — every fn/method carrying `#Inline` or
-  `#InlineAlways`: the contract and the Rust attribute codegen emits
+- `inline` (D-INLINE-PARAM1) — every fn/method carrying `#Inline` or
+  `#Inline(Always)`: the contract and the Rust attribute codegen emits
   (`#[inline]` / `#[inline(always)]`). Functions with neither marker produce
   no line — the lens reports contracts, not every function in the program.
 

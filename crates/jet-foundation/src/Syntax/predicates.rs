@@ -1,7 +1,8 @@
 /// D-SHAPE2=A: is `name` a built-in applied rule? The I7/R3 dispatch
 /// chokepoint — parser/formatter/sema/LSP ask here, never hand-roll the list.
 pub fn is_applied_rule(name: &str) -> bool {
-    APPLIED_RULES.contains(&name)
+    crate::Policy::applied_rule(name)
+        .is_some_and(|row| matches!(row.status, crate::Policy::RuleStatus::Active))
 }
 
 /// D-DSLBLOCK1=A: is `name` one of the stdlib-owned DSL block markers allowed
@@ -395,8 +396,8 @@ pub fn edit_distance(a: &str, b: &str) -> usize {
     prev[b.len()]
 }
 use super::{
-    APPLIED_RULES, CORE_CANONICAL, CORE_EMAIL_MODULE, CORE_SHORT,
-    STDLIB_DSL_BLOCK_MARKERS, TYPE_BIT_SET, TYPE_BYTE_BUFFER,
+    CORE_CANONICAL, CORE_EMAIL_MODULE, CORE_SHORT, STDLIB_DSL_BLOCK_MARKERS, TYPE_BIT_SET,
+    TYPE_BYTE_BUFFER,
 };
 
 /// D-SHAPE-INTERNAL1 / D-SHAPE-DUNDER2: the one prefix classification used by

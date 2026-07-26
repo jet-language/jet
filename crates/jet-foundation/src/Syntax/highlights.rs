@@ -751,9 +751,9 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
 
 pub fn highlighted_tokens_sorted() -> Vec<HighlightToken> {
     let mut tokens = JET_HIGHLIGHT_TOKENS.to_vec();
-    for &marker in APPLIED_RULES {
+    for row in crate::Policy::APPLIED_RULES.iter().filter(|row| matches!(row.status, crate::Policy::RuleStatus::Active)) {
         tokens.push(HighlightToken {
-            text: marker,
+            text: row.name,
             class: HighlightClass::MarkerRule,
         });
     }
@@ -1032,7 +1032,7 @@ fn tree_sitter_const_name(class: HighlightClass) -> &'static str {
     }
 }
 use super::{
-    APPLIED_RULES, ATTR_PREFIX, BUILTIN_INPUT, BUILTIN_PRINT, RULE_PREFIX, CTX_BLOCK,
+    ATTR_PREFIX, BUILTIN_INPUT, BUILTIN_PRINT, RULE_PREFIX, CTX_BLOCK,
     KW_ADD, KW_ALIAS, KW_AS, KW_BENCH, KW_BREAK, KW_CHANGE,
     KW_COMPTIME, KW_CONST, KW_DERIVE, KW_DISTINCT, KW_ELSE, KW_ENUM,
     KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IT, KW_LOOP,

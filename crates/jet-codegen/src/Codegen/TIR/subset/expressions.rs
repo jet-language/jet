@@ -593,6 +593,10 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             if type_name == crate::Syntax::DURATION_UNIT_TYPE {
                 return crate::Syntax::DURATION_UNITS.contains(&variant.as_str());
             }
+            if type_name == crate::Syntax::TYPE_REDUCE_OP {
+                return args.is_empty()
+                    && matches!(variant.as_str(), "Add" | "Mul" | "Min" | "Max" | "Avg");
+            }
             if type_name == "NetShutdown" {
                 return matches!(variant.as_str(), "Read" | "Write" | "Both");
             }
@@ -688,7 +692,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // inner value (if any) is in-subset — they lower to `Some(x)` / `None`.
         Expr::Present(inner, _) => expr_in_subset(inner, cx, locals),
         Expr::Absent(_) => true,
-        // D-SIMD2: a reduce-op marker `#Op`. Only appears inside `v.reduce(#Op)`; the
+        // D-REDUCE-VALUE1: a validated ReduceOp. Only appears inside `v.reduce(.Op)`; the
         // method lowering consumes it (it never emits on its own), so it is in-subset.
         Expr::ReduceMarker(_, _) => true,
         // c109 Phase 23: a `#Todo` typed hole. Covered when sema filled the expected

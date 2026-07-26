@@ -49,9 +49,50 @@ impl<'a> Parser<'a> {
         /// Parse `#Test "name" { … }` (D-CASING1 follow-on). The bare lowercase
         /// `test` path enters via `test_def_after_kw` after emitting E0052.
         pub(in crate::Parser) fn test_def(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
-            self.expect(TokKind::Hash, "before `Test`")?;
-            self.bump(); // the `Test` marker ident (guaranteed by at_test_def)
-            self.test_def_after_kw()
+            let marker = self.parse_rule_marker()?;
+            if matches!(self.peek().kind, TokKind::KwFn) {
+                if !marker.args.is_empty() {
+                    return Err(Self::marker_argument_shape_error(
+                        Syntax::KW_TEST,
+                        marker.span,
+                    ));
+                }
+                return self.test_def_after_kw();
+            }
+            if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
+                return Err(Self::marker_argument_shape_error(
+                    Syntax::KW_TEST,
+                    marker.span,
+                ));
+            }
+            let (name, name_span) = match &marker.args[0] {
+                crate::AST::Expr::Str(parts, span) if parts.len() == 1 => match &parts[0] {
+                    crate::AST::StrPart::Lit(name) => (name.clone(), *span),
+                    crate::AST::StrPart::Interp(..) => {
+                        return Err(Self::marker_argument_shape_error(
+                            Syntax::KW_TEST,
+                            marker.span,
+                        ));
+                    }
+                },
+                _ => {
+                    return Err(Self::marker_argument_shape_error(
+                        Syntax::KW_TEST,
+                        marker.span,
+                    ));
+                }
+            };
+            let item_start = marker.span.start;
+            self.expect(TokKind::LBrace, "to open the test body")?;
+            let body = self.block_stmts();
+            return Ok(crate::AST::TestDef {
+                span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
+                name,
+                name_span,
+                params: Vec::new(),
+                fn_keyword_span: None,
+                body,
+            });
         }
     
         pub(super) fn test_def_after_kw(&mut self) -> Result<crate::AST::TestDef, Diagnostic> {
@@ -110,11 +151,30 @@ impl<'a> Parser<'a> {
         /// `test_def`; there is no retired lowercase spelling for benches.
         pub(in crate::Parser) fn bench_def(&mut self) -> Result<crate::AST::BenchDef, Diagnostic> {
             let item_start = self.peek().span.start;
-            self.expect(TokKind::Hash, "before `Bench`")?;
-            self.bump(); // the `Bench` marker ident (guaranteed by at_bench_def)
-            self.expect(TokKind::LParen, "after `#Bench`")?;
-            let (name, name_span) = self.expect_marker_name(Syntax::KW_BENCH)?;
-            self.expect(TokKind::RParen, "to close `#Bench(…)`")?;
+            let marker = self.parse_rule_marker()?;
+            if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
+                return Err(Self::marker_argument_shape_error(
+                    Syntax::KW_BENCH,
+                    marker.span,
+                ));
+            }
+            let (name, name_span) = match &marker.args[0] {
+                crate::AST::Expr::Str(parts, span) if parts.len() == 1 => match &parts[0] {
+                    crate::AST::StrPart::Lit(name) => (name.clone(), *span),
+                    crate::AST::StrPart::Interp(..) => {
+                        return Err(Self::marker_argument_shape_error(
+                            Syntax::KW_BENCH,
+                            marker.span,
+                        ));
+                    }
+                },
+                _ => {
+                    return Err(Self::marker_argument_shape_error(
+                        Syntax::KW_BENCH,
+                        marker.span,
+                    ));
+                }
+            };
             self.expect(TokKind::LBrace, "to open the benchmark body")?;
             let body = self.block_stmts();
             Ok(crate::AST::BenchDef {
@@ -201,23 +261,48 @@ impl<'a> Parser<'a> {
                 && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
         }
     
-        /// D-METHODMACRO1=A: true when the cursor is at `#Inline fn`/`#Inline pub
-        /// fn` or `#InlineAlways fn`/`#InlineAlways pub fn` — or the retired `#`
-        /// spelling, so `func()`/`method_in_type()` can consume it and teach
-        /// E0062.
+        /// D-INLINE-PARAM1=A: `#Inline` or `#Inline(Always)` before a function.
+        /// The retired predecessor also reaches the parser for its registry fix.
         pub(super) fn at_inline_fn(&self) -> bool {
-            matches!(self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n)
-                    if n == Syntax::CONTRACT_INLINE || n == Syntax::CONTRACT_INLINE_ALWAYS)
-                && (matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
-                    // D-METHODMACRO1=A: `#Inline #InlineAlways fn …` (or the other
-                    // order) — recognize the doubled marker too, so `func()` reaches
-                    // `parse_inline_marker`'s E0920 conflict check instead of
-                    // falling through to the generic `@` teaching error (E0990).
-                    || (matches!(self.peek3().kind, TokKind::Hash)
-                        && matches!(&self.peek4().kind, TokKind::Ident(n)
-                            if n == Syntax::CONTRACT_INLINE || n == Syntax::CONTRACT_INLINE_ALWAYS)
-                        && matches!(self.peek5().kind, TokKind::KwFn | TokKind::KwPub)))
+            if !matches!(self.peek().kind, TokKind::Hash) {
+                return false;
+            }
+            if matches!(&self.peek2().kind, TokKind::Ident(n) if Self::retired_inline_always(n))
+            {
+                return self.token_after_web_marker_is_fn(2);
+            }
+            if !matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_INLINE) {
+                return false;
+            }
+            if matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub) {
+                return true;
+            }
+            if matches!(self.peek3().kind, TokKind::LParen) {
+                let mut depth = 0usize;
+                let mut index = self.pos + 2;
+                while let Some(token) = self.toks.get(index) {
+                    match token.kind {
+                        TokKind::LParen => depth += 1,
+                        TokKind::RParen => {
+                            depth -= 1;
+                            if depth == 0 {
+                                index += 1;
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    index += 1;
+                }
+                while matches!(self.toks.get(index).map(|token| &token.kind), Some(TokKind::Semi)) {
+                    index += 1;
+                }
+                return matches!(
+                    self.toks.get(index).map(|token| &token.kind),
+                    Some(TokKind::KwFn | TokKind::KwPub)
+                );
+            }
+            false
         }
     
         /// D-STATE1: true when the cursor is at `#State(…)` (a require-state fn marker).
@@ -357,47 +442,6 @@ impl<'a> Parser<'a> {
             }
         }
     
-        /// A `#Test`/`#Bench` block name: one plain string literal, no
-        /// interpolation. `kw` is the marker keyword for the error copy.
-        pub(super) fn expect_marker_name(&mut self, kw: &str) -> Result<(String, Span), Diagnostic> {
-            let parts = match &self.peek().kind {
-                TokKind::Str(parts) => parts.clone(),
-                other => {
-                    return Err(Diagnostic::error(
-                        "E0003",
-                        format!(
-                            "expected a name in quotes after `#{}`, found {}",
-                            kw,
-                            describe(other)
-                        ),
-                        "each block needs a name so results are easy to find".to_string(),
-                        format!("write: #{} \"describes this block\" {{ ... }}", kw),
-                        Some(self.peek().span),
-                    ));
-                }
-            };
-            let span = self.bump().span;
-            if parts.len() != 1 {
-                return Err(Diagnostic::error(
-                    "E0003",
-                    "a block name must be one piece of quoted text".to_string(),
-                    "names are labels, not interpolated messages".to_string(),
-                    format!("write: #{} \"my name\" {{ ... }}", kw),
-                    Some(span),
-                ));
-            }
-            match &parts[0] {
-                StrTokPart::Lit(s) => Ok((s.clone(), span)),
-                StrTokPart::Interp(_) => Err(Diagnostic::error(
-                    "E0003",
-                    "a block name can't contain `{ }` interpolation".to_string(),
-                    "names are fixed labels".to_string(),
-                    format!("write: #{} \"my name\" {{ ... }}", kw),
-                    Some(span),
-                )),
-            }
-        }
-    
         /// S50 (M7): `extern rust "crate@version" { fn … = "rust::path"; }`
         pub(super) fn extern_rust_block(&mut self) -> Result<crate::AST::ExternRustBlock, Diagnostic> {
             let start = self.bump().span;
@@ -450,16 +494,18 @@ impl<'a> Parser<'a> {
     
         pub(super) fn extern_fn(&mut self) -> Result<crate::AST::ExternFn, Diagnostic> {
             let abi = if matches!(self.peek().kind, TokKind::Hash) {
-                self.bump();
-                let (marker, marker_span) = self.expect_ident("after `@`")?;
-                if marker != Syntax::ATTR_ABI {
-                    return Err(Diagnostic::error("E3212", format!("unknown C ABI marker `#{marker}`"), "C declarations only accept the per-function `#Abi(name)` marker".to_string(), "use `#Abi(system)` or remove the marker for the default C ABI".to_string(), Some(marker_span)));
+                let marker = self.parse_rule_marker()?;
+                if marker.name != Syntax::ATTR_ABI {
+                    return Err(Diagnostic::error("E3212", format!("unknown C ABI marker `#{}`", marker.name), "C declarations only accept the per-function `#Abi(name)` marker".to_string(), "use `#Abi(system)` or remove the marker for the default C ABI".to_string(), Some(marker.name_span)));
                 }
-                self.expect(TokKind::LParen, "after `#Abi`")?;
-                let (name, span) = self.expect_ident("for the ABI name")?;
-                self.expect(TokKind::RParen, "after the ABI name")?;
+                if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
+                    return Err(Self::marker_argument_shape_error(Syntax::ATTR_ABI, marker.span));
+                }
+                let crate::AST::Expr::Ident(name, span) = &marker.args[0] else {
+                    return Err(Self::marker_argument_shape_error(Syntax::ATTR_ABI, marker.span));
+                };
                 while matches!(self.peek().kind, TokKind::Semi) { self.bump(); }
-                Some((name, span))
+                Some((name.clone(), *span))
             } else { None };
             let fn_span = self.peek().span;
             self.expect_kw(TokKind::KwFn, "to declare a foreign function")?;

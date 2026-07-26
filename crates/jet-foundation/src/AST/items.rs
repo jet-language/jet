@@ -55,7 +55,7 @@ pub enum Item {
     /// D-STATE-DECL (ratified 2026-06-25, option B): `state TypeName { A, B, C }` —
     /// declares the bounded set of states for a typestate machine. The set erases at
     /// runtime (pure compile-time, no discriminant). Each name in the body is a state
-    /// label; `#State(S)` / `#Transition(From -> To)` markers on `TypeName::*` methods
+    /// label; `#State(S)` / `#Transition(From, To)` markers on `TypeName::*` methods
     /// must reference names from this set (unknown state = E0151). A declared state with
     /// no outgoing `#Transition` is a dead-end warning (L0151). Declaration family sibling
     /// of `tag`/`struct`/`enum`.
@@ -639,7 +639,7 @@ pub struct ProtocolDecl {
 
 /// D-STATE-DECL (ratified 2026-06-25, option B): `state TypeName { A, B, C }` —
 /// a bounded compile-time state-set declaration. Each string in `states` is a valid
-/// state label; `#State(X)` / `#Transition(A -> B)` markers on `TypeName::*` methods
+/// state label; `#State(X)` / `#Transition(A, B)` markers on `TypeName::*` methods
 /// must reference labels from this set. Erases in codegen (I3, no runtime discriminant).
 #[derive(Debug, Clone)]
 pub struct StateDecl {
@@ -834,7 +834,7 @@ pub struct Func {
     /// `state`; calling it on a value in any other state is E0150. `None` =
     /// unguarded. Compile-time only, erased in codegen (I3).
     pub state_requires: Option<(String, Span)>,
-    /// D-STATE1: `#Transition(From -> To) fn …` — a transition declaration. The fn
+    /// D-STATE1: `#Transition(From, To) fn …` — a transition declaration. The fn
     /// consumes a value in state `from` (the wildcard `_` → `None`, an entry
     /// transition with no prior state) and produces one in state `to`. A call
     /// requires the receiver/argument be in `from` (E0150 otherwise) and advances it
@@ -871,12 +871,12 @@ pub struct Func {
     /// D-METHODMACRO1=A: `#Inline fn` / method — a soft hint (`#[inline]` in
     /// codegen); never rejected by sema.
     pub is_inline: bool,
-    /// D-METHODMACRO1=A: `#InlineAlways fn` / method — a checked promise
+    /// D-METHODMACRO1=A: `#Inline(Always) fn` / method — a checked promise
     /// (`#[inline(always)]` in codegen). Sema rejects it (E0917/E0918/E0919)
     /// when the compiler can prove it genuinely cannot inline. Mutually
     /// exclusive with `is_inline` (E0920 if both are written).
     pub is_inline_always: bool,
-    /// Span of whichever `#Inline`/`#InlineAlways` marker was written (for
+    /// Span of whichever `#Inline`/`#Inline(Always)` marker was written (for
     /// diagnostics); `None` when neither is present.
     pub inline_span: Option<Span>,
     /// D-WASM1: `#Wasm` / `#Js` / `#WasmExport` partition marker on the function.
@@ -925,7 +925,7 @@ pub struct ContractClause {
     pub span: Span,
 }
 
-/// D-STATE1: the parsed `#Transition(From -> To)` declaration on a function. `from`
+/// D-STATE1: the parsed `#Transition(From, To)` declaration on a function. `from`
 /// is `None` for an entry transition (`_ -> To`).
 #[derive(Debug, Clone)]
 pub struct StateTransition {
@@ -1144,6 +1144,10 @@ pub struct Marker {
     pub name: String,
     pub name_span: Span,
     pub args: Vec<Expr>,
+    /// D-MARKSIG1=A: call-site labels paired with `args`. Marker arguments
+    /// use the ordinary call grammar; sema validates labels against the row's
+    /// typed signature.
+    pub arg_labels: Vec<Option<(String, Span)>>,
     pub span: Span,
     /// Card #131 / D-SERDE5: for an `#[Default(expr)]` field rule, the
     /// compile-time value its argument evaluates to. Sema fills this once
@@ -1176,7 +1180,7 @@ pub struct StructDef {
     pub published_schema_span: Option<Span>,
     /// D-LIN1 (ratified 2026-06-21): `#SingleUse` marker before `struct` — values
     /// of this type must be consumed exactly once on every path (E0140/E0141)
-    /// and may not be aliased (E0142). Implies `#NoCopy`. The span points at the
+    /// and may not be aliased (E0142). The span points at the
     /// marker for diagnostics.
     pub is_single_use: bool,
     pub single_use_span: Option<Span>,
@@ -1230,6 +1234,9 @@ pub struct DistinctDef {
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) Name :: distinct Base`.
     pub is_package_pub: bool,
+    /// Source-ordered applied rules. Capability booleans below are semantic
+    /// projections; the formatter preserves this order.
+    pub type_markers: Vec<Marker>,
     /// D-DIST3: whether `#Numeric` marker was present — enables same-type arithmetic.
     pub is_numeric: bool,
     /// D-CAPBUNDLE1: `#Comparable` was present — grants hash/sort on top of the
@@ -1257,6 +1264,10 @@ pub struct DistinctDef {
     /// Int(0..10)` provably holds `0..=10` (`..` inclusive, S22). `(lo, hi,
     /// span-of-the-`(lo..hi)`-clause)`.
     pub range: Option<(i64, i64, Span)>,
+    /// D-REFINE1: source predicate carried by `#Invariant("…")`. The proved
+    /// integer bounds also live in `range`; this preserves the applied rule for
+    /// formatter round trips.
+    pub invariant: Option<(String, Span)>,
     pub span: Span,
 }
 
@@ -1350,6 +1361,7 @@ impl UnitFamilyDef {
                 names.into_iter().map(move |(name, is_point)| DistinctDef {
                     is_pub: self.is_pub,
                     is_package_pub: self.is_package_pub,
+                    type_markers: Vec::new(),
                     // Affine points deliberately do not inherit point+point arithmetic;
                     // the closed Point/Delta algebra is added by sema, never by this sugar.
                     is_numeric: !is_point,
@@ -1372,6 +1384,7 @@ impl UnitFamilyDef {
                     base: Type::Float,
                     base_span: member.name_span,
                     range: None,
+                    invariant: None,
                     span: member.name_span,
                 })
             })

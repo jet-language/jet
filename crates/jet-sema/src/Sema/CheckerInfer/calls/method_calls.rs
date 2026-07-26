@@ -2959,40 +2959,74 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-SIMD2 / D-LINALG1: methods on the built-in math value types
-            // (`v.dot(w)`, `v.length()`, `v.sum()`, `v.reduce(#Max)`, `m.matmul(n)`).
+            // (`v.dot(w)`, `v.length()`, `v.sum()`, `v.reduce(.Max)`, `m.matmul(n)`).
             // Operator overloading on this closed family is blessed; named methods are
             // the rest of the surface. Set `recv_type_out` so codegen routes to the
             // math-method op (TIR handle-method path).
             if let Type::Named(math_ty) = &recv_ty {
                 if is_math_type(math_ty) && !self.registry.contains(math_ty) {
                     let math_ty = math_ty.clone();
-                    // `reduce(#Op)` — the sole arg is a reduce-op marker, validated here.
+                    // D-REDUCE-VALUE1=A: the sole argument is a Core ReduceOp value.
                     if method == "reduce" && is_simd_lane_type(&math_ty) {
                         if args.len() != 1 {
                             self.diags.push(Diagnostic::error(
                                 "E2510",
-                                format!("`reduce` takes one reduce-op marker, got {}", args.len()),
-                                "a lane reduction names its operation with a marker".to_string(),
-                                "write `v.reduce(#Add)`, `#Mul`, `#Min`, or `#Max`".to_string(),
+                                format!("`reduce` takes one `ReduceOp` value, got {}", args.len()),
+                                "a lane reduction uses the closed Core `ReduceOp` enum".to_string(),
+                                "write `v.reduce(.Add)`, `.Mul`, `.Min`, `.Max`, or `.Avg`"
+                                    .to_string(),
                                 Some(span),
                             ));
                         } else if let Expr::ReduceMarker(op, mspan) = &args[0].expr {
-                            if !simd_reduce_markers().contains(&op.as_str()) {
+                            let replacement = crate::Policy::applied_rule(op)
+                                .and_then(|row| match row.status {
+                                    crate::Policy::RuleStatus::Retired { replacement } => Some(replacement),
+                                    crate::Policy::RuleStatus::Active => None,
+                                })
+                                .unwrap_or(".Add");
+                            self.diags.push(Diagnostic::error(
+                                "E2510",
+                                format!("`#{op}` is retired as a reduce selector"),
+                                "reduce operations are ordinary Core `ReduceOp` enum values".to_string(),
+                                format!("write `v.reduce({replacement})`"),
+                                Some(*mspan),
+                            ));
+                        } else if let Expr::EnumLit {
+                            type_name,
+                            variant,
+                            args: enum_args,
+                            span: value_span,
+                        } = &args[0].expr
+                        {
+                            let valid = (type_name.is_empty()
+                                || type_name == crate::Syntax::TYPE_REDUCE_OP)
+                                && enum_args.is_empty()
+                                && simd_reduce_markers().contains(&variant.as_str());
+                            let value_span = *value_span;
+                            if valid {
+                                let old = self.expected_type.take();
+                                self.expected_type = Some(Type::Named(
+                                    crate::Syntax::TYPE_REDUCE_OP.to_string(),
+                                ));
+                                self.infer(&mut args[0].expr);
+                                self.expected_type = old;
+                            } else {
                                 self.diags.push(Diagnostic::error(
                                     "E2510",
-                                    format!("`#{}` isn't a reduce operation", op),
-                                    "a lane reduction folds the lanes with one of a fixed set of operations".to_string(),
-                                    "use `#Add`, `#Mul`, `#Min`, or `#Max`".to_string(),
-                                    Some(*mspan),
+                                    "this value is not a `ReduceOp`".to_string(),
+                                    "`reduce` accepts `.Add`, `.Mul`, `.Min`, `.Max`, or `.Avg`"
+                                        .to_string(),
+                                    "use a Core `ReduceOp` value".to_string(),
+                                    Some(value_span),
                                 ));
                             }
                         } else {
                             self.diags.push(Diagnostic::error(
                                 "E2510",
-                                "`reduce` takes a reduce-op marker, not a value".to_string(),
-                                "the operation is named with a marker so the fold is explicit"
+                                "`reduce` takes a `ReduceOp` value".to_string(),
+                                "the operation is an ordinary closed Core enum value".to_string(),
+                                "write `v.reduce(.Add)`, `.Mul`, `.Min`, `.Max`, or `.Avg`"
                                     .to_string(),
-                                "write `v.reduce(#Add)`, `#Mul`, `#Min`, or `#Max`".to_string(),
                                 Some(args[0].expr.span()),
                             ));
                             self.infer(&mut args[0].expr);

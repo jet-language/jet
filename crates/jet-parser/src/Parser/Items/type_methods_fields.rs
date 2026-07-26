@@ -99,9 +99,9 @@ impl<'a> Parser<'a> {
                 is_replayable = true;
                 replayable_span = Some(Span::new(start, end));
             }
-            // D-METHODMACRO1=A: `#Inline`/`#InlineAlways` on methods too.
+            // D-METHODMACRO1=A: `#Inline`/`#Inline(Always)` on methods too.
             let (is_inline, is_inline_always, inline_span) = self.parse_inline_marker()?;
-            // D-STATE1: `#State(S)` / `#Transition(From -> To)` typestate markers on
+            // D-STATE1: `#State(S)` / `#Transition(From, To)` typestate markers on
             // methods — the common case (typestate methods carry `self`).
             let mut state_requires = None;
             let mut state_transition = None;
@@ -228,15 +228,38 @@ impl<'a> Parser<'a> {
                 self.bump();
                 let (attr_name, _) = self.expect_ident("after `@`")?;
                 match attr_name.as_str() {
-                    "static" => attrs.push(ConstAttr::ForceStatic),
-                    "inline" => attrs.push(ConstAttr::ForceInline),
+                    "Static" => attrs.push(ConstAttr::ForceStatic),
+                    "Inline" => attrs.push(ConstAttr::ForceInline),
+                    "static" | "inline" => {
+                        let replacement = crate::Policy::applied_rule(&attr_name)
+                            .and_then(|row| match row.status {
+                                crate::Policy::RuleStatus::Retired { replacement } => {
+                                    Some(replacement)
+                                }
+                                crate::Policy::RuleStatus::Active => None,
+                            })
+                            .unwrap_or("#Static");
+                        self.diags.push(Diagnostic::error(
+                            "E0927",
+                            format!("`#{attr_name}` is retired"),
+                            "const markers use the same PascalCase marker plane as other declarations"
+                                .to_string(),
+                            format!("write `{replacement}`"),
+                            Some(self.toks[self.pos.saturating_sub(1)].span),
+                        ));
+                        attrs.push(if attr_name == "static" {
+                            ConstAttr::ForceStatic
+                        } else {
+                            ConstAttr::ForceInline
+                        });
+                    }
                     other => {
                         return Err(Diagnostic::error(
                             "E0003",
                             format!("`#{}` isn't a known rule on a const", other),
-                            "only `#static` and `#inline` are supported on const declarations"
+                            "only `#Static` and `#Inline` are supported on const declarations"
                                 .to_string(),
-                            "remove the rule or use `#static` or `#inline`".to_string(),
+                            "remove the rule or use `#Static` or `#Inline`".to_string(),
                             Some(self.peek().span),
                         ));
                     }

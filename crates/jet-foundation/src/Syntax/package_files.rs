@@ -150,7 +150,7 @@ pub const ATTR_PUBLISHED_SCHEMA: &str = "PublishedSchema"; // D-MIGRATE1
 /// a type whose values must be consumed exactly once on every reachable path
 /// (moved to a `^` parameter or returned). Using one zero times is E0140
 /// (unconsumed at scope end) / E0141 (unconsumed on one branch); aliasing one
-/// with `&`/`view` is E0142. `#SingleUse` implies `#NoCopy`. The tag is
+/// with `&`/`view` is E0142. `#SingleUse` values are move-only. The tag is
 /// compile-time only and erases in codegen (I3). Written `#SingleUse` before the
 /// `struct`/`enum`, same marker idiom as `#PublishedSchema`.
 pub const ATTR_SINGLE_USE: &str = "SingleUse"; // D-LIN1

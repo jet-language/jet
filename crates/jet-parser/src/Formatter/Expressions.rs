@@ -218,7 +218,7 @@ impl<'a> Fmt<'a> {
                 self.write(&format!("#{}", len_symbol.as_ref().map(|v| v.0.as_str()).map_or_else(|| len.to_string(), str::to_string)));
                 self.write("]");
             }
-            // D-QUAL4=A: `#Marker Type` — prefix value-tag.
+            // D-QUAL4=A: `#TagName Type` — prefix value-tag.
             Type::Tagged { marker, inner } => {
                 self.write(crate::Syntax::RULE_PREFIX);
                 self.write(marker);
@@ -709,7 +709,7 @@ impl<'a> Fmt<'a> {
                 self.write(")");
             }
             Expr::Absent(_) => self.write(Syntax::LIT_NULL),
-            // D-SIMD2: a reduce-op marker `#Add`/`#Mul`/`#Min`/`#Max` (inside `.reduce(…)`).
+            // Retired reduce selector retained only so `jet fmt` can teach its replacement.
             Expr::ReduceMarker(name, _) => self.write(&format!("#{}", name)),
             Expr::Todo { .. } => self.write(&format!("#{}", Syntax::KW_TODO)),
             Expr::PatternTest {

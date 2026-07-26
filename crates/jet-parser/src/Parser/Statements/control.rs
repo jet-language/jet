@@ -79,17 +79,11 @@ impl<'a> Parser<'a> {
     }
 
     pub(in super::super) fn parse_meta_attr(&mut self) -> Result<MetaAttr, Diagnostic> {
-        let start = self.peek().span;
-        self.expect(TokKind::Hash, "expected `#`")?;
-        let (_, name_span) = self.expect_ident(&format!("`#{}`", Syntax::ATTR_META))?;
-        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::ATTR_META))?;
+        let marker = self.parse_rule_marker()?;
         let mut fields = Vec::new();
-        if !matches!(self.peek().kind, TokKind::RParen) {
-            loop {
-                let (name, field_span) = self.expect_ident("for a `#Meta` field")?;
-                if matches!(self.peek().kind, TokKind::Colon) {
-                    self.bump();
-                    let value = self.expr_no_struct_lit()?;
+        for (value, label) in marker.args.into_iter().zip(marker.arg_labels) {
+            match label {
+                Some((name, field_span)) => {
                     let span = Span::new(field_span.start, value.span().end);
                     if name == Syntax::META_FIELD_CATEGORY {
                         fields.push(MetaField::Category { value, span });
@@ -112,6 +106,10 @@ impl<'a> Parser<'a> {
                             ));
                         }
                         fields.push(MetaField::Maturity { value, span });
+                    } else if name == Syntax::META_FIELD_TUNABLE
+                        && matches!(value, Expr::Bool(true, _))
+                    {
+                        fields.push(MetaField::Tunable { span });
                     } else {
                         fields.push(MetaField::Unknown {
                             name,
@@ -119,30 +117,27 @@ impl<'a> Parser<'a> {
                             span: field_span,
                         });
                     }
-                } else if name == Syntax::META_FIELD_TUNABLE {
-                    fields.push(MetaField::Tunable { span: field_span });
-                } else {
-                    fields.push(MetaField::Unknown {
-                        name,
-                        value: None,
-                        span: field_span,
-                    });
                 }
-                if matches!(self.peek().kind, TokKind::Comma) {
-                    self.bump();
-                    if matches!(self.peek().kind, TokKind::RParen) {
-                        break;
+                None => {
+                    let span = value.span();
+                    if matches!(&value, Expr::Ident(name, _) if name == Syntax::META_FIELD_TUNABLE) {
+                        fields.push(MetaField::Tunable { span });
+                    } else {
+                        fields.push(MetaField::Unknown {
+                            name: match value {
+                                Expr::Ident(name, _) => name,
+                                _ => "<positional>".to_string(),
+                            },
+                            value: None,
+                            span,
+                        });
                     }
-                    continue;
                 }
-                break;
             }
         }
-        let end = self.peek().span.end;
-        self.expect(TokKind::RParen, &format!("to close `#{}`", Syntax::ATTR_META))?;
         Ok(MetaAttr {
             fields,
-            span: Span::new(start.start, end.max(name_span.end)),
+            span: marker.span,
         })
     }
 
@@ -224,46 +219,33 @@ impl<'a> Parser<'a> {
     /// D-UNSAFE2 (ratified 2026-06-22, opt B): parse `#Unsafe("reason") { … }`
     /// in statement position. The reason string is the argument of `#Unsafe`
     /// itself; the separate `#Audit` marker is retired (E0055 teaching error).
-    /// A missing reason is allowed by the grammar and flagged in sema (L3101).
+    /// D-UNSAFE-REASON1=A: a missing reason is E3112.
     pub(super) fn at_unsafe_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        // E0055: `#Audit("…")` is the retired spelling — teach the new form.
-        if matches!(self.peek().kind, TokKind::Hash)
-            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_AUDIT)
-        {
-            let audit_start = self.peek().span;
-            self.bump(); // `#`
-            self.bump(); // `Audit`
-                         // Consume the optional `("…")` argument so we can keep parsing.
-            if matches!(self.peek().kind, TokKind::LParen) {
-                self.bump(); // `(`
-                             // skip the string argument
-                let _ = self.expect_plain_string(
-                    "for the audit reason",
-                    "`#Audit` is retired; write `#Unsafe(\"reason\") { … }` instead",
-                    "write: #Unsafe(\"index checked against len\") { … }",
-                );
-                let _ = self.expect(TokKind::RParen, "after the audit reason");
+        // E0055: retirement and replacement come from the shared registry;
+        // the ordinary marker-call reader consumes the old arguments.
+        let retired_audit = match &self.peek2().kind {
+            TokKind::Ident(name) if name == Syntax::ATTR_AUDIT => {
+                crate::Policy::applied_rule(name).and_then(|row| match row.status {
+                    crate::Policy::RuleStatus::Retired { replacement } => Some(replacement),
+                    crate::Policy::RuleStatus::Active => None,
+                })
             }
+            _ => None,
+        };
+        if matches!(self.peek().kind, TokKind::Hash) && retired_audit.is_some() {
+            let replacement = retired_audit.unwrap();
+            let audit = self.parse_rule_marker()?;
             // Skip synthetic line terminator between `#Audit(…)` and `#Unsafe`.
             if matches!(self.peek().kind, TokKind::Semi) {
                 self.bump();
             }
-            let audit_span = Span::new(audit_start.start, self.toks[self.pos - 1].span.end);
             self.diags.push(Diagnostic::error(
                 "E0055",
-                format!(
-                    "`#{}` is retired — merge the reason into `#{}`",
-                    Syntax::ATTR_AUDIT,
-                    Syntax::KW_UNSAFE
-                ),
+                format!("`#{}` is retired", audit.name),
                 "D-UNSAFE2 merged the audit reason into the gate itself".to_string(),
-                format!(
-                    "write `#{}(\"why this is safe\") {{ … }}` (drop the separate `#{}` line)",
-                    Syntax::KW_UNSAFE,
-                    Syntax::ATTR_AUDIT
-                ),
-                Some(audit_span),
+                format!("write `{replacement} {{ … }}` and drop the separate audit line"),
+                Some(audit.span),
             ));
         }
         // Required `#Unsafe`.
@@ -281,38 +263,62 @@ impl<'a> Parser<'a> {
                 Some(self.peek().span),
             ));
         }
-        self.bump(); // `#`
-        self.bump(); // `Unsafe`
-        // Optional reason plus D-UNSAFE-OBLIG1 per-site selection:
-        // `#Unsafe("reason", obligations: .Track) { … }`.
-        let mut audit = None;
-        let mut obligation_mode = None;
-        if matches!(self.peek().kind, TokKind::LParen) {
-            self.bump(); // `(`
-            if matches!(self.peek().kind, TokKind::Str(_)) {
-                let (reason, _) = self.expect_plain_string(
-                    "for the safety reason",
-                    "`#Unsafe` takes quoted text explaining why the block is safe",
-                    "write: #Unsafe(\"index checked against len\") { … }",
-                )?;
-                audit = Some(reason);
-                if matches!(self.peek().kind, TokKind::Comma) { self.bump(); }
-            }
-            if !matches!(self.peek().kind, TokKind::RParen) {
-                let (field, field_span) = self.expect_ident("for the `#Unsafe` option")?;
-                if field != "obligations" {
-                    return Err(Diagnostic::error("E3108", format!("`{field}` is not an unsafe-gate option"), "per-site control has one typed field: `obligations`".to_string(), "write `obligations: .Track` or `obligations: .Skip`".to_string(), Some(field_span)));
+        let marker = self.parse_rule_marker()?;
+        if marker.args.is_empty() {
+            return Err(Diagnostic::error(
+                "E3112",
+                "an `#Unsafe` block needs a reason".to_string(),
+                "every unsafe gate records why its unchecked operations preserve memory safety"
+                    .to_string(),
+                "write `#Unsafe(\"why this is safe\") { … }`".to_string(),
+                Some(marker.span),
+            ));
+        }
+        // D-UNSAFE-OBLIG1: ordinary call arguments, then semantic validation.
+        let audit = match (&marker.args[0], &marker.arg_labels[0]) {
+            (Expr::Str(parts, _), None) if parts.len() == 1 => match &parts[0] {
+                StrPart::Lit(reason) => Some(reason.clone()),
+                StrPart::Interp(..) => {
+                    return Err(Self::marker_argument_shape_error(
+                        Syntax::KW_UNSAFE,
+                        marker.span,
+                    ));
                 }
-                self.expect(TokKind::Colon, "after `obligations`")?;
-                self.expect(TokKind::Dot, "before the obligation mode")?;
-                let (mode, mode_span) = self.expect_ident("after `obligations: .`")?;
-                obligation_mode = Some(match mode.as_str() {
+            },
+            _ => {
+                return Err(Self::marker_argument_shape_error(
+                    Syntax::KW_UNSAFE,
+                    marker.span,
+                ));
+            }
+        };
+        let mut obligation_mode = None;
+        if marker.args.len() > 2 {
+            return Err(Self::marker_argument_shape_error(
+                Syntax::KW_UNSAFE,
+                marker.span,
+            ));
+        }
+        if let Some(value) = marker.args.get(1) {
+            let Some((field, field_span)) = marker.arg_labels[1].as_ref() else {
+                return Err(Self::marker_argument_shape_error(
+                    Syntax::KW_UNSAFE,
+                    marker.span,
+                ));
+            };
+            if field != "obligations" {
+                return Err(Diagnostic::error("E3108", format!("`{field}` is not an unsafe-gate option"), "per-site control has one typed field: `obligations`".to_string(), "write `obligations: .Track` or `obligations: .Skip`".to_string(), Some(*field_span)));
+            }
+            let (mode, mode_span) = match value {
+                Expr::EnumLit { type_name, variant, span, args, .. }
+                    if type_name.is_empty() && args.is_empty() => (variant, span),
+                _ => return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, value.span())),
+            };
+            obligation_mode = Some(match mode.as_str() {
                     "Track" => crate::Policy::PolicyValue::UnsafeTrack,
                     "Skip" => crate::Policy::PolicyValue::UnsafeSkip,
-                    _ => return Err(Diagnostic::error("E3108", format!("`.{mode}` is not a per-site obligation mode"), "a gate either tracks typed obligations or explicitly skips them when policy permits".to_string(), "write `.Track` or `.Skip`".to_string(), Some(mode_span))),
+                    _ => return Err(Diagnostic::error("E3108", format!("`.{mode}` is not a per-site obligation mode"), "a gate either tracks typed obligations or explicitly skips them when policy permits".to_string(), "write `.Track` or `.Skip`".to_string(), Some(*mode_span))),
                 });
-            }
-            self.expect(TokKind::RParen, "after the safety reason")?;
         }
         self.expect(TokKind::LBrace, "after `#Unsafe(…)`")?;
         let body = self.block_stmts();
@@ -339,20 +345,29 @@ impl<'a> Parser<'a> {
     /// statement position. Mirrors `at_unsafe_stmt`. Missing reason → L3102 in sema.
     pub(super) fn at_impure_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
-        self.bump(); // `#`
-        self.bump(); // `Impure`
-                     // Optional `("reason")` argument — absent means L3102 fires in sema.
-        let mut reason = None;
-        if matches!(self.peek().kind, TokKind::LParen) {
-            self.bump(); // `(`
-            let (r, _) = self.expect_plain_string(
-                "for the impure reason",
-                "`#Impure` takes one piece of quoted text explaining why ambient I/O is needed here",
-                "write: #Impure(\"reading build config\") { … }",
-            )?;
-            self.expect(TokKind::RParen, "after the impure reason")?;
-            reason = Some(r);
-        }
+        let marker = self.parse_rule_marker()?;
+        let reason = match marker.args.as_slice() {
+            [] => None,
+            [Expr::Str(parts, _)]
+                if marker.arg_labels[0].is_none() && parts.len() == 1 =>
+            {
+                match &parts[0] {
+                    StrPart::Lit(reason) => Some(reason.clone()),
+                    StrPart::Interp(..) => {
+                        return Err(Self::marker_argument_shape_error(
+                            Syntax::KW_IMPURE,
+                            marker.span,
+                        ));
+                    }
+                }
+            }
+            _ => {
+                return Err(Self::marker_argument_shape_error(
+                    Syntax::KW_IMPURE,
+                    marker.span,
+                ));
+            }
+        };
         self.expect(TokKind::LBrace, "after `#Impure(…)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
@@ -407,15 +422,17 @@ impl<'a> Parser<'a> {
 
     /// D-BLOCKPLANE1=A: `#Region(name) { … }`.
     pub(super) fn at_region_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.bump().span; // `#`
-        self.bump(); // `Region`
-        self.expect(TokKind::LParen, "after `#Region`")?;
-        let (name, name_span) = self.expect_ident("for the region name")?;
-        self.expect(TokKind::RParen, "after the region name")?;
+        let marker = self.parse_rule_marker()?;
+        if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
+            return Err(Self::marker_argument_shape_error(Syntax::ATTR_REGION, marker.span));
+        }
+        let Expr::Ident(name, name_span) = &marker.args[0] else {
+            return Err(Self::marker_argument_shape_error(Syntax::ATTR_REGION, marker.span));
+        };
         self.expect(TokKind::LBrace, "after `#Region(name)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
-        Ok(Stmt::Region { name, name_span, body, span: Span::new(start.start, end) })
+        Ok(Stmt::Region { name: name.clone(), name_span: *name_span, body, span: Span::new(marker.span.start, end) })
     }
 
     /// D-BLOCKPLANE1=A: `#Live { … }`.
@@ -430,53 +447,44 @@ impl<'a> Parser<'a> {
 
     /// D-BLOCKPLANE1=A: audited `#Nondeterministic("reason") { … }`.
     pub(super) fn at_nondeterministic_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.bump().span; // `#`
-        self.bump(); // `Nondeterministic`
-        self.expect(TokKind::LParen, "after `#Nondeterministic`")?;
-        let (reason, _) = self.expect_plain_string(
-            "for the nondeterminism reason",
-            "`#Nondeterministic` requires quoted audit text",
-            "write: #Nondeterministic(\"OS clock is an explicit input\") { … }",
-        )?;
-        self.expect(TokKind::RParen, "after the nondeterminism reason")?;
+        let marker = self.parse_rule_marker()?;
+        let reason = match marker.args.as_slice() {
+            [Expr::Str(parts, _)]
+                if marker.arg_labels[0].is_none() && parts.len() == 1 =>
+            {
+                match &parts[0] {
+                    StrPart::Lit(reason) => reason.clone(),
+                    StrPart::Interp(..) => return Err(Self::marker_argument_shape_error(Syntax::ATTR_NONDETERMINISTIC, marker.span)),
+                }
+            }
+            _ => return Err(Self::marker_argument_shape_error(Syntax::ATTR_NONDETERMINISTIC, marker.span)),
+        };
         self.expect(TokKind::LBrace, "after `#Nondeterministic(…)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
-        Ok(Stmt::AssumeDet { reason, body, span: Span::new(start.start, end) })
+        Ok(Stmt::AssumeDet { reason, body, span: Span::new(marker.span.start, end) })
     }
 
     /// D-CTX1 (ratified 2026-06-22, G2): parse `#Context(field: value, …) { … }`.
     /// Cursor is on the `#` token. Emits E0760 for `=` spelling, E0761 for
     /// unknown fields.
     pub(super) fn at_context_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.peek().span;
-        self.bump(); // `#`
-        self.bump(); // `Context`
-        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::CTX_BLOCK))?;
+        if let (TokKind::Ident(field), TokKind::Eq) = (&self.peek4().kind, &self.peek5().kind) {
+            return Err(Diagnostic::error(
+                "E0760",
+                "context fields are set with `:`, not `=`".to_string(),
+                "`=` is reassignment; ordinary call labels use `name: value`".to_string(),
+                format!("write `#{}({field}: …) {{ … }}`", Syntax::CTX_BLOCK),
+                Some(self.peek5().span),
+            ));
+        }
+        let marker = self.parse_rule_marker()?;
+        let marker_span = marker.span;
         let mut fields: Vec<(String, Expr, Span)> = Vec::new();
-        // Parse comma-separated `ident : expr` pairs.
-        while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
-            let field_start = self.peek().span;
-            let (field_name, field_name_span) = self.expect_ident("for the context field name")?;
-            // E0760: `=` is reassignment (S17); context fields use `:`.
-            if matches!(self.peek().kind, TokKind::Eq) {
-                let eq_span = self.peek().span;
-                return Err(Diagnostic::error(
-                    "E0760",
-                    "context fields are set with `:`, not `=`".to_string(),
-                    "`=` is reassignment (S17); the `name: value` form sets a context field (D-CTX1)".to_string(),
-                    format!(
-                        "write `#{}({}: …) {{ … }}`",
-                        Syntax::CTX_BLOCK,
-                        field_name
-                    ),
-                    Some(eq_span),
-                ));
-            }
-            self.expect(
-                TokKind::Colon,
-                &format!("after the field name `{}`", field_name),
-            )?;
+        for (value, label) in marker.args.into_iter().zip(marker.arg_labels) {
+            let Some((field_name, field_name_span)) = label else {
+                return Err(Self::marker_argument_shape_error(Syntax::CTX_BLOCK, marker_span));
+            };
             // E0761: unknown field name.
             if field_name != Syntax::CTX_FIELD_ALLOCATOR
                 && field_name != Syntax::CTX_FIELD_LOGGER
@@ -492,20 +500,11 @@ impl<'a> Parser<'a> {
                         Syntax::CTX_BLOCK,
                         Syntax::CTX_BLOCK
                     ),
-                    Some(Span::new(field_start.start, field_name_span.end)),
+                    Some(field_name_span),
                 ));
             }
-            let value = self.expr()?;
-            let field_end = self.toks[self.pos - 1].span.end;
-            fields.push((field_name, value, Span::new(field_start.start, field_end)));
-            if matches!(self.peek().kind, TokKind::Comma) {
-                self.bump();
-            }
+            fields.push((field_name, value.clone(), Span::new(field_name_span.start, value.span().end)));
         }
-        self.expect(
-            TokKind::RParen,
-            &format!("after `#{}(…`", Syntax::CTX_BLOCK),
-        )?;
         self.expect(
             TokKind::LBrace,
             &format!("after `#{}(…)`", Syntax::CTX_BLOCK),
@@ -515,7 +514,7 @@ impl<'a> Parser<'a> {
         Ok(Stmt::ContextBlock {
             fields,
             body,
-            span: Span::new(start.start, end),
+            span: Span::new(marker_span.start, end),
         })
     }
 
@@ -523,35 +522,25 @@ impl<'a> Parser<'a> {
     /// in statement position. Cursor is on the `#` token. Effect names are bare
     /// idents; sema validates them against the known effect vocabulary (E0119).
     pub(super) fn at_caps_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.peek().span;
-        self.bump(); // `#`
-        self.bump(); // `Caps`
-        let lparen = self.peek().span;
-        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::KW_CAPS))?;
-        let mut caps = Vec::new();
-        if !matches!(self.peek().kind, TokKind::RParen) {
-            loop {
-                let (name, span) = self.expect_effect_path_name("for an effect name")?;
-                caps.push((name, span));
-                if matches!(self.peek().kind, TokKind::RParen) {
-                    break;
-                }
-                self.expect(TokKind::Comma, "between effects in the list")?;
+        let marker = self.parse_rule_marker()?;
+        let mut caps = Vec::with_capacity(marker.args.len());
+        for (argument, label) in marker.args.iter().zip(&marker.arg_labels) {
+            if label.is_some() {
+                return Err(Self::marker_argument_shape_error(Syntax::KW_CAPS, marker.span));
             }
+            let Some(name) = Self::marker_effect_path(argument) else {
+                return Err(Self::marker_argument_shape_error(Syntax::KW_CAPS, argument.span()));
+            };
+            caps.push((name, argument.span()));
         }
-        let rparen = self.peek().span;
-        self.expect(
-            TokKind::RParen,
-            &format!("to close the `#{}(…)` list", Syntax::KW_CAPS),
-        )?;
         self.expect(TokKind::LBrace, &format!("after `#{}(…)`", Syntax::KW_CAPS))?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Caps {
             caps,
-            caps_span: Span::new(lparen.start, rparen.end),
+            caps_span: marker.span,
             body,
-            span: Span::new(start.start, end),
+            span: Span::new(marker.span.start, end),
         })
     }
 
@@ -561,27 +550,17 @@ impl<'a> Parser<'a> {
     /// capability handle for the block. The dual of `#Caps`: `#Grant` authorizes
     /// the listed effects through the handle, RAII-revoked at scope end.
     pub(super) fn at_grant_stmt(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.peek().span;
-        self.bump(); // `#`
-        self.bump(); // `Grant`
-        let lparen = self.peek().span;
-        self.expect(TokKind::LParen, &format!("after `#{}`", Syntax::KW_GRANT))?;
-        let mut caps = Vec::new();
-        if !matches!(self.peek().kind, TokKind::RParen) {
-            loop {
-                let (name, span) = self.expect_effect_path_name("for an effect name")?;
-                caps.push((name, span));
-                if matches!(self.peek().kind, TokKind::RParen) {
-                    break;
-                }
-                self.expect(TokKind::Comma, "between effects in the list")?;
+        let marker = self.parse_rule_marker()?;
+        let mut caps = Vec::with_capacity(marker.args.len());
+        for (argument, label) in marker.args.iter().zip(&marker.arg_labels) {
+            if label.is_some() {
+                return Err(Self::marker_argument_shape_error(Syntax::KW_GRANT, marker.span));
             }
+            let Some(name) = Self::marker_effect_path(argument) else {
+                return Err(Self::marker_argument_shape_error(Syntax::KW_GRANT, argument.span()));
+            };
+            caps.push((name, argument.span()));
         }
-        let rparen = self.peek().span;
-        self.expect(
-            TokKind::RParen,
-            &format!("to close the `#{}(…)` list", Syntax::KW_GRANT),
-        )?;
         self.expect(
             TokKind::LBrace,
             &format!("after `#{}(…)`", Syntax::KW_GRANT),
@@ -601,12 +580,22 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Grant {
             caps,
-            caps_span: Span::new(lparen.start, rparen.end),
+            caps_span: marker.span,
             binding,
             binding_span,
             body,
-            span: Span::new(start.start, end),
+            span: Span::new(marker.span.start, end),
         })
+    }
+
+    fn marker_effect_path(expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Ident(name, _) => Some(name.clone()),
+            Expr::Field(base, member, _) => {
+                Some(format!("{}.{}", Self::marker_effect_path(base)?, member))
+            }
+            _ => None,
+        }
     }
 
     /// D-TXN4: parse a `#Transact(name) { … }` transaction block in statement

@@ -1,6 +1,6 @@
-// D-METHODMACRO1=A — checked `#Inline`/`#InlineAlways` contracts.
+// D-INLINE-PARAM1=A — checked `#Inline`/`#Inline(Always)` contracts.
 // `#Inline` is a soft hint (the compiler is free to ignore it; never an
-// error). `#InlineAlways` is a checked promise: the compiler proves it can
+// error). `#Inline(Always)` is a checked promise: the compiler proves it can
 // actually inline every call, or the build fails naming why (self-recursive,
 // address-taken, or too large) — never a silent miss. Methods stay ordinary
 // functions; there is no macro-rewrite hook, just an attribute on the
@@ -9,14 +9,14 @@
     return x * x
 }
 
-#InlineAlways fn double(x: Int) -> Int {
+#Inline(Always) fn double(x: Int) -> Int {
     return x * 2
 }
 
 struct Meters {
     value: Int
 
-    #InlineAlways fn plus(self, other: Int) -> Int {
+    #Inline(Always) fn plus(self, other: Int) -> Int {
         return self.value + other
     }
 }

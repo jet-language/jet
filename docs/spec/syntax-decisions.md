@@ -201,7 +201,7 @@ function type, a bare `{ }` after `)` stands in for that lambda —
 (E0334/E0335).
 
 **Declined (functions)**: UFCS (D-UFCS1); call-site macro-method expansion —
-inlining via `#Inline`/`#InlineAlways` contracts instead (D-METHODMACRO1);
+inlining via `#Inline`/`#Inline(Always)` contracts instead (D-METHODMACRO1);
 expression-body `fn f() = expr` (D-FP2); the earlier general-pipe proposal
 (D-SUGAR2), superseded by D-SHAPE-PIPE1=C.
 
@@ -494,9 +494,12 @@ Value spelling `Shape.Circle(2.0)` or `.Circle(2.0)` where the type is known;
 patterns take the leading dot (D-ENUMDOT1).
 
 **D-DIST1 / D-DIST3 — Distinct types**: `Usd :: distinct Decimal` mints a
-nominal type over a base; no inherited operators. **D-CAPBUNDLE1**: capability
-bundles re-expose curated slices, stackable — `#Numeric` (`+ - * /`, ordering,
-same-type only; E0138), `#Comparable`, `#Printable`, `#CodableAsBase`.
+nominal type over a base; no inherited operators. **D-CAPBUNDLE1 /
+D-CAPPLANE1=A** *(ratified 2026-07-23, card #762)*: capability rules expose
+one concept on every type. `#Comparable` and `#Printable` derive from fields
+on structs and enums, and re-expose the base capability on distinct types.
+Distinct-only `#Numeric` exposes `+ - * /` and ordering for the same type
+(E0138); `#CodableAsBase` exposes base coding.
 `Usd + Eur` stays a type error; `.raw()` strips. **D-RANGETYPE1 — range-constrained
 types**: `distinct Int(0..10)` is an `Int` provably within bounds; literal
 conversion checks at compile time (E0135 out of bounds), runtime conversion
@@ -696,7 +699,7 @@ money-named field holds a float (`#[allow(float_money)]` suppresses).
 
 **D-STATE1 — Typestate** *(D-STATE-REQ/TRANS/DECL)*: states declared in a
 `state TypeName { A, B, C }` block; `#State(S) fn m(self)` requires state S;
-`#Transition(From -> To) fn` advances it (`_` from-state = entry constructor).
+`#Transition(From, To) fn` advances it (`_` from-state = entry constructor).
 Wrong-state call E0150; markers erase in codegen. Ordering falls out of the
 transition graph.
 
@@ -1103,6 +1106,31 @@ use `#`: `Rename`, `Skip`, `Default`, `Flatten`, `RenameAll`,
 in-body config as a type body's first statements. `comptime` stays a prefix
 keyword. LSP surfaces applicable markers per item.
 
+**D-MARKSIG1=A — Marker signatures and one call grammar** *(ratified
+2026-07-23, card #759)*: one declarative registry row owns each rule's name,
+typed signature, legal sites, form, and active or retired status. Marker
+arguments use the ordinary Jet call grammar: positional arguments first, then
+named arguments. One E0930 family reports a mismatch and prints the declared
+signature. Parser, sema, formatter, LSP, explain, and retirement handling read
+the same row.
+
+**D-MARK-STACK1=A — Bare single, one bracket list for several** *(ratified
+2026-07-23, card #761; amends S82)*: one attached rule is `#Rule`; two or more
+share one `#[A, B]` list. A one-item list or adjacent bare stack is E0999 with
+the canonical rewrite. `jet fmt` performs that rewrite and preserves order.
+Scoped block rules do not stack.
+
+**D-INLINE-PARAM1=A — One inline rule** *(ratified 2026-07-23, card #762)*:
+`#Inline` is the soft function hint and `#Inline(Always)` is the checked
+promise. The retired `#InlineAlways` spelling fixes to `#Inline(Always)`.
+E0917, E0918, and E0919 retain their checked semantics; E0920 is retired
+because one rule cannot conflict with itself.
+
+**D-CONSTMARK1=A — PascalCase constant rules** *(ratified 2026-07-23,
+card #762)*: `#Static const` gives the constant a stable address; `#Inline
+const` copies the value into use sites. Retired lowercase `#static` and
+`#inline` fix to those registry-backed forms.
+
 **D-CANVASSTATE1=D — Statement switch attributes**: `#Off <stmt>` parses and
 type-checks the statement, then emits no code in every build. `#DebugOnly <stmt>`
 parses and type-checks the statement in every build, emits in debug/dev builds,
@@ -1222,7 +1250,7 @@ uses `consume(x)` (still `#Unsafe`-gated, D-LIN1 semantics unchanged).
 `.drop("reason")` keeps sole ownership of the
 discard meaning.
 
-**D-DOTSCOPE1 — Scope members**: inside a `#Marker { }` block body, a
+**D-DOTSCOPE1 — Scope members**: inside an applied-rule block body, a
 statement-position `.name { … }` / `.name(args) { … }` resolves against that
 marker's declared scope members (`#Test`: `.expect_fail`, `.setup`,
 `.timeout`, `.skip`); this is the ONLY spelling for scope vocabulary (I8 —
@@ -1589,8 +1617,8 @@ and `name.on_commit(() => …)` explicit hooks (layer 3, Drop-backed).
 Irreversible effects (`Net`/`Fs`/`Exec`) inside the block are E0746 — move
 after the block or register via `on_commit`.
 
-**D-LIN1 — Single-use values** *(D-LIN1-DROP)*: `#SingleUse` (implies
-`#NoCopy`) must be consumed exactly once on every path — `^` param, return,
+**D-LIN1 — Single-use values** *(D-LIN1-DROP)*: `#SingleUse` values must be
+consumed exactly once on every path — `^` param, return,
 or `consume(x)` inside `#Unsafe("reason")` (respelled by D-DROP-WORD1, 2026-07-12; else E0143). Unconsumed E0140;
 one-branch-only E0141; lending instead E0142.
 
@@ -1599,13 +1627,14 @@ signature (`result` in Post); conditions pure; checked in every build;
 per-module build-policy strip is an explicit opt-out. Violation quotes the
 clause at the call site.
 
-**D-METHODMACRO1=A — Checked inline contracts**: `#Inline`/`#InlineAlways` on
+**D-METHODMACRO1=A / D-INLINE-PARAM1=A — Checked inline contracts**:
+`#Inline`/`#Inline(Always)` on
 a `fn` or `fn Type.method`; methods stay ordinary functions, no macro-rewrite
-hooks. `#Inline` is a soft hint (`#[inline]`; never rejected). `#InlineAlways`
+hooks. `#Inline` is a soft hint (`#[inline]`; never rejected). `#Inline(Always)`
 is a checked promise (`#[inline(always)]`): sema proves the call can actually
 inline or fails the build naming why — self-recursive (E0917), address-taken
-(E0918), or over the statement ceiling (E0919). Both markers on one
-declaration is E0920 (pick one). PascalCase per D-CONTRACTCASE1.
+(E0918), or over the statement ceiling (E0919). PascalCase per
+D-CONTRACTCASE1.
 
 **D-PERSIST1**: `#Persist` module binding survives `jet dev` hot reload;
 identity = module path + name; layout change re-decodes Codable-style, falls
@@ -1692,8 +1721,9 @@ decisions).
 **S58 — Two gates, one keyword**: `use core.mem` is the discovery gate
 (allocators, `*T`, layout/repr, volatile read/write). `#Unsafe("reason") { … }` /
 `#Unsafe("reason") fn` is the audit gate (**D-UNSAFE2** — the reason is the
-gate's argument; **D-UNSAFE-REASON1=B** — bare `#Unsafe { … }` / `#Unsafe fn`
-compile and emit L3101; whole-fn form requires an enclosing `#Unsafe` at call
+gate's argument; **D-UNSAFE-REASON1=A** *(ratified 2026-07-23, card #762)* —
+bare `#Unsafe { … }` / `#Unsafe fn` are hard E3112 errors; whole-fn form
+requires an enclosing `#Unsafe` at call
 sites). Gated ops: deref `p.*`, raw-pointer-of `*x`,
 volatile `mem.volatile_read(p)` / `mem.volatile_write(p, value)`, pointer math,
 transmute-class casts, FFI pointer crossings (outside the gate: E0208).
@@ -1711,8 +1741,8 @@ typed `valid_ptr`, `aligned`, and `no_alias` obligations; an undischarged
 required obligation is an error. A typed assertion is a postfix record on the
 immediately preceding operation statement (`mem.volatile_read(p)` followed by
 `assert valid_ptr, aligned`); it cannot discharge a later operation or cross a
-control-flow boundary. `.Relaxed` suppresses only L3101 for a bare
-gate. `.PerSite` is also available: each gate selects
+control-flow boundary. `.Relaxed` relaxes typed per-operation obligations but
+never the required reason. `.PerSite` is also available: each gate selects
 `obligations: .Track` or `.Skip`, and organization policy may reject `.Skip`.
 Every mode still requires a lexical `#Unsafe` block or function for every
 low-level operation; none permits generated Rust `unsafe` outside I1's audited
@@ -1802,7 +1832,10 @@ same family (growable field under it = compile error).
 
 **D-SIMD1 / D-SIMD2 — SIMD**: portable lane types `F32x4`/`F64x2` —
 `F32x4(…)`, `.splat(x)`, `v[i]`, element-wise ops, `v.sum()` /
-`v.reduce(#Add)`; `[F32#4]` bridges via `from_array`/`to_array`
+`v.reduce(.Add)`; **D-REDUCE-VALUE1=A** *(ratified 2026-07-23, card #762)*:
+the typed `ReduceOp` values are `.Add`, `.Mul`, `.Min`, `.Max`, and `.Avg`;
+the old argument-position markers fix to dot values. `[F32#4]` bridges via
+`from_array`/`to_array`
 (E2510/E2511). Raw intrinsics behind `#Unsafe`. Operator overloading exists
 **only** on built-in lane/linalg types.
 
