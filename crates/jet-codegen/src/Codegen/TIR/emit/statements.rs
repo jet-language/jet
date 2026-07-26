@@ -242,7 +242,6 @@ fn emit_tir_stmt(
             kw,
             let_ty,
             init,
-            track_origin,
             gc_promotion,
             gc_transferred: _,
         } => {
@@ -340,15 +339,6 @@ fn emit_tir_stmt(
             ));
             if matches!(&init.kind, crate::Codegen::TIR::TExprKind::ResourceNew(_)) {
                 active_deferred_closes.push(ActiveCleanup::Resource(mangle(name)));
-            }
-            if let Some(origin) = track_origin {
-                out.push_str(&format!(
-                    "{}{}jet_track_float_origin(&{}, {:?});\n",
-                    pad,
-                    cx.root_prefix,
-                    mangle(name),
-                    origin
-                ));
             }
         }
         TStmt::GcEdit {

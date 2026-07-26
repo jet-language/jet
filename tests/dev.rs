@@ -5599,3 +5599,38 @@ fn run() {
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn tracked_float_origin_matches_aot_in_default_dev() {
+    let dir = common::unique_tmp("jet_float_binding_origin_dev");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("float_binding_origin.jet");
+    fs::write(
+        &file,
+        "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    print(speed.origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() -> Float {\n    print(\"evaluated\")\n    return 3.5\n}\n",
+    )
+    .unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let expected_stdout = format!(
+        "tracked `speed` at {shown}:2:12: #Track speed :: 3.5\nuntracked\nuntracked\nevaluated\nuntracked\n"
+    );
+    let aot = compiled_binary_output(
+        &dir,
+        "float_binding_origin",
+        0,
+        "float_binding_origin",
+        &shown,
+    );
+    let dev = match dev_iteration_with_timeout("float_binding_origin", &shown, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => panic!("default dev failed Float origin: {diags:?}"),
+    };
+
+    assert_eq!(aot, ProgramOutput::ran(expected_stdout, String::new(), 0));
+    assert_eq!(dev, aot);
+    let _ = fs::remove_dir_all(&dir);
+}

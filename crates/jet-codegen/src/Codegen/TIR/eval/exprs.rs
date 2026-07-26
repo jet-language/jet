@@ -1288,7 +1288,9 @@ impl EvalCtx<'_> {
             TNumericOp::Predicate(method) => {
                 crate::Comptime::Builtins::apply_method(v, method, vec![], self.span())
             }
-            TNumericOp::Origin => Ok(CtValue::Str("untracked".to_string())),
+            TNumericOp::Origin(origin) => Ok(CtValue::Str(
+                origin.clone().unwrap_or_else(|| "untracked".to_string()),
+            )),
             TNumericOp::CastAs { .. } => {
                 // Width casts keep the same CtValue scalar representation.
                 Ok(v.clone())

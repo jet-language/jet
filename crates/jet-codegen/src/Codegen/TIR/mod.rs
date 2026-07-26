@@ -1398,9 +1398,6 @@ pub enum TStmt {
         kw: &'static str,
         let_ty: TLetTy,
         init: TExpr,
-        /// D-PROVENANCE1=B: if present, record this Float binding's origin after
-        /// initialization. Empty for every untracked/non-Float binding.
-        track_origin: Option<String>,
         /// D-OPTGC1=A: sema's complete automatic-promotion decision.
         gc_promotion: Option<crate::AST::GcPromotion>,
         gc_transferred: bool,
@@ -2617,8 +2614,8 @@ pub enum TNumericOp {
     /// `width` is the receiver's bit width (baked at lowering — TirBridge may
     /// evaluate before locals carry `IntN` types).
     BitCount { method: String, width: u32 },
-    /// `origin` on a Float receiver → debug provenance note or `"untracked"`.
-    Origin,
+    /// `origin` on a Float receiver → resolved binding note or `"untracked"`.
+    Origin(Option<String>),
     /// A widening / float-targeted / float-sourced conversion → `(({recv}) as {dst})`.
     CastAs { dst_rust: String },
     /// An integer-narrowing conversion → the checked `<{dst}>::try_from(...)` form

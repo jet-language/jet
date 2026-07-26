@@ -182,7 +182,6 @@ pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: 
                 probe: crate::Codegen::TIR::TMatchProbe::Unwrap,
             })),
         },
-        track_origin: None,
         gc_promotion: None,
         gc_transferred: false,
     }];
@@ -202,7 +201,6 @@ pub(super) fn lower_str_match_pattern_bindings(pattern: &Pattern, cx: &Cx, env: 
                     index: i,
                 })),
             },
-            track_origin: None,
             gc_promotion: None,
             gc_transferred: false,
         });
@@ -260,7 +258,6 @@ pub(super) fn lower_bin_match_pattern_bindings(
                 probe: crate::Codegen::TIR::TMatchProbe::Unwrap,
             })),
         },
-        track_origin: None,
         gc_promotion: None,
         gc_transferred: false,
     }];
@@ -280,7 +277,6 @@ pub(super) fn lower_bin_match_pattern_bindings(
                     index: i,
                 })),
             },
-            track_origin: None,
             gc_promotion: None,
             gc_transferred: false,
         });

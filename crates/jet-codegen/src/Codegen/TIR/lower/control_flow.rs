@@ -396,7 +396,6 @@ fn lower_if_cond_atom(
                             ty: map_ty.clone(),
                             kind: TExprKind::DataEntriesToMap(TLocal::generated(&obj_tmp)),
                         },
-                        track_origin: None,
                 gc_promotion: None,
                 gc_transferred: false,
                     };
@@ -813,7 +812,6 @@ fn lower_struct_pattern_bindings(
                     )),
                 })),
             },
-            track_origin: None,
                 gc_promotion: None,
                 gc_transferred: false,
         });
