@@ -1,0 +1,38 @@
+use core.files as fs
+use core.io as io
+use core.process as process
+use core.time as time
+
+fn run() {
+    args :: io.args()
+    if args.len() != 2 {
+        panic("usage: process_batch INPUT_FILE")
+    }
+    input :: args.get(1) ?? panic("missing input file")
+    text :: fs.read(input) ?? panic("cannot read input")
+    line_number := 0
+    loop line; text.split("\n") {
+        line_number += 1
+        if line_number != 1 && line != "" {
+            fields :: line.split("\t").to_list()
+            if fields.len() != 4 {
+                panic("bad process row {line_number}")
+            }
+            label :: fields[0]
+            program :: fields[1]
+            argument :: fields[2]
+            timeout_ms :: Int.parse(fields[3]) ?? panic("bad timeout")
+            timeout :: Duration.milliseconds(timeout_ms) ?? panic("bad timeout")
+            result :: process.cmd([~program, ~argument])
+                .stdout(.Capture)
+                .stderr(.Capture)
+                .timeout(timeout)
+                .run() ?? panic("process failed")
+            if result.timed_out {
+                print("{label}|timeout")
+            } else {
+                print("{label}|exit={result.code}|stdout={result.output.trim()}")
+            }
+        }
+    }
+}

@@ -43,9 +43,9 @@ No aggregate Jet rank exists until the corpus records all required metrics and a
 | Browser and desktop work | None | Not run | #769 |
 | Document and media work | None | Not run | #769 |
 | MCP tools and hooks | None | Not run | #769 |
-| Long-running and interactive commands | None | Not run | #769 |
+| Long-running and interactive commands | `process-batch-success`, `process-batch-timeout-recovery` | Linux proved for direct subprocesses; macOS declared native but not run; Windows cannot count Bash as native | #769 |
 
-The report records task success, source tokens, cold and warm wall time, output stability, platform, architecture, adapter versions, corpus evidence, and the canonical card. The data workload proves exact success, malformed-input, and partial-failure outcomes over identical TSV input for all four adapters. Agent tool calls, repair turns, peak memory, diagnostic quality, orphan processes, sandbox escapes, and cross-platform runs remain `not-recorded:#769`.
+The report records task success, source tokens, cold and warm wall time, output stability, platform, architecture, adapter versions, corpus evidence, and the canonical card. The data workload proves exact success, malformed-input, and partial-failure outcomes over identical TSV input for all four adapters. The process workload proves captured output plus a 50-millisecond direct-child timeout, kill/reap, and successful next launch. Descendant-tree cleanup is not claimed. Agent tool calls, repair turns, peak memory, diagnostic quality, orphan processes, sandbox escapes, and cross-platform runs remain `not-recorded:#769`.
 
 Network access and external writes remain `unmeasured:#769`. The declared-input hash check only proves that an adapter did not change its input file or tree.
 

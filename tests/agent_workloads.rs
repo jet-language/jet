@@ -36,6 +36,18 @@ const EXPECTED_TASKS: &[(&str, &str, &str, &str)] = &[
         "partial-failure",
         "exit=0;stdout=exact",
     ),
+    (
+        "process-batch-success",
+        "long-running-and-interactive-commands",
+        "success",
+        "exit=0;stdout=exact",
+    ),
+    (
+        "process-batch-timeout-recovery",
+        "long-running-and-interactive-commands",
+        "timeout-cancellation-cleanup",
+        "exit=0;stdout=exact",
+    ),
 ];
 const ADAPTERS: &[(&str, &str)] = &[
     ("jet", "jet"),
@@ -106,6 +118,8 @@ fn adapter_stem(task_id: &str) -> &'static str {
         "repository_marker_scan"
     } else if task_id.starts_with("incident-report-") {
         "incident_report"
+    } else if task_id.starts_with("process-batch-") {
+        "process_batch"
     } else {
         panic!("task has no adapter source: {task_id}")
     }
@@ -371,7 +385,7 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
 
     let sums = fs::read_to_string(corpus_root().join("SHA256SUMS")).unwrap();
     let verified = verify_checksum_closure(&corpus_root(), &sums).unwrap();
-    assert_eq!(verified, 10, "all inputs and declared outputs must be frozen");
+    assert_eq!(verified, 14, "all inputs and declared outputs must be frozen");
 }
 
 #[test]
