@@ -126,6 +126,8 @@ pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core.http",
     // D-WS1=B: standalone WebSocket client/server home.
     "core.ws",
+    // D-BROWSER-AUTO1=A: native versioned WebDriver BiDi automation profiles.
+    "core.browser",
     // D-REGEXENGINE1=A: std-only linear regex in the generated prelude.
     "core.regex",
     // D-CORE-COMPRESS1=A / D-DEP-ARCHIVE1=A: zip/tar containers only.

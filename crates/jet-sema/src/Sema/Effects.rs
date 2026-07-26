@@ -510,7 +510,8 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
     }
     Some(match module {
         "core.files" => Effect::Fs,
-        "core.net" | "core.tls" | "jet.http" | "core.http.client" | "core.http.server" | "core.http.middleware" => Effect::Net,
+        // D-BROWSER-AUTO1=A: browser automation is a versioned network protocol.
+        "core.net" | "core.tls" | "jet.http" | "core.http.client" | "core.http.server" | "core.http.middleware" | "core.browser" => Effect::Net,
         // D-RAYLIB1=A: windowing/drawing/input/audio bridge.
         "core.raylib" => Effect::Gpu,
         "core.time" => Effect::Time,

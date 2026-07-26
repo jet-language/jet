@@ -720,6 +720,13 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "access_log",
             "request_id",
         ],
+        // D-BROWSER-AUTO1=A: native BiDi profile/session entry points.
+        "core.browser" => &[
+            "Browser", "BrowserContext", "BrowserPage", "BrowserLocator",
+            "BrowserEvent", "BrowserTrace", "BrowserError", "BrowserCapabilities",
+            "BrowserProfile", "BrowserTimeout", "BrowserProtocol",
+            "profile", "timeout", "connect", "connect_profile",
+        ],
         // U13 (D-JPK-SECRETCRYPTO1): decrypted-repo-secret read, age-style
         // crypto FFI bridge.
         // D-CORE-SECRETS1=A: one home for encrypted storage and lifecycle.
@@ -758,6 +765,10 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
         | ("jet.http" | "core.http.client" | "core.http.server",
             "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
             | "Headers" | "Request" | "Response" | "Body" | "Handler" | "HttpError" | "Client" | "Proxy")
+        | ("core.browser",
+            "Browser" | "BrowserContext" | "BrowserPage" | "BrowserLocator"
+            | "BrowserEvent" | "BrowserTrace" | "BrowserError" | "BrowserCapabilities"
+            | "BrowserProfile" | "BrowserTimeout" | "BrowserProtocol")
         // D-WEBAPP1=D: namespaced `web.App` / `web.Page` / `web.Context` / `web.Mount`.
         | ("core.web", "App" | "Page" | "Context" | "Mount")
     )

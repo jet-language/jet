@@ -2971,6 +2971,83 @@ impl<'a> Checker<'a> {
                         err: Box::new(Type::Named("WsError".to_string())),
                     });
                 }
+                // D-BROWSER-AUTO1=A: versioned native BiDi protocol core.
+                ("core.browser", "profile") => {
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity("profile", 1, args.len(), span));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return None;
+                    }
+                    self.expect_core_arg("profile", 0, &Type::String, &mut args[0]);
+                    return Some(Type::Result {
+                        ok: Box::new(Type::Named("BrowserProfile".to_string())),
+                        err: Box::new(Type::Named("BrowserError".to_string())),
+                    });
+                }
+                ("core.browser", "timeout") => {
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity("timeout", 1, args.len(), span));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return None;
+                    }
+                    self.expect_core_arg("timeout", 0, &Type::Int, &mut args[0]);
+                    return Some(Type::Result {
+                        ok: Box::new(Type::Named("BrowserTimeout".to_string())),
+                        err: Box::new(Type::Named("BrowserError".to_string())),
+                    });
+                }
+                ("core.browser", "connect") => {
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity("connect", 1, args.len(), span));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return None;
+                    }
+                    self.expect_core_arg("connect", 0, &Type::String, &mut args[0]);
+                    return Some(Type::Result {
+                        ok: Box::new(Type::Named("Browser".to_string())),
+                        err: Box::new(Type::Named("BrowserError".to_string())),
+                    });
+                }
+                ("core.browser", "connect_profile") => {
+                    if args.len() != 3 {
+                        self.diags.push(wrong_core_arity(
+                            "connect_profile",
+                            3,
+                            args.len(),
+                            span,
+                        ));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return None;
+                    }
+                    self.expect_core_arg("connect_profile", 0, &Type::String, &mut args[0]);
+                    self.expect_core_arg(
+                        "connect_profile",
+                        1,
+                        &Type::Named("BrowserProfile".to_string()),
+                        &mut args[1],
+                    );
+                    self.expect_core_arg(
+                        "connect_profile",
+                        2,
+                        &Type::Named("BrowserTimeout".to_string()),
+                        &mut args[2],
+                    );
+                    return Some(Type::Result {
+                        ok: Box::new(Type::Named("Browser".to_string())),
+                        err: Box::new(Type::Named("BrowserError".to_string())),
+                    });
+                }
                 ("core.http.server", "mux") => {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);

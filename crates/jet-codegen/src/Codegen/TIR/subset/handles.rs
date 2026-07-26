@@ -804,6 +804,24 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
                 err: Box::new(Type::Named("WsError".to_string())),
             };
         }
+        ("core.browser", "profile") => {
+            return Type::Result {
+                ok: Box::new(Type::Named("BrowserProfile".to_string())),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            };
+        }
+        ("core.browser", "timeout") => {
+            return Type::Result {
+                ok: Box::new(Type::Named("BrowserTimeout".to_string())),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            };
+        }
+        ("core.browser", "connect" | "connect_profile") => {
+            return Type::Result {
+                ok: Box::new(Type::Named("Browser".to_string())),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            };
+        }
         ("core.http.server", "bind") => return Type::Result {
             ok: Box::new(Type::Named("HttpServer".to_string())),
             err: Box::new(Type::String),

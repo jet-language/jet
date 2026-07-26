@@ -2997,6 +2997,102 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         ("WsMessage", "bytes") => {
                             format!("{}jet_ws_message_bytes(&({}))", root, recv)
                         }
+                        // D-BROWSER-AUTO1=A: native BiDi handle methods.
+                        ("Browser", "capabilities") => {
+                            format!("{}jet_browser_capabilities(&({}))", root, recv)
+                        }
+                        ("Browser", "context") => {
+                            format!("{}jet_browser_context(&({}))", root, recv)
+                        }
+                        ("Browser", "subscribe") => format!(
+                            "{}jet_browser_subscribe(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
+                        ("Browser", "next_event") => format!(
+                            "{}jet_browser_next_event(&({}), {})",
+                            root,
+                            recv,
+                            a(0)
+                        ),
+                        ("Browser", "protocol") => format!(
+                            "{}jet_browser_protocol(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
+                        ("Browser", "trace") => {
+                            format!("{}jet_browser_trace(&({}))", root, recv)
+                        }
+                        ("Browser", "close") => {
+                            format!("{}jet_browser_close(&({}))", root, recv)
+                        }
+                        ("BrowserContext", "page") => {
+                            format!("{}jet_browser_context_page(&({}))", root, recv)
+                        }
+                        ("BrowserContext", "close") => {
+                            format!("{}jet_browser_context_close(&({}))", root, recv)
+                        }
+                        ("BrowserPage", "goto") => format!(
+                            "{}jet_browser_page_goto(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
+                        ("BrowserPage", "get_by_role") => format!(
+                            "{}jet_browser_page_get_by_role(&({}), &({}), &({}))",
+                            root,
+                            recv,
+                            a(0),
+                            a(1)
+                        ),
+                        ("BrowserPage", "close") => {
+                            format!("{}jet_browser_page_close(&({}))", root, recv)
+                        }
+                        ("BrowserLocator", "wait") => format!(
+                            "{}jet_browser_locator_wait(&({}), {})",
+                            root,
+                            recv,
+                            a(0)
+                        ),
+                        ("BrowserLocator", "click") => {
+                            format!("{}jet_browser_locator_click(&({}))", root, recv)
+                        }
+                        ("BrowserEvent", "kind") => {
+                            format!("{}jet_browser_event_kind(&({}))", root, recv)
+                        }
+                        ("BrowserProtocol", "send") => format!(
+                            "{}jet_browser_protocol_send(&({}), &({}), &({}))",
+                            root,
+                            recv,
+                            a(0),
+                            a(1)
+                        ),
+                        ("BrowserCapabilities", "bidi") => format!(
+                            "{}jet_browser_capabilities_bidi(&({}))",
+                            root,
+                            recv
+                        ),
+                        ("BrowserCapabilities", "cdp") => format!(
+                            "{}jet_browser_capabilities_cdp(&({}))",
+                            root,
+                            recv
+                        ),
+                        ("BrowserCapabilities", "profile") => format!(
+                            "{}jet_browser_capabilities_profile(&({}))",
+                            root,
+                            recv
+                        ),
+                        ("BrowserTrace", "entry_count") => {
+                            format!("{}jet_browser_trace_entry_count(&({}))", root, recv)
+                        }
+                        ("BrowserTrace", "redacted") => {
+                            format!("{}jet_browser_trace_redacted(&({}))", root, recv)
+                        }
+                        ("BrowserTrace", "summary") => {
+                            format!("{}jet_browser_trace_summary(&({}))", root, recv)
+                        }
                         ("HttpResponse", "header") => format!(
                             "{}jet_http_srv_response_header({}, &({}), &({}))",
                             root,

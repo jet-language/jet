@@ -1838,6 +1838,45 @@ pub(crate) fn lower_method_call(
                 ok: Box::new(Type::List(Box::new(Type::Named("U8".to_string())))),
                 err: Box::new(Type::Named("WsError".to_string())),
             },
+            ("Browser", "capabilities") => Type::Named("BrowserCapabilities".to_string()),
+            ("Browser", "context") => Type::Result {
+                ok: Box::new(Type::Named("BrowserContext".to_string())),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            },
+            ("Browser", "subscribe" | "close") => Type::Result {
+                ok: Box::new(unit_type()),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            },
+            ("Browser", "next_event") => Type::Result {
+                ok: Box::new(Type::Named("BrowserEvent".to_string())),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            },
+            ("Browser", "protocol") => Type::Result {
+                ok: Box::new(Type::Named("BrowserProtocol".to_string())),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            },
+            ("Browser", "trace") => Type::Named("BrowserTrace".to_string()),
+            ("BrowserContext", "page") => Type::Result {
+                ok: Box::new(Type::Named("BrowserPage".to_string())),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            },
+            ("BrowserContext", "close")
+            | ("BrowserPage", "goto" | "close")
+            | ("BrowserLocator", "wait" | "click") => Type::Result {
+                ok: Box::new(unit_type()),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            },
+            ("BrowserPage", "get_by_role") => Type::Named("BrowserLocator".to_string()),
+            ("BrowserEvent", "kind")
+            | ("BrowserCapabilities", "profile")
+            | ("BrowserTrace", "summary") => Type::String,
+            ("BrowserProtocol", "send") => Type::Result {
+                ok: Box::new(Type::String),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            },
+            ("BrowserCapabilities", "bidi" | "cdp")
+            | ("BrowserTrace", "redacted") => Type::Bool,
+            ("BrowserTrace", "entry_count") => Type::Int,
             _ => unit_type(),
         };
         let targs: Vec<TExpr> = args
@@ -1886,6 +1925,17 @@ pub(crate) fn lower_method_call(
             || kind == "HttpHandler"
             || kind == "WsConn"
             || kind == "WsMessage"
+            || matches!(
+                kind.as_str(),
+                "Browser"
+                    | "BrowserContext"
+                    | "BrowserPage"
+                    | "BrowserLocator"
+                    | "BrowserEvent"
+                    | "BrowserTrace"
+                    | "BrowserCapabilities"
+                    | "BrowserProtocol"
+            )
             || server_message_method
         {
             THandleOp::HttpServerMethod {

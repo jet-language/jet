@@ -364,6 +364,7 @@ const CORELIB_PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/Top/HttpClient.rs"),
     include_str!("../Prelude/CoreLib/Top/HttpServer.rs"),
     include_str!("../Prelude/CoreLib/Top/Ws.rs"),
+    include_str!("../Prelude/CoreLib/Top/Browser.rs"),
     include_str!("../Prelude/CoreLib/Top/Args.rs"),
     include_str!("../Prelude/CoreLib/Top/Reflect.rs"),
     // D-AUTH2=A (ratified 2026-07-13): `core.auth.verify_jwt` prelude.

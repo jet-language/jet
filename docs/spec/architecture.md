@@ -205,6 +205,29 @@ surfaces, client leases, live reload, and last-good swap. `CmdCompile.rs`
 drives its build-state API while retaining compile/codegen/rustc execution;
 there is no callback or dependency edge from the seam back to the root.
 
+### Browser automation protocol core
+
+D-BROWSER-AUTO1=A puts the portable automation API in `core.browser`. The
+generated runtime uses the existing std-only WebSocket and strict JSON codecs
+to speak WebDriver BiDi. It does not require Node, Playwright, or a Canvas
+facade. Browser installation and process launch are separate Jetpack work.
+
+`BrowserProfile` pins a supported BiDi contract. A session negotiates
+capabilities before use. `Browser.context()` creates an isolated BiDi user
+context, and the context owns its pages. The beginner path uses semantic
+accessibility locators and bounded waits. The expert path exposes raw BiDi and
+capability-checked CDP commands through `Browser.protocol`.
+
+The protocol core accepts only strict JSON objects and exact response IDs.
+Malformed messages, protocol errors, unsupported profiles, unavailable expert
+protocols, and timeouts return `BrowserError`. The trace keeps at most 512
+entries. Entries record only
+sequence IDs, method names, and status. They never record endpoints, command
+parameters, results, event payloads, secrets, or page data. Page, context, and
+session cleanup is explicit, idempotent, and retry-safe after protocol failure.
+Last-owner drops perform the same cleanup as a best effort; page leases keep
+their isolated user context alive until the final child is gone.
+
 ### Adding an FFI bridge
 
 Foreign dependencies stay behind the existing runtime boundary; they never
