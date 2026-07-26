@@ -31,21 +31,23 @@ impl<'a> Parser<'a> {
             scope: crate::Policy::PolicyScope,
         ) -> Result<Vec<crate::Policy::PolicyDeclaration>, Diagnostic> {
             let marker_span = marker.span;
+            let arguments = self.bound_registered_rule_arguments(&marker)?;
+            let expressions = arguments.variadic().cloned().collect::<Vec<_>>();
             let mut out = Vec::new();
-            for expr in marker.args {
+            for expr in expressions {
                 let (name, name_span, limit) = match expr {
                     crate::AST::Expr::Ident(name, span) => (name, span, None),
                     crate::AST::Expr::Call(mut call) if call.args.len() == 1 => {
                         let argument = call.args.pop().unwrap();
                         let crate::AST::Expr::Int(value, _, _, _) = argument.expr else {
-                            return Err(Self::marker_argument_shape_error(Syntax::ATTR_POLICY, marker_span));
+                            return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_POLICY, marker_span));
                         };
                         if argument.label.is_some() {
-                            return Err(Self::marker_argument_shape_error(Syntax::ATTR_POLICY, marker_span));
+                            return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_POLICY, marker_span));
                         }
                         (call.name, call.name_span, Some(value))
                     }
-                    other => return Err(Self::marker_argument_shape_error(Syntax::ATTR_POLICY, other.span())),
+                    other => return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_POLICY, other.span())),
                 };
                 let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
                     let site_bound = crate::Policy::applied_rule(&name).is_some_and(|row| !row.inherits);
@@ -403,6 +405,7 @@ impl<'a> Parser<'a> {
             let mut web_target_ceiling = None;
             let mut default_target: Option<String> = None;
             let mut html_path: Option<String> = None;
+            let mut html_seen = false;
             let mut pub_file = false;
             let mut no_prelude = false;
             let mut no_alloc_policy: Option<Span> = None;
@@ -586,7 +589,7 @@ impl<'a> Parser<'a> {
                                                 no_prelude = true;
                                             }
                                         }
-                                        Syntax::ATTR_TARGET => match Self::web_target_from_marker(&marker) {
+                                        Syntax::ATTR_TARGET => match self.web_target_from_marker(&marker) {
                                             Ok(TargetMarker::DefaultWeb) if default_target.is_none() => {
                                                 default_target = Some(crate::Syntax::BUILD_TARGET_WEB.to_string());
                                             }
@@ -608,8 +611,11 @@ impl<'a> Parser<'a> {
                                                 failed = true;
                                             }
                                         },
-                                        Syntax::ATTR_HTML => match Self::html_from_marker(&marker) {
-                                            Ok(path) if html_path.is_none() => html_path = Some(path),
+                                        Syntax::ATTR_HTML => match self.html_from_marker(&marker) {
+                                            Ok(path) if !html_seen => {
+                                                html_seen = true;
+                                                html_path = path;
+                                            }
                                             Ok(_) => {
                                                 self.diags.push(Diagnostic::error(
                                                     "E0003",
@@ -736,8 +742,8 @@ impl<'a> Parser<'a> {
                     // D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — explicit
                     // companion host page for `--target=web` builds.
                     TokKind::Hash if self.at_html_marker() => match self.parse_html_marker() {
-                        Ok(path) => {
-                            if html_path.is_some() {
+                        Ok((marker, path)) => {
+                            if html_seen {
                                 let span = self.peek().span;
                                 self.diags.push(Diagnostic::error(
                                     "E0003",
@@ -749,7 +755,12 @@ impl<'a> Parser<'a> {
                                 self.sync_top();
                                 continue;
                             }
-                            html_path = Some(path);
+                            html_seen = true;
+                            html_path = path;
+                            self.applied_rules.push(crate::AST::AppliedRuleApplication {
+                                marker,
+                                target: None,
+                            });
                             continue;
                         }
                         Err(d) => {
@@ -1410,6 +1421,7 @@ impl<'a> Parser<'a> {
                 no_alloc_policy,
                 policy_declarations: std::mem::take(&mut self.policy_declarations),
                 applied_rules: std::mem::take(&mut self.applied_rules),
+                rule_facts: std::mem::take(&mut self.rule_facts),
             }
         }
     

@@ -8,11 +8,11 @@
 
 ## Why
 
-web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#[Codable]` structs/enums per D-JSBIND1)
+web exports and imports only admit ABI-safe types (scalars, `String`, `List`/`Map` of ABI-safe values, and `#Codable` structs/enums per D-JSBIND1)
 
 ## Fix
 
-use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `#[Codable]` struct/enum whose fields are ABI-safe (D-JSBIND1)
+use a scalar, `String`, a `List`/`Map` of ABI-safe values, or a `#Codable` struct/enum whose fields are ABI-safe (D-JSBIND1)
 
 ## Example
 

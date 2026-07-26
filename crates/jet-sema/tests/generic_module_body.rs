@@ -30,6 +30,7 @@ fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
             html_path: program.html_path,
             no_alloc_policy: program.no_alloc_policy,
             policy_declarations: program.policy_declarations.clone(),
+            rule_facts: std::mem::take(&mut program.rule_facts),
         }],
         parse_teaching: Vec::new(),
         used_core: HashSet::new(),
@@ -77,6 +78,7 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
             web_target_ceiling: program.web_target_ceiling, pub_file: program.pub_file, no_prelude: program.no_prelude,
             html_path: program.html_path, no_alloc_policy: program.no_alloc_policy,
             policy_declarations: program.policy_declarations.clone(),
+            rule_facts: std::mem::take(&mut program.rule_facts),
         });
     }
     let mut bundle = ProgramBundle {
@@ -405,9 +407,9 @@ fn run() {}
     let items = &bundle.modules[0].items;
     let tests: Vec<_> = items.iter().filter_map(|item| match item { Item::Test(t) => Some(t), _ => None }).collect();
     let benches: Vec<_> = items.iter().filter_map(|item| match item { Item::Bench(b) => Some(b), _ => None }).collect();
-    assert_eq!(tests.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), vec!["int_checks_identity", "text_checks_identity"]);
+    assert_eq!(tests.iter().map(|t| t.name.as_deref()).collect::<Vec<_>>(), vec![Some("int_checks_identity"), Some("text_checks_identity")]);
     assert_eq!(tests[0].params[0].ty, Type::Int);
     assert_eq!(tests[1].params[0].ty, Type::String);
-    assert_eq!(benches.iter().map(|b| b.name.as_str()).collect::<Vec<_>>(), vec!["int_checks_work", "text_checks_work"]);
+    assert_eq!(benches.iter().map(|b| b.name.as_deref()).collect::<Vec<_>>(), vec![Some("int_checks_work"), Some("text_checks_work")]);
     assert!(!format!("{:?}{:?}", tests[0].body, benches[0].body).contains("count"));
 }

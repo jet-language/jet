@@ -1849,6 +1849,7 @@ fn program_bundle(src: &str, mut prog: crate::AST::Program) -> crate::AST::Progr
             no_alloc_policy: prog.no_alloc_policy,
             policy_declarations: prog.policy_declarations.clone(),
             block_spans: prog.block_spans.clone(),
+            rule_facts: std::mem::take(&mut prog.rule_facts),
         }],
         parse_teaching: Vec::new(),
         used_core: std::collections::HashSet::new(),

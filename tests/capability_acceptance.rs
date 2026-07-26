@@ -168,7 +168,7 @@ fn derive_source_reentry() {
 
     let source = r#"
 use core.encoding.json as json
-#[Codable]
+#Codable
 struct Point { x: Int }
 fn run() {
     p := Point.{ x: 7 }

@@ -54,36 +54,96 @@ impl<'a> Lexer<'a> {
                 )
             })
             .collect::<Vec<_>>();
-        let bare = matches!(
-            significant.as_slice(),
-            [.., hash, ffi, open, lang, close]
-                if matches!(hash.kind, TokKind::Hash)
-                    && matches!(&ffi.kind, TokKind::Ident(name) if name == Syntax::ATTR_FFI)
-                    && matches!(open.kind, TokKind::LParen)
-                    && matches!(lang.kind, TokKind::Ident(_))
-                    && matches!(close.kind, TokKind::RParen)
-        );
-        if bare {
-            return true;
-        }
-        let Some(group_start) = significant
-            .windows(2)
-            .rposition(|pair| {
-                matches!(pair[0].kind, TokKind::Hash)
-                    && matches!(pair[1].kind, TokKind::LBracket)
-            })
-        else {
-            return false;
+        let is_marker_name =
+            |token: &&Token| matches!(token.kind, TokKind::Ident(_) | TokKind::KwUnsafe);
+        let is_ffi = |token: &&Token| {
+            matches!(&token.kind, TokKind::Ident(name) if name == Syntax::ATTR_FFI)
         };
-        matches!(significant.last().map(|token| &token.kind), Some(TokKind::RBracket))
-            && significant[group_start + 2..significant.len() - 1]
-                .windows(4)
-                .any(|window| {
-                    matches!(&window[0].kind, TokKind::Ident(name) if name == Syntax::ATTR_FFI)
-                        && matches!(window[1].kind, TokKind::LParen)
-                        && matches!(window[2].kind, TokKind::Ident(_))
-                        && matches!(window[3].kind, TokKind::RParen)
-                })
+        let mut cursor = significant.len();
+        let mut saw_ffi = false;
+        loop {
+            if cursor >= 2
+                && matches!(significant[cursor - 2].kind, TokKind::Hash)
+                && is_marker_name(&significant[cursor - 1])
+            {
+                saw_ffi |= is_ffi(&significant[cursor - 1]);
+                cursor -= 2;
+                continue;
+            }
+            if cursor > 0 && matches!(significant[cursor - 1].kind, TokKind::RParen) {
+                let mut depth = 0usize;
+                let mut open = None;
+                for index in (0..cursor).rev() {
+                    match significant[index].kind {
+                        TokKind::RParen => depth += 1,
+                        TokKind::LParen => {
+                            depth -= 1;
+                            if depth == 0 {
+                                open = Some(index);
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if let Some(open) = open {
+                    if open >= 2
+                        && matches!(significant[open - 2].kind, TokKind::Hash)
+                        && is_marker_name(&significant[open - 1])
+                    {
+                        saw_ffi |= is_ffi(&significant[open - 1]);
+                        cursor = open - 2;
+                        continue;
+                    }
+                }
+            }
+            if cursor > 0 && matches!(significant[cursor - 1].kind, TokKind::RBracket) {
+                let mut depth = 0usize;
+                let mut open = None;
+                for index in (0..cursor).rev() {
+                    match significant[index].kind {
+                        TokKind::RBracket => depth += 1,
+                        TokKind::LBracket => {
+                            depth -= 1;
+                            if depth == 0 {
+                                open = Some(index);
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if let Some(open) = open {
+                    if open > 0 && matches!(significant[open - 1].kind, TokKind::Hash) {
+                        let mut paren_depth = 0usize;
+                        let mut bracket_depth = 0usize;
+                        let mut expects_name = true;
+                        for token in &significant[open + 1..cursor - 1] {
+                            if expects_name && paren_depth == 0 && bracket_depth == 0 {
+                                saw_ffi |= is_ffi(token);
+                                expects_name = false;
+                            }
+                            match token.kind {
+                                TokKind::LParen => paren_depth += 1,
+                                TokKind::RParen => paren_depth = paren_depth.saturating_sub(1),
+                                TokKind::LBracket => bracket_depth += 1,
+                                TokKind::RBracket => {
+                                    bracket_depth = bracket_depth.saturating_sub(1);
+                                }
+                                TokKind::Comma if paren_depth == 0 && bracket_depth == 0 => {
+                                    expects_name = true;
+                                }
+                                _ => {}
+                            }
+                        }
+                        cursor = open - 1;
+                        continue;
+                    }
+                }
+            }
+            break;
+        }
+        saw_ffi
     }
 
     pub(super) fn at(&self, i: usize) -> char {
@@ -605,5 +665,37 @@ fn add(a: Int, b: Int) -> Int {
             _ => None,
         });
         assert!(body.is_some(), "{tokens:?}");
+    }
+
+    #[test]
+    fn adjacent_ffi_markers_keep_foreign_body_raw_in_both_orders() {
+        for source in [
+            "#Unsafe(\"registers\") #FFI(asm) fn add() { \"\"\"add {a}, {b}\"\"\" }",
+            "#FFI(asm) #Unsafe(\"registers\") fn add() { \"\"\"add {a}, {b}\"\"\" }",
+        ] {
+            let (tokens, diagnostics) = lex_raw(source);
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            assert!(tokens.iter().any(|token| matches!(
+                &token.kind,
+                TokKind::Str(parts)
+                    if matches!(parts.as_slice(), [StrTokPart::Lit(text)] if text == "add {a}, {b}")
+            )), "{tokens:?}");
+        }
+    }
+
+    #[test]
+    fn grouped_ffi_argument_name_does_not_make_an_ordinary_body_raw() {
+        let source =
+            "#[Meta(category: FFI(asm)), Task] fn work() { text :: \"\"\"\nvalue={value}\n\"\"\" }";
+        let (tokens, diagnostics) = lex_raw(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(
+            tokens.iter().any(|token| matches!(
+                &token.kind,
+                TokKind::Str(parts)
+                    if parts.iter().any(|part| matches!(part, StrTokPart::Interp(_)))
+            )),
+            "{tokens:?}"
+        );
     }
 }

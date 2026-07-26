@@ -67,6 +67,45 @@ impl<'a> Checker<'a> {
         /// Check two alternative branches with independent move states, then
         /// keep the union (a value moved in either branch counts as gone).
         pub(crate) fn check_stmt(&mut self, stmt: &mut Stmt) {
+            if let Some(mut marker) = self.take_statement_rule_fact(stmt.span()) {
+                if let Some(arguments) = self.validate_rule_signature(&mut marker) {
+                    let text = match arguments.constant_for_source(0) {
+                        Some(crate::Comptime::CtValue::Str(value)) => Some(value.clone()),
+                        _ => None,
+                    };
+                    match stmt {
+                        Stmt::Unsafe {
+                            audit,
+                            audit_expr,
+                            ..
+                        } if marker.name == Syntax::KW_UNSAFE => {
+                            *audit = text;
+                            *audit_expr = marker.args.into_iter().next();
+                        }
+                        Stmt::Impure {
+                            reason,
+                            reason_expr,
+                            ..
+                        } if marker.name == Syntax::KW_IMPURE => {
+                            *reason = text;
+                            *reason_expr = marker.args.into_iter().next();
+                        }
+                        Stmt::AssumeDet {
+                            reason,
+                            reason_expr,
+                            ..
+                        } if marker.name == Syntax::ATTR_NONDETERMINISTIC => {
+                            if let Some(text) = text {
+                                *reason = text;
+                            }
+                            if let Some(argument) = marker.args.into_iter().next() {
+                                *reason_expr = argument;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
             if let Stmt::While { span, .. }
             | Stmt::For { span, .. }
             | Stmt::Loop { span, .. }
@@ -1653,7 +1692,9 @@ impl<'a> Checker<'a> {
                 // semantically a plain block: it has no runtime significance. The gate is
                 // enforced only inside the comptime interpreter. L3102 fires when no
                 // reason was given.
-                Stmt::Impure { reason, body, span } => {
+                Stmt::Impure {
+                    reason, body, span, ..
+                } => {
                     if reason.is_none() {
                         self.diags.push(Diagnostic::lint(
                             "L3102",
@@ -2104,12 +2145,36 @@ impl<'a> Checker<'a> {
                 Stmt::ContextBlock {
                     fields,
                     body,
-                    span: _,
+                    span,
                 } => {
-                    for (field_name, value_expr, field_span) in fields.iter_mut() {
-                        let ty = self.infer(value_expr);
+                    let rule_fact = self.take_rule_fact(crate::Syntax::CTX_BLOCK, *span);
+                    let signature_checked = rule_fact.is_some();
+                    let validated = rule_fact.and_then(|mut marker| {
+                            for (argument, (_, value, _)) in marker.args.iter_mut().zip(fields.iter_mut()) {
+                                std::mem::swap(argument, value);
+                            }
+                            let validated = self.validate_rule_signature(&mut marker);
+                            for (argument, (_, value, _)) in marker.args.iter_mut().zip(fields.iter_mut()) {
+                                std::mem::swap(argument, value);
+                            }
+                            validated
+                        });
+                    let signature_valid = !signature_checked || validated.is_some();
+                    for (source_index, (field_name, value_expr, field_span)) in
+                        fields.iter_mut().enumerate()
+                    {
+                        let ty = if signature_checked {
+                            validated
+                                .as_ref()
+                                .and_then(|arguments| arguments.type_for_source(source_index))
+                        } else {
+                            self.infer(value_expr)
+                        };
                         match field_name.as_str() {
                             crate::Syntax::CTX_FIELD_ALLOCATOR => {
+                                if !signature_valid {
+                                    continue;
+                                }
                                 // Must be one of the known allocator handle types.
                                 let ok = match &ty {
                                     Some(Type::Named(n)) => {
@@ -2137,6 +2202,9 @@ impl<'a> Checker<'a> {
                                 let _ = ty;
                             }
                             crate::Syntax::CTX_FIELD_DEADLINE => {
+                                if !signature_valid {
+                                    continue;
+                                }
                                 if !matches!(ty, Some(Type::Int)) {
                                     let got = ty
                                         .as_ref()

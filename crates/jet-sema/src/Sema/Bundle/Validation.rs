@@ -1543,6 +1543,9 @@ pub(crate) fn check_module_bodies(
                 }
             }
             Item::Test(t) if mode == CompileMode::Test => {
+                let Some(test_name) = t.name.as_deref() else {
+                    continue;
+                };
                 // D-TEST1: a parameterized `#Test fn` is a property test — its
                 // params must be generatable types so the runner can synthesize
                 // inputs. Validate before checking the body so the error points at
@@ -1557,7 +1560,7 @@ pub(crate) fn check_module_bodies(
                     is_pub: false,
                     is_package_pub: false,
                     external_type: None,
-                    name: format!("__test_{}", t.name),
+                    name: format!("__test_{test_name}"),
                     name_span: t.name_span,
                     meta: None,
                     type_params: Vec::new(),
@@ -1621,12 +1624,15 @@ pub(crate) fn check_module_bodies(
             // (a bare statement list, no params, unit context) — only the mode
             // gate differs.
             Item::Bench(b) if mode == CompileMode::Bench => {
+                let Some(bench_name) = b.name.as_deref() else {
+                    continue;
+                };
                 let mut synthetic = Func {
                     span: b.name_span,
                     is_pub: false,
                     is_package_pub: false,
                     external_type: None,
-                    name: format!("__bench_{}", b.name),
+                    name: format!("__bench_{bench_name}"),
                     name_span: b.name_span,
                     meta: None,
                     type_params: Vec::new(),
@@ -1941,6 +1947,7 @@ pub(crate) fn check_func_body_bundle(
         func_pkg_pub: &st.func_pkg_pub,
         module_path: &st.module_path,
         policy_declarations: &st.policy_declarations,
+        rule_facts: st.rule_facts.clone(),
         current_function_span: f.span,
         reference_anchors,
         diags: Vec::new(),

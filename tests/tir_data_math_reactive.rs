@@ -90,10 +90,9 @@ fn columnar_serialization_is_transparent() {
     }
     let src = "\
 use core.encoding.json as json
-#[Codable]
-#Layout(columnar)
+#[Codable, Layout(columnar)]
 struct Pt { a: Int, b: Int }
-#[Codable]
+#Codable
 struct PlainPt { a: Int, b: Int }
 fn run() {
     cs :: [Pt].{ Pt.{ a: 1, b: 2 }, Pt.{ a: 3, b: 4 } }

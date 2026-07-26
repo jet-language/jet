@@ -464,7 +464,6 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "Decode",
         "Summarize",
         "Comparable",
-        "Pure",
         "MustUse",
         "Pre",
         "Post",

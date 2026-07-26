@@ -287,12 +287,28 @@ impl<'a> Fmt<'a> {
         // D-TESTPAREN1=A: unit-test block form is `#Test("name") { … }` — no space before `(`.
         // D-TEST1: property test form is `#Test fn name(params) { … }` — space before `fn`.
         if t.params.is_empty() && t.fn_keyword_span.is_none() {
-            self.write("(\"");
-            self.write(&t.name.replace('\\', "\\\\").replace('"', "\\\""));
-            self.write("\")");
+            self.write("(");
+            if let Some(name) = &t.name_expr {
+                self.fmt_expr(name, Prec::OrFallback);
+            } else {
+                self.write("\"");
+                self.write(
+                    &t.name
+                        .as_deref()
+                        .expect("synthetic test blocks have a resolved name")
+                        .replace('\\', "\\\\")
+                        .replace('"', "\\\""),
+                );
+                self.write("\"");
+            }
+            self.write(")");
         } else {
             self.write(" fn ");
-            self.write(&t.name);
+            self.write(
+                t.name
+                    .as_deref()
+                    .expect("property tests have a parsed name"),
+            );
             self.write("(");
             for (i, p) in t.params.iter().enumerate() {
                 if i > 0 {
@@ -313,9 +329,9 @@ impl<'a> Fmt<'a> {
         self.write(&format!("#{}", Syntax::KW_BENCH));
         // D-BENCH-MARKER1=A: benchmark blocks use the same parenthesized
         // marker-argument shape as `#Test("name")`.
-        self.write("(\"");
-        self.write(&b.name.replace('\\', "\\\\").replace('"', "\\\""));
-        self.write("\")");
+        self.write("(");
+        self.fmt_expr(&b.name_expr, Prec::OrFallback);
+        self.write(")");
         self.write(" ");
         self.write(Syntax::BLOCK_OPEN);
         self.newline();
@@ -618,6 +634,9 @@ impl<'a> Fmt<'a> {
                     self.write(&escape_str_lit(text));
                     self.write("\"");
                 }
+                crate::AST::EveryArg::Expression(expression) => {
+                    self.fmt_expr(expression, super::Prec::OrFallback)
+                }
             }
             self.write(")");
         }
@@ -651,9 +670,9 @@ impl<'a> Fmt<'a> {
             start_rule!();
             self.write(&format!("{name}("));
             self.fmt_expr(&clause.cond, Prec::OrFallback);
-            self.write(", \"");
-            self.write(&escape_str_lit(&clause.message));
-            self.write("\")");
+            self.write(", ");
+            self.fmt_expr(&clause.message_expr, Prec::OrFallback);
+            self.write(")");
         }
         if grouped {
             self.write("] ");

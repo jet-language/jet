@@ -19,20 +19,6 @@ impl<'a> Parser<'a> {
             self.diags.push(Self::retired_effect_syntax(span));
         }
     
-        pub(in crate::Parser) fn marker_argument_shape_error(name: &str, span: Span) -> Diagnostic {
-            let expected = crate::Policy::applied_rule(name)
-                .map(|row| row.signature.render())
-                .unwrap_or_else(|| "()".to_string());
-            Diagnostic::error(
-                "E0930",
-                format!("`#{name}` arguments do not match `{name}{expected}`"),
-                "marker arguments use the same call grammar and typed signature as function arguments"
-                    .to_string(),
-                format!("match the registered signature `{name}{expected}`"),
-                Some(span),
-            )
-        }
-
         pub(super) fn retired_inline_always(name: &str) -> bool {
             crate::Policy::applied_rule(name).is_some_and(|row| {
                 matches!(
@@ -64,11 +50,9 @@ impl<'a> Parser<'a> {
             if marker.args.is_empty() {
                 return Ok((false, span));
             }
-            if marker.args.len() != 1
-                || !matches!(&marker.args[0], crate::AST::Expr::Ident(mode, _) if mode == "Always")
-                || marker.arg_labels[0].is_some()
-            {
-                return Err(Self::marker_argument_shape_error(
+            let arguments = self.bound_registered_rule_arguments(&marker)?;
+            if !matches!(arguments.parameter(0), Some(crate::AST::Expr::Ident(mode, _)) if mode == "Always") {
+                return Err(crate::Policy::marker_argument_shape_error(
                     Syntax::CONTRACT_INLINE,
                     marker.span,
                 ));
@@ -257,22 +241,22 @@ impl<'a> Parser<'a> {
         ) -> Result<crate::AST::ContractClause, Diagnostic> {
             let start = self.peek().span.start;
             let marker = self.parse_rule_marker()?;
-            if marker.name != kw || marker.args.len() != 2 || marker.arg_labels.iter().any(Option::is_some) {
-                return Err(Self::marker_argument_shape_error(kw, marker.span));
-            }
-            let cond = marker.args[0].clone();
-            let (message, message_span) = match &marker.args[1] {
+            let arguments = self.bound_registered_rule_arguments(&marker)?;
+            let (Some(condition), Some(message_argument)) =
+                (arguments.parameter(0), arguments.parameter(1))
+            else {
+                return Err(crate::Policy::marker_argument_shape_error(kw, marker.span));
+            };
+            let cond = condition.clone();
+            let message_span = match message_argument {
                 crate::AST::Expr::Str(parts, span) if parts.len() == 1 => match &parts[0] {
-                    crate::AST::StrPart::Lit(message) => (message.clone(), *span),
-                    crate::AST::StrPart::Interp(..) => {
-                        return Err(Self::marker_argument_shape_error(kw, *span));
-                    }
+                    crate::AST::StrPart::Lit(_) | crate::AST::StrPart::Interp(..) => *span,
                 },
-                other => return Err(Self::marker_argument_shape_error(kw, other.span())),
+                other => other.span(),
             };
             Ok(crate::AST::ContractClause {
                 cond,
-                message,
+                message_expr: message_argument.clone(),
                 message_span,
                 span: Span::new(start, marker.span.end),
             })
@@ -294,27 +278,28 @@ impl<'a> Parser<'a> {
     
         /// D-HTMLPAIR1 (ratified 2026-07-01, c134): parse `#Html("path.html")` — the file's
         /// explicit companion host page for `--target=web` builds.
-        pub(super) fn parse_html_marker(&mut self) -> Result<String, Diagnostic> {
+        pub(super) fn parse_html_marker(
+            &mut self,
+        ) -> Result<(crate::AST::Marker, Option<String>), Diagnostic> {
             let marker = self.parse_rule_marker()?;
-            Self::html_from_marker(&marker)
+            let path = self.html_from_marker(&marker)?;
+            Ok((marker, path))
         }
 
-        pub(super) fn html_from_marker(marker: &crate::AST::Marker) -> Result<String, Diagnostic> {
-            if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
-                return Err(Self::marker_argument_shape_error(Syntax::ATTR_HTML, marker.span));
-            }
-            match &marker.args[0] {
-                crate::AST::Expr::Str(parts, span) if parts.len() == 1 => match &parts[0] {
-                    crate::AST::StrPart::Lit(s) => Ok(s.clone()),
-                    crate::AST::StrPart::Interp(..) => Err(Self::marker_argument_shape_error(
-                        Syntax::ATTR_HTML,
-                        *span,
-                    )),
+        pub(super) fn html_from_marker(
+            &self,
+            marker: &crate::AST::Marker,
+        ) -> Result<Option<String>, Diagnostic> {
+            let arguments = self.bound_registered_rule_arguments(marker)?;
+            let Some(path) = arguments.parameter(0) else {
+                return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_HTML, marker.span));
+            };
+            match path {
+                crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+                    crate::AST::StrPart::Lit(s) => Ok(Some(s.clone())),
+                    crate::AST::StrPart::Interp(..) => Ok(None),
                 },
-                other => Err(Self::marker_argument_shape_error(
-                    Syntax::ATTR_HTML,
-                    other.span(),
-                )),
+                _ => Ok(None),
             }
         }
     
@@ -323,19 +308,20 @@ impl<'a> Parser<'a> {
         /// backend — a different axis, same marker).
         pub(in crate::Parser) fn parse_web_target_marker(&mut self) -> Result<TargetMarker, Diagnostic> {
             let marker = self.parse_rule_marker()?;
-            Self::web_target_from_marker(&marker)
+            self.web_target_from_marker(&marker)
         }
 
-        pub(super) fn web_target_from_marker(marker: &crate::AST::Marker) -> Result<TargetMarker, Diagnostic> {
-            if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
-                return Err(Self::marker_argument_shape_error(
+        pub(super) fn web_target_from_marker(&self, marker: &crate::AST::Marker) -> Result<TargetMarker, Diagnostic> {
+            let arguments = self.bound_registered_rule_arguments(marker)?;
+            let Some(target) = arguments.parameter(0) else {
+                return Err(crate::Policy::marker_argument_shape_error(
                     Syntax::ATTR_TARGET,
                     marker.span,
                 ));
-            }
+            };
             // D-OSTARGET1=A: `#Target(Os.Linux|Os.Macos|Os.Windows)` — the second,
             // mutually-exclusive axis (native platform gating on an `impl`).
-            if let crate::AST::Expr::Field(base, os_name, os_span) = &marker.args[0] {
+            if let crate::AST::Expr::Field(base, os_name, os_span) = target {
                 if matches!(
                     base.as_ref(),
                     crate::AST::Expr::Ident(namespace, _)
@@ -359,8 +345,8 @@ impl<'a> Parser<'a> {
                         });
                 }
             }
-            let crate::AST::Expr::Ident(name, name_span) = &marker.args[0] else {
-                return Err(Self::marker_argument_shape_error(
+            let crate::AST::Expr::Ident(name, name_span) = target else {
+                return Err(crate::Policy::marker_argument_shape_error(
                     Syntax::ATTR_TARGET,
                     marker.span,
                 ));
@@ -436,11 +422,9 @@ impl<'a> Parser<'a> {
         pub(super) fn parse_state_require_marker(&mut self) -> Result<(String, Span), Diagnostic> {
             let start = self.peek().span.start;
             let marker = self.parse_rule_marker()?;
-            if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
-                return Err(Self::marker_argument_shape_error(Syntax::KW_STATE, marker.span));
-            }
-            let crate::AST::Expr::Ident(name, _) = &marker.args[0] else {
-                return Err(Self::marker_argument_shape_error(Syntax::KW_STATE, marker.span));
+            let arguments = self.bound_registered_rule_arguments(&marker)?;
+            let Some(crate::AST::Expr::Ident(name, _)) = arguments.parameter(0) else {
+                return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_STATE, marker.span));
             };
             Ok((name.clone(), Span::new(start, marker.span.end)))
         }
@@ -450,19 +434,22 @@ impl<'a> Parser<'a> {
         pub(super) fn parse_transition_marker(&mut self) -> Result<crate::AST::StateTransition, Diagnostic> {
             let start = self.peek().span.start;
             let marker = self.parse_rule_marker()?;
-            if marker.args.len() != 2 || marker.arg_labels.iter().any(Option::is_some) {
-                return Err(Self::marker_argument_shape_error(
+            let arguments = self.bound_registered_rule_arguments(&marker)?;
+            let (Some(from_argument), Some(to_argument)) =
+                (arguments.parameter(0), arguments.parameter(1))
+            else {
+                return Err(crate::Policy::marker_argument_shape_error(
                     Syntax::KW_TRANSITION,
                     marker.span,
                 ));
-            }
-            let from = match &marker.args[0] {
+            };
+            let from = match from_argument {
                 crate::AST::Expr::Ident(name, _) if name == Syntax::STATE_ENTRY => None,
                 crate::AST::Expr::Ident(name, _) => Some(name.clone()),
-                _ => return Err(Self::marker_argument_shape_error(Syntax::KW_TRANSITION, marker.span)),
+                _ => return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_TRANSITION, marker.span)),
             };
-            let crate::AST::Expr::Ident(to, _) = &marker.args[1] else {
-                return Err(Self::marker_argument_shape_error(Syntax::KW_TRANSITION, marker.span));
+            let crate::AST::Expr::Ident(to, _) = to_argument else {
+                return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_TRANSITION, marker.span));
             };
             Ok(crate::AST::StateTransition {
                 from,
@@ -479,10 +466,11 @@ impl<'a> Parser<'a> {
         pub(super) fn parse_every_marker(&mut self) -> Result<crate::AST::EveryMarker, Diagnostic> {
             let start = self.peek().span.start;
             let marker = self.parse_rule_marker()?;
-            if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
-                return Err(Self::marker_argument_shape_error(Syntax::ATTR_EVERY, marker.span));
-            }
-            let arg = match &marker.args[0] {
+            let arguments = self.bound_registered_rule_arguments(&marker)?;
+            let Some(schedule) = arguments.parameter(0) else {
+                return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_EVERY, marker.span));
+            };
+            let arg = match schedule {
                 crate::AST::Expr::UnitLit { int, float, suffix, suffix_span, .. } => {
                     crate::AST::EveryArg::Duration {
                         int: *int,
@@ -492,18 +480,15 @@ impl<'a> Parser<'a> {
                     }
                 }
                 crate::AST::Expr::Str(parts, tok_span) => {
-                    if parts.len() != 1 {
-                        return Err(Self::e0926_bad_every_arg(*tok_span));
-                    }
-                    match &parts[0] {
-                        crate::AST::StrPart::Lit(s) => crate::AST::EveryArg::WallClock {
+                    match parts.as_slice() {
+                        [crate::AST::StrPart::Lit(s)] => crate::AST::EveryArg::WallClock {
                             text: s.clone(),
                             text_span: *tok_span,
                         },
-                        crate::AST::StrPart::Interp(..) => return Err(Self::e0926_bad_every_arg(*tok_span)),
+                        _ => crate::AST::EveryArg::Expression(schedule.clone()),
                     }
                 }
-                other => return Err(Self::e0926_bad_every_arg(other.span())),
+                other => crate::AST::EveryArg::Expression(other.clone()),
             };
             Ok(crate::AST::EveryMarker {
                 arg,
@@ -536,22 +521,6 @@ impl<'a> Parser<'a> {
                     .to_string(),
                 "add `#Task` (`#Task #Every(5min) fn …`), or drop `#Every(…)` if this isn't a \
                  scheduled task."
-                    .to_string(),
-                Some(span),
-            )
-        }
-
-        /// E0926: `#Every(…)`'s argument isn't a duration literal or a quoted
-        /// `"HH:MM"` wall-clock time — the two shapes D-SCHEDULE1 allows.
-        pub(super) fn e0926_bad_every_arg(span: Span) -> Diagnostic {
-            Diagnostic::error(
-                "E0926",
-                "`#Every(…)` needs a duration literal or a quoted daily time".to_string(),
-                "a schedule is either a repeat interval (D-UNITLIT1 duration literal) or a fixed \
-                 daily wall-clock trigger — nothing else names a cadence."
-                    .to_string(),
-                "write `#Every(5min)` (`ns`/`us`/`ms`/`s`/`min`) or `#Every(\"03:00\")` (24h \
-                 `HH:MM`)."
                     .to_string(),
                 Some(span),
             )

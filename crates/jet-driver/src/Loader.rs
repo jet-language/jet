@@ -828,6 +828,7 @@ fn load_file(
         html_path: prog.html_path.clone(),
         no_alloc_policy: prog.no_alloc_policy,
         policy_declarations: effective_declarations,
+        rule_facts: std::mem::take(&mut prog.rule_facts),
     });
 
     for imp in &imports {

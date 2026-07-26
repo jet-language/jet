@@ -1324,8 +1324,8 @@ fn shape_cli_entry_type_drives_shell_inputs_but_remains_optional() {
         dir.join("typed.jet"),
         r#"#Cli
 struct RunArgs {
-    #[Doc("person to greet")] name: String
-    #[Default(2)] retries: Int
+    #Doc("person to greet") name: String
+    #Default(2) retries: Int
     verbose: Bool
 }
 
@@ -1446,8 +1446,8 @@ fn typed_cli_entry_accepts_an_imported_argument_type() {
         dir.join("args.jet"),
         r#"#Cli
 pub struct RunArgs {
-    #[Doc("person to greet")] pub name: String
-    #[Default(2)] pub retries: Int
+    #Doc("person to greet") pub name: String
+    #Default(2) pub retries: Int
     pub verbose: Bool
 }
 "#,

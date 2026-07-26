@@ -682,7 +682,7 @@ fn check_bundle_opts_for_output_inner(
     explicit_output: Option<&str>,
     mut incremental: Option<&mut IncrementalSemaCache>,
 ) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
-    let mut diags = super::BudgetSpecs::validate_bundle(bundle);
+    let mut diags = Vec::new();
     diags.extend(super::Casing::validate_bundle(bundle));
     // D-OSTARGET2=B (ratified 2026-07-03): fold every `comptime if build.os == {
     // … }` switch to the arm matching this build's active OS *before* any other
@@ -731,6 +731,7 @@ fn check_bundle_opts_for_output_inner(
             tests: HashMap::new(),
             trait_reg: TraitRegistry::default(),
             policy_declarations: m.policy_declarations.clone(),
+            rule_facts: m.rule_facts.clone(),
             code_modules: HashMap::new(),
             code_module_identities: HashMap::new(),
             unqualified: HashMap::new(),
@@ -815,8 +816,25 @@ fn check_bundle_opts_for_output_inner(
     // `derive_providers` above.
     let known_derive_names: HashSet<String> =
         derive_providers.iter().map(|(_, name, _, _, _)| name.clone()).collect();
+    let ct_core_imports: Vec<HashMap<String, String>> = bundle
+        .modules
+        .iter()
+        .map(|module| {
+            module
+                .imports
+                .iter()
+                .filter_map(|import| {
+                    Some((import.import_alias(), import.core_module_path()?))
+                })
+                .collect()
+        })
+        .collect();
+    let mut top_level_embed_inputs = Vec::new();
 
     for (idx, module) in bundle.modules.iter_mut().enumerate() {
+        diags.extend(super::CheckerMarkers::check_rule_signatures(
+            &module.rule_facts,
+        ));
         super::Protocol::expand_module_protocols(&mut module.items, &mut diags);
         // D-DOTSCOPE1: validate contextual `.member { … }` scope statements
         // against each marker's declared vocabulary (E0614/E0615/E0616/E0617/E0618).
@@ -829,6 +847,26 @@ fn check_bundle_opts_for_output_inner(
         process_validate_blocks(&mut module.items, &mut diags);
         // D-PATCH1: synthetic `T.Patch` before struct registration.
         inject_patchable_types(&mut module.items, &mut diags);
+        let base = module
+            .path
+            .parent()
+            .map(|path| path.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let mut comptime_types = HashMap::new();
+        eval_comptime_items(
+            &mut module.items,
+            &mut comptime_types,
+            &base,
+            &mut diags,
+            &ct_core_imports[idx],
+            Some(&mut top_level_embed_inputs),
+        );
+        super::CheckerMarkers::resolve_static_rule_products(
+            module,
+            &base,
+            &ct_core_imports[idx],
+            &mut diags,
+        );
         // Card #436: `CFFI::assemble` (jetpack crate) drains every
         // `#Extern`/`#Bindgen module` out of its declaring file and re-homes
         // it in a synthetic per-lib module (`<c.lib>`) with an empty
@@ -980,16 +1018,19 @@ fn check_bundle_opts_for_output_inner(
                     }
                 }
                 Item::Test(t) => {
-                    if name_defined(&t.name, &st.funcs, &st.registry, &st.consts)
-                        || st.tests.contains_key(&t.name)
+                    let Some(name) = &t.name else {
+                        continue;
+                    };
+                    if name_defined(name, &st.funcs, &st.registry, &st.consts)
+                        || st.tests.contains_key(name)
                     {
                         diags.push(defined_twice(
-                            &t.name,
+                            name,
                             "every test needs a unique name so failures are easy to find",
                             t.name_span,
                         ));
                     } else {
-                        st.tests.insert(t.name.clone(), t.name_span);
+                        st.tests.insert(name.clone(), t.name_span);
                     }
                 }
                 // D-BENCH1: `#Bench` blocks define no referenceable name; codegen
@@ -1269,6 +1310,7 @@ fn check_bundle_opts_for_output_inner(
             }
         }
 
+        st.consts.extend(comptime_types);
         // Defaults must exist before serde source expansion so Decode bodies
         // embed the evaluated value rather than re-evaluating at runtime.
         let serde_core_imports: HashMap<String, String> = module
@@ -1339,6 +1381,8 @@ fn check_bundle_opts_for_output_inner(
             &st.trait_reg,
         ));
     }
+    bundle.comptime_inputs.extend(top_level_embed_inputs);
+    diags.extend(super::BudgetSpecs::validate_bundle(bundle));
 
     // S62 E2401: delegation validation — check field exists and implements trait.
     // Runs after all m9 registrations so implements_trait is populated.
@@ -1389,45 +1433,6 @@ fn check_bundle_opts_for_output_inner(
             }
         }
     }
-
-    // S57 (M9.5): evaluate comptime bindings per module. `embed_file` paths
-    // resolve against each module file's own directory (S16 convention).
-    // D-CTCORE1: pre-collect core_imports (alias→module) per module so the
-    // comptime interpreter can evaluate whitelisted pure Core calls. Build a
-    // SEPARATE local map — not `states[idx].core_imports` — so the duplicate
-    // import check in the full import-resolution loop (below) is unaffected.
-    let ct_core_imports: Vec<HashMap<String, String>> = bundle
-        .modules
-        .iter()
-        .map(|module| {
-            module
-                .imports
-                .iter()
-                .filter_map(|imp| {
-                    let path = imp.core_module_path()?;
-                    let alias = imp.import_alias();
-                    Some((alias, path))
-                })
-                .collect()
-        })
-        .collect();
-    let mut top_level_embed_inputs = Vec::new();
-    for (idx, module) in bundle.modules.iter_mut().enumerate() {
-        let base = module
-            .path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        eval_comptime_items(
-            &mut module.items,
-            &mut states[idx].consts,
-            &base,
-            &mut diags,
-            &ct_core_imports[idx],
-            Some(&mut top_level_embed_inputs),
-        );
-    }
-    bundle.comptime_inputs.extend(top_level_embed_inputs);
 
     // D-MOD3/4: Unqualified imports (`use alias.Item`) are processed in a
     // dedicated pass *after* file-module aliases land in `st.imports` below.
@@ -2286,6 +2291,7 @@ mod structure_tests {
                 html_path: program.html_path,
                 no_alloc_policy: program.no_alloc_policy,
                 policy_declarations: program.policy_declarations,
+                rule_facts: program.rule_facts,
             }],
             parse_teaching: Vec::new(),
             used_core: HashSet::new(),

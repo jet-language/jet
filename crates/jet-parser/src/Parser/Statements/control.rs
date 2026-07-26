@@ -87,8 +87,31 @@ impl<'a> Parser<'a> {
         &mut self,
         marker: Marker,
     ) -> Result<MetaAttr, Diagnostic> {
+        let arguments = self.bound_registered_rule_arguments(&marker)?;
+        let parameter_indices = (0..marker.args.len())
+            .map(|index| arguments.parameter_for_source(index))
+            .collect::<Vec<_>>();
         let mut fields = Vec::new();
-        for (value, label) in marker.args.into_iter().zip(marker.arg_labels) {
+        for (index, (value, label)) in marker
+            .args
+            .into_iter()
+            .zip(marker.arg_labels)
+            .enumerate()
+        {
+            if label.is_none()
+                && matches!(&value, Expr::Ident(name, _) if name == Syntax::META_FIELD_TUNABLE)
+            {
+                fields.push(MetaField::Tunable { span: value.span() });
+                continue;
+            }
+            let label = label.or_else(|| {
+                let parameter_index = parameter_indices[index]?;
+                let parameter = crate::Policy::applied_rule(Syntax::ATTR_META)?
+                    .signature
+                    .params
+                    .get(parameter_index)?;
+                Some((parameter.name.to_string(), value.span()))
+            });
             match label {
                 Some((name, field_span)) => {
                     let span = Span::new(field_span.start, value.span().end);
@@ -113,10 +136,16 @@ impl<'a> Parser<'a> {
                             ));
                         }
                         fields.push(MetaField::Maturity { value, span });
-                    } else if name == Syntax::META_FIELD_TUNABLE
-                        && matches!(value, Expr::Bool(true, _))
-                    {
-                        fields.push(MetaField::Tunable { span });
+                    } else if name == Syntax::META_FIELD_TUNABLE {
+                        match value {
+                            Expr::Bool(true, _) => fields.push(MetaField::Tunable { span }),
+                            Expr::Bool(false, _) => {}
+                            value => fields.push(MetaField::Unknown {
+                                name,
+                                value: Some(value),
+                                span: field_span,
+                            }),
+                        }
                     } else {
                         fields.push(MetaField::Unknown {
                             name,
@@ -127,18 +156,14 @@ impl<'a> Parser<'a> {
                 }
                 None => {
                     let span = value.span();
-                    if matches!(&value, Expr::Ident(name, _) if name == Syntax::META_FIELD_TUNABLE) {
-                        fields.push(MetaField::Tunable { span });
-                    } else {
-                        fields.push(MetaField::Unknown {
-                            name: match value {
-                                Expr::Ident(name, _) => name,
-                                _ => "<positional>".to_string(),
-                            },
-                            value: None,
-                            span,
-                        });
-                    }
+                    fields.push(MetaField::Unknown {
+                        name: match value {
+                            Expr::Ident(name, _) => name,
+                            _ => "<positional>".to_string(),
+                        },
+                        value: None,
+                        span,
+                    });
                 }
             }
         }
@@ -281,45 +306,28 @@ impl<'a> Parser<'a> {
                 Some(marker.span),
             ));
         }
+        let arguments = self.bound_registered_rule_arguments(&marker)?;
         // D-UNSAFE-OBLIG1: ordinary call arguments, then semantic validation.
-        let audit = match (&marker.args[0], &marker.arg_labels[0]) {
-            (Expr::Str(parts, _), None) if parts.len() == 1 => match &parts[0] {
+        let audit_expr = arguments.parameter(0).cloned();
+        let audit = audit_expr.as_ref().and_then(|argument| match argument {
+            Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
                 StrPart::Lit(reason) => Some(reason.clone()),
-                StrPart::Interp(..) => {
-                    return Err(Self::marker_argument_shape_error(
-                        Syntax::KW_UNSAFE,
-                        marker.span,
-                    ));
-                }
+                StrPart::Interp(..) => None,
             },
-            _ => {
-                return Err(Self::marker_argument_shape_error(
-                    Syntax::KW_UNSAFE,
-                    marker.span,
-                ));
-            }
-        };
+            _ => None,
+        });
         let mut obligation_mode = None;
         if marker.args.len() > 2 {
-            return Err(Self::marker_argument_shape_error(
+            return Err(crate::Policy::marker_argument_shape_error(
                 Syntax::KW_UNSAFE,
                 marker.span,
             ));
         }
-        if let Some(value) = marker.args.get(1) {
-            let Some((field, field_span)) = marker.arg_labels[1].as_ref() else {
-                return Err(Self::marker_argument_shape_error(
-                    Syntax::KW_UNSAFE,
-                    marker.span,
-                ));
-            };
-            if field != "obligations" {
-                return Err(Diagnostic::error("E3108", format!("`{field}` is not an unsafe-gate option"), "per-site control has one typed field: `obligations`".to_string(), "write `obligations: .Track` or `obligations: .Skip`".to_string(), Some(*field_span)));
-            }
+        if let Some(value) = arguments.parameter(1) {
             let (mode, mode_span) = match value {
                 Expr::EnumLit { type_name, variant, span, args, .. }
                     if type_name.is_empty() && args.is_empty() => (variant, span),
-                _ => return Err(Self::marker_argument_shape_error(Syntax::KW_UNSAFE, value.span())),
+                _ => return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_UNSAFE, value.span())),
             };
             obligation_mode = Some(match mode.as_str() {
                     "Track" => crate::Policy::PolicyValue::UnsafeTrack,
@@ -343,6 +351,7 @@ impl<'a> Parser<'a> {
         }
         Ok(Stmt::Unsafe {
             audit,
+            audit_expr,
             body,
             span,
         })
@@ -353,33 +362,21 @@ impl<'a> Parser<'a> {
     pub(super) fn at_impure_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.peek().span;
         let marker = self.parse_rule_marker()?;
-        let reason = match marker.args.as_slice() {
-            [] => None,
-            [Expr::Str(parts, _)]
-                if marker.arg_labels[0].is_none() && parts.len() == 1 =>
-            {
-                match &parts[0] {
-                    StrPart::Lit(reason) => Some(reason.clone()),
-                    StrPart::Interp(..) => {
-                        return Err(Self::marker_argument_shape_error(
-                            Syntax::KW_IMPURE,
-                            marker.span,
-                        ));
-                    }
-                }
-            }
-            _ => {
-                return Err(Self::marker_argument_shape_error(
-                    Syntax::KW_IMPURE,
-                    marker.span,
-                ));
-            }
-        };
+        let arguments = self.bound_registered_rule_arguments(&marker)?;
+        let reason_expr = arguments.parameter(0).cloned();
+        let reason = reason_expr.as_ref().and_then(|argument| match argument {
+            Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
+                StrPart::Lit(reason) => Some(reason.clone()),
+                StrPart::Interp(..) => None,
+            },
+            _ => None,
+        });
         self.expect(TokKind::LBrace, "after `#Impure(…)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
         Ok(Stmt::Impure {
             reason,
+            reason_expr,
             body,
             span: Span::new(start.start, end),
         })
@@ -430,11 +427,9 @@ impl<'a> Parser<'a> {
     /// D-BLOCKPLANE1=A: `#Region(name) { … }`.
     pub(super) fn at_region_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let marker = self.parse_rule_marker()?;
-        if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
-            return Err(Self::marker_argument_shape_error(Syntax::ATTR_REGION, marker.span));
-        }
-        let Expr::Ident(name, name_span) = &marker.args[0] else {
-            return Err(Self::marker_argument_shape_error(Syntax::ATTR_REGION, marker.span));
+        let arguments = self.bound_registered_rule_arguments(&marker)?;
+        let Some(Expr::Ident(name, name_span)) = arguments.parameter(0) else {
+            return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_REGION, marker.span));
         };
         self.expect(TokKind::LBrace, "after `#Region(name)`")?;
         let body = self.block_stmts();
@@ -455,21 +450,26 @@ impl<'a> Parser<'a> {
     /// D-BLOCKPLANE1=A: audited `#Nondeterministic("reason") { … }`.
     pub(super) fn at_nondeterministic_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let marker = self.parse_rule_marker()?;
-        let reason = match marker.args.as_slice() {
-            [Expr::Str(parts, _)]
-                if marker.arg_labels[0].is_none() && parts.len() == 1 =>
-            {
+        let arguments = self.bound_registered_rule_arguments(&marker)?;
+        let reason_expr = arguments.parameter(0).cloned().expect("bound reason argument");
+        let reason = match &reason_expr {
+            Expr::Str(parts, _) if parts.len() == 1 => {
                 match &parts[0] {
                     StrPart::Lit(reason) => reason.clone(),
-                    StrPart::Interp(..) => return Err(Self::marker_argument_shape_error(Syntax::ATTR_NONDETERMINISTIC, marker.span)),
+                    StrPart::Interp(..) => String::new(),
                 }
             }
-            _ => return Err(Self::marker_argument_shape_error(Syntax::ATTR_NONDETERMINISTIC, marker.span)),
+            _ => String::new(),
         };
         self.expect(TokKind::LBrace, "after `#Nondeterministic(…)`")?;
         let body = self.block_stmts();
         let end = self.toks[self.pos - 1].span.end;
-        Ok(Stmt::AssumeDet { reason, body, span: Span::new(marker.span.start, end) })
+        Ok(Stmt::AssumeDet {
+            reason,
+            reason_expr,
+            body,
+            span: Span::new(marker.span.start, end),
+        })
     }
 
     /// D-CTX1 (ratified 2026-06-22, G2): parse `#Context(field: value, …) { … }`.
@@ -487,10 +487,27 @@ impl<'a> Parser<'a> {
         }
         let marker = self.parse_rule_marker()?;
         let marker_span = marker.span;
+        let arguments = self.bound_registered_rule_arguments(&marker)?;
+        let parameter_indices = (0..marker.args.len())
+            .map(|index| arguments.parameter_for_source(index))
+            .collect::<Vec<_>>();
         let mut fields: Vec<(String, Expr, Span)> = Vec::new();
-        for (value, label) in marker.args.into_iter().zip(marker.arg_labels) {
-            let Some((field_name, field_name_span)) = label else {
-                return Err(Self::marker_argument_shape_error(Syntax::CTX_BLOCK, marker_span));
+        for (index, (value, label)) in marker
+            .args
+            .into_iter()
+            .zip(marker.arg_labels)
+            .enumerate()
+        {
+            let (field_name, field_name_span) = match label {
+                Some(label) => label,
+                None => {
+                    let parameter_index =
+                        parameter_indices[index].expect("normalized context argument");
+                    let parameter = crate::Policy::applied_rule(Syntax::CTX_BLOCK)
+                        .and_then(|rule| rule.signature.params.get(parameter_index))
+                        .expect("normalized context argument");
+                    (parameter.name.to_string(), value.span())
+                }
             };
             // E0761: unknown field name.
             if field_name != Syntax::CTX_FIELD_ALLOCATOR
@@ -530,13 +547,11 @@ impl<'a> Parser<'a> {
     /// idents; sema validates them against the known effect vocabulary (E0119).
     pub(super) fn at_caps_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let marker = self.parse_rule_marker()?;
+        let arguments = self.bound_registered_rule_arguments(&marker)?;
         let mut caps = Vec::with_capacity(marker.args.len());
-        for (argument, label) in marker.args.iter().zip(&marker.arg_labels) {
-            if label.is_some() {
-                return Err(Self::marker_argument_shape_error(Syntax::KW_CAPS, marker.span));
-            }
+        for argument in arguments.variadic() {
             let Some(name) = Self::marker_effect_path(argument) else {
-                return Err(Self::marker_argument_shape_error(Syntax::KW_CAPS, argument.span()));
+                return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_CAPS, argument.span()));
             };
             caps.push((name, argument.span()));
         }
@@ -558,13 +573,11 @@ impl<'a> Parser<'a> {
     /// the listed effects through the handle, RAII-revoked at scope end.
     pub(super) fn at_grant_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let marker = self.parse_rule_marker()?;
+        let arguments = self.bound_registered_rule_arguments(&marker)?;
         let mut caps = Vec::with_capacity(marker.args.len());
-        for (argument, label) in marker.args.iter().zip(&marker.arg_labels) {
-            if label.is_some() {
-                return Err(Self::marker_argument_shape_error(Syntax::KW_GRANT, marker.span));
-            }
+        for argument in arguments.variadic() {
             let Some(name) = Self::marker_effect_path(argument) else {
-                return Err(Self::marker_argument_shape_error(Syntax::KW_GRANT, argument.span()));
+                return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_GRANT, argument.span()));
             };
             caps.push((name, argument.span()));
         }

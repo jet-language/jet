@@ -128,7 +128,50 @@ pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
 }
 
 impl<'a> Checker<'a> {
-        pub(crate) fn check_meta_attr(&mut self, meta: &MetaAttr) {
+        pub(crate) fn check_meta_attr(&mut self, meta: &mut MetaAttr) {
+            if let Some(mut marker) = self.take_rule_fact(Syntax::ATTR_META, meta.span) {
+                let Some(arguments) = self.validate_rule_signature(&mut marker) else {
+                    return;
+                };
+                let mut normalized = Vec::with_capacity(meta.fields.len());
+                for (source_index, mut field) in meta.fields.drain(..).enumerate() {
+                    let parameter = arguments
+                        .bindings
+                        .iter()
+                        .find(|binding| binding.source_index == source_index)
+                        .and_then(|binding| binding.parameter_index);
+                    match (
+                        parameter,
+                        arguments.constant_for_source(source_index),
+                        &mut field,
+                    ) {
+                        (
+                            Some(0),
+                            Some(crate::Comptime::CtValue::Str(value)),
+                            MetaField::Category { value: expression, .. },
+                        ) => {
+                            let span = expression.span();
+                            *expression = Expr::Str(
+                                vec![StrPart::Lit(value.clone())],
+                                span,
+                            );
+                            normalized.push(field);
+                        }
+                        (
+                            Some(1),
+                            Some(crate::Comptime::CtValue::Bool(true)),
+                            _,
+                        ) => normalized.push(MetaField::Tunable { span: marker.args[source_index].span() }),
+                        (
+                            Some(1),
+                            Some(crate::Comptime::CtValue::Bool(false)),
+                            _,
+                        ) => {}
+                        _ => normalized.push(field),
+                    }
+                }
+                meta.fields = normalized;
+            }
             self.diags.extend(check_meta_attr_fields(meta));
         }
 
@@ -215,7 +258,7 @@ impl<'a> Checker<'a> {
         }
     
         pub(crate) fn check_binding(&mut self, b: &mut Binding) {
-            if let Some(meta) = &b.meta {
+            if let Some(meta) = &mut b.meta {
                 self.check_meta_attr(meta);
             }
             // D-DETACH1: record the binding name so report_unsendable can flag view-capturing tasks.

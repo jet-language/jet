@@ -40,6 +40,9 @@ pub struct Program {
     /// semantic AST fields do not retain order. `None` targets the file;
     /// `Some(span)` targets the parsed function declaration.
     pub applied_rules: Vec<AppliedRuleApplication>,
+    /// D-MARKSIG1=A: every source-order applied rule, retained unchanged for
+    /// sema's shared signature-conformance pass.
+    pub rule_facts: Vec<AppliedRuleApplication>,
 }
 
 #[derive(Debug, Clone)]
@@ -369,6 +372,8 @@ pub struct LoadedModule {
     pub no_alloc_policy: Option<Span>,
     /// Mirrors `Program::policy_declarations` for sema/index/explain consumers.
     pub policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
+    /// Mirrors `Program::rule_facts` for sema signature conformance.
+    pub rule_facts: Vec<AppliedRuleApplication>,
 }
 
 /// D-ERR-CONV (ratified 2026-06-19): how `?` converts the error type.

@@ -127,9 +127,9 @@ impl<'a> Parser<'a> {
                 if attr == Syntax::ATTR_INVARIANT {
                     let mut marker = self.finish_rule_marker(attr, attr_span)?;
                     marker.span.start = sigil_span.start;
-                    let (lo, hi, span, text) = self.parse_invariant_range(marker.clone())?;
-                    invariant_range = Some((lo, hi, span));
-                    invariant = Some((text, span));
+                    let (bounds, span, text) = self.parse_invariant_range(marker.clone())?;
+                    invariant_range = bounds.map(|(lo, hi)| (lo, hi, span));
+                    invariant = text.map(|text| (text, span));
                     type_markers.push(marker);
                     continue;
                 }
@@ -345,21 +345,25 @@ impl<'a> Parser<'a> {
         pub(in crate::Parser) fn parse_invariant_range(
             &mut self,
             marker: crate::AST::Marker,
-        ) -> Result<(i64, i64, Span, String), Diagnostic> {
-            if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
-                return Err(Self::marker_argument_shape_error(Syntax::ATTR_INVARIANT, marker.span));
-            }
-            let text = match &marker.args[0] {
+        ) -> Result<(Option<(i64, i64)>, Span, Option<String>), Diagnostic> {
+            let arguments = self.bound_registered_rule_arguments(&marker)?;
+            let Some(invariant) = arguments.parameter(0) else {
+                return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_INVARIANT, marker.span));
+            };
+            let text = match invariant {
                 crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
-                    crate::AST::StrPart::Lit(text) => text.clone(),
-                    crate::AST::StrPart::Interp(..) => return Err(Self::marker_argument_shape_error(Syntax::ATTR_INVARIANT, marker.span)),
+                    crate::AST::StrPart::Lit(text) => Some(text.clone()),
+                    crate::AST::StrPart::Interp(..) => None,
                 },
-                _ => return Err(Self::marker_argument_shape_error(Syntax::ATTR_INVARIANT, marker.span)),
+                _ => None,
             };
             let span = marker.span;
             let text_span = marker.args[0].span();
+            let Some(text) = text else {
+                return Ok((None, span, None));
+            };
             match parse_invariant_bounds(&text) {
-                Some((lo, hi)) if lo <= hi => Ok((lo, hi, span, text)),
+                Some((lo, hi)) if lo <= hi => Ok((Some((lo, hi)), span, Some(text))),
                 Some((lo, hi)) => Err(Diagnostic::error(
                     "E0137",
                     format!("this invariant range is empty — {} is after {}", lo, hi),
@@ -420,29 +424,15 @@ impl<'a> Parser<'a> {
             is_package_pub: bool,
         ) -> Result<crate::AST::UnitFamilyDef, Diagnostic> {
             let marker = self.parse_rule_marker()?;
-            if marker.args.is_empty() || marker.args.len() > 2 || marker.arg_labels[0].is_some() {
-                return Err(Self::marker_argument_shape_error(Syntax::ATTR_UNIT_FAMILY, marker.span));
-            }
-            let crate::AST::Expr::Ident(family, family_span) = &marker.args[0] else {
-                return Err(Self::marker_argument_shape_error(Syntax::ATTR_UNIT_FAMILY, marker.span));
+            let arguments = self.bound_registered_rule_arguments(&marker)?;
+            let Some(crate::AST::Expr::Ident(family, family_span)) = arguments.parameter(0) else {
+                return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_UNIT_FAMILY, marker.span));
             };
             let family = family.clone();
             let family_span = *family_span;
-            let base = if let Some(value) = marker.args.get(1) {
-                let Some((field, field_span)) = marker.arg_labels[1].as_ref() else {
-                    return Err(Self::marker_argument_shape_error(Syntax::ATTR_UNIT_FAMILY, marker.span));
-                };
-                if field != Syntax::UNIT_FAMILY_BASE_FIELD {
-                    return Err(Diagnostic::error(
-                        "E0003",
-                        format!("unknown unit-family field `{field}`"),
-                        "scaled and affine families name one canonical base".to_string(),
-                        "write `base: member_name`".to_string(),
-                        Some(*field_span),
-                    ));
-                }
+            let base = if let Some(value) = arguments.parameter(1) {
                 let crate::AST::Expr::Ident(base, base_span) = value else {
-                    return Err(Self::marker_argument_shape_error(Syntax::ATTR_UNIT_FAMILY, value.span()));
+                    return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_UNIT_FAMILY, value.span()));
                 };
                 Some((base.clone(), *base_span))
             } else {
@@ -636,38 +626,16 @@ impl<'a> Parser<'a> {
             outer_is_pub: bool,
         ) -> Result<crate::AST::Item, Diagnostic> {
             let marker = self.parse_rule_marker()?;
-            if marker.args.is_empty() || marker.args.len() > 2 {
-                return Err(Self::marker_argument_shape_error(Syntax::ATTR_LAYOUT, marker.span));
-            }
-            if marker.arg_labels[0].as_ref().is_some_and(|(label, _)| label == Syntax::LAYOUT_COLUMNAR) {
-                return Err(Diagnostic::error(
-                    "E1109",
-                    "partial `#Layout(columnar: …)` isn't supported yet".to_string(),
-                    "v1 supports whole-struct columnar only — every field becomes a column".to_string(),
-                    "write `#Layout(columnar)` to convert the whole struct".to_string(),
-                    marker.arg_labels[0].as_ref().map(|(_, span)| *span),
-                ));
-            }
-            if marker.arg_labels[0].is_some() {
-                return Err(Self::marker_argument_shape_error(Syntax::ATTR_LAYOUT, marker.span));
-            }
-            let crate::AST::Expr::Ident(variant, variant_span) = &marker.args[0] else {
-                return Err(Self::marker_argument_shape_error(Syntax::ATTR_LAYOUT, marker.span));
+            let arguments = self.bound_registered_rule_arguments(&marker)?;
+            let Some(crate::AST::Expr::Ident(variant, variant_span)) = arguments.parameter(0) else {
+                return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_LAYOUT, marker.span));
             };
             let variant = variant.clone();
             let variant_span = *variant_span;
             let mut tag_width = None;
-            if let Some(value) = marker.args.get(1) {
-                let Some((label, label_span)) = marker.arg_labels[1].as_ref() else {
-                    return Err(Self::marker_argument_shape_error(Syntax::ATTR_LAYOUT, marker.span));
-                };
-                if label != "tag" {
-                    return Err(Diagnostic::error("E1105", format!("`{label}` isn't a C enum layout option"),
-                        "D-REPRC2 supports only the enum tag width override here.".to_string(),
-                        "Write `#Layout(c, tag: U8)` or use `#Layout(c)`.".to_string(), Some(*label_span)));
-                }
+            if let Some(value) = arguments.parameter(1) {
                 let crate::AST::Expr::Ident(width, width_span) = value else {
-                    return Err(Self::marker_argument_shape_error(Syntax::ATTR_LAYOUT, value.span()));
+                    return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_LAYOUT, value.span()));
                 };
                 tag_width = Some((width.clone(), *width_span));
             }

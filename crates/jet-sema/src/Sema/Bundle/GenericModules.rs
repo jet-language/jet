@@ -105,7 +105,16 @@ fn specialize_tag(source: &crate::AST::TagDef, types: &HashMap<String, Type>,
 fn specialize_test(source: &crate::AST::TestDef, alias: &str,
     types: &HashMap<String, Type>, values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::TestDef {
     let mut result = source.clone();
-    result.name = module_value_name(alias, &source.name);
+    if let Some(expression) = &mut result.name_expr {
+        substitute_expr(expression, types, values);
+        result.name = None;
+        result.name_prefix = Some(alias.to_string());
+    } else {
+        result.name = source
+            .name
+            .as_deref()
+            .map(|name| module_value_name(alias, name));
+    }
     for param in &mut result.params {
         param.ty = specialize_module_type(&param.ty, types, values);
         if let Some(default) = &mut param.default { substitute_expr(default, types, values); }
@@ -117,7 +126,9 @@ fn specialize_test(source: &crate::AST::TestDef, alias: &str,
 fn specialize_bench(source: &crate::AST::BenchDef, alias: &str,
     types: &HashMap<String, Type>, values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::BenchDef {
     let mut result = source.clone();
-    result.name = module_value_name(alias, &source.name);
+    substitute_expr(&mut result.name_expr, types, values);
+    result.name = None;
+    result.name_prefix = Some(alias.to_string());
     substitute_stmts(&mut result.body, types, values);
     result
 }

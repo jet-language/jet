@@ -2,6 +2,34 @@ use super::super::{
     Diagnostic, Item, Marker, Parser, Span, Syntax, TagDef, TokKind, TraitDef, describe,
 };
 
+pub(in crate::Parser) struct BoundRuleArguments<'m> {
+    marker: &'m Marker,
+    bindings: Vec<crate::Policy::RuleArgumentBinding>,
+}
+
+impl<'m> BoundRuleArguments<'m> {
+    pub(in crate::Parser) fn parameter(&self, index: usize) -> Option<&'m crate::AST::Expr> {
+        self.bindings
+            .iter()
+            .find(|binding| binding.parameter_index == Some(index))
+            .map(|binding| &self.marker.args[binding.source_index])
+    }
+
+    pub(in crate::Parser) fn parameter_for_source(&self, source_index: usize) -> Option<usize> {
+        self.bindings
+            .iter()
+            .find(|binding| binding.source_index == source_index)
+            .and_then(|binding| binding.parameter_index)
+    }
+
+    pub(in crate::Parser) fn variadic(&self) -> impl Iterator<Item = &'m crate::AST::Expr> + '_ {
+        self.bindings
+            .iter()
+            .filter(|binding| binding.parameter_index.is_none())
+            .map(|binding| &self.marker.args[binding.source_index])
+    }
+}
+
 impl<'a> Parser<'a> {
         /// D-MARKSIG1=A: parse one marker with the ordinary call-argument
         /// reader; cursor sits on the name.
@@ -60,7 +88,22 @@ impl<'a> Parser<'a> {
                 ct: None,
             };
             self.validate_registered_rule_marker(&marker, parenthesized)?;
+            self.rule_facts.push(crate::AST::AppliedRuleApplication {
+                marker: marker.clone(),
+                target: None,
+            });
             Ok(marker)
+        }
+
+        fn bind_rule_fact_target(&mut self, name_span: Span, target: Span) {
+            if let Some(application) = self
+                .rule_facts
+                .iter_mut()
+                .rev()
+                .find(|application| application.marker.name_span == name_span)
+            {
+                application.target = Some(target);
+            }
         }
 
         fn validate_registered_rule_marker(
@@ -85,35 +128,49 @@ impl<'a> Parser<'a> {
             if (call_required && !parenthesized && marker.name != Syntax::KW_UNSAFE)
                 || bare_required && parenthesized
             {
-                return Err(Self::marker_argument_shape_error(&marker.name, marker.span));
+                return Err(crate::Policy::marker_argument_shape_error(&marker.name, marker.span));
             }
             if marker.name == Syntax::KW_UNSAFE && marker.args.is_empty() {
                 return Ok(());
             }
-            let signature = rule.signature;
-            if signature.variadic.is_none() && marker.args.len() > signature.params.len() {
-                return Err(Self::marker_argument_shape_error(&marker.name, marker.span));
-            }
-            let mut supplied = vec![false; signature.params.len()];
-            for (index, _argument) in marker.args.iter().enumerate() {
-                let parameter_index = if let Some((label, _)) = marker.arg_labels[index].as_ref() {
-                    signature.params.iter().position(|parameter| parameter.name == label)
-                } else {
-                    (index < signature.params.len()).then_some(index)
-                };
-                if let Some(parameter_index) = parameter_index {
-                    supplied[parameter_index] = true;
-                }
-            }
-            if signature
-                .params
-                .iter()
-                .zip(supplied)
-                .any(|(parameter, supplied)| parameter.default.is_none() && !supplied)
+            self.validate_registered_rule_arguments(marker)
+        }
+
+        fn validate_registered_rule_arguments(&self, marker: &Marker) -> Result<(), Diagnostic> {
+            let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
+                return Ok(());
+            };
+            if matches!(rule.status, crate::Policy::RuleStatus::Retired { .. })
+                || marker.name == Syntax::KW_UNSAFE && marker.args.is_empty()
             {
-                return Err(Self::marker_argument_shape_error(&marker.name, marker.span));
+                return Ok(());
+            }
+            if rule.signature.marker_argument_bindings(marker).is_none() {
+                return Err(crate::Policy::marker_argument_shape_error(&marker.name, marker.span));
             }
             Ok(())
+        }
+
+        pub(in crate::Parser) fn bound_registered_rule_arguments<'m>(
+            &self,
+            marker: &'m Marker,
+        ) -> Result<BoundRuleArguments<'m>, Diagnostic> {
+            let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
+                return Ok(BoundRuleArguments {
+                    marker,
+                    bindings: Vec::new(),
+                });
+            };
+            if matches!(rule.status, crate::Policy::RuleStatus::Retired { .. }) {
+                return Ok(BoundRuleArguments {
+                    marker,
+                    bindings: Vec::new(),
+                });
+            }
+            let Some(bindings) = rule.signature.marker_argument_bindings(marker) else {
+                return Err(crate::Policy::marker_argument_shape_error(&marker.name, marker.span));
+            };
+            Ok(BoundRuleArguments { marker, bindings })
         }
 
         /// Shared entry for a bare `#Name` / `#Name(args)` application.
@@ -212,7 +269,7 @@ impl<'a> Parser<'a> {
             Ok(group)
         }
 
-        fn parse_attached_marker_sequence(
+        pub(in crate::Parser) fn parse_attached_marker_sequence(
             &mut self,
             site: Option<crate::Policy::RuleSite>,
             noun: &str,
@@ -311,31 +368,6 @@ impl<'a> Parser<'a> {
             )
         }
 
-        fn shared_function_marker(name: &str) -> bool {
-            matches!(
-                name,
-                Syntax::ATTR_POLICY
-                    | Syntax::ATTR_META
-                    | Syntax::KW_UNSAFE
-                    | Syntax::KW_TASK
-                    | Syntax::ATTR_EVERY
-                    | Syntax::ATTR_MUST_USE
-                    | Syntax::ATTR_REPLAYABLE
-                    | Syntax::ATTR_WASM_EXPORT
-                    | Syntax::ATTR_TARGET
-                    | Syntax::KW_REACTIVE
-                    | Syntax::KW_SANITIZER
-                    | Syntax::CONTRACT_INLINE
-                    | Syntax::CONTRACT_PRE
-                    | Syntax::CONTRACT_POST
-                    | Syntax::KW_STATE
-                    | Syntax::KW_TRANSITION
-                    | Syntax::ATTR_FFI
-                    | Syntax::KW_PURE
-                    | "InlineAlways"
-            )
-        }
-
         fn skip_bare_marker(&self, index: usize) -> Option<usize> {
             if !matches!(self.toks.get(index).map(|token| &token.kind), Some(TokKind::Hash)) {
                 return None;
@@ -380,8 +412,7 @@ impl<'a> Parser<'a> {
                     _ => return false,
                 };
                 if site == crate::Policy::RuleSite::Function
-                    && (!Self::shared_function_marker(name)
-                        || self.target_marker_selects_file_web_at(cursor))
+                    && self.target_marker_selects_file_web_at(cursor)
                 {
                     return false;
                 }
@@ -440,9 +471,7 @@ impl<'a> Parser<'a> {
                     Self::skip_bracket_group(&self.toks, cursor + 1)
                 } else {
                     let Some(name) = self.marker_name_at(cursor) else { break };
-                    if !Self::shared_function_marker(name)
-                        || self.target_marker_selects_file_web_at(cursor + 1)
-                    {
+                    if self.target_marker_selects_file_web_at(cursor + 1) {
                         break;
                     }
                     if !crate::Policy::rule_allows(name, crate::Policy::RuleSite::Function) {
@@ -558,10 +587,25 @@ impl<'a> Parser<'a> {
                     }
                     continue;
                 }
+                if !Self::function_marker_has_applicator(&marker.name) {
+                    return Err(Diagnostic::error(
+                        "E0355",
+                        format!(
+                            "`#{}` cannot attach through this function marker list",
+                            marker.name
+                        ),
+                        "the marker registry gives every marker exact sites and a typed signature"
+                            .to_string(),
+                        "remove the marker or move it to its registered site".to_string(),
+                        Some(marker.span),
+                    ));
+                }
+                self.validate_registered_rule_arguments(&marker)?;
+                let arguments = self.bound_registered_rule_arguments(&marker)?;
                 match marker.name.as_str() {
                     Syntax::ATTR_POLICY => {
                         policy.extend(self.policy_declarations_from_marker(
-                            marker,
+                            marker.clone(),
                             crate::Policy::PolicyScope::Function,
                         )?);
                     }
@@ -594,13 +638,13 @@ impl<'a> Parser<'a> {
                         function.task_span = Some(marker.span);
                     }
                     Syntax::ATTR_EVERY => {
-                        if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
-                            return Err(Self::marker_argument_shape_error(
+                        let Some(schedule) = arguments.parameter(0) else {
+                            return Err(crate::Policy::marker_argument_shape_error(
                                 Syntax::ATTR_EVERY,
                                 marker.span,
                             ));
-                        }
-                        let arg = match &marker.args[0] {
+                        };
+                        let arg = match schedule {
                             crate::AST::Expr::UnitLit {
                                 int,
                                 float,
@@ -619,20 +663,10 @@ impl<'a> Parser<'a> {
                                         text: text.clone(),
                                         text_span: *span,
                                     },
-                                    crate::AST::StrPart::Interp(..) => {
-                                        return Err(Self::marker_argument_shape_error(
-                                            Syntax::ATTR_EVERY,
-                                            *span,
-                                        ));
-                                    }
+                                    crate::AST::StrPart::Interp(..) => crate::AST::EveryArg::Expression(schedule.clone()),
                                 }
                             }
-                            other => {
-                                return Err(Self::marker_argument_shape_error(
-                                    Syntax::ATTR_EVERY,
-                                    other.span(),
-                                ));
-                            }
+                            other => crate::AST::EveryArg::Expression(other.clone()),
                         };
                         function.every = Some(crate::AST::EveryMarker {
                             arg,
@@ -652,7 +686,7 @@ impl<'a> Parser<'a> {
                             Some(crate::Syntax::WebPartitionMarker::WasmExport);
                     }
                     Syntax::ATTR_TARGET => {
-                        function.web_marker = Some(match Self::web_target_from_marker(&marker)? {
+                        function.web_marker = Some(match self.web_target_from_marker(&marker)? {
                             super::TargetMarker::Bucket(crate::Syntax::WebBucket::Wasm) => {
                                 crate::Syntax::WebPartitionMarker::Wasm
                             }
@@ -674,50 +708,38 @@ impl<'a> Parser<'a> {
                     Syntax::KW_SANITIZER if marker.args.is_empty() => function.is_sanitizer = true,
                     Syntax::CONTRACT_INLINE => {
                         function.inline_span = Some(marker.span);
-                        if marker.args.is_empty() {
+                        if arguments.parameter(0).is_none() {
                             function.is_inline = true;
-                        } else if marker.args.len() == 1
-                            && matches!(&marker.args[0], crate::AST::Expr::Ident(mode, _) if mode == "Always")
+                        } else if matches!(arguments.parameter(0), Some(crate::AST::Expr::Ident(mode, _)) if mode == "Always")
                         {
                             function.is_inline_always = true;
                         } else {
-                            return Err(Self::marker_argument_shape_error(
+                            return Err(crate::Policy::marker_argument_shape_error(
                                 Syntax::CONTRACT_INLINE,
                                 marker.span,
                             ));
                         }
                     }
                     Syntax::CONTRACT_PRE | Syntax::CONTRACT_POST => {
-                        if marker.args.len() != 2
-                            || marker.arg_labels.iter().any(Option::is_some)
-                        {
-                            return Err(Self::marker_argument_shape_error(
+                        let (Some(condition), Some(message_argument)) =
+                            (arguments.parameter(0), arguments.parameter(1))
+                        else {
+                            return Err(crate::Policy::marker_argument_shape_error(
                                 &marker.name,
                                 marker.span,
                             ));
-                        }
-                        let (message, message_span) = match &marker.args[1] {
+                        };
+                        let message_span = match message_argument {
                             crate::AST::Expr::Str(parts, span) if parts.len() == 1 => {
                                 match &parts[0] {
-                                    crate::AST::StrPart::Lit(message) => (message.clone(), *span),
-                                    crate::AST::StrPart::Interp(..) => {
-                                        return Err(Self::marker_argument_shape_error(
-                                            &marker.name,
-                                            *span,
-                                        ));
-                                    }
+                                    crate::AST::StrPart::Lit(_) | crate::AST::StrPart::Interp(..) => *span,
                                 }
                             }
-                            other => {
-                                return Err(Self::marker_argument_shape_error(
-                                    &marker.name,
-                                    other.span(),
-                                ));
-                            }
+                            other => other.span(),
                         };
                         let clause = crate::AST::ContractClause {
-                            cond: marker.args[0].clone(),
-                            message,
+                            cond: condition.clone(),
+                            message_expr: message_argument.clone(),
                             message_span,
                             span: marker.span,
                         };
@@ -728,8 +750,8 @@ impl<'a> Parser<'a> {
                         }
                     }
                     Syntax::KW_STATE => {
-                        let [crate::AST::Expr::Ident(state, _)] = marker.args.as_slice() else {
-                            return Err(Self::marker_argument_shape_error(
+                        let Some(crate::AST::Expr::Ident(state, _)) = arguments.parameter(0) else {
+                            return Err(crate::Policy::marker_argument_shape_error(
                                 Syntax::KW_STATE,
                                 marker.span,
                             ));
@@ -737,10 +759,12 @@ impl<'a> Parser<'a> {
                         function.state_requires = Some((state.clone(), marker.span));
                     }
                     Syntax::KW_TRANSITION => {
-                        let [crate::AST::Expr::Ident(from, _), crate::AST::Expr::Ident(to, _)] =
-                            marker.args.as_slice()
+                        let (
+                            Some(crate::AST::Expr::Ident(from, _)),
+                            Some(crate::AST::Expr::Ident(to, _)),
+                        ) = (arguments.parameter(0), arguments.parameter(1))
                         else {
-                            return Err(Self::marker_argument_shape_error(
+                            return Err(crate::Policy::marker_argument_shape_error(
                                 Syntax::KW_TRANSITION,
                                 marker.span,
                             ));
@@ -752,6 +776,17 @@ impl<'a> Parser<'a> {
                         });
                     }
                     Syntax::ATTR_FFI if function.inline_foreign.is_some() => {}
+                    Syntax::ATTR_ABI => {
+                        return Err(Diagnostic::error(
+                            "E3212",
+                            "`#Abi` only applies to C declarations".to_string(),
+                            "ordinary Jet functions do not select a native C calling convention"
+                                .to_string(),
+                            "move the function into a `#Extern module c.<library> { … }` declaration or remove `#Abi`"
+                                .to_string(),
+                            Some(marker.span),
+                        ));
+                    }
                     _ => {
                         return Err(Diagnostic::error(
                             "E0355",
@@ -774,6 +809,9 @@ impl<'a> Parser<'a> {
                 }
             }
             self.policy_declarations.extend(policy);
+            for marker in &ordered_markers {
+                self.bind_rule_fact_target(marker.name_span, function.span);
+            }
             self.applied_rules.extend(
                 ordered_markers
                     .into_iter()
@@ -788,6 +826,30 @@ impl<'a> Parser<'a> {
                     }),
             );
             Ok(function)
+        }
+
+        pub(in crate::Parser) fn function_marker_has_applicator(name: &str) -> bool {
+            matches!(
+                name,
+                Syntax::ATTR_POLICY
+                    | Syntax::KW_UNSAFE
+                    | Syntax::KW_SANITIZER
+                    | Syntax::CONTRACT_PRE
+                    | Syntax::CONTRACT_POST
+                    | Syntax::CONTRACT_INLINE
+                    | Syntax::KW_TASK
+                    | Syntax::ATTR_EVERY
+                    | Syntax::ATTR_REPLAYABLE
+                    | Syntax::ATTR_WASM_EXPORT
+                    | Syntax::KW_STATE
+                    | Syntax::KW_TRANSITION
+                    | Syntax::ATTR_FFI
+                    | Syntax::ATTR_ABI
+                    | Syntax::ATTR_MUST_USE
+                    | Syntax::ATTR_META
+                    | Syntax::KW_REACTIVE
+                    | Syntax::ATTR_TARGET
+            )
         }
 
         pub(in crate::Parser) fn apply_unsafe_function_marker(
@@ -805,27 +867,18 @@ impl<'a> Parser<'a> {
                     Some(marker.span),
                 ));
             }
-            let reason = match &marker.args[0] {
-                crate::AST::Expr::Str(parts, _) if parts.len() == 1 => match &parts[0] {
-                    crate::AST::StrPart::Lit(value) => value.clone(),
-                    crate::AST::StrPart::Interp(..) => {
-                        return Err(Self::marker_argument_shape_error(
-                            Syntax::KW_UNSAFE,
-                            marker.span,
-                        ));
-                    }
+            let arguments = self.bound_registered_rule_arguments(marker)?;
+            let reason = match arguments.parameter(0) {
+                Some(crate::AST::Expr::Str(parts, _)) if parts.len() == 1 => match &parts[0] {
+                    crate::AST::StrPart::Lit(value) => Some(value.clone()),
+                    crate::AST::StrPart::Interp(..) => None,
                 },
-                _ => {
-                    return Err(Self::marker_argument_shape_error(
-                        Syntax::KW_UNSAFE,
-                        marker.span,
-                    ));
-                }
+                _ => None,
             };
             function.is_unsafe = true;
-            function.unsafe_reason = Some(reason);
+            function.unsafe_reason = reason;
             function.unsafe_span = Some(marker.span);
-            let Some(value) = marker.args.get(1) else { return Ok(None) };
+            let Some(value) = arguments.parameter(1) else { return Ok(None) };
             let mode = match value {
                 crate::AST::Expr::EnumLit {
                     type_name,
@@ -834,7 +887,7 @@ impl<'a> Parser<'a> {
                     ..
                 } if type_name.is_empty() && args.is_empty() => variant.as_str(),
                 _ => {
-                    return Err(Self::marker_argument_shape_error(
+                    return Err(crate::Policy::marker_argument_shape_error(
                         Syntax::KW_UNSAFE,
                         value.span(),
                     ));
@@ -947,10 +1000,10 @@ impl<'a> Parser<'a> {
                                 d.codable_as_base_span = Some(marker.span);
                             }
                             Syntax::ATTR_INVARIANT => {
-                                let (low, high, span, text) =
+                                let (bounds, span, text) =
                                     self.parse_invariant_range(marker)?;
-                                d.range = Some((low, high, span));
-                                d.invariant = Some((text, span));
+                                d.range = bounds.map(|(low, high)| (low, high, span));
+                                d.invariant = text.map(|text| (text, span));
                             }
                             _ => {}
                         }

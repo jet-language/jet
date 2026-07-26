@@ -729,7 +729,12 @@ pub struct ExternFn {
 #[derive(Debug, Clone)]
 pub struct TestDef {
     pub span: Span,
-    pub name: String,
+    /// Sema-resolved static test identity.
+    pub name: Option<String>,
+    /// Raw `#Test(...)` name expression; sema resolves it to `name`.
+    pub name_expr: Option<Expr>,
+    /// Generic-module instance prefix applied to the resolved identity.
+    pub name_prefix: Option<String>,
     pub name_span: Span,
     /// D-TEST1 (ratified 2026-06-22, option B): a property test is an `#Test fn`
     /// with parameters — inputs are generated from the parameter types and a
@@ -748,7 +753,12 @@ pub struct TestDef {
 #[derive(Debug, Clone)]
 pub struct BenchDef {
     pub span: Span,
-    pub name: String,
+    /// Sema-resolved static benchmark identity.
+    pub name: Option<String>,
+    /// Raw `#Bench(...)` name expression; sema resolves it to `name`.
+    pub name_expr: Expr,
+    /// Generic-module instance prefix applied to the resolved identity.
+    pub name_prefix: Option<String>,
     pub name_span: Span,
     pub body: Vec<Stmt>,
 }
@@ -920,7 +930,8 @@ pub struct InlineForeign {
 #[derive(Debug, Clone)]
 pub struct ContractClause {
     pub cond: Expr,
-    pub message: String,
+    /// Raw typed message expression; sema elaborates it before codegen.
+    pub message_expr: Expr,
     pub message_span: Span,
     pub span: Span,
 }
@@ -952,6 +963,9 @@ pub enum EveryArg {
     },
     /// `#Every("03:00")` — the plain string content (no interpolation).
     WallClock { text: String, text_span: Span },
+    /// A typed expression accepted by the shared marker call grammar. Sema
+    /// checks its `Duration | String` type before schedule-domain validation.
+    Expression(Expr),
 }
 
 /// D-SCHEDULE1: the whole `#Every(…)` marker — its raw argument plus the
@@ -990,6 +1004,9 @@ pub enum EveryScheduleError {
     HourOutOfRange,
     /// `MM` is outside `00`..=`59`.
     MinuteOutOfRange,
+    /// A runtime expression has the right type but cannot define a static
+    /// task schedule.
+    DynamicValue,
 }
 
 impl EveryArg {
@@ -1038,6 +1055,7 @@ impl EveryArg {
                     minute: minute as u8,
                 })
             }
+            EveryArg::Expression(_) => Err(EveryScheduleError::DynamicValue),
         }
     }
 }

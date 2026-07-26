@@ -466,6 +466,7 @@ fn materialize_namespace(
                 html_path: program.html_path.clone(),
                 no_alloc_policy: program.no_alloc_policy,
                 policy_declarations: program.policy_declarations.clone(),
+                rule_facts: std::mem::take(&mut program.rule_facts),
             });
             return Ok(module_idx);
         }
@@ -485,6 +486,7 @@ fn materialize_namespace(
         html_path: None,
         no_alloc_policy: None,
         policy_declarations: Vec::new(),
+        rule_facts: Vec::new(),
     });
     Ok(module_idx)
 }

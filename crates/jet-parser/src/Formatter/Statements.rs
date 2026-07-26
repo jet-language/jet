@@ -213,28 +213,53 @@ impl<'a> Fmt<'a> {
                 self.write("loop {");
                 self.fmt_body(inner);
             }
-            Stmt::Unsafe { audit, body, span } => {
+            Stmt::Unsafe {
+                audit,
+                audit_expr,
+                body,
+                span,
+            } => {
                 // D-UNSAFE2: the reason is the argument of `#Unsafe` itself; the
                 // separate `#Audit` line is retired.
                 let site_mode = self.policy_declarations.iter().find(|declaration|
                     declaration.key == crate::Policy::PolicyKey::Unsafe
                         && declaration.target == Some(*span)
                         && matches!(declaration.value, crate::Policy::PolicyValue::UnsafeTrack | crate::Policy::PolicyValue::UnsafeSkip)).map(|declaration| declaration.value);
+                if let Some(argument) = audit_expr {
+                    self.write(&format!("#{}(", Syntax::KW_UNSAFE));
+                    self.fmt_expr(argument, Prec::OrFallback);
+                    if let Some(mode) = site_mode {
+                        self.write(&format!(", obligations: {}", mode.display()));
+                    }
+                    self.write(") {");
+                } else {
                 match (audit, site_mode) {
                     (Some(reason), Some(mode)) => self.write(&format!("#{}(\"{}\", obligations: {}) {{", Syntax::KW_UNSAFE, escape_str_lit(reason), mode.display())),
                     (None, Some(mode)) => self.write(&format!("#{}(obligations: {}) {{", Syntax::KW_UNSAFE, mode.display())),
                     (Some(reason), None) => self.write(&format!("#{}(\"{}\") {{", Syntax::KW_UNSAFE, escape_str_lit(reason))),
                     (None, None) => self.write(&format!("#{} {{", Syntax::KW_UNSAFE)),
                 }
+                }
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
             // D-CTEFFECT1: `#Impure("reason") { … }` round-trips verbatim.
-            Stmt::Impure { reason, body, .. } => {
+            Stmt::Impure {
+                reason,
+                reason_expr,
+                body,
+                ..
+            } => {
+                if let Some(argument) = reason_expr {
+                    self.write(&format!("#{}(", Syntax::KW_IMPURE));
+                    self.fmt_expr(argument, Prec::OrFallback);
+                    self.write(") {");
+                } else {
                 match reason {
                     Some(r) => self.write(&format!("#{}(\"{}\") {{", Syntax::KW_IMPURE, r)),
                     None => self.write(&format!("#{} {{", Syntax::KW_IMPURE)),
+                }
                 }
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
@@ -392,8 +417,14 @@ impl<'a> Fmt<'a> {
                 self.end_block();
             }
             // D-BLOCKPLANE1=A: `#Nondeterministic("reason") { … }`.
-            Stmt::AssumeDet { reason, body, .. } => {
-                self.write(&format!("#{}(\"{}\") {{", Syntax::ATTR_NONDETERMINISTIC, reason));
+            Stmt::AssumeDet {
+                reason_expr,
+                body,
+                ..
+            } => {
+                self.write(&format!("#{}(", Syntax::ATTR_NONDETERMINISTIC));
+                self.fmt_expr(reason_expr, Prec::OrFallback);
+                self.write(") {");
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();

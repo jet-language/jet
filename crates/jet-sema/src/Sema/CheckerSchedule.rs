@@ -53,6 +53,11 @@ fn e0926_bad_schedule_value(reason: EveryScheduleError, span: Span) -> Diagnosti
             "wall-clock minutes run `00`..=`59`.",
             "write a minute between `00` and `59`, e.g. `#Every(\"03:00\")`.",
         ),
+        EveryScheduleError::DynamicValue => (
+            "a task schedule must be known at compile time",
+            "the marker argument has the right type, but task discovery needs one fixed cadence.",
+            "write a duration or wall-clock literal, e.g. `#Every(5min)` or `#Every(\"03:00\")`.",
+        ),
     };
     Diagnostic::error("E0926", what.to_string(), why.to_string(), fix.to_string(), Some(span))
 }
@@ -104,6 +109,7 @@ pub(crate) fn check_every_marker(f: &Func) -> Vec<Diagnostic> {
             let span = match &every.arg {
                 crate::AST::EveryArg::Duration { suffix_span, .. } => *suffix_span,
                 crate::AST::EveryArg::WallClock { text_span, .. } => *text_span,
+                crate::AST::EveryArg::Expression(expression) => expression.span(),
             };
             diags.push(e0926_bad_schedule_value(reason, span));
             diags

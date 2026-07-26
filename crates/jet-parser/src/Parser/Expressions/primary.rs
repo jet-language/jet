@@ -609,6 +609,7 @@ impl<'a> Parser<'a> {
                             module_arg_expr_depth: None,
                             policy_declarations: Vec::new(),
                             applied_rules: Vec::new(),
+                            rule_facts: Vec::new(),
                             block_spans: Vec::new(),
                         };
                         let e = sub.expr()?;

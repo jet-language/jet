@@ -197,6 +197,7 @@ fn dom_fn() {
             html_path: prog.html_path.clone(),
             no_alloc_policy: prog.no_alloc_policy,
             policy_declarations: std::mem::take(&mut prog.policy_declarations),
+            rule_facts: std::mem::take(&mut prog.rule_facts),
         }],
         parse_teaching: vec![],
         used_core: Default::default(),

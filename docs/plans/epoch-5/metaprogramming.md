@@ -18,7 +18,7 @@ flagged, but §15 tracks the ratified option shapes exactly.
 
 - **comptime** — evaluation during compilation. Value-level only (S26): it
   computes values, it never creates types.
-- **derive** — code generated from a type's shape (`#[Codable]`, user
+- **derive** — code generated from a type's shape (`#Codable`, user
   `derive T.Wire`). The boilerplate killer.
 - **reflection** — reading a type's shape at compile time (`T.reflect()` →
   `TypeInfo`). The read half of derives.
@@ -67,7 +67,7 @@ jobs (I8). A beginner lives on rungs 0–1 and never learns the rest exist.
 
 | Rung | Job | Mechanism | Status |
 |---|---|---|---|
-| 0 | type-driven boilerplate | built-in derives (`#[Codable]`, …) | shipped (S55) |
+| 0 | type-driven boilerplate | built-in derives (`#Codable`, …) | shipped (S55) |
 | 1 | compile-time values | `comptime x = f();`, `comptime if`, `comptime { }` | shipped (S26/S57, D-CTMARKER1) |
 | 2 | pure eval + data embedding | whitelist Core (D-CTCORE1), `embed_file`/`embed_bytes` (D-CTIO1), `find` (D-CTFIND1), `fetch(url, sha256:)` (D-NETDEP1) | shipped |
 | 3 | user derives | `T.reflect()` (D-METAREFLECT1) + `derive T.Trait` emitting source fragments with `$` splices (D-METADERIVE1) | shipped |

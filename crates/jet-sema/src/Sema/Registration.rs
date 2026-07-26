@@ -260,6 +260,37 @@ impl<'a> Checker<'a> {
                 );
             }
         }
+        for mut marker in self.take_targeted_rule_facts(f.span) {
+            let Some(arguments) = self.validate_rule_signature(&mut marker) else {
+                if marker.name == Syntax::ATTR_EVERY {
+                    f.every = None;
+                }
+                continue;
+            };
+            match marker.name.as_str() {
+                Syntax::KW_UNSAFE => {
+                    f.unsafe_reason = match arguments.constant_for_source(0) {
+                        Some(crate::Comptime::CtValue::Str(value)) => Some(value.clone()),
+                        _ => f.unsafe_reason.take(),
+                    };
+                }
+                Syntax::CONTRACT_PRE | Syntax::CONTRACT_POST => {
+                    let clauses = if marker.name == Syntax::CONTRACT_PRE {
+                        &mut f.pre
+                    } else {
+                        &mut f.post
+                    };
+                    if let Some(clause) =
+                        clauses.iter_mut().find(|clause| clause.span == marker.span)
+                    {
+                        if let Some(message) = marker.args.get(1) {
+                            clause.message_expr = message.clone();
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
         // D-FFI-INLINE1=A (card #501): an inline foreign tier fn (`#FFI(<lang>)
         // fn`) has a foreign-source body, not Jet statements. Its parameters are
         // in scope above (the Jet signature is a real, checked contract at call

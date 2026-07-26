@@ -213,6 +213,41 @@ impl RuleArgType {
             Self::DurationOrString => "Duration | String",
         }
     }
+
+    /// D-MARKSIG1=A: value-shape half of the shared applied-rule signature.
+    /// Expressions with a statically visible literal shape are checked here;
+    /// `Any` deliberately accepts every expression.
+    pub fn matches_expr(self, expr: &crate::AST::Expr) -> bool {
+        let definite_literal = matches!(
+            expr,
+            crate::AST::Expr::Str(..)
+                | crate::AST::Expr::StrMatchLit(..)
+                | crate::AST::Expr::BinMatchLit(..)
+                | crate::AST::Expr::Int(..)
+                | crate::AST::Expr::Float(..)
+                | crate::AST::Expr::Bool(..)
+                | crate::AST::Expr::Char(..)
+                | crate::AST::Expr::ListLit(..)
+                | crate::AST::Expr::MapLit(..)
+                | crate::AST::Expr::UnitLit { .. }
+        );
+        match self {
+            Self::Any => true,
+            Self::String => matches!(expr, crate::AST::Expr::Str(..)) || !definite_literal,
+            Self::Ident => matches!(
+                expr,
+                crate::AST::Expr::Ident(..)
+                    | crate::AST::Expr::Field(..)
+                    | crate::AST::Expr::EnumLit { .. }
+            ),
+            Self::Bool => matches!(expr, crate::AST::Expr::Bool(..)) || !definite_literal,
+            Self::Int => matches!(expr, crate::AST::Expr::Int(..)) || !definite_literal,
+            Self::DurationOrString => matches!(
+                expr,
+                crate::AST::Expr::UnitLit { .. } | crate::AST::Expr::Str(..)
+            ) || !definite_literal,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -228,6 +263,13 @@ pub struct RuleSignature {
     pub params: &'static [RuleParam],
     pub variadic: Option<RuleArgType>,
     pub variadic_source_type: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuleArgumentBinding {
+    pub source_index: usize,
+    pub parameter_index: Option<usize>,
+    pub ty: RuleArgType,
 }
 
 impl RuleSignature {
@@ -261,6 +303,158 @@ impl RuleSignature {
         }
         count
     }
+
+    /// Bind source arguments to normalized parameter slots. The parser and
+    /// every marker applicator use this one arity/label/variadic algorithm.
+    pub fn argument_bindings(
+        self,
+        labels: &[Option<&str>],
+    ) -> Option<Vec<RuleArgumentBinding>> {
+        let mut supplied = vec![false; self.params.len()];
+        let mut positional = 0usize;
+        let mut saw_named = false;
+        let mut bindings = Vec::with_capacity(labels.len());
+        for (source_index, label) in labels.iter().enumerate() {
+            let parameter = if let Some(label) = label {
+                saw_named = true;
+                let index = self.params.iter().position(|param| param.name == *label)?;
+                if supplied[index] {
+                    return None;
+                }
+                supplied[index] = true;
+                Some(index)
+            } else {
+                if saw_named {
+                    return None;
+                }
+                while positional < supplied.len() && supplied[positional] {
+                    positional += 1;
+                }
+                if positional < supplied.len() {
+                    let index = positional;
+                    supplied[index] = true;
+                    positional += 1;
+                    Some(index)
+                } else {
+                    None
+                }
+            };
+            bindings.push(RuleArgumentBinding {
+                source_index,
+                parameter_index: parameter,
+                ty: match parameter {
+                    Some(index) => self.params[index].ty,
+                    None => self.variadic?,
+                },
+            });
+        }
+        if self
+            .params
+            .iter()
+            .zip(supplied)
+            .any(|(param, supplied)| param.default.is_none() && !supplied)
+        {
+            return None;
+        }
+        Some(bindings)
+    }
+
+    pub fn argument_types(self, labels: &[Option<&str>]) -> Option<Vec<RuleArgType>> {
+        self.argument_bindings(labels)
+            .map(|bindings| bindings.into_iter().map(|binding| binding.ty).collect())
+    }
+
+    pub fn marker_argument_bindings(
+        self,
+        marker: &crate::AST::Marker,
+    ) -> Option<Vec<RuleArgumentBinding>> {
+        let labels = marker
+            .args
+            .iter()
+            .zip(&marker.arg_labels)
+            .map(|(argument, label)| {
+                if let Some((name, _)) = label {
+                    return Some(name.as_str());
+                }
+                if marker.name == crate::Syntax::ATTR_META
+                    && matches!(argument, crate::AST::Expr::Ident(name, _) if name == crate::Syntax::META_FIELD_TUNABLE)
+                {
+                    return Some(crate::Syntax::META_FIELD_TUNABLE);
+                }
+                None
+            })
+            .collect::<Vec<_>>();
+        self.argument_bindings(&labels)
+    }
+}
+
+pub fn marker_argument_shape_error(
+    name: &str,
+    span: crate::Diagnostics::Span,
+) -> crate::Diagnostics::Diagnostic {
+    let expected = applied_rule(name)
+        .map(|row| row.signature.render())
+        .unwrap_or_else(|| "()".to_string());
+    crate::Diagnostics::Diagnostic::error(
+        "E0930",
+        format!("`#{name}` arguments do not match `{name}{expected}`"),
+        "marker arguments use the same call grammar and typed signature as function arguments"
+            .to_string(),
+        format!("match the registered signature `{name}{expected}`"),
+        Some(span),
+    )
+}
+
+pub fn parse_invariant_bounds(text: &str) -> Option<(i64, i64)> {
+    let mut lo = i64::MIN;
+    let mut hi = i64::MAX;
+    let mut saw = false;
+    for raw in text.split("&&") {
+        let clause = raw.trim();
+        if clause.is_empty() {
+            return None;
+        }
+        let (new_lo, new_hi) = parse_invariant_clause(clause)?;
+        lo = lo.max(new_lo);
+        hi = hi.min(new_hi);
+        saw = true;
+    }
+    (saw && lo != i64::MIN && hi != i64::MAX).then_some((lo, hi))
+}
+
+fn parse_invariant_clause(clause: &str) -> Option<(i64, i64)> {
+    for op in ["<=", ">=", "==", "<", ">"] {
+        if let Some((left, right)) = clause.split_once(op) {
+            let left = left.trim();
+            let right = right.trim();
+            return match (left == "value", right == "value") {
+                (true, false) => {
+                    let n = right.parse::<i64>().ok()?;
+                    match op {
+                        ">=" => Some((n, i64::MAX)),
+                        ">" => n.checked_add(1).map(|value| (value, i64::MAX)),
+                        "<=" => Some((i64::MIN, n)),
+                        "<" => n.checked_sub(1).map(|value| (i64::MIN, value)),
+                        "==" => Some((n, n)),
+                        _ => None,
+                    }
+                }
+                (false, true) => {
+                    let n = left.parse::<i64>().ok()?;
+                    match op {
+                        "<=" => Some((n, i64::MAX)),
+                        "<" => n.checked_add(1).map(|value| (value, i64::MAX)),
+                        ">=" => Some((i64::MIN, n)),
+                        ">" => n.checked_sub(1).map(|value| (i64::MIN, value)),
+                        "==" => Some((n, n)),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+        }
+    }
+    None
 }
 
 const NO_POLICY_SCOPES: &[PolicyScope] = &[];
@@ -406,7 +600,7 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Reactive", sig!(), &[RuleSite::Function, RuleSite::Block], Block),
     rule!("Off", sig!(), STATEMENT_SITE, Prefix),
     rule!("DebugOnly", sig!(), STATEMENT_SITE, Prefix),
-    rule!("Test", sig!(param!("name", String)), &[RuleSite::Test], Block),
+    rule!("Test", sig!(param!("name", String, "function name")), &[RuleSite::Test], Block),
     rule!("Bench", sig!(param!("name", String)), &[RuleSite::Bench], Block),
     rule!("Target", sig!(param!("target", Ident => "Target")), &[RuleSite::File, RuleSite::Module, RuleSite::Function], Call),
     rule!("Html", sig!(param!("path", String)), FILE_SITE, Call),
@@ -449,6 +643,9 @@ pub fn rule_allows(name: &str, site: RuleSite) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use crate::AST::Expr;
+    use crate::Diagnostics::Span;
+
     #[test]
     fn every_registered_rule_has_one_exact_applicability_row() {
         let rows = super::applied_rule_registry();
@@ -479,6 +676,79 @@ mod tests {
         assert!(!super::rule_allows("Doc", super::RuleSite::Block));
         assert!(!super::rule_allows("Region", super::RuleSite::File));
         assert!(!super::rule_allows("PubFile", super::RuleSite::Field));
+    }
+
+    #[test]
+    fn rule_argument_types_match_all_registry_kinds_and_variadics() {
+        let span = Span::new(0, 1);
+        let string = Expr::Str(vec![], span);
+        let ident = Expr::Ident("C".into(), span);
+        let boolean = Expr::Bool(true, span);
+        let integer = Expr::Int(1, span, None, None);
+        let duration = Expr::UnitLit {
+            raw: "1".into(),
+            int: Some(1),
+            float: None,
+            suffix: "s".into(),
+            suffix_span: span,
+            span,
+        };
+        assert!(super::RuleArgType::Any.matches_expr(&boolean));
+        assert!(super::RuleArgType::String.matches_expr(&string));
+        assert!(super::RuleArgType::String.matches_expr(&ident));
+        assert!(!super::RuleArgType::String.matches_expr(&boolean));
+        assert!(super::RuleArgType::Ident.matches_expr(&ident));
+        assert!(!super::RuleArgType::Ident.matches_expr(&integer));
+        assert!(super::RuleArgType::Bool.matches_expr(&boolean));
+        assert!(super::RuleArgType::Bool.matches_expr(&ident));
+        assert!(!super::RuleArgType::Bool.matches_expr(&integer));
+        assert!(super::RuleArgType::Int.matches_expr(&integer));
+        assert!(super::RuleArgType::Int.matches_expr(&ident));
+        assert!(!super::RuleArgType::Int.matches_expr(&string));
+        assert!(super::RuleArgType::DurationOrString.matches_expr(&duration));
+        assert!(super::RuleArgType::DurationOrString.matches_expr(&string));
+        assert!(super::RuleArgType::DurationOrString.matches_expr(&ident));
+        assert!(!super::RuleArgType::DurationOrString.matches_expr(&integer));
+
+        let policy = super::applied_rule("Policy").unwrap().signature;
+        assert_eq!(policy.argument_bindings(&[]), Some(Vec::new()));
+        assert_eq!(
+            policy.argument_types(&[None, None, None]),
+            Some(vec![
+                super::RuleArgType::Any,
+                super::RuleArgType::Any,
+                super::RuleArgType::Any,
+            ])
+        );
+        assert!(policy.argument_bindings(&[Some("setting")]).is_none());
+        let meta = super::applied_rule("Meta").unwrap().signature;
+        let reordered = meta
+            .argument_bindings(&[Some("maturity"), Some("category")])
+            .unwrap();
+        assert_eq!(
+            reordered
+                .iter()
+                .map(|binding| binding.parameter_index)
+                .collect::<Vec<_>>(),
+            vec![Some(2), Some(0)]
+        );
+        assert_eq!(
+            meta.argument_types(&[Some("maturity"), Some("category")]),
+            Some(vec![super::RuleArgType::Ident, super::RuleArgType::String])
+        );
+        assert!(meta.argument_bindings(&[None, Some("maturity")]).is_some());
+        assert!(meta.argument_bindings(&[Some("maturity")]).is_some());
+        assert!(
+            meta.argument_bindings(&[Some("category"), None])
+                .is_none()
+        );
+        assert!(
+            meta.argument_bindings(&[Some("category"), Some("category")])
+                .is_none()
+        );
+        assert!(meta.argument_types(&[Some("unknown")]).is_none());
+        let transition = super::applied_rule("Transition").unwrap().signature;
+        assert!(transition.argument_bindings(&[Some("to")]).is_none());
     }
 
     #[test]

@@ -606,8 +606,8 @@ impl Circle {
   and `struct Pair<T> { … }`. Built-in traits follow S55: auto
   `Printable`/`Equatable`/`Debug` (D-MARK-DEBUG1=A: `Debug` auto-derives
   whenever every field qualifies — no `#Debug` needed; a hand-written impl
-  overrides); explicit `#[Comparable]`, `#[Codable]`,
-  `#[Encode]`, `#[Decode]`.
+  overrides); explicit `#Comparable`, `#Codable`,
+  `#Encode`, `#Decode`.
 - **Encoding traits (D-SERDE2/D-SERDE16):** `Encode.encode(self) -> DataTree`
   and `Decode.decode(tree: DataTree) -> Self ? DecodeError` are ordinary Jet
   trait methods. `DataTree.decode<T>()` is the one public typed-dispatch path;
@@ -753,7 +753,7 @@ impl Circle {
      *prefer the newest matching version*, so data that satisfies the current
      shape never migrates.
   2. **Shape detection** — on failure, the data's top-level field-name set
-     (wire keys, after any `#[Rename]`/`#[RenameAll]` treatment) is compared
+     (wire keys, after any `#Rename`/`#RenameAll` treatment) is compared
      against the historical shapes, newest (`vK`) to oldest (`v1`); the first
      match wins.
   3. **Walk forward** — the matched shape's data is rewritten step by step,
@@ -1834,7 +1834,7 @@ Compiler-known `core.<name>` namespaces backed by Rust std helpers in the
 generated prelude (D-CORENS1/D-CORENS-CANON1): file/terminal/env/process I/O,
 math, random, time, args, sized numeric types with checked-by-default
 overflow, and unified `core.encoding` serialization (JSON/CSV/TOML/YAML over
-one `DataTree` value, plus `#[Codable]` derive). Every fallible call returns
+one `DataTree` value, plus `#Codable` derive). Every fallible call returns
 `T ? E`, handled with `?`/`??`/a pattern test like any M4 result. Importing a
 module is free (R10) — codegen only emits the helpers a program actually
 calls. See core-library.md for the full module list, signatures, and
@@ -2908,11 +2908,9 @@ no separate flag DSL to learn. `fn run()` (S12, zero-arg) is the simple program
 entry; a program opts into CLI parsing by defining `fn run` with one parameter:
 
 ```jet
-#[Cli]
+#Cli
 struct ServeArgs {
-    #[Doc("port to listen on")]
-    #[Default(3000)]
-    port: Int
+    #[Doc("port to listen on"), Default(3000)] port: Int
     verbose: Bool
     config: String?
 }
@@ -2922,9 +2920,9 @@ fn run(args: ServeArgs) {
 }
 ```
 
-`#[Cli]` is a sibling derive of `#[Codable]` on the same marker/derive
-machinery (D-MARKERMOVE1). `#[Doc("...")]` is a field-level marker giving
-that flag's `--help` line; a field with no `#[Doc(...)]` gets a generic
+`#Cli` is a sibling derive of `#Codable` on the same marker/derive
+machinery (D-MARKERMOVE1). `#Doc("...")` is a field-level marker giving
+that flag's `--help` line; a field with no `#Doc(...)` gets a generic
 "value for --name" line instead.
 
 **Entry semantics.** `run` is the only reserved program entry name (S12). Plain
@@ -2957,7 +2955,7 @@ fn verify_release() -> Void ? {}
 `Output` is a closed sum with exactly `Library`, `Executable`, `Service`,
 `Check`, `Environment`, `Image`, `Bundle`, `System`, and `Fleet`. Every Output
 has fixed text `name:`. Executable, Service, and Check also require `entry:`.
-An Executable takes zero or one `#[Cli]`-derived parameter; Service and Check
+An Executable takes zero or one `#Cli`-derived parameter; Service and Check
 take none. All three return `Void` or `Void ?`. Sema resolves and validates the
 callable before TIR or Rust emission, and publishes its definition and solved
 effect row to semantic tooling.
@@ -2966,7 +2964,7 @@ For a singular run, explicit selection is handled by the command layer. With
 no explicit address, legacy `fn run` wins; otherwise a sole compatible
 Executable is selected. Multiple candidates produce E1321 with a sorted list.
 
-**Pinned field-mapping rule** — every `#[Cli]` struct field maps to exactly
+**Pinned field-mapping rule** — every `#Cli` struct field maps to exactly
 one named `--flag`, by this rule (checked top to bottom, first match wins).
 D-CLI-POS1=A adds positional filling for required value fields:
 
@@ -2974,31 +2972,31 @@ D-CLI-POS1=A adds positional filling for required value fields:
 |---|---|---|---|
 | `Bool` | `--name` (boolean flag) | — | `false` |
 | `T?` (`T` a supported scalar) | `--name VALUE` (optional) | — | `None` |
-| scalar with `#[Default(expr)]` | `--name VALUE` (optional) | — | `expr` |
-| required scalar with `#[Flag]` | `--name VALUE` only | rejected on purpose | runtime error, `core.args` voice |
+| scalar with `#Default(expr)` | `--name VALUE` (optional) | — | `expr` |
+| required scalar with `#Flag` | `--name VALUE` only | rejected on purpose | runtime error, `core.args` voice |
 | any other supported scalar | `--name VALUE` | fills by declaration order | runtime error, `core.args` voice — no new diagnostic code |
 
 Supported scalars: `Int`, `Float`, `Bool`, `String`, `Path`. Any other field
 type (a `[K: V]`, a closure, a `[T]`, a nested struct that isn't itself
-`#[Cli]`, …) is **E1305** — there is no flag shape for it. Field defaults
-use the *existing* `#[Default(expr)]` marker (D-SERDE5) — not a second,
+`#Cli`, …) is **E1305** — there is no flag shape for it. Field defaults
+use the *existing* `#Default(expr)` marker (D-SERDE5) — not a second,
 inline `= expr` mechanism (that syntax is reserved for function-parameter
-defaults, S61, a different grammar slot; reusing `#[Default(...)]` here is
+defaults, S61, a different grammar slot; reusing `#Default(...)` here is
 I8: one mechanism for "this field has a default", not two). Field name
 `snake_case` → flag `--snake-case` (underscores become dashes); no
 casing-style menu (that's a wire-format concern, D-SERDE3, not a CLI-flag
 one). Every field always accepts its named `--field` spelling; when both a
 named value and a bare positional appear for the same field, the named value
-wins. `#[Flag]` on a Bool / optional / defaulted field is **E1309** (nothing
+wins. `#Flag` on a Bool / optional / defaulted field is **E1309** (nothing
 to opt out of). Declaration order of required value fields is part of the
 command interface; reordering them is a breaking shape change reported through
 the checked `CliSchema` / dossier / embedded command metadata.
 Every generated CLI spec also registers `--help` automatically (rendering
-the struct's fields/types/`#[Doc]` text); a field named `help` collides
+the struct's fields/types/`#Doc` text); a field named `help` collides
 with it and is **E1306**.
 
-**Nested `#[Cli]` structs are not supported in v1** — a field whose type is
-itself a `#[Cli]`-derived struct is E1305, same as any other unmapped type.
+**Nested `#Cli` structs are not supported in v1** — a field whose type is
+itself a `#Cli`-derived struct is E1305, same as any other unmapped type.
 (Grouped `--outer-inner` flag prefixing was scoped out rather than bolted
 onto the decode machinery under time pressure that would otherwise force a
 second, prefix-threaded code path — a real feature, not a punt: it needs
@@ -3015,9 +3013,9 @@ fn run(cmd: Cmd) { ... }   // $ myapp import data.csv
 ```
 
 The first positional token picks the variant by its **lowercased** name;
-the rest of argv re-parses against that variant's own `#[Cli]` spec (its
+the rest of argv re-parses against that variant's own `#Cli` spec (its
 own `--help`, its own flags — no flag namespace is shared across
-variants). Every variant's payload must be a single `#[Cli]`-derived
+variants). Every variant's payload must be a single `#Cli`-derived
 struct — any other payload shape is **E1307**. Given **zero** arguments (no
 subcommand token at all), or given root `--help`, the generated entry prints
 the lowercased command list to stdout and exits 0 — an invocation asking "what
@@ -3066,11 +3064,11 @@ stderr.
 
 **Diagnostics:** E1305 (unmappable field type), E1306 (flag-name collision,
 including the reserved `--help`), E1307 (subcommand payload isn't
-`#[Cli]`), E1308 (`run`'s one parameter isn't a `#[Cli]` struct or an enum
-of `#[Cli]` payloads), E1309 (`#[Flag]` on a field that is already flag-only).
+`#Cli`), E1308 (`run`'s one parameter isn't a `#Cli` struct or an enum
+of `#Cli` payloads), E1309 (`#Flag` on a field that is already flag-only).
 See docs/spec/diagnostics.md.
 
-The public `#[Cli]` struct or subcommand enum may be declared in the entry file
+The public `#Cli` struct or subcommand enum may be declared in the entry file
 or in one directly imported module. Its generated parser/decode helpers remain
 internal projections over the same `ArgsSpec` engine.
 

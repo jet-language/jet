@@ -22,12 +22,12 @@ fn write_todo(dir: &std::path::Path) {
         r#"#Cli
 struct AddArgs {
     text: String
-    #[Default("")] due: String
+    #Default("") due: String
 }
 
 #Cli
 struct LoginArgs {
-    #[Flag] token: String
+    #Flag token: String
 }
 
 enum Cmd {

@@ -94,6 +94,8 @@ pub enum Stmt {
     /// recovery after E3112. `body` is the gated statements.
     Unsafe {
         audit: Option<String>,
+        /// Raw source argument retained until sema validates and constant-folds it.
+        audit_expr: Option<Expr>,
         body: Vec<Stmt>,
         span: Span,
     },
@@ -105,6 +107,8 @@ pub enum Stmt {
     /// the gate is enforced entirely in the comptime interpreter (I3).
     Impure {
         reason: Option<String>,
+        /// Raw source argument retained until sema validates and constant-folds it.
+        reason_expr: Option<Expr>,
         body: Vec<Stmt>,
         span: Span,
     },
@@ -281,6 +285,8 @@ pub enum Stmt {
     /// block; the suppression is a compile-time fact, erased in codegen (I3).
     AssumeDet {
         reason: String,
+        /// Raw source argument retained until sema validates and constant-folds it.
+        reason_expr: Expr,
         body: Vec<Stmt>,
         span: Span,
     },

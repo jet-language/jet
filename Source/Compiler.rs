@@ -285,8 +285,8 @@ fn item_node(item: &AST::Item) -> SyntaxNode {
         AST::Item::Tag(t) => (SyntaxNodeKind::Tag, Some(t.name.clone()), t.name_span),
         AST::Item::Impl(i) => (SyntaxNodeKind::Impl, Some(i.type_name.clone()), i.type_span),
         AST::Item::Const(c) => (SyntaxNodeKind::Const, Some(c.name.clone()), c.name_span),
-        AST::Item::Test(t) => (SyntaxNodeKind::Test, Some(t.name.clone()), t.name_span),
-        AST::Item::Bench(b) => (SyntaxNodeKind::Bench, Some(b.name.clone()), b.name_span),
+        AST::Item::Test(t) => (SyntaxNodeKind::Test, t.name.clone(), t.name_span),
+        AST::Item::Bench(b) => (SyntaxNodeKind::Bench, b.name.clone(), b.name_span),
         AST::Item::ExternRust(e) => (
             SyntaxNodeKind::ExternRust,
             Some(e.crate_spec.clone()),

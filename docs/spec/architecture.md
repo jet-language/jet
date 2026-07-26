@@ -448,7 +448,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   generation), and any error in generated output surfaces as a **real sema
   diagnostic pinned to the user's trigger site** — the struct, field, or
   derive marker that caused it — with the generated fragment shown only as
-  optional context, never as raw rustc output. The shipped `#[Codable]` derive
+  optional context, never as raw rustc output. The shipped `#Codable` derive
   already works this way; it is the required shape for all future derives and
   build-time steps (S56 user derives, comptime). (D-CTCODEGEN1=A, ratified
   2026-06-25; pairs with D-METADERIVE1=A, which makes a user derive's output a

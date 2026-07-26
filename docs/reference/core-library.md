@@ -1676,7 +1676,7 @@ sort, join, pivot, and collect enforce named ceilings. Invalid analytics
 instead of silent zeros or clamps. Pivot cells use distinct `DataPivotCell`
 row/column keys.
 
-`data.csv<T>(text)` decodes CSV into `[T]` using the same `#[Codable]` model as
+`data.csv<T>(text)` decodes CSV into `[T]` using the same `#Codable` model as
 `core.encoding.csv.decode<T>`. `data.json<T>(text)` decodes a JSON array of objects
 into `[T]` via the same Decode path as `core.encoding.json.decode<[T]>`. Selectors are typed
 lambdas, so a misspelled row field is a Jet field error before codegen.
@@ -1743,7 +1743,7 @@ their binders ship.
 ```jet
 use core.data as data
 
-#[Codable]
+#Codable
 struct Ticket {
     team: String
     minutes: Float
@@ -1806,8 +1806,8 @@ Core helpers include `field`, `int`, `float`, `bool`, `redact`, `counter`,
 
 #### Typed (de)serialization — one derive, every format (D-SERDE1–8)
 
-Mark a type `#[Codable]` and it crosses the wire in any format. `#[Codable]` is
-both directions; the one-way markers are `#[Encode]` (write-only) and `#[Decode]`
+Mark a type `#Codable` and it crosses the wire in any format. `#Codable` is
+both directions; the one-way markers are `#Encode` (write-only) and `#Decode`
 (read-only). The derive is compiler-owned (like `derive Comparable`) — no macros,
 no runtime reflection.
 
@@ -1815,10 +1815,10 @@ no runtime reflection.
 use core.encoding.csv as csv
 use core.encoding.json as json
 
-#[Codable]
+#Codable
 struct Order {
     id: Int
-    #[Rename("customer")] who: String      // wire key overrides the field name
+    #Rename("customer") who: String      // wire key overrides the field name
     items: [String]
     note: String?                          // absent optional is omitted on the wire
 }
@@ -1833,7 +1833,7 @@ fn run() {
 }
 ```
 
-**Encode** — `to_string(v)` / `to_string_pretty(v)` accept any `#[Codable]`/`#[Encode]`
+**Encode** — `to_string(v)` / `to_string_pretty(v)` accept any `#Codable`/`#Encode`
 value (the dynamic `JSON` tree and the `[[String]]`/`[K: V]` forms still work too). Field
 order is preserved.
 
@@ -1933,35 +1933,35 @@ are follow-on work — see docs/spec/syntax-decisions.md's D-VALIDATE1 entry.
 
 | Attribute | Effect |
 |-----------|--------|
-| `#[Rename("k")]` | use `k` as the wire key for this field |
-| `#[Skip]` | never serialize; on decode use the field's default |
-| `#[Default]` / `#[Default(8080)]` | when the key is absent, use the type's default (or the given literal) |
-| `#[Flatten]` | inline a `#[Codable]` struct field's keys into the parent object |
+| `#Rename("k")` | use `k` as the wire key for this field |
+| `#Skip` | never serialize; on decode use the field's default |
+| `#Default` / `#Default(8080)` | when the key is absent, use the type's default (or the given literal) |
+| `#Flatten` | inline a `#Codable` struct field's keys into the parent object |
 
 **Container attributes:**
 
 | Attribute | Effect |
 |-----------|--------|
-| `#[RenameAll(camel)]` | map every field's wire key — `camel`/`snake`/`pascal`/`kebab`/`screaming` (D-SERDE3) |
-| `#[DenyUnknownFields]` | a wire key the struct doesn't declare is an error, not ignored (D-SERDE8) |
-| `#[Tag("type")]` / `#[Untagged]` | enum wire representation (D-SERDE7); default is externally tagged |
+| `#RenameAll(camel)` | map every field's wire key — `camel`/`snake`/`pascal`/`kebab`/`screaming` (D-SERDE3) |
+| `#DenyUnknownFields` | a wire key the struct doesn't declare is an error, not ignored (D-SERDE8) |
+| `#Tag("type")` / `#Untagged` | enum wire representation (D-SERDE7); default is externally tagged |
 
 **Enums** serialize externally tagged by default: a unit variant is its bare name
-(`"Closed"`), a payload variant is `{"Variant": payload}`. `#[Tag("type")]` switches
+(`"Closed"`), a payload variant is `{"Variant": payload}`. `#Tag("type")` switches
 to internal tagging (`{"type":"Click", …}`); a single unnamed payload uses the
-canonical `value` key (`{"type":"Count","value":7}`). `#[Untagged]` emits the
+canonical `value` key (`{"type":"Count","value":7}`). `#Untagged` emits the
 payload alone.
 
 Unknown wire keys are ignored by default (forward-compatible); opt into strict
-checking with `#[DenyUnknownFields]`. Diagnostics: E2407 (`#[Rename]` non-string),
-E2408 (`#[Flatten]` non-struct), E2409 (bad `#[RenameAll]` style), E2410 (missing
+checking with `#DenyUnknownFields`. Diagnostics: E2407 (`#Rename` non-string),
+E2408 (`#Flatten` non-struct), E2409 (bad `#RenameAll` style), E2410 (missing
 required field, runtime), E2411 (type isn't serializable — also fires at the use
 site for a non-codable generic argument), E2412 (unknown field, runtime). E2413 is
 retired (D-SERDE12).
 
-Generic `#[Codable]` is first-class (D-SERDE9-12): the derive auto-injects
+Generic `#Codable` is first-class (D-SERDE9-12): the derive auto-injects
 `T: Encode`/`T: Decode` bounds on exactly the type params that reach the wire —
-the user never spells them. A phantom or `#[Skip]`-only param carries no serde
+the user never spells them. A phantom or `#Skip`-only param carries no serde
 bound (only structural `Clone`), so `Id<Kind>` serializes for any `Kind`. A
 non-codable type argument fails at the use site (E2411), not the definition.
 
@@ -2879,9 +2879,9 @@ the package system fully stabilizes.
 | `examples/features/io/cli_args.jet` | `core.args` — flag/option/positional spec + parse |
 | `examples/features/io/db_checked_sql.jet` | `core.db` — checked SQL params, typed row reads, transactions, migrations |
 | `examples/features/io/dir_entry.jet` | `fs.list_dir` → `[DirEntry]` |
-| `examples/features/serde/serde_derive.jet` | `#[Codable]` encode + typed `decode<T>` with `#[Rename]` |
+| `examples/features/serde/serde_derive.jet` | `#Codable` encode + typed `decode<T>` with `#Rename` |
 | `examples/features/serde/csv_typed.jet` | `csv.decode<Row>` → struct → JSON (the typed CSV pipeline) |
-| `examples/features/serde/json_typed.jet` | Nested struct + list + optional round-trip with `#[RenameAll(camel)]` |
+| `examples/features/serde/json_typed.jet` | Nested struct + list + optional round-trip with `#RenameAll(camel)` |
 | `examples/features/serde/decode_traced.jet` | `decode_traced<T>` → `DecodeResult<T>`/`MigrationStatus`, incl. a real v1→v2 migration at decode time |
 | `examples/features/reflection/reflect-value.jet` | `reflect.of(x)` — `.type_name()`/`.display()`/`.fields()` |
 | `examples/features/syntax/maturity_tags.jet` | `#Meta(maturity: .Experimental / .Tested / .Hardened)` doc-only API metadata (D-MARK-META1=B) |

@@ -388,6 +388,7 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
             html_path: None,
             no_alloc_policy: None,
             policy_declarations: Vec::new(),
+            rule_facts: Vec::new(),
         });
         lib_to_idx.insert(lib.clone(), synth_idx);
         cffi.libs.push(CLib {
@@ -453,6 +454,7 @@ pub fn assemble(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<Diagnostic>> {
                         html_path: None,
                         no_alloc_policy: None,
                         policy_declarations: Vec::new(),
+                        rule_facts: Vec::new(),
                     });
                     lib_to_idx.insert(lib.clone(), synth_idx);
                     cffi.libs.push(CLib {
@@ -668,6 +670,7 @@ fn load_cache_source(
         html_path: prog.html_path.clone(),
         no_alloc_policy: prog.no_alloc_policy,
         policy_declarations: prog.policy_declarations.clone(),
+        rule_facts: std::mem::take(&mut prog.rule_facts),
     });
 }
 

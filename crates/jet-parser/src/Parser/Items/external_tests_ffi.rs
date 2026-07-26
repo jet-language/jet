@@ -52,35 +52,26 @@ impl<'a> Parser<'a> {
             let marker = self.parse_rule_marker()?;
             if matches!(self.peek().kind, TokKind::KwFn) {
                 if !marker.args.is_empty() {
-                    return Err(Self::marker_argument_shape_error(
+                    return Err(crate::Policy::marker_argument_shape_error(
                         Syntax::KW_TEST,
                         marker.span,
                     ));
                 }
                 return self.test_def_after_kw();
             }
-            if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
-                return Err(Self::marker_argument_shape_error(
+            let arguments = self.bound_registered_rule_arguments(&marker)?;
+            let Some(name_argument) = arguments.parameter(0) else {
+                return Err(crate::Policy::marker_argument_shape_error(
                     Syntax::KW_TEST,
                     marker.span,
                 ));
-            }
-            let (name, name_span) = match &marker.args[0] {
+            };
+            let (name, name_span) = match name_argument {
                 crate::AST::Expr::Str(parts, span) if parts.len() == 1 => match &parts[0] {
-                    crate::AST::StrPart::Lit(name) => (name.clone(), *span),
-                    crate::AST::StrPart::Interp(..) => {
-                        return Err(Self::marker_argument_shape_error(
-                            Syntax::KW_TEST,
-                            marker.span,
-                        ));
-                    }
+                    crate::AST::StrPart::Lit(name) => (Some(name.clone()), *span),
+                    crate::AST::StrPart::Interp(..) => (None, *span),
                 },
-                _ => {
-                    return Err(Self::marker_argument_shape_error(
-                        Syntax::KW_TEST,
-                        marker.span,
-                    ));
-                }
+                other => (None, other.span()),
             };
             let item_start = marker.span.start;
             self.expect(TokKind::LBrace, "to open the test body")?;
@@ -88,6 +79,8 @@ impl<'a> Parser<'a> {
             return Ok(crate::AST::TestDef {
                 span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
                 name,
+                name_expr: Some(name_argument.clone()),
+                name_prefix: None,
                 name_span,
                 params: Vec::new(),
                 fn_keyword_span: None,
@@ -121,7 +114,9 @@ impl<'a> Parser<'a> {
                 let body = self.block_stmts();
                 return Ok(crate::AST::TestDef {
                     span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
-                    name,
+                    name: Some(name),
+                    name_expr: None,
+                    name_prefix: None,
                     name_span,
                     params,
                     fn_keyword_span: Some(fn_span),
@@ -133,7 +128,9 @@ impl<'a> Parser<'a> {
             let body = self.block_stmts();
             Ok(crate::AST::TestDef {
                 span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
-                name,
+                name: Some(name),
+                name_expr: None,
+                name_prefix: None,
                 name_span,
                 params: Vec::new(),
                 fn_keyword_span: None,
@@ -152,34 +149,27 @@ impl<'a> Parser<'a> {
         pub(in crate::Parser) fn bench_def(&mut self) -> Result<crate::AST::BenchDef, Diagnostic> {
             let item_start = self.peek().span.start;
             let marker = self.parse_rule_marker()?;
-            if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
-                return Err(Self::marker_argument_shape_error(
+            let arguments = self.bound_registered_rule_arguments(&marker)?;
+            let Some(name_argument) = arguments.parameter(0) else {
+                return Err(crate::Policy::marker_argument_shape_error(
                     Syntax::KW_BENCH,
                     marker.span,
                 ));
-            }
-            let (name, name_span) = match &marker.args[0] {
+            };
+            let (name, name_span) = match name_argument {
                 crate::AST::Expr::Str(parts, span) if parts.len() == 1 => match &parts[0] {
-                    crate::AST::StrPart::Lit(name) => (name.clone(), *span),
-                    crate::AST::StrPart::Interp(..) => {
-                        return Err(Self::marker_argument_shape_error(
-                            Syntax::KW_BENCH,
-                            marker.span,
-                        ));
-                    }
+                    crate::AST::StrPart::Lit(name) => (Some(name.clone()), *span),
+                    crate::AST::StrPart::Interp(..) => (None, *span),
                 },
-                _ => {
-                    return Err(Self::marker_argument_shape_error(
-                        Syntax::KW_BENCH,
-                        marker.span,
-                    ));
-                }
+                other => (None, other.span()),
             };
             self.expect(TokKind::LBrace, "to open the benchmark body")?;
             let body = self.block_stmts();
             Ok(crate::AST::BenchDef {
                 span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
                 name,
+                name_expr: name_argument.clone(),
+                name_prefix: None,
                 name_span,
                 body,
             })
@@ -494,15 +484,32 @@ impl<'a> Parser<'a> {
     
         pub(super) fn extern_fn(&mut self) -> Result<crate::AST::ExternFn, Diagnostic> {
             let abi = if matches!(self.peek().kind, TokKind::Hash) {
-                let marker = self.parse_rule_marker()?;
-                if marker.name != Syntax::ATTR_ABI {
-                    return Err(Diagnostic::error("E3212", format!("unknown C ABI marker `#{}`", marker.name), "C declarations only accept the per-function `#Abi(name)` marker".to_string(), "use `#Abi(system)` or remove the marker for the default C ABI".to_string(), Some(marker.name_span)));
+                let markers = self.parse_attached_marker_sequence(
+                    Some(crate::Policy::RuleSite::Function),
+                    "C declaration",
+                )?;
+                let marker = markers
+                    .iter()
+                    .find(|marker| marker.name == Syntax::ATTR_ABI);
+                if markers.len() != 1 || marker.is_none() {
+                    let marker = markers
+                        .iter()
+                        .find(|marker| marker.name != Syntax::ATTR_ABI)
+                        .or_else(|| markers.first())
+                        .expect("attached marker sequence is non-empty");
+                    return Err(Diagnostic::error(
+                        "E3212",
+                        format!("unknown C ABI marker `#{}`", marker.name),
+                        "C declarations only accept the per-function `#Abi(name)` marker"
+                            .to_string(),
+                        "use `#Abi(system)` or remove the marker for the default C ABI".to_string(),
+                        Some(marker.name_span),
+                    ));
                 }
-                if marker.args.len() != 1 || marker.arg_labels[0].is_some() {
-                    return Err(Self::marker_argument_shape_error(Syntax::ATTR_ABI, marker.span));
-                }
-                let crate::AST::Expr::Ident(name, span) = &marker.args[0] else {
-                    return Err(Self::marker_argument_shape_error(Syntax::ATTR_ABI, marker.span));
+                let marker = marker.expect("one Abi marker");
+                let arguments = self.bound_registered_rule_arguments(marker)?;
+                let Some(crate::AST::Expr::Ident(name, span)) = arguments.parameter(0) else {
+                    return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_ABI, marker.span));
                 };
                 while matches!(self.peek().kind, TokKind::Semi) { self.bump(); }
                 Some((name.clone(), *span))

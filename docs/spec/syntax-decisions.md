@@ -106,7 +106,7 @@ beside S17 (owner-chosen I8 exception).
 `fn run() -> Void ?` (S80, D-S80-RUN1). **D-CLIFLAG1** (implemented, c7cliflag): a
 typed entry parameter optionally opts into CLI parsing — `fn run(args: ServeArgs)`
 derives `--flag` names/defaults/help from the struct's fields
-(`#[Cli]`/`#[Doc("...")]` markers, bracket form matching `#[Codable]`); an
+(`#Cli`/`#Doc("...")` markers, bracket form matching `#Codable`); an
 `enum` param derives subcommands. There is no Jet `main` entry and no
 variadic entry signature. Raw argv access stays explicit inside `fn run()`
 via `core.args`/`core.io.args`. See docs/spec/spec.md
@@ -115,13 +115,13 @@ existing `core.args` `ArgsSpec` builder (D-ARGS1) remains the library floor
 for non-entry parsing; the typed layer generates onto it rather than adding
 a second parser.
 
-**D-CLI-POS1=A — positional by default, `#[Flag]` to opt out** *(ratified
-2026-07-23, card #748)*: on a `#[Cli]` struct, required value fields fill from
+**D-CLI-POS1=A — positional by default, `#Flag` to opt out** *(ratified
+2026-07-23, card #748)*: on a `#Cli` struct, required value fields fill from
 bare argv in declaration order. Boolean flags and optional/defaulted fields stay
 flag-only. Every field still accepts its named `--field` spelling; when both the
 named form and a bare value appear for the same field, the named value wins.
-`#[Flag]` on a required value field removes it from positional filling (expert
-opt-out for secrets and similar). `#[Flag]` on a Bool / optional / defaulted
+`#Flag` on a required value field removes it from positional filling (expert
+opt-out for secrets and similar). `#Flag` on a Bool / optional / defaulted
 field is E1309. Declaration order of required value fields is
 part of the command interface; the always-available named spelling keeps scripts
 stable across reorders. Help lists positionals before flags. Marker constant:
@@ -514,8 +514,8 @@ required/allowed field list (E0339 if provided), and direct assignment
 (`s.field = v`, `s.field++`) is also E0339. A cycle among computed-field
 formulas, including self-reference, is E0338. Codegen: not a Rust struct
 member — a synthesized inherent getter method instead; every read routes to a
-call of it. `#[Patchable]` (D-PATCH1) excludes a computed field from `T.Patch`
-and from `apply`/`diff`/`merge`. `#[Codable]` encode calls the getter (the
+call of it. `#Patchable` (D-PATCH1) excludes a computed field from `T.Patch`
+and from `apply`/`diff`/`merge`. `#Codable` encode calls the getter (the
 field appears in the wire output); decode never reads into it.
 
 **D-QUAL3 — Unit families**: `#UnitFamily(Currency) { usd, eur, gbp }` mints
@@ -1043,7 +1043,7 @@ D-MARK-DEBUG1=A, 2026-07-11, card #498)*: silent auto-derive for
 `Printable`, `Equatable`, **and `Debug`** whenever every field qualifies; a
 hand-written impl overrides. `Debug` auto-derivation resolves the S55 ↔
 D-DISPLAYDBG1 contradiction in favor of auto (dev-facing tool, no ceremony;
-`#[Redact]` carries the secrets story); the standalone opt-in `#Debug`
+`#Redact` carries the secrets story); the standalone opt-in `#Debug`
 marker leaves the derive list. Explicit opt-in markers for the rest —
 `#Comparable`, `#Summarize`, and the codability family `#Codable`
 (≡ `#[Encode, Decode]`), `#Encode`, `#Decode` (D-SERDE4, D-MARKERMOVE3).
@@ -1053,7 +1053,7 @@ the `#` plane (see Serde under Core library).
 **D-DISPLAYDBG1 / D-DISPLAY-SHAPE — Display & Debug**: `Display` is
 user-facing — a single explicit method `fn display(self) -> String`, no
 default (E0915, L0520); interpolation `{}` calls it. `Debug` is dev-facing and
-auto-derived; `{value#Debug}` selects it; `#[Redact]` on a field renders
+auto-derived; `{value#Debug}` selects it; `#Redact` on a field renders
 `"[redacted]"` (D-DEBUG-REDACT).
 
 **D-ITER-HOOK / D-INDEX-HOOK — Extensibility hooks**: beginners use
@@ -1295,7 +1295,7 @@ marker (extends D-CANVASMETA1's field-ballot hook). Applied immediately
 to the shipped maturity trio (above). `#Doc` stays: it is the CLI
 help-text carrier (D-CLIFLAG1), not free metadata.
 
-**D-PATCH1 — Typed patches** *(ratified 2026-07-03, card #181)*: `#[Patchable]`
+**D-PATCH1 — Typed patches** *(ratified 2026-07-03, card #181)*: `#Patchable`
 on a struct `T` synthesizes `T.Patch` — every field wrapped `T?` (Option),
 absent field = no change. Generated methods: `t.apply(patch) -> T` (apply
 onto a base), `T.diff(new, old) -> T.Patch` (static; fields that changed,
@@ -2304,12 +2304,12 @@ binding type; bare `decode(s)` yields dynamic `DataTree`). Hand-impl surface:
 `encode`/`decode` verbs over `DataTree`
 (`.Null/.Bool/.Int/.Float/.Text/.Array/.Object`); `DecodeError
 { path, reason }`; encode infallible. Field markers (`#` plane):
-`#[Rename("x")]`, `#[Skip]`, `#[Default]`/`#[Default(expr)]`, `#[Flatten]`,
-`#[RenameAll(camel|snake|pascal|kebab|screaming)]` (E2409). Enum wire:
-externally tagged default, single-value variants bare; `#[Tag("type")]`
-internal (single unnamed payload under `"value"`), `#[Untagged]`. Unknown wire
+`#Rename("x")`, `#Skip`, `#Default`/`#Default(expr)`, `#Flatten`,
+`#RenameAll(camel|snake|pascal|kebab|screaming)` (E2409). Enum wire:
+externally tagged default, single-value variants bare; `#Tag("type")`
+internal (single unnamed payload under `"value"`), `#Untagged`. Unknown wire
 keys ignored by default;
-`#[DenyUnknownFields]` errors (E2412). Generic `#Codable` auto-adds
+`#DenyUnknownFields` errors (E2412). Generic `#Codable` auto-adds
 `Encode`/`Decode` bounds to wire-reaching type params only. Dynamic trees get
 `?`-chaining accessors (`.field(name)`, `.at(i)`, `.int()`, `.text()`, …).
 YAML parser is std-only, YAML 1.2 core incl. anchors.

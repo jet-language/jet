@@ -1463,6 +1463,7 @@ mod tests {
                 no_prelude: program.no_prelude, html_path: program.html_path,
                 no_alloc_policy: program.no_alloc_policy,
                 policy_declarations: program.policy_declarations.clone(),
+                rule_facts: std::mem::take(&mut program.rule_facts),
             }],
             parse_teaching: Vec::new(), used_core: HashSet::new(), ffi_callback_fns: HashSet::new(), cffi: crate::AST::CFfi::default(),
             comptime_inputs: Vec::new(), import_targets: HashMap::new(), layer_ceiling: None,
@@ -1536,6 +1537,7 @@ mod tests {
                 html_path: prog.html_path.clone(),
                 no_alloc_policy: prog.no_alloc_policy,
                 policy_declarations: prog.policy_declarations.clone(),
+                rule_facts: std::mem::take(&mut prog.rule_facts),
             }],
             parse_teaching: Vec::new(),
             used_core: HashSet::new(),
@@ -1751,7 +1753,11 @@ fn emit_test_main_cov(
     out.push_str("    if let Ok(path) = std::env::var(\"JET_TEST_PROOF_REPORT\") { if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) { use std::io::Write as _; if file.metadata().map(|m| m.len() == 0).unwrap_or(false) { let _ = file.write_all(b\"JETTEST2\"); } } }\n");
     out.push_str("    let mut slots: Vec<JetTestSlot> = vec![\n");
     for (i, test) in tests.iter().enumerate() {
-        let name = escape_rust_str(&test.name);
+        let name = escape_rust_str(
+            test.name
+                .as_deref()
+                .expect("sema resolves every test marker name before codegen"),
+        );
         let skip = whole_test_skip(test);
         out.push_str(&format!(
             "        JetTestSlot {{ name: {}, skip: {}, property: {}, run: jet_test_{} }},\n",
@@ -1961,14 +1967,22 @@ fn emit_test_fns(cx: &Cx, tests: &[&TestDef], out: &mut String) {
         ));
         out.push_str(&format!(
             "            jet_proof_record(3, 1, {}, &args.join(\", \"), &seed.to_string(), (case_index + 1) as u32);\n",
-            escape_rust_str(&test.name)
+            escape_rust_str(
+                test.name
+                    .as_deref()
+                    .expect("sema resolves every test marker name before codegen"),
+            )
         ));
         out.push_str("            return Err(format!(\"property failed for {}\\n  {}\", args.join(\", \"), msg));\n");
         out.push_str("        }\n");
         out.push_str("    }\n");
         out.push_str(&format!(
             "    jet_proof_record(3, 0, {}, \"\", &seed.to_string(), {});\n",
-            escape_rust_str(&test.name), CASES
+            escape_rust_str(
+                test.name
+                    .as_deref()
+                    .expect("sema resolves every test marker name before codegen"),
+            ), CASES
         ));
         out.push_str("    Ok(())\n");
         out.push_str("}\n\n");
@@ -2290,7 +2304,10 @@ fn select_fuzz_target<'a>(
     test_name: Option<&str>,
 ) -> Result<usize, String> {
     if let Some(name) = test_name {
-        match tests.iter().position(|t| t.name == name) {
+        match tests
+            .iter()
+            .position(|test| test.name.as_deref() == Some(name))
+        {
             Some(i) if !tests[i].params.is_empty() => Ok(i),
             Some(_) => Err(format!(
                 "`{}` is a unit `#Test`, not a property test — `jet fuzz` needs a parameterized `#Test fn` (D-TEST1)",
@@ -2313,7 +2330,15 @@ fn select_fuzz_target<'a>(
             ),
             1 => Ok(candidates[0]),
             _ => {
-                let names: Vec<&str> = candidates.iter().map(|&i| tests[i].name.as_str()).collect();
+                let names: Vec<&str> = candidates
+                    .iter()
+                    .map(|&index| {
+                        tests[index]
+                            .name
+                            .as_deref()
+                            .expect("sema resolves every test marker name before codegen")
+                    })
+                    .collect();
                 Err(format!(
                     "multiple property tests in this file — say which one: {}\n  fix: `jet fuzz <file> <name>`, e.g. `jet fuzz <file> \"{}\"`",
                     names.join(", "),
@@ -2481,7 +2506,11 @@ fn emit_fuzz_main(cx: &Cx, test: &TestDef, idx: usize, file_label: &str, out: &m
         .enumerate()
         .map(|(k, p)| format!("format!(\"{} = {{}}\", input.{}.render())", p.name, k))
         .collect();
-    let name_lit = escape_rust_str(&test.name);
+    let name_lit = escape_rust_str(
+        test.name
+            .as_deref()
+            .expect("sema resolves every test marker name before codegen"),
+    );
     let file_lit = escape_rust_str(file_label);
 
     out.push_str("fn main() {\n");
@@ -2752,7 +2781,12 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
     out.push_str("    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n");
     out.push_str("    fn hex(bytes: &[u8]) -> String { const H: &[u8; 16] = b\"0123456789abcdef\"; let mut out = String::with_capacity(bytes.len() * 2); for byte in bytes { out.push(H[(byte >> 4) as usize] as char); out.push(H[(byte & 15) as usize] as char); } out }\n");
     for (i, bench) in benches.iter().enumerate() {
-        let name = escape_rust_str(&bench.name);
+        let name = escape_rust_str(
+            bench
+                .name
+                .as_deref()
+                .expect("sema resolves every benchmark marker name before codegen"),
+        );
         out.push_str(&format!(
             "    {{\n        let (samples, allocations, iters) = jet_bench_{}();\n",
             i

@@ -1030,6 +1030,7 @@ pub(crate) struct ModuleState {
     tests: HashMap<String, Span>,
     trait_reg: TraitRegistry,
     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
+    rule_facts: Vec<crate::AST::AppliedRuleApplication>,
     /// D-MOD2: inline code module aliases present in this file (alias → module name).
     /// `math.double(x)` resolves to `user_math__double(x)` when `math` is in here.
     code_modules: HashMap<String, String>,
@@ -1071,6 +1072,7 @@ pub(crate) struct Checker<'a> {
     func_pkg_pub: &'a HashMap<String, bool>,
     module_path: &'a str,
     policy_declarations: &'a [crate::Policy::PolicyDeclaration],
+    rule_facts: Vec<crate::AST::AppliedRuleApplication>,
     current_function_span: Span,
     reference_anchors: &'a mut HashMap<(String, usize, usize), Effects::DefinitionAnchorFact>,
     diags: Vec<Diagnostic>,

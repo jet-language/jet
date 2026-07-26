@@ -162,7 +162,12 @@ impl AttachmentCatalog {
 fn attachment_catalog(items: &[Item]) -> AttachmentCatalog {
     let mut catalog = AttachmentCatalog::default();
     for item in items {
-        if let Item::Bench(bench) = item { catalog.benches.insert(bench.name.clone()); continue; }
+        if let Item::Bench(bench) = item {
+            if let Some(name) = &bench.name {
+                catalog.benches.insert(name.clone());
+            }
+            continue;
+        }
         if let Item::Func(func) = item {
             collect_scene_attachments(&func.body, &mut catalog.scenes);
             continue;

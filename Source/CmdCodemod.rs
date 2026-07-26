@@ -912,6 +912,7 @@ fn parse_pattern_tree(template: &Template, class: &str) -> PatternTree {
         html_path: program.html_path,
         no_alloc_policy: program.no_alloc_policy,
         policy_declarations: program.policy_declarations.clone(),
+        rule_facts: program.rule_facts.clone(),
     };
     let nodes = jet_semindex::structural_nodes_from_parsed(&module);
     let end = actual_start + fragment.len();

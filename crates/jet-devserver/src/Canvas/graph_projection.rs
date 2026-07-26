@@ -851,7 +851,9 @@ fn project_stmt(
                 vec!["source_jump"],
             );
         }
-        Stmt::Unsafe { span, audit, body } => {
+        Stmt::Unsafe {
+            span, audit, body, ..
+        } => {
             g.regions.push(format!(
                 "{{\"region_id\":{},\"kind\":\"unsafe\",\"title\":{},\"source_span\":{}}}",
                 json_str(&format!("{}:region:{ordinal}:unsafe", g.graph_id)),
@@ -860,7 +862,9 @@ fn project_stmt(
             ));
             project_stmt_block(g, index, src, body, ordinal * 100 + 95, x + 230, y + 70);
         }
-        Stmt::Impure { reason, body, span } => {
+        Stmt::Impure {
+            reason, body, span, ..
+        } => {
             add_region(
                 g,
                 ordinal,

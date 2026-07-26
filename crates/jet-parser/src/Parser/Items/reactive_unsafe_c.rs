@@ -146,19 +146,14 @@ impl<'a> Parser<'a> {
                 .first()
                 .map_or(self.peek().span.start, |marker| marker.span.start);
             let Some(ffi) = markers.iter().find(|marker| marker.name == Syntax::ATTR_FFI) else {
-                return Err(Self::marker_argument_shape_error(
+                return Err(crate::Policy::marker_argument_shape_error(
                     Syntax::ATTR_FFI,
                     markers.first().map_or(self.peek().span, |marker| marker.span),
                 ));
             };
-            if ffi.name != Syntax::ATTR_FFI
-                || ffi.args.len() != 1
-                || ffi.arg_labels[0].is_some()
-            {
-                return Err(Self::marker_argument_shape_error(Syntax::ATTR_FFI, ffi.span));
-            }
-            let crate::AST::Expr::Ident(lang, lang_span) = &ffi.args[0] else {
-                return Err(Self::marker_argument_shape_error(Syntax::ATTR_FFI, ffi.span));
+            let arguments = self.bound_registered_rule_arguments(ffi)?;
+            let Some(crate::AST::Expr::Ident(lang, lang_span)) = arguments.parameter(0) else {
+                return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_FFI, ffi.span));
             };
             let lang = lang.clone();
             let lang_span = *lang_span;

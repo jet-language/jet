@@ -55,6 +55,7 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
         module_arg_expr_depth: None,
         policy_declarations: Vec::new(),
         applied_rules: Vec::new(),
+        rule_facts: Vec::new(),
         block_spans: Vec::new(),
     };
     let prog = p.program();
@@ -84,6 +85,7 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
         module_arg_expr_depth: None,
         policy_declarations: Vec::new(),
         applied_rules: Vec::new(),
+        rule_facts: Vec::new(),
         block_spans: Vec::new(),
     };
     let prog = p.program();
@@ -190,6 +192,7 @@ struct Parser<'a> {
     module_arg_expr_depth: Option<usize>,
     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     applied_rules: Vec<crate::AST::AppliedRuleApplication>,
+    rule_facts: Vec<crate::AST::AppliedRuleApplication>,
     block_spans: Vec<Span>,
 }
 
@@ -661,6 +664,98 @@ mod s61_tests {
     }
 
     #[test]
+    fn named_rule_arguments_bind_by_signature_without_reordering_source() {
+        let src = "#[Transition(to: Closed, from: Open), Meta(maturity: .Hardened, tunable: false)]\nfn work() {}\n";
+        let parsed = program(src);
+        let function = parsed
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::Func(function) if function.name == "work" => Some(function),
+                _ => None,
+            })
+            .expect("work function");
+        let transition = function
+            .state_transition
+            .as_ref()
+            .expect("bound transition");
+        assert_eq!(transition.from.as_deref(), Some("Open"));
+        assert_eq!(transition.to, "Closed");
+        assert_eq!(
+            function.maturity,
+            Some(crate::AST::MaturityTag::Hardened)
+        );
+        assert!(
+            !function.meta.as_ref().expect("meta").facts().tunable,
+            "explicit false keeps the default"
+        );
+        let source_transition = parsed
+            .applied_rules
+            .iter()
+            .find(|application| application.marker.name == Syntax::KW_TRANSITION)
+            .expect("source transition");
+        assert_eq!(
+            source_transition
+                .marker
+                .arg_labels
+                .iter()
+                .map(|label| label.as_ref().map(|(name, _)| name.as_str()))
+                .collect::<Vec<_>>(),
+            vec![Some("to"), Some("from")]
+        );
+
+        let family = program(
+            "#UnitFamily(base: meter, family: Length) {\n    meter\n}\n",
+        );
+        let family = family
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::UnitFamily(family) => Some(family),
+                _ => None,
+            })
+            .expect("unit family");
+        assert_eq!(family.family, "Length");
+        assert_eq!(family.base.as_ref().map(|(name, _)| name.as_str()), Some("meter"));
+
+        let formatted = crate::Formatter::format_source(src).expect("format reordered labels");
+        assert!(
+            formatted.contains(
+                "#[Transition(to: Closed, from: Open), Meta(maturity: .Hardened, tunable: false)]"
+            ),
+            "{formatted}"
+        );
+
+        let invalid = "#Transition(to: Closed, Open)\nfn work() {}\n";
+        let (tokens, lex_diagnostics) = lex(invalid);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+        let diagnostics = parse(&tokens).expect_err("positional after named is E0930");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E0930"),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn marker_stack_fix_preserves_reordered_named_arguments() {
+        let src = "#Transition(to: Closed, from: Open)\n#Meta(maturity: .Tested, category: \"state\")\nfn work() {}\n";
+        let (tokens, lex_diagnostics) = lex(src);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+        let diagnostics = parse(&tokens).expect_err("adjacent markers are E0999");
+        let edit = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E0999")
+            .and_then(|diagnostic| diagnostic.edit.as_ref())
+            .expect("marker stack edit");
+        assert_eq!(
+            edit.new_text,
+            "#[Transition(to: Closed, from: Open), Meta(maturity: .Tested, category: \"state\")]"
+        );
+    }
+
+    #[test]
     fn argument_marker_stack_fix_keeps_payloads_and_order() {
         let src = "#Codable\n#RenameAll(camel)\nstruct Particle { x: Float }\n";
         let (tokens, lex_diagnostics) = lex(src);
@@ -731,10 +826,12 @@ mod s61_tests {
     }
 
     #[test]
-        fn grouped_retired_function_markers_keep_known_teaching() {
+    fn grouped_retired_function_markers_keep_known_teaching() {
         for (src, code) in [
             ("#[Pure, Task]\nfn work() {}\n", "E0066"),
             ("#[InlineAlways, Task]\nfn work() {}\n", "E0927"),
+            ("#[Pure(), Task]\nfn work() {}\n", "E0066"),
+            ("#[InlineAlways(), Task]\nfn work() {}\n", "E0927"),
         ] {
             let (tokens, lex_diagnostics) = lex(src);
             assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
@@ -742,7 +839,71 @@ mod s61_tests {
             assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == code), "{diagnostics:?}");
             assert!(!diagnostics.iter().any(|diagnostic| diagnostic.code == "E0930" || diagnostic.code == "E0355"), "{diagnostics:?}");
         }
+    }
 
+    #[test]
+    fn abi_function_markers_route_to_the_c_declaration_diagnostic() {
+        for src in [
+            "#[Abi(C), MustUse]\nfn work() {}\n",
+            "#Abi(C) fn work() {}\n",
+        ] {
+            let (tokens, lex_diagnostics) = lex(src);
+            assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+            let diagnostics = parse(&tokens).expect_err("ordinary functions reject C ABI selection");
+            assert!(
+                diagnostics.iter().any(|diagnostic| {
+                    diagnostic.code == "E3212"
+                        && diagnostic.what.contains("only applies to C declarations")
+                }),
+                "{diagnostics:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn abi_lowers_to_the_c_declaration_field_and_groups_reject_extra_rules() {
+        let program = program(
+            "#Extern module c.demo {\n    #Abi(sysv64) fn ping(x: I32) -> I32 = \"ping\"\n}\n",
+        );
+        let function = program
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::CModule(module) => module.functions.first(),
+                _ => None,
+            })
+            .expect("C declaration");
+        assert_eq!(
+            function.abi.as_ref().map(|(name, _)| name.as_str()),
+            Some("sysv64")
+        );
+
+        let src =
+            "#Extern module c.demo {\n    #[Abi(sysv64), MustUse] fn ping() = \"ping\"\n}\n";
+        let (tokens, lex_diagnostics) = lex(src);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+        let diagnostics =
+            parse(&tokens).expect_err("C declarations reject non-ABI function markers");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E3212"),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn every_active_function_rule_has_an_applicator() {
+        for rule in crate::Policy::applied_rule_registry().iter().filter(|rule| {
+            matches!(rule.status, crate::Policy::RuleStatus::Active)
+                && rule.sites.contains(&crate::Policy::RuleSite::Function)
+        }) {
+            assert!(
+                Parser::function_marker_has_applicator(rule.name),
+                "active function rule `{}` has no applicator",
+                rule.name
+            );
+        }
     }
 
     /// D-FFI-INLINE1=A (card #501): `jet fmt` round-trips `#FFI` fns idempotently
@@ -816,6 +977,7 @@ fn run() {
             module_arg_expr_depth: None,
             policy_declarations: Vec::new(),
             applied_rules: Vec::new(),
+            rule_facts: Vec::new(),
             block_spans: Vec::new(),
         };
         let _prog = p.program();

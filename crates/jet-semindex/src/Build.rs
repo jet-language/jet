@@ -1747,7 +1747,9 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
         }
         // D-LINTPOLICY1=A: an `#Unsafe("reason") { … }` audited region is a
         // spelled bypass — record it before recursing into its body.
-        AST::Stmt::Unsafe { audit, body, span } => {
+        AST::Stmt::Unsafe {
+            audit, body, span, ..
+        } => {
             ctx.db.bypasses.push(BypassFact {
                 kind: BypassKind::UnsafeRegion,
                 site: active_scope(ctx).to_string(),

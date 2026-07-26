@@ -288,8 +288,8 @@ renumbered, and no new `W` code may be allocated.
 | E0333 | parse | a chained comparison changes direction (`a < b > c`) (D-CHAINCMP1) |
 | E0334 | sema  | a trailing `{ }` block argument's slot isn't a zero-parameter function (D-TRAILBLOCK1) |
 | E0335 | parse | a second trailing block, or a trailing block on a non-call (D-TRAILBLOCK1) |
-| E0336 | sema  | `#[Patchable]` on a generic struct (D-PATCH1) |
-| E0337 | sema  | `#[Patchable]` struct has a function-typed field (D-PATCH1) |
+| E0336 | sema  | `#Patchable` on a generic struct (D-PATCH1) |
+| E0337 | sema  | `#Patchable` struct has a function-typed field (D-PATCH1) |
 | E0338 | sema  | a cycle among computed-field formulas, including self-reference (D-FIELDPOL1) |
 | E0339 | sema  | a computed field given in a struct literal or assigned to directly (D-FIELDPOL1) |
 | E0340 | sema  | teaching: `read_dir` is not a Jet API — use `Path.from(p).walk()` (D-PATHFS1) |
@@ -569,11 +569,11 @@ renumbered, and no new `W` code may be allocated.
 | E1302 | sema  | `ArgsSpec.option` or `ParsedArgs.option` called with wrong arity (D-ARGS1) |
 | E1303 | sema  | `ArgsSpec.positional` or `ParsedArgs.positional` called with wrong arity (D-ARGS1) |
 | E1304 | sema  | `ArgsSpec.parse` called with wrong arity (D-ARGS1) |
-| E1305 | sema  | `#[Cli]` struct field has a type with no CLI flag mapping (D-CLIFLAG1) |
-| E1306 | sema  | two `#[Cli]` fields (or a field and the reserved `--help`) derive the same flag name (D-CLIFLAG1) |
-| E1307 | sema  | subcommand `enum` variant's payload isn't a `#[Cli]`-derived struct (D-CLIFLAG1) |
-| E1308 | sema  | `fn run`'s entry parameter isn't a `#[Cli]` struct or an enum of `#[Cli]` payloads (D-CLIFLAG1) |
-| E1309 | sema  | `#[Flag]` on a `#[Cli]` field that is already flag-only (D-CLI-POS1) |
+| E1305 | sema  | `#Cli` struct field has a type with no CLI flag mapping (D-CLIFLAG1) |
+| E1306 | sema  | two `#Cli` fields (or a field and the reserved `--help`) derive the same flag name (D-CLIFLAG1) |
+| E1307 | sema  | subcommand `enum` variant's payload isn't a `#Cli`-derived struct (D-CLIFLAG1) |
+| E1308 | sema  | `fn run`'s entry parameter isn't a `#Cli` struct or an enum of `#Cli` payloads (D-CLIFLAG1) |
+| E1309 | sema  | `#Flag` on a `#Cli` field that is already flag-only (D-CLI-POS1) |
 | E1321 | sema  | a typed `Output` kind, payload, callable reference, callable contract, visibility, or singular selection is invalid (D-SHAPE-OUTPUT-CALLABLE1) |
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
@@ -763,7 +763,7 @@ or query methods are called with the wrong number of arguments.
 
 ### Typed entry-signature CLI parsing (D-CLIFLAG1)
 
-`#[Cli]` is a derive (sibling of `#[Codable]`) that turns a struct's fields into
+`#Cli` is a derive (sibling of `#Codable`) that turns a struct's fields into
 `core.args` flag registrations; `fn run(args: T)` / `fn run(cmd: Enum)` is the
 typed form of Jet's only entry point. It parses `io.args()` against
 the derived spec before calling the user's function. See docs/spec/spec.md
@@ -773,11 +773,11 @@ the `core.args` runtime-error voice above (no new code for that).
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E1305 | `` field `name` has no CLI flag mapping (Type) `` | Only `Int`, `Float`, `Bool`, `String`, `Path`, and `T?` of those map to a flag; a nested `#[Cli]` struct, a `Map`, a closure, or a plain `[T]` don't. | Change the field to a supported type, or drop it from the `#[Cli]` struct. |
-| E1306 | two `#[Cli]` fields both derive the same flag | Every field needs a distinct `--flag`; `--help` is also reserved (every generated CLI gets one automatically). | Rename one of the fields. |
-| E1307 | a subcommand variant's payload isn't a `#[Cli]` struct | Each `enum Cmd { Variant(Payload) }` variant used as a `fn run` parameter needs a single `#[Cli]`-derived struct payload — that's where the subcommand's own flags come from. | Give the variant a single `#[Cli]` struct payload. |
-| E1308 | `` `run`'s parameter isn't a CLI-derived type `` | A typed `fn run(args: T)` entry only works when `T` is `#[Cli]`-derived, or an `enum` whose every variant carries a `#[Cli]` struct payload. | Mark the struct `#[Cli]`, or give the enum's variants `#[Cli]` struct payloads. |
-| E1309 | `` `#[Flag]` on `name` has nothing to opt out of `` | `#[Flag]` keeps a required value field flag-only (D-CLI-POS1=A). Bool fields, `T?` fields, and fields with `#[Default(...)]` are already flag-only. | Remove `#[Flag]`, or make the field a required scalar without `#[Default]`. |
+| E1305 | `` field `name` has no CLI flag mapping (Type) `` | Only `Int`, `Float`, `Bool`, `String`, `Path`, and `T?` of those map to a flag; a nested `#Cli` struct, a `Map`, a closure, or a plain `[T]` don't. | Change the field to a supported type, or drop it from the `#Cli` struct. |
+| E1306 | two `#Cli` fields both derive the same flag | Every field needs a distinct `--flag`; `--help` is also reserved (every generated CLI gets one automatically). | Rename one of the fields. |
+| E1307 | a subcommand variant's payload isn't a `#Cli` struct | Each `enum Cmd { Variant(Payload) }` variant used as a `fn run` parameter needs a single `#Cli`-derived struct payload — that's where the subcommand's own flags come from. | Give the variant a single `#Cli` struct payload. |
+| E1308 | `` `run`'s parameter isn't a CLI-derived type `` | A typed `fn run(args: T)` entry only works when `T` is `#Cli`-derived, or an `enum` whose every variant carries a `#Cli` struct payload. | Mark the struct `#Cli`, or give the enum's variants `#Cli` struct payloads. |
+| E1309 | `` `#Flag` on `name` has nothing to opt out of `` | `#Flag` keeps a required value field flag-only (D-CLI-POS1=A). Bool fields, `T?` fields, and fields with `#Default(...)` are already flag-only. | Remove `#Flag`, or make the field a required scalar without `#Default`. |
 
 ### Checked Output callables (D-SHAPE-OUTPUT-CALLABLE1)
 
@@ -930,14 +930,14 @@ block reserved for M6.
 | E2404 | `` `?` can't turn a `{Source}` into a `{Target}` here ``. | `?` changes an error's type only when you've declared how via `impl Source -> Target { … }` (D-ERR-CONV); no such declaration exists for this pair. | Add `impl {Source} -> {Target} { … }` before the function that uses `?`. |
 | E2405 | `impl {Source} -> {Target}` is already declared. | There can be at most one declared way to convert a `Source` error into a `Target`; the second block is rejected. | Remove one of the two `impl … -> …` blocks. |
 | E2406 | Can't declare `impl {Source} -> {Target}` — neither type is defined in this program. | Error conversions obey the same orphan rule as trait impls (S28): at least one of `Source` or `Target` must be a type you defined, so conversions between two foreign types can't be added silently. | Define one of these types locally, or use `Fallible` (D-ERR2) if you don't own either type. |
-| E2407 | `#[Rename(...)]` needs a string literal. | The wire key a `#[Codable]` field maps to is a constant string (D-SERDE5); a number or expression has no place on the wire. | Pass one quoted string — `#[Rename("wire_name")]`. |
-| E2408 | `#[Flatten]` on `{field}` needs a struct-typed field. | Flatten splices another struct's keys into this object (D-SERDE5), so the field must itself be a `#[Codable]` struct — not a primitive, list, or map. | Give `{field}` a `#[Codable]` struct type, or drop `#[Flatten]`. |
-| E2409 | `#[RenameAll({style})]` isn't a known casing style. | The wire-casing menu is the closed typed set `camel`/`snake`/`pascal`/`kebab`/`screaming` (D-SERDE3); anything else is rejected so a typo fails at compile time, not on the wire. | Pick one of `camel` / `snake` / `pascal` / `kebab` / `screaming`. |
-| E2410 | `E2410: missing required field `{field}`` (runtime `DecodeError`). | Decoding into a `#[Codable]`/`#[Decode]` type found no wire value for a required field and the field has no `#[Default]` and isn't optional (D-SERDE5). | Mark the field optional (`T?`), give it `#[Default]`/`#[Default(value)]`, or fix the input so the key is present. Compose with `??` to supply a fallback. |
-| E2411 | `{Type}` can't be serialized / decoded. | Only types that opt in with `#[Codable]`/`#[Encode]`/`#[Decode]` (and whose fields all have a wire form) can cross the wire; a field holding a non-Codable type, closure, or handle has nothing to (de)serialize (D-SERDE1). | Add `#[Codable]`/`#[Encode]`/`#[Decode]` to the offending type, or remove it from the encoded value (e.g. `#[Skip]`). |
-| E2412 | `E2412: unknown field `{field}`` (runtime `DecodeError`). | The struct is marked `#[DenyUnknownFields]` (D-SERDE8) and the input carried a key the struct doesn't declare, so decoding fails fast instead of silently dropping it. | Remove `#[DenyUnknownFields]` to ignore extra keys (the lenient default), add the field, or fix the producer. |
-| E2413 | retired (D-SERDE12) — generic `#[Codable]` is first-class; the derive auto-injects `Encode`/`Decode` bounds on the wire-reaching type params (D-SERDE9/D-SERDE10). A non-codable type argument fails at the use site (E0905), not the definition. | — | — |
-| E2414 | `#[Default(...)]` on `{field}` must be a compile-time constant. | A decode default fills a missing field, so it is baked into the program and its value has to be known at compile time (D-SERDE5, Card #131). An argument that can only be computed at runtime — an impure call, a non-deterministic value — has no fixed value to bake, and both the compiled binary and `jet dev` must agree on the default (R12). | Use a literal or a `comptime`-evaluable expression, e.g. `#[Default(8080)]`, `#[Default(Color.Red)]`, or `#[Default([1, 2])]`. |
+| E2407 | `#Rename(...)` needs a string literal. | The wire key a `#Codable` field maps to is a constant string (D-SERDE5); a number or expression has no place on the wire. | Pass one quoted string — `#Rename("wire_name")`. |
+| E2408 | `#Flatten` on `{field}` needs a struct-typed field. | Flatten splices another struct's keys into this object (D-SERDE5), so the field must itself be a `#Codable` struct — not a primitive, list, or map. | Give `{field}` a `#Codable` struct type, or drop `#Flatten`. |
+| E2409 | `#RenameAll({style})` isn't a known casing style. | The wire-casing menu is the closed typed set `camel`/`snake`/`pascal`/`kebab`/`screaming` (D-SERDE3); anything else is rejected so a typo fails at compile time, not on the wire. | Pick one of `camel` / `snake` / `pascal` / `kebab` / `screaming`. |
+| E2410 | `E2410: missing required field `{field}`` (runtime `DecodeError`). | Decoding into a `#Codable`/`#Decode` type found no wire value for a required field and the field has no `#Default` and isn't optional (D-SERDE5). | Mark the field optional (`T?`), give it `#Default`/`#Default(value)`, or fix the input so the key is present. Compose with `??` to supply a fallback. |
+| E2411 | `{Type}` can't be serialized / decoded. | Only types that opt in with `#Codable`/`#Encode`/`#Decode` (and whose fields all have a wire form) can cross the wire; a field holding a non-Codable type, closure, or handle has nothing to (de)serialize (D-SERDE1). | Add `#Codable`/`#Encode`/`#Decode` to the offending type, or remove it from the encoded value (e.g. `#Skip`). |
+| E2412 | `E2412: unknown field `{field}`` (runtime `DecodeError`). | The struct is marked `#DenyUnknownFields` (D-SERDE8) and the input carried a key the struct doesn't declare, so decoding fails fast instead of silently dropping it. | Remove `#DenyUnknownFields` to ignore extra keys (the lenient default), add the field, or fix the producer. |
+| E2413 | retired (D-SERDE12) — generic `#Codable` is first-class; the derive auto-injects `Encode`/`Decode` bounds on the wire-reaching type params (D-SERDE9/D-SERDE10). A non-codable type argument fails at the use site (E0905), not the definition. | — | — |
+| E2414 | `#Default(...)` on `{field}` must be a compile-time constant. | A decode default fills a missing field, so it is baked into the program and its value has to be known at compile time (D-SERDE5, Card #131). An argument that can only be computed at runtime — an impure call, a non-deterministic value — has no fixed value to bake, and both the compiled binary and `jet dev` must agree (R12). | Use a literal or a `comptime`-evaluable expression, e.g. `#Default(8080)`, `#Default(Color.Red)`, or `#Default([1, 2])`. |
 | E2415 | union `{Union}` can't be decoded — `{A}` and `{B}` share wire shape `{shape}`. | Anonymous-union decode (D-UNIONTYPE1=A) picks a member by primary wire shape; two members with the same shape would force an arbitrary declaration order. | Use a named enum with an explicit tag, or change the members so each has a distinct wire shape. |
 | L2401 | Public function `{fn}` has a positional `Bool` parameter `{param}`. | Positional booleans are easy to transpose: `connect(host, true, false)` is a guessing game. Labels (S61) make the intent clear at the call site. | Callers can use `{param}: true` to document intent; or give the parameter a default value so it can be omitted. No action required — this is advisory. |
 | L0520 | `` `{type}` has no `Display` impl — bare `{}` will require one soon ``. | Bare `{value}` interpolation is moving to the explicit `Display` hook (D-DISPLAY-SHAPE); auto-printable structs still compile via a temporary `jet_show` fallback. | Add `impl {type}.Display { fn display(self) -> String { … } }`, or use `{value#Debug}` for debug output. |
@@ -1284,7 +1284,7 @@ reported as **E0119** (unknown name).
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E-WEB-CROSS-PARTITION | `{caller}` is compiled to {caller_bucket} but calls `{callee}`, which lives in {callee_bucket}. | The web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet (D-WASM1). | Move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm\|Js)` markers (D-MARK-TARGET1). Run `jet build --target web --explain-partition` to audit assignments. |
-| E-WEB-ABI-TYPE | `{type}` cannot cross the JS/WASM boundary {context}. | Web exports and imports only admit ABI-safe types: scalars, `String`, `List`/`Map` of ABI-safe values, and `#[Codable]` structs/enums whose fields are ABI-safe (D-JSBIND1). | Use a scalar, `String`, a `List`/`Map` of ABI-safe values, or add `#[Codable]` to the struct/enum and keep every field ABI-safe. |
+| E-WEB-ABI-TYPE | `{type}` cannot cross the JS/WASM boundary {context}. | Web exports and imports only admit ABI-safe types: scalars, `String`, `List`/`Map` of ABI-safe values, and `#Codable` structs/enums whose fields are ABI-safe (D-JSBIND1). | Use a scalar, `String`, a `List`/`Map` of ABI-safe values, or add `#Codable` to the struct/enum and keep every field ABI-safe. |
 | E-WEB-TARGET-BROWSER | `{fn}` is pinned to Wasm but uses the `Browser` effect. | A Wasm-pinned function cannot call browser/DOM APIs directly; the partition keeps view code in JS (D-WASM1). | Remove the `#Target(Wasm)` pin, move browser work into a `#Target(Js)` function, or drop the browser API calls (D-MARK-TARGET1). |
 | E-WEB-TIR-UNSUPPORTED | Web output cannot compile `{fn}` yet. | Web builds use the same checked executable body path as native builds; this function uses a construct the web output cannot lower today (D-WEBTIR1). | Move the unsupported work behind a Wasm export that uses covered Jet constructs, or simplify this function for the web target. |
 
@@ -1733,7 +1733,7 @@ diagnostic.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `{type}` can't auto-derive `Debug` because field `{field}` isn't debuggable ``. | Auto-derived `Debug` requires every non-`#[Redact]` field to be debuggable. | Mark `{field}` with `#[Redact]`, change its type, or implement `Debug` manually for `{type}`. |
+| `` `{type}` can't auto-derive `Debug` because field `{field}` isn't debuggable ``. | Auto-derived `Debug` requires every non-`#Redact` field to be debuggable. | Mark `{field}` with `#Redact`, change its type, or implement `Debug` manually for `{type}`. |
 
 ### E0917 — `#Inline(Always)` self-recursive (D-METHODMACRO1)
 

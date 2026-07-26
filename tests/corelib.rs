@@ -2039,7 +2039,7 @@ fn csv_whole_value_handles_multiline_quotes_crlf_and_typed_decode() {
     let source = r#"
 use core.encoding.csv as csv
 
-#[Codable]
+#Codable
 struct Note { name: String, note: String }
 
 fn run() {
@@ -2773,7 +2773,7 @@ fn cbor_whole_codable_bytes_and_original_wire_canonical_validation() {
 use core.encoding as encoding
 use core.encoding.cbor as cbor
 
-#[Codable]
+#Codable
 struct Packet { id: Int, payload: [U8] }
 
 fn run() {
@@ -2873,7 +2873,7 @@ fn cbor_whole_indefinite_values_obey_normal_canonical_and_limit_laws() {
 use core.encoding as encoding
 use core.encoding.cbor as cbor
 
-#[Codable]
+#Codable
 struct Packet { name: String, data: [U8] }
 
 fn run() {
@@ -9130,15 +9130,15 @@ fn generic_codable_injects_wire_param_bounds() {
         r#"
 use core.encoding.json as json
 
-#[Codable]
+#Codable
 struct Wrap<T> {
     value: T
 }
 
-#[Codable]
+#Codable
 struct Tagged<K> {
     raw: Int
-    #[Skip] marker: K?
+    #Skip marker: K?
 }
 
 fn run() {
@@ -9191,15 +9191,15 @@ fn generic_codable_round_trips() {
         r#"
 use core.encoding.json as json
 
-#[Codable]
+#Codable
 struct Wrap<T> {
     value: T
 }
 
-#[Codable]
+#Codable
 struct Tagged<K> {
     raw: Int
-    #[Skip] marker: K?
+    #Skip marker: K?
 }
 
 fn run() {
@@ -9241,9 +9241,9 @@ fn toml_full_nested_decode_and_round_trip() {
         "toml_typed",
         r#"
 use core.encoding.toml as toml
-#[Codable]
+#Codable
 struct Server { host: String  port: Int }
-#[Codable]
+#Codable
 struct Config { title: String  server: Server  ports: [Int] }
 fn run() {
     raw :: "title = \"jet\"\nports = [80, 443]\n\n[server]\nhost = \"db.local\"\nport = 5432\n"
@@ -9351,7 +9351,7 @@ fn datatree_decode_dispatches_all_decode_impl_kinds() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let src = r#"
-#[Codable]
+#Codable
 struct Point { x: Int }
 struct Email { addr: String }
 impl Email.Decode {
@@ -9393,7 +9393,7 @@ fn generated_enum_codecs_reenter_jet_pipeline() {
     fs::create_dir_all(&dir).unwrap();
     let src = r#"
 use core.encoding.json as json
-#[Codable]
+#Codable
 enum Event {
     Idle
     Count(Int)
@@ -9426,8 +9426,7 @@ fn generated_internal_tagged_enum_round_trips_every_variant_shape() {
     let src = r#"
 use core.encoding.json as json
 
-#[Codable]
-#[Tag("type")]
+#[Codable, Tag("type")]
 enum Event {
     Idle
     Count(Int)
@@ -9490,7 +9489,7 @@ fn generated_struct_codecs_preserve_option_and_computed_fields() {
     let src = r#"
 use core.encoding.json as json
 
-#[Codable]
+#Codable
 struct Record {
     base: Int
     note: String?
@@ -9581,10 +9580,10 @@ fn generated_struct_encode_preserves_order_with_rename_and_option() {
     let src = r#"
 use core.encoding.json as json
 
-#[Encode]
+#Encode
 struct Wire {
     first: String
-    #[Rename("wireSecond")] second: String
+    #Rename("wireSecond") second: String
     maybe: String?
     last: Int
 }
@@ -9623,8 +9622,8 @@ struct Inner { x: Int  y: Bool }
 #[Codable, RenameAll(camel)]
 struct Outer {
     display_name: String
-    #[Flatten] inner: Inner
-    #[Default(4 + 5)] count: Int
+    #Flatten inner: Inner
+    #Default(4 + 5) count: Int
 }
 
 fn run() {
@@ -9652,8 +9651,7 @@ fn generated_struct_decode_denies_unknown_fields() {
     let src = r#"
 use core.encoding.json as json
 
-#[Codable]
-#[DenyUnknownFields]
+#[Codable, DenyUnknownFields]
 struct Strict { name: String }
 
 fn run() {
@@ -9679,10 +9677,10 @@ fn generated_decode_dispatches_across_module_boundaries() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let lib = r#"
-#[Codable]
+#Codable
 pub struct Address { pub city: String }
 
-#[Codable]
+#Codable
 pub struct Order {
     pub shipping: Address
     pub quantities: [Int]
@@ -9775,9 +9773,9 @@ use core.encoding.json as json
 
 derive T.ConfigSchema {
     emit("""
-#[Codable]
+#Codable
 struct GeneratedConfig {{
-    #[Default([80, 443])] ports: [Int]
+    #Default([80, 443]) ports: [Int]
 }}
 """)
 }
@@ -9948,9 +9946,9 @@ fn yaml_full_nested_decode_and_features() {
         "yaml_typed",
         r#"
 use core.encoding.yaml as yaml
-#[Codable]
+#Codable
 struct Service { name: String  port: Int }
-#[Codable]
+#Codable
 struct Config { app: String  services: [Service] }
 fn run() {
     raw :: "app: myapp\nservices:\n  - name: web\n    port: 80\n  - name: db\n    port: 5432\n"
@@ -10022,7 +10020,7 @@ fn decode_traced_json_plain_and_published_fresh() {
         r#"
 use core.encoding.json as json
 
-#[Codable]
+#Codable
 struct Point { x: Int  y: Int }
 
 #[PublishedSchema, Codable]
@@ -10080,7 +10078,7 @@ fn decode_traced_toml_and_csv() {
 use core.encoding.toml as toml
 use core.encoding.csv as csv
 
-#[Codable]
+#Codable
 struct Config { port: Int }
 
 fn run() {
