@@ -622,37 +622,17 @@ impl<'a> Interp<'a> {
                 }
                 // D-CTEFFECT1 Tier-1: fetch is hermetic (sha256-pinned); no gate.
                 if module == "core.net" && method == "fetch" {
-                    return self.eval_net_fetch(argv, span);
+                    return eval_net_fetch(&argv, Some(&mut self.embed_inputs), span);
                 }
                 // U13 (D-JPK-SECRETCRYPTO1): `core.vault.get` is denied at build time
                 // unconditionally — unlike the Tier-2 effects below, there is no
                 // `#Impure`/`--allow-impure` escape hatch, because a build artifact
                 // must never bake in a decrypted secret (I1).
                 if module == "core.vault" {
-                    return Err(Diagnostic::error(
-                        "E1265",
-                        format!("`{}.{}()` can't be reached from a build-time context", module, method),
-                        "module-field/comptime evaluation runs before secrets are ever decrypted; \
-                         a repo's encrypted store is only ever opened at ordinary runtime, and — \
-                         unlike the Tier-2 comptime effect gate — there is no `#Impure` escape hatch \
-                         here.".to_string(),
-                        "move the secret read out of comptime/module-field evaluation and into \
-                         ordinary runtime code.".to_string(),
-                        Some(span),
-                    ));
+                    return Err(vault_comptime_denied(&module, method, span));
                 }
                 // D-CTEFFECT1: Tier-2 effect calls require an #Impure gate (or REPL sandbox).
-                let is_tier2 = (matches!(
-                    module.as_str(),
-                    "core.files"
-                        | "core.env"
-                        | "core.io"
-                        | "core.exec"
-                        | "core.net"
-                        | "core.tls"
-                        | "core.process"
-                ) && !is_pure_tier2_call(&module, method))
-                    || (self.repl_mode && module == "core.random" && method != "rng");
+                let is_tier2 = is_tier2_core_call(&module, method, self.repl_mode);
                 if is_tier2 {
                     if self.repl_mode && matches!((module.as_str(), method), ("core.io", "eprint")) {
                         return apply_impure_core_call(
@@ -2038,45 +2018,11 @@ impl<'a> Interp<'a> {
             _ => {}
         }
         if is_build_context && method == "fetch" {
-            return self
-                .eval_net_fetch(argv, span)
+            return eval_net_fetch(&argv, Some(&mut self.embed_inputs), span)
                 .map(|value| CtValue::ResOk(Box::new(value)));
         }
         if is_build_context && method == "embed" {
-            let rel = match argv.first() {
-                Some(CtValue::Str(path)) => path,
-                _ => return Err(unsupported("`b.embed` requires a path string", span)),
-            };
-            let path = std::path::Path::new(rel);
-            if path.is_absolute()
-                || path.components().any(|component| matches!(component, std::path::Component::ParentDir))
-            {
-                return Err(Diagnostic::error(
-                    "E0957",
-                    format!("`b.embed` path `{rel}` escapes the build root"),
-                    "locked build inputs must stay beneath the selected source directory".to_string(),
-                    "use a relative path returned by `b.find`, without `..`".to_string(),
-                    Some(span),
-                ));
-            }
-            let bytes = std::fs::read(self.base_dir.join(path)).map_err(|error| Diagnostic::error(
-                "E0955",
-                format!("`b.embed` cannot open `{rel}`"),
-                error.to_string(),
-                "check the locked relative path".to_string(),
-                Some(span),
-            ))?;
-            self.embed_inputs.push(crate::AST::ComptimeInput {
-                path: rel.clone(),
-                hash: crate::SHA256::sha256_hex(&bytes),
-            });
-            return String::from_utf8(bytes).map(CtValue::Str).map_err(|_| Diagnostic::error(
-                "E0955",
-                format!("`b.embed` cannot decode `{rel}` as text"),
-                "the embedded file is not valid UTF-8".to_string(),
-                "embed a UTF-8 text file".to_string(),
-                Some(span),
-            ));
+            return eval_build_embed(&argv, self.base_dir, Some(&mut self.embed_inputs), span);
         }
         if let Some(result) = sequence_parity::eval_sequence_method(
             self,

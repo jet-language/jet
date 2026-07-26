@@ -224,6 +224,7 @@ impl EvalCtx<'_> {
                 module,
                 method,
                 args,
+                source_span,
                 ..
             } => {
                 if module == "core.data" {
@@ -234,7 +235,26 @@ impl EvalCtx<'_> {
                     argv.push(self.eval_expr(a, scope)?);
                 }
                 if module == "core.browser" && self.runtime_execution {
-                    return super::browser::core_call(method, argv, self.span());
+                    return super::browser::core_call(method, argv, *source_span);
+                }
+                if !self.runtime_execution && module == "core.net" && method == "fetch" {
+                    return crate::Comptime::eval_net_fetch(
+                        &argv,
+                        self.embed_inputs.as_deref_mut(),
+                        *source_span,
+                    );
+                }
+                if !self.runtime_execution && module == "core.vault" {
+                    return Err(crate::Comptime::vault_comptime_denied(
+                        module,
+                        method,
+                        *source_span,
+                    ));
+                }
+                let is_tier2 =
+                    crate::Comptime::is_tier2_core_call(module, method, self.repl_mode);
+                if !is_tier2 {
+                    return apply_core_call(module, method, argv, *source_span, self.repl_mode);
                 }
                 // Runtime deopt / `jet run` sets impure_depth>0 so Tier-2
                 // ambient I/O matches AOT (env/fs/process). Pure comptime
@@ -244,7 +264,7 @@ impl EvalCtx<'_> {
                         module,
                         method,
                         argv,
-                        self.span(),
+                        *source_span,
                         &self.base_dir,
                         self.sink.as_deref_mut(),
                         self.repl_mode,
@@ -252,7 +272,7 @@ impl EvalCtx<'_> {
                         None,
                     )
                 } else if self.impure_depth == 0 {
-                    apply_core_call(module, method, argv, self.span(), self.repl_mode)
+                    apply_core_call(module, method, argv, *source_span, self.repl_mode)
                 } else {
                     Err(Diagnostic::error(
                         "E3411",
@@ -261,7 +281,7 @@ impl EvalCtx<'_> {
                         ),
                         "the `#Impure` block opts in to ambient comptime I/O, but the build flag is required so CI can audit builds that touch the host".to_string(),
                         "add `--allow-impure` to your `jet build` / `jet run` invocation".to_string(),
-                        Some(self.span()),
+                        Some(*source_span),
                     ))
                 }
             }

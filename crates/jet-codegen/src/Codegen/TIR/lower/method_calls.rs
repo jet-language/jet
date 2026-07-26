@@ -377,7 +377,7 @@ pub(crate) fn lower_method_call(
         let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
         let widen_to_vec = core_widen_to_vec(module, helper, &targs);
         return TExpr { ty: resolved_ret.cloned().unwrap_or_else(unit_type), kind: TExprKind::CoreCall {
-            module: module.to_string(), method: helper.to_string(), args: targs, widen_to_vec,
+            module: module.to_string(), method: helper.to_string(), args: targs, source_span: method_span, widen_to_vec,
         }};
     }
     if let Some(kind) = recv_type
@@ -406,7 +406,7 @@ pub(crate) fn lower_method_call(
             let args = vec![recv];
             let widen_to_vec = core_widen_to_vec("jet.crypto", helper, &args);
             return TExpr { ty: resolved_ret.cloned().unwrap_or_else(unit_type), kind: TExprKind::CoreCall {
-                module: "jet.crypto".to_string(), method: helper.to_string(), args, widen_to_vec,
+                module: "jet.crypto".to_string(), method: helper.to_string(), args, source_span: method_span, widen_to_vec,
             }};
         }
     }
@@ -1098,7 +1098,9 @@ pub(crate) fn lower_method_call(
     if let Expr::Ident(alias, _) = receiver {
         if !env.locals.contains_key(alias) {
             if let Some(module) = cx.core_imports.get(alias).cloned() {
-                if let Some(t) = lower_core_closure_call(&module, method, args, cx, env) {
+                if let Some(t) =
+                    lower_core_closure_call(&module, method, method_span, args, cx, env)
+                {
                     return t;
                 }
                 let targs: Vec<TExpr> =
@@ -1132,6 +1134,7 @@ pub(crate) fn lower_method_call(
                         module,
                         method: method.to_string(),
                         args: targs,
+                        source_span: method_span,
                         widen_to_vec,
                     },
                 };
@@ -1156,6 +1159,7 @@ pub(crate) fn lower_method_call(
                         module: submodule,
                         method: method.to_string(),
                         args: targs,
+                        source_span: method_span,
                         widen_to_vec,
                     },
                 };
@@ -3047,6 +3051,7 @@ pub(crate) fn lower_method_call(
                     module: "core.perf".to_string(),
                     method: method.to_string(),
                     args: targs,
+                    source_span: method_span,
                     widen_to_vec,
                 },
             };

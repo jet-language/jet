@@ -999,3 +999,100 @@ fn run() { print(generated_asset()) }
     let lock = fs::read_to_string(root.join(".jet/lock")).unwrap();
     assert!(lock.contains("assets/message.txt"));
 }
+
+#[test]
+fn build_context_fetch_uses_the_locked_tier_one_host_surface() {
+    let root = project("build-context-fetch");
+    let input = root.join("input.txt");
+    write(&input, "hello");
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        &format!(
+            r#"
+fn build(b: BuildContext) -> BuildPlan ? {{
+    content :: b.fetch("file://{}", "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")?
+    if content != "hello" {{ panic("unexpected fetch content") }}
+    app :: b.add_executable("app", ["main.jet"], [])?
+    return b.plan(app)
+}}
+fn run() {{}}
+"#,
+            input.display()
+        ),
+    );
+
+    let output =
+        compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default()).unwrap();
+    let input_key = format!("url:file://{}", input.display());
+    assert!(
+        output
+            .compile
+            .comptime_inputs
+            .iter()
+            .any(|locked| locked.path == input_key
+                && locked.hash
+                    == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"),
+        "{:#?}",
+        output.compile.comptime_inputs
+    );
+    let lock = fs::read_to_string(root.join(".jet/lock")).unwrap();
+    assert!(lock.contains(&input_key), "{lock}");
+}
+
+#[test]
+fn pure_core_call_inside_impure_does_not_require_allow_impure() {
+    let root = project("pure-inside-impure");
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        r#"
+use core.math as math
+fn build(b: BuildContext) -> BuildPlan ? {
+    #Impure("scope contains no ambient effect") {
+        value :: math.abs((-5))
+        if value == 5 {
+            b.error(b.program.functions()[0].span, "PURE", "pure", "executed", "ok")
+        }
+    }
+    return b.plan()
+}
+fn run() {}
+"#,
+    );
+
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default())
+        .expect_err("pure Core call should execute without --allow-impure");
+    assert!(
+        errors.iter().any(|diagnostic| diagnostic.code == "PURE"),
+        "{errors:#?}"
+    );
+    assert!(!errors.iter().any(|diagnostic| diagnostic.code == "E3411"));
+}
+
+#[test]
+fn vault_is_denied_unconditionally_inside_impure_build_context() {
+    let root = project("vault-inside-impure");
+    let entry = root.join("main.jet");
+    write(
+        &entry,
+        r#"
+use core.vault as vault
+fn build(b: BuildContext) --[Secret]-> BuildPlan ? {
+    #Impure("must not grant secret access") {
+        secret :: vault.get("db_password")
+    }
+    return b.plan()
+}
+fn run() {}
+"#,
+    );
+
+    let errors = compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions::default())
+        .expect_err("vault access must remain denied without an impurity escape hatch");
+    assert!(
+        errors.iter().any(|diagnostic| diagnostic.code == "E1265"),
+        "{errors:#?}"
+    );
+    assert!(!errors.iter().any(|diagnostic| diagnostic.code == "E3411"));
+}

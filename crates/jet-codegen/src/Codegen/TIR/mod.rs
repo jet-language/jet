@@ -2315,6 +2315,7 @@ pub enum TExprKind {
         module: String,
         method: String,
         args: Vec<TExpr>,
+        source_span: crate::Diagnostics::Span,
         /// D-FIXARR1: per-argument `[T#N]` to `[T]` widening, resolved from the
         /// authoritative Core signature during lowering.
         widen_to_vec: Vec<bool>,

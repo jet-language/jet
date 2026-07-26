@@ -357,7 +357,9 @@ fn web_stmts_guarantee_return(stmts: &[TIR::TStmt]) -> bool {
                     .as_ref()
                     .is_none_or(|body| web_stmts_guarantee_return(body))
         }
-        TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) => web_stmts_guarantee_return(body),
+        TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) | TIR::TStmt::Impure(body) => {
+            web_stmts_guarantee_return(body)
+        }
         _ => false,
     })
 }
@@ -469,7 +471,7 @@ fn web_wasm_stmts_supported(
                     web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
                 })
         }
-        TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) => {
+        TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) | TIR::TStmt::Impure(body) => {
             web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
         }
         _ => false,
@@ -581,7 +583,9 @@ fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
                     .as_ref()
                     .is_none_or(|body| web_stmts_supported(body))
         }
-        TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) => web_stmts_supported(body),
+        TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) | TIR::TStmt::Impure(body) => {
+            web_stmts_supported(body)
+        }
         _ => false,
     })
 }
@@ -2081,14 +2085,11 @@ fn emit_wasm_body(
                 }
                 out.push_str(&format!("{pad}}}\n"));
             }
-            TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) => emit_wasm_body(
-                body,
-                out,
-                indent,
-                funcs,
-                file_prefix,
-                reconstructions,
-            )?,
+            TIR::TStmt::Inline(body)
+            | TIR::TStmt::Region(body)
+            | TIR::TStmt::Impure(body) => {
+                emit_wasm_body(body, out, indent, funcs, file_prefix, reconstructions)?
+            }
             TIR::TStmt::Return(None) => out.push_str(&format!("{pad}return;\n")),
             TIR::TStmt::LineMarker(line) => {
                 out.push_str(&format!("{pad}// jet:line {line}\n"));
@@ -2730,7 +2731,11 @@ fn emit_tir_js_body(
                 }
                 out.push_str(&format!("{pad}  }}\n{pad}}}\n"));
             }
-            TIR::TStmt::Inline(inner) | TIR::TStmt::Region(inner) => emit_tir_js_body(inner, out, funcs, file_prefix, indent)?,
+            TIR::TStmt::Inline(inner)
+            | TIR::TStmt::Region(inner)
+            | TIR::TStmt::Impure(inner) => {
+                emit_tir_js_body(inner, out, funcs, file_prefix, indent)?
+            }
             _ => return Err(()),
         }
     }

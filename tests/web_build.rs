@@ -979,6 +979,42 @@ fn run() {}
 }
 
 #[test]
+fn web_backends_traverse_impure_regions() {
+    let src = r#"#Target(Web)
+#Target(Js)
+fn js_value() -> Int {
+    value := 0
+    #Impure("preserve JS body") {
+        value = 7
+    }
+    return value
+}
+#WasmExport
+fn wasm_value() -> Int {
+    value := 0
+    #Impure("preserve Wasm body") {
+        value = 9
+    }
+    return value
+}
+fn run() { print(js_value()) }
+"#;
+    let out = jet::compile_web_with_path(src, "tests/fixtures/web_impure_regions.jet")
+        .expect("Impure regions should be transparent to web codegen");
+    let web = out.web.expect("web artifacts");
+    assert!(
+        web.js_app.contains("value = 7"),
+        "JS body was dropped:\n{}",
+        web.js_app
+    );
+    assert!(
+        web.wasm_rust.contains("value = 9"),
+        "Wasm body was dropped:\n{}",
+        web.wasm_rust
+    );
+}
+
+#[test]
 fn web_inline_modules_keep_qualified_function_identity() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping web module identity test");
