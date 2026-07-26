@@ -421,16 +421,14 @@ fn jet_browser_connect_profile(
             jet_browser_object(vec![("alwaysMatch", jet_browser_object(Vec::new()))]),
         )]),
     )?;
+    browser.state.borrow_mut().session_started = true;
     let _session_id = jet_browser_string(&new_session, "sessionId")?;
     let capabilities = jet_browser_get(&new_session, "capabilities")
         .filter(|value| matches!(value, jet_std::Json::Object(_)))
         .ok_or_else(|| JetBrowserError::new("protocol"))?;
     let cdp = jet_browser_get(capabilities, "goog:cdp")
         .is_some_and(|value| matches!(value, jet_std::Json::Boolean(true)));
-    let mut state = browser.state.borrow_mut();
-    state.cdp = cdp;
-    state.session_started = true;
-    drop(state);
+    browser.state.borrow_mut().cdp = cdp;
     Ok(browser)
 }
 

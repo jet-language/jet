@@ -387,6 +387,26 @@ fn run_handshake(
     methods
 }
 
+fn run_malformed_session(listener: TcpListener) -> Vec<String> {
+    let (mut stream, _) = listener.accept().unwrap();
+    accept_websocket(&mut stream);
+    let mut methods = Vec::new();
+    for result in [
+        r#"{"ready":true,"message":"ready"}"#,
+        r#"{"sessionId":1,"capabilities":[]}"#,
+        "{}",
+    ] {
+        let request = read_text_frame(&mut stream);
+        let id = field(&request, "id");
+        methods.push(field(&request, "method"));
+        write_text_frame(
+            &mut stream,
+            &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+        );
+    }
+    methods
+}
+
 fn run_event_storm(listener: TcpListener) -> Vec<String> {
     let (mut stream, _) = listener.accept().unwrap();
     accept_websocket(&mut stream);
@@ -478,6 +498,13 @@ fn handshake_listener(
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let endpoint = format!("ws://{}/session", listener.local_addr().unwrap());
     let server = thread::spawn(move || run_handshake(listener, status_result, expect_session));
+    (endpoint, server)
+}
+
+fn malformed_session_listener() -> (String, thread::JoinHandle<Vec<String>>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!("ws://{}/session", listener.local_addr().unwrap());
+    let server = thread::spawn(move || run_malformed_session(listener));
     (endpoint, server)
 }
 
@@ -723,6 +750,7 @@ fn native_bidi_rejects_hostile_frames_profiles_and_timeouts_without_leaks() {
         handshake_listener(r#"{"ready":true,"message":"\uD83D\uDE80"}"#, true);
     let (closed_protocol, closed_protocol_server) =
         handshake_listener(r#"{"ready":true,"message":"ready"}"#, true);
+    let (malformed_session, malformed_session_server) = malformed_session_listener();
     let source = r#"
 use core.browser as browser
 
@@ -784,6 +812,7 @@ fn run() {
     print(connect_outcome("__NOT_READY__"))
     print(valid_outcome("__SURROGATE__"))
     print(closed_protocol_outcome("__CLOSED_PROTOCOL__"))
+    print(connect_outcome("__MALFORMED_SESSION__"))
 }
 "#
     .replace("__MALFORMED__", &malformed)
@@ -794,14 +823,15 @@ fn run() {
     .replace("__INVALID_NUMBER__", &invalid_number)
     .replace("__NOT_READY__", &not_ready)
     .replace("__SURROGATE__", &surrogate)
-    .replace("__CLOSED_PROTOCOL__", &closed_protocol);
+    .replace("__CLOSED_PROTOCOL__", &closed_protocol)
+    .replace("__MALFORMED_SESSION__", &malformed_session);
 
     let (code, stdout, stderr) =
         common::build_and_run("jet_browser_bidi_hostile", "browser_bidi_hostile", &source);
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert_eq!(
         stdout,
-        "caught\ncaught\ncaught\ncaught\ncaught\ncaught\ncaught\ncaught\ncaught\nconnected\nclosed\n"
+        "caught\ncaught\ncaught\ncaught\ncaught\ncaught\ncaught\ncaught\ncaught\nconnected\nclosed\ncaught\n"
     );
     assert!(!stdout.contains("SECRET"), "{stdout}");
     assert!(!stderr.contains("SECRET"), "{stderr}");
@@ -819,6 +849,10 @@ fn run() {
     );
     assert_eq!(
         closed_protocol_server.join().unwrap(),
+        ["session.status", "session.new", "session.end"]
+    );
+    assert_eq!(
+        malformed_session_server.join().unwrap(),
         ["session.status", "session.new", "session.end"]
     );
 }
