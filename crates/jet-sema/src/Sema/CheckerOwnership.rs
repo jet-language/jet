@@ -2431,8 +2431,10 @@ impl<'a> Checker<'a> {
         self.diags.push(Diagnostic::error(
             "E2305",
             "returned views need a stable owner relationship".to_string(),
-            "public view provenance is not carried through compiler APIs and TIR yet, so this return could outlive its owner".to_string(),
-            "keep the view local, or return an owned copy instead".to_string(),
+            "each public `View`/`ViewMut` slot must name one receiver, parameter, or static source that stays live; this return did not prove that source"
+                .to_string(),
+            "return a view derived from one parameter or receiver on every path, keep the view local, or return an owned copy with `~`"
+                .to_string(),
             Some(span),
         ));
     }
@@ -2441,9 +2443,24 @@ impl<'a> Checker<'a> {
         self.diags.push(Diagnostic::error(
             "E2307",
             "returned string views need a stable owner relationship".to_string(),
-            "the compiler could not prove which caller-owned `String` keeps this `View<str>` alive"
+            "each public `View<str>` slot must name one receiver, parameter, or static `String` source that stays live; this return did not prove that source"
                 .to_string(),
-            "return a view derived from one parameter or receiver on every path, or return an owned `String` copy"
+            "return a view derived from one parameter or receiver on every path, or return an owned `String` copy with `~`"
+                .to_string(),
+            Some(span),
+        ));
+    }
+
+    /// #1164 / #1163 teaching: a plain owned `String` place is not a `View<str>`.
+    /// Only tracked string-view bindings / `.trim()`/`.after()`/`.before()` fill
+    /// that slot under today's string-view rules.
+    pub(crate) fn report_owned_string_as_view_str(&mut self, span: Span) {
+        self.diags.push(Diagnostic::error(
+            "E2307",
+            "an owned `String` cannot fill a `View<str>` slot".to_string(),
+            "`View<str>` needs a zero-copy window from `.trim()` / `.after()` / `.before()` (or an already-tracked string-view binding); a plain `String` place owns its buffer instead"
+                .to_string(),
+            "bind a window with `.trim()`/`.after()`/`.before()`, return a `View` of the owning element and read the field through it, or store an owned `String` field and copy with `~`"
                 .to_string(),
             Some(span),
         ));

@@ -2407,8 +2407,8 @@ fn run() {
     );
 }
 
-/// #1163: a plain owned String place cannot fill View<str>; only tracked
-/// string-view bindings / trim|after|before may.
+/// #1163 / #1164: a plain owned String place cannot fill View<str>; only tracked
+/// string-view bindings / trim|after|before may. Teaching names the ceiling.
 #[test]
 fn owner_backed_collection_rejects_plain_string_as_view_str_field() {
     let src = r#"
@@ -2438,9 +2438,72 @@ fn run() {
 }
 "#;
     let diags = jet::compile(src).expect_err("plain String into View<str> must fail");
+    let e2307: Vec<_> = diags.iter().filter(|d| d.code == "E2307").collect();
+    assert_eq!(e2307.len(), 1, "expected one E2307, got {diags:?}");
+    assert!(
+        e2307[0].what.contains("owned `String` cannot fill a `View<str>`"),
+        "teaching must name the owned-String ceiling, got {:?}",
+        e2307[0]
+    );
+    assert!(
+        e2307[0].why.contains(".trim()") || e2307[0].fix.contains(".trim()"),
+        "fix must teach trim/after/before or element View, got {:?}",
+        e2307[0]
+    );
+}
+
+/// #1164: returning a local-owned View reports E2305 once — not twice via
+/// aggregate + direct return paths.
+#[test]
+fn local_owned_view_return_reports_e2305_once() {
+    let src = r#"
+fn make() => View<Int> {
+    incidents := [Int].{1, 2, 3, 4, 5}
+    return incidents[0..2]
+}
+
+fn run() {
+    make()
+    print(0)
+}
+"#;
+    let diags = jet::compile(src).expect_err("local-owned view return must fail");
+    let e2305: Vec<_> = diags.iter().filter(|d| d.code == "E2305").collect();
+    assert_eq!(
+        e2305.len(),
+        1,
+        "expected exactly one E2305, got {diags:?}"
+    );
+    assert!(
+        e2305[0].what.contains("this function owns"),
+        "expected owns-return teaching, got {:?}",
+        e2305[0]
+    );
+}
+
+/// #1164: returning a string view as owned String teaches E2307 once — no
+/// extra E2305 from treating the ident as a view-return boundary.
+#[test]
+fn string_view_as_owned_return_teaches_copy_once() {
+    let src = r#"
+fn make() => String {
+    email := "nate@jet.dev"
+    d :: email.after("@")
+    return d
+}
+
+fn run() {
+    print(make())
+}
+"#;
+    let diags = jet::compile(src).expect_err("string view as String must fail");
     assert!(
         diags.iter().any(|d| d.code == "E2307"),
         "expected E2307, got {diags:?}"
+    );
+    assert!(
+        diags.iter().all(|d| d.code != "E2305"),
+        "owned String return must not also fire E2305, got {diags:?}"
     );
 }
 

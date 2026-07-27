@@ -312,10 +312,14 @@ saved :: ~name    // fresh, independent value; `name` still usable after
 ### Named views, not raw references
 
 Raw reference syntax is not first-class: `-> &T` return types, `&T` struct
-fields, and `#Ref` provenance are not in the grammar. Named views stay local
-until the public-boundary work can carry queryable, semver-pinned owner
-provenance through sema, compiler APIs, and TIR (#643). Returning or storing a
-view is **E2305** today. An ordinary field still owns its value:
+fields, and `#Ref` provenance are not in the grammar. D-MEM-VIEWRET1 lets
+named `View<T>` / `ViewMut<T>` values cross returns and struct fields when
+sema proves one stable receiver, parameter, or static source per output slot
+(see `examples/features/memory/returned_views.jet` and
+`examples/features/memory/owner_backed_views.jet`). Unstable sources,
+function values that erase provenance, temporary owners, and list/tuple
+storage are **E2305** (or **E2307** for string views). An ordinary owned field
+still owns its value:
 
 ```jet
 struct Span { text: String, meta: String }
@@ -328,7 +332,10 @@ fn describe(source: String, kind: String) {
 
 (examples/features/memory/ref_field.jet) When a program genuinely needs
 "many owners, one value," reach for `Shared<T>` or `Pool<T>`/`Id<T>` (below)
-instead of a raw stored reference.
+instead of a raw stored reference. Nested `View<str>` into a `String` field of
+a collection element is a teaching ceiling today: fill `View<str>` only from
+`.trim()` / `.after()` / `.before()` (or a tracked string-view binding), or
+return `View<Book>` and read the title through the element window.
 
 #### Place access (D-SHAPE-PLACE1=A)
 

@@ -1192,7 +1192,19 @@ impl<'a> Checker<'a> {
                             let et = self.infer(e);
                             self.allow_string_view_read = saved_string_view_read;
                             self.expected_type = saved_expected;
-                            self.check_aggregate_view_return(e);
+                            // #1164: direct `View`/`ViewMut` returns use the
+                            // dedicated path below. Aggregates that contain view
+                            // fields need the walk. Non-view returns must not
+                            // re-check string-view idents as view escapes — the
+                            // E2307 "needs owned String" path already teaches.
+                            let direct_view_return = matches!(
+                                &rt,
+                                Type::Apply { name, .. }
+                                    if matches!(name.as_str(), "View" | "ViewMut")
+                            );
+                            if !direct_view_return && self.type_contains_view_boundary(&rt) {
+                                self.check_aggregate_view_return(e);
+                            }
                             // D-ALLOC2: E0631 — returning an arena `view` would let
                             // it outlive the arena (the arena drops at scope end).
                             if let Expr::Ident(n, nspan) = &*e {

@@ -1,0 +1,7 @@
+Error [E2307]: an owned `String` cannot fill a `View<str>` slot
+  --> tests/ui/owned_string_as_view_str.jet:7:31
+    |
+  7 |     return TitleView.{ value: title }
+    |                               ^^^^^
+ Why: `View<str>` needs a zero-copy window from `.trim()` / `.after()` / `.before()` (or an already-tracked string-view binding); a plain `String` place owns its buffer instead
+ Fix: bind a window with `.trim()`/`.after()`/`.before()`, return a `View` of the owning element and read the field through it, or store an owned `String` field and copy with `~`

@@ -1363,7 +1363,9 @@ impl<'a> Checker<'a> {
                         && et == Type::String
                         && !string_view_compatible
                     {
-                        self.report_string_view_boundary(expr.span());
+                        // #1164: owned String into View<str> is a teaching
+                        // ceiling, not a missing-provenance case.
+                        self.report_owned_string_as_view_str(expr.span());
                     } else if is_patch_lit {
                         if let Some(inner) = inst.unwrap_option() {
                             self.check_type_assignable(&inner, &et, expr.span());
