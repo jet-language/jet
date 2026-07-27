@@ -3152,6 +3152,21 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         ("BrowserTrace", "summary") => {
                             format!("{}jet_browser_trace_summary(&({}))", root, recv)
                         }
+                        ("BrowserLocked", "engine") => {
+                            format!("{}jet_browser_locked_engine(&({}))", root, recv)
+                        }
+                        ("BrowserLocked", "version") => {
+                            format!("{}jet_browser_locked_version(&({}))", root, recv)
+                        }
+                        ("BrowserLocked", "binary") => {
+                            format!("{}jet_browser_locked_binary(&({}))", root, recv)
+                        }
+                        ("BrowserLocked", "protocol") => {
+                            format!("{}jet_browser_locked_protocol(&({}))", root, recv)
+                        }
+                        ("BrowserLocked", "verify") => {
+                            format!("{}jet_browser_locked_verify(&({}))", root, recv)
+                        }
                         ("HTTPResponse", "header") => format!(
                             "{}jet_http_srv_response_header({}, &({}), &({}))",
                             root,

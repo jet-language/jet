@@ -1,0 +1,12 @@
+// D-BROWSER-AUTO1=A (#1187): project-locked browser provisioning.
+// Lock a browser with Jetpack first:
+//   jetpack browser lock chromium --binary /path/to/chromium
+use core.browser as browser
+
+fn run() =[FS, IO]=> {
+    locked :: browser.locked("chromium") ?? return
+    print("engine:{locked.engine()}")
+    print("protocol:{locked.protocol()}")
+    locked.verify() ?? return
+    print("verified:true")
+}

@@ -213,7 +213,9 @@ there is no callback or dependency edge from the seam back to the root.
 D-BROWSER-AUTO1=A puts the portable automation API in `core.browser`. The
 generated runtime uses the existing std-only WebSocket and strict JSON codecs
 to speak WebDriver BiDi. It does not require Node, Playwright, or a Canvas
-facade. Browser installation and process launch are separate Jetpack work.
+facade. Browser installation is Jetpack work: `jetpack browser lock|provision`
+writes `[[browser]]` entries into `.jet/lock`, and `browser.locked(engine)`
+reads that pin (FS) so later launch cards resolve a deterministic binary.
 
 `BrowserProfile` pins a client command contract; it is not a claim about a
 server version. The runtime gates raw commands against that contract. A

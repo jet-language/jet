@@ -1845,6 +1845,7 @@ fn lock_file_content_hash_roundtrip() {
         }],
         comptime_inputs: vec![],
         toolchains: Vec::new(),
+        browsers: Vec::new(),
         source_channels: Vec::new(),
     };
     let serialized = jet::Lock::write(&lock);
@@ -3122,6 +3123,7 @@ fn make_test_lock(name: &str, version: &str, fp: &str) -> jet::Lock::LockFile {
         workspace_members: vec![],
         comptime_inputs: Vec::new(),
         toolchains: Vec::new(),
+        browsers: Vec::new(),
         source_channels: Vec::new(),
     }
 }
@@ -3222,6 +3224,7 @@ fn e1217_missing_locked_revision() {
         workspace_members: vec![],
         comptime_inputs: Vec::new(),
         toolchains: Vec::new(),
+        browsers: Vec::new(),
         source_channels: Vec::new(),
     };
     let err = verify_all_manifest_deps_locked(&mf, &empty_lock)

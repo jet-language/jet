@@ -171,6 +171,48 @@ fn timeout_ct(value: JetBrowserTimeout) -> CtValue {
     }
 }
 
+fn locked_ct(value: JetBrowserLocked) -> CtValue {
+    CtValue::Struct {
+        type_name: "BrowserLocked".to_string(),
+        fields: vec![
+            ("engine".to_string(), CtValue::Str(value.engine)),
+            ("version".to_string(), CtValue::Str(value.version)),
+            ("binary".to_string(), CtValue::Str(value.binary)),
+            ("protocol".to_string(), CtValue::Str(value.protocol)),
+            ("size".to_string(), CtValue::Int(value.size)),
+            ("output_hash".to_string(), CtValue::Str(value.output_hash)),
+        ],
+    }
+}
+
+fn locked_value(value: &CtValue, span: Span) -> Result<JetBrowserLocked, Diagnostic> {
+    match (
+        field(value, "BrowserLocked", "engine"),
+        field(value, "BrowserLocked", "version"),
+        field(value, "BrowserLocked", "binary"),
+        field(value, "BrowserLocked", "protocol"),
+        field(value, "BrowserLocked", "size"),
+        field(value, "BrowserLocked", "output_hash"),
+    ) {
+        (
+            Some(CtValue::Str(engine)),
+            Some(CtValue::Str(version)),
+            Some(CtValue::Str(binary)),
+            Some(CtValue::Str(protocol)),
+            Some(CtValue::Int(size)),
+            Some(CtValue::Str(output_hash)),
+        ) => Ok(JetBrowserLocked {
+            engine: engine.clone(),
+            version: version.clone(),
+            binary: binary.clone(),
+            protocol: protocol.clone(),
+            size: *size,
+            output_hash: output_hash.clone(),
+        }),
+        _ => Err(host_error("locked", span)),
+    }
+}
+
 pub(crate) fn eval_core_call(
     method: &str,
     args: Vec<CtValue>,
@@ -188,6 +230,7 @@ pub(crate) fn eval_core_call(
             };
             result(jet_browser_timeout(milliseconds), timeout_ct)
         }
+        "locked" => result(jet_browser_locked(&string_arg(&args, 0, span)?), locked_ct),
         "connect" => result(
             jet_browser_connect(&string_arg(&args, 0, span)?),
             |browser| store("Browser", BrowserHostValue::Browser(browser)),
@@ -356,6 +399,13 @@ pub(crate) fn eval_value_method(
                 entries,
             })))
         }),
+        ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => {
+            field(recv, kind, method).cloned()
+        }
+        ("BrowserLocked", "verify") => {
+            let locked = locked_value(recv, span)?;
+            Some(result(jet_browser_locked_verify(&locked), |_| CtValue::Unit))
+        }
         _ => None,
     };
     if value.is_none() {

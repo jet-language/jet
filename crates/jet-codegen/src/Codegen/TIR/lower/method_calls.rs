@@ -2005,7 +2005,8 @@ pub(crate) fn lower_method_call(
             ("BrowserPage", "get_by_role") => Type::Named("BrowserLocator".to_string()),
             ("BrowserEvent", "kind")
             | ("BrowserCapabilities", "profile")
-            | ("BrowserTrace", "summary") => Type::String,
+            | ("BrowserTrace", "summary")
+            | ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => Type::String,
             ("BrowserProtocol", "send") => Type::Result {
                 ok: Box::new(Type::String),
                 err: Box::new(Type::Named("BrowserError".to_string())),
@@ -2013,6 +2014,10 @@ pub(crate) fn lower_method_call(
             ("BrowserCapabilities", "bidi" | "cdp")
             | ("BrowserTrace", "redacted") => Type::Bool,
             ("BrowserTrace", "entry_count") => Type::Int,
+            ("BrowserLocked", "verify") => Type::Result {
+                ok: Box::new(unit_type()),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            },
             _ => unit_type(),
         };
         let targs: Vec<TExpr> = args
@@ -2071,6 +2076,7 @@ pub(crate) fn lower_method_call(
                     | "BrowserTrace"
                     | "BrowserCapabilities"
                     | "BrowserProtocol"
+                    | "BrowserLocked"
             )
             || server_message_method
         {

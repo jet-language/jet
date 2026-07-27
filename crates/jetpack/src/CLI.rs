@@ -20,6 +20,7 @@ mod bridge_os_studio;
 mod studio_server;
 mod studio_transactions;
 mod tool;
+mod browser;
 #[doc(hidden)]
 pub mod ProfileDispatch;
 mod usage_tests;

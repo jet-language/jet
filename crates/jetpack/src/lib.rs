@@ -35,6 +35,7 @@ pub use jet_pkg_model::{
 // shims WorkspaceFile.rs and WorkspaceLock.rs in this crate.
 
 pub mod Bridge;
+pub mod BrowserLock;
 pub mod BuildDebug;
 pub mod CLI;
 pub mod Components;

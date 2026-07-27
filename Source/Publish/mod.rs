@@ -375,6 +375,7 @@ mod tests {
             workspace_members: Vec::new(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
+            browsers: Vec::new(),
             source_channels: Vec::new(),
         }
     }

@@ -260,7 +260,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "WsConn" | "WsError" | "WsMessage"
         | "Browser" | "BrowserContext" | "BrowserPage" | "BrowserLocator"
         | "BrowserEvent" | "BrowserTrace" | "BrowserError" | "BrowserCapabilities"
-        | "BrowserProfile" | "BrowserTimeout" | "BrowserProtocol"
+        | "BrowserProfile" | "BrowserTimeout" | "BrowserProtocol" | "BrowserLocked"
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
         // expected-type elaboration of a string literal (E0149 guards a plain
         // runtime `String` from filling this position).

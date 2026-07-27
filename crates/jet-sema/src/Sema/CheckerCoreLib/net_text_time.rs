@@ -24,7 +24,9 @@ impl<'a> Checker<'a> {
             | ("BrowserLocator", "click")
             | ("BrowserEvent", "kind")
             | ("BrowserCapabilities", "bidi" | "cdp" | "profile")
-            | ("BrowserTrace", "entry_count" | "redacted" | "summary") => Vec::new(),
+            | ("BrowserTrace", "entry_count" | "redacted" | "summary")
+            | ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => Vec::new(),
+            ("BrowserLocked", "verify") => Vec::new(),
             ("Browser", "subscribe" | "protocol") | ("BrowserPage", "goto") => {
                 vec![Type::String]
             }
@@ -45,6 +47,9 @@ impl<'a> Checker<'a> {
                 | ("BrowserProtocol", "send")
         ) {
             self.record_effect(Effect::Net.name(), span);
+        }
+        if matches!((type_name, method), ("BrowserLocked", "verify")) {
+            self.record_effect(Effect::FS.name(), span);
         }
 
         if args.len() != expected.len() {
@@ -208,6 +213,13 @@ pub fn net_method_return(
         ("BrowserTrace", "entry_count") => Some(Some(Type::Int)),
         ("BrowserTrace", "redacted") => Some(Some(Type::Bool)),
         ("BrowserTrace", "summary") => Some(Some(Type::String)),
+        ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => {
+            Some(Some(Type::String))
+        }
+        ("BrowserLocked", "verify") => Some(Some(Type::Result {
+            ok: Box::new(unit_ty()),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
         // D-ROUTE1=A: HTTPRouter registration methods.
         ("HTTPRouter", "get" | "post" | "put" | "delete") => Some(Some(unit.clone())),
         // TcpListener methods.
@@ -637,6 +649,14 @@ pub fn http_type_method_return(
             ("entry_count", 0) => mk_int(),
             ("redacted", 0) => Some(Some(Type::Bool)),
             ("summary", 0) => mk_str(),
+            _ => None,
+        },
+        Type::Named(n) if n == "BrowserLocked" => match (method, _args.len()) {
+            ("engine" | "version" | "binary" | "protocol", 0) => mk_str(),
+            ("verify", 0) => Some(Some(Type::Result {
+                ok: Box::new(unit_ty()),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
             _ => None,
         },
         Type::Named(n) if n == "HTTPBody" => match method {

@@ -27,6 +27,11 @@ impl JetShow for JetBrowserError {
             "timeout" => "browser operation timed out",
             "closed" => "browser session is closed",
             "transport" => "browser transport failed",
+            "missing lock" => "no locked browser for this engine in .jet/lock",
+            "unknown engine" => "browser engine is not supported",
+            "missing binary" => "locked browser binary was not found",
+            "size mismatch" => "locked browser binary size drifted",
+            "invalid lock" => "browser lock entry is incomplete",
             _ => "browser protocol failed",
         }
         .to_string()
@@ -37,6 +42,17 @@ impl JetShow for JetBrowserError {
 struct JetBrowserProfile {
     name: String,
     version: String,
+}
+
+/// D-BROWSER-AUTO1=A (#1187): project-locked browser binary for later launch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JetBrowserLocked {
+    engine: String,
+    version: String,
+    binary: String,
+    protocol: String,
+    size: i64,
+    output_hash: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -369,6 +385,133 @@ fn jet_browser_timeout(milliseconds: i64) -> Result<JetBrowserTimeout, JetBrowse
         return Err(JetBrowserError::new("invalid timeout"));
     }
     Ok(JetBrowserTimeout { milliseconds })
+}
+
+fn jet_browser_project_root() -> String {
+    std::env::var("JET_PROJECT_ROOT").unwrap_or_else(|_| ".".to_string())
+}
+
+fn jet_browser_parse_locked(raw: &str, engine: &str) -> Result<JetBrowserLocked, JetBrowserError> {
+    let mut current: Option<JetBrowserLocked> = None;
+    let mut in_browser = false;
+    let mut found: Option<JetBrowserLocked> = None;
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            if in_browser {
+                if let Some(entry) = current.take() {
+                    if entry.engine == engine {
+                        found = Some(entry);
+                    }
+                }
+            }
+            in_browser = line == "[[browser]]";
+            if in_browser {
+                current = Some(JetBrowserLocked {
+                    engine: String::new(),
+                    version: String::new(),
+                    binary: String::new(),
+                    protocol: String::new(),
+                    size: 0,
+                    output_hash: String::new(),
+                });
+            }
+            continue;
+        }
+        if !in_browser {
+            continue;
+        }
+        let Some(entry) = current.as_mut() else {
+            continue;
+        };
+        let Some((key, val)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let val = val.trim().trim_matches('"');
+        match key {
+            "engine" => entry.engine = val.to_string(),
+            "version" => entry.version = val.to_string(),
+            "binary" => entry.binary = val.to_string(),
+            "protocol" => entry.protocol = val.to_string(),
+            "size" => {
+                entry.size = val.parse().map_err(|_| JetBrowserError::new("invalid lock"))?;
+            }
+            "output-hash" => entry.output_hash = val.to_string(),
+            _ => {}
+        }
+    }
+    if in_browser {
+        if let Some(entry) = current.take() {
+            if entry.engine == engine {
+                found = Some(entry);
+            }
+        }
+    }
+    let locked = found.ok_or_else(|| JetBrowserError::new("missing lock"))?;
+    if locked.engine.is_empty()
+        || locked.binary.is_empty()
+        || locked.protocol.is_empty()
+        || locked.output_hash.is_empty()
+    {
+        return Err(JetBrowserError::new("invalid lock"));
+    }
+    Ok(locked)
+}
+
+fn jet_browser_locked(engine: &String) -> Result<JetBrowserLocked, JetBrowserError> {
+    let engine_name = match engine.as_str() {
+        "chromium" | "firefox" | "webkit" => engine.as_str(),
+        _ => return Err(JetBrowserError::new("unknown engine")),
+    };
+    let root = jet_browser_project_root();
+    let lock_path = std::path::Path::new(&root).join(".jet/lock");
+    let raw = std::fs::read_to_string(&lock_path).map_err(|_| JetBrowserError::new("missing lock"))?;
+    let locked = jet_browser_parse_locked(&raw, engine_name)?;
+    let path = std::path::Path::new(&locked.binary);
+    if !path.is_file() {
+        return Err(JetBrowserError::new("missing binary"));
+    }
+    let size = std::fs::metadata(path)
+        .map_err(|_| JetBrowserError::new("missing binary"))?
+        .len() as i64;
+    if size != locked.size {
+        return Err(JetBrowserError::new("size mismatch"));
+    }
+    Ok(locked)
+}
+
+fn jet_browser_locked_engine(locked: &JetBrowserLocked) -> String {
+    locked.engine.clone()
+}
+
+fn jet_browser_locked_version(locked: &JetBrowserLocked) -> String {
+    locked.version.clone()
+}
+
+fn jet_browser_locked_binary(locked: &JetBrowserLocked) -> String {
+    locked.binary.clone()
+}
+
+fn jet_browser_locked_protocol(locked: &JetBrowserLocked) -> String {
+    locked.protocol.clone()
+}
+
+fn jet_browser_locked_verify(locked: &JetBrowserLocked) -> Result<(), JetBrowserError> {
+    let path = std::path::Path::new(&locked.binary);
+    if !path.is_file() {
+        return Err(JetBrowserError::new("missing binary"));
+    }
+    let size = std::fs::metadata(path)
+        .map_err(|_| JetBrowserError::new("missing binary"))?
+        .len() as i64;
+    if size != locked.size {
+        return Err(JetBrowserError::new("size mismatch"));
+    }
+    Ok(())
 }
 
 fn jet_browser_connect(endpoint: &String) -> Result<JetBrowser, JetBrowserError> {

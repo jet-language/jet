@@ -162,7 +162,10 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     }
     // D-BROWSER-AUTO1=A: fixed native BiDi entry points.
     if module == "core.browser"
-        && matches!(method, "profile" | "timeout" | "connect" | "connect_profile")
+        && matches!(
+            method,
+            "profile" | "timeout" | "locked" | "connect" | "connect_profile"
+        )
     {
         return true;
     }

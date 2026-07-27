@@ -410,6 +410,7 @@ pub const JETPACK_VERBS: &[&str] = &[
     IMAGE_SUBCOMMAND,
     USER_SUBCOMMAND,
     TOOL_SUBCOMMAND,
+    BROWSER_SUBCOMMAND,
 ];
 
 /// U16 (card c9jetpackgates): `jet env -p <pkg>...` — ad-hoc nixpkgs packages
@@ -532,6 +533,24 @@ pub const TOOL_EXTERNAL_PROVIDERS: &[&str] =
 pub const TOOL_DIAG_COLLIDE: &str = "E1297";
 /// Diagnostic class JPK-TOOL-PROVIDER (E1298): external provider not available.
 pub const TOOL_DIAG_PROVIDER: &str = "E1298";
+
+/// D-BROWSER-AUTO1=A (#1187): `jetpack browser lock|provision|resolve|list`.
+pub const BROWSER_SUBCOMMAND: &str = "browser";
+pub const BROWSER_VERB_LOCK: &str = "lock";
+pub const BROWSER_VERB_PROVISION: &str = "provision";
+pub const BROWSER_VERB_RESOLVE: &str = "resolve";
+pub const BROWSER_VERB_LIST: &str = "list";
+pub const BROWSER_VERBS: &[&str] = &[
+    BROWSER_VERB_LOCK,
+    BROWSER_VERB_PROVISION,
+    BROWSER_VERB_RESOLVE,
+    BROWSER_VERB_LIST,
+];
+pub const BROWSER_FLAG_BINARY: &str = "--binary";
+pub const BROWSER_FLAG_VERSION: &str = "--version";
+pub const BROWSER_FLAG_PROTOCOL: &str = "--protocol";
+pub const BROWSER_ENGINES: &[&str] = &["chromium", "firefox", "webkit"];
+pub const BROWSER_DEFAULT_PROTOCOL: &str = "bidi-2025.5";
 
 /// D-JPK-GRANTCMD1=A: `jet trust <verb>` is the public grant graph command
 /// family. The top-level `jet` binary dispatches it to Jetpack, which owns the

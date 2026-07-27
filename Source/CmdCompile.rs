@@ -804,6 +804,7 @@ fn write_sbom_for_build(file: &str, bin: &Path) {
         workspace_members: Vec::new(),
         comptime_inputs: Vec::new(),
         toolchains: Vec::new(),
+        browsers: Vec::new(),
         source_channels: Vec::new(),
     });
 

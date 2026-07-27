@@ -5,6 +5,7 @@ use super::package_hangar_vendor::{cmd_audit, cmd_clean, cmd_hangar, cmd_list, c
 use super::run_enter_dev::{cmd_dev, cmd_enter, cmd_run};
 use super::services_secrets_config::{cmd_config, cmd_secrets, cmd_service_probe, cmd_services};
 use super::tool::cmd_tool;
+use super::browser::cmd_browser;
 use super::trust_env_build::{cmd_build, cmd_test, cmd_trust};
 use super::update_search_info::{
     cmd_explain, cmd_info, cmd_logs, cmd_outdated, cmd_override, cmd_search, cmd_update,
@@ -74,6 +75,12 @@ pub(super) struct Flags {
     pub(super) assume_yes: bool,
     /// D-JPK-TOOLRUN1: `jetpack tool install <ref> --as <name>` bin rename.
     pub(super) as_name: Option<String>,
+    /// D-BROWSER-AUTO1=A (#1187): `jetpack browser lock --binary <path>`.
+    pub(super) browser_binary: Option<String>,
+    /// D-BROWSER-AUTO1=A (#1187): optional `--version` override for lock/provision.
+    pub(super) browser_version: Option<String>,
+    /// D-BROWSER-AUTO1=A (#1187): optional BiDi `--protocol` pin.
+    pub(super) browser_protocol: Option<String>,
 }
 
 /// Result of separating flags, positional args, and a trailing `-- cmd`.
@@ -116,6 +123,9 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
         trust_scope: None,
         assume_yes: false,
         as_name: None,
+        browser_binary: None,
+        browser_version: None,
+        browser_protocol: None,
         os_name: None,
         os_manual: None,
         os_disk: None,
@@ -238,6 +248,24 @@ pub(super) fn parse_args_for(verb: &str, args: &[String]) -> Parsed {
                     flags.as_name = Some(name.clone());
                 }
             }
+            a if a == Syntax::BROWSER_FLAG_BINARY => {
+                i += 1;
+                if let Some(path) = args.get(i) {
+                    flags.browser_binary = Some(path.clone());
+                }
+            }
+            a if a == Syntax::BROWSER_FLAG_VERSION => {
+                i += 1;
+                if let Some(version) = args.get(i) {
+                    flags.browser_version = Some(version.clone());
+                }
+            }
+            a if a == Syntax::BROWSER_FLAG_PROTOCOL => {
+                i += 1;
+                if let Some(protocol) = args.get(i) {
+                    flags.browser_protocol = Some(protocol.clone());
+                }
+            }
             _ => positional.push(a.clone()),
         }
         i += 1;
@@ -322,6 +350,7 @@ pub fn main(args: Vec<String>) -> i32 {
         v if v == Syntax::SERVICES_SUBCOMMAND => cmd_services(&theme, &parsed),
         v if v == Syntax::SECRETS_SUBCOMMAND => cmd_secrets(&theme, &parsed),
         v if v == Syntax::TOOL_SUBCOMMAND => cmd_tool(&theme, &parsed),
+        v if v == Syntax::BROWSER_SUBCOMMAND => cmd_browser(&theme, &parsed),
         "help" | "--help" | "-h" => {
             let theme = Theme::resolve_for(color, std::io::stdout().is_terminal());
             println!("{}", super::usage_tests::usage_with_color(theme.color));

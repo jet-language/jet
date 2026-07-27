@@ -3002,6 +3002,21 @@ impl<'a> Checker<'a> {
                         err: Box::new(Type::Named("BrowserError".to_string())),
                     });
                 }
+                ("core.browser", "locked") => {
+                    if args.len() != 1 {
+                        self.diags
+                            .push(wrong_core_arity("locked", 1, args.len(), span));
+                        for arg in args.iter_mut() {
+                            self.infer(&mut arg.expr);
+                        }
+                        return None;
+                    }
+                    self.expect_core_arg("locked", 0, &Type::String, &mut args[0]);
+                    return Some(Type::Result {
+                        ok: Box::new(Type::Named("BrowserLocked".to_string())),
+                        err: Box::new(Type::Named("BrowserError".to_string())),
+                    });
+                }
                 ("core.browser", "connect") => {
                     if args.len() != 1 {
                         self.diags

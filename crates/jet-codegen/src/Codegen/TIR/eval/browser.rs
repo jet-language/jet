@@ -31,12 +31,13 @@ pub(super) fn handle(
             | "BrowserTrace"
             | "BrowserCapabilities"
             | "BrowserProtocol"
+            | "BrowserLocked"
     ) {
         return None;
     }
     Some(if matches!(
         kind.as_str(),
-        "BrowserEvent" | "BrowserTrace" | "BrowserCapabilities"
+        "BrowserEvent" | "BrowserTrace" | "BrowserCapabilities" | "BrowserLocked"
     ) {
         crate::BrowserHost::eval_value_method(kind, method, recv, span).and_then(|value| {
             value.ok_or_else(|| {

@@ -135,6 +135,20 @@ pub struct LockedRevision {
     pub last_modified: u64,
 }
 
+/// D-BROWSER-AUTO1=A (#1187): project-locked browser binary for automation.
+/// Exact engine/version/binary/hash so `Browser.launch` later resolves a
+/// deterministic install — not a host PATH scrape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockedBrowser {
+    pub engine: String,
+    pub version: String,
+    pub binary: String,
+    /// WebDriver BiDi client profile name (`bidi-2025.5`, …).
+    pub protocol: String,
+    pub size: u64,
+    pub envelope: LockEnvelope,
+}
+
 /// The full lock graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockFile {
@@ -152,6 +166,8 @@ pub struct LockFile {
     pub comptime_inputs: Vec<ComptimeInput>,
     /// D-JPK-TOOLCHAIN1=A (A4): pinned toolchain objects, envelope-carrying.
     pub toolchains: Vec<LockedToolchain>,
+    /// D-BROWSER-AUTO1=A (#1187): locked browser binaries for automation.
+    pub browsers: Vec<LockedBrowser>,
     /// D-JPK-CHANNEL1=A: named source channels resolved to exact source refs.
     pub source_channels: Vec<LockedSourceChannel>,
 }
@@ -268,6 +284,17 @@ pub fn write(lock: &LockFile) -> String {
         write_envelope(&mut out, &tc.envelope);
     }
 
+    for browser in &lock.browsers {
+        out.push('\n');
+        out.push_str("[[browser]]\n");
+        out.push_str(&format!("engine = \"{}\"\n", escape_str(&browser.engine)));
+        out.push_str(&format!("version = \"{}\"\n", escape_str(&browser.version)));
+        out.push_str(&format!("binary = \"{}\"\n", escape_str(&browser.binary)));
+        out.push_str(&format!("protocol = \"{}\"\n", escape_str(&browser.protocol)));
+        out.push_str(&format!("size = {}\n", browser.size));
+        write_envelope(&mut out, &browser.envelope);
+    }
+
     for source in &lock.source_channels {
         out.push('\n');
         out.push_str("[[source_channel]]\n");
@@ -341,11 +368,13 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     let mut workspace_members: Vec<LockedWorkspaceMember> = Vec::new();
     let mut comptime_inputs: Vec<ComptimeInput> = Vec::new();
     let mut toolchains: Vec<LockedToolchain> = Vec::new();
+    let mut browsers: Vec<LockedBrowser> = Vec::new();
     let mut source_channels: Vec<LockedSourceChannel> = Vec::new();
     let mut current_pkg: Option<PartialPkg> = None;
     let mut current_ci: Option<PartialCi> = None;
     let mut current_workspace_member: Option<PartialWorkspaceMember> = None;
     let mut current_toolchain: Option<PartialToolchain> = None;
+    let mut current_browser: Option<PartialBrowser> = None;
     let mut current_source_channel: Option<PartialSourceChannel> = None;
     let mut in_root = false;
 
@@ -372,6 +401,9 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             if let Some(t) = current_toolchain.take() {
                 toolchains.push(t.finish());
             }
+            if let Some(b) = current_browser.take() {
+                browsers.push(b.finish()?);
+            }
             if let Some(sc) = current_source_channel.take() {
                 if let Some(c) = sc.finish() {
                     source_channels.push(c);
@@ -385,6 +417,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                     current_workspace_member = Some(PartialWorkspaceMember::default())
                 }
                 "[[toolchain]]" => current_toolchain = Some(PartialToolchain::default()),
+                "[[browser]]" => current_browser = Some(PartialBrowser::default()),
                 "[[source_channel]]" => {
                     current_source_channel = Some(PartialSourceChannel::default())
                 }
@@ -399,7 +432,12 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
             None => continue,
         };
 
-        if key == "version" && current_pkg.is_none() && current_toolchain.is_none() && !in_root {
+        if key == "version"
+            && current_pkg.is_none()
+            && current_toolchain.is_none()
+            && current_browser.is_none()
+            && !in_root
+        {
             version = val.trim_matches('"').parse().ok();
             continue;
         }
@@ -436,6 +474,27 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
                 "platform" => tc.envelope.platform = val.trim_matches('"').to_string(),
                 "signature" => tc.envelope.signature = val.trim_matches('"').to_string(),
                 "provenance" => tc.envelope.provenance = val.trim_matches('"').to_string(),
+                _ => {}
+            }
+            continue;
+        }
+        if let Some(ref mut browser) = current_browser {
+            match key {
+                "engine" => browser.engine = Some(val.trim_matches('"').to_string()),
+                "version" => browser.version = Some(val.trim_matches('"').to_string()),
+                "binary" => browser.binary = Some(val.trim_matches('"').to_string()),
+                "protocol" => browser.protocol = Some(val.trim_matches('"').to_string()),
+                "size" => {
+                    browser.size = Some(
+                        val.trim_matches('"')
+                            .parse()
+                            .map_err(|_| format!("invalid browser size: {val}"))?,
+                    );
+                }
+                "output-hash" => browser.envelope.output_hash = val.trim_matches('"').to_string(),
+                "platform" => browser.envelope.platform = val.trim_matches('"').to_string(),
+                "signature" => browser.envelope.signature = val.trim_matches('"').to_string(),
+                "provenance" => browser.envelope.provenance = val.trim_matches('"').to_string(),
                 _ => {}
             }
             continue;
@@ -494,6 +553,9 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
     if let Some(t) = current_toolchain {
         toolchains.push(t.finish());
     }
+    if let Some(b) = current_browser {
+        browsers.push(b.finish()?);
+    }
     if let Some(sc) = current_source_channel {
         if let Some(c) = sc.finish() {
             source_channels.push(c);
@@ -507,6 +569,7 @@ pub fn parse(raw: &str) -> Result<LockFile, String> {
         workspace_members,
         comptime_inputs,
         toolchains,
+        browsers,
         source_channels,
     })
 }
@@ -613,6 +676,29 @@ impl PartialToolchain {
             version: self.version.unwrap_or_default(),
             envelope: self.envelope,
         }
+    }
+}
+
+#[derive(Default)]
+struct PartialBrowser {
+    engine: Option<String>,
+    version: Option<String>,
+    binary: Option<String>,
+    protocol: Option<String>,
+    size: Option<u64>,
+    envelope: LockEnvelope,
+}
+
+impl PartialBrowser {
+    fn finish(self) -> Result<LockedBrowser, String> {
+        Ok(LockedBrowser {
+            engine: self.engine.ok_or("missing browser engine")?,
+            version: self.version.ok_or("missing browser version")?,
+            binary: self.binary.ok_or("missing browser binary")?,
+            protocol: self.protocol.ok_or("missing browser protocol")?,
+            size: self.size.ok_or("missing browser size")?,
+            envelope: self.envelope,
+        })
     }
 }
 
@@ -822,6 +908,7 @@ pub fn record_nix_realization(
             workspace_members: Vec::new(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
+            browsers: Vec::new(),
             source_channels: Vec::new(),
         });
     lock.version = LOCK_VERSION;
@@ -899,6 +986,7 @@ pub fn record_cran_realization(
             workspace_members: Vec::new(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
+            browsers: Vec::new(),
             source_channels: Vec::new(),
         });
     lock.version = LOCK_VERSION;
@@ -975,6 +1063,7 @@ pub fn record_luarocks_realization(
             workspace_members: Vec::new(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
+            browsers: Vec::new(),
             source_channels: Vec::new(),
         });
     lock.version = LOCK_VERSION;
@@ -1052,6 +1141,7 @@ pub fn record_registry_realization(
             workspace_members: Vec::new(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
+            browsers: Vec::new(),
             source_channels: Vec::new(),
         });
     lock.version = LOCK_VERSION;
@@ -1133,6 +1223,7 @@ pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
             workspace_members: Vec::new(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
+            browsers: Vec::new(),
             source_channels: Vec::new(),
         });
     // A project has exactly one `jet` self-toolchain pin (its object id is
@@ -1147,6 +1238,38 @@ pub fn record_toolchain(project_root: &Path, tc: LockedToolchain) {
         *existing = tc;
     } else {
         lock.toolchains.push(tc);
+    }
+    if let Some(parent) = lock_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(lock_path, write(&lock));
+}
+
+/// D-BROWSER-AUTO1=A (#1187): upsert a project-locked browser binary by engine.
+pub fn record_browser(project_root: &Path, browser: LockedBrowser) {
+    let lock_path = project_root.join(Syntax::UNIFIED_LOCK_FILE);
+    let mut lock = std::fs::read_to_string(&lock_path)
+        .ok()
+        .and_then(|raw| parse(&raw).ok())
+        .unwrap_or_else(|| LockFile {
+            version: LOCK_VERSION,
+            packages: Vec::new(),
+            root_dependencies: Vec::new(),
+            workspace_members: Vec::new(),
+            comptime_inputs: Vec::new(),
+            toolchains: Vec::new(),
+            browsers: Vec::new(),
+            source_channels: Vec::new(),
+        });
+    lock.version = LOCK_VERSION;
+    if let Some(existing) = lock
+        .browsers
+        .iter_mut()
+        .find(|entry| entry.engine == browser.engine)
+    {
+        *existing = browser;
+    } else {
+        lock.browsers.push(browser);
     }
     if let Some(parent) = lock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -1172,6 +1295,7 @@ pub fn record_generated_inputs(
             workspace_members: Vec::new(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
+            browsers: Vec::new(),
             source_channels: Vec::new(),
         });
     if locked {
@@ -1242,6 +1366,7 @@ pub fn record_source_channel(project_root: &Path, source: LockedSourceChannel) {
             workspace_members: Vec::new(),
             comptime_inputs: Vec::new(),
             toolchains: Vec::new(),
+            browsers: Vec::new(),
             source_channels: Vec::new(),
         });
     lock.version = LOCK_VERSION;
@@ -1493,6 +1618,7 @@ mod a4_envelope_tests {
             workspace_members: Vec::new(),
             comptime_inputs: Vec::new(),
             toolchains,
+            browsers: Vec::new(),
             source_channels: Vec::new(),
         }
     }

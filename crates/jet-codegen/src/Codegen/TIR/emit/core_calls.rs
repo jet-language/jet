@@ -2775,6 +2775,7 @@ pub(crate) fn emit_tir_core_call(
             format!("jet_browser_profile(&({}))", arg(0))
         }
         ("core.browser", "timeout") => format!("jet_browser_timeout({})", arg(0)),
+        ("core.browser", "locked") => format!("jet_browser_locked(&({}))", arg(0)),
         ("core.browser", "connect") => {
             format!("jet_browser_connect(&({}))", arg(0))
         }

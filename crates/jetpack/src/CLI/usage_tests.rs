@@ -23,6 +23,10 @@ pub(super) fn usage_with_color(color: bool) -> String {
   {bin} tool install <ref> [--as name] install onto ~/.jet/bin (tools profile generation)
   {bin} tool list                      list globally installed tools
   {bin} tool uninstall <name>          remove an installed tool from ~/.jet/bin
+  {bin} browser lock <engine> --binary <path>  lock a browser binary into .jet/lock
+  {bin} browser provision <engine>@src realize and lock a browser package
+  {bin} browser resolve <engine>       verify and print the locked browser
+  {bin} browser list                   list locked browsers
 
 {manifest}
   {bin} add    <package>@<source>      add a package to ./{pack}
@@ -153,6 +157,17 @@ mod tests {
         assert_eq!(
             RuntimePolicy::verb_policy(Syntax::TOOL_SUBCOMMAND, &[]).verb,
             Syntax::TOOL_SUBCOMMAND
+        );
+    }
+
+    #[test]
+    fn browser_is_in_canonical_route_registry_and_help() {
+        assert!(Syntax::JETPACK_VERBS.contains(&Syntax::BROWSER_SUBCOMMAND));
+        assert!(usage_with_color(false).contains("browser lock"));
+        assert!(usage_with_color(false).contains("browser provision"));
+        assert_eq!(
+            RuntimePolicy::verb_policy(Syntax::BROWSER_SUBCOMMAND, &[]).verb,
+            Syntax::BROWSER_SUBCOMMAND
         );
     }
 

@@ -508,15 +508,19 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
             _ => None,
         };
     }
-    // D-BROWSER-AUTO1=A: profile and timeout only validate deterministic
-    // values. Connecting and all handle I/O remain Net effects.
-    if module == "core.browser" && matches!(method, "profile" | "timeout") {
-        return None;
+    // D-BROWSER-AUTO1=A: profile/timeout validate pure values; locked reads the
+    // project lock (FS). Connecting and handle I/O remain Net effects.
+    if module == "core.browser" {
+        return match method {
+            "profile" | "timeout" => None,
+            "locked" => Some(Effect::FS),
+            _ => Some(Effect::Net),
+        };
     }
     Some(match module {
         "core.files" => Effect::FS,
         // D-BROWSER-AUTO1=A: browser automation is a versioned network protocol.
-        "core.net" | "core.tls" | "jet.http" | "core.http.client" | "core.http.server" | "core.http.middleware" | "core.browser" => Effect::Net,
+        "core.net" | "core.tls" | "jet.http" | "core.http.client" | "core.http.server" | "core.http.middleware" => Effect::Net,
         // D-RAYLIB1=A: windowing/drawing/input/audio bridge.
         "core.raylib" => Effect::GPU,
         "core.time" => Effect::Time,

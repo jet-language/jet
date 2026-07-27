@@ -254,7 +254,8 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
                 | "BrowserEvent"
                 | "BrowserTrace"
                 | "BrowserCapabilities"
-                | "BrowserProtocol",
+                | "BrowserProtocol"
+                | "BrowserLocked",
         )
     )
 }
@@ -290,6 +291,9 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
         Some("BrowserProtocol") => method == "send",
         Some("BrowserCapabilities") => matches!(method, "bidi" | "cdp" | "profile"),
         Some("BrowserTrace") => matches!(method, "entry_count" | "redacted" | "summary"),
+        Some("BrowserLocked") => {
+            matches!(method, "engine" | "version" | "binary" | "protocol" | "verify")
+        }
         _ => false,
     }
 }
