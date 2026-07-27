@@ -3742,22 +3742,36 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
     );
 
     let interpreted = match dev_iteration(file, false, true) {
-        RunOutcome::Ran { stdout, .. } => stdout,
-        RunOutcome::Problems(ds) if ds.iter().any(|d| BOUNDARY_CODES.contains(&d.code.as_str())) => {
-            golden_stdout(stem)
-        }
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
         RunOutcome::Problems(ds) => {
             panic!("interpreter baseline must run `{stem}`, got diagnostics: {ds:?}")
         }
     };
 
+    jet_jit::reset_jit_trace_for_test();
     let mut backend = CraneliftBackend::new();
     let jit = jet_jit::with_program_args(&[file.to_string()], || {
         match backend.run(&bundle, false) {
-            RunOutcome::Ran { stdout, .. } => stdout,
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => ProgramOutput::ran(stdout, stderr, exit_code),
             RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
         }
     });
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "`{stem}` did not execute in resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "`{stem}` used deopt or fallback"
+    );
     assert_eq!(
         jit, interpreted,
         "JIT vs interpreter divergence for `{stem}`"
@@ -3765,7 +3779,7 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
 
     let dir = std::env::temp_dir().join(format!("jet_jit_3way_{}", std::process::id()));
     let aot = compiled_binary_output(&dir, "jit_3way", 0, stem, file);
-    assert_eq!(jit, aot.stdout, "JIT vs AOT divergence for `{stem}`");
+    assert_eq!(jit, aot, "JIT vs AOT divergence for `{stem}`");
 }
 
 #[test]
@@ -4195,16 +4209,32 @@ fn run() {
     assert_eq!(resident.len(), 1, "resident JIT trap count");
     let interpreted = &interpreted[0];
     let resident = &resident[0];
+    assert_eq!(resident.severity, interpreted.severity, "trap severity drift");
     assert_eq!(resident.code, interpreted.code, "trap code drift");
     assert_eq!(resident.what, interpreted.what, "trap summary drift");
     assert_eq!(resident.why, interpreted.why, "trap detail drift");
     assert_eq!(resident.fix, interpreted.fix, "trap fix drift");
+    assert_eq!(resident.detail, interpreted.detail, "trap detail field drift");
+    assert_eq!(
+        resident.structured, interpreted.structured,
+        "trap structured field drift"
+    );
+    assert!(resident.edit.is_none() && interpreted.edit.is_none());
     let trap = "attempt to calculate the remainder with overflow";
     assert_eq!(interpreted.code, "E0953");
-    assert!(
-        interpreted.why.contains(trap),
-        "interpreter trap lost source-width remainder detail: {}",
-        interpreted.why
+    assert_eq!(
+        interpreted.what,
+        "your comptime code stopped the build"
+    );
+    assert_eq!(
+        interpreted.why,
+        format!(
+            "while computing this value at compile time, the program panicked: {trap}"
+        )
+    );
+    assert_eq!(
+        interpreted.fix,
+        "this is the sanctioned way to validate at compile time — fix the input the check rejects"
     );
 
     let aot = compiled_binary_output(
@@ -4214,13 +4244,14 @@ fn run() {
         "fixed_width_remainder_trap",
         &shown,
     );
-    assert_ne!(aot.exit_code, 101, "AOT leaked a raw Rust panic: {aot:?}");
-    assert_eq!(aot.exit_code, 70, "AOT remainder trap exit: {aot:?}");
-    assert!(aot.stdout.is_empty(), "AOT printed a wrapped result: {aot:?}");
-    assert!(
-        aot.stderr.contains(trap),
-        "AOT remainder trap lost overflow detail: {}",
-        aot.stderr
+    assert_eq!(
+        aot,
+        ProgramOutput::ran(
+            String::new(),
+            format!("panic: {trap}\n  --> {shown}:3\n"),
+            70,
+        ),
+        "AOT remainder trap presentation drift"
     );
     let _ = fs::remove_dir_all(&dir);
 }
@@ -4323,32 +4354,54 @@ fn fixed_width_mixed_sign_shift_counts_trap_across_tiers() {
         assert_eq!(resident.len(), 1, "{tag} resident JIT trap count");
         let interpreted = &interpreted[0];
         let resident = &resident[0];
+        assert_eq!(
+            resident.severity, interpreted.severity,
+            "{tag} trap severity drift"
+        );
         assert_eq!(resident.code, interpreted.code, "{tag} trap code drift");
         assert_eq!(resident.what, interpreted.what, "{tag} trap summary drift");
         assert_eq!(resident.why, interpreted.why, "{tag} trap detail drift");
         assert_eq!(resident.fix, interpreted.fix, "{tag} trap fix drift");
+        assert_eq!(
+            resident.detail, interpreted.detail,
+            "{tag} trap detail field drift"
+        );
+        assert_eq!(
+            resident.structured, interpreted.structured,
+            "{tag} trap structured field drift"
+        );
+        assert!(resident.edit.is_none() && interpreted.edit.is_none());
         assert_eq!(interpreted.code, "E0953", "{tag} interpreter trap code");
-        assert!(
-            interpreted.why.contains(trap),
-            "{tag} interpreter trap detail: {}",
-            interpreted.why
+        assert_eq!(
+            interpreted.what,
+            "your comptime code stopped the build",
+            "{tag} trap summary"
+        );
+        assert_eq!(
+            interpreted.why,
+            format!(
+                "while computing this value at compile time, the program panicked: {trap}"
+            ),
+            "{tag} trap detail"
+        );
+        assert_eq!(
+            interpreted.fix,
+            "this is the sanctioned way to validate at compile time — fix the input the check rejects",
+            "{tag} trap fix"
         );
 
         let aot = compiled_binary_output(&dir, tag, i, tag, &shown);
-        assert_ne!(aot.exit_code, 101, "{tag} leaked a raw Rust panic: {aot:?}");
-        assert_eq!(aot.exit_code, 70, "{tag} AOT shift trap exit: {aot:?}");
-        assert!(aot.stdout.is_empty(), "{tag} printed a shifted result: {aot:?}");
-        assert!(
-            aot.stderr.contains(trap),
-            "{tag} AOT trap detail: {}",
-            aot.stderr
-        );
-        assert!(
-            !aot.stderr.contains("panicked at"),
-            "{tag} leaked Rust panic presentation: {}",
-            aot.stderr
+        assert_eq!(
+            aot,
+            ProgramOutput::ran(
+                String::new(),
+                format!("panic: {trap}\n  --> {shown}:2\n"),
+                70,
+            ),
+            "{tag} AOT shift trap presentation drift"
         );
     }
+
     let _ = fs::remove_dir_all(&dir);
 }
 
