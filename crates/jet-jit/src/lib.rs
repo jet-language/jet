@@ -27,6 +27,7 @@ mod Fmt;
 mod Game;
 mod Io;
 mod Memory;
+mod net_http_rt;
 mod Net;
 mod Numeric;
 mod Parse;

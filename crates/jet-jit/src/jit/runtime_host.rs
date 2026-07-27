@@ -1534,6 +1534,7 @@ pub(crate) struct HostFns {
     pub(crate) db: crate::Db::DbHostFns,
     pub(crate) crypto: Crypto::CryptoHostFns,
     pub(crate) net: Net::NetHostFns,
+    pub(crate) net_http: crate::net_http_rt::NetHttpHostFns,
     pub(crate) game: crate::Game::GameHostFns,
     pub(crate) raylib: crate::Raylib::RaylibHostFns,
     pub(crate) parse: crate::Parse::HostFns,
@@ -1727,6 +1728,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Db::register_db_symbols(&mut builder);
     Crypto::register_crypto_symbols(&mut builder);
     Net::register_net_symbols(&mut builder);
+    crate::net_http_rt::register_net_http_symbols(&mut builder);
     crate::Game::register_game_symbols(&mut builder);
     crate::Raylib::register_raylib_symbols(&mut builder);
     crate::Parse::register_symbols(&mut builder);
@@ -1763,6 +1765,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let db = crate::Db::declare_db_host_fns(&mut module)?;
     let crypto = Crypto::declare_crypto_host_fns(&mut module)?;
     let net = Net::declare_net_host_fns(&mut module)?;
+    let net_http = crate::net_http_rt::declare_net_http_host_fns(&mut module)?;
     let game = crate::Game::declare_game_host_fns(&mut module)?;
     let raylib = crate::Raylib::declare_raylib_host_fns(&mut module)?;
     let parse = crate::Parse::declare(&mut module)?;
@@ -1791,6 +1794,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         db,
         crypto,
         net,
+        net_http,
         game,
         raylib,
         parse,
@@ -1966,6 +1970,7 @@ fn declare_host_fns(
     db: crate::Db::DbHostFns,
     crypto: Crypto::CryptoHostFns,
     net: Net::NetHostFns,
+    net_http: crate::net_http_rt::NetHttpHostFns,
     game: crate::Game::GameHostFns,
     raylib: crate::Raylib::RaylibHostFns,
     parse: crate::Parse::HostFns,
@@ -2310,6 +2315,7 @@ fn declare_host_fns(
         db,
         crypto,
         net,
+        net_http,
         game,
         raylib,
         parse,
@@ -2326,6 +2332,5 @@ fn declare_host_fns(
         time,
         io,
         watcher,
-        net,
     })
 }

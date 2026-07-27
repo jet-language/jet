@@ -2474,6 +2474,21 @@ fn resident_safe_capture_policy(c: &JitSpawnCapture) -> bool {
                     | Type::Bool
                     | Type::Char
             )
+            || matches!(
+                &c.ty,
+                Type::Named(name) if matches!(
+                    name.as_str(),
+                    "TcpListener"
+                        | "TcpStream"
+                        | "SocketAddr"
+                        | "UdpSocket"
+                        | "UnixListener"
+                        | "UnixStream"
+                        | "HttpMux"
+                        | "HttpServer"
+                        | "WsConn"
+                )
+            )
     } else {
         true
     }
@@ -2879,6 +2894,53 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             "join" | "param" if args.len() == 1 => true,
             _ => false,
         },
+        THandleOp::TcpListenerAccept
+        | THandleOp::TcpListenerLocalAddr
+        | THandleOp::TcpStreamClose => args.is_empty(),
+        THandleOp::TcpStreamReadText | THandleOp::TcpStreamWriteAllBytes if args.len() == 1 => true,
+        THandleOp::HttpClientMethod { kind, method } => match (kind.as_str(), method.as_str()) {
+            ("HttpResponse", "status" | "body" | "cookies") if args.is_empty() => true,
+            ("HttpResponse", "header") if args.len() == 1 => true,
+            ("HttpBody", "text") if args.len() == 1 => true,
+            ("HttpRequest", "form" | "cookie" | "header") if args.len() == 2 => true,
+            ("HttpRequest", "redirects" | "connect_timeout" | "read_timeout")
+                if args.len() == 1 =>
+            {
+                true
+            }
+            ("HttpRequest", "send") if args.is_empty() => true,
+            _ => false,
+        },
+        THandleOp::HttpServerMethod { kind, method } => match (kind.as_str(), method.as_str()) {
+            ("HttpMux", m)
+                if matches!(
+                    m,
+                    "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
+                ) && args.len() == 2 =>
+            {
+                true
+            }
+            ("HttpMux", "middleware") if args.len() == 1 => true,
+            ("HttpHandler", "handle") if args.len() == 1 => true,
+            ("HttpRequest", "body" | "method" | "path" | "trailers" | "body_len")
+                if args.is_empty() =>
+            {
+                true
+            }
+            ("HttpRequest", "param" | "header" | "under_limit") if args.len() == 1 => true,
+            ("HttpBody", "text") if args.len() == 1 => true,
+            ("HttpResponse", "status" | "body") if args.is_empty() => true,
+            ("HttpResponse", "trailers") if args.len() == 1 => true,
+            ("HttpServer", "local_addr" | "serve") if args.is_empty() => true,
+            ("HttpServer", "shutdown") if args.len() == 1 => true,
+            ("WsConn", "recv") if args.is_empty() => true,
+            ("WsConn", "send_text") if args.len() == 1 => true,
+            ("WsConn", "close") if args.len() == 2 => true,
+            ("WsMessage", "is_text" | "text") if args.is_empty() => true,
+            _ => false,
+        },
+        THandleOp::HttpReqTrailers => args.is_empty(),
+        THandleOp::HttpRespTrailers => args.len() == 1,
         _ => false,
     }
 }

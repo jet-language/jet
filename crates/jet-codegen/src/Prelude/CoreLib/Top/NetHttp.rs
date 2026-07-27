@@ -6,6 +6,17 @@ pub struct JetTcpListener {
     inner: std::net::TcpListener,
 }
 
+impl Clone for JetTcpListener {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self
+                .inner
+                .try_clone()
+                .expect("TcpListener try_clone for spawn capture"),
+        }
+    }
+}
+
 pub struct JetTcpStream {
     inner: std::net::TcpStream,
     closed: bool,
@@ -210,6 +221,18 @@ pub struct JetDnsSrv {
 #[cfg(unix)]
 pub struct JetUnixListener {
     inner: std::os::unix::net::UnixListener,
+}
+
+#[cfg(unix)]
+impl Clone for JetUnixListener {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self
+                .inner
+                .try_clone()
+                .expect("UnixListener try_clone for spawn capture"),
+        }
+    }
 }
 
 #[cfg(unix)]

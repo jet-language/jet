@@ -129,6 +129,7 @@ fn lower_lambda_expecting_with_host_borrow(
     // AST slot `{ rust_name: cap, deref: false, jet_ty: None }`).
     let mut prep = String::new();
     let mut extra_cloned: Vec<String> = Vec::new();
+    let mut captures: Vec<(String, String, Type)> = Vec::new();
     // Moving escape into `jet_iter_map` / similar hosts needs owned captures. A
     // borrowed Fn parameter (`&Box<dyn Fn…>`) is not always in `cloned_captures`
     // yet, and a bare `move || f(…)` trips rustc E0521. Clone it into an owned
@@ -170,7 +171,38 @@ fn lower_lambda_expecting_with_host_borrow(
             cap,
             env.place_of(name)
         ));
-        lam_env.bind(name, TLocal::generated(&cap), None);
+        let cap_ty = env
+            .ty_of(name)
+            .unwrap_or_else(|| Type::Named("Unit".to_string()));
+        captures.push((name.clone(), cap.clone(), cap_ty.clone()));
+        lam_env.bind(name, TLocal::generated(&cap), Some(cap_ty));
+    }
+    // Taken resources (`owned :: ~next`) are neither cloned nor moved-captured in
+    // sema — AOT relies on Rust lexical capture. Cranelift needs an explicit pack.
+    {
+        let param_names: HashSet<&str> = lam.params.iter().map(|p| p.name.as_str()).collect();
+        let reads = match &lam.body {
+            LambdaBody::Block(stmts) => crate::Sema::block_free_var_reads(stmts),
+            LambdaBody::Expr(e) => {
+                crate::Sema::block_free_var_reads(&[Stmt::Expr((**e).clone())])
+            }
+        };
+        for name in reads {
+            if param_names.contains(name.as_str()) {
+                continue;
+            }
+            if captures.iter().any(|(n, _, _)| n == &name) {
+                continue;
+            }
+            if !env.locals.contains_key(&name) {
+                continue;
+            }
+            let cap_ty = env
+                .ty_of(&name)
+                .unwrap_or_else(|| Type::Named("Unit".to_string()));
+            // Body still reads the outer place (no `_jet_cap_` rebind).
+            captures.push((name.clone(), crate::Codegen::TIR::local_place(&name), cap_ty));
+        }
     }
     // Params bind as `mangle(name)` (no deref), typed from the annotation, falling
     // back to `expected_params` at the same position (D-MEM1 S6: this fallback
@@ -258,6 +290,7 @@ fn lower_lambda_expecting_with_host_borrow(
         is_move,
         boxed: lam.meta.escapes,
         arc: http_handler,
+        captures,
     }
 }
 

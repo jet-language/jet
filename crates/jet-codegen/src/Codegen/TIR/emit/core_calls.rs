@@ -83,6 +83,7 @@ pub(crate) fn emit_http_bridge_error(ffi: &str, error: &str) -> String {
          {ffi}::JetHttpBridgeError::Io => JetHttpError::Io {{ operation: \"transport\".to_string() }}, \
          {ffi}::JetHttpBridgeError::ResourceUnavailable => JetHttpError::ResourceUnavailable {{ resource: \"transport\".to_string() }}, \
          {ffi}::JetHttpBridgeError::Cancelled => JetHttpError::Cancelled, \
+         {ffi}::JetHttpBridgeError::UnsupportedTarget => JetHttpError::UnsupportedTarget {{ operation: JetHttpOperation::ClientConnect }}, \
          {ffi}::JetHttpBridgeError::Internal => JetHttpError::Internal {{ incident_id: \"http-transport\".to_string() }} }}"
     )
 }
@@ -2835,6 +2836,9 @@ pub(crate) fn emit_tir_core_call(
         ("core.http.server", "request_id") => {
             format!("jet_http_srv_install_request_id(&({}))", arg(0))
         }
+        // D-WS1=B: cleartext WebSocket client/server.
+        ("core.ws", "connect") => format!("jet_ws_connect(&({}))", arg(0)),
+        ("core.ws", "upgrade") => format!("jet_ws_upgrade(&({}))", arg(0)),
         // D-TIMEDEPTH1=A: civil-time constructors.
         ("core.time.date", "new") => format!("JetDate::new({}, {}, {})", arg(0), arg(1), arg(2)),
         ("core.time.date", "today") => format!("JetDate::today_utc()"),

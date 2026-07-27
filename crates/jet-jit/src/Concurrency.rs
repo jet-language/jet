@@ -9,12 +9,15 @@ use jet_codegen::scheduler::{
     JetSchedulerJoin, JetSchedulerWait, JetShieldExit, JetTaskControl,
 };
 use std::cell::{Cell, RefCell};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 // Every native host call that reaches the resident runtime crosses this lock.
 // Spawned Cranelift frames share the same arena as their parent, so the raw
 // runtime pointer must never be dereferenced concurrently.
 static RUNTIME_ACCESS: Mutex<()> = Mutex::new(());
+/// Published for HTTP `std::thread` workers that are not jet-scheduler tasks.
+static HTTP_SHARED_RUNTIME: AtomicUsize = AtomicUsize::new(0);
 
 thread_local! {
     static ACTIVE_RUNTIME: RefCell<Option<*mut super::JitRuntime>> = const { RefCell::new(None) };
@@ -137,6 +140,38 @@ where
 
 pub(crate) fn set_active_runtime(ptr: Option<*mut super::JitRuntime>) {
     ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = ptr);
+    // Publish on install only. Clearing TLS (spawn worker epilogue / post-drain)
+    // must not drop the shared pointer while HTTP OS threads still serve.
+    if let Some(p) = ptr {
+        HTTP_SHARED_RUNTIME.store(p as usize, Ordering::Release);
+    }
+}
+
+pub(crate) fn clear_http_shared_runtime() {
+    HTTP_SHARED_RUNTIME.store(0, Ordering::Release);
+}
+
+/// Pin the resident JIT heap onto the current thread for the duration of `f`.
+/// HTTP `Server.serve` workers are raw OS threads; without this, host calls that
+/// touch `with_runtime_mut` silently return `Default` (often `0`).
+pub(crate) fn with_http_jet_runtime<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    let had = active_runtime_ptr().is_some();
+    if !had {
+        let addr = HTTP_SHARED_RUNTIME.load(Ordering::Acquire);
+        if addr != 0 {
+            ACTIVE_RUNTIME.with(|slot| {
+                *slot.borrow_mut() = Some(addr as *mut super::JitRuntime);
+            });
+        }
+    }
+    let out = f();
+    if !had {
+        ACTIVE_RUNTIME.with(|slot| *slot.borrow_mut() = None);
+    }
+    out
 }
 
 /// Record a panic trap. Returns normally (caller yields a dummy value); JIT
@@ -352,7 +387,7 @@ fn take_task_entries(
         .collect()
 }
 
-fn active_runtime_ptr() -> Option<*mut super::JitRuntime> {
+pub(crate) fn active_runtime_ptr() -> Option<*mut super::JitRuntime> {
     ACTIVE_RUNTIME.with(|slot| *slot.borrow())
 }
 

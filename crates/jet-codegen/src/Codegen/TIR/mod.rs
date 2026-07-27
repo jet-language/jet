@@ -3177,6 +3177,8 @@ pub struct TLambda {
     pub is_move: bool,
     pub boxed: bool,
     pub arc: bool,
+    /// JIT capture pack: (enclosing Jet name, body place, type). Empty = non-capturing.
+    pub captures: Vec<(String, String, Type)>,
 }
 
 pub enum TLambdaBody {

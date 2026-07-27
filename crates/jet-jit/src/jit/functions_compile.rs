@@ -3,7 +3,7 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Linkage, Module};
 use jet_codegen::Codegen::TIR::{
-    self, JitProgram, TFunc, TFuncKind, TJitSpawnBody, TJitSpawnLambda, TLambda, TLambdaBody,
+    self, JitProgram, TFunc, TFuncKind, TJitSpawnBody, TJitSpawnLambda, TLambda, TLambdaBody, TStmt,
 };
 use jet_foundation::AST::Type;
 use std::collections::HashMap;
@@ -175,6 +175,44 @@ fn lower_spawn_function(
     Ok(())
 }
 
+fn block_has_valued_return(stmts: &[TStmt]) -> bool {
+    fn walk(stmts: &[TStmt]) -> bool {
+        for stmt in stmts {
+            match stmt {
+                TStmt::Return(Some(_)) => return true,
+                TStmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    if walk(then_body) || else_body.as_ref().is_some_and(|b| walk(b)) {
+                        return true;
+                    }
+                }
+                TStmt::EnumMatch {
+                    arms,
+                    else_body,
+                    ..
+                } => {
+                    if arms.iter().any(|arm| walk(&arm.body))
+                        || else_body.as_ref().is_some_and(|b| walk(b))
+                    {
+                        return true;
+                    }
+                }
+                TStmt::Loop { body, .. } | TStmt::While { body, .. } => {
+                    if walk(body) {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+    walk(stmts)
+}
+
 pub(crate) fn lower_callable_lambda(
     module: &mut JITModule,
     host: &HostFns,
@@ -186,7 +224,10 @@ pub(crate) fn lower_callable_lambda(
     spawn_site: &mut usize,
     runtime: &mut JitRuntime,
 ) -> Result<FuncId, String> {
-    if !lam.prep.is_empty() {
+    let capturing = !lam.captures.is_empty();
+    // Capturing callables are supported when every capture is an i64 handle/scalar
+    // (HttpHandler middleware closures). Prep is AOT-only Rust clone text.
+    if !lam.prep.is_empty() && !capturing {
         return Err("jit callable captures unsupported".to_string());
     }
     let fn_ty = Type::Fn {
@@ -194,7 +235,22 @@ pub(crate) fn lower_callable_lambda(
         ret: lam.ret.clone().map(Box::new),
         effect_bound: None,
     };
-    let sig = fn_value_signature(module, &fn_ty, meta)?;
+    let block_returns_value = match &lam.executable {
+        TLambdaBody::Block(stmts) => block_has_valued_return(stmts),
+        TLambdaBody::Expr(_) => false,
+    };
+    let sig = if capturing {
+        let mut sig = fn_value_signature(module, &fn_ty, meta)?;
+        sig.params.insert(0, AbiParam::new(types::I64)); // env
+        // Block-bodied lambdas often type as Unit when arms `return` Result;
+        // Cranelift still needs the real return ABI.
+        if (lam.ret.is_some() || block_returns_value) && sig.returns.is_empty() {
+            sig.returns.push(AbiParam::new(types::I64));
+        }
+        sig
+    } else {
+        fn_value_signature(module, &fn_ty, meta)?
+    };
     let id = module
         .declare_function(&lam.jit_name, Linkage::Local, &sig)
         .map_err(|error| error.to_string())?;
@@ -210,6 +266,17 @@ pub(crate) fn lower_callable_lambda(
         b.switch_to_block(entry);
         b.seal_block(entry);
         let values = b.block_params(entry).to_vec();
+        let ret_clif = lam
+            .ret
+            .as_ref()
+            .and_then(|ret| meta.clif_ty(ret))
+            .or_else(|| {
+                if block_returns_value {
+                    Some(types::I64)
+                } else {
+                    None
+                }
+            });
         let mut lctx = LowerCtx {
             b: &mut b,
             module,
@@ -227,7 +294,7 @@ pub(crate) fn lower_callable_lambda(
             dead: false,
             next_var: 0,
             method_struct: None,
-            ret_clif: lam.ret.as_ref().and_then(|ret| meta.clif_ty(ret)),
+            ret_clif,
             shield_depth: 0,
             deadline_depth: 0,
             switch_subject: None,
@@ -238,17 +305,32 @@ pub(crate) fn lower_callable_lambda(
             scope_guards: Vec::new(),
             txn_stack: Vec::new(),
         };
-        for (i, (name, ty)) in lam
-            .source_params
-            .iter()
-            .zip(&lam.param_types)
-            .enumerate()
-        {
+        let mut arg_i = 0usize;
+        if capturing {
+            let env = values[arg_i];
+            arg_i += 1;
+            let line = lctx.b.ins().iconst(types::I32, 0);
+            for (idx, (_outer, place, ty)) in lam.captures.iter().enumerate() {
+                let idx_v = lctx.b.ins().iconst(types::I64, idx as i64);
+                let host = lctx
+                    .module
+                    .declare_func_in_func(lctx.host.coll.list_get, lctx.b.func);
+                let call = lctx.b.ins().call(host, &[env, idx_v, line]);
+                let val = lctx.b.inst_results(call)[0];
+                let clif = meta.clif_ty(ty).unwrap_or(types::I64);
+                let var = lctx.fresh_var(clif);
+                lctx.b.def_var(var, val);
+                lctx.vars.insert(place.clone(), var);
+                lctx.var_tys.insert(place.clone(), ty.clone());
+            }
+        }
+        for (name, ty) in lam.source_params.iter().zip(&lam.param_types) {
             let clif = meta
                 .clif_ty(ty)
                 .ok_or_else(|| format!("jit callable param unsupported: {ty:?}"))?;
             let var = lctx.fresh_var(clif);
-            lctx.b.def_var(var, values[i]);
+            lctx.b.def_var(var, values[arg_i]);
+            arg_i += 1;
             let place = TIR::local_place(name);
             lctx.vars.insert(place.clone(), var);
             lctx.var_tys.insert(place, ty.clone());
@@ -274,8 +356,15 @@ pub(crate) fn lower_callable_lambda(
         }
         b.finalize();
     }
-    cranelift_codegen::verify_function(&ctx.func, module.isa())
-        .map_err(|error| format!("{}: verifier: {error:?}", lam.jit_name))?;
+    cranelift_codegen::verify_function(&ctx.func, module.isa()).map_err(|error| {
+        format!(
+            "{}: verifier: {error:?} (ret={:?}, captures={}, sig_returns={})",
+            lam.jit_name,
+            lam.ret,
+            lam.captures.len(),
+            ctx.func.signature.returns.len()
+        )
+    })?;
     module
         .define_function(id, &mut ctx)
         .map_err(|error| error.to_string())?;

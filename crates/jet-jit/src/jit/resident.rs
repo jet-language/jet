@@ -155,6 +155,7 @@ pub(crate) fn resident_teardown() {
     crate::Collections::clear_packed_enum_show();
     crate::Watcher::clear_watcher_state();
     crate::Net::clear_net_state();
+    crate::net_http_rt::clear_net_http_handles();
     // CLI plan stays installed across teardown→recompile in the same try_resident;
     // prepare_cli_from_bundle / clear_cli_plan own its lifetime.
     // Keep STRUCT_REDACT: resident_run_fresh teardowns then recompiles in the
@@ -162,6 +163,7 @@ pub(crate) fn resident_teardown() {
     RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);
     RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = None);
     Concurrency::set_active_runtime(None);
+    Concurrency::clear_http_shared_runtime();
 }
 
 pub(crate) fn ensure_resident_module(program: &JitProgram) -> Result<(), String> {
@@ -240,6 +242,7 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         Concurrency::settle_pending_after_native();
         jet_codegen::scheduler::jet_scheduler_drain();
         Concurrency::set_active_runtime(None);
+        Concurrency::clear_http_shared_runtime();
         if let Some(rendered) = runtime.deadline_exceeded.take() {
             // Match AOT `#Context(deadline:)` ProgramOutput: keep prior stdout,
             // emit the rendered E3003, then the join-fatal line, exit 70.

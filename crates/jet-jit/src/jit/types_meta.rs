@@ -845,6 +845,10 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
             "path" | "reason" => Some(Type::String),
             _ => None,
         },
+        "HttpShutdownReport" => match field {
+            "accepted" | "overloaded" | "completed" | "cancelled" => Some(Type::Int),
+            _ => None,
+        },
         "MigrationStatus" => match field {
             "migrated" => Some(Type::Bool),
             "from" => Some(Type::String),

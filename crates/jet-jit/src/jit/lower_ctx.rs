@@ -376,7 +376,9 @@ impl LowerCtx<'_, '_> {
     }
 
     fn result_payload(&mut self, handle: Value, ty: &Type) -> Result<Value, String> {
-        if matches!(ty, Type::Named(n) if n == "Unit" || n == "Void") {
+        if matches!(ty, Type::Named(n) if n == "Unit" || n == "Void")
+            || matches!(ty, Type::Tuple(items) if items.is_empty())
+        {
             return Ok(self.b.ins().iconst(types::I8, 0));
         }
         let erased = match ty {
@@ -7747,15 +7749,195 @@ impl LowerCtx<'_, '_> {
                 if module == "core.net" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "tcp_listen" if args.len() == 1 => (
-                            self.host.net.tcp_listen,
+                            self.host.net_http.tcp_listen_str,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "tcp_listen_addr" if args.len() == 1 => (
+                            self.host.net_http.tcp_listen_addr,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "tcp_connect" if args.len() == 1 => (
+                            self.host.net_http.tcp_connect,
                             vec![self.lower_expr(&args[0])?],
                         ),
                         "listener_local_socket_addr" if args.len() == 1 => (
-                            self.host.net.listener_local_socket_addr,
+                            self.host.net_http.listener_local_socket_addr,
                             vec![self.lower_expr(&args[0])?],
                         ),
                         "socket_port" if args.len() == 1 => (
-                            self.host.net.socket_port,
+                            self.host.net_http.socket_port_typed,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "socket_host" if args.len() == 1 => (
+                            self.host.net_http.socket_host,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "socket_to_string" if args.len() == 1 => (
+                            self.host.net_http.socket_to_string,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "socket_addr" if args.len() == 2 => (
+                            self.host.net_http.socket_addr,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "set_timeout" if args.len() == 2 => (
+                            self.host.net_http.set_timeout,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "tcp_reply" if args.len() == 3 => (
+                            self.host.net_http.tcp_reply,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        "udp_bind" if args.len() == 1 => (
+                            self.host.net_http.udp_bind,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "udp_local_addr" if args.len() == 1 => (
+                            self.host.net_http.udp_local_addr,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "udp_set_timeout" if args.len() == 2 => (
+                            self.host.net_http.udp_set_timeout,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "udp_send_bytes_to" if args.len() == 3 => (
+                            self.host.net_http.udp_send_bytes_to,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        "udp_receive" if args.len() == 2 => (
+                            self.host.net_http.udp_receive,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "udp_packet_bytes" if args.len() == 1 => (
+                            self.host.net_http.udp_packet_bytes,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "udp_packet_original_len" if args.len() == 1 => (
+                            self.host.net_http.udp_packet_original_len,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "udp_packet_truncated" if args.len() == 1 => (
+                            self.host.net_http.udp_packet_truncated,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "unix_listen" if args.len() == 1 => (
+                            self.host.net_http.unix_listen,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "unix_accept" if args.len() == 1 => (
+                            self.host.net_http.unix_accept,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "unix_connect" if args.len() == 1 => (
+                            self.host.net_http.unix_connect,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "unix_read" if args.len() == 1 => (
+                            self.host.net_http.unix_read,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "unix_write" if args.len() == 2 => (
+                            self.host.net_http.unix_write,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "unix_write_all_bytes" if args.len() == 2 => (
+                            self.host.net_http.unix_write_all_bytes,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "unix_close" if args.len() == 1 => (
+                            self.host.net_http.unix_close,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    let v = self.b.inst_results(call)[0];
+                    return if matches!(expr.ty, Type::Bool) {
+                        Ok(self.b.ins().ireduce(types::I8, v))
+                    } else {
+                        Ok(v)
+                    };
+                }
+                if module == "core.http.server" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "mux" if args.is_empty() => (self.host.net_http.http_mux_new, vec![]),
+                        "response" if args.len() == 2 => (
+                            self.host.net_http.http_response,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "bind" if args.len() == 2 => (
+                            self.host.net_http.http_server_bind,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "serve_once_listener" if args.len() == 2 => (
+                            self.host.net_http.http_serve_once_listener,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "request_id" if args.len() == 1 => (
+                            self.host.net_http.http_request_id,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "sse" if args.len() == 1 => (
+                            self.host.net_http.http_sse,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "static_file_range" if args.len() == 3 => (
+                            self.host.net_http.http_static_file_range,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if matches!(module.as_str(), "jet.http" | "core.http" | "core.http.client") {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "get" if args.len() == 1 => (
+                            self.host.net_http.http_client_get,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "post" if args.len() == 2 => (
+                            self.host.net_http.http_client_post,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "request" if args.len() == 2 => (
+                            self.host.net_http.http_client_request_new,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.ws" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "upgrade" if args.len() == 1 => (
+                            self.host.net_http.ws_upgrade,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "connect" if args.len() == 1 => (
+                            self.host.net_http.ws_connect,
                             vec![self.lower_expr(&args[0])?],
                         ),
                         _ => {
@@ -9815,8 +9997,8 @@ impl LowerCtx<'_, '_> {
                     .map(|(ok, _)| ok.clone())
                     .or_else(|| Self::result_ok_ty_recover(value))
                     .ok_or_else(|| "jit result ?? operand is not Result".to_string())?;
-                let is_unit =
-                    matches!(&ok_ty, Type::Named(n) if n == "Unit" || n == "Void");
+                let is_unit = matches!(&ok_ty, Type::Named(n) if n == "Unit" || n == "Void")
+                    || matches!(&ok_ty, Type::Tuple(items) if items.is_empty());
                 let ret_ty = if is_unit {
                     types::I8
                 } else {
@@ -10022,6 +10204,26 @@ impl LowerCtx<'_, '_> {
                 let type_name = type_name.ok_or_else(|| {
                     format!("jit field recv type: field `{field}` on {record_ty:?}")
                 })?;
+                if type_name == "HttpShutdownReport" {
+                    let field_id = match field.as_str() {
+                        "accepted" => 0,
+                        "overloaded" => 1,
+                        "completed" => 2,
+                        "cancelled" => 3,
+                        other => {
+                            return Err(format!(
+                                "jit field `{other}` on `HttpShutdownReport`"
+                            ));
+                        }
+                    };
+                    let field_v = self.b.ins().iconst(types::I64, field_id);
+                    let host = self.module.declare_func_in_func(
+                        self.host.net_http.http_shutdown_report_field,
+                        self.b.func,
+                    );
+                    let call = self.b.ins().call(host, &[handle, field_v]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 // TIR may leave CORE struct fields as Int when cx.struct_fields
                 // lacks the type; recover the real ABI type for get_*/print.
                 let field_ty = self.meta.struct_field_ty(&type_name, field)
@@ -10965,7 +11167,63 @@ impl LowerCtx<'_, '_> {
                     self.runtime,
                 )?;
                 let func_ref = self.module.declare_func_in_func(id, self.b.func);
-                Ok(self.b.ins().func_addr(types::I64, func_ref))
+                let fn_addr = self.b.ins().func_addr(types::I64, func_ref);
+                if lam.captures.is_empty() {
+                    return Ok(fn_addr);
+                }
+                if lam.arc
+                    || matches!(
+                        &expr.ty,
+                        Type::Named(name) if name == "HttpHandler"
+                    )
+                {
+                    // Prefer host-side packing for the common single-capture
+                    // middleware shape (`owned :: ~next`); JIT list_push was
+                    // arriving empty at bind time on the serve thread.
+                    if lam.captures.len() == 1 {
+                        let (outer, _place, _ty) = &lam.captures[0];
+                        let key = TIR::local_place(outer);
+                        let var = self
+                            .vars
+                            .get(&key)
+                            .copied()
+                            .ok_or_else(|| format!("jit lambda capture unknown `{outer}`"))?;
+                        let cap0 = self.b.use_var(var);
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_handler_bind1,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[fn_addr, cap0]);
+                        Ok(self.b.inst_results(call)[0])
+                    } else {
+                        let empty = self
+                            .module
+                            .declare_func_in_func(self.host.coll.list_new, self.b.func);
+                        let call = self.b.ins().call(empty, &[]);
+                        let env = self.b.inst_results(call)[0];
+                        let push = self
+                            .module
+                            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+                        for (outer, _place, _ty) in &lam.captures {
+                            let key = TIR::local_place(outer);
+                            let var = self
+                                .vars
+                                .get(&key)
+                                .copied()
+                                .ok_or_else(|| format!("jit lambda capture unknown `{outer}`"))?;
+                            let val = self.b.use_var(var);
+                            self.b.ins().call(push, &[env, val]);
+                        }
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_handler_bind,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[fn_addr, env]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                } else {
+                    Err("jit callable captures unsupported".to_string())
+                }
             }
             TExprKind::HostBorrowCallback { .. } => {
                 Err("jit borrowed callback adapter unsupported".to_string())
@@ -12456,6 +12714,29 @@ impl LowerCtx<'_, '_> {
             if self.meta.is_enum(name) {
                 return self.lower_expr(inner);
             }
+            // Opaque net/http/ws runtime handles are i64 slots — clone copies the handle.
+            if matches!(
+                name.as_str(),
+                "TcpListener"
+                    | "TcpStream"
+                    | "SocketAddr"
+                    | "UdpSocket"
+                    | "UdpPacket"
+                    | "UnixListener"
+                    | "UnixStream"
+                    | "HttpMux"
+                    | "HttpHandler"
+                    | "HttpRequest"
+                    | "HttpResponse"
+                    | "HttpBody"
+                    | "HttpHeaders"
+                    | "HttpServer"
+                    | "HttpShutdownReport"
+                    | "WsConn"
+                    | "WsMessage"
+            ) {
+                return self.lower_expr(inner);
+            }
             return self.lower_clone_struct(inner);
         }
         if matches!(&inner.ty, Type::Apply { name, .. } if name == "Sender") {
@@ -13481,17 +13762,52 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.inst_results(call)[0])
             }
             THandleOp::PreciseMethod { .. } => Err("jit handle method unsupported".to_string()),
-            THandleOp::TcpListenerAccept => Err("jit handle method unsupported".to_string()),
-            THandleOp::TcpListenerLocalAddr => Err("jit handle method unsupported".to_string()),
+            THandleOp::TcpListenerAccept => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.net_http.tcp_accept, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::TcpListenerLocalAddr => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.net_http.tcp_local_addr, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::TcpStreamReadText if args.len() == 1 => {
+                let limit = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.net_http.tcp_read_text, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, limit]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::TcpStreamWriteAllBytes if args.len() == 1 => {
+                let data = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.net_http.tcp_write_all_bytes, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, data]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::TcpStreamReadText | THandleOp::TcpStreamWriteAllBytes => {
+                Err("jit handle method unsupported".to_string())
+            }
+            THandleOp::TcpStreamClose => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.net_http.tcp_close, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::TcpStreamRead => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpStreamWrite => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpStreamPeerAddr => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpStreamLocalAddr => Err("jit handle method unsupported".to_string()),
-            THandleOp::TcpStreamClose => Err("jit handle method unsupported".to_string()),
             THandleOp::TcpStreamReadBytes
-            | THandleOp::TcpStreamReadText
             | THandleOp::TcpStreamWriteBytes
-            | THandleOp::TcpStreamWriteAllBytes
             | THandleOp::TcpStreamWriteText
             | THandleOp::TcpStreamShutdown
             | THandleOp::TcpStreamReady
@@ -14078,10 +14394,336 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[recv_v, method_val, a0, a1]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::HttpClientMethod { .. } => Err("jit handle method unsupported".to_string()),
-            THandleOp::HttpServerMethod { .. } => Err("jit handle method unsupported".to_string()),
-            THandleOp::HttpReqTrailers => Err("jit handle method unsupported".to_string()),
-            THandleOp::HttpRespTrailers => Err("jit handle method unsupported".to_string()),
+            THandleOp::HttpClientMethod { kind, method } => {
+                match (kind.as_str(), method.as_str()) {
+                    ("HttpResponse", "status") if args.is_empty() => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.http_resp_status, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpResponse", "body") if args.is_empty() => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.http_resp_body, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpResponse", "header") if args.len() == 1 => {
+                        let name = self.lower_expr(&args[0])?;
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.http_resp_header, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val, name]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpResponse", "cookies") if args.is_empty() => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.http_resp_cookies, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpBody", "text") if args.len() == 1 => {
+                        let limit = self.lower_expr(&args[0])?;
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.http_body_text, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val, limit]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpRequest", "form") if args.len() == 2 => {
+                        let a0 = self.lower_expr(&args[0])?;
+                        let a1 = self.lower_expr(&args[1])?;
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_client_request_form,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val, a0, a1]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpRequest", "cookie") if args.len() == 2 => {
+                        let a0 = self.lower_expr(&args[0])?;
+                        let a1 = self.lower_expr(&args[1])?;
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_client_request_cookie,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val, a0, a1]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpRequest", "header") if args.len() == 2 => {
+                        let a0 = self.lower_expr(&args[0])?;
+                        let a1 = self.lower_expr(&args[1])?;
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_client_request_header,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val, a0, a1]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpRequest", "redirects") if args.len() == 1 => {
+                        let a0 = self.lower_expr(&args[0])?;
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_client_request_redirects,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val, a0]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpRequest", "connect_timeout") if args.len() == 1 => {
+                        let a0 = self.lower_expr(&args[0])?;
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_client_request_connect_timeout,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val, a0]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpRequest", "read_timeout") if args.len() == 1 => {
+                        let a0 = self.lower_expr(&args[0])?;
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_client_request_read_timeout,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val, a0]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpRequest", "send") if args.is_empty() => {
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_client_request_send,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    _ => Err(format!(
+                        "jit handle method unsupported: {kind}::{method}"
+                    )),
+                }
+            }
+            THandleOp::HttpServerMethod { kind, method } => {
+                match (kind.as_str(), method.as_str()) {
+                    ("HttpMux", m)
+                        if matches!(
+                            m,
+                            "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
+                        ) && args.len() == 2 =>
+                    {
+                        let pattern = self.lower_expr(&args[0])?;
+                        let handler = self.lower_expr(&args[1])?;
+                        let method_s = self.runtime.heap.alloc_string(m.to_uppercase());
+                        let method_v = self.b.ins().iconst(types::I64, method_s);
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.http_mux_add, self.b.func);
+                        let call =
+                            self.b
+                                .ins()
+                                .call(host, &[recv_val, method_v, pattern, handler]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpMux", "middleware") if args.len() == 1 => {
+                        let mw = self.lower_expr(&args[0])?;
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_mux_middleware,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val, mw]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpHandler", "handle") if args.len() == 1 => {
+                        let req = self.lower_expr(&args[0])?;
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_handler_handle,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val, req]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpRequest", "body") if args.is_empty() => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.http_req_body, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpRequest", "method") if args.is_empty() => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.http_req_method, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpRequest", "path") if args.is_empty() => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.http_req_path, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpRequest", "param") if args.len() == 1 => {
+                        let name = self.lower_expr(&args[0])?;
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.http_req_param, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val, name]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpRequest", "header") if args.len() == 1 => {
+                        let name = self.lower_expr(&args[0])?;
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.http_req_header, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val, name]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpRequest", "trailers") if args.is_empty() => {
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_req_trailers,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpRequest", "body_len") if args.is_empty() => {
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_req_body_len,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpRequest", "under_limit") if args.len() == 1 => {
+                        let max = self.lower_expr(&args[0])?;
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_req_under_limit,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val, max]);
+                        let v = self.b.inst_results(call)[0];
+                        Ok(self.b.ins().ireduce(types::I8, v))
+                    }
+                    ("HttpResponse", "trailers") if args.len() == 1 => {
+                        let trailers = self.lower_expr(&args[0])?;
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_resp_trailers,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val, trailers]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpBody", "text") if args.len() == 1 => {
+                        let limit = self.lower_expr(&args[0])?;
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.http_body_text, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val, limit]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpResponse", "status") if args.is_empty() => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.http_resp_status, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpResponse", "body") if args.is_empty() => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.http_resp_body, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpServer", "local_addr") if args.is_empty() => {
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_server_local_addr,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpServer", "serve") if args.is_empty() => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.http_server_serve, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HttpServer", "shutdown") if args.len() == 1 => {
+                        // Duration handle -> ms via DurationIn not available here; pass
+                        // duration record bits as ms when it's a Duration milliseconds handle.
+                        let grace = self.lower_expr(&args[0])?;
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_server_shutdown,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val, grace]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("WsConn", "send_text") if args.len() == 1 => {
+                        let text = self.lower_expr(&args[0])?;
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.ws_send_text, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val, text]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("WsConn", "recv") if args.is_empty() => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.ws_recv, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("WsConn", "close") if args.len() == 2 => {
+                        let code = self.lower_expr(&args[0])?;
+                        let reason = self.lower_expr(&args[1])?;
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.ws_close, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val, code, reason]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("WsMessage", "is_text") if args.is_empty() => {
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.ws_message_is_text,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val]);
+                        let v = self.b.inst_results(call)[0];
+                        Ok(self.b.ins().ireduce(types::I8, v))
+                    }
+                    ("WsMessage", "text") if args.is_empty() => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.ws_message_text, self.b.func);
+                        let call = self.b.ins().call(host, &[recv_val]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    _ => Err(format!(
+                        "jit handle method unsupported: {kind}::{method}"
+                    )),
+                }
+            }
+            THandleOp::HttpReqTrailers => {
+                let host = self.module.declare_func_in_func(
+                    self.host.net_http.http_req_trailers,
+                    self.b.func,
+                );
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::HttpRespTrailers => {
+                let trailers = self.lower_expr(&args[0])?;
+                let host = self.module.declare_func_in_func(
+                    self.host.net_http.http_resp_trailers,
+                    self.b.func,
+                );
+                let call = self.b.ins().call(host, &[recv_val, trailers]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::DataTreeField | THandleOp::JsonField => {
                 let name = self.lower_expr(&args[0])?;
                 let host_ref = self
