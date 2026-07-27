@@ -4780,15 +4780,16 @@ fn assert_network_http_browser_three_way(file: &str, stem: &str) {
         RunOutcome::Problems(diags)
             if diags
                 .iter()
-                .any(|d| d.code == "E2201" || d.code == "E1265" || d.code == "E3412") =>
+                .any(|d| d.code == "E2201" || d.code == "E0956" || d.code == "E1265") =>
         {
-            // Live network/HTTP/WS stop at the honest interpreter boundary;
+            // Live network/HTTP/WS stop at the honest interpreter boundary
+            // (E3412 comptime voice is rewritten to E2201 in Source/Interpreter);
             // golden + resident JIT + AOT carry ProgramOutput parity.
             None
         }
         RunOutcome::Problems(diags) => {
             panic!(
-                "interpreter baseline must run `{stem}` or stop at E2201/E1265/E3412, got: {diags:?}"
+                "interpreter baseline must run `{stem}` or stop at E2201/E0956/E1265, got: {diags:?}"
             )
         }
     };
