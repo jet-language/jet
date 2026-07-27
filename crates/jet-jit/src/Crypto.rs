@@ -177,6 +177,24 @@ fn with_crypto<R>(handle: i64, f: impl FnOnce(&CryptoValue) -> Option<R>) -> Opt
     })
 }
 
+/// Snapshot closed-family secret material for `ExpiringSecret` zeroize-on-expiry.
+/// Keeps the crypto handle live so `with` can loan it until expiry drops it.
+pub(crate) fn claim_expiring_secret(handle: i64) -> Option<crate::Memory::SecretState> {
+    let bytes = with_crypto(handle, |value| match value {
+        CryptoValue::SigningKey(key) => Some(runtime::jet_crypto_expert_signing_key_bytes_impl(key)),
+        CryptoValue::X25519SecretKey(key) => {
+            Some(runtime::jet_crypto_expert_x25519_secret_bytes_impl(key))
+        }
+        CryptoValue::Secret(secret) => Some(runtime::jet_crypto_expert_secret_bytes_impl(secret)),
+        _ => None,
+    })?;
+    Some(crate::Memory::SecretState::from_material(handle, bytes))
+}
+
+pub(crate) fn drop_crypto_handle(handle: i64) {
+    let _ = take_crypto(handle);
+}
+
 /// D-EMAIL-SMTP-CONFIG1=A: sole SMTP extraction boundary used by JIT email hosts.
 pub(crate) fn secret_copy_for_smtp(handle: i64) -> Option<Vec<u8>> {
     with_crypto(handle, |value| match value {

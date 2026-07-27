@@ -74,10 +74,14 @@ pub(crate) struct ExpiringState {
 
 pub(crate) struct SecretState {
     handle: i64,
-    bytes: Box<[u8; 32]>,
+    bytes: Vec<u8>,
 }
 
 impl SecretState {
+    pub(crate) fn from_material(handle: i64, bytes: Vec<u8>) -> Self {
+        Self { handle, bytes }
+    }
+
     fn zeroize(&mut self) {
         for byte in self.bytes.iter_mut() {
             // SAFETY: the pointer refers to this live, uniquely borrowed byte.
@@ -99,12 +103,9 @@ mod tests {
 
     #[test]
     fn secret_storage_zeroizes_the_owned_bytes() {
-        let mut secret = SecretState {
-            handle: 1,
-            bytes: Box::new([0x5a; 32]),
-        };
+        let mut secret = SecretState::from_material(1, vec![0x5a; 32]);
         secret.zeroize();
-        assert_eq!(secret.bytes.as_ref(), &[0; 32]);
+        assert_eq!(secret.bytes.as_slice(), &[0; 32]);
     }
 }
 
@@ -408,23 +409,27 @@ extern "C" fn jet_jit_expiring_new(
     clock: i64,
     secret: i64,
 ) -> i64 {
+    // SigningKey / X25519 / Secret live in crypto_values (#1222). Claim a
+    // zeroize mirror here; keep the crypto handle live for `with` loans.
+    let owned_secret = if secret != 0 {
+        match crate::Crypto::claim_expiring_secret(value) {
+            Some(state) => Some(state),
+            None => {
+                Concurrency::with_runtime_mut(|rt| {
+                    rt.set_trap("secret key handle is invalid or already moved");
+                });
+                return 0;
+            }
+        }
+    } else {
+        None
+    };
     Concurrency::with_runtime_mut(|rt| {
         let now = rt
             .clocks
             .get((clock as usize).wrapping_sub(1))
             .copied()
             .unwrap_or(0);
-        let owned_secret = if secret != 0 {
-            rt.secrets
-                .get_mut((value as usize).wrapping_sub(1))
-                .and_then(Option::take)
-        } else {
-            None
-        };
-        if secret != 0 && owned_secret.is_none() {
-            rt.set_trap("secret key handle is invalid or already moved");
-            return 0;
-        }
         rt.expirings.push(ExpiringState {
             value,
             expires_at: now.saturating_add(duration.max(0)),
@@ -436,7 +441,7 @@ extern "C" fn jet_jit_expiring_new(
 }
 
 extern "C" fn jet_jit_expiring_get(handle: i64, clock: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
+    let (status, drop_crypto) = Concurrency::with_runtime_mut(|rt| {
         let stored_clock = rt
             .expirings
             .get((handle as usize).wrapping_sub(1))
@@ -449,15 +454,20 @@ extern "C" fn jet_jit_expiring_get(handle: i64, clock: i64) -> i64 {
             .copied()
             .unwrap_or(0);
         let Some(value) = rt.expirings.get_mut((handle as usize).wrapping_sub(1)) else {
-            return 0;
+            return (0_i64, None);
         };
         if now > value.expires_at {
+            let crypto_handle = value.value;
             value.secret.take();
             value.value = 0;
-            return 0;
+            return (0, Some(crypto_handle));
         }
-        value.value + 1
-    })
+        (value.value + 1, None)
+    });
+    if let Some(crypto_handle) = drop_crypto {
+        crate::Crypto::drop_crypto_handle(crypto_handle);
+    }
+    status
 }
 
 extern "C" fn jet_jit_expiring_is_valid(handle: i64, clock: i64) -> i8 {
