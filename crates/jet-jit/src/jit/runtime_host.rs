@@ -91,6 +91,8 @@ pub(crate) struct JitRuntime {
     pub(crate) sets: Vec<std::collections::HashSet<i64>>,
     /// `Deque<T>` handles — 1-based indices (#729 collections/deque). Int elems only.
     pub(crate) deques: Vec<std::collections::VecDeque<i64>>,
+    /// `Bag<T>` handles — counted JIT-value bits, keyed by the checked element ABI.
+    pub(crate) bags: Vec<std::collections::HashMap<i64, usize>>,
     /// Set by a host shim when the user program hits a runtime panic (overflow,
     /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
     /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,
@@ -852,6 +854,127 @@ extern "C" fn jet_jit_struct_set_str(h: i64, idx: i64, v: i64) {
     });
 }
 
+fn measurement_ct(value: f64, uncertainty: f64) -> Option<jet_codegen::AST::CtValue> {
+    use jet_codegen::AST::{CtFloat, CtValue};
+    jet_codegen::Comptime::apply_core_call(
+        "core.science.measurement",
+        "from",
+        vec![
+            CtValue::Float(CtFloat::f64(value)),
+            CtValue::Float(CtFloat::f64(uncertainty)),
+        ],
+        jet_codegen::Diagnostics::Span::new(0, 0),
+        false,
+    )
+    .ok()
+}
+
+fn measurement_parts(value: &jet_codegen::AST::CtValue) -> Option<(f64, f64)> {
+    use jet_codegen::AST::CtValue;
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "Measurement" {
+        return None;
+    }
+    let field = |name: &str| {
+        fields.iter().find_map(|(field, value)| {
+            (field == name).then_some(value).and_then(|value| match value {
+                CtValue::Float(value) => Some(value.as_f64()),
+                _ => None,
+            })
+        })
+    };
+    Some((field("value")?, field("uncertainty")?))
+}
+
+fn alloc_measurement(rt: &mut JitRuntime, value: &jet_codegen::AST::CtValue) -> i64 {
+    let Some((measured, uncertainty)) = measurement_parts(value) else {
+        rt.set_trap("the canonical Measurement operation returned a malformed value");
+        return 0;
+    };
+    let handle = rt.heap.alloc_record(2);
+    let _ = rt.heap.record_set_float(handle, 0, measured);
+    let _ = rt.heap.record_set_float(handle, 1, uncertainty);
+    handle
+}
+
+fn read_measurement(rt: &mut JitRuntime, handle: i64) -> Option<jet_codegen::AST::CtValue> {
+    measurement_ct(
+        rt.heap.record_get_float(handle, 0)?,
+        rt.heap.record_get_float(handle, 1)?,
+    )
+}
+
+extern "C" fn jet_jit_measurement_new(value: f64, uncertainty: f64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match measurement_ct(value, uncertainty) {
+        Some(value) => alloc_measurement(rt, &value),
+        None => {
+            rt.set_trap("the canonical Measurement constructor rejected Float inputs");
+            0
+        }
+    })
+}
+
+extern "C" fn jet_jit_measurement_arithmetic(left: i64, right: i64, op: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let (Some(left), Some(right)) = (
+            read_measurement(rt, left),
+            read_measurement(rt, right),
+        ) else {
+            rt.set_trap("the JIT received an invalid Measurement handle");
+            return 0;
+        };
+        let method = match op {
+            0 => "add",
+            1 => "sub",
+            2 => "mul",
+            3 => "div",
+            _ => {
+                rt.set_trap("the JIT received an invalid Measurement operation");
+                return 0;
+            }
+        };
+        match jet_codegen::Comptime::Builtins::apply_method(
+            &left,
+            method,
+            vec![right],
+            jet_codegen::Diagnostics::Span::new(0, 0),
+        ) {
+            Ok(value) => alloc_measurement(rt, &value),
+            Err(_) => {
+                rt.set_trap("the canonical Measurement operation rejected valid operands");
+                0
+            }
+        }
+    })
+}
+
+extern "C" fn jet_jit_measurement_get(handle: i64, field: i64) -> f64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .record_get_float(handle, field)
+            .unwrap_or_else(|| {
+                rt.set_trap("the JIT received an invalid Measurement handle");
+                0.0
+            })
+    })
+}
+
+extern "C" fn jet_jit_measurement_show(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(value) = read_measurement(rt, handle) else {
+            rt.set_trap("the JIT received an invalid Measurement handle");
+            return 0;
+        };
+        let Some(rendered) = jet_codegen::Comptime::display_core_pure_value(&value) else {
+            rt.set_trap("the canonical Measurement display rejected a valid value");
+            return 0;
+        };
+        rt.heap.alloc_string(rendered)
+    })
+}
+
 const JIT_PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
 // D-FIDELITY-API1=A: this signal is deliberately outside `JitRuntime` — it
 // must survive `resident_teardown()` + a fresh `JitRuntime` (a "restart"),
@@ -1136,6 +1259,10 @@ pub(crate) struct HostFns {
     pub(crate) struct_set_bool: FuncId,
     pub(crate) struct_set_char: FuncId,
     pub(crate) struct_set_str: FuncId,
+    pub(crate) measurement_new: FuncId,
+    pub(crate) measurement_arithmetic: FuncId,
+    pub(crate) measurement_get: FuncId,
+    pub(crate) measurement_show: FuncId,
     pub(crate) result_new_i64: FuncId,
     pub(crate) result_new_f64: FuncId,
     pub(crate) result_new_i8: FuncId,
@@ -1271,6 +1398,13 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         "jet_jit_struct_set_str",
         jet_jit_struct_set_str as *const u8,
     );
+    builder.symbol("jet_jit_measurement_new", jet_jit_measurement_new as *const u8);
+    builder.symbol(
+        "jet_jit_measurement_arithmetic",
+        jet_jit_measurement_arithmetic as *const u8,
+    );
+    builder.symbol("jet_jit_measurement_get", jet_jit_measurement_get as *const u8);
+    builder.symbol("jet_jit_measurement_show", jet_jit_measurement_show as *const u8);
     builder.symbol("jet_jit_result_new_i64", jet_jit_result_new_i64 as *const u8);
     builder.symbol("jet_jit_result_new_f64", jet_jit_result_new_f64 as *const u8);
     builder.symbol("jet_jit_result_new_i8", jet_jit_result_new_i8 as *const u8);
@@ -1489,6 +1623,19 @@ fn declare_host_fns(
     sig_struct_set_i32.params.push(AbiParam::new(types::I64));
     sig_struct_set_i32.params.push(AbiParam::new(types::I64));
     sig_struct_set_i32.params.push(AbiParam::new(types::I32));
+    let mut sig_measurement_new = Signature::new(cc);
+    sig_measurement_new.params.push(AbiParam::new(types::F64));
+    sig_measurement_new.params.push(AbiParam::new(types::F64));
+    sig_measurement_new.returns.push(AbiParam::new(types::I64));
+    let mut sig_measurement_arithmetic = Signature::new(cc);
+    sig_measurement_arithmetic.params.push(AbiParam::new(types::I64));
+    sig_measurement_arithmetic.params.push(AbiParam::new(types::I64));
+    sig_measurement_arithmetic.params.push(AbiParam::new(types::I64));
+    sig_measurement_arithmetic.returns.push(AbiParam::new(types::I64));
+    let mut sig_measurement_get = Signature::new(cc);
+    sig_measurement_get.params.push(AbiParam::new(types::I64));
+    sig_measurement_get.params.push(AbiParam::new(types::I64));
+    sig_measurement_get.returns.push(AbiParam::new(types::F64));
     let mut sig_is_trapped = Signature::new(cc);
     sig_is_trapped.returns.push(AbiParam::new(types::I64));
     let mut sig_result_new_i64 = Signature::new(cc);
@@ -1617,6 +1764,13 @@ fn declare_host_fns(
         struct_set_bool: import("jet_jit_struct_set_bool", &sig_struct_set_i8)?,
         struct_set_char: import("jet_jit_struct_set_char", &sig_struct_set_i32)?,
         struct_set_str: import("jet_jit_struct_set_str", &sig_struct_set_i64)?,
+        measurement_new: import("jet_jit_measurement_new", &sig_measurement_new)?,
+        measurement_arithmetic: import(
+            "jet_jit_measurement_arithmetic",
+            &sig_measurement_arithmetic,
+        )?,
+        measurement_get: import("jet_jit_measurement_get", &sig_measurement_get)?,
+        measurement_show: import("jet_jit_measurement_show", &sig_str_unary_i64)?,
         result_new_i64: import("jet_jit_result_new_i64", &sig_result_new_i64)?,
         result_new_f64: import("jet_jit_result_new_f64", &sig_result_new_f64)?,
         result_new_i8: import("jet_jit_result_new_i8", &sig_result_new_i8)?,

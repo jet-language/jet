@@ -675,7 +675,10 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     init = TExpr {
                         ty: init.ty.clone(),
                         kind: TExprKind::FnValue {
-                            kind: TFnValueKind::NamedFn { wrapper: coerced },
+                            kind: TFnValueKind::NamedFn {
+                                wrapper: coerced,
+                                name: None,
+                            },
                         },
                     };
                 }

@@ -1277,7 +1277,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
             let lit = format!("{rust_type} {{ {} }}", parts.join(", "));
             match as_trait {
-                Some(trait_name) => {
+                Some((trait_name, _)) => {
                     let trait_rust = crate::Generics::user_trait_rust(trait_name);
                     format!("Box::new({lit}) as Box<dyn {trait_rust}>")
                 }
@@ -3549,7 +3549,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // a fn-value emits `({callee})({args})`, byte-for-byte `emit_expr`'s
         // `Expr::CallValue` (Source/Codegen/Expression.rs).
         TExprKind::FnValue { kind } => match kind {
-            TFnValueKind::NamedFn { wrapper } => wrapper.clone(),
+            TFnValueKind::NamedFn { wrapper, .. } => wrapper.clone(),
             TFnValueKind::Call { callee, args } => {
                 format!(
                     "({})({})",

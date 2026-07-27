@@ -1,13 +1,15 @@
 //! Exhaustive TExprKind evaluation (#777).
 use std::collections::HashMap;
 use crate::AST::{CtFloat, Type, UnOp};
-use crate::Codegen::TIR::{TCallArg, TExpr, TExprKind, TPlace, TStrPart};
+use crate::Codegen::TIR::{
+    ListSpreadPart, TCallArg, TExpr, TExprKind, TFnValueKind, TPlace, TStrPart,
+};
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::{apply_core_call, apply_impure_core_call, CtValue};
 use crate::Diagnostics::Diagnostic;
 use super::builtins::eval_builtin;
 use super::handles::eval_handle;
-use super::{materialize_view_mut_window, unsupported, EvalCtx, Flow};
+use super::{materialize_view_mut_window, unsupported, EvalCallable, EvalCtx, Flow};
 
 fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
     match (value, ty) {
@@ -44,10 +46,10 @@ fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
     }
 }
 
-impl EvalCtx<'_> {
+impl<'a> EvalCtx<'a> {
     pub(crate) fn eval_expr(
         &mut self,
-        expr: &TExpr,
+        expr: &'a TExpr,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         self.burn()?;
@@ -99,8 +101,10 @@ impl EvalCtx<'_> {
                 if self.pending_return.is_some() {
                     return Ok(CtValue::Unit);
                 }
-                let shown =
-                    show_typed_value(&v, &inner.ty, false).unwrap_or_else(|| v.jet_show());
+                let shown = match show_typed_value(&v, &inner.ty, false) {
+                    Some(shown) => shown,
+                    None => self.show_value(&v, scope)?,
+                };
                 self.write_print(&shown, false)?;
                 Ok(CtValue::Unit)
             }
@@ -372,16 +376,21 @@ impl EvalCtx<'_> {
                     ))
                 }
             }
-            TExprKind::StructLit { fields, .. } => {
+            TExprKind::StructLit {
+                fields, as_trait, ..
+            } => {
                 let mut out = Vec::with_capacity(fields.len());
                 for (name, val, _) in fields {
                     out.push((name.clone(), self.eval_expr(val, scope)?));
                 }
-                let type_name = match &expr.ty {
-                    crate::AST::Type::Named(n) => n.clone(),
-                    crate::AST::Type::Apply { name, .. } => name.clone(),
-                    _ => "struct".into(),
-                };
+                let type_name = as_trait
+                    .as_ref()
+                    .map(|(_, concrete)| concrete.clone())
+                    .unwrap_or_else(|| match &expr.ty {
+                        crate::AST::Type::Named(n) => n.clone(),
+                        crate::AST::Type::Apply { name, .. } => name.clone(),
+                        _ => "struct".into(),
+                    });
                 Ok(CtValue::Struct {
                     type_name,
                     fields: out,
@@ -532,6 +541,76 @@ impl EvalCtx<'_> {
                 if method.name == "clone" {
                     return Ok(r);
                 }
+                if method.name == "apply" {
+                    if let (
+                        CtValue::Struct {
+                            type_name,
+                            fields,
+                        },
+                        Some(CtValue::Struct {
+                            type_name: patch_name,
+                            fields: patch_fields,
+                        }),
+                    ) = (&r, argv.first())
+                    {
+                        if patch_name == &format!("{type_name}.Patch") {
+                            let fields = fields
+                                .iter()
+                                .map(|(name, old)| {
+                                    let value = patch_fields
+                                        .iter()
+                                        .find_map(|(patch_name, value)| {
+                                            (patch_name == name).then_some(value)
+                                        })
+                                        .and_then(|value| match value {
+                                            CtValue::Some(value) => Some((**value).clone()),
+                                            _ => None,
+                                        })
+                                        .unwrap_or_else(|| old.clone());
+                                    (name.clone(), value)
+                                })
+                                .collect();
+                            return Ok(CtValue::Struct {
+                                type_name: type_name.clone(),
+                                fields,
+                            });
+                        }
+                    }
+                }
+                if method.name == "merge" {
+                    if let (
+                        CtValue::Struct {
+                            type_name,
+                            fields,
+                        },
+                        Some(CtValue::Struct {
+                            type_name: other_name,
+                            fields: other_fields,
+                        }),
+                    ) = (&r, argv.first())
+                    {
+                        if type_name.ends_with(".Patch") && type_name == other_name {
+                            let fields = fields
+                                .iter()
+                                .map(|(name, current)| {
+                                    let incoming = other_fields
+                                        .iter()
+                                        .find_map(|(other_name, value)| {
+                                            (other_name == name).then_some(value)
+                                        })
+                                        .filter(|value| matches!(value, CtValue::Some(_)))
+                                        .cloned()
+                                        .unwrap_or_else(|| current.clone());
+                                    (name.clone(), incoming)
+                                })
+                                .collect();
+                            return Ok(CtValue::Struct {
+                                type_name: type_name.clone(),
+                                fields,
+                            });
+                        }
+                    }
+                }
                 let span = self.span();
                 let base_dir = self.base_dir.clone();
                 if let Some(result) =
@@ -640,13 +719,15 @@ impl EvalCtx<'_> {
                     if let Some(func) = self.funcs.get(&name).copied() {
                         let mut child = HashMap::new();
                         // Instance methods lower `self` into the env, not `params`.
-                        let argv_for_params = if matches!(
+                        let has_receiver = matches!(
                             &func.kind,
                             crate::Codegen::TIR::TFuncKind::Method {
                                 self_conv: Some(_),
                                 ..
                             }
-                        ) {
+                                | crate::Codegen::TIR::TFuncKind::TraitMethod { .. }
+                        );
+                        let argv_for_params = if has_receiver {
                             child.insert("self".to_string(), r.clone());
                             argv
                         } else {
@@ -867,6 +948,19 @@ impl EvalCtx<'_> {
                         }
                     }
                 }
+                crate::Codegen::TIR::THostCall::SwitchSubjectField { field } => {
+                    let CtValue::Struct { fields, .. } = self
+                        .switch_subject
+                        .as_ref()
+                        .ok_or_else(|| unsupported("switch subject field outside switch", self.span()))?
+                    else {
+                        return Err(unsupported("switch subject is not a struct", self.span()));
+                    };
+                    fields
+                        .iter()
+                        .find_map(|(name, value)| (name == field).then(|| value.clone()))
+                        .ok_or_else(|| unsupported(&format!("switch subject field `{field}`"), self.span()))
+                }
                 crate::Codegen::TIR::THostCall::Method { recv, method, args } => {
                     let mut r = self.eval_expr(recv, scope)?;
                     let mut argv = Vec::with_capacity(args.len());
@@ -964,7 +1058,11 @@ impl EvalCtx<'_> {
                     ))
                 }
             },
-            TExprKind::DataEntriesToMap(..) => Err(unsupported("expr `DataEntriesToMap`", self.span())),
+            TExprKind::DataEntriesToMap(local) => scope
+                .get(&local.name)
+                .cloned()
+                .or_else(|| self.globals.get(&local.name).cloned())
+                .ok_or_else(|| unsupported(&format!("unbound `{}`", local.name), self.span())),
             TExprKind::DistinctCtor { name: _, arg, base: _ } => {
                 // Distinct is a zero-cost nominal wrapper over its base scalar.
                 self.eval_expr(arg, scope)
@@ -998,7 +1096,7 @@ impl EvalCtx<'_> {
                     let CtValue::Int(n) = &inner else {
                         return Err(unsupported("distinct range check on non-Int", self.span()));
                     };
-                    if *n < *lo || *n >= *hi {
+                    if *n < *lo || *n > *hi {
                         let err = CtValue::Str(format!("value doesn't fit in range {lo}..{hi}"));
                         return Ok(if *fallible {
                             CtValue::ResErr(Box::new(err))
@@ -1142,7 +1240,23 @@ impl EvalCtx<'_> {
                 })
             }
             TExprKind::DbValueLit { .. } => Err(unsupported("expr `DbValueLit`", self.span())),
-            TExprKind::ListSpread { .. } => Err(unsupported("expr `ListSpread`", self.span())),
+            TExprKind::ListSpread { parts } => {
+                let mut values = Vec::new();
+                for part in parts {
+                    match part {
+                        ListSpreadPart::Elem(expr) => {
+                            values.push(self.eval_expr(expr, scope)?);
+                        }
+                        ListSpreadPart::Spread(expr) => {
+                            let CtValue::List(items) = self.eval_expr(expr, scope)? else {
+                                return Err(unsupported("list spread operand", self.span()));
+                            };
+                            values.extend(items);
+                        }
+                    }
+                }
+                Ok(CtValue::List(values))
+            }
             TExprKind::ColumnarListLit { .. } => {
                 Err(unsupported("expr `ColumnarListLit`", self.span()))
             }
@@ -1165,7 +1279,21 @@ impl EvalCtx<'_> {
             TExprKind::MathSwizzleRead { .. } => {
                 Err(unsupported("expr `MathSwizzleRead`", self.span()))
             }
-            TExprKind::FnFieldCall { .. } => Err(unsupported("expr `FnFieldCall`", self.span())),
+            TExprKind::FnFieldCall { recv, field, args } => {
+                let value = self.eval_expr(recv, scope)?;
+                let CtValue::Struct { fields, .. } = value else {
+                    return Err(unsupported("function field receiver", self.span()));
+                };
+                let callable = fields
+                    .into_iter()
+                    .find_map(|(name, value)| (name == *field).then_some(value))
+                    .ok_or_else(|| unsupported(&format!("function field `{field}`"), self.span()))?;
+                let mut argv = Vec::with_capacity(args.len());
+                for arg in args {
+                    argv.push(self.eval_expr(&arg.value, scope)?);
+                }
+                self.call_callable(&callable, argv)
+            }
             TExprKind::StaticCall {
                 owner,
                 method,
@@ -1178,6 +1306,45 @@ impl EvalCtx<'_> {
                 }
                 match owner {
                     crate::Codegen::TIR::TStaticOwner::User(type_name) => {
+                        if method.name == "diff" && argv.len() == 2 {
+                            if let (
+                                CtValue::Struct {
+                                    type_name: new_name,
+                                    fields: new_fields,
+                                },
+                                CtValue::Struct {
+                                    type_name: old_name,
+                                    fields: old_fields,
+                                },
+                            ) = (&argv[0], &argv[1])
+                            {
+                                if new_name == type_name && old_name == type_name {
+                                    let fields = new_fields
+                                        .iter()
+                                        .map(|(name, new_value)| {
+                                            let changed = old_fields
+                                                .iter()
+                                                .find_map(|(old_name, old_value)| {
+                                                    (old_name == name).then_some(old_value)
+                                                })
+                                                != Some(new_value);
+                                            (
+                                                name.clone(),
+                                                if changed {
+                                                    CtValue::Some(Box::new(new_value.clone()))
+                                                } else {
+                                                    CtValue::None(new_value.jet_type())
+                                                },
+                                            )
+                                        })
+                                        .collect();
+                                    return Ok(CtValue::Struct {
+                                        type_name: format!("{type_name}.Patch"),
+                                        fields,
+                                    });
+                                }
+                            }
+                        }
                         if let Some(res) = crate::Comptime::Builtins::apply_static_type_method(
                             type_name,
                             &method.name,
@@ -1274,7 +1441,10 @@ impl EvalCtx<'_> {
                     _ => Err(unsupported("opt-field recv", self.span())),
                 }
             }
-            TExprKind::Lambda(..) => Err(unsupported("expr `Lambda`", self.span())),
+            TExprKind::Lambda(lambda) => Ok(self.store_callable(EvalCallable::Lambda {
+                lambda,
+                captured: scope.clone(),
+            })),
             TExprKind::PatternMatches { .. } => {
                 Err(unsupported("expr `PatternMatches`", self.span()))
             }
@@ -1360,7 +1530,22 @@ impl EvalCtx<'_> {
             TExprKind::SelectAfter { .. } => Err(unsupported("expr `SelectAfter`", self.span())),
             TExprKind::SelectRead { .. } => Err(unsupported("expr `SelectRead`", self.span())),
             TExprKind::SelectWait { .. } => Err(unsupported("expr `SelectWait`", self.span())),
-            TExprKind::FnValue { .. } => Err(unsupported("expr `FnValue`", self.span())),
+            TExprKind::FnValue { kind } => match kind {
+                TFnValueKind::NamedFn {
+                    name: Some(name), ..
+                } => Ok(self.store_callable(EvalCallable::Named(name))),
+                TFnValueKind::NamedFn { name: None, .. } => {
+                    Err(unsupported("rendered function coercion", self.span()))
+                }
+                TFnValueKind::Call { callee, args } => {
+                    let callable = self.eval_expr(callee, scope)?;
+                    let mut argv = Vec::with_capacity(args.len());
+                    for arg in args {
+                        argv.push(self.eval_expr(&arg.value, scope)?);
+                    }
+                    self.call_callable(&callable, argv)
+                }
+            },
             TExprKind::ModuleCall { .. } => Err(unsupported("expr `ModuleCall`", self.span())),
             TExprKind::ExternCall { .. } => Err(unsupported("expr `ExternCall`", self.span())),
         }
@@ -1368,7 +1553,7 @@ impl EvalCtx<'_> {
 
     pub(crate) fn write_back_place(
         &mut self,
-        place: &TExpr,
+        place: &'a TExpr,
         value: CtValue,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<(), Diagnostic> {
@@ -1510,7 +1695,7 @@ impl EvalCtx<'_> {
     fn eval_call(
         &mut self,
         name: &str,
-        args: &[TCallArg],
+        args: &'a [TCallArg],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         let mut argv = Vec::with_capacity(args.len());
@@ -1615,7 +1800,8 @@ impl EvalCtx<'_> {
             let key = format!("{type_name}::display");
             if let Some(func) = self.funcs.get(&key).copied() {
                 let mut child = HashMap::new();
-                if let CtValue::Str(s) = self.run_func(func, vec![v.clone()], &mut child)? {
+                child.insert("self".to_string(), v.clone());
+                if let CtValue::Str(s) = self.run_func(func, Vec::new(), &mut child)? {
                     return Ok(s);
                 }
             }

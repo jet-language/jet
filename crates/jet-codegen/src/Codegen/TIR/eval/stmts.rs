@@ -1,15 +1,15 @@
 //! Exhaustive TStmt evaluation (#777).
 use std::collections::HashMap;
-use crate::Codegen::TIR::{TIfCond, TPlace, TStmt};
+use crate::Codegen::TIR::{TIfCond, TPatternPosition, TPlace, TStmt};
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::CtValue;
 use crate::Diagnostics::Diagnostic;
 use super::{unsupported, EvalCtx, Flow};
 
-impl EvalCtx<'_> {
+impl<'a> EvalCtx<'a> {
     pub(crate) fn exec_stmts(
         &mut self,
-        stmts: &[TStmt],
+        stmts: &'a [TStmt],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
         for stmt in stmts {
@@ -23,7 +23,7 @@ impl EvalCtx<'_> {
 
     pub(super) fn exec_stmt(
         &mut self,
-        stmt: &TStmt,
+        stmt: &'a TStmt,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
         self.burn()?;
@@ -354,23 +354,40 @@ impl EvalCtx<'_> {
                 }
                 Ok(Flow::Normal)
             }
-            TStmt::RangeSwitch { .. } => Err(unsupported("range switch", self.span())),
-            TStmt::MixedSwitch {
-                subject: _,
+            TStmt::RangeSwitch {
+                subject,
                 arms,
                 else_body,
             } => {
-                // Subject is bound for AOT parity only; arm conditions are full exprs.
-                for (cond, body) in arms {
-                    let c = self.eval_expr(cond, scope)?;
-                    if as_bool(&c, self.span())? {
+                let value = as_int(&self.eval_expr(subject, scope)?, self.span())?;
+                for (lo, hi, body) in arms {
+                    if value >= *lo && value <= *hi {
                         return self.exec_stmts(body, scope);
                     }
                 }
-                if let Some(body) = else_body {
-                    return self.exec_stmts(body, scope);
-                }
-                Ok(Flow::Normal)
+                self.exec_stmts(else_body, scope)
+            }
+            TStmt::MixedSwitch {
+                subject,
+                arms,
+                else_body,
+            } => {
+                let value = self.eval_expr(subject, scope)?;
+                let saved = self.switch_subject.replace(value);
+                let result = (|| {
+                    for (cond, body) in arms {
+                        let c = self.eval_expr(cond, scope)?;
+                        if as_bool(&c, self.span())? {
+                            return self.exec_stmts(body, scope);
+                        }
+                    }
+                    if let Some(body) = else_body {
+                        return self.exec_stmts(body, scope);
+                    }
+                    Ok(Flow::Normal)
+                })();
+                self.switch_subject = saved;
+                result
             }
             TStmt::IndexAssign {
                 base,
@@ -515,7 +532,7 @@ impl EvalCtx<'_> {
 
     pub(super) fn eval_if_cond(
         &mut self,
-        cond: &TIfCond,
+        cond: &'a TIfCond,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<bool, Diagnostic> {
         match cond {
@@ -531,6 +548,13 @@ impl EvalCtx<'_> {
             }
             TIfCond::IfLet { pattern, subj } => {
                 let value = self.eval_expr(subj, scope)?;
+                if let TPatternPosition::DataEntries { temp } = &pattern.position {
+                    if let CtValue::Enum { args, .. } = &value {
+                        if let Some((_, payload)) = args.first() {
+                            scope.insert(temp.clone(), payload.clone());
+                        }
+                    }
+                }
                 match &pattern.pattern {
                     crate::AST::Pattern::Ok { binding, .. } => match value {
                         CtValue::ResOk(inner) => {
@@ -556,17 +580,20 @@ impl EvalCtx<'_> {
                     crate::AST::Pattern::Absent(_) => {
                         Ok(matches!(value, CtValue::None(_) | CtValue::Unit))
                     }
-                    _ => Err(unsupported("if-let pattern", self.span())),
+                    _ => bind_match_pattern(&pattern.pattern, &value, scope),
                 }
             }
-            TIfCond::Matches { .. } => Err(unsupported("if-matches", self.span())),
+            TIfCond::Matches { pattern, subj } => {
+                let value = self.eval_expr(subj, scope)?;
+                bind_match_pattern(&pattern.pattern, &value, scope)
+            }
         }
     }
 
     fn exec_infinite(
         &mut self,
         label: Option<&str>,
-        body: &[TStmt],
+        body: &'a [TStmt],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
         loop {
@@ -605,7 +632,9 @@ fn bind_match_pattern(
                 CtValue::ResErr(inner) if variant == "Err" => {
                     return bind_slots(bindings, &[(**inner).clone()], scope);
                 }
-                CtValue::Some(inner) if variant == "Some" || variant == "Present" => {
+                CtValue::Some(inner)
+                    if variant == "Some" || variant == "Present" || variant == "Val" =>
+                {
                     return bind_slots(bindings, &[(**inner).clone()], scope);
                 }
                 CtValue::None(_) | CtValue::Unit if variant == "None" || variant == "Absent" => {
@@ -613,7 +642,11 @@ fn bind_match_pattern(
                 }
                 _ => return Ok(false),
             };
-            if got != variant.as_str() {
+            if got != variant.as_str()
+                && got
+                    .strip_prefix(variant)
+                    .is_none_or(|suffix| !suffix.starts_with('.'))
+            {
                 return Ok(false);
             }
             let positional: Vec<CtValue> = args.iter().map(|(_, v)| v.clone()).collect();

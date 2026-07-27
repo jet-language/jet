@@ -530,7 +530,7 @@ pub(crate) fn lower_comptime_scalar(
 /// Read from `cx.fn_types`, which sema-built `Type::Fn { ret, .. }` per function.
 pub(crate) fn call_return_type(cx: &Cx, name: &str) -> Type {
     match cx.fn_types.get(name) {
-        Some(Type::Fn { ret: Some(r), .. }) => (**r).clone(),
+        Some(Type::Fn { ret: Some(r), .. }) => cx.expand_type_aliases(r),
         // c109 Phase 23: a distinct-type constructor `UserId(x)` yields the distinct
         // type itself (it has no `fn_types` entry). Keeps the call's result type total.
         _ if cx.distinct_types.contains_key(name) => Type::Named(name.to_string()),

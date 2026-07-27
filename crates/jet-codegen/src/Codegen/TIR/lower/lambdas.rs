@@ -8,6 +8,7 @@ use crate::Codegen::TIR::emit_tir_stmts;
 use crate::Codegen::TIR::fork_panic;
 use crate::Codegen::TIR::JitSpawnCapture;
 use crate::Codegen::TIR::lambda_body_ty;
+use crate::Codegen::TIR::lambda_body_ty_expecting;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::lower_expr;
 use crate::Codegen::TIR::lower_owned_expr;
@@ -88,6 +89,19 @@ fn lower_lambda_expecting_with_host_borrow(
     host_borrow: Option<bool>,
     by_value: bool,
 ) -> TLambda {
+    let param_types: Vec<Type> = lam
+        .params
+        .iter()
+        .enumerate()
+        .map(|(i, param)| {
+            param
+                .ty
+                .clone()
+                .or_else(|| expected_params.and_then(|types| types.get(i)).cloned())
+                .unwrap_or(Type::Int)
+        })
+        .collect();
+    let body_ty = lambda_body_ty_expecting(lam, cx, env, expected_params);
     // Http handlers cross the server boundary as owned requests. Their public
     // callback type is `Fn(HttpRequest)`, never Jet's ordinary read-borrowed
     // function convention.
@@ -200,6 +214,10 @@ fn lower_lambda_expecting_with_host_borrow(
         body,
         executable,
         source_params: lam.params.iter().map(|p| p.name.clone()).collect(),
+        jit_name: format!("__jit_lambda_{}_{}", lam.span.start, lam.span.end),
+        param_types,
+        ret: (!matches!(&body_ty, Type::Named(name) if name == "Unit" || name == "Void"))
+            .then_some(body_ty),
         is_move,
         boxed: lam.meta.escapes,
         arc: http_handler,

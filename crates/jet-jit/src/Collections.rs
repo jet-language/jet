@@ -1,7 +1,7 @@
 //! M5: list/map host shims for the Cranelift JIT (`JetArena` handles).
 
 use super::Concurrency;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Record an out-of-bounds trap. Returns normally; JIT code branches to its
 /// epilogue at the next `emit_trap_check` (I1 — no Rust panic ever unwinds
@@ -208,16 +208,23 @@ extern "C" fn jet_jit_list_slice(list: i64, start: i64, end: i64, _line: u32) ->
 
 extern "C" fn jet_jit_list_join_str(list: i64, sep_id: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let xs = rt
-            .heap
-            .clone_int_list(list)
-            .expect("jit list join: bad handle");
-        let sep = rt.heap.clone_string(sep_id).unwrap_or_default();
-        let joined = xs
+        let Some(xs) = rt.heap.clone_int_list(list) else {
+            rt.set_trap("list join received an invalid list");
+            return 0;
+        };
+        let Some(sep) = rt.heap.clone_string(sep_id) else {
+            rt.set_trap("list join received an invalid separator");
+            return 0;
+        };
+        let Some(parts) = xs
             .iter()
-            .map(|v| v.to_string())
-            .collect::<Vec<_>>()
-            .join(&sep);
+            .map(|id| rt.heap.clone_string(*id))
+            .collect::<Option<Vec<_>>>()
+        else {
+            rt.set_trap("list join received a non-string element");
+            return 0;
+        };
+        let joined = parts.join(&sep);
         rt.heap.alloc_string(joined)
     })
 }
@@ -705,6 +712,76 @@ extern "C" fn jet_jit_deque_len(dq: i64) -> i64 {
     })
 }
 
+fn bag_handle(rt: &mut crate::JitRuntime, bag: HashMap<i64, usize>) -> i64 {
+    rt.bags.push(bag);
+    rt.bags.len() as i64
+}
+
+extern "C" fn jet_jit_bag_new() -> i64 {
+    Concurrency::with_runtime_mut(|rt| bag_handle(rt, HashMap::new()))
+}
+
+extern "C" fn jet_jit_bag_add(bag: i64, value: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(bag) = rt.bags.get_mut((bag as usize).wrapping_sub(1)) else {
+            return 0;
+        };
+        *bag.entry(value).or_insert(0) += 1;
+        1
+    })
+}
+
+extern "C" fn jet_jit_bag_remove(bag: i64, value: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(bag) = rt.bags.get_mut((bag as usize).wrapping_sub(1)) else {
+            return;
+        };
+        let remove = match bag.get_mut(&value) {
+            Some(count) if *count > 1 => {
+                *count -= 1;
+                false
+            }
+            Some(_) => true,
+            None => false,
+        };
+        if remove {
+            bag.remove(&value);
+        }
+    });
+}
+
+extern "C" fn jet_jit_bag_has(bag: i64, value: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        i8::from(
+            rt.bags
+                .get((bag as usize).wrapping_sub(1))
+                .and_then(|bag| bag.get(&value))
+                .copied()
+                .unwrap_or(0)
+                > 0,
+        )
+    })
+}
+
+extern "C" fn jet_jit_bag_count(bag: i64, value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.bags
+            .get((bag as usize).wrapping_sub(1))
+            .and_then(|bag| bag.get(&value))
+            .copied()
+            .unwrap_or(0) as i64
+    })
+}
+
+extern "C" fn jet_jit_bag_len(bag: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.bags
+            .get((bag as usize).wrapping_sub(1))
+            .map(|bag| bag.values().sum::<usize>() as i64)
+            .unwrap_or(0)
+    })
+}
+
 /// Packed-enum JetShow table: variant mangled names + payload kind codes.
 /// kind: 0 = unit, 1 = Int (>>8), 2 = nested packed enum (>>8), 3 = String handle (>>8).
 #[derive(Clone)]
@@ -833,6 +910,12 @@ pub(crate) struct CollectionsHostFns {
     pub deque_peek_front: cranelift_module::FuncId,
     pub deque_peek_back: cranelift_module::FuncId,
     pub deque_len: cranelift_module::FuncId,
+    pub bag_new: cranelift_module::FuncId,
+    pub bag_add: cranelift_module::FuncId,
+    pub bag_remove: cranelift_module::FuncId,
+    pub bag_has: cranelift_module::FuncId,
+    pub bag_count: cranelift_module::FuncId,
+    pub bag_len: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -893,6 +976,12 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_deque_peek_front", jet_jit_deque_peek_front as *const u8);
     builder.symbol("jet_jit_deque_peek_back", jet_jit_deque_peek_back as *const u8);
     builder.symbol("jet_jit_deque_len", jet_jit_deque_len as *const u8);
+    builder.symbol("jet_jit_bag_new", jet_jit_bag_new as *const u8);
+    builder.symbol("jet_jit_bag_add", jet_jit_bag_add as *const u8);
+    builder.symbol("jet_jit_bag_remove", jet_jit_bag_remove as *const u8);
+    builder.symbol("jet_jit_bag_has", jet_jit_bag_has as *const u8);
+    builder.symbol("jet_jit_bag_count", jet_jit_bag_count as *const u8);
+    builder.symbol("jet_jit_bag_len", jet_jit_bag_len as *const u8);
 }
 
 pub(crate) fn declare_collections_host_fns(
@@ -1025,5 +1114,11 @@ pub(crate) fn declare_collections_host_fns(
         deque_peek_front: import("jet_jit_deque_peek_front", &sig_len)?,
         deque_peek_back: import("jet_jit_deque_peek_back", &sig_len)?,
         deque_len: import("jet_jit_deque_len", &sig_len)?,
+        bag_new: import("jet_jit_bag_new", &sig_new)?,
+        bag_add: import("jet_jit_bag_add", &sig_list_eq)?,
+        bag_remove: import("jet_jit_bag_remove", &sig_push)?,
+        bag_has: import("jet_jit_bag_has", &sig_list_eq)?,
+        bag_count: import("jet_jit_bag_count", &sig_get_opt)?,
+        bag_len: import("jet_jit_bag_len", &sig_len)?,
     })
 }

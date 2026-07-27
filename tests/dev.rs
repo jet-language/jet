@@ -3783,6 +3783,50 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
 }
 
 #[test]
+fn language_callables_and_types_match_interpreter_jit_and_aot() {
+    let stems = [
+        "basics/bare_lambda_param",
+        "basics/callbacks",
+        "basics/pattern_matching",
+        "basics/variadics_spread",
+        "patterns/struct_destructure",
+        "syntax/trailing_block",
+        "types/anonymous_unions",
+        "types/generic_types",
+        "types/measurement",
+        "types/nested_enum_groups",
+        "types/no_any_alternatives",
+        "types/optional_result_variants",
+        "types/patchable",
+        "types/refinements",
+        "types/renderable-varargs-multi",
+        "types/renderable-varargs",
+        "types/traits",
+        "types/type_alias",
+        "types/value_tag_type",
+    ];
+    let mut failures = Vec::new();
+    for stem in stems {
+        let file = example_path(stem);
+        if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assert_cranelift_three_way(&file, stem);
+        })) {
+            let detail = payload
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("unknown panic");
+            failures.push(format!("{stem}: {detail}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "language/callable/type parity failures:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
 fn comptime_scalar_examples_match_interpreter_resident_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;

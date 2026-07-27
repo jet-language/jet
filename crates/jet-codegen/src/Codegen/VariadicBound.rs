@@ -69,7 +69,7 @@ pub(crate) fn lower_variadic_bound_call(
         .entry(call.name.clone())
         .or_default()
         .insert(arity);
-    let args = call
+    let args: Vec<crate::Codegen::TIR::TCallArg> = call
         .args
         .iter()
         .enumerate()
@@ -92,6 +92,11 @@ pub(crate) fn lower_variadic_bound_call(
             lower_one_call_arg(a, conv, env, cx)
         })
         .collect();
+    cx.jit_generic_calls
+        .borrow_mut()
+        .entry(variadic_bound_fn_name(&call.name, arity))
+        .or_default()
+        .push(args.iter().map(|arg| arg.value.ty.clone()).collect());
     let ret = call_return_type(cx, &call.name);
     TExpr {
         ty: ret,
@@ -134,7 +139,7 @@ pub(crate) fn emit_variadic_bound_specializations(cx: &Cx, items: &[Item], out: 
 /// generic type parameters (each bound to `bounds`) replace the trailing
 /// variadic parameter, one per call-site argument, and the body's one legal
 /// `loop x; <variadic> { … }` loop is unrolled to match.
-fn build_variadic_bound_func(f: &Func, bounds: &[String], arity: usize) -> Func {
+pub(crate) fn build_variadic_bound_func(f: &Func, bounds: &[String], arity: usize) -> Func {
     let last = f
         .params
         .last()

@@ -1,7 +1,7 @@
 use jet_codegen::Codegen::TIR::{
     self, JitProgram, JitSpawnCapture, TBuiltinOp, TCallArg, TCoreClosureKind, TEnumPayload, TExpr,
     TExprKind, TFunc, TFuncKind, THandleOp, THostCall, TIfCond, TJitSpawnBody, TJitSpawnLambda, TModuleCallForm, TOrFallback,
-    TStmt, TStrPart,
+    ListSpreadPart, TStmt, TStrPart,
     TNumericOp,
 };
 use jet_foundation::AST::{BinOp, Pattern, Type, UnOp};
@@ -27,6 +27,13 @@ fn resident_safe_string_parts(parts: &[TStrPart], callees: &HashSet<String>) -> 
 
 fn jit_scalar_type(ty: &Type) -> bool {
     jit_value_type(ty)
+}
+
+fn erase_runtime_qualifiers(mut ty: &Type) -> &Type {
+    while let Type::Tagged { inner, .. } = ty {
+        ty = inner;
+    }
+    ty
 }
 
 pub(crate) fn jit_list_int_type(ty: &Type) -> bool {
@@ -215,7 +222,7 @@ pub(crate) fn jit_list_record_type(ty: &Type) -> bool {
     matches!(
         ty,
         Type::List(elem) | Type::FixedList { elem, .. }
-            if record_type_key(elem).is_some()
+            if record_type_key(elem).is_some() || matches!(elem.as_ref(), Type::TraitObject(_))
     )
 }
 
@@ -246,7 +253,7 @@ pub(crate) fn jit_tuple_type(ty: &Type) -> bool {
 }
 
 pub(crate) fn jit_enum_type(ty: &Type) -> bool {
-    user_type_name(ty).is_some()
+    user_type_name(ty).is_some() || matches!(ty, Type::Union(_))
 }
 
 fn jit_compound_type(ty: &Type) -> bool {
@@ -262,9 +269,9 @@ fn jit_compound_type(ty: &Type) -> bool {
         || matches!(
             ty,
             Type::Apply { name, args }
-                if matches!(name.as_str(), "Set" | "Deque")
+                if matches!(name.as_str(), "Set" | "Deque" | "Bag")
                     && args.len() == 1
-                    && matches!(&args[0], Type::Int)
+                    && jit_value_type(&args[0])
         )
 }
 
@@ -286,6 +293,7 @@ pub(crate) fn jit_value_type(ty: &Type) -> bool {
         return jit_value_type(base);
     }
     match ty {
+        Type::Tagged { inner, .. } => jit_value_type(inner),
         Type::Named(n)
             if matches!(
                 n.as_str(),
@@ -308,6 +316,12 @@ pub(crate) fn jit_value_type(ty: &Type) -> bool {
         | Type::Bool
         | Type::String
         | Type::Char => true,
+        Type::Fn { params, ret, .. } => {
+            params.iter().all(jit_value_type)
+                && ret.as_ref().is_none_or(|ret| jit_value_type(ret))
+        }
+        Type::Union(members) => members.iter().all(jit_value_type),
+        Type::TraitObject(traits) => !traits.is_empty(),
         Type::Result { ok, err } => {
             jit_result_payload_type(ok.as_ref()) && jit_result_payload_type(err.as_ref())
         }
@@ -474,6 +488,16 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 || (jit_list_record_type(&expr.ty)
                     && elems.iter().all(|e| resident_safe_expr(e, callees)))
         }
+        TExprKind::ListSpread { parts } => {
+            matches!(&expr.ty, Type::List(_) | Type::FixedList { .. })
+                && parts.iter().all(|part| match part {
+                    ListSpreadPart::Elem(elem) => resident_safe_expr(elem, callees),
+                    ListSpreadPart::Spread(list) => {
+                        (jit_list_native_type(&list.ty) || jit_list_record_type(&list.ty))
+                            && resident_safe_expr(list, callees)
+                    }
+                })
+        }
         TExprKind::Index {
             base,
             index,
@@ -558,11 +582,12 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
         TExprKind::StructLit { fields, .. } => {
-            jit_struct_type(&expr.ty)
+            (jit_struct_type(&expr.ty) || matches!(&expr.ty, Type::TraitObject(_)))
                 && fields
                     .iter()
                     .all(|(_, v, _)| resident_safe_expr(v, callees))
         }
+        TExprKind::DataEntriesToMap(_) => true,
         TExprKind::TupleLit { fields, .. } => {
             jit_tuple_type(&expr.ty) && resident_safe_tuple_fields(fields, callees)
         }
@@ -591,6 +616,10 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::MethodCall { recv, args, .. } => {
             resident_safe_expr(recv, callees)
                 && args.iter().all(|a| resident_safe_call_arg(a, callees))
+        }
+        TExprKind::FnFieldCall { recv, args, .. } => {
+            resident_safe_expr(recv, callees)
+                && args.iter().all(|arg| resident_safe_call_arg(arg, callees))
         }
         TExprKind::StaticCall { args, .. } => {
             args.iter().all(|a| resident_safe_call_arg(a, callees))
@@ -638,8 +667,8 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     && resident_safe_expr(rhs, callees);
             }
             if *overflow
-                && (!matches!(&lhs.ty, Type::Int | Type::IntN { .. })
-                    || !matches!(&rhs.ty, Type::Int | Type::IntN { .. }))
+                && (!matches!(erase_runtime_qualifiers(&lhs.ty), Type::Int | Type::IntN { .. })
+                    || !matches!(erase_runtime_qualifiers(&rhs.ty), Type::Int | Type::IntN { .. }))
             {
                 return false;
             }
@@ -675,6 +704,28 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         }
         TExprKind::Clone(inner) => resident_safe_expr(inner, callees),
         TExprKind::Borrow { place, .. } => resident_safe_expr(place, callees),
+        TExprKind::Lambda(lam) => {
+            lam.prep.is_empty()
+                && lam.param_types.iter().all(jit_value_type)
+                && lam.ret.as_ref().is_none_or(jit_value_type)
+                && match &lam.executable {
+                    TIR::TLambdaBody::Expr(expr) => resident_safe_expr(expr, callees),
+                    TIR::TLambdaBody::Block(stmts) => {
+                        stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+                    }
+                }
+        }
+        TExprKind::FnValue { kind } => match kind {
+            TIR::TFnValueKind::NamedFn {
+                name: Some(name), ..
+            } => callees.contains(name),
+            TIR::TFnValueKind::NamedFn { name: None, .. } => false,
+            TIR::TFnValueKind::Call { callee, args } => {
+                resident_safe_expr(callee, callees)
+                    && args.iter().all(|arg| resident_safe_call_arg(arg, callees))
+            }
+        },
+        TExprKind::PatternMatches { subj, .. } => resident_safe_expr(subj, callees),
         TExprKind::OptionLift2 { f, a, b } => {
             matches!(
                 &f.kind,
@@ -759,6 +810,13 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     || (matches!(ty, Type::Float)
                         && matches!(member.as_str(), "INFINITY" | "NAN" | "EPSILON"))
             }
+            THostCall::FixedListIndex { base, index } => {
+                resident_safe_expr(base, callees)
+                    && resident_safe_expr(index, callees)
+                    && matches!(&index.ty, Type::Int | Type::IntN { .. } | Type::Named(_))
+            }
+            THostCall::TupleIndex { base, .. } => resident_safe_expr(base, callees),
+            THostCall::SwitchSubjectField { .. } => true,
             _ => false,
         },
         // Codable encode lowers to `JsonLit` (DataTree/Json foreign enum).
@@ -776,7 +834,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
 fn resident_safe_call_arg(arg: &TCallArg, callees: &HashSet<String>) -> bool {
     // Arc/fn-coerce still unsupported. borrow/mut_borrow pass heap handles;
     // clone lowers through `lower_clone` for the types below.
-    if arg.arc_clone || arg.fn_coerce.is_some() {
+    if arg.arc_clone {
         return false;
     }
     let ty = &arg.value.ty;
@@ -1110,6 +1168,17 @@ fn resident_safe_builtin_op(
                     if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int))
                 && resident_safe_expr(&args[0], callees)
         }
+        TBuiltinOp::BagAdd | TBuiltinOp::BagRemove | TBuiltinOp::BagHas | TBuiltinOp::BagCount => {
+            matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "Bag" && targs.len() == 1 && jit_value_type(&targs[0]))
+                && args.len() == 1
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::BagLen => {
+            matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "Bag" && targs.len() == 1 && jit_value_type(&targs[0]))
+                && args.is_empty()
+        }
         TBuiltinOp::Contains
             if matches!(&recv.ty, Type::Apply { name, args: targs }
                 if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int)) =>
@@ -1237,21 +1306,15 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             let cond_ok = match cond {
                 TIfCond::Plain(e) => matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees),
                 TIfCond::IfLet { pattern, subj } => {
-                    let result_ok = matches!(
+                    matches!(
                         &pattern.pattern,
-                        Pattern::Ok { .. } | Pattern::Err { .. }
-                    ) && matches!(&subj.ty, Type::Result { .. });
-                    let option_ok = matches!(&pattern.pattern, Pattern::Present { .. })
-                        && matches!(&subj.ty, Type::Option(_));
-                    let datatree_ok = matches!(&pattern.pattern, Pattern::Variant { .. })
-                        && matches!(
-                            &subj.ty,
-                            Type::Named(n)
-                                if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
-                        );
-                    (result_ok || option_ok || datatree_ok) && resident_safe_expr(subj, callees)
+                        Pattern::Ok { .. }
+                            | Pattern::Err { .. }
+                            | Pattern::Present { .. }
+                            | Pattern::Variant { .. }
+                    ) && resident_safe_expr(subj, callees)
                 }
-                TIfCond::Matches { .. } => false,
+                TIfCond::Matches { subj, .. } => resident_safe_expr(subj, callees),
                 TIfCond::And { .. } => false,
                 // `if maybe == .None` — Option ABI already lowered in lower_ctx.
                 TIfCond::IsNone { subj } => {
@@ -1408,13 +1471,27 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     .is_none_or(|b| b.iter().all(|s| resident_safe_stmt(s, callees)))
         }
         TStmt::MixedSwitch {
-            arms, else_body, ..
+            subject,
+            arms,
+            else_body,
         } => {
-            arms.iter()
+            resident_safe_expr(subject, callees)
+                && arms.iter()
                 .all(|(_, b)| b.iter().all(|s| resident_safe_stmt(s, callees)))
                 && else_body
                     .as_ref()
                     .is_none_or(|b| b.iter().all(|s| resident_safe_stmt(s, callees)))
+        }
+        TStmt::RangeSwitch {
+            subject,
+            arms,
+            else_body,
+        } => {
+            resident_safe_expr(subject, callees)
+                && arms
+                    .iter()
+                    .all(|(_, _, body)| body.iter().all(|s| resident_safe_stmt(s, callees)))
+                && else_body.iter().all(|s| resident_safe_stmt(s, callees))
         }
         TStmt::Region(body) | TStmt::Impure(body) | TStmt::Shield { body } => {
             body.iter().all(|s| resident_safe_stmt(s, callees))
@@ -1796,6 +1873,14 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::SolverRequire => args.len() == 1 && recv.ty == Type::Named("Solver".into()) && args[0].ty == Type::Bool,
         THandleOp::SolverFailureCount | THandleOp::SolverStatus => {
             args.is_empty() && recv.ty == Type::Named("Solver".into())
+        }
+        THandleOp::MeasurementMethod { method } => {
+            matches!(&recv.ty, Type::Apply { name, args: targs }
+                if name == "Measurement" && targs.as_slice() == [Type::Float])
+                && matches!(
+                    (method.as_str(), args.len()),
+                    ("value" | "uncertainty", 0) | ("add" | "sub" | "mul" | "div", 1)
+                )
         }
         THandleOp::PreciseMethod { type_name, method } => {
             type_name == "BigInt"

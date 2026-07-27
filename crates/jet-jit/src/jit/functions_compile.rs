@@ -2,13 +2,17 @@ use cranelift_codegen::ir::{types, AbiParam, InstBuilder, Signature};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Linkage, Module};
-use jet_codegen::Codegen::TIR::{self, JitProgram, TFunc, TFuncKind, TJitSpawnBody, TJitSpawnLambda};
+use jet_codegen::Codegen::TIR::{
+    self, JitProgram, TFunc, TFuncKind, TJitSpawnBody, TJitSpawnLambda, TLambda, TLambdaBody,
+};
 use jet_foundation::AST::Type;
 use std::collections::HashMap;
 
 use super::lower_ctx::LowerCtx;
 use super::runtime_host::HostFns;
-use super::types_meta::{clif_ty, func_has_receiver, func_signature, jit_fn_name, JitMeta};
+use super::types_meta::{
+    clif_ty, fn_value_signature, func_has_receiver, func_signature, jit_fn_name, JitMeta,
+};
 use super::JitRuntime;
 use crate::Collections;
 
@@ -97,6 +101,7 @@ fn lower_spawn_function(
             method_struct: None,
             ret_clif: clif_ty(&lam.ret),
             shield_depth: 0,
+            switch_subject: None,
         };
         for cap in &lam.captures {
             let var = lctx.fresh_var(types::I64);
@@ -162,6 +167,106 @@ fn lower_spawn_function(
     Ok(())
 }
 
+pub(crate) fn lower_callable_lambda(
+    module: &mut JITModule,
+    host: &HostFns,
+    meta: &JitMeta<'_>,
+    lam: &TLambda,
+    func_ids: &HashMap<String, FuncId>,
+    spawn_func_ids: &[FuncId],
+    spawn_lambdas: &[TJitSpawnLambda],
+    spawn_site: &mut usize,
+    runtime: &mut JitRuntime,
+) -> Result<FuncId, String> {
+    if !lam.prep.is_empty() {
+        return Err("jit callable captures unsupported".to_string());
+    }
+    let fn_ty = Type::Fn {
+        params: lam.param_types.clone(),
+        ret: lam.ret.clone().map(Box::new),
+        effect_bound: None,
+    };
+    let sig = fn_value_signature(module, &fn_ty, meta)?;
+    let id = module
+        .declare_function(&lam.jit_name, Linkage::Local, &sig)
+        .map_err(|error| error.to_string())?;
+    let mut ctx = module.make_context();
+    ctx.func.signature = sig;
+    let mut fbcx = FunctionBuilderContext::new();
+    let mut vars = HashMap::new();
+    let mut var_tys = HashMap::new();
+    {
+        let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbcx);
+        let entry = b.create_block();
+        b.append_block_params_for_function_params(entry);
+        b.switch_to_block(entry);
+        b.seal_block(entry);
+        let values = b.block_params(entry).to_vec();
+        let mut lctx = LowerCtx {
+            b: &mut b,
+            module,
+            host,
+            runtime,
+            meta,
+            vars: &mut vars,
+            var_tys: &mut var_tys,
+            func_ids,
+            spawn_site,
+            spawn_func_ids,
+            spawn_lambdas,
+            loop_stack: Vec::new(),
+            dead: false,
+            next_var: 0,
+            method_struct: None,
+            ret_clif: lam.ret.as_ref().and_then(|ret| meta.clif_ty(ret)),
+            shield_depth: 0,
+            switch_subject: None,
+        };
+        for (i, (name, ty)) in lam
+            .source_params
+            .iter()
+            .zip(&lam.param_types)
+            .enumerate()
+        {
+            let clif = meta
+                .clif_ty(ty)
+                .ok_or_else(|| format!("jit callable param unsupported: {ty:?}"))?;
+            let var = lctx.fresh_var(clif);
+            lctx.b.def_var(var, values[i]);
+            let place = TIR::local_place(name);
+            lctx.vars.insert(place.clone(), var);
+            lctx.var_tys.insert(place, ty.clone());
+        }
+        match &lam.executable {
+            TLambdaBody::Expr(expr) => {
+                let value = lctx.lower_expr(expr)?;
+                if lam.ret.is_some() {
+                    lctx.b.ins().return_(&[value]);
+                } else {
+                    lctx.b.ins().return_(&[]);
+                }
+            }
+            TLambdaBody::Block(stmts) => {
+                lctx.lower_stmts(stmts)?;
+                if !lctx.dead {
+                    if lam.ret.is_some() {
+                        return Err("jit callable block missing return".to_string());
+                    }
+                    lctx.b.ins().return_(&[]);
+                }
+            }
+        }
+        b.finalize();
+    }
+    cranelift_codegen::verify_function(&ctx.func, module.isa())
+        .map_err(|error| format!("{}: verifier: {error:?}", lam.jit_name))?;
+    module
+        .define_function(id, &mut ctx)
+        .map_err(|error| error.to_string())?;
+    module.clear_context(&mut ctx);
+    Ok(id)
+}
+
 fn lower_function(
     module: &mut JITModule,
     host: &HostFns,
@@ -217,6 +322,7 @@ fn lower_function(
             method_struct,
             ret_clif: tir.ret.as_ref().and_then(|ret| meta.clif_ty(ret)),
             shield_depth: 0,
+            switch_subject: None,
         };
         if func_has_receiver(tir) {
             let self_var = lctx.fresh_var(types::I64);

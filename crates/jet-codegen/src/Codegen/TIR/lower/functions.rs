@@ -103,7 +103,7 @@ pub(crate) fn lower_web_func(f: &Func, cx: &Cx) -> TFunc {
 fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool) -> TFunc {
     let mut env = LowerEnv::new(f.name.clone());
     env.gc_return = f.gc_return;
-    env.ret_ty = f.return_type.clone();
+    env.ret_ty = f.return_type.as_ref().map(|ty| cx.expand_type_aliases(ty));
     // Mirror emit_func's parameter slot construction: a non-scalar `Read` param
     // (String, Char) is a borrow in Rust and reads as `(*name)`.
     let mut params = Vec::new();
@@ -111,11 +111,11 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
     let mut web_param_reconstructions = Vec::new();
     for p in &f.params {
         let rust_name = cx.mangle_name(&p.name);
-        let param_ty = if p.variadic {
+        let param_ty = cx.expand_type_aliases(&if p.variadic {
             Type::List(Box::new(p.ty.clone()))
         } else {
             p.ty.clone()
-        };
+        });
         // c109 Phase 17: a param TYPED as a bare type parameter (`item: T`) is forced to
         // the `Move` convention for the slot deref (it is passed by value — `rust_param_type`
         // renders it `T`, no `&`), EXACTLY as `emit_func` forces `conv = Move` for an
@@ -173,7 +173,7 @@ fn lower_func_with_web_boundary(f: &Func, cx: &Cx, reconstruct_web_params: bool)
         name: f.name.clone(),
         params,
         web_param_reconstructions,
-        ret: f.return_type.clone(),
+        ret: f.return_type.as_ref().map(|ty| cx.expand_type_aliases(ty)),
         gc_return: f.gc_return,
         return_view_provenance: f.return_view_provenance.clone(),
         generics,

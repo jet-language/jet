@@ -44,6 +44,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         cbor_writers: Vec::new(),
         sets: Vec::new(),
         deques: Vec::new(),
+        bags: Vec::new(),
         trapped: None,
         deadline_exceeded: None,
     }

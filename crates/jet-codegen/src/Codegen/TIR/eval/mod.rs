@@ -114,9 +114,22 @@ pub(super) struct EvalCtx<'a> {
     pub(super) struct_fields: HashMap<String, Vec<(String, bool)>>,
     /// `TypeName -> [(field, Type)]` for `core.data.csv` / decode on deopt.
     pub(super) struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
+    /// Current `MixedSwitch` subject for structured field conditions.
+    switch_subject: Option<CtValue>,
+    /// TIR-native callable values. Entries borrow the already-lowered program
+    /// and retain only the captured evaluator scope.
+    callables: Vec<EvalCallable<'a>>,
 }
 
-impl EvalCtx<'_> {
+enum EvalCallable<'a> {
+    Lambda {
+        lambda: &'a TIR::TLambda,
+        captured: HashMap<String, CtValue>,
+    },
+    Named(&'a str),
+}
+
+impl<'a> EvalCtx<'a> {
     pub(crate) fn span(&self) -> Span {
         Span::new(0, 0)
     }
@@ -150,7 +163,7 @@ impl EvalCtx<'_> {
 
     pub(crate) fn run_func(
         &mut self,
-        func: &TFunc,
+        func: &'a TFunc,
         args: Vec<CtValue>,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
@@ -177,6 +190,64 @@ impl EvalCtx<'_> {
         };
         self.call_depth -= 1;
         result
+    }
+
+    fn store_callable(&mut self, callable: EvalCallable<'a>) -> CtValue {
+        let index = self.callables.len() as i64;
+        self.callables.push(callable);
+        CtValue::Struct {
+            type_name: "__JetTirCallable".to_string(),
+            fields: vec![("index".to_string(), CtValue::Int(index))],
+        }
+    }
+
+    fn callable_index(value: &CtValue) -> Option<usize> {
+        let CtValue::Struct { type_name, fields } = value else {
+            return None;
+        };
+        if type_name != "__JetTirCallable" {
+            return None;
+        }
+        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+            ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
+            _ => None,
+        })
+    }
+
+    fn call_callable(
+        &mut self,
+        value: &CtValue,
+        args: Vec<CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let index = Self::callable_index(value)
+            .ok_or_else(|| unsupported("calling this non-function value", self.span()))?;
+        let (lambda, named, mut captured) = match self.callables.get(index) {
+            Some(EvalCallable::Lambda { lambda, captured }) => {
+                (Some(*lambda), None, captured.clone())
+            }
+            Some(EvalCallable::Named(name)) => (None, Some(*name), HashMap::new()),
+            None => return Err(unsupported("calling an unknown function value", self.span())),
+        };
+        if let Some(lambda) = lambda {
+            let result = self.eval_tlambda(lambda, args, &mut captured);
+            if result.is_ok() {
+                if let Some(EvalCallable::Lambda {
+                    captured: stored, ..
+                }) = self.callables.get_mut(index)
+                {
+                    *stored = captured;
+                }
+            }
+            return result;
+        }
+        let name = named.expect("callable target");
+        let func = self
+            .funcs
+            .get(name)
+            .copied()
+            .ok_or_else(|| unsupported(&format!("callable function `{name}`"), self.span()))?;
+        let mut child = HashMap::new();
+        self.run_func(func, args, &mut child)
     }
 }
 
@@ -367,6 +438,8 @@ pub fn run_program_with_structs(
         embed_inputs: None,
         struct_fields,
         struct_field_types,
+        switch_subject: None,
+        callables: Vec::new(),
     };
     let mut scope = HashMap::new();
     ctx.run_func(entry, Vec::new(), &mut scope)
@@ -410,6 +483,8 @@ pub fn run_named_func(
         embed_inputs: None,
         struct_fields: HashMap::new(),
         struct_field_types: HashMap::new(),
+        switch_subject: None,
+        callables: Vec::new(),
     };
     let mut scope = HashMap::new();
     ctx.run_func(func, args, &mut scope)
@@ -522,6 +597,8 @@ fn eval_expr_hook(
         embed_inputs,
         struct_fields: HashMap::new(),
         struct_field_types: HashMap::new(),
+        switch_subject: None,
+        callables: Vec::new(),
     };
     let mut scope = globals;
     ctx.eval_expr(&tir, &mut scope)
@@ -578,6 +655,8 @@ fn eval_block_hook(
         embed_inputs,
         struct_fields: HashMap::new(),
         struct_field_types: HashMap::new(),
+        switch_subject: None,
+        callables: Vec::new(),
     };
     let mut scope = globals;
     match ctx.exec_stmts(&tir, &mut scope)? {
