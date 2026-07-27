@@ -4204,11 +4204,11 @@ fn run() {
 }
 "#,
             "generator" => r#"
-fn stopped() -> Stream<Int> {
+fn stopped() => Stream<Int> {
     yield 1
     yield 2
 }
-fn closes() -> Stream<Int> {
+fn closes() => Stream<Int> {
     yield 3
     return
 }
