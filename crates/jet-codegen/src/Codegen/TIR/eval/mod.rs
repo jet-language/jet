@@ -15,7 +15,9 @@ use std::sync::OnceLock;
 
 use crate::AST::{Expr, ProgramBundle, Stmt};
 use super::Cx;
-use crate::Codegen::TIR::{self, JitProgram, LowerEnv, TExpr, TFunc, TLocal, TStmt};
+use crate::Codegen::TIR::{
+    self, JitProgram, LowerEnv, TExpr, TFunc, TJitSpawnBody, TJitSpawnLambda, TLocal, TStmt,
+};
 use super::build_cx_items;
 use crate::Comptime::{self, CtValue, DevSink};
 use crate::Diagnostics::{Diagnostic, Span};
@@ -119,6 +121,23 @@ pub(super) struct EvalCtx<'a> {
     /// TIR-native callable values. Entries borrow the already-lowered program
     /// and retain only the captured evaluator scope.
     callables: Vec<EvalCallable<'a>>,
+    /// Generator calls are inert handles until a `ForIn` consumer drives them.
+    streams: Vec<EvalStream<'a>>,
+    /// Shared<T> values live behind evaluator-local handles so cloned handles
+    /// preserve aliasing across task capture scopes.
+    shared_values: Vec<CtValue>,
+    /// Manual clocks are aliased handles so an ExpiringSecret observes later
+    /// ticks through the same clock instance.
+    clocks: Vec<i64>,
+    /// Spawn bodies are lowered separately because native tiers compile them as
+    /// independent functions. The evaluator executes each site synchronously,
+    /// which is observationally exact at the task `wait` boundary.
+    spawn_lambdas: &'a [TJitSpawnLambda],
+    spawn_site: usize,
+    /// Direct yield delivery keeps generator evaluation streaming: no eager
+    /// collection is materialized between producer and consumer.
+    yield_consumer: Option<YieldConsumer<'a>>,
+    yield_scope: Option<HashMap<String, CtValue>>,
 }
 
 enum EvalCallable<'a> {
@@ -129,7 +148,60 @@ enum EvalCallable<'a> {
     Named(&'a str),
 }
 
+struct EvalStream<'a> {
+    func: &'a TFunc,
+    args: Vec<CtValue>,
+}
+
+#[derive(Clone)]
+struct YieldConsumer<'a> {
+    var: String,
+    body: &'a [TStmt],
+}
+
 impl<'a> EvalCtx<'a> {
+    fn eval_spawn(
+        &mut self,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let lam = self
+            .spawn_lambdas
+            .get(self.spawn_site)
+            .ok_or_else(|| unsupported("spawn body", self.span()))?;
+        self.spawn_site += 1;
+        let mut child = HashMap::new();
+        for capture in &lam.captures {
+            child.insert(
+                capture.name.clone(),
+                scope
+                    .get(&capture.name)
+                    .cloned()
+                    .or_else(|| self.globals.get(&capture.name).cloned())
+                    .unwrap_or(CtValue::Unit),
+            );
+        }
+        let value = match &lam.body {
+            TJitSpawnBody::Expr(expr) => self.eval_expr(expr, &mut child)?,
+            TJitSpawnBody::Block { prefix, tail } => match self.exec_stmts(prefix, &mut child)? {
+                Flow::Return(value) => value,
+                Flow::Normal => match tail {
+                    Some(expr) => self.eval_expr(expr, &mut child)?,
+                    None => CtValue::Unit,
+                },
+                other => {
+                    return Err(unsupported(
+                        &format!("control flow {other:?} escaping spawn"),
+                        self.span(),
+                    ));
+                }
+            },
+        };
+        Ok(CtValue::Struct {
+            type_name: "__JetTirTask".to_string(),
+            fields: vec![("value".to_string(), value)],
+        })
+    }
+
     pub(crate) fn span(&self) -> Span {
         Span::new(0, 0)
     }
@@ -206,6 +278,28 @@ impl<'a> EvalCtx<'a> {
             return None;
         };
         if type_name != "__JetTirCallable" {
+            return None;
+        }
+        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+            ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
+            _ => None,
+        })
+    }
+
+    fn store_stream(&mut self, func: &'a TFunc, args: Vec<CtValue>) -> CtValue {
+        let index = self.streams.len() as i64;
+        self.streams.push(EvalStream { func, args });
+        CtValue::Struct {
+            type_name: "__JetTirStream".to_string(),
+            fields: vec![("index".to_string(), CtValue::Int(index))],
+        }
+    }
+
+    fn stream_index(value: &CtValue) -> Option<usize> {
+        let CtValue::Struct { type_name, fields } = value else {
+            return None;
+        };
+        if type_name != "__JetTirStream" {
             return None;
         }
         fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
@@ -440,6 +534,13 @@ pub fn run_program_with_structs(
         struct_field_types,
         switch_subject: None,
         callables: Vec::new(),
+        streams: Vec::new(),
+        shared_values: Vec::new(),
+        clocks: Vec::new(),
+        spawn_lambdas: &program.spawn_lambdas,
+        spawn_site: 0,
+        yield_consumer: None,
+        yield_scope: None,
     };
     let mut scope = HashMap::new();
     ctx.run_func(entry, Vec::new(), &mut scope)
@@ -485,6 +586,13 @@ pub fn run_named_func(
         struct_field_types: HashMap::new(),
         switch_subject: None,
         callables: Vec::new(),
+        streams: Vec::new(),
+        shared_values: Vec::new(),
+        clocks: Vec::new(),
+        spawn_lambdas: &program.spawn_lambdas,
+        spawn_site: 0,
+        yield_consumer: None,
+        yield_scope: None,
     };
     let mut scope = HashMap::new();
     ctx.run_func(func, args, &mut scope)
@@ -599,6 +707,13 @@ fn eval_expr_hook(
         struct_field_types: HashMap::new(),
         switch_subject: None,
         callables: Vec::new(),
+        streams: Vec::new(),
+        shared_values: Vec::new(),
+        clocks: Vec::new(),
+        spawn_lambdas: &[],
+        spawn_site: 0,
+        yield_consumer: None,
+        yield_scope: None,
     };
     let mut scope = globals;
     ctx.eval_expr(&tir, &mut scope)
@@ -657,6 +772,13 @@ fn eval_block_hook(
         struct_field_types: HashMap::new(),
         switch_subject: None,
         callables: Vec::new(),
+        streams: Vec::new(),
+        shared_values: Vec::new(),
+        clocks: Vec::new(),
+        spawn_lambdas: &[],
+        spawn_site: 0,
+        yield_consumer: None,
+        yield_scope: None,
     };
     let mut scope = globals;
     match ctx.exec_stmts(&tir, &mut scope)? {

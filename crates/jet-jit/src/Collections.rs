@@ -1,7 +1,7 @@
 //! M5: list/map host shims for the Cranelift JIT (`JetArena` handles).
 
 use super::Concurrency;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 
 /// Record an out-of-bounds trap. Returns normally; JIT code branches to its
 /// epilogue at the next `emit_trap_check` (I1 — no Rust panic ever unwinds
@@ -265,6 +265,13 @@ extern "C" fn jet_jit_map_insert(map: i64, key: i64, value: i64) {
     });
 }
 
+extern "C" fn jet_jit_map_increment(map: i64, key: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let current = rt.heap.map_get(map, key).unwrap_or(0);
+        let _ = rt.heap.map_insert(map, key, current + 1);
+    });
+}
+
 extern "C" fn jet_jit_map_get(map: i64, key: i64, _line: u32) -> i64 {
     Concurrency::with_runtime_mut(|rt| match rt.heap.map_get(map, key) {
         Some(value) => value,
@@ -316,6 +323,37 @@ extern "C" fn jet_jit_map_value_at(map: i64, idx: i64) -> i64 {
         rt.heap
             .map_value_at(map, idx)
             .expect("jit map value_at: bad handle")
+    })
+}
+
+extern "C" fn jet_jit_map_keys(map: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.map_len(map).expect("jit map keys: bad handle");
+        let out = rt.heap.alloc_empty_list();
+        for i in 0..len {
+            let key = rt.heap.map_key_at(map, i).expect("jit map keys: key");
+            rt.heap
+                .list_push_int(out, key)
+                .expect("jit map keys: push");
+        }
+        out
+    })
+}
+
+extern "C" fn jet_jit_map_values(map: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.map_len(map).expect("jit map values: bad handle");
+        let out = rt.heap.alloc_empty_list();
+        for i in 0..len {
+            let value = rt
+                .heap
+                .map_value_at(map, i)
+                .expect("jit map values: value");
+            rt.heap
+                .list_push_int(out, value)
+                .expect("jit map values: push");
+        }
+        out
     })
 }
 
@@ -450,6 +488,103 @@ extern "C" fn jet_jit_iter_windows(list: i64, n: i64) -> i64 {
 
 extern "C" fn jet_jit_list_sum_i64(list: i64) -> i64 {
     clone_list_ints(list).into_iter().sum()
+}
+
+extern "C" fn jet_jit_list_product_i64(list: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .clone_int_list(list)
+            .unwrap_or_default()
+            .into_iter()
+            .product()
+    })
+}
+
+extern "C" fn jet_jit_list_min_i64(list: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .clone_int_list(list)
+            .unwrap_or_default()
+            .into_iter()
+            .min()
+            .map(|value| value + 1)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_list_max_i64(list: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .clone_int_list(list)
+            .unwrap_or_default()
+            .into_iter()
+            .max()
+            .map(|value| value + 1)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_list_flatten(list: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let outer = rt.heap.clone_int_list(list).unwrap_or_default();
+        let out = rt.heap.alloc_empty_list();
+        for inner in outer {
+            for value in rt.heap.clone_int_list(inner).unwrap_or_default() {
+                let _ = rt.heap.list_push_int(out, value);
+            }
+        }
+        out
+    })
+}
+
+extern "C" fn jet_jit_list_intersperse(list: i64, separator: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let values = rt.heap.clone_int_list(list).unwrap_or_default();
+        let out = rt.heap.alloc_empty_list();
+        for (index, value) in values.into_iter().enumerate() {
+            if index != 0 {
+                let _ = rt.heap.list_push_int(out, separator);
+            }
+            let _ = rt.heap.list_push_int(out, value);
+        }
+        out
+    })
+}
+
+extern "C" fn jet_jit_list_zip(left: i64, right: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let left = rt.heap.clone_int_list(left).unwrap_or_default();
+        let right = rt.heap.clone_int_list(right).unwrap_or_default();
+        let out = rt.heap.alloc_empty_list();
+        for (a, b) in left.into_iter().zip(right) {
+            let pair = rt.heap.alloc_record(2);
+            let _ = rt.heap.record_set_int(pair, 0, a);
+            let _ = rt.heap.record_set_int(pair, 1, b);
+            let _ = rt.heap.list_push_int(out, pair);
+        }
+        out
+    })
+}
+
+extern "C" fn jet_jit_list_unzip(pairs: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let pairs = rt.heap.clone_int_list(pairs).unwrap_or_default();
+        let left = rt.heap.alloc_empty_list();
+        let right = rt.heap.alloc_empty_list();
+        for pair in pairs {
+            if let (Some(a), Some(b)) = (
+                rt.heap.record_get_int(pair, 0),
+                rt.heap.record_get_int(pair, 1),
+            ) {
+                let _ = rt.heap.list_push_int(left, a);
+                let _ = rt.heap.list_push_int(right, b);
+            }
+        }
+        let result = rt.heap.alloc_record(2);
+        let _ = rt.heap.record_set_int(result, 0, left);
+        let _ = rt.heap.record_set_int(result, 1, right);
+        result
+    })
 }
 
 /// Stable sort `list` in place by parallel i64 `keys` (same length).
@@ -793,6 +928,330 @@ extern "C" fn jet_jit_bag_len(bag: i64) -> i64 {
     })
 }
 
+pub(crate) struct LruState {
+    capacity: usize,
+    entries: VecDeque<(String, i64)>,
+}
+
+fn copy_list(rt: &mut crate::JitRuntime, values: impl IntoIterator<Item = i64>) -> i64 {
+    let list = rt.heap.alloc_empty_list();
+    for value in values {
+        let _ = rt.heap.list_push_int(list, value);
+    }
+    list
+}
+
+extern "C" fn jet_jit_sorted_set_new() -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.sorted_sets.push(BTreeSet::new());
+        rt.sorted_sets.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_sorted_set_from(list: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let set = rt
+            .heap
+            .clone_int_list(list)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        rt.sorted_sets.push(set);
+        rt.sorted_sets.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_sorted_set_insert(handle: i64, value: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        i8::from(
+            rt.sorted_sets
+                .get_mut((handle as usize).wrapping_sub(1))
+                .is_some_and(|set| set.insert(value)),
+        )
+    })
+}
+
+extern "C" fn jet_jit_sorted_set_remove(handle: i64, value: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(set) = rt.sorted_sets.get_mut((handle as usize).wrapping_sub(1)) {
+            set.remove(&value);
+        }
+    });
+}
+
+extern "C" fn jet_jit_sorted_set_to_list(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let values = rt
+            .sorted_sets
+            .get((handle as usize).wrapping_sub(1))
+            .map(|set| set.iter().copied().collect::<Vec<_>>())
+            .unwrap_or_default();
+        copy_list(rt, values)
+    })
+}
+
+extern "C" fn jet_jit_sorted_set_first(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.sorted_sets
+            .get((handle as usize).wrapping_sub(1))
+            .and_then(|set| set.first().copied())
+            .map(|value| value + 1)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_sorted_set_last(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.sorted_sets
+            .get((handle as usize).wrapping_sub(1))
+            .and_then(|set| set.last().copied())
+            .map(|value| value + 1)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_priority_queue_new() -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.priority_queues.push(BinaryHeap::new());
+        rt.priority_queues.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_priority_queue_from(list: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let heap = BinaryHeap::from(rt.heap.clone_int_list(list).unwrap_or_default());
+        rt.priority_queues.push(heap);
+        rt.priority_queues.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_priority_queue_push(handle: i64, value: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(heap) = rt
+            .priority_queues
+            .get_mut((handle as usize).wrapping_sub(1))
+        {
+            heap.push(value);
+        }
+    });
+}
+
+extern "C" fn jet_jit_priority_queue_peek(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.priority_queues
+            .get((handle as usize).wrapping_sub(1))
+            .and_then(|heap| heap.peek().copied())
+            .map(|value| value + 1)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_priority_queue_pop(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.priority_queues
+            .get_mut((handle as usize).wrapping_sub(1))
+            .and_then(BinaryHeap::pop)
+            .map(|value| value + 1)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_priority_queue_to_sorted_list(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let values = rt
+            .priority_queues
+            .get((handle as usize).wrapping_sub(1))
+            .map(|heap| heap.clone().into_sorted_vec().into_iter().rev().collect::<Vec<_>>())
+            .unwrap_or_default();
+        copy_list(rt, values)
+    })
+}
+
+extern "C" fn jet_jit_lru_new(capacity: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.lrus.push(LruState {
+            capacity: capacity.max(0) as usize,
+            entries: VecDeque::new(),
+        });
+        rt.lrus.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_lru_put(handle: i64, key: i64, value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(key) = rt.heap.clone_string(key) else {
+            return 0;
+        };
+        let Some(lru) = rt.lrus.get_mut((handle as usize).wrapping_sub(1)) else {
+            return 0;
+        };
+        if let Some(index) = lru.entries.iter().position(|(existing, _)| existing == &key) {
+            let (_, old) = lru.entries.remove(index).expect("lru position");
+            lru.entries.push_front((key, value));
+            return old + 1;
+        }
+        lru.entries.push_front((key, value));
+        if lru.entries.len() > lru.capacity {
+            return lru.entries.pop_back().map(|(_, old)| old + 1).unwrap_or(0);
+        }
+        0
+    })
+}
+
+extern "C" fn jet_jit_lru_get(handle: i64, key: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(key) = rt.heap.clone_string(key) else {
+            return 0;
+        };
+        let Some(lru) = rt.lrus.get_mut((handle as usize).wrapping_sub(1)) else {
+            return 0;
+        };
+        let Some(index) = lru.entries.iter().position(|(existing, _)| existing == &key) else {
+            return 0;
+        };
+        let entry = lru.entries.remove(index).expect("lru position");
+        let value = entry.1;
+        lru.entries.push_front(entry);
+        value + 1
+    })
+}
+
+extern "C" fn jet_jit_lru_has(handle: i64, key: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(key) = rt.heap.clone_string(key) else {
+            return 0;
+        };
+        i8::from(
+            rt.lrus
+                .get((handle as usize).wrapping_sub(1))
+                .is_some_and(|lru| lru.entries.iter().any(|(existing, _)| existing == &key)),
+        )
+    })
+}
+
+extern "C" fn jet_jit_lru_keys(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let keys = rt
+            .lrus
+            .get((handle as usize).wrapping_sub(1))
+            .map(|lru| {
+                lru.entries
+                    .iter()
+                    .map(|(key, _)| key.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let ids = keys.into_iter().map(|key| rt.heap.alloc_string(key)).collect::<Vec<_>>();
+        copy_list(rt, ids)
+    })
+}
+
+extern "C" fn jet_jit_bit_set_new() -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.bit_sets.push(BTreeSet::new());
+        rt.bit_sets.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_bit_set_add(handle: i64, value: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        i8::from(
+            rt.bit_sets
+                .get_mut((handle as usize).wrapping_sub(1))
+                .is_some_and(|set| set.insert(value)),
+        )
+    })
+}
+
+extern "C" fn jet_jit_bit_set_remove(handle: i64, value: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(set) = rt.bit_sets.get_mut((handle as usize).wrapping_sub(1)) {
+            set.remove(&value);
+        }
+    });
+}
+
+extern "C" fn jet_jit_bit_set_to_list(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let values = rt
+            .bit_sets
+            .get((handle as usize).wrapping_sub(1))
+            .map(|set| set.iter().copied().collect::<Vec<_>>())
+            .unwrap_or_default();
+        copy_list(rt, values)
+    })
+}
+
+extern "C" fn jet_jit_bit_set_len(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.bit_sets
+            .get((handle as usize).wrapping_sub(1))
+            .and_then(|set| set.iter().next_back().copied())
+            .map(|last| last.saturating_add(1))
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_bit_set_count(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.bit_sets
+            .get((handle as usize).wrapping_sub(1))
+            .map(|set| set.len() as i64)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_byte_buffer_new() -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.byte_buffers.push(Vec::new());
+        rt.byte_buffers.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_byte_buffer_write(handle: i64, value: i64, method: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let bytes = if method == 7 {
+            rt.heap
+                .clone_int_list(value)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|byte| byte as u8)
+                .collect()
+        } else {
+            match method {
+                0 => vec![value as u8],
+                1 => (value as u16).to_le_bytes().to_vec(),
+                2 => (value as u16).to_be_bytes().to_vec(),
+                3 => (value as u32).to_le_bytes().to_vec(),
+                4 => (value as u32).to_be_bytes().to_vec(),
+                5 => (value as u64).to_le_bytes().to_vec(),
+                6 => (value as u64).to_be_bytes().to_vec(),
+                _ => Vec::new(),
+            }
+        };
+        if let Some(buffer) = rt
+            .byte_buffers
+            .get_mut((handle as usize).wrapping_sub(1))
+        {
+            buffer.extend(bytes);
+        }
+    });
+}
+
+extern "C" fn jet_jit_byte_buffer_to_bytes(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let values = rt
+            .byte_buffers
+            .get((handle as usize).wrapping_sub(1))
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(i64::from)
+            .collect::<Vec<_>>();
+        copy_list(rt, values)
+    })
+}
+
 /// Packed-enum JetShow table: variant mangled names + payload kind codes.
 /// kind: 0 = unit, 1 = Int (>>8), 2 = nested packed enum (>>8), 3 = String handle (>>8).
 #[derive(Clone)]
@@ -888,12 +1347,15 @@ pub(crate) struct CollectionsHostFns {
     pub map_new: cranelift_module::FuncId,
     pub map_clone: cranelift_module::FuncId,
     pub map_insert: cranelift_module::FuncId,
+    pub map_increment: cranelift_module::FuncId,
     pub map_get: cranelift_module::FuncId,
     pub map_validate: cranelift_module::FuncId,
     pub map_get_opt: cranelift_module::FuncId,
     pub map_len: cranelift_module::FuncId,
     pub map_key_at: cranelift_module::FuncId,
     pub map_value_at: cranelift_module::FuncId,
+    pub map_keys: cranelift_module::FuncId,
+    pub map_values: cranelift_module::FuncId,
     pub iter_take: cranelift_module::FuncId,
     pub iter_skip: cranelift_module::FuncId,
     pub iter_step_by: cranelift_module::FuncId,
@@ -901,6 +1363,13 @@ pub(crate) struct CollectionsHostFns {
     pub iter_chunks: cranelift_module::FuncId,
     pub iter_windows: cranelift_module::FuncId,
     pub list_sum_i64: cranelift_module::FuncId,
+    pub list_product_i64: cranelift_module::FuncId,
+    pub list_min_i64: cranelift_module::FuncId,
+    pub list_max_i64: cranelift_module::FuncId,
+    pub list_flatten: cranelift_module::FuncId,
+    pub list_intersperse: cranelift_module::FuncId,
+    pub list_zip: cranelift_module::FuncId,
+    pub list_unzip: cranelift_module::FuncId,
     pub list_sort_by_i64_keys: cranelift_module::FuncId,
     pub print_list: cranelift_module::FuncId,
     pub print_opt: cranelift_module::FuncId,
@@ -928,6 +1397,33 @@ pub(crate) struct CollectionsHostFns {
     pub bag_has: cranelift_module::FuncId,
     pub bag_count: cranelift_module::FuncId,
     pub bag_len: cranelift_module::FuncId,
+    pub sorted_set_new: cranelift_module::FuncId,
+    pub sorted_set_from: cranelift_module::FuncId,
+    pub sorted_set_insert: cranelift_module::FuncId,
+    pub sorted_set_remove: cranelift_module::FuncId,
+    pub sorted_set_to_list: cranelift_module::FuncId,
+    pub sorted_set_first: cranelift_module::FuncId,
+    pub sorted_set_last: cranelift_module::FuncId,
+    pub priority_queue_new: cranelift_module::FuncId,
+    pub priority_queue_from: cranelift_module::FuncId,
+    pub priority_queue_push: cranelift_module::FuncId,
+    pub priority_queue_peek: cranelift_module::FuncId,
+    pub priority_queue_pop: cranelift_module::FuncId,
+    pub priority_queue_to_sorted_list: cranelift_module::FuncId,
+    pub lru_new: cranelift_module::FuncId,
+    pub lru_put: cranelift_module::FuncId,
+    pub lru_get: cranelift_module::FuncId,
+    pub lru_has: cranelift_module::FuncId,
+    pub lru_keys: cranelift_module::FuncId,
+    pub bit_set_new: cranelift_module::FuncId,
+    pub bit_set_add: cranelift_module::FuncId,
+    pub bit_set_remove: cranelift_module::FuncId,
+    pub bit_set_to_list: cranelift_module::FuncId,
+    pub bit_set_len: cranelift_module::FuncId,
+    pub bit_set_count: cranelift_module::FuncId,
+    pub byte_buffer_new: cranelift_module::FuncId,
+    pub byte_buffer_write: cranelift_module::FuncId,
+    pub byte_buffer_to_bytes: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -952,12 +1448,15 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_map_new", jet_jit_map_new as *const u8);
     builder.symbol("jet_jit_map_clone", jet_jit_map_clone as *const u8);
     builder.symbol("jet_jit_map_insert", jet_jit_map_insert as *const u8);
+    builder.symbol("jet_jit_map_increment", jet_jit_map_increment as *const u8);
     builder.symbol("jet_jit_map_get", jet_jit_map_get as *const u8);
     builder.symbol("jet_jit_map_validate", jet_jit_map_validate as *const u8);
     builder.symbol("jet_jit_map_get_opt", jet_jit_map_get_opt as *const u8);
     builder.symbol("jet_jit_map_len", jet_jit_map_len as *const u8);
     builder.symbol("jet_jit_map_key_at", jet_jit_map_key_at as *const u8);
     builder.symbol("jet_jit_map_value_at", jet_jit_map_value_at as *const u8);
+    builder.symbol("jet_jit_map_keys", jet_jit_map_keys as *const u8);
+    builder.symbol("jet_jit_map_values", jet_jit_map_values as *const u8);
     builder.symbol("jet_jit_iter_take", jet_jit_iter_take as *const u8);
     builder.symbol("jet_jit_iter_skip", jet_jit_iter_skip as *const u8);
     builder.symbol("jet_jit_iter_step_by", jet_jit_iter_step_by as *const u8);
@@ -965,6 +1464,13 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_iter_chunks", jet_jit_iter_chunks as *const u8);
     builder.symbol("jet_jit_iter_windows", jet_jit_iter_windows as *const u8);
     builder.symbol("jet_jit_list_sum_i64", jet_jit_list_sum_i64 as *const u8);
+    builder.symbol("jet_jit_list_product_i64", jet_jit_list_product_i64 as *const u8);
+    builder.symbol("jet_jit_list_min_i64", jet_jit_list_min_i64 as *const u8);
+    builder.symbol("jet_jit_list_max_i64", jet_jit_list_max_i64 as *const u8);
+    builder.symbol("jet_jit_list_flatten", jet_jit_list_flatten as *const u8);
+    builder.symbol("jet_jit_list_intersperse", jet_jit_list_intersperse as *const u8);
+    builder.symbol("jet_jit_list_zip", jet_jit_list_zip as *const u8);
+    builder.symbol("jet_jit_list_unzip", jet_jit_list_unzip as *const u8);
     builder.symbol(
         "jet_jit_list_sort_by_i64_keys",
         jet_jit_list_sort_by_i64_keys as *const u8,
@@ -995,6 +1501,39 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_bag_has", jet_jit_bag_has as *const u8);
     builder.symbol("jet_jit_bag_count", jet_jit_bag_count as *const u8);
     builder.symbol("jet_jit_bag_len", jet_jit_bag_len as *const u8);
+    builder.symbol("jet_jit_sorted_set_new", jet_jit_sorted_set_new as *const u8);
+    builder.symbol("jet_jit_sorted_set_from", jet_jit_sorted_set_from as *const u8);
+    builder.symbol("jet_jit_sorted_set_insert", jet_jit_sorted_set_insert as *const u8);
+    builder.symbol("jet_jit_sorted_set_remove", jet_jit_sorted_set_remove as *const u8);
+    builder.symbol("jet_jit_sorted_set_to_list", jet_jit_sorted_set_to_list as *const u8);
+    builder.symbol("jet_jit_sorted_set_first", jet_jit_sorted_set_first as *const u8);
+    builder.symbol("jet_jit_sorted_set_last", jet_jit_sorted_set_last as *const u8);
+    builder.symbol("jet_jit_priority_queue_new", jet_jit_priority_queue_new as *const u8);
+    builder.symbol("jet_jit_priority_queue_from", jet_jit_priority_queue_from as *const u8);
+    builder.symbol("jet_jit_priority_queue_push", jet_jit_priority_queue_push as *const u8);
+    builder.symbol("jet_jit_priority_queue_peek", jet_jit_priority_queue_peek as *const u8);
+    builder.symbol("jet_jit_priority_queue_pop", jet_jit_priority_queue_pop as *const u8);
+    builder.symbol(
+        "jet_jit_priority_queue_to_sorted_list",
+        jet_jit_priority_queue_to_sorted_list as *const u8,
+    );
+    builder.symbol("jet_jit_lru_new", jet_jit_lru_new as *const u8);
+    builder.symbol("jet_jit_lru_put", jet_jit_lru_put as *const u8);
+    builder.symbol("jet_jit_lru_get", jet_jit_lru_get as *const u8);
+    builder.symbol("jet_jit_lru_has", jet_jit_lru_has as *const u8);
+    builder.symbol("jet_jit_lru_keys", jet_jit_lru_keys as *const u8);
+    builder.symbol("jet_jit_bit_set_new", jet_jit_bit_set_new as *const u8);
+    builder.symbol("jet_jit_bit_set_add", jet_jit_bit_set_add as *const u8);
+    builder.symbol("jet_jit_bit_set_remove", jet_jit_bit_set_remove as *const u8);
+    builder.symbol("jet_jit_bit_set_to_list", jet_jit_bit_set_to_list as *const u8);
+    builder.symbol("jet_jit_bit_set_len", jet_jit_bit_set_len as *const u8);
+    builder.symbol("jet_jit_bit_set_count", jet_jit_bit_set_count as *const u8);
+    builder.symbol("jet_jit_byte_buffer_new", jet_jit_byte_buffer_new as *const u8);
+    builder.symbol("jet_jit_byte_buffer_write", jet_jit_byte_buffer_write as *const u8);
+    builder.symbol(
+        "jet_jit_byte_buffer_to_bytes",
+        jet_jit_byte_buffer_to_bytes as *const u8,
+    );
 }
 
 pub(crate) fn declare_collections_host_fns(
@@ -1054,6 +1593,8 @@ pub(crate) fn declare_collections_host_fns(
     sig_map_insert.params.push(AbiParam::new(types::I64));
     sig_map_insert.params.push(AbiParam::new(types::I64));
     sig_map_insert.params.push(AbiParam::new(types::I64));
+    let mut sig_three_ret = sig_map_insert.clone();
+    sig_three_ret.returns.push(AbiParam::new(types::I64));
     let sig_map_get = sig_get.clone();
     let sig_map_get_opt = sig_get_opt.clone();
     let sig_map_at = sig_get_opt.clone();
@@ -1094,12 +1635,15 @@ pub(crate) fn declare_collections_host_fns(
         map_new: import("jet_jit_map_new", &sig_new)?,
         map_clone: import("jet_jit_map_clone", &sig_len)?,
         map_insert: import("jet_jit_map_insert", &sig_map_insert)?,
+        map_increment: import("jet_jit_map_increment", &sig_push)?,
         map_get: import("jet_jit_map_get", &sig_map_get)?,
         map_validate: import("jet_jit_map_validate", &sig_len)?,
         map_get_opt: import("jet_jit_map_get_opt", &sig_map_get_opt)?,
         map_len: import("jet_jit_map_len", &sig_len)?,
         map_key_at: import("jet_jit_map_key_at", &sig_map_at)?,
         map_value_at: import("jet_jit_map_value_at", &sig_map_at)?,
+        map_keys: import("jet_jit_map_keys", &sig_len)?,
+        map_values: import("jet_jit_map_values", &sig_len)?,
         iter_take: import("jet_jit_iter_take", &sig_get_opt)?,
         iter_skip: import("jet_jit_iter_skip", &sig_get_opt)?,
         iter_step_by: import("jet_jit_iter_step_by", &sig_get_opt)?,
@@ -1107,6 +1651,13 @@ pub(crate) fn declare_collections_host_fns(
         iter_chunks: import("jet_jit_iter_chunks", &sig_get_opt)?,
         iter_windows: import("jet_jit_iter_windows", &sig_get_opt)?,
         list_sum_i64: import("jet_jit_list_sum_i64", &sig_len)?,
+        list_product_i64: import("jet_jit_list_product_i64", &sig_len)?,
+        list_min_i64: import("jet_jit_list_min_i64", &sig_len)?,
+        list_max_i64: import("jet_jit_list_max_i64", &sig_len)?,
+        list_flatten: import("jet_jit_list_flatten", &sig_len)?,
+        list_intersperse: import("jet_jit_list_intersperse", &sig_get_opt)?,
+        list_zip: import("jet_jit_list_zip", &sig_get_opt)?,
+        list_unzip: import("jet_jit_list_unzip", &sig_len)?,
         list_sort_by_i64_keys: import("jet_jit_list_sort_by_i64_keys", &sig_sort_by_keys)?,
         print_list: import("jet_jit_print_list", &sig_print_list)?,
         print_opt: import("jet_jit_print_opt", &sig_print_list)?,
@@ -1134,5 +1685,35 @@ pub(crate) fn declare_collections_host_fns(
         bag_has: import("jet_jit_bag_has", &sig_list_eq)?,
         bag_count: import("jet_jit_bag_count", &sig_get_opt)?,
         bag_len: import("jet_jit_bag_len", &sig_len)?,
+        sorted_set_new: import("jet_jit_sorted_set_new", &sig_new)?,
+        sorted_set_from: import("jet_jit_sorted_set_from", &sig_len)?,
+        sorted_set_insert: import("jet_jit_sorted_set_insert", &sig_list_eq)?,
+        sorted_set_remove: import("jet_jit_sorted_set_remove", &sig_push)?,
+        sorted_set_to_list: import("jet_jit_sorted_set_to_list", &sig_len)?,
+        sorted_set_first: import("jet_jit_sorted_set_first", &sig_len)?,
+        sorted_set_last: import("jet_jit_sorted_set_last", &sig_len)?,
+        priority_queue_new: import("jet_jit_priority_queue_new", &sig_new)?,
+        priority_queue_from: import("jet_jit_priority_queue_from", &sig_len)?,
+        priority_queue_push: import("jet_jit_priority_queue_push", &sig_push)?,
+        priority_queue_peek: import("jet_jit_priority_queue_peek", &sig_len)?,
+        priority_queue_pop: import("jet_jit_priority_queue_pop", &sig_len)?,
+        priority_queue_to_sorted_list: import(
+            "jet_jit_priority_queue_to_sorted_list",
+            &sig_len,
+        )?,
+        lru_new: import("jet_jit_lru_new", &sig_len)?,
+        lru_put: import("jet_jit_lru_put", &sig_three_ret)?,
+        lru_get: import("jet_jit_lru_get", &sig_get_opt)?,
+        lru_has: import("jet_jit_lru_has", &sig_list_eq)?,
+        lru_keys: import("jet_jit_lru_keys", &sig_len)?,
+        bit_set_new: import("jet_jit_bit_set_new", &sig_new)?,
+        bit_set_add: import("jet_jit_bit_set_add", &sig_list_eq)?,
+        bit_set_remove: import("jet_jit_bit_set_remove", &sig_push)?,
+        bit_set_to_list: import("jet_jit_bit_set_to_list", &sig_len)?,
+        bit_set_len: import("jet_jit_bit_set_len", &sig_len)?,
+        bit_set_count: import("jet_jit_bit_set_count", &sig_len)?,
+        byte_buffer_new: import("jet_jit_byte_buffer_new", &sig_new)?,
+        byte_buffer_write: import("jet_jit_byte_buffer_write", &sig_map_insert)?,
+        byte_buffer_to_bytes: import("jet_jit_byte_buffer_to_bytes", &sig_len)?,
     })
 }

@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 use crate::AST::{CtFloat, Type, UnOp};
 use crate::Codegen::TIR::{
-    ListSpreadPart, TCallArg, TExpr, TExprKind, TFnValueKind, TPlace, TStrPart,
+    ListSpreadPart, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFnValueKind, TPlace, TStrPart,
 };
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::{apply_core_call, apply_impure_core_call, CtValue};
@@ -10,6 +10,31 @@ use crate::Diagnostics::Diagnostic;
 use super::builtins::eval_builtin;
 use super::handles::eval_handle;
 use super::{materialize_view_mut_window, unsupported, EvalCallable, EvalCtx, Flow};
+
+fn handle_index(value: &CtValue, type_name: &str) -> Option<usize> {
+    let CtValue::Struct {
+        type_name: actual,
+        fields,
+    } = value
+    else {
+        return None;
+    };
+    (actual == type_name).then_some(())?;
+    fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("index", CtValue::Int(index)) => Some(*index as usize),
+        _ => None,
+    })
+}
+
+fn struct_int(value: &CtValue, field: &str) -> Option<i64> {
+    let CtValue::Struct { fields, .. } = value else {
+        return None;
+    };
+    fields.iter().find_map(|(name, value)| match value {
+        CtValue::Int(value) if name == field => Some(*value),
+        _ => None,
+    })
+}
 
 fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
     match (value, ty) {
@@ -294,6 +319,77 @@ impl<'a> EvalCtx<'a> {
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
                 }
+                if let Some(index) = handle_index(&r, "__JetTirClock") {
+                    let delta = argv.first().and_then(|value| match value {
+                        CtValue::Int(value) => Some(*value),
+                        _ => None,
+                    });
+                    let span = self.span();
+                    let Some(clock) = self.clocks.get_mut(index) else {
+                        return Err(unsupported("clock handle", span));
+                    };
+                    let result = match op {
+                        crate::Codegen::TIR::THandleOp::ClockNow => CtValue::Int(*clock),
+                        crate::Codegen::TIR::THandleOp::ClockTick
+                        | crate::Codegen::TIR::THandleOp::ClockAdvance
+                        | crate::Codegen::TIR::THandleOp::ClockWait => {
+                            let Some(delta) = delta else {
+                                return Err(unsupported("clock delta", span));
+                            };
+                            *clock = clock.saturating_add(delta);
+                            CtValue::Unit
+                        }
+                        _ => return Err(unsupported("clock method", self.span())),
+                    };
+                    return Ok(result);
+                }
+                if matches!(
+                    op,
+                    crate::Codegen::TIR::THandleOp::ExpiringMethod { .. }
+                ) {
+                    let deadline = struct_int(&r, "deadline")
+                        .ok_or_else(|| unsupported("expiring deadline", self.span()))?;
+                    let clock_index = argv
+                        .first()
+                        .and_then(|clock| handle_index(clock, "__JetTirClock"))
+                        .ok_or_else(|| unsupported("expiring clock", self.span()))?;
+                    let now = *self
+                        .clocks
+                        .get(clock_index)
+                        .ok_or_else(|| unsupported("expiring clock handle", self.span()))?;
+                    let valid = now <= deadline;
+                    let result = match op {
+                        crate::Codegen::TIR::THandleOp::ExpiringMethod { method }
+                            if method == "is_valid" =>
+                        {
+                            CtValue::Bool(valid)
+                        }
+                        crate::Codegen::TIR::THandleOp::ExpiringMethod { method }
+                            if method == "get" =>
+                        {
+                            let value = if valid {
+                                let CtValue::Struct { fields, .. } = &r else {
+                                    unreachable!();
+                                };
+                                fields
+                                    .iter()
+                                    .find_map(|(name, value)| {
+                                        (name == "value").then(|| value.clone())
+                                    })
+                                    .unwrap_or(CtValue::Unit)
+                            } else {
+                                CtValue::Str("expired".to_string())
+                            };
+                            if valid {
+                                CtValue::ResOk(Box::new(value))
+                            } else {
+                                CtValue::ResErr(Box::new(value))
+                            }
+                        }
+                        _ => return Err(unsupported("expiring method", self.span())),
+                    };
+                    return Ok(result);
+                }
                 let result = eval_handle(op, &mut r, &mut argv, self.span())?;
                 self.write_back_place(recv, r, scope)?;
                 // `Rng.shuffle(&list)` mutates the list arg in place. Fragment
@@ -324,6 +420,18 @@ impl<'a> EvalCtx<'a> {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
+                }
+                if module == "jet.crypto"
+                    && method == "__signing_generate"
+                    && argv.is_empty()
+                {
+                    return Ok(CtValue::ResOk(Box::new(CtValue::Int(1))));
+                }
+                if module == "jet.crypto"
+                    && method == "__signing_public"
+                    && argv.len() == 1
+                {
+                    return Ok(argv.remove(0));
                 }
                 if module == "core.browser" && self.runtime_execution {
                     return super::browser::core_call(method, argv, *source_span);
@@ -977,6 +1085,70 @@ impl<'a> EvalCtx<'a> {
                 }
                 crate::Codegen::TIR::THostCall::Method { recv, method, args } => {
                     let mut r = self.eval_expr(recv, scope)?;
+                    if matches!(&r, CtValue::Struct { type_name, .. } if type_name == "__JetTirExpiring")
+                        && method == "with"
+                    {
+                        let clock_index = struct_int(&r, "clock")
+                            .ok_or_else(|| unsupported("expiring secret clock", self.span()))?
+                            as usize;
+                        let deadline = struct_int(&r, "deadline")
+                            .ok_or_else(|| unsupported("expiring secret deadline", self.span()))?;
+                        let valid = self
+                            .clocks
+                            .get(clock_index)
+                            .is_some_and(|now| *now <= deadline);
+                        if !valid {
+                            return Ok(CtValue::ResErr(Box::new(CtValue::Str(
+                                "expired".to_string(),
+                            ))));
+                        }
+                        let CtValue::Struct { fields, .. } = &r else {
+                            unreachable!();
+                        };
+                        let value = fields
+                            .iter()
+                            .find_map(|(name, value)| (name == "value").then(|| value.clone()))
+                            .unwrap_or(CtValue::Unit);
+                        let Some(TExpr {
+                            kind: TExprKind::Lambda(lambda),
+                            ..
+                        }) = args.first()
+                        else {
+                            return Err(unsupported("expiring secret lambda", self.span()));
+                        };
+                        let result = self.eval_tlambda(lambda, vec![value], scope)?;
+                        return Ok(CtValue::ResOk(Box::new(result)));
+                    }
+                    if matches!(&r, CtValue::Struct { type_name, .. } if type_name == "__JetTirShared") {
+                        let CtValue::Struct { fields, .. } = &r else {
+                            unreachable!();
+                        };
+                        let index = fields
+                            .iter()
+                            .find_map(|(name, value)| match (name.as_str(), value) {
+                                ("index", CtValue::Int(index)) => Some(*index as usize),
+                                _ => None,
+                            })
+                            .ok_or_else(|| unsupported("shared handle", self.span()))?;
+                        let current = self
+                            .shared_values
+                            .get(index)
+                            .cloned()
+                            .ok_or_else(|| unsupported("shared value", self.span()))?;
+                        let Some(TExpr {
+                            kind: TExprKind::Lambda(lambda),
+                            ..
+                        }) = args.first()
+                        else {
+                            return Err(unsupported("shared method lambda", self.span()));
+                        };
+                        let (result, updated) =
+                            self.eval_tlambda_mut_arg(lambda, current, scope)?;
+                        if matches!(method.as_str(), "edit" | "edit_txn") {
+                            self.shared_values[index] = updated;
+                        }
+                        return Ok(result);
+                    }
                     let mut argv = Vec::with_capacity(args.len());
                     for a in args {
                         argv.push(self.eval_expr(a, scope)?);
@@ -1028,9 +1200,11 @@ impl<'a> EvalCtx<'a> {
                                 ));
                             }
                         };
+                        let index = self.clocks.len();
+                        self.clocks.push(seed);
                         return Ok(CtValue::Struct {
-                            type_name: crate::Syntax::CLOCK_TYPE.to_string(),
-                            fields: vec![("now".to_string(), CtValue::Int(seed))],
+                            type_name: "__JetTirClock".to_string(),
+                            fields: vec![("index".to_string(), CtValue::Int(index as i64))],
                         });
                     }
                     if leaf == "jet_std_clock_system" || leaf.ends_with("jet_std_clock_system") {
@@ -1043,6 +1217,61 @@ impl<'a> EvalCtx<'a> {
                         &format!("expr `HostCall` helper `{leaf}`"),
                         self.span(),
                     ))
+                }
+                crate::Codegen::TIR::THostCall::YieldSend { value } => {
+                    let yielded = self.eval_expr(value, scope)?;
+                    let consumer = self
+                        .yield_consumer
+                        .clone()
+                        .ok_or_else(|| unsupported("yield outside a stream consumer", self.span()))?;
+                    let mut consumer_scope = self
+                        .yield_scope
+                        .take()
+                        .ok_or_else(|| unsupported("stream consumer scope", self.span()))?;
+                    consumer_scope.insert(consumer.var, yielded);
+                    let result = self.exec_stmts(consumer.body, &mut consumer_scope);
+                    self.yield_scope = Some(consumer_scope);
+                    match result? {
+                        Flow::Normal | Flow::Continue => Ok(CtValue::Unit),
+                        other => Err(unsupported(
+                            &format!("stream consumer control flow {other:?}"),
+                            self.span(),
+                        )),
+                    }
+                }
+                crate::Codegen::TIR::THostCall::ExpiringValueNew {
+                    value,
+                    duration,
+                    clock,
+                }
+                | crate::Codegen::TIR::THostCall::ExpiringSecretNew {
+                    value,
+                    duration,
+                    clock,
+                    ..
+                } => {
+                    let value = self.eval_expr(value, scope)?;
+                    let duration = self.eval_expr(duration, scope)?;
+                    let duration = struct_int(&duration, "ms")
+                        .ok_or_else(|| unsupported("expiring duration", self.span()))?;
+                    let clock = self.eval_expr(clock, scope)?;
+                    let clock_index = handle_index(&clock, "__JetTirClock")
+                        .ok_or_else(|| unsupported("expiring clock", self.span()))?;
+                    let now = *self
+                        .clocks
+                        .get(clock_index)
+                        .ok_or_else(|| unsupported("expiring clock handle", self.span()))?;
+                    Ok(CtValue::Struct {
+                        type_name: "__JetTirExpiring".to_string(),
+                        fields: vec![
+                            ("value".to_string(), value),
+                            (
+                                "deadline".to_string(),
+                                CtValue::Int(now.saturating_add(duration)),
+                            ),
+                            ("clock".to_string(), CtValue::Int(clock_index as i64)),
+                        ],
+                    })
                 }
                 other => {
                     let tag = match other {
@@ -1060,7 +1289,7 @@ impl<'a> EvalCtx<'a> {
                         crate::Codegen::TIR::THostCall::SwitchSubjectField { .. } => {
                             "SwitchSubjectField"
                         }
-                        crate::Codegen::TIR::THostCall::YieldSend { .. } => "YieldSend",
+                        crate::Codegen::TIR::THostCall::YieldSend { .. } => unreachable!(),
                         crate::Codegen::TIR::THostCall::TypedTextInterp { .. } => "TypedTextInterp",
                         crate::Codegen::TIR::THostCall::ExpectSnapshot { .. } => "ExpectSnapshot",
                         crate::Codegen::TIR::THostCall::EnvSet { .. } => "EnvSet",
@@ -1172,8 +1401,13 @@ impl<'a> EvalCtx<'a> {
                 }
                 eval_precise_builtin(type_name, func, argv, self.span())
             }
-            TExprKind::ResourceNew(..) => Err(unsupported("expr `ResourceNew`", self.span())),
-            TExprKind::ResourceTake(..) => Err(unsupported("expr `ResourceTake`", self.span())),
+            TExprKind::ResourceNew(inner) => self.eval_expr(inner, scope),
+            TExprKind::ResourceTake(place) => scope
+                .get(place)
+                .cloned()
+                .or_else(|| place.strip_prefix("user_").and_then(|name| scope.get(name).cloned()))
+                .or_else(|| self.globals.get(place).cloned())
+                .ok_or_else(|| unsupported(&format!("resource `{place}`"), self.span())),
             TExprKind::AmbientInput { .. } => Err(unsupported("expr `AmbientInput`", self.span())),
             TExprKind::RequireStop {
                 kind,
@@ -1238,7 +1472,10 @@ impl<'a> EvalCtx<'a> {
             TExprKind::PtrFromAddr { .. } => Err(unsupported("expr `PtrFromAddr`", self.span())),
             TExprKind::Deref(inner) => self.eval_expr(inner, scope),
             TExprKind::RawOf(inner) => self.eval_expr(inner, scope),
-            TExprKind::AllocNew { .. } => Err(unsupported("expr `AllocNew`", self.span())),
+            TExprKind::AllocNew { ctor } => Ok(CtValue::Struct {
+                type_name: "__JetTirAllocator".to_string(),
+                fields: vec![("ctor".to_string(), CtValue::Str(ctor.clone()))],
+            }),
             TExprKind::JsonLit { variant, arg } => {
                 let payload = match arg {
                     Some(inner) => Some(self.eval_expr(&inner.0, scope)?),
@@ -1280,8 +1517,72 @@ impl<'a> EvalCtx<'a> {
             TExprKind::ColumnarColumnRead { .. } => {
                 Err(unsupported("expr `ColumnarColumnRead`", self.span()))
             }
-            TExprKind::PoolSlot { .. } => Err(unsupported("expr `PoolSlot`", self.span())),
-            TExprKind::IndexHook { .. } => Err(unsupported("expr `IndexHook`", self.span())),
+            TExprKind::PoolSlot {
+                pool,
+                id,
+                field,
+                ..
+            } => {
+                let pool_value = self.eval_expr(pool, scope)?;
+                let id_value = self.eval_expr(id, scope)?;
+                let Some((index, generation)) = pool_id_parts(&id_value) else {
+                    return Err(pool_stale_diagnostic());
+                };
+                let CtValue::Struct { fields, .. } = pool_value else {
+                    return Err(pool_stale_diagnostic());
+                };
+                let slots = fields.iter().find_map(|(name, value)| match value {
+                    CtValue::List(slots) if name == "slots" => Some(slots),
+                    _ => None,
+                });
+                let Some(CtValue::Enum {
+                    variant,
+                    args,
+                    ..
+                }) = slots.and_then(|slots| slots.get(index))
+                else {
+                    return Err(pool_stale_diagnostic());
+                };
+                if variant != "Occupied"
+                    || !matches!(args.first(), Some((_, CtValue::Int(found))) if *found == generation)
+                {
+                    return Err(pool_stale_diagnostic());
+                }
+                let Some((_, mut value)) = args.get(1).cloned() else {
+                    return Err(pool_stale_diagnostic());
+                };
+                if let Some(field) = field {
+                    let CtValue::Struct { fields, .. } = value else {
+                        return Err(unsupported("Pool field on a non-struct", self.span()));
+                    };
+                    value = fields
+                        .into_iter()
+                        .find_map(|(name, value)| (name == *field).then_some(value))
+                        .ok_or_else(|| unsupported(&format!("Pool field `{field}`"), self.span()))?;
+                }
+                Ok(value)
+            }
+            TExprKind::IndexHook {
+                type_name,
+                base,
+                index,
+                ..
+            } => {
+                let recv = self.eval_expr(base, scope)?;
+                let key = self.eval_expr(index, scope)?;
+                let func = self
+                    .funcs
+                    .get(&format!("{type_name}::get"))
+                    .copied()
+                    .ok_or_else(|| unsupported("Index.get", self.span()))?;
+                let mut child = HashMap::new();
+                child.insert("self".to_string(), recv);
+                match self.run_func(func, vec![key], &mut child)? {
+                    CtValue::Some(value) => Ok(*value),
+                    CtValue::None(_) => Err(unsupported("index miss", self.span())),
+                    _ => Err(unsupported("Index.get result", self.span())),
+                }
+            }
             TExprKind::MathLaneIndex { base, index, .. } => {
                 let b = self.eval_expr(base, scope)?;
                 let i = as_int(&self.eval_expr(index, scope)?, self.span())?;
@@ -1396,6 +1697,14 @@ impl<'a> EvalCtx<'a> {
                         ))
                     }
                     crate::Codegen::TIR::TStaticOwner::Prelude { path, .. } => {
+                        if path == "jet_std::JetShared" && method.name == "new" && argv.len() == 1 {
+                            let index = self.shared_values.len();
+                            self.shared_values.push(argv.remove(0));
+                            return Ok(CtValue::Struct {
+                                type_name: "__JetTirShared".to_string(),
+                                fields: vec![("index".to_string(), CtValue::Int(index as i64))],
+                            });
+                        }
                         if let Some(res) = crate::Comptime::Builtins::apply_static_type_method(
                             path,
                             &method.name,
@@ -1533,6 +1842,9 @@ impl<'a> EvalCtx<'a> {
                     self.span(),
                 )
             }
+            TExprKind::CoreClosureCall {
+                kind: TCoreClosureKind::Spawn { .. },
+            } => self.eval_spawn(scope),
             TExprKind::CoreClosureCall { .. } => {
                 Err(unsupported("expr `CoreClosureCall`", self.span()))
             }
@@ -1592,6 +1904,54 @@ impl<'a> EvalCtx<'a> {
                     }
                 }
                 self.write_back_place(recv, base_val, scope)
+            }
+            TExprKind::PoolSlot {
+                pool,
+                id,
+                field,
+                ..
+            } => {
+                let mut pool_value = self.eval_expr(pool, scope)?;
+                let id_value = self.eval_expr(id, scope)?;
+                let Some((index, generation)) = pool_id_parts(&id_value) else {
+                    return Err(pool_stale_diagnostic());
+                };
+                let CtValue::Struct { fields, .. } = &mut pool_value else {
+                    return Err(pool_stale_diagnostic());
+                };
+                let slots = fields.iter_mut().find_map(|(name, value)| match value {
+                    CtValue::List(slots) if name == "slots" => Some(slots),
+                    _ => None,
+                });
+                let Some(CtValue::Enum {
+                    variant,
+                    args,
+                    ..
+                }) = slots.and_then(|slots| slots.get_mut(index))
+                else {
+                    return Err(pool_stale_diagnostic());
+                };
+                if variant != "Occupied"
+                    || !matches!(args.first(), Some((_, CtValue::Int(found))) if *found == generation)
+                {
+                    return Err(pool_stale_diagnostic());
+                }
+                let Some((_, payload)) = args.get_mut(1) else {
+                    return Err(pool_stale_diagnostic());
+                };
+                if let Some(field) = field {
+                    let CtValue::Struct { fields, .. } = payload else {
+                        return Err(unsupported("Pool field on a non-struct", self.span()));
+                    };
+                    let slot = fields
+                        .iter_mut()
+                        .find_map(|(name, value)| (name == field).then_some(value))
+                        .ok_or_else(|| unsupported(&format!("Pool field `{field}`"), self.span()))?;
+                    *slot = value;
+                } else {
+                    *payload = value;
+                }
+                self.write_back_place(pool, pool_value, scope)
             }
             _ => Ok(()),
         }
@@ -1779,6 +2139,12 @@ impl<'a> EvalCtx<'a> {
         let Some(func) = self.funcs.get(name).copied() else {
             return Err(unsupported(&format!("call `{name}`"), self.span()));
         };
+        if matches!(
+            &func.ret,
+            Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_STREAM
+        ) {
+            return Ok(self.store_stream(func, argv));
+        }
         let mut child = HashMap::new();
         let result = self.run_func(func, argv, &mut child)?;
         // CtValue params are copy-in/copy-out. Fragment lowering often lacks
@@ -1883,6 +2249,33 @@ impl<'a> EvalCtx<'a> {
         }
     }
 
+}
+
+fn pool_id_parts(value: &CtValue) -> Option<(usize, i64)> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "Id" {
+        return None;
+    }
+    let int_field = |wanted: &str| {
+        fields.iter().find_map(|(name, value)| match value {
+            CtValue::Int(value) if name == wanted => Some(*value),
+            _ => None,
+        })
+    };
+    Some((usize::try_from(int_field("index")?).ok()?, int_field("generation")?))
+}
+
+fn pool_stale_diagnostic() -> Diagnostic {
+    Diagnostic::error(
+        "E0953",
+        "your comptime code stopped the build".to_string(),
+        "while computing this value at compile time, the program panicked: this Id no longer refers to a live value — its pool slot was removed".to_string(),
+        "this is the sanctioned way to validate at compile time — fix the input the check rejects"
+            .to_string(),
+        None,
+    )
 }
 
 fn eval_precise_builtin(

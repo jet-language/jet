@@ -102,6 +102,9 @@ fn lower_spawn_function(
             ret_clif: clif_ty(&lam.ret),
             shield_depth: 0,
             switch_subject: None,
+            yield_sender: None,
+            in_shared_transaction: false,
+            unsafe_depth: 0,
         };
         for cap in &lam.captures {
             let var = lctx.fresh_var(types::I64);
@@ -221,6 +224,9 @@ pub(crate) fn lower_callable_lambda(
             ret_clif: lam.ret.as_ref().and_then(|ret| meta.clif_ty(ret)),
             shield_depth: 0,
             switch_subject: None,
+            yield_sender: None,
+            in_shared_transaction: false,
+            unsafe_depth: 0,
         };
         for (i, (name, ty)) in lam
             .source_params
@@ -323,6 +329,9 @@ fn lower_function(
             ret_clif: tir.ret.as_ref().and_then(|ret| meta.clif_ty(ret)),
             shield_depth: 0,
             switch_subject: None,
+            yield_sender: None,
+            in_shared_transaction: false,
+            unsafe_depth: 0,
         };
         if func_has_receiver(tir) {
             let self_var = lctx.fresh_var(types::I64);
@@ -333,12 +342,36 @@ fn lower_function(
             }
             param_idx = 1;
         }
-        for (i, (name, ty, _)) in tir.params.iter().enumerate() {
-            let clif = meta.clif_ty(ty).ok_or("jit param clif type")?;
+        for (i, (name, ty, convention)) in tir.params.iter().enumerate() {
+            let scalar_write = matches!(
+                convention,
+                jet_foundation::AST::AccessConvention::Write
+            ) && matches!(
+                ty,
+                Type::Int
+                    | Type::IntN { .. }
+                    | Type::Float
+                    | Type::Float32
+                    | Type::Bool
+                    | Type::Char
+            );
+            let clif = if scalar_write {
+                types::I64
+            } else {
+                meta.clif_ty(ty).ok_or("jit param clif type")?
+            };
             let var = lctx.fresh_var(clif);
             lctx.b.def_var(var, param_vals[param_idx + i]);
             lctx.vars.insert(name.clone(), var);
-            lctx.var_tys.insert(name.clone(), ty.clone());
+            let stored_ty = if scalar_write {
+                Type::Apply {
+                    name: "__JetScalarMut".to_string(),
+                    args: vec![ty.clone()],
+                }
+            } else {
+                ty.clone()
+            };
+            lctx.var_tys.insert(name.clone(), stored_ty);
         }
 
         lctx.lower_stmts(&tir.body)?;
@@ -382,6 +415,162 @@ fn lower_function(
         super::types_meta::jit_fn_name(&tir.name)
     };
     super::tier_cache::note_defined(&export_name, &ctx);
+    module.clear_context(&mut ctx);
+    Ok(())
+}
+
+fn is_generator(tir: &TFunc) -> bool {
+    matches!(&tir.ret, Some(Type::Apply { name, .. }) if name == "Stream")
+}
+
+fn generator_body_signature(module: &JITModule, tir: &TFunc) -> Result<Signature, String> {
+    if func_has_receiver(tir) {
+        return Err("jit generator methods unsupported".to_string());
+    }
+    let mut sig = Signature::new(module.target_config().default_call_conv);
+    for (_, ty, _) in &tir.params {
+        let clif = clif_ty(ty)
+            .ok_or_else(|| format!("jit generator param unsupported: {ty:?}"))?;
+        if clif != types::I64 {
+            return Err(format!("jit generator param ABI unsupported: {ty:?}"));
+        }
+        sig.params.push(AbiParam::new(clif));
+    }
+    sig.params.push(AbiParam::new(types::I64));
+    sig.returns.push(AbiParam::new(types::I64));
+    Ok(sig)
+}
+
+fn lower_generator_body(
+    module: &mut JITModule,
+    host: &HostFns,
+    meta: &JitMeta<'_>,
+    tir: &TFunc,
+    func_id: FuncId,
+    func_ids: &HashMap<String, FuncId>,
+    spawn_func_ids: &[FuncId],
+    spawn_lambdas: &[TJitSpawnLambda],
+    spawn_site: &mut usize,
+    runtime: &mut JitRuntime,
+) -> Result<(), String> {
+    let mut ctx = module.make_context();
+    ctx.func.signature = generator_body_signature(module, tir)?;
+    let mut fbcx = FunctionBuilderContext::new();
+    let mut vars = HashMap::new();
+    let mut var_tys = HashMap::new();
+    {
+        let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbcx);
+        let entry = b.create_block();
+        b.append_block_params_for_function_params(entry);
+        b.switch_to_block(entry);
+        b.seal_block(entry);
+        let values = b.block_params(entry).to_vec();
+        let sender = *values.last().ok_or("jit generator sender missing")?;
+        let mut lctx = LowerCtx {
+            b: &mut b,
+            module,
+            host,
+            runtime,
+            meta,
+            vars: &mut vars,
+            var_tys: &mut var_tys,
+            func_ids,
+            spawn_site,
+            spawn_func_ids,
+            spawn_lambdas,
+            loop_stack: Vec::new(),
+            dead: false,
+            next_var: 0,
+            method_struct: None,
+            ret_clif: Some(types::I64),
+            shield_depth: 0,
+            switch_subject: None,
+            yield_sender: Some(sender),
+            in_shared_transaction: false,
+            unsafe_depth: 0,
+        };
+        for (index, (name, ty, _)) in tir.params.iter().enumerate() {
+            let var = lctx.fresh_var(types::I64);
+            lctx.b.def_var(var, values[index]);
+            lctx.vars.insert(name.clone(), var);
+            lctx.var_tys.insert(name.clone(), ty.clone());
+        }
+        lctx.lower_stmts(&tir.body)?;
+        if lctx.dead {
+            return Err("jit generator body cannot return before sender close".to_string());
+        }
+        let close = lctx
+            .module
+            .declare_func_in_func(lctx.host.conc.sender_close, lctx.b.func);
+        lctx.b.ins().call(close, &[sender]);
+        let zero = lctx.b.ins().iconst(types::I64, 0);
+        lctx.b.ins().return_(&[zero]);
+        b.finalize();
+    }
+    cranelift_codegen::verify_function(&ctx.func, module.isa())
+        .map_err(|error| format!("{} generator: verifier: {error:?}", tir.name))?;
+    module
+        .define_function(func_id, &mut ctx)
+        .map_err(|error| error.to_string())?;
+    module.clear_context(&mut ctx);
+    Ok(())
+}
+
+fn lower_generator_wrapper(
+    module: &mut JITModule,
+    host: &HostFns,
+    tir: &TFunc,
+    func_id: FuncId,
+    body_id: FuncId,
+    meta: &JitMeta<'_>,
+) -> Result<(), String> {
+    let mut ctx = module.make_context();
+    ctx.func.signature = func_signature(module, tir, meta)?;
+    let mut fbcx = FunctionBuilderContext::new();
+    {
+        let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbcx);
+        let entry = b.create_block();
+        b.append_block_params_for_function_params(entry);
+        b.switch_to_block(entry);
+        b.seal_block(entry);
+        let params = b.block_params(entry).to_vec();
+        if params.len() + 1 > 4 {
+            return Err("jit generator capture count unsupported".to_string());
+        }
+        if params
+            .iter()
+            .any(|value| b.func.dfg.value_type(*value) != types::I64)
+        {
+            return Err("jit generator parameter ABI unsupported".to_string());
+        }
+        let new = module.declare_func_in_func(host.conc.channel_new, b.func);
+        let call = b.ins().call(new, &[]);
+        let channel = b.inst_results(call)[0];
+        let sender_fn = module.declare_func_in_func(host.conc.channel_sender, b.func);
+        let call = b.ins().call(sender_fn, &[channel]);
+        let sender = b.inst_results(call)[0];
+        let body_ref = module.declare_func_in_func(body_id, b.func);
+        let body_ptr = b.ins().func_addr(types::I64, body_ref);
+        let mut spawn_args = vec![body_ptr];
+        spawn_args.extend(params);
+        spawn_args.push(sender);
+        let spawn_id = match spawn_args.len() - 1 {
+            1 => host.conc.spawn1,
+            2 => host.conc.spawn2,
+            3 => host.conc.spawn3,
+            4 => host.conc.spawn4,
+            _ => return Err("jit generator capture count unsupported".to_string()),
+        };
+        let spawn = module.declare_func_in_func(spawn_id, b.func);
+        b.ins().call(spawn, &spawn_args);
+        b.ins().return_(&[channel]);
+        b.finalize();
+    }
+    cranelift_codegen::verify_function(&ctx.func, module.isa())
+        .map_err(|error| format!("{} wrapper: verifier: {error:?}", tir.name))?;
+    module
+        .define_function(func_id, &mut ctx)
+        .map_err(|error| error.to_string())?;
     module.clear_context(&mut ctx);
     Ok(())
 }
@@ -441,6 +630,18 @@ pub(crate) fn compile_program_tiered(
         };
         func_ids.insert(f.name.clone(), id);
     }
+    let mut generator_body_ids = HashMap::new();
+    for f in &program.funcs {
+        if !is_generator(f) {
+            continue;
+        }
+        let name = format!("{}__generator", jit_fn_name(&f.name));
+        let sig = generator_body_signature(module, f)?;
+        let id = module
+            .declare_function(&name, Linkage::Local, &sig)
+            .map_err(|error| error.to_string())?;
+        generator_body_ids.insert(f.name.clone(), id);
+    }
 
     for (i, lam) in spawn_lambdas.iter().enumerate() {
         lower_spawn_function(
@@ -462,6 +663,22 @@ pub(crate) fn compile_program_tiered(
         if let Some(&idx) = deopt_index.get(&f.name) {
             super::deopt::lower_deopt_stub(module, host, &meta, f, id, idx)
                 .map_err(|e| format!("{}: {e}", f.name))?;
+        } else if let Some(&body_id) = generator_body_ids.get(&f.name) {
+            lower_generator_body(
+                module,
+                host,
+                &meta,
+                f,
+                body_id,
+                &func_ids,
+                &spawn_func_ids,
+                spawn_lambdas,
+                &mut spawn_site,
+                runtime,
+            )
+            .map_err(|error| format!("{}: {error}", f.name))?;
+            lower_generator_wrapper(module, host, f, id, body_id, &meta)
+                .map_err(|error| format!("{}: {error}", f.name))?;
         } else {
             lower_function(
                 module,

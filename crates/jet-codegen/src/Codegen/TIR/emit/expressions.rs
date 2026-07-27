@@ -1315,7 +1315,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // `*mut`). Forming the pointer is safe Rust; only dereferencing it needs
         // the surrounding `#Unsafe`. The const→mut cast is the standard idiom.
         TExprKind::RawOf(operand) => {
-            format!("(&({}) as *const _ as *mut _)", emit_tir_expr(operand, cx))
+            if matches!(&operand.ty, Type::Apply { name, .. } if name == "Ptr") {
+                emit_tir_expr(operand, cx)
+            } else {
+                format!("(&({}) as *const _ as *mut _)", emit_tir_expr(operand, cx))
+            }
         }
         // c109 Phase 19: the arena allocator constructor — the ctor tail was rendered whole
         // at lowering (`jet_mem::Jet<Alloc>::new()` / `::with_capacity(...)`), so emit just

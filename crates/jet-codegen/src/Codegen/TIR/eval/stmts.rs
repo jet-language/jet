@@ -1,6 +1,6 @@
 //! Exhaustive TStmt evaluation (#777).
 use std::collections::HashMap;
-use crate::Codegen::TIR::{TIfCond, TPatternPosition, TPlace, TStmt};
+use crate::Codegen::TIR::{TForInMethod, TIfCond, TPatternPosition, TPlace, TStmt};
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::CtValue;
 use crate::Diagnostics::Diagnostic;
@@ -57,6 +57,26 @@ impl<'a> EvalCtx<'a> {
                             rhs = eval_binop(*binop, cur, rhs, self.span())?;
                         }
                         scope.insert(key, rhs);
+                        Ok(Flow::Normal)
+                    }
+                    TPlace::Expr(place_expr)
+                        if matches!(place_expr.kind, crate::Codegen::TIR::TExprKind::PoolSlot { .. }) =>
+                    {
+                        if let Some(binop) = op {
+                            let current = self.eval_expr(place_expr, scope)?;
+                            rhs = eval_binop(*binop, current, rhs, self.span())?;
+                        }
+                        self.write_back_place(place_expr, rhs, scope)?;
+                        Ok(Flow::Normal)
+                    }
+                    TPlace::Expr(place_expr)
+                        if matches!(place_expr.kind, crate::Codegen::TIR::TExprKind::Field { .. }) =>
+                    {
+                        if let Some(binop) = op {
+                            let current = self.eval_expr(place_expr, scope)?;
+                            rhs = eval_binop(*binop, current, rhs, self.span())?;
+                        }
+                        self.write_back_place(place_expr, rhs, scope)?;
                         Ok(Flow::Normal)
                     }
                     TPlace::Expr(_) => Err(unsupported("complex assign place", self.span())),
@@ -263,10 +283,75 @@ impl<'a> EvalCtx<'a> {
                 body,
                 ..
             } => {
+                let coll = self.eval_expr(source, scope)?;
+                if let Some(TForInMethod::Iterable {
+                    coll_type,
+                    iter_type,
+                }) = method_kind
+                {
+                    let iter_func = self
+                        .funcs
+                        .get(&format!("{coll_type}::iter"))
+                        .copied()
+                        .ok_or_else(|| unsupported("Iterable.iter", self.span()))?;
+                    let next_func = self
+                        .funcs
+                        .get(&format!("{iter_type}::next"))
+                        .copied()
+                        .ok_or_else(|| unsupported("Iterator.next", self.span()))?;
+                    let mut iter_scope = HashMap::new();
+                    iter_scope.insert("self".to_string(), coll);
+                    let mut iterator = self.run_func(iter_func, Vec::new(), &mut iter_scope)?;
+                    loop {
+                        self.burn()?;
+                        let mut next_scope = HashMap::new();
+                        next_scope.insert("self".to_string(), iterator);
+                        let next = self.run_func(next_func, Vec::new(), &mut next_scope)?;
+                        iterator = next_scope.remove("self").unwrap_or(CtValue::Unit);
+                        let CtValue::Some(item) = next else {
+                            if matches!(next, CtValue::None(_)) {
+                                break;
+                            }
+                            return Err(unsupported("Iterator.next result", self.span()));
+                        };
+                        scope.insert(var.clone(), *item);
+                        match self.exec_stmts(body, scope)? {
+                            Flow::Normal | Flow::Continue => {}
+                            Flow::Break => break,
+                            Flow::BreakLabel(ref name)
+                                if label.as_deref() == Some(name.as_str()) =>
+                            {
+                                break
+                            }
+                            Flow::ContinueLabel(ref name)
+                                if label.as_deref() == Some(name.as_str()) => {}
+                            other => return Ok(other),
+                        }
+                    }
+                    return Ok(Flow::Normal);
+                }
                 if method_kind.is_some() {
                     return Err(unsupported("for-in method collection", self.span()));
                 }
-                let coll = self.eval_expr(source, scope)?;
+                if let Some(stream_index) = super::EvalCtx::stream_index(&coll) {
+                    let (func, args) = self
+                        .streams
+                        .get(stream_index)
+                        .map(|stream| (stream.func, stream.args.clone()))
+                        .ok_or_else(|| unsupported("stream handle", self.span()))?;
+                    let previous_consumer = self.yield_consumer.replace(super::YieldConsumer {
+                        var: var.clone(),
+                        body,
+                    });
+                    let previous_scope = self.yield_scope.replace(std::mem::take(scope));
+                    let mut generator_scope = HashMap::new();
+                    let result = self.run_func(func, args, &mut generator_scope);
+                    *scope = self.yield_scope.take().unwrap_or_default();
+                    self.yield_scope = previous_scope;
+                    self.yield_consumer = previous_consumer;
+                    result?;
+                    return Ok(Flow::Normal);
+                }
                 let stride = match step {
                     Some(s) => as_int(&self.eval_expr(s, scope)?, self.span())?,
                     None => 1,
@@ -466,12 +551,6 @@ impl<'a> EvalCtx<'a> {
                 if assign.is_map {
                     return Err(unsupported("index field assign on map", self.span()));
                 }
-                let base_name = match &assign.base.kind {
-                    crate::Codegen::TIR::TExprKind::Local(local) => local.name.clone(),
-                    _ => {
-                        return Err(unsupported("index field assign base", self.span()));
-                    }
-                };
                 let idx = as_int(&self.eval_expr(&assign.index, scope)?, self.span())?;
                 if idx < 0 {
                     return Err(unsupported("negative index field assign", self.span()));
@@ -480,7 +559,7 @@ impl<'a> EvalCtx<'a> {
                 if assign.clone_value {
                     rhs = rhs.clone();
                 }
-                let Some(CtValue::List(mut items)) = scope.get(&base_name).cloned() else {
+                let CtValue::List(mut items) = self.eval_expr(&assign.base, scope)? else {
                     return Err(unsupported("index field assign list", self.span()));
                 };
                 let i = idx as usize;
@@ -513,10 +592,31 @@ impl<'a> EvalCtx<'a> {
                     ));
                 }
                 items[i] = CtValue::Struct { type_name, fields };
-                scope.insert(base_name, CtValue::List(items));
+                self.write_back_place(&assign.base, CtValue::List(items), scope)?;
                 Ok(Flow::Normal)
             }
-            TStmt::IndexHookAssign { .. } => Err(unsupported("index hook assign", self.span())),
+            TStmt::IndexHookAssign {
+                type_name,
+                base,
+                index,
+                value,
+            } => {
+                let recv = self.eval_expr(base, scope)?;
+                let key = self.eval_expr(index, scope)?;
+                let rhs = self.eval_expr(value, scope)?;
+                let func = self
+                    .funcs
+                    .get(&format!("{type_name}::set"))
+                    .copied()
+                    .ok_or_else(|| unsupported("IndexMut.set", self.span()))?;
+                let mut child = HashMap::new();
+                child.insert("self".to_string(), recv);
+                self.run_func(func, vec![key, rhs], &mut child)?;
+                if let Some(updated) = child.remove("self") {
+                    self.write_back_place(base, updated, scope)?;
+                }
+                Ok(Flow::Normal)
+            }
             TStmt::MathSwizzleAssign { .. } => Err(unsupported("math swizzle assign", self.span())),
             TStmt::GcEdit { .. } => Err(unsupported("gc edit", self.span())),
             TStmt::SplitViews { .. } => Err(unsupported("split views", self.span())),
@@ -526,7 +626,7 @@ impl<'a> EvalCtx<'a> {
             TStmt::Live { .. } => Err(unsupported("statement `Live`", self.span())),
             TStmt::Shield { .. } => Err(unsupported("statement `Shield`", self.span())),
             TStmt::ScopeMember { .. } => Err(unsupported("statement `ScopeMember`", self.span())),
-            TStmt::Transact { .. } => Err(unsupported("statement `Transact`", self.span())),
+            TStmt::Transact { body, .. } => self.exec_stmts(body, scope),
         }
     }
 

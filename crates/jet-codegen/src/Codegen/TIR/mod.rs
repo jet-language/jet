@@ -106,6 +106,9 @@ pub struct JitProgram {
     /// Sema-resolved `(trait, method) -> concrete owner` dispatch facts.
     pub trait_method_owners:
         std::collections::HashMap<(String, String), Vec<String>>,
+    /// Sema-resolved `(collection, iterator) -> Iterable.Item` facts.
+    pub iterable_item_types:
+        std::collections::HashMap<(String, String), Type>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1134,6 +1137,16 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             _ => {}
         }
     }
+    let iterable_item_types = cx
+        .iterable_hooks
+        .iter()
+        .map(|(collection, hook)| {
+            (
+                (collection.clone(), hook.iter_type.clone()),
+                hook.item_type.clone(),
+            )
+        })
+        .collect();
     Some(JitProgram {
         instance_provenance: instance_provenance(bundle),
         source_file: module.display.clone(),
@@ -1147,6 +1160,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         int_constants,
         distinct_bases,
         trait_method_owners,
+        iterable_item_types,
     })
     })
 }

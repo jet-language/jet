@@ -455,4 +455,37 @@ impl<'a> EvalCtx<'a> {
         }
         Ok(result)
     }
+
+    pub(super) fn eval_tlambda_mut_arg(
+        &mut self,
+        lam: &'a TLambda,
+        arg: CtValue,
+        outer: &mut HashMap<String, CtValue>,
+    ) -> Result<(CtValue, CtValue), Diagnostic> {
+        let Some(param) = lam.source_params.first() else {
+            return Err(unsupported("shared lambda parameter", self.span()));
+        };
+        let mut child = outer.clone();
+        child.insert(param.clone(), arg);
+        let result = match &lam.executable {
+            TLambdaBody::Expr(expr) => self.eval_expr(expr, &mut child)?,
+            TLambdaBody::Block(stmts) => match self.exec_stmts(stmts, &mut child)? {
+                Flow::Return(value) => value,
+                Flow::Normal => CtValue::Unit,
+                other => {
+                    return Err(unsupported(
+                        &format!("control flow {other:?} escaping shared lambda"),
+                        self.span(),
+                    ));
+                }
+            },
+        };
+        let updated = child.remove(param).unwrap_or(CtValue::Unit);
+        for (name, value) in child {
+            if outer.contains_key(&name) {
+                outer.insert(name, value);
+            }
+        }
+        Ok((result, updated))
+    }
 }

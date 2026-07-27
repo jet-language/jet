@@ -164,6 +164,31 @@ pub(crate) fn clif_ty_with_distinct(
     if matches!(&ty, Type::Named(n) if n == "Unit") {
         return None;
     }
+    if matches!(&ty, Type::Named(n)
+        if matches!(
+            n.as_str(),
+            "Arena" | "Bump" | "Pool" | "Fixed" | "Solver" | "BitSet" | "ByteBuffer"
+        ))
+    {
+        return Some(types::I64);
+    }
+    if matches!(&ty, Type::Shared(_))
+        || matches!(&ty, Type::Apply { name, .. }
+            if matches!(
+                name.as_str(),
+                "Pool"
+                    | "Id"
+                    | "Ptr"
+                    | "Stream"
+                    | "ExpiringValue"
+                    | "ExpiringSecret"
+                    | "SortedSet"
+                    | "PriorityQueue"
+                    | "Lru"
+            ))
+    {
+        return Some(types::I64);
+    }
     if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "Duration" | "DurationUnit" | "RangeError" | "ParseError")) {
         return Some(types::I64);
     }
@@ -255,12 +280,13 @@ pub(crate) fn func_signature(
                     | Type::Char
             )
         {
-            return Err(format!("jit writable scalar param ABI unsupported: {ty:?}"));
+            sig.params.push(AbiParam::new(types::I64));
+        } else {
+            sig.params.push(AbiParam::new(
+                meta.clif_ty(ty)
+                    .ok_or_else(|| format!("jit param type unsupported: {ty:?}"))?,
+            ));
         }
-        sig.params.push(AbiParam::new(
-            meta.clif_ty(ty)
-                .ok_or_else(|| format!("jit param type unsupported: {ty:?}"))?,
-        ));
     }
     if let Some(ret) = &tir.ret {
         if let Some(clif) = meta.clif_ty(ret) {
@@ -308,6 +334,8 @@ pub(crate) fn jit_fn_name(name: &str) -> String {
 pub(crate) struct JitMeta<'a> {
     trait_method_owners:
         &'a HashMap<(String, String), Vec<String>>,
+    iterable_item_types:
+        &'a HashMap<(String, String), Type>,
     struct_fields: &'a HashMap<String, Vec<String>>,
     struct_field_types: &'a HashMap<String, Vec<Type>>,
     enum_variants: &'a HashMap<String, Vec<String>>,
@@ -321,6 +349,7 @@ impl<'a> JitMeta<'a> {
     pub(crate) fn from_program(program: &'a JitProgram) -> Self {
         JitMeta {
             trait_method_owners: &program.trait_method_owners,
+            iterable_item_types: &program.iterable_item_types,
             struct_fields: &program.struct_fields,
             struct_field_types: &program.struct_field_types,
             enum_variants: &program.enum_variants,
@@ -346,6 +375,15 @@ impl<'a> JitMeta<'a> {
             .flatten()
             .map(String::as_str)
             .collect()
+    }
+
+    pub(crate) fn iterable_item_type(
+        &self,
+        collection: &str,
+        iterator: &str,
+    ) -> Option<&Type> {
+        self.iterable_item_types
+            .get(&(collection.to_string(), iterator.to_string()))
     }
 
     pub(crate) fn enum_variant_payload_types(

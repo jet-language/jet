@@ -4,7 +4,9 @@
 //! Keeping the pure AST walk in the driver prevents either product from
 //! depending on the root host or inventing a second boundary vocabulary.
 
-use crate::AST::{AccessConvention, CallArg, ElseBranch, Expr, IfStmt, ImportKind, Item, ProgramBundle, Stmt};
+use crate::AST::{
+    AccessConvention, CallArg, ElseBranch, Expr, IfStmt, ImportKind, Item, ProgramBundle, Stmt,
+};
 use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::HashSet;
 
@@ -90,9 +92,6 @@ fn boundary_scan(bundle: &ProgramBundle) -> Option<Boundary> {
                             span: Some(function.name_span),
                         });
                     }
-                    if let Some(boundary) = scan_stmts_for_unsafe(&function.body) {
-                        return Some(boundary);
-                    }
                     if let Some(boundary) =
                         scan_stmts_for_mut_arg(&function.body, &interpreted_functions)
                     {
@@ -108,7 +107,6 @@ fn boundary_scan(bundle: &ProgramBundle) -> Option<Boundary> {
 
 fn native_module_feature(name: &str) -> Option<&'static str> {
     match name {
-        "core.tasks" => Some("spawns a task or uses a channel"),
         "core.mem" => Some("uses the low-level `core.mem` tier"),
         "core.files" => Some("reads or writes files"),
         "core.env" => Some("reads the environment"),
@@ -118,34 +116,6 @@ fn native_module_feature(name: &str) -> Option<&'static str> {
         "core.auth" => Some("verifies signed authentication tokens using the native crypto runtime"),
         _ => None,
     }
-}
-
-fn scan_stmts_for_unsafe(stmts: &[Stmt]) -> Option<Boundary> {
-    stmts.iter().find_map(scan_stmt_for_unsafe)
-}
-
-fn scan_stmt_for_unsafe(stmt: &Stmt) -> Option<Boundary> {
-    match stmt {
-        Stmt::Unsafe { span, .. } => Some(Boundary {
-            feature: "uses an `#Unsafe` block".to_string(),
-            span: Some(*span),
-        }),
-        Stmt::If(statement) => scan_if_for_unsafe(statement),
-        Stmt::While { body, .. } | Stmt::Loop { body, .. } | Stmt::CountedLoop { body, .. }
-        | Stmt::For { body, .. } => scan_stmts_for_unsafe(body),
-        Stmt::Switch { arms, else_body, .. } => arms.iter()
-            .find_map(|arm| scan_stmts_for_unsafe(&arm.body))
-            .or_else(|| else_body.as_ref().and_then(|body| scan_stmts_for_unsafe(body))),
-        _ => None,
-    }
-}
-
-fn scan_if_for_unsafe(statement: &IfStmt) -> Option<Boundary> {
-    scan_stmts_for_unsafe(&statement.then_body).or_else(|| match &statement.else_branch {
-        Some(ElseBranch::ElseIf(inner)) => scan_if_for_unsafe(inner),
-        Some(ElseBranch::Else(body)) => scan_stmts_for_unsafe(body),
-        None => None,
-    })
 }
 
 fn scan_stmts_for_mut_arg(

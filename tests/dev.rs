@@ -1342,22 +1342,47 @@ fn fluent_method_chain_preserves_fuel_order_and_spans() {
 }
 
 #[test]
-fn task_program_hits_e2201_in_interpreter_mode() {
+fn task_programs_reach_the_canonical_tir_interpreter_boundary() {
     let file = "examples/features/concurrency/tasks.jet";
     match dev_iteration(file, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(stdout, "5050\n");
+            assert!(stderr.is_empty());
+            assert_eq!(exit_code, 0);
+        }
         RunOutcome::Problems(diags) => {
-            assert_eq!(diags.len(), 1, "expected exactly one boundary note");
-            let d = &diags[0];
-            assert_eq!(d.code, "E2201");
-            assert!(
-                d.what.contains("spawns a task"),
-                "E2201 should name the task feature, got: {}",
-                d.what
-            );
+            panic!("supported spawn/join must run in the TIR interpreter: {diags:?}")
         }
-        RunOutcome::Ran { .. } => {
-            panic!("interpreter mode must not run task programs (E2201 boundary)")
-        }
+    }
+
+    let unsupported_path = std::env::temp_dir().join(format!(
+        "jet_task_tir_boundary_{}.jet",
+        std::process::id()
+    ));
+    fs::write(
+        &unsupported_path,
+        "use core.tasks as tasks\nfn run() {\n    task :: tasks.spawn(() => 1)\n    task.cancel()\n}\n",
+    )
+    .unwrap();
+    let unsupported_file = unsupported_path.to_string_lossy().into_owned();
+    let unsupported = jet::Loader::load_entry(&unsupported_file)
+        .expect("unsupported task example should load");
+    assert!(
+        jet_driver::InterpreterBoundary::dev_boundary_scan(&unsupported).is_none(),
+        "the AST boundary must not intercept core.tasks"
+    );
+    match dev_iteration(&unsupported_file, false, true) {
+        RunOutcome::Problems(diags) => assert!(
+            diags
+                .iter()
+                .any(|diag| diag.code == "E2201" && diag.what.contains("TaskCancel")),
+            "unsupported task operation must stop at canonical TIR: {diags:?}"
+        ),
+        outcome => panic!("unsupported task operation unexpectedly ran: {outcome:?}"),
     }
 }
 
@@ -3723,6 +3748,42 @@ fn golden_stdout(stem: &str) -> String {
         .unwrap_or_else(|e| panic!("missing golden for `{stem}`: {e}"))
 }
 
+#[test]
+fn unsafe_blocks_reach_the_canonical_tir_interpreter_boundary() {
+    let raw = jet::Loader::load_entry(&example_path("memory/rawptr"))
+        .expect("rawptr example should load");
+    assert!(
+        jet_driver::InterpreterBoundary::dev_boundary_scan(&raw).is_none(),
+        "sema-approved #Unsafe blocks are evaluated by canonical TIR"
+    );
+
+    let unsupported_path = std::env::temp_dir().join(format!(
+        "jet_unsafe_tir_boundary_{}.jet",
+        std::process::id()
+    ));
+    fs::write(
+        &unsupported_path,
+        "use core.mem\nfn run() {\n    #Unsafe(\"mapped address is valid and aligned\") {\n        p :: mem.Ptr<Int>.from_addr(0x40000100)\n        print(p.*)\n    }\n}\n",
+    )
+    .unwrap();
+    let unsupported_file = unsupported_path.to_string_lossy().into_owned();
+    let unsupported = jet::Loader::load_entry(&unsupported_file)
+        .expect("pointer cast example should load");
+    assert!(
+        jet_driver::InterpreterBoundary::dev_boundary_scan(&unsupported).is_none(),
+        "the AST boundary must not intercept an unsupported unsafe operation"
+    );
+    match dev_iteration(&unsupported_file, false, true) {
+        RunOutcome::Problems(diags) => assert!(
+            diags.iter().any(|diag| {
+                diag.code == "E2201" && diag.what.contains("PtrFromAddr")
+            }),
+            "unsupported unsafe operation must stop at canonical TIR: {diags:?}"
+        ),
+        outcome => panic!("unsupported unsafe operation unexpectedly ran: {outcome:?}"),
+    }
+}
+
 fn assert_cranelift_three_way(file: &str, stem: &str) {
     if skip_if_cranelift_host_unsupported() {
         return;
@@ -3740,6 +3801,49 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
         jet_jit::resident_jit_safe_bundle(&bundle) && compile.is_ok(),
         "`{stem}` must be resident-JIT safe for three-way differential: safety={safety_detail:?}, compile={compile:?}"
     );
+
+    if stem == "memory/pool_stale_id" {
+        let interpreted = match dev_iteration(file, false, true) {
+            RunOutcome::Problems(diags) => diags,
+            outcome => panic!("stale Pool Id unexpectedly ran in interpreter: {outcome:?}"),
+        };
+        assert_eq!(interpreted.len(), 1);
+        assert_eq!(interpreted[0].code, "E0953");
+
+        jet_jit::reset_jit_trace_for_test();
+        let mut backend = CraneliftBackend::new();
+        let native = jet_jit::with_program_args(&[file.to_string()], || {
+            backend.run(&bundle, false)
+        });
+        let native = match native {
+            RunOutcome::Problems(diags) => diags,
+            outcome => panic!("stale Pool Id unexpectedly ran in resident JIT: {outcome:?}"),
+        };
+        assert_eq!(native.len(), 1);
+        assert_eq!(
+            (native[0].code.as_str(), native[0].what.as_str(), native[0].why.as_str()),
+            (
+                interpreted[0].code.as_str(),
+                interpreted[0].what.as_str(),
+                interpreted[0].why.as_str(),
+            ),
+            "stale Pool diagnostic diverged between interpreter and resident JIT"
+        );
+        assert!(jet_jit::jit_executed_for_test());
+        assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
+
+        let dir =
+            std::env::temp_dir().join(format!("jet_jit_3way_{}", std::process::id()));
+        let aot = compiled_binary_output(&dir, "jit_3way", 0, stem, file);
+        assert_ne!(aot.exit_code, 0, "stale Pool Id unexpectedly ran in AOT");
+        assert!(
+            aot.stderr.contains(
+                "this Id no longer refers to a live value — its pool slot was removed"
+            ),
+            "AOT stale Pool report diverged: {aot:?}"
+        );
+        return;
+    }
 
     let interpreted = match dev_iteration(file, false, true) {
         RunOutcome::Ran {
@@ -3845,6 +3949,70 @@ fn language_callables_and_types_match_interpreter_jit_and_aot() {
     assert!(
         failures.is_empty(),
         "language/callable/type parity failures:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
+    const CHILD_STEM: &str = "JET_1216_STEM";
+    if let Ok(stem) = std::env::var(CHILD_STEM) {
+        assert_cranelift_three_way(&example_path(&stem), &stem);
+        return;
+    }
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let stems = [
+        "collections/index_hook",
+        "collections/iter_hook",
+        "collections/iter_tools_audit",
+        "memory/arena",
+        "memory/arena_parse",
+        "memory/arena_regions",
+        "memory/entity_tree",
+        "memory/entity_world",
+        "memory/expiring_secret",
+        "memory/ownership",
+        "memory/parameter_modes",
+        "memory/pool_stale_id",
+        "memory/rawptr",
+        "memory/returned_views",
+        "memory/shared_config",
+        "memory/shared_transact",
+        "memory/string_view",
+        "streams/generators",
+    ];
+    let mut failures = Vec::new();
+    for stem in stems {
+        let mut command = Command::new(std::env::current_exe().expect("current dev test binary"));
+        command
+            .args([
+                "--exact",
+                "collections_memory_and_streams_match_interpreter_jit_and_aot",
+                "--nocapture",
+            ])
+            .env(CHILD_STEM, stem)
+            .env("RUST_MIN_STACK", "8388608")
+            .env("NO_COLOR", "1");
+        let output = command_output_with_timeout(
+            command,
+            DEV_DIFF_TIMEOUT,
+            &format!("collection/memory/stream parity `{stem}`"),
+        );
+        if !output.status.success() {
+            failures.push(format!(
+                "{stem}: status={:?}\nstdout:\n{}\nstderr:\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "collection/memory/stream parity failures:\n{}",
         failures.join("\n")
     );
 }

@@ -208,8 +208,11 @@ pub(super) fn eval_handle(
             Err(unsupported("handle `TlsClientConfigWithVersionBounds`", span))
         }
         THandleOp::HttpClientNew => Err(unsupported("handle `HttpClientNew`", span)),
-        THandleOp::AllocAlloc => Err(unsupported("handle `AllocAlloc`", span)),
-        THandleOp::AllocReset => Err(unsupported("handle `AllocReset`", span)),
+        THandleOp::AllocAlloc => args
+            .first()
+            .cloned()
+            .ok_or_else(|| unsupported("allocator value", span)),
+        THandleOp::AllocReset => Ok(CtValue::Unit),
         THandleOp::HttpReqField(_) => Err(unsupported("handle `HttpReqField`", span)),
         THandleOp::HttpReqHeader => Err(unsupported("handle `HttpReqHeader`", span)),
         THandleOp::HttpReqParam => Err(unsupported("handle `HttpReqParam`", span)),
@@ -257,8 +260,14 @@ pub(super) fn eval_handle(
         THandleOp::ReflectValueFields => Err(unsupported("handle `ReflectValueFields`", span)),
         THandleOp::ReflectFieldName => Err(unsupported("handle `ReflectFieldName`", span)),
         THandleOp::ReflectFieldValue => Err(unsupported("handle `ReflectFieldValue`", span)),
-        THandleOp::TaskJoin => Err(unsupported("handle `TaskJoin`", span)),
-        THandleOp::TaskDetach => Err(unsupported("handle `TaskDetach`", span)),
+        THandleOp::TaskJoin => match recv {
+            CtValue::Struct { type_name, fields } if type_name == "__JetTirTask" => fields
+                .iter()
+                .find_map(|(name, value)| (name == "value").then(|| value.clone()))
+                .ok_or_else(|| unsupported("task result", span)),
+            _ => Err(unsupported("task receiver", span)),
+        },
+        THandleOp::TaskDetach => Ok(CtValue::Unit),
         THandleOp::TaskPause => Err(unsupported("handle `TaskPause`", span)),
         THandleOp::TaskResume => Err(unsupported("handle `TaskResume`", span)),
         THandleOp::TaskCancel => Err(unsupported("handle `TaskCancel`", span)),

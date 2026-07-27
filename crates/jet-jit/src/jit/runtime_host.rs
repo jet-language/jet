@@ -8,8 +8,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::resident::resident_teardown;
 use super::{
-    Archive, Collections, Compress, Concurrency, CoreHost, Encoding, Fmt, JitResultValue, Numeric,
-    Process, Random, Sketch, Solver, Text, TRY_COMPILE_PANIC_HOOK_LOCK,
+    Archive, Collections, Compress, Concurrency, CoreHost, Encoding, Fmt, JitResultValue, Memory,
+    Numeric, Process, Random, Sketch, Solver, Text, TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
 pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
@@ -55,7 +55,7 @@ pub(crate) struct JitRuntime {
     pub(crate) heap: jet_rt::JetArena,
     pub(crate) invocations: u64,
     pub(crate) channels: Vec<JetSchedulerChannel<i64>>,
-    pub(crate) senders: Vec<JetSchedulerSender<i64>>,
+    pub(crate) senders: Vec<Option<JetSchedulerSender<i64>>>,
     pub(crate) tasks: Vec<Option<JetSchedulerJoin<i64>>>,
     pub(crate) task_controls: Vec<std::sync::Arc<JetTaskControl>>,
     /// General `Result<T, E>` ABI arena. Handles are one-based indices; payload
@@ -93,6 +93,15 @@ pub(crate) struct JitRuntime {
     pub(crate) deques: Vec<std::collections::VecDeque<i64>>,
     /// `Bag<T>` handles — counted JIT-value bits, keyed by the checked element ABI.
     pub(crate) bags: Vec<std::collections::HashMap<i64, usize>>,
+    pub(crate) sorted_sets: Vec<std::collections::BTreeSet<i64>>,
+    pub(crate) priority_queues: Vec<std::collections::BinaryHeap<i64>>,
+    pub(crate) lrus: Vec<Collections::LruState>,
+    pub(crate) bit_sets: Vec<std::collections::BTreeSet<i64>>,
+    pub(crate) byte_buffers: Vec<Vec<u8>>,
+    pub(crate) allocators: Vec<Memory::AllocatorState>,
+    pub(crate) pools: Vec<std::sync::Arc<std::sync::Mutex<Memory::PoolState>>>,
+    pub(crate) shareds: Vec<std::sync::Arc<Memory::SharedState>>,
+    pub(crate) expirings: Vec<Memory::ExpiringState>,
     /// Set by a host shim when the user program hits a runtime panic (overflow,
     /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
     /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,
@@ -646,6 +655,23 @@ extern "C" fn jet_jit_clock_new(ms: i64) -> i64 {
         rt.clocks.push(ms);
         rt.clocks.len() as i64
     })
+}
+
+extern "C" fn jet_jit_clock_now(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.clocks
+            .get((handle as usize).wrapping_sub(1))
+            .copied()
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_clock_tick(handle: i64, delta: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(now) = rt.clocks.get_mut((handle as usize).wrapping_sub(1)) {
+            *now = now.saturating_add(delta);
+        }
+    });
 }
 
 extern "C" fn jet_jit_trap_panic(_unused: i64) -> i64 {
@@ -1238,6 +1264,8 @@ pub(crate) struct HostFns {
     pub(crate) str_before: FuncId,
     pub(crate) str_slice: FuncId,
     pub(crate) clock_new: FuncId,
+    pub(crate) clock_now: FuncId,
+    pub(crate) clock_tick: FuncId,
     pub(crate) parse_i64: FuncId,
     pub(crate) parse_f64: FuncId,
     pub(crate) numeric_try_i64: FuncId,
@@ -1286,6 +1314,7 @@ pub(crate) struct HostFns {
     pub(crate) is_trapped: FuncId,
     pub(crate) deopt_call: FuncId,
     pub(crate) coll: Collections::CollectionsHostFns,
+    pub(crate) memory: Memory::MemoryHostFns,
     pub(crate) conc: Concurrency::ConcurrencyHostFns,
     pub(crate) core: CoreHost::CoreHostFns,
     pub(crate) encoding: Encoding::EncodingHostFns,
@@ -1346,6 +1375,8 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_before", jet_jit_str_before as *const u8);
     builder.symbol("jet_jit_str_slice", jet_jit_str_slice as *const u8);
     builder.symbol("jet_jit_clock_new", jet_jit_clock_new as *const u8);
+    builder.symbol("jet_jit_clock_now", jet_jit_clock_now as *const u8);
+    builder.symbol("jet_jit_clock_tick", jet_jit_clock_tick as *const u8);
     builder.symbol("jet_jit_trap_panic", jet_jit_trap_panic as *const u8);
     builder.symbol("jet_jit_parse_i64", jet_jit_parse_i64 as *const u8);
     builder.symbol("jet_jit_parse_f64", jet_jit_parse_f64 as *const u8);
@@ -1436,6 +1467,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_is_trapped", jet_jit_is_trapped as *const u8);
     builder.symbol("jet_deopt_call", super::deopt::jet_deopt_call as *const u8);
     Collections::register_collections_symbols(&mut builder);
+    Memory::register_memory_symbols(&mut builder);
     Concurrency::register_concurrency_symbols(&mut builder);
     CoreHost::register_core_host_symbols(&mut builder);
     Encoding::register_encoding_symbols(&mut builder);
@@ -1453,6 +1485,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Db::register_db_symbols(&mut builder);
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
+    let memory = Memory::declare_memory_host_fns(&mut module)?;
     let conc = Concurrency::declare_concurrency_host_fns(&mut module)?;
     let core = CoreHost::declare_core_host_fns(&mut module)?;
     let encoding = Encoding::declare_encoding_host_fns(&mut module)?;
@@ -1471,6 +1504,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let host = declare_host_fns(
         &mut module,
         coll,
+        memory,
         conc,
         core,
         encoding,
@@ -1493,6 +1527,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
 fn declare_host_fns(
     module: &mut JITModule,
     coll: Collections::CollectionsHostFns,
+    memory: Memory::MemoryHostFns,
     conc: Concurrency::ConcurrencyHostFns,
     core: CoreHost::CoreHostFns,
     encoding: Encoding::EncodingHostFns,
@@ -1743,6 +1778,8 @@ fn declare_host_fns(
         str_before: import("jet_jit_str_before", &sig_str_binary_i64)?,
         str_slice: import("jet_jit_str_slice", &sig_str_replace)?,
         clock_new: import("jet_jit_clock_new", &sig_str_unary_i64)?,
+        clock_now: import("jet_jit_clock_now", &sig_str_unary_i64)?,
+        clock_tick: import("jet_jit_clock_tick", &sig_struct_assign)?,
         parse_i64: import("jet_jit_parse_i64", &sig_str_unary_i64)?,
         parse_f64: import("jet_jit_parse_f64", &sig_str_unary_i64)?,
         numeric_try_i64: import("jet_jit_numeric_try_i64", &sig_i64_i64_i64_i64)?,
@@ -1794,6 +1831,7 @@ fn declare_host_fns(
         is_trapped: import("jet_jit_is_trapped", &sig_is_trapped)?,
         deopt_call: import("jet_deopt_call", &sig_deopt)?,
         coll,
+        memory,
         conc,
         core,
         encoding,

@@ -277,10 +277,26 @@ fn jit_compound_type(ty: &Type) -> bool {
         || matches!(
             ty,
             Type::Apply { name, args }
-                if matches!(name.as_str(), "Set" | "Deque" | "Bag")
-                    && args.len() == 1
-                    && (name != "Bag" || jit_bag_raw_key_candidate(&args[0]))
+                if args.len() == 1
+                    && (matches!(
+                        name.as_str(),
+                        "Set"
+                            | "Deque"
+                            | "Pool"
+                            | "Id"
+                            | "Stream"
+                            | "ExpiringValue"
+                            | "ExpiringSecret"
+                            | "SortedSet"
+                            | "PriorityQueue"
+                            | "Lru"
+                            | "Ptr"
+                    ) || (name == "Bag" && jit_bag_raw_key_candidate(&args[0])))
         )
+        || matches!(ty, Type::Apply { name, args }
+            if name == "View" && args.len() == 1 && jit_value_type(&args[0]))
+        || matches!(ty, Type::Named(name) if matches!(name.as_str(), "BitSet" | "ByteBuffer"))
+        || matches!(ty, Type::Shared(_))
 }
 
 fn jit_concurrency_elem(ty: &Type) -> bool {
@@ -313,6 +329,10 @@ pub(crate) fn jit_value_type(ty: &Type) -> bool {
                     | "ProcessResult"
                     | "ProcessSpec"
                     | "ProcessChild"
+                    | "Arena"
+                    | "Bump"
+                    | "Pool"
+                    | "Fixed"
             ) =>
         {
             true
@@ -324,6 +344,7 @@ pub(crate) fn jit_value_type(ty: &Type) -> bool {
         | Type::Bool
         | Type::String
         | Type::Char => true,
+        Type::Tuple(fields) if fields.is_empty() => true,
         Type::Fn { params, ret, .. } => {
             params.iter().all(jit_value_type)
                 && ret.as_ref().is_none_or(|ret| jit_value_type(ret))
@@ -362,6 +383,13 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             args,
             ..
         } => {
+            if module == "jet.crypto" {
+                return match (method.as_str(), args.as_slice()) {
+                    ("__signing_generate", []) => true,
+                    ("__signing_public", [key]) => resident_safe_expr(key, callees),
+                    _ => false,
+                };
+            }
             if module == "core.text" {
                 return match method.as_str() {
                     "lower" | "upper" | "trim" | "scalar_count" | "byte_count" | "graphemes"
@@ -634,6 +662,19 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::StaticCall { args, .. } => {
             args.iter().all(|a| resident_safe_call_arg(a, callees))
         }
+        TExprKind::AllocNew { .. } => true,
+        TExprKind::PoolSlot { pool, id, .. } => {
+            resident_safe_expr(pool, callees) && resident_safe_expr(id, callees)
+        }
+        TExprKind::IndexHook {
+            base, index, ..
+        } => {
+            resident_safe_expr(base, callees) && resident_safe_expr(index, callees)
+        }
+        TExprKind::Drop(inner)
+        | TExprKind::MaterializeView(inner)
+        | TExprKind::Deref(inner)
+        | TExprKind::RawOf(inner) => resident_safe_expr(inner, callees),
         TExprKind::EnumLit { payload, .. } => {
             jit_enum_type(&expr.ty) && resident_safe_enum_payload(payload, callees)
         }
@@ -715,8 +756,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::Clone(inner) => resident_safe_expr(inner, callees),
         TExprKind::Borrow { place, .. } => resident_safe_expr(place, callees),
         TExprKind::Lambda(lam) => {
-            lam.prep.is_empty()
-                && lam.param_types.iter().all(jit_value_type)
+            lam.param_types.iter().all(jit_value_type)
                 && lam.ret.as_ref().is_none_or(jit_value_type)
                 && match &lam.executable {
                     TIR::TLambdaBody::Expr(expr) => resident_safe_expr(expr, callees),
@@ -827,6 +867,37 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             }
             THostCall::TupleIndex { base, .. } => resident_safe_expr(base, callees),
             THostCall::SwitchSubjectField { .. } => true,
+            THostCall::Method { recv, args, .. } => {
+                resident_safe_expr(recv, callees)
+                    && args.iter().all(|arg| resident_safe_expr(arg, callees))
+            }
+            THostCall::Helper { helper, args }
+                if helper.ends_with("jet_std_clock_new") =>
+            {
+                args.len() == 1
+                    && args.iter().all(|arg| match arg {
+                        TIR::THostArg::Expr(expr) | TIR::THostArg::Borrow(expr) => {
+                            resident_safe_expr(expr, callees)
+                        }
+                        TIR::THostArg::Lambda(_) => false,
+                    })
+            }
+            THostCall::ExpiringValueNew {
+                value,
+                duration,
+                clock,
+            }
+            | THostCall::ExpiringSecretNew {
+                value,
+                duration,
+                clock,
+                ..
+            } => {
+                resident_safe_expr(value, callees)
+                    && resident_safe_expr(duration, callees)
+                    && resident_safe_expr(clock, callees)
+            }
+            THostCall::YieldSend { value } => resident_safe_expr(value, callees),
             _ => false,
         },
         // Codable encode lowers to `JsonLit` (DataTree/Json foreign enum).
@@ -874,6 +945,7 @@ fn resident_safe_call_arg(arg: &TCallArg, callees: &HashSet<String>) -> bool {
                 | Type::IntN { .. }
                 | Type::Float32
         ) || jit_struct_type(ty)
+            || jit_compound_type(ty)
             || jit_tuple_type(ty)
             || jit_list_native_type(ty)
             || jit_list_record_type(ty)
@@ -1002,6 +1074,10 @@ fn resident_safe_closure_method(
         TIR::TClosureOp::FlatMap => {
             jit_list_of_int_list_type(&recv.ty) && resident_safe_unary_lambda(args, callees)
         }
+        TIR::TClosureOp::CountBy => {
+            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::String))
+                && resident_safe_unary_lambda(args, callees)
+        }
         _ => false,
     }
 }
@@ -1068,10 +1144,15 @@ fn resident_safe_builtin_op(
                     .all(|a| matches!(&a.ty, Type::String) && resident_safe_expr(a, callees))
         }
         TBuiltinOp::Push => {
-            jit_list_native_type(&recv.ty)
+            (jit_list_native_type(&recv.ty)
+                || matches!(&recv.ty, Type::List(elem) if jit_value_type(elem))
+                || matches!(&recv.ty, Type::Apply { name, .. } if name == "PriorityQueue"))
                 && args.len() == 1
-                && matches!(&args[0].ty, Type::Int | Type::Float)
+                && (jit_value_type(&args[0].ty) || jit_compound_type(&args[0].ty))
                 && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::Keys | TBuiltinOp::Values => {
+            jit_map_string_type(&recv.ty) && args.is_empty()
         }
         TBuiltinOp::Sort => jit_list_int_type(&recv.ty) && args.is_empty(),
         TBuiltinOp::LenList => {
@@ -1079,7 +1160,8 @@ fn resident_safe_builtin_op(
                 || jit_list_native_type(&recv.ty)
                 || jit_list_iter_elem_type(&recv.ty).is_some()
                 || jit_closure_elem_type(&recv.ty).is_some()
-                || matches!(&recv.ty, Type::Apply { name, .. } if matches!(name.as_str(), "Set" | "Deque")))
+                || matches!(&recv.ty, Type::Apply { name, .. } if matches!(name.as_str(), "Set" | "Deque"))
+                || matches!(&recv.ty, Type::Named(name) if name == "BitSet"))
                 && args.is_empty()
         }
         TBuiltinOp::GetList => {
@@ -1112,7 +1194,7 @@ fn resident_safe_builtin_op(
             matches!(&recv.ty, Type::String) && args.is_empty()
         }
         TBuiltinOp::Slice { .. } => {
-            jit_list_int_type(&recv.ty)
+            (jit_list_int_type(&recv.ty) || matches!(&recv.ty, Type::String))
                 && args.len() == 2
                 && matches!(&args[0].ty, Type::Int)
                 && matches!(&args[1].ty, Type::Int)
@@ -1150,6 +1232,23 @@ fn resident_safe_builtin_op(
         TBuiltinOp::Sum { float: false } => {
             matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int)) && args.is_empty()
         }
+        TBuiltinOp::Product { float: false }
+        | TBuiltinOp::Min { float: false }
+        | TBuiltinOp::Max { float: false } => {
+            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::Int)) && args.is_empty()
+        }
+        TBuiltinOp::Flatten => jit_list_of_int_list_type(&recv.ty) && args.is_empty(),
+        TBuiltinOp::Intersperse => {
+            jit_list_iter_elem_type(&recv.ty).is_some()
+                && args.len() == 1
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::Zip { .. } => {
+            jit_list_iter_elem_type(&recv.ty).is_some()
+                && args.len() == 1
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::Unzip { .. } => args.is_empty(),
         TBuiltinOp::TryCollect => {
             jit_result_list_elem(&recv.ty).is_some() && args.is_empty()
         }
@@ -1204,6 +1303,56 @@ fn resident_safe_builtin_op(
                 && args.len() == 1
                 && matches!(&args[0].ty, Type::Apply { name, args: targs }
                     if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int))
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::SortedSetFrom | TBuiltinOp::PriorityQueueFrom => {
+            jit_list_int_type(&recv.ty) && args.is_empty()
+        }
+        TBuiltinOp::SortedSetInsert | TBuiltinOp::SortedSetRemove => {
+            matches!(&recv.ty, Type::Apply { name, .. } if name == "SortedSet")
+                && args.len() == 1
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::SortedSetToList
+        | TBuiltinOp::PriorityQueuePeek
+        | TBuiltinOp::PriorityQueueToSortedList
+        | TBuiltinOp::LruKeys
+        | TBuiltinOp::BitSetCount
+        | TBuiltinOp::BitSetToList
+        | TBuiltinOp::ByteBufferToBytes => args.is_empty(),
+        TBuiltinOp::First | TBuiltinOp::Last => {
+            matches!(&recv.ty, Type::Apply { name, .. } if name == "SortedSet")
+                && args.is_empty()
+        }
+        TBuiltinOp::Pop => {
+            matches!(&recv.ty, Type::Apply { name, .. } if name == "PriorityQueue")
+                && args.is_empty()
+        }
+        TBuiltinOp::LruPut | TBuiltinOp::LruAddNew => {
+            matches!(&recv.ty, Type::Apply { name, .. } if name == "Lru")
+                && args.len() == 2
+                && args.iter().all(|arg| resident_safe_expr(arg, callees))
+        }
+        TBuiltinOp::LruGet | TBuiltinOp::ContainsKey => {
+            matches!(&recv.ty, Type::Apply { name, .. } if name == "Lru")
+                && args.len() == 1
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::BitSetAdd | TBuiltinOp::BitSetRemove => {
+            matches!(&recv.ty, Type::Named(name) if name == "BitSet")
+                && args.len() == 1
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::BitSetNew | TBuiltinOp::ByteBufferNew => args.is_empty(),
+        TBuiltinOp::ByteBufferWrite { .. } => {
+            matches!(&recv.ty, Type::Named(name) if name == "ByteBuffer")
+                && args.len() == 1
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::TrimView => matches!(&recv.ty, Type::String) && args.is_empty(),
+        TBuiltinOp::AfterView | TBuiltinOp::BeforeView => {
+            matches!(&recv.ty, Type::String)
+                && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::BagAdd | TBuiltinOp::BagRemove | TBuiltinOp::BagHas | TBuiltinOp::BagCount => {
@@ -1327,8 +1476,16 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     .chars()
                     .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
             });
-            let field = op.is_none() && structured_record_field_place(place);
-            !clone_value
+            let field = structured_record_field_place(place)
+                || matches!(
+                    place,
+                    TIR::TPlace::Expr(expr)
+                        if matches!(
+                            &expr.kind,
+                            TExprKind::PoolSlot { field: Some(_), .. }
+                        )
+                );
+            (!clone_value || jit_value_type(&value.ty))
                 && compound
                 && (local || field)
                 && resident_safe_expr(value, callees)
@@ -1453,6 +1610,13 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             use jet_codegen::Codegen::TIR::TForInMethod;
             let chars_ok = matches!(method_kind, Some(TForInMethod::Chars))
                 && matches!(&source.ty, Type::String);
+            let iterable_ok = matches!(
+                method_kind,
+                Some(TForInMethod::Iterable { coll_type, iter_type })
+                    if record_type_key(&source.ty).is_some_and(|name| name == *coll_type)
+                        && callees.contains(&format!("{coll_type}::iter"))
+                        && callees.contains(&format!("{iter_type}::next"))
+            );
             let process_lines_ok = matches!(method_kind, Some(TForInMethod::LinesProcessStream))
                 && var2.is_none()
                 && matches!(
@@ -1478,6 +1642,16 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 && (jit_list_iter_elem_type(&collection.ty).is_some()
                     || jit_closure_elem_type(&collection.ty).is_some()
                     || jit_list_record_type(&collection.ty));
+            let stream_ok = method_kind.is_none()
+                && var2.is_none()
+                && step.is_none()
+                && matches!(
+                    &collection.ty,
+                    Type::Apply { name, args }
+                        if name == "Stream"
+                            && args.len() == 1
+                            && jit_value_type(&args[0])
+                );
             // D-RANGE-EXCL1=C: sequence two-binding is index then item.
             let list_pair_ok = method_kind.is_none()
                 && var2.is_some()
@@ -1490,8 +1664,9 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             // `by_value` marks Stream/Iter/HttpBodyChunks. Only Iter<T> is list-
             // backed under the JIT host ABI (true lazy handles don't cross).
             let by_value_ok = !*by_value
-                || jet_foundation::Collections::is_iter_type(&collection.ty);
-            (chars_ok || list_ok || list_pair_ok || map_ok)
+                || jet_foundation::Collections::is_iter_type(&collection.ty)
+                || matches!(&collection.ty, Type::Apply { name, .. } if name == "Stream");
+            (chars_ok || iterable_ok || stream_ok || list_ok || list_pair_ok || map_ok)
                 && !columnar
                 && by_value_ok
                 && resident_safe_expr(source, callees)
@@ -1531,8 +1706,22 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     .all(|(_, _, body)| body.iter().all(|s| resident_safe_stmt(s, callees)))
                 && else_body.iter().all(|s| resident_safe_stmt(s, callees))
         }
-        TStmt::Region(body) | TStmt::Impure(body) | TStmt::Shield { body } => {
+        TStmt::Region(body)
+        | TStmt::Impure(body)
+        | TStmt::Unsafe(body)
+        | TStmt::Shield { body }
+        | TStmt::Transact { body, .. } => {
             body.iter().all(|s| resident_safe_stmt(s, callees))
+        }
+        TStmt::IndexHookAssign {
+            base,
+            index,
+            value,
+            ..
+        } => {
+            resident_safe_expr(base, callees)
+                && resident_safe_expr(index, callees)
+                && resident_safe_expr(value, callees)
         }
         // JIT models singleton split views as checked element/window handles.
         // Range windows need relative end-bound enforcement before they can be
@@ -1580,7 +1769,10 @@ fn structured_record_field_place(place: &TIR::TPlace) -> bool {
             recv,
             boxed: false,
             ..
-        } if matches!(&recv.kind, TIR::TExprKind::Local(_))
+        } if matches!(
+            &recv.kind,
+            TIR::TExprKind::Local(_) | TIR::TExprKind::PoolSlot { .. }
+        )
     )
 }
 
@@ -1856,6 +2048,7 @@ pub(crate) fn resident_safe_spawn_lambda(lam: &TJitSpawnLambda, callees: &HashSe
 fn resident_safe_capture_policy(c: &JitSpawnCapture) -> bool {
     if c.clone_at_spawn {
         matches!(&c.ty, Type::Apply { name, .. } if name == "Sender")
+            || matches!(&c.ty, Type::Shared(_))
     } else {
         true
     }
@@ -1929,6 +2122,12 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                 )
         }
         THandleOp::DurationNew { .. } => args.is_empty(),
+        THandleOp::AllocAlloc => args.len() == 1,
+        THandleOp::AllocReset | THandleOp::ClockNow => args.is_empty(),
+        THandleOp::ClockTick => args.len() == 1,
+        THandleOp::ExpiringMethod { method } => {
+            matches!(method.as_str(), "get" | "is_valid") && args.len() == 1
+        }
         THandleOp::ProcessSpecMethod { method } => {
             matches!(
                 (method.as_str(), args.len()),
