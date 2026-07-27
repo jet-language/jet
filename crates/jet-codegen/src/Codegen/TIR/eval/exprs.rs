@@ -417,6 +417,45 @@ impl<'a> EvalCtx<'a> {
                 if module == "core.data" {
                     return self.eval_core_data_call(method, args, &expr.ty, scope);
                 }
+                if module == "core.mem" && method == "volatile_write" && args.len() == 2 {
+                    let pointer = self.eval_expr(&args[0], scope)?;
+                    let value = self.eval_expr(&args[1], scope)?;
+                    let CtValue::Struct { type_name, fields } = pointer else {
+                        return Err(unsupported("raw pointer carrier", self.span()));
+                    };
+                    if type_name != "__JetRawLocal" {
+                        return Err(unsupported("raw pointer target", self.span()));
+                    }
+                    let name = fields.iter().find_map(|(field, value)| {
+                        match (field.as_str(), value) {
+                            ("name", CtValue::Str(name)) => Some(name.clone()),
+                            _ => None,
+                        }
+                    });
+                    let Some(name) = name else {
+                        return Err(unsupported("raw pointer local", self.span()));
+                    };
+                    scope.insert(name, value);
+                    return Ok(CtValue::Unit);
+                }
+                if module == "core.mem" && method == "volatile_read" && args.len() == 1 {
+                    let pointer = self.eval_expr(&args[0], scope)?;
+                    let CtValue::Struct { type_name, fields } = pointer else {
+                        return Err(unsupported("raw pointer carrier", self.span()));
+                    };
+                    if type_name != "__JetRawLocal" {
+                        return Err(unsupported("raw pointer target", self.span()));
+                    }
+                    let name = fields.iter().find_map(|(field, value)| {
+                        match (field.as_str(), value) {
+                            ("name", CtValue::Str(name)) => Some(name.as_str()),
+                            _ => None,
+                        }
+                    });
+                    return name
+                        .and_then(|name| scope.get(name).cloned())
+                        .ok_or_else(|| unsupported("raw pointer local", self.span()));
+                }
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
@@ -1130,11 +1169,17 @@ impl<'a> EvalCtx<'a> {
                                 _ => None,
                             })
                             .ok_or_else(|| unsupported("shared handle", self.span()))?;
-                        let current = self
-                            .shared_values
-                            .get(index)
-                            .cloned()
-                            .ok_or_else(|| unsupported("shared value", self.span()))?;
+                        let transactional = method == "edit_txn";
+                        let current = if transactional {
+                            self.shared_transactions
+                                .last()
+                                .and_then(|transaction| transaction.get(&index))
+                                .cloned()
+                                .or_else(|| self.shared_values.get(index).cloned())
+                        } else {
+                            self.shared_values.get(index).cloned()
+                        }
+                        .ok_or_else(|| unsupported("shared value", self.span()))?;
                         let Some(TExpr {
                             kind: TExprKind::Lambda(lambda),
                             ..
@@ -1144,7 +1189,15 @@ impl<'a> EvalCtx<'a> {
                         };
                         let (result, updated) =
                             self.eval_tlambda_mut_arg(lambda, current, scope)?;
-                        if matches!(method.as_str(), "edit" | "edit_txn") {
+                        if transactional {
+                            let Some(transaction) = self.shared_transactions.last_mut() else {
+                                return Err(unsupported(
+                                    "Shared.edit_txn outside #Transact",
+                                    self.span(),
+                                ));
+                            };
+                            transaction.insert(index, updated);
+                        } else if method == "edit" {
                             self.shared_values[index] = updated;
                         }
                         return Ok(result);
@@ -1233,6 +1286,10 @@ impl<'a> EvalCtx<'a> {
                     self.yield_scope = Some(consumer_scope);
                     match result? {
                         Flow::Normal | Flow::Continue => Ok(CtValue::Unit),
+                        Flow::Break => {
+                            self.pending_return = Some(CtValue::Unit);
+                            Ok(CtValue::Unit)
+                        }
                         other => Err(unsupported(
                             &format!("stream consumer control flow {other:?}"),
                             self.span(),
@@ -1470,8 +1527,31 @@ impl<'a> EvalCtx<'a> {
                 })
             }
             TExprKind::PtrFromAddr { .. } => Err(unsupported("expr `PtrFromAddr`", self.span())),
-            TExprKind::Deref(inner) => self.eval_expr(inner, scope),
-            TExprKind::RawOf(inner) => self.eval_expr(inner, scope),
+            TExprKind::Deref(inner) => {
+                let pointer = self.eval_expr(inner, scope)?;
+                let CtValue::Struct { type_name, fields } = pointer else {
+                    return Err(unsupported("raw pointer carrier", self.span()));
+                };
+                if type_name != "__JetRawLocal" {
+                    return Err(unsupported("raw pointer target", self.span()));
+                }
+                let name = fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
+                    ("name", CtValue::Str(name)) => Some(name.as_str()),
+                    _ => None,
+                });
+                name.and_then(|name| scope.get(name).cloned())
+                    .ok_or_else(|| unsupported("raw pointer local", self.span()))
+            }
+            TExprKind::RawOf(inner) => {
+                let local = super::raw_place_local(inner);
+                let Some(local) = local else {
+                    return Err(unsupported("raw pointer non-local place", self.span()));
+                };
+                Ok(CtValue::Struct {
+                    type_name: "__JetRawLocal".to_string(),
+                    fields: vec![("name".to_string(), CtValue::Str(local.name.clone()))],
+                })
+            }
             TExprKind::AllocNew { ctor } => Ok(CtValue::Struct {
                 type_name: "__JetTirAllocator".to_string(),
                 fields: vec![("ctor".to_string(), CtValue::Str(ctor.clone()))],
@@ -1889,6 +1969,24 @@ impl<'a> EvalCtx<'a> {
                 Ok(())
             }
             TExprKind::Borrow { place, .. } => self.write_back_place(place, value, scope),
+            TExprKind::Deref(inner) => {
+                let pointer = self.eval_expr(inner, scope)?;
+                let CtValue::Struct { type_name, fields } = pointer else {
+                    return Err(unsupported("raw pointer carrier", self.span()));
+                };
+                if type_name != "__JetRawLocal" {
+                    return Err(unsupported("raw pointer target", self.span()));
+                }
+                let name = fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
+                    ("name", CtValue::Str(name)) => Some(name.clone()),
+                    _ => None,
+                });
+                let Some(name) = name else {
+                    return Err(unsupported("raw pointer local", self.span()));
+                };
+                scope.insert(name, value);
+                Ok(())
+            }
             TExprKind::Field { recv, field, .. } => {
                 let mut base_val = self.eval_expr(recv, scope)?;
                 match &mut base_val {

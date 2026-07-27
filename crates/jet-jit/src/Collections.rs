@@ -3,6 +3,14 @@
 use super::Concurrency;
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 
+fn option_i64(rt: &mut crate::JitRuntime, value: Option<i64>) -> i64 {
+    crate::runtime_host::alloc_jit_result(
+        rt,
+        value.is_some(),
+        value.unwrap_or_default() as u64,
+    )
+}
+
 /// Record an out-of-bounds trap. Returns normally; JIT code branches to its
 /// epilogue at the next `emit_trap_check` (I1 — no Rust panic ever unwinds
 /// through a JIT frame; cranelift-jit emits no unwind tables for them).
@@ -268,7 +276,11 @@ extern "C" fn jet_jit_map_insert(map: i64, key: i64, value: i64) {
 extern "C" fn jet_jit_map_increment(map: i64, key: i64) {
     Concurrency::with_runtime_mut(|rt| {
         let current = rt.heap.map_get(map, key).unwrap_or(0);
-        let _ = rt.heap.map_insert(map, key, current + 1);
+        let Some(next) = current.checked_add(1) else {
+            rt.set_trap("integer overflow");
+            return;
+        };
+        let _ = rt.heap.map_insert(map, key, next);
     });
 }
 
@@ -302,7 +314,8 @@ extern "C" fn jet_jit_map_get_opt(map: i64, key: i64) -> i64 {
         if rt.heap.map_len(map).is_none() {
             jet_foundation::ice!(None, "jit map get_opt: bad handle");
         }
-        rt.heap.map_get(map, key).map(|v| v + 1).unwrap_or(0)
+        let value = rt.heap.map_get(map, key);
+        option_i64(rt, value)
     })
 }
 
@@ -487,7 +500,16 @@ extern "C" fn jet_jit_iter_windows(list: i64, n: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_list_sum_i64(list: i64) -> i64 {
-    clone_list_ints(list).into_iter().sum()
+    let values = clone_list_ints(list);
+    Concurrency::with_runtime_mut(|rt| {
+        values
+            .into_iter()
+            .try_fold(0i64, i64::checked_add)
+            .unwrap_or_else(|| {
+                rt.set_trap("integer overflow");
+                0
+            })
+    })
 }
 
 extern "C" fn jet_jit_list_product_i64(list: i64) -> i64 {
@@ -496,31 +518,25 @@ extern "C" fn jet_jit_list_product_i64(list: i64) -> i64 {
             .clone_int_list(list)
             .unwrap_or_default()
             .into_iter()
-            .product()
+            .try_fold(1i64, i64::checked_mul)
+            .unwrap_or_else(|| {
+                rt.set_trap("integer overflow");
+                0
+            })
     })
 }
 
 extern "C" fn jet_jit_list_min_i64(list: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        rt.heap
-            .clone_int_list(list)
-            .unwrap_or_default()
-            .into_iter()
-            .min()
-            .map(|value| value + 1)
-            .unwrap_or(0)
+        let value = rt.heap.clone_int_list(list).unwrap_or_default().into_iter().min();
+        option_i64(rt, value)
     })
 }
 
 extern "C" fn jet_jit_list_max_i64(list: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        rt.heap
-            .clone_int_list(list)
-            .unwrap_or_default()
-            .into_iter()
-            .max()
-            .map(|value| value + 1)
-            .unwrap_or(0)
+        let value = rt.heap.clone_int_list(list).unwrap_or_default().into_iter().max();
+        option_i64(rt, value)
     })
 }
 
@@ -653,11 +669,16 @@ extern "C" fn jet_jit_list_show(list: i64, kind: i64) -> i64 {
 /// 3 = result-arena signed IntN, 4 = result-arena unsigned IntN.
 extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
     Concurrency::with_runtime_mut(|rt| {
-        if packed == 0 {
+        let result_abi = kind >= 10;
+        if (result_abi
+            && !crate::runtime_host::jit_result_is_ok(rt, packed).unwrap_or(false))
+            || (!result_abi && packed == 0)
+        {
             rt.stdout.push_str("null\n");
             return;
         }
-        let payload = if kind >= 3 {
+        let kind = if result_abi { kind - 10 } else { kind };
+        let payload = if result_abi || kind >= 3 {
             crate::runtime_host::jit_result_i64(rt, packed).unwrap_or_default()
         } else {
             packed - 1
@@ -992,21 +1013,19 @@ extern "C" fn jet_jit_sorted_set_to_list(handle: i64) -> i64 {
 
 extern "C" fn jet_jit_sorted_set_first(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        rt.sorted_sets
+        let value = rt.sorted_sets
             .get((handle as usize).wrapping_sub(1))
-            .and_then(|set| set.first().copied())
-            .map(|value| value + 1)
-            .unwrap_or(0)
+            .and_then(|set| set.first().copied());
+        option_i64(rt, value)
     })
 }
 
 extern "C" fn jet_jit_sorted_set_last(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        rt.sorted_sets
+        let value = rt.sorted_sets
             .get((handle as usize).wrapping_sub(1))
-            .and_then(|set| set.last().copied())
-            .map(|value| value + 1)
-            .unwrap_or(0)
+            .and_then(|set| set.last().copied());
+        option_i64(rt, value)
     })
 }
 
@@ -1038,21 +1057,19 @@ extern "C" fn jet_jit_priority_queue_push(handle: i64, value: i64) {
 
 extern "C" fn jet_jit_priority_queue_peek(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        rt.priority_queues
+        let value = rt.priority_queues
             .get((handle as usize).wrapping_sub(1))
-            .and_then(|heap| heap.peek().copied())
-            .map(|value| value + 1)
-            .unwrap_or(0)
+            .and_then(|heap| heap.peek().copied());
+        option_i64(rt, value)
     })
 }
 
 extern "C" fn jet_jit_priority_queue_pop(handle: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        rt.priority_queues
+        let value = rt.priority_queues
             .get_mut((handle as usize).wrapping_sub(1))
-            .and_then(BinaryHeap::pop)
-            .map(|value| value + 1)
-            .unwrap_or(0)
+            .and_then(BinaryHeap::pop);
+        option_i64(rt, value)
     })
 }
 
@@ -1080,39 +1097,40 @@ extern "C" fn jet_jit_lru_new(capacity: i64) -> i64 {
 extern "C" fn jet_jit_lru_put(handle: i64, key: i64, value: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(key) = rt.heap.clone_string(key) else {
-            return 0;
+            return option_i64(rt, None);
         };
         let Some(lru) = rt.lrus.get_mut((handle as usize).wrapping_sub(1)) else {
-            return 0;
+            return option_i64(rt, None);
         };
         if let Some(index) = lru.entries.iter().position(|(existing, _)| existing == &key) {
             let (_, old) = lru.entries.remove(index).expect("lru position");
             lru.entries.push_front((key, value));
-            return old + 1;
+            return option_i64(rt, Some(old));
         }
         lru.entries.push_front((key, value));
         if lru.entries.len() > lru.capacity {
-            return lru.entries.pop_back().map(|(_, old)| old + 1).unwrap_or(0);
+            let evicted = lru.entries.pop_back().map(|(_, old)| old);
+            return option_i64(rt, evicted);
         }
-        0
+        option_i64(rt, None)
     })
 }
 
 extern "C" fn jet_jit_lru_get(handle: i64, key: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let Some(key) = rt.heap.clone_string(key) else {
-            return 0;
+            return option_i64(rt, None);
         };
         let Some(lru) = rt.lrus.get_mut((handle as usize).wrapping_sub(1)) else {
-            return 0;
+            return option_i64(rt, None);
         };
         let Some(index) = lru.entries.iter().position(|(existing, _)| existing == &key) else {
-            return 0;
+            return option_i64(rt, None);
         };
         let entry = lru.entries.remove(index).expect("lru position");
         let value = entry.1;
         lru.entries.push_front(entry);
-        value + 1
+        option_i64(rt, Some(value))
     })
 }
 

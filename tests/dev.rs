@@ -4018,6 +4018,123 @@ fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
 }
 
 #[test]
+fn jit_1216_adversarial_regressions() {
+    const CASE: &str = "JET_1216_ADVERSARIAL_CASE";
+    if let Ok(case) = std::env::var(CASE) {
+        let source = match case.as_str() {
+            "oob" => "fn run() { xs := [1]\n xs[4] = 2 }\n",
+            "stm_return" => r#"
+struct Cell { value: Int }
+fn rollback(cell: Shared<Cell>) {
+    #Transact(tx) {
+        cell.edit(value => { value.value = 9 })
+        return
+    }
+}
+fn run() {
+    cell :: Shared.new(Cell.{value: 1})
+    rollback(cell)
+    print(cell.read(value => value.value))
+}
+"#,
+            "generator" => r#"
+fn stopped() -> Stream<Int> {
+    yield 1
+    yield 2
+}
+fn closes() -> Stream<Int> {
+    yield 3
+    return
+}
+fn run() {
+    loop value; stopped() {
+        print(value)
+        break
+    }
+    loop value; closes() { print(value) }
+    print("done")
+}
+"#,
+            "raw_alias" => r#"
+use core.mem
+fn run() {
+    value := 4
+    #Unsafe("the pointer stays inside this stack frame") {
+        pointer :: *Int.{*value}
+        mem.volatile_write(pointer, 9)
+        print(value)
+    }
+}
+"#,
+            "option_minus_one" => r#"
+fn run() {
+    queue := PriorityQueue.from([-1])
+    print(queue.pop())
+    print(queue.pop())
+}
+"#,
+            "sum_overflow" => r#"
+fn run() {
+    print([9223372036854775807, 1].sum())
+}
+"#,
+            _ => panic!("unknown #1216 adversarial case `{case}`"),
+        };
+        jet_jit::reset_jit_trace_for_test();
+        let outcome = run_cranelift_outcome_without_fallback(source, &format!("1216_{case}"));
+        match case.as_str() {
+            "oob" | "sum_overflow" => {
+                assert!(matches!(outcome, RunOutcome::Problems(_)));
+            }
+            expected_case => {
+                let RunOutcome::Ran { stdout, .. } = outcome else {
+                    panic!("`{expected_case}` did not run in resident JIT: {outcome:?}");
+                };
+                let expected = match expected_case {
+                    "stm_return" => "1\n",
+                    "generator" => "1\n3\ndone\n",
+                    "raw_alias" => "9\n",
+                    "option_minus_one" => "-1\nnull\n",
+                    _ => unreachable!(),
+                };
+                assert_eq!(stdout, expected);
+                assert!(jet_jit::jit_executed_for_test());
+                assert!(!jet_jit::deopt_invoked_for_test());
+            }
+        }
+        return;
+    }
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    for case in [
+        "oob",
+        "stm_return",
+        "generator",
+        "raw_alias",
+        "option_minus_one",
+        "sum_overflow",
+    ] {
+        let mut command = Command::new(std::env::current_exe().expect("current dev test binary"));
+        command
+            .args(["--exact", "jit_1216_adversarial_regressions", "--nocapture"])
+            .env(CASE, case)
+            .env("NO_COLOR", "1");
+        let output = command_output_with_timeout(
+            command,
+            Duration::from_secs(10),
+            &format!("#1216 adversarial `{case}`"),
+        );
+        assert!(
+            output.status.success(),
+            "{case}: stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
 fn comptime_scalar_examples_match_interpreter_resident_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;

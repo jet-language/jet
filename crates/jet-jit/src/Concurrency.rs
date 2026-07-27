@@ -7,8 +7,8 @@ use jet_codegen::scheduler::{
     jet_scheduler_wait_without_unwind, JetSchedulerChannel, JetSchedulerJoin, JetSchedulerWait,
     JetShieldExit, JetTaskControl,
 };
-use std::cell::RefCell;
-use std::sync::{Arc, Mutex};
+use std::cell::{Cell, RefCell};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 // Every native host call that reaches the resident runtime crosses this lock.
 // Spawned Cranelift frames share the same arena as their parent, so the raw
@@ -17,8 +17,34 @@ static RUNTIME_ACCESS: Mutex<()> = Mutex::new(());
 
 thread_local! {
     static ACTIVE_RUNTIME: RefCell<Option<*mut super::JitRuntime>> = const { RefCell::new(None) };
+    static RUNTIME_ACCESS_DEPTH: Cell<usize> = const { Cell::new(0) };
     static PENDING_SHIELD_EXIT: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
     static WAIT_VALUE: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+}
+
+struct RuntimeAccessGuard {
+    _lock: Option<MutexGuard<'static, ()>>,
+}
+
+impl RuntimeAccessGuard {
+    fn enter() -> Self {
+        let lock = RUNTIME_ACCESS_DEPTH.with(|depth| {
+            let current = depth.get();
+            depth.set(current + 1);
+            (current == 0).then(|| {
+                RUNTIME_ACCESS
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+            })
+        });
+        Self { _lock: lock }
+    }
+}
+
+impl Drop for RuntimeAccessGuard {
+    fn drop(&mut self) {
+        RUNTIME_ACCESS_DEPTH.with(|depth| depth.set(depth.get() - 1));
+    }
 }
 
 #[repr(i64)]
@@ -96,9 +122,7 @@ where
     let mut out = R::default();
     ACTIVE_RUNTIME.with(|slot| {
         if let Some(ptr) = *slot.borrow() {
-            let _guard = RUNTIME_ACCESS
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let _guard = RuntimeAccessGuard::enter();
             // SAFETY: set only for the duration of resident_invoke on this thread.
             unsafe {
                 if let Some(rt) = ptr.as_mut() {
@@ -128,6 +152,22 @@ extern "C" fn jet_jit_channel_new() -> i64 {
         rt.channels.push(JetSchedulerChannel::new());
         id
     })
+}
+
+extern "C" fn jet_jit_generator_channel_new() -> i64 {
+    with_runtime_mut(|rt| {
+        let id = rt.channels.len() as i64;
+        rt.channels.push(JetSchedulerChannel::bounded(0));
+        id
+    })
+}
+
+extern "C" fn jet_jit_channel_close(ch: i64) {
+    with_runtime_mut(|rt| {
+        if let Some(channel) = rt.channels.get(ch as usize) {
+            channel.close();
+        }
+    });
 }
 
 extern "C" fn jet_jit_channel_sender(ch: i64) -> i64 {
@@ -412,6 +452,8 @@ extern "C" fn jet_jit_sleep(millis: i64) -> i64 {
 
 pub(crate) struct ConcurrencyHostFns {
     pub channel_new: cranelift_module::FuncId,
+    pub generator_channel_new: cranelift_module::FuncId,
+    pub channel_close: cranelift_module::FuncId,
     pub channel_sender: cranelift_module::FuncId,
     pub sender_clone: cranelift_module::FuncId,
     pub sender_send: cranelift_module::FuncId,
@@ -438,6 +480,11 @@ pub(crate) struct ConcurrencyHostFns {
 
 pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuilder) {
     builder.symbol("jet_jit_channel_new", jet_jit_channel_new as *const u8);
+    builder.symbol(
+        "jet_jit_generator_channel_new",
+        jet_jit_generator_channel_new as *const u8,
+    );
+    builder.symbol("jet_jit_channel_close", jet_jit_channel_close as *const u8);
     builder.symbol(
         "jet_jit_channel_sender",
         jet_jit_channel_sender as *const u8,
@@ -526,6 +573,8 @@ pub(crate) fn declare_concurrency_host_fns(
 
     Ok(ConcurrencyHostFns {
         channel_new: import("jet_jit_channel_new", &sig_channel_new)?,
+        generator_channel_new: import("jet_jit_generator_channel_new", &sig_channel_new)?,
+        channel_close: import("jet_jit_channel_close", &sig_void_i64)?,
         channel_sender: import("jet_jit_channel_sender", &sig_i64)?,
         sender_clone: import("jet_jit_sender_clone", &sig_i64)?,
         sender_send: import("jet_jit_sender_send", &sig_send)?,

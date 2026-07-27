@@ -102,6 +102,7 @@ pub(crate) struct JitRuntime {
     pub(crate) pools: Vec<std::sync::Arc<std::sync::Mutex<Memory::PoolState>>>,
     pub(crate) shareds: Vec<std::sync::Arc<Memory::SharedState>>,
     pub(crate) expirings: Vec<Memory::ExpiringState>,
+    pub(crate) secrets: Vec<Option<Memory::SecretState>>,
     /// Set by a host shim when the user program hits a runtime panic (overflow,
     /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
     /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,
@@ -632,6 +633,41 @@ extern "C" fn jet_jit_str_before(id: i64, sep_id: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_str_trim_view(id: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        let Some(text) = rt.heap.get_string(id) else {
+            return 0;
+        };
+        let start = text.len() - text.trim_start().len();
+        let end = text.trim_end().len();
+        rt.heap.alloc_string_view(id, start, end).unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_str_after_view(id: i64, sep_id: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        let sep = rt.heap.clone_string(sep_id).unwrap_or_default();
+        let Some(text) = rt.heap.get_string(id) else {
+            return 0;
+        };
+        let start = text.find(&sep).map_or(0, |index| index + sep.len());
+        rt.heap
+            .alloc_string_view(id, start, text.len())
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_str_before_view(id: i64, sep_id: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        let sep = rt.heap.clone_string(sep_id).unwrap_or_default();
+        let Some(text) = rt.heap.get_string(id) else {
+            return 0;
+        };
+        let end = text.find(&sep).unwrap_or(text.len());
+        rt.heap.alloc_string_view(id, 0, end).unwrap_or(0)
+    })
+}
+
 /// Inclusive string slice (`s.slice(lo, hi)`). Same start/end = one char.
 extern "C" fn jet_jit_str_slice(id: i64, start: i64, end: i64) -> i64 {
     with_runtime_result(0, |rt| {
@@ -1017,7 +1053,7 @@ thread_local! {
         const { std::cell::Cell::new(JIT_PERF_DEFAULT_FIDELITY_BITS) };
 }
 
-fn alloc_jit_result(rt: &mut JitRuntime, ok: bool, bits: u64) -> i64 {
+pub(crate) fn alloc_jit_result(rt: &mut JitRuntime, ok: bool, bits: u64) -> i64 {
     rt.results.push(JitResultValue { ok, bits });
     rt.results.len() as i64
 }
@@ -1031,6 +1067,10 @@ pub(crate) fn jit_result(rt: &JitRuntime, handle: i64) -> Option<JitResultValue>
 
 pub(crate) fn jit_result_i64(rt: &JitRuntime, handle: i64) -> Option<i64> {
     jit_result(rt, handle).map(|result| result.bits as i64)
+}
+
+pub(crate) fn jit_result_is_ok(rt: &JitRuntime, handle: i64) -> Option<bool> {
+    jit_result(rt, handle).map(|result| result.ok)
 }
 
 extern "C" fn jet_jit_result_new_i64(ok: i8, value: i64) -> i64 {
@@ -1262,6 +1302,9 @@ pub(crate) struct HostFns {
     pub(crate) str_scalar_strings: FuncId,
     pub(crate) str_after: FuncId,
     pub(crate) str_before: FuncId,
+    pub(crate) str_trim_view: FuncId,
+    pub(crate) str_after_view: FuncId,
+    pub(crate) str_before_view: FuncId,
     pub(crate) str_slice: FuncId,
     pub(crate) clock_new: FuncId,
     pub(crate) clock_now: FuncId,
@@ -1373,6 +1416,18 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_scalar_strings", jet_jit_str_scalar_strings as *const u8);
     builder.symbol("jet_jit_str_after", jet_jit_str_after as *const u8);
     builder.symbol("jet_jit_str_before", jet_jit_str_before as *const u8);
+    builder.symbol(
+        "jet_jit_str_trim_view",
+        jet_jit_str_trim_view as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_str_after_view",
+        jet_jit_str_after_view as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_str_before_view",
+        jet_jit_str_before_view as *const u8,
+    );
     builder.symbol("jet_jit_str_slice", jet_jit_str_slice as *const u8);
     builder.symbol("jet_jit_clock_new", jet_jit_clock_new as *const u8);
     builder.symbol("jet_jit_clock_now", jet_jit_clock_now as *const u8);
@@ -1776,6 +1831,9 @@ fn declare_host_fns(
         str_scalar_strings: import("jet_jit_str_scalar_strings", &sig_str_unary_i64)?,
         str_after: import("jet_jit_str_after", &sig_str_binary_i64)?,
         str_before: import("jet_jit_str_before", &sig_str_binary_i64)?,
+        str_trim_view: import("jet_jit_str_trim_view", &sig_str_unary_i64)?,
+        str_after_view: import("jet_jit_str_after_view", &sig_str_binary_i64)?,
+        str_before_view: import("jet_jit_str_before_view", &sig_str_binary_i64)?,
         str_slice: import("jet_jit_str_slice", &sig_str_replace)?,
         clock_new: import("jet_jit_clock_new", &sig_str_unary_i64)?,
         clock_now: import("jet_jit_clock_now", &sig_str_unary_i64)?,

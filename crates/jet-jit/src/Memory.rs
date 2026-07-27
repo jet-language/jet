@@ -2,11 +2,47 @@
 
 use super::Concurrency;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::{fs::File, io::Read, sync::atomic::compiler_fence};
+
+static SHARED_TRANSACTION_SERIAL: Mutex<()> = Mutex::new(());
 
 thread_local! {
-    static SHARED_TRANSACTION: std::cell::RefCell<Vec<(i64, Arc<SharedState>)>> =
+    static SHARED_TRANSACTIONS: std::cell::RefCell<Vec<SharedTransaction>> =
         const { std::cell::RefCell::new(Vec::new()) };
+}
+
+struct SharedTransaction {
+    entries: Vec<SharedTransactionEntry>,
+    _serial: Option<MutexGuard<'static, ()>>,
+}
+
+struct SharedTransactionEntry {
+    handle: i64,
+    shared: Arc<SharedState>,
+    staged: i64,
+    record: bool,
+}
+
+struct SharedLockGuard(Vec<Arc<SharedState>>);
+
+impl SharedLockGuard {
+    fn acquire(entries: &[SharedTransactionEntry]) -> Self {
+        let mut locked = Vec::with_capacity(entries.len());
+        for entry in entries {
+            entry.shared.lock();
+            locked.push(Arc::clone(&entry.shared));
+        }
+        Self(locked)
+    }
+}
+
+impl Drop for SharedLockGuard {
+    fn drop(&mut self) {
+        for shared in self.0.iter().rev() {
+            shared.unlock();
+        }
+    }
 }
 
 #[derive(Default)]
@@ -34,7 +70,43 @@ pub(crate) struct ExpiringState {
     value: i64,
     expires_at: i64,
     clock: i64,
-    secret: bool,
+    secret: Option<SecretState>,
+}
+
+pub(crate) struct SecretState {
+    handle: i64,
+    bytes: Box<[u8; 32]>,
+}
+
+impl SecretState {
+    fn zeroize(&mut self) {
+        for byte in self.bytes.iter_mut() {
+            // SAFETY: the pointer refers to this live, uniquely borrowed byte.
+            unsafe { std::ptr::write_volatile(byte, 0) };
+        }
+        compiler_fence(Ordering::SeqCst);
+    }
+}
+
+impl Drop for SecretState {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SecretState;
+
+    #[test]
+    fn secret_storage_zeroizes_the_owned_bytes() {
+        let mut secret = SecretState {
+            handle: 1,
+            bytes: Box::new([0x5a; 32]),
+        };
+        secret.zeroize();
+        assert_eq!(secret.bytes.as_ref(), &[0; 32]);
+    }
 }
 
 impl SharedState {
@@ -174,7 +246,9 @@ extern "C" fn jet_jit_pool_remove(handle: i64, id: i64) -> i64 {
         return 0;
     };
     slot.generation = slot.generation.wrapping_add(1);
-    value + 1
+    Concurrency::with_runtime_mut(|rt| {
+        crate::runtime_host::alloc_jit_result(rt, true, value as u64)
+    })
 }
 
 extern "C" fn jet_jit_pool_ids(handle: i64) -> i64 {
@@ -225,60 +299,107 @@ extern "C" fn jet_jit_shared_end_write(handle: i64, value: i64) {
 }
 
 extern "C" fn jet_jit_shared_txn_begin() {
-    SHARED_TRANSACTION.with(|transaction| transaction.borrow_mut().clear());
-}
-
-extern "C" fn jet_jit_shared_txn_touch(handle: i64) {
-    let Some(shared) = Concurrency::with_runtime_mut(|rt| shared(rt, handle)) else {
-        return;
-    };
-    SHARED_TRANSACTION.with(|transaction| {
-        let mut transaction = transaction.borrow_mut();
-        if !transaction.iter().any(|(existing, _)| *existing == handle) {
-            transaction.push((handle, shared));
-        }
+    SHARED_TRANSACTIONS.with(|transactions| {
+        let serial = transactions.borrow().is_empty().then(|| {
+            // ponytail: replace this global serialization only when measured
+            // transaction throughput justifies a versioned retry protocol.
+            SHARED_TRANSACTION_SERIAL
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        });
+        transactions.borrow_mut().push(SharedTransaction {
+            entries: Vec::new(),
+            _serial: serial,
+        });
     });
-}
-
-extern "C" fn jet_jit_shared_txn_lock() {
-    SHARED_TRANSACTION.with(|transaction| {
-        let mut transaction = transaction.borrow_mut();
-        transaction.sort_by_key(|(handle, _)| *handle);
-        for (_, shared) in transaction.iter() {
-            shared.lock();
-        }
-    });
-}
-
-fn transaction_shared(handle: i64) -> Option<Arc<SharedState>> {
-    SHARED_TRANSACTION.with(|transaction| {
-        transaction
-            .borrow()
-            .iter()
-            .find(|(existing, _)| *existing == handle)
-            .map(|(_, shared)| Arc::clone(shared))
-    })
 }
 
 extern "C" fn jet_jit_shared_txn_get(handle: i64) -> i64 {
-    transaction_shared(handle)
-        .map(|shared| shared.value.load(Ordering::Relaxed))
-        .unwrap_or(0)
+    if let Some(staged) = SHARED_TRANSACTIONS.with(|transactions| {
+        transactions
+            .borrow()
+            .last()
+            .and_then(|transaction| {
+                transaction
+                    .entries
+                    .iter()
+                    .find(|entry| entry.handle == handle)
+            })
+            .map(|entry| entry.staged)
+    }) {
+        return staged;
+    }
+    let Some((shared, original, staged, record)) = Concurrency::with_runtime_mut(|rt| {
+        let shared = shared(rt, handle)?;
+        let original = shared.value.load(Ordering::Acquire);
+        let staged = rt.heap.alloc_record(0);
+        let record = rt.heap.record_assign_from(staged, original).is_some();
+        Some((shared, original, if record { staged } else { original }, record))
+    }) else {
+        return 0;
+    };
+    SHARED_TRANSACTIONS.with(|transactions| {
+        let mut transactions = transactions.borrow_mut();
+        let Some(transaction) = transactions.last_mut() else {
+            return 0;
+        };
+        transaction.entries.push(SharedTransactionEntry {
+            handle,
+            shared,
+            staged,
+            record,
+        });
+        staged
+    })
 }
 
 extern "C" fn jet_jit_shared_txn_set(handle: i64, value: i64) {
-    if let Some(shared) = transaction_shared(handle) {
-        shared.value.store(value, Ordering::Relaxed);
-    }
+    SHARED_TRANSACTIONS.with(|transactions| {
+        if let Some(entry) = transactions
+            .borrow_mut()
+            .last_mut()
+            .and_then(|transaction| {
+                transaction
+                    .entries
+                    .iter_mut()
+                    .find(|entry| entry.handle == handle)
+            })
+        {
+            entry.staged = value;
+        }
+    });
 }
 
-extern "C" fn jet_jit_shared_txn_end() {
-    SHARED_TRANSACTION.with(|transaction| {
-        let mut transaction = transaction.borrow_mut();
-        for (_, shared) in transaction.iter().rev() {
-            shared.unlock();
+extern "C" fn jet_jit_shared_txn_commit() {
+    let Some(mut transaction) =
+        SHARED_TRANSACTIONS.with(|transactions| transactions.borrow_mut().pop())
+    else {
+        return;
+    };
+    transaction.entries.sort_by_key(|entry| entry.handle);
+    let _locks = SharedLockGuard::acquire(&transaction.entries);
+    Concurrency::with_runtime_mut(|rt| {
+        for entry in &transaction.entries {
+            if entry.record {
+                let current = entry.shared.value.load(Ordering::Acquire);
+                if rt
+                    .heap
+                    .record_assign_from(current, entry.staged)
+                    .is_none()
+                {
+                    rt.set_trap("Shared transaction record payload became invalid");
+                    return;
+                }
+            } else {
+                entry.shared.value.store(entry.staged, Ordering::Release);
+            }
         }
-        transaction.clear();
+    });
+}
+
+extern "C" fn jet_jit_shared_txn_abort() {
+    SHARED_TRANSACTIONS.with(|transactions| {
+        transactions.borrow_mut().pop();
     });
 }
 
@@ -294,11 +415,22 @@ extern "C" fn jet_jit_expiring_new(
             .get((clock as usize).wrapping_sub(1))
             .copied()
             .unwrap_or(0);
+        let owned_secret = if secret != 0 {
+            rt.secrets
+                .get_mut((value as usize).wrapping_sub(1))
+                .and_then(Option::take)
+        } else {
+            None
+        };
+        if secret != 0 && owned_secret.is_none() {
+            rt.set_trap("secret key handle is invalid or already moved");
+            return 0;
+        }
         rt.expirings.push(ExpiringState {
             value,
             expires_at: now.saturating_add(duration.max(0)),
             clock,
-            secret: secret != 0,
+            secret: owned_secret,
         });
         rt.expirings.len() as i64
     })
@@ -320,13 +452,48 @@ extern "C" fn jet_jit_expiring_get(handle: i64, clock: i64) -> i64 {
         let Some(value) = rt.expirings.get_mut((handle as usize).wrapping_sub(1)) else {
             return 0;
         };
-        if now >= value.expires_at {
-            if value.secret {
-                value.value = 0;
-            }
+        if now > value.expires_at {
+            value.secret.take();
+            value.value = 0;
             return 0;
         }
         value.value + 1
+    })
+}
+
+extern "C" fn jet_jit_signing_generate() -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let mut bytes = Box::new([0u8; 32]);
+        let Ok(mut random) = File::open("/dev/urandom") else {
+            rt.set_trap("the operating system random source is unavailable");
+            return 0;
+        };
+        if random.read_exact(bytes.as_mut_slice()).is_err() {
+            rt.set_trap("the operating system random source failed");
+            return 0;
+        }
+        let handle = rt.secrets.len() as i64 + 1;
+        rt.secrets.push(Some(SecretState { handle, bytes }));
+        handle
+    })
+}
+
+extern "C" fn jet_jit_signing_public(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let live = rt
+            .secrets
+            .get((handle as usize).wrapping_sub(1))
+            .and_then(Option::as_ref)
+            .is_some()
+            || rt
+                .expirings
+                .iter()
+                .any(|value| value.secret.as_ref().is_some_and(|secret| secret.handle == handle));
+        if !live {
+            rt.set_trap("secret key has expired or was dropped");
+            return 0;
+        }
+        handle
     })
 }
 
@@ -348,14 +515,15 @@ pub(crate) struct MemoryHostFns {
     pub shared_end_read: cranelift_module::FuncId,
     pub shared_end_write: cranelift_module::FuncId,
     pub shared_txn_begin: cranelift_module::FuncId,
-    pub shared_txn_touch: cranelift_module::FuncId,
-    pub shared_txn_lock: cranelift_module::FuncId,
     pub shared_txn_get: cranelift_module::FuncId,
     pub shared_txn_set: cranelift_module::FuncId,
-    pub shared_txn_end: cranelift_module::FuncId,
+    pub shared_txn_commit: cranelift_module::FuncId,
+    pub shared_txn_abort: cranelift_module::FuncId,
     pub expiring_new: cranelift_module::FuncId,
     pub expiring_get: cranelift_module::FuncId,
     pub expiring_is_valid: cranelift_module::FuncId,
+    pub signing_generate: cranelift_module::FuncId,
+    pub signing_public: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_memory_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -384,16 +552,29 @@ pub(crate) fn register_memory_symbols(builder: &mut cranelift_jit::JITBuilder) {
         jet_jit_shared_end_write as *const u8,
     );
     builder.symbol("jet_jit_shared_txn_begin", jet_jit_shared_txn_begin as *const u8);
-    builder.symbol("jet_jit_shared_txn_touch", jet_jit_shared_txn_touch as *const u8);
-    builder.symbol("jet_jit_shared_txn_lock", jet_jit_shared_txn_lock as *const u8);
     builder.symbol("jet_jit_shared_txn_get", jet_jit_shared_txn_get as *const u8);
     builder.symbol("jet_jit_shared_txn_set", jet_jit_shared_txn_set as *const u8);
-    builder.symbol("jet_jit_shared_txn_end", jet_jit_shared_txn_end as *const u8);
+    builder.symbol(
+        "jet_jit_shared_txn_commit",
+        jet_jit_shared_txn_commit as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_shared_txn_abort",
+        jet_jit_shared_txn_abort as *const u8,
+    );
     builder.symbol("jet_jit_expiring_new", jet_jit_expiring_new as *const u8);
     builder.symbol("jet_jit_expiring_get", jet_jit_expiring_get as *const u8);
     builder.symbol(
         "jet_jit_expiring_is_valid",
         jet_jit_expiring_is_valid as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_signing_generate",
+        jet_jit_signing_generate as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_signing_public",
+        jet_jit_signing_public as *const u8,
     );
 }
 
@@ -444,13 +625,14 @@ pub(crate) fn declare_memory_host_fns(
         shared_end_read: import("jet_jit_shared_end_read", &unary_void)?,
         shared_end_write: import("jet_jit_shared_end_write", &binary_void)?,
         shared_txn_begin: import("jet_jit_shared_txn_begin", &Signature::new(cc))?,
-        shared_txn_touch: import("jet_jit_shared_txn_touch", &unary_void)?,
-        shared_txn_lock: import("jet_jit_shared_txn_lock", &Signature::new(cc))?,
         shared_txn_get: import("jet_jit_shared_txn_get", &unary)?,
         shared_txn_set: import("jet_jit_shared_txn_set", &binary_void)?,
-        shared_txn_end: import("jet_jit_shared_txn_end", &Signature::new(cc))?,
+        shared_txn_commit: import("jet_jit_shared_txn_commit", &Signature::new(cc))?,
+        shared_txn_abort: import("jet_jit_shared_txn_abort", &Signature::new(cc))?,
         expiring_new: import("jet_jit_expiring_new", &quaternary)?,
         expiring_get: import("jet_jit_expiring_get", &binary)?,
         expiring_is_valid: import("jet_jit_expiring_is_valid", &binary_i8)?,
+        signing_generate: import("jet_jit_signing_generate", &noarg_i64)?,
+        signing_public: import("jet_jit_signing_public", &unary)?,
     })
 }

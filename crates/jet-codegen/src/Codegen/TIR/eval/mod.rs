@@ -37,6 +37,15 @@ pub(super) fn native_call_hook() -> Option<NativeCallHook> {
     NATIVE_CALL_HOOK.with(Cell::get)
 }
 
+pub(super) fn raw_place_local(expr: &TExpr) -> Option<&TLocal> {
+    match &expr.kind {
+        TIR::TExprKind::Local(local) => Some(local),
+        TIR::TExprKind::Borrow { place, .. } => raw_place_local(place),
+        TIR::TExprKind::DistinctCtor { arg, .. } => raw_place_local(arg),
+        _ => None,
+    }
+}
+
 pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0956",
@@ -126,6 +135,7 @@ pub(super) struct EvalCtx<'a> {
     /// Shared<T> values live behind evaluator-local handles so cloned handles
     /// preserve aliasing across task capture scopes.
     shared_values: Vec<CtValue>,
+    shared_transactions: Vec<HashMap<usize, CtValue>>,
     /// Manual clocks are aliased handles so an ExpiringSecret observes later
     /// ticks through the same clock instance.
     clocks: Vec<i64>,
@@ -536,6 +546,7 @@ pub fn run_program_with_structs(
         callables: Vec::new(),
         streams: Vec::new(),
         shared_values: Vec::new(),
+        shared_transactions: Vec::new(),
         clocks: Vec::new(),
         spawn_lambdas: &program.spawn_lambdas,
         spawn_site: 0,
@@ -588,6 +599,7 @@ pub fn run_named_func(
         callables: Vec::new(),
         streams: Vec::new(),
         shared_values: Vec::new(),
+        shared_transactions: Vec::new(),
         clocks: Vec::new(),
         spawn_lambdas: &program.spawn_lambdas,
         spawn_site: 0,
@@ -709,6 +721,7 @@ fn eval_expr_hook(
         callables: Vec::new(),
         streams: Vec::new(),
         shared_values: Vec::new(),
+        shared_transactions: Vec::new(),
         clocks: Vec::new(),
         spawn_lambdas: &[],
         spawn_site: 0,
@@ -774,6 +787,7 @@ fn eval_block_hook(
         callables: Vec::new(),
         streams: Vec::new(),
         shared_values: Vec::new(),
+        shared_transactions: Vec::new(),
         clocks: Vec::new(),
         spawn_lambdas: &[],
         spawn_site: 0,

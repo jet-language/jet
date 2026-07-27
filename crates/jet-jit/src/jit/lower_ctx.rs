@@ -1,6 +1,7 @@
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::{
-    types, Block, Endianness, InstBuilder, MemFlags, StackSlotData, StackSlotKind, TrapCode, Value,
+    types, Block, Endianness, InstBuilder, MemFlags, StackSlot, StackSlotData, StackSlotKind,
+    TrapCode, Value,
 };
 use cranelift_frontend::{FunctionBuilder, Variable};
 use cranelift_jit::JITModule;
@@ -39,6 +40,7 @@ pub(crate) struct LoopTargets {
     continue_block: Block,
     break_block: Block,
     shield_depth: u32,
+    shared_transaction_depth: u32,
 }
 
 /// One JIT-lowering pass over a single function's `TStmt`/`TExpr` tree into
@@ -61,6 +63,7 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) meta: &'a JitMeta<'a>,
     pub(crate) vars: &'a mut HashMap<String, Variable>,
     pub(crate) var_tys: &'a mut HashMap<String, Type>,
+    pub(crate) raw_slots: HashMap<String, StackSlot>,
     pub(crate) func_ids: &'a HashMap<String, FuncId>,
     pub(crate) spawn_site: &'a mut usize,
     pub(crate) spawn_func_ids: &'a [FuncId],
@@ -81,10 +84,56 @@ pub(crate) struct LowerCtx<'a, 'b> {
     /// Sender handle for a native generator body.
     pub(crate) yield_sender: Option<Value>,
     pub(crate) in_shared_transaction: bool,
+    pub(crate) shared_transaction_depth: u32,
     pub(crate) unsafe_depth: usize,
 }
 
 impl LowerCtx<'_, '_> {
+    fn receiver_is(ty: &Type, expected: &str) -> bool {
+        matches!(ty, Type::Named(name) if name == expected)
+            || matches!(ty, Type::Apply { name, .. } if name == expected)
+    }
+
+    fn uses_result_option_abi(expr: &TExpr) -> bool {
+        if !matches!(&expr.ty, Type::Option(_)) {
+            return false;
+        }
+        match &expr.kind {
+            TExprKind::BuiltinMethod { op, recv, .. } => match op {
+                TBuiltinOp::GetMap => matches!(&recv.ty, Type::Map { .. }),
+                TBuiltinOp::First | TBuiltinOp::Last => {
+                    Self::receiver_is(&recv.ty, "SortedSet")
+                }
+                TBuiltinOp::Min { float: false } | TBuiltinOp::Max { float: false } => {
+                    matches!(&recv.ty, Type::List(_) | Type::FixedList { .. })
+                }
+                TBuiltinOp::Pop | TBuiltinOp::PriorityQueuePeek => {
+                    Self::receiver_is(&recv.ty, "PriorityQueue")
+                }
+                TBuiltinOp::LruPut | TBuiltinOp::LruGet => {
+                    Self::receiver_is(&recv.ty, "Lru")
+                }
+                _ => false,
+            },
+            TExprKind::HostCall(host) => matches!(
+                host.as_ref(),
+                THostCall::Method { recv, method, .. }
+                    if method == "remove"
+                        && Self::receiver_is(&recv.ty, "Pool")
+            ),
+            _ => false,
+        }
+    }
+
+    fn raw_place_local(expr: &TExpr) -> Option<&TLocal> {
+        match &expr.kind {
+            TExprKind::Local(local) => Some(local),
+            TExprKind::Borrow { place, .. } => Self::raw_place_local(place),
+            TExprKind::DistinctCtor { arg, .. } => Self::raw_place_local(arg),
+            _ => None,
+        }
+    }
+
     fn enum_discriminant(&mut self, subject: Value, heap: bool) -> Value {
         if heap {
             let zero = self.b.ins().iconst(types::I64, 0);
@@ -177,6 +226,12 @@ impl LowerCtx<'_, '_> {
     }
 
     fn emit_dummy_return(&mut self) {
+        if let Some(sender) = self.yield_sender {
+            let close = self
+                .module
+                .declare_func_in_func(self.host.conc.sender_close, self.b.func);
+            self.b.ins().call(close, &[sender]);
+        }
         match self.ret_clif {
             Some(ty) => {
                 let value = if ty == types::F64 {
@@ -204,6 +259,15 @@ impl LowerCtx<'_, '_> {
         status
     }
 
+    fn emit_shared_transaction_aborts_to(&mut self, target_depth: u32) {
+        let abort = self
+            .module
+            .declare_func_in_func(self.host.memory.shared_txn_abort, self.b.func);
+        for _ in target_depth..self.shared_transaction_depth {
+            self.b.ins().call(abort, &[]);
+        }
+    }
+
     fn emit_pending_interrupt_check(&mut self, status: Value) {
         let zero = self.b.ins().iconst(types::I64, 0);
         let pending = self.b.ins().icmp(IntCC::NotEqual, status, zero);
@@ -228,6 +292,7 @@ impl LowerCtx<'_, '_> {
         self.b.ins().brif(interrupted, unwind, &[], ready, &[]);
         self.b.switch_to_block(unwind);
         self.b.seal_block(unwind);
+        self.emit_shared_transaction_aborts_to(0);
         self.emit_shield_leaves_to(0);
         self.emit_dummy_return();
         self.b.switch_to_block(ready);
@@ -1566,6 +1631,7 @@ impl LowerCtx<'_, '_> {
         self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
         self.b.switch_to_block(err_block);
         self.b.seal_block(err_block);
+        self.emit_shared_transaction_aborts_to(0);
         self.emit_shield_leaves_to(0);
         self.b.ins().return_(&[handle]);
         self.b.switch_to_block(ok_block);
@@ -1617,8 +1683,10 @@ impl LowerCtx<'_, '_> {
                 .brif(pending, interrupted, &[], destination, &[]);
             self.b.switch_to_block(interrupted);
             self.b.seal_block(interrupted);
+            self.emit_shared_transaction_aborts_to(0);
             self.emit_dummy_return();
         } else {
+            self.emit_shared_transaction_aborts_to(targets.shared_transaction_depth);
             self.b.ins().jump(destination, &[]);
         }
         Ok(())
@@ -1665,6 +1733,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(epilogue);
         self.b.seal_block(epilogue);
+        self.emit_shared_transaction_aborts_to(0);
         self.emit_shield_leaves_to(0);
         self.emit_dummy_return();
 
@@ -2088,6 +2157,15 @@ impl LowerCtx<'_, '_> {
                 // field write-through.
                 if local.deref {
                     let dst = self.b.use_var(var);
+                    if matches!(
+                        self.var_tys.get(&key),
+                        Some(Type::Apply { name, .. })
+                            if name == jet_foundation::Syntax::TYPE_PTR
+                    ) {
+                        let rhs = self.lower_expr(value)?;
+                        self.b.ins().store(MemFlags::trusted(), rhs, dst, 0);
+                        return Ok(());
+                    }
                     let view_elem_ty = match self.var_tys.get(&key) {
                         Some(Type::Apply { name, args })
                             if name == "ViewMut" && args.len() == 1 =>
@@ -2169,7 +2247,15 @@ impl LowerCtx<'_, '_> {
                     }
                 }
                 let val = if let Some(op) = op {
-                    let current = self.b.use_var(var);
+                    let current = if let Some(slot) = self.raw_slots.get(&key).copied() {
+                        let ty = self
+                            .meta
+                            .clif_ty(self.var_tys.get(&key).unwrap_or(&value.ty))
+                            .ok_or("jit spilled local type")?;
+                        self.b.ins().stack_load(ty, slot, 0)
+                    } else {
+                        self.b.use_var(var)
+                    };
                     let rhs = self.lower_expr(value)?;
                     let arithmetic_ty = self
                         .var_tys
@@ -2180,7 +2266,11 @@ impl LowerCtx<'_, '_> {
                 } else {
                     self.lower_expr(value)?
                 };
-                self.b.def_var(var, val);
+                if let Some(slot) = self.raw_slots.get(&key).copied() {
+                    self.b.ins().stack_store(val, slot, 0);
+                } else {
+                    self.b.def_var(var, val);
+                }
             }
             TStmt::IndexFieldAssign(assign) => {
                 if assign.is_map {
@@ -2249,13 +2339,30 @@ impl LowerCtx<'_, '_> {
             }
             TStmt::Return(Some(expr)) => {
                 let val = self.lower_expr(expr)?;
+                self.emit_shared_transaction_aborts_to(0);
                 self.emit_shield_leaves_to(0);
+                if let Some(sender) = self.yield_sender {
+                    let close = self
+                        .module
+                        .declare_func_in_func(self.host.conc.sender_close, self.b.func);
+                    self.b.ins().call(close, &[sender]);
+                }
                 self.b.ins().return_(&[val]);
                 self.dead = true;
             }
             TStmt::Return(None) => {
+                self.emit_shared_transaction_aborts_to(0);
                 self.emit_shield_leaves_to(0);
-                self.b.ins().return_(&[]);
+                if let Some(sender) = self.yield_sender {
+                    let close = self
+                        .module
+                        .declare_func_in_func(self.host.conc.sender_close, self.b.func);
+                    self.b.ins().call(close, &[sender]);
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    self.b.ins().return_(&[zero]);
+                } else {
+                    self.b.ins().return_(&[]);
+                }
                 self.dead = true;
             }
             TStmt::ExprStmt(expr) => {
@@ -2406,6 +2513,7 @@ impl LowerCtx<'_, '_> {
                     continue_block: header,
                     break_block: exit,
                     shield_depth: self.shield_depth,
+                    shared_transaction_depth: self.shared_transaction_depth,
                 });
                 self.b.switch_to_block(body_block);
                 self.b.seal_block(body_block);
@@ -2437,6 +2545,7 @@ impl LowerCtx<'_, '_> {
                     continue_block: header,
                     break_block: exit,
                     shield_depth: self.shield_depth,
+                    shared_transaction_depth: self.shared_transaction_depth,
                 });
                 self.b.switch_to_block(body_block);
                 self.b.seal_block(body_block);
@@ -2475,6 +2584,7 @@ impl LowerCtx<'_, '_> {
                     continue_block: step_block,
                     break_block: exit,
                     shield_depth: self.shield_depth,
+                    shared_transaction_depth: self.shared_transaction_depth,
                 });
                 self.b.switch_to_block(body_block);
                 self.b.seal_block(body_block);
@@ -2537,6 +2647,7 @@ impl LowerCtx<'_, '_> {
                     continue_block: step_block,
                     break_block: exit,
                     shield_depth: self.shield_depth,
+                    shared_transaction_depth: self.shared_transaction_depth,
                 });
                 self.b.switch_to_block(body_block);
                 self.b.seal_block(body_block);
@@ -2780,6 +2891,7 @@ impl LowerCtx<'_, '_> {
                         continue_block: step_block,
                         break_block: exit,
                         shield_depth: self.shield_depth,
+                        shared_transaction_depth: self.shared_transaction_depth,
                     });
                     self.b.switch_to_block(body_block);
                     self.b.seal_block(body_block);
@@ -2959,6 +3071,7 @@ impl LowerCtx<'_, '_> {
                         continue_block: step_block,
                         break_block: exit,
                         shield_depth: self.shield_depth,
+                        shared_transaction_depth: self.shared_transaction_depth,
                     });
                     self.b.switch_to_block(body_block);
                     self.b.seal_block(body_block);
@@ -3381,39 +3494,18 @@ impl LowerCtx<'_, '_> {
                         self.b.func,
                     );
                     self.b.ins().call(begin, &[]);
-                    let touch = self.module.declare_func_in_func(
-                        self.host.memory.shared_txn_touch,
-                        self.b.func,
-                    );
-                    for stmt in body {
-                        let TStmt::ExprStmt(expr) = stmt else {
-                            continue;
-                        };
-                        let TExprKind::HostCall(host) = &expr.kind else {
-                            continue;
-                        };
-                        let THostCall::Method { recv, method, .. } = host.as_ref() else {
-                            continue;
-                        };
-                        if method == "edit_txn" {
-                            let handle = self.lower_expr(recv)?;
-                            self.b.ins().call(touch, &[handle]);
-                        }
-                    }
-                    let lock = self.module.declare_func_in_func(
-                        self.host.memory.shared_txn_lock,
-                        self.b.func,
-                    );
-                    self.b.ins().call(lock, &[]);
                     self.in_shared_transaction = true;
+                    self.shared_transaction_depth += 1;
                     self.lower_stmts_scoped(body)?;
-                    self.in_shared_transaction = false;
+                    self.shared_transaction_depth -= 1;
+                    self.in_shared_transaction = self.shared_transaction_depth != 0;
                     if !self.dead {
-                        let end = self.module.declare_func_in_func(
-                            self.host.memory.shared_txn_end,
+                        let commit = self.module.declare_func_in_func(
+                            self.host.memory.shared_txn_commit,
                             self.b.func,
                         );
-                        self.b.ins().call(end, &[]);
+                        self.b.ins().call(commit, &[]);
+                        self.emit_trap_check()?;
                     }
                 } else {
                     self.lower_stmts_scoped(body)?;
@@ -3524,6 +3616,7 @@ impl LowerCtx<'_, '_> {
             continue_block: step_block,
             break_block: exit,
             shield_depth: self.shield_depth,
+            shared_transaction_depth: self.shared_transaction_depth,
         });
         self.lower_stmts_scoped(body)?;
         self.loop_stack.pop();
@@ -3569,6 +3662,7 @@ impl LowerCtx<'_, '_> {
         self.b.def_var(channel_var, channel);
         let header = self.b.create_block();
         let body_block = self.b.create_block();
+        let cancel = self.b.create_block();
         let exit = self.b.create_block();
         self.b.ins().jump(header, &[]);
 
@@ -3601,14 +3695,23 @@ impl LowerCtx<'_, '_> {
         self.loop_stack.push(LoopTargets {
             label: label.clone(),
             continue_block: header,
-            break_block: exit,
+            break_block: cancel,
             shield_depth: self.shield_depth,
+            shared_transaction_depth: self.shared_transaction_depth,
         });
         self.lower_stmts_scoped(body)?;
         self.loop_stack.pop();
         if !self.dead {
             self.b.ins().jump(header, &[]);
         }
+        self.b.switch_to_block(cancel);
+        self.b.seal_block(cancel);
+        let channel = self.b.use_var(channel_var);
+        let close = self
+            .module
+            .declare_func_in_func(self.host.conc.channel_close, self.b.func);
+        self.b.ins().call(close, &[channel]);
+        self.b.ins().jump(exit, &[]);
         self.b.seal_block(header);
         self.b.switch_to_block(exit);
         self.b.seal_block(exit);
@@ -3746,7 +3849,22 @@ impl LowerCtx<'_, '_> {
                     .module
                     .declare_func_in_func(self.host.conc.sender_send, self.b.func);
                 let call = self.b.ins().call(send, &[sender, value]);
-                let _ = self.finish_wait_call(self.b.inst_results(call)[0]);
+                let sent = self.finish_wait_call(self.b.inst_results(call)[0]);
+                let zero = self.b.ins().iconst(types::I64, 0);
+                let closed = self.b.ins().icmp(IntCC::Equal, sent, zero);
+                let stop = self.b.create_block();
+                let resume = self.b.create_block();
+                self.b.ins().brif(closed, stop, &[], resume, &[]);
+                self.b.switch_to_block(stop);
+                self.b.seal_block(stop);
+                let close = self
+                    .module
+                    .declare_func_in_func(self.host.conc.sender_close, self.b.func);
+                self.b.ins().call(close, &[sender]);
+                let zero = self.b.ins().iconst(types::I64, 0);
+                self.b.ins().return_(&[zero]);
+                self.b.switch_to_block(resume);
+                self.b.seal_block(resume);
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             THostCall::GcRead { root } => {
@@ -4405,14 +4523,6 @@ impl LowerCtx<'_, '_> {
 
     fn is_string_abi_ty(ty: &Type) -> bool {
         matches!(ty, Type::String)
-            || matches!(
-                ty,
-                Type::Apply { name, args }
-                    if name == "View"
-                        && args.len() == 1
-                        && (matches!(&args[0], Type::String)
-                            || matches!(&args[0], Type::Named(name) if name == "str"))
-            )
     }
 
     fn is_field_mut_ty(ty: &Type) -> bool {
@@ -4499,7 +4609,16 @@ impl LowerCtx<'_, '_> {
             .get(&key)
             .copied()
             .ok_or_else(|| format!("jit unknown local `{}`", local.name))?;
-        let raw = self.b.use_var(var);
+        let raw = if let Some(slot) = self.raw_slots.get(&key).copied() {
+            let ty = self
+                .var_tys
+                .get(&key)
+                .and_then(|ty| self.meta.clif_ty(ty))
+                .ok_or("jit spilled local type")?;
+            self.b.ins().stack_load(ty, slot, 0)
+        } else {
+            self.b.use_var(var)
+        };
         if !local.deref {
             return Ok(raw);
         }
@@ -5420,9 +5539,35 @@ impl LowerCtx<'_, '_> {
                 args,
                 ..
             } => {
+                if module == "core.mem" && method == "volatile_read" && args.len() == 1 {
+                    if self.unsafe_depth == 0 {
+                        return Err("jit volatile read outside #Unsafe".to_string());
+                    }
+                    let pointer = self.lower_expr(&args[0])?;
+                    let clif = self.meta.clif_ty(&expr.ty).ok_or_else(|| {
+                        format!("jit volatile read result unsupported: {:?}", expr.ty)
+                    })?;
+                    return Ok(self.b.ins().load(clif, MemFlags::trusted(), pointer, 0));
+                }
+                if module == "core.mem" && method == "volatile_write" && args.len() == 2 {
+                    if self.unsafe_depth == 0 {
+                        return Err("jit volatile write outside #Unsafe".to_string());
+                    }
+                    let pointer = self.lower_expr(&args[0])?;
+                    let value = self.lower_expr(&args[1])?;
+                    self.b
+                        .ins()
+                        .store(MemFlags::trusted(), value, pointer, 0);
+                    return Ok(self.b.ins().iconst(types::I8, 0));
+                }
                 if module == "jet.crypto" && method == "__signing_generate" && args.is_empty() {
                     let tag = self.b.ins().iconst(types::I8, 1);
-                    let key = self.b.ins().iconst(types::I64, 1);
+                    let generate = self
+                        .module
+                        .declare_func_in_func(self.host.memory.signing_generate, self.b.func);
+                    let generated = self.b.ins().call(generate, &[]);
+                    let key = self.b.inst_results(generated)[0];
+                    self.emit_trap_check()?;
                     let host = self
                         .module
                         .declare_func_in_func(self.host.result_new_i64, self.b.func);
@@ -5430,7 +5575,14 @@ impl LowerCtx<'_, '_> {
                     return Ok(self.b.inst_results(call)[0]);
                 }
                 if module == "jet.crypto" && method == "__signing_public" && args.len() == 1 {
-                    return self.lower_expr(&args[0]);
+                    let key = self.lower_expr(&args[0])?;
+                    let public = self
+                        .module
+                        .declare_func_in_func(self.host.memory.signing_public, self.b.func);
+                    let call = self.b.ins().call(public, &[key]);
+                    let result = self.b.inst_results(call)[0];
+                    self.emit_trap_check()?;
+                    return Ok(result);
                 }
                 if module == "core.io" && method == "args" && args.is_empty() {
                     let host_ref = self
@@ -6742,12 +6894,23 @@ impl LowerCtx<'_, '_> {
                     let fail_block = self.b.create_block();
                     let merge = self.b.create_block();
                     self.b.append_block_param(merge, types::I64);
-                    let zero = self.b.ins().iconst(types::I64, 0);
-                    let gt = self.b.ins().icmp(IntCC::SignedGreaterThan, status, zero);
-                    self.b.ins().brif(gt, ok_block, &[], fail_block, &[]);
+                    let is_result_option = Self::uses_result_option_abi(value);
+                    let present = if is_result_option {
+                        let is_ok = self
+                            .module
+                            .declare_func_in_func(self.host.result_is_ok, self.b.func);
+                        let call = self.b.ins().call(is_ok, &[status]);
+                        self.b.inst_results(call)[0]
+                    } else {
+                        let zero = self.b.ins().iconst(types::I64, 0);
+                        self.b.ins().icmp(IntCC::SignedGreaterThan, status, zero)
+                    };
+                    self.b.ins().brif(present, ok_block, &[], fail_block, &[]);
                     self.b.switch_to_block(ok_block);
                     self.b.seal_block(ok_block);
-                    let val = if matches!(&value.kind, TExprKind::OverflowOpt { .. }) {
+                    let val = if is_result_option
+                        || matches!(&value.kind, TExprKind::OverflowOpt { .. })
+                    {
                         let host = self
                             .module
                             .declare_func_in_func(self.host.result_get_i64, self.b.func);
@@ -7459,6 +7622,36 @@ impl LowerCtx<'_, '_> {
                         if name == jet_foundation::Syntax::TYPE_PTR && args.len() == 1
                 ) {
                     return self.lower_expr(inner);
+                }
+                let local = Self::raw_place_local(inner);
+                if let Some(local) = local {
+                    let key = Self::local_key(local);
+                    let var = self
+                        .vars
+                        .get(&key)
+                        .copied()
+                        .ok_or_else(|| format!("jit RawOf unknown local `{}`", local.name))?;
+                    let clif = self.meta.clif_ty(&inner.ty).ok_or_else(|| {
+                        format!("jit raw pointer payload unsupported: {:?}", inner.ty)
+                    })?;
+                    let slot = if let Some(slot) = self.raw_slots.get(&key).copied() {
+                        slot
+                    } else {
+                        let slot = self.b.create_sized_stack_slot(StackSlotData::new(
+                            StackSlotKind::ExplicitSlot,
+                            u32::from(clif.bytes()),
+                            0,
+                        ));
+                        let value = self.b.use_var(var);
+                        self.b.ins().stack_store(value, slot, 0);
+                        self.raw_slots.insert(key, slot);
+                        slot
+                    };
+                    return Ok(self.b.ins().stack_addr(
+                        self.module.target_config().pointer_type(),
+                        slot,
+                        0,
+                    ));
                 }
                 let value = self.lower_expr(inner)?;
                 let clif = self
@@ -8478,16 +8671,16 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::TrimView => {
                 let host = self
                     .module
-                    .declare_func_in_func(self.host.str_trim, self.b.func);
+                    .declare_func_in_func(self.host.str_trim_view, self.b.func);
                 let call = self.b.ins().call(host, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::AfterView | TBuiltinOp::BeforeView => {
                 let separator = self.lower_expr(&args[0])?;
                 let host_id = if matches!(op, TBuiltinOp::AfterView) {
-                    self.host.str_after
+                    self.host.str_after_view
                 } else {
-                    self.host.str_before
+                    self.host.str_before_view
                 };
                 let host = self.module.declare_func_in_func(host_id, self.b.func);
                 let call = self.b.ins().call(host, &[recv_val, separator]);
@@ -11144,7 +11337,7 @@ impl LowerCtx<'_, '_> {
                 }
                 // `T?` — IntN uses the result arena; legacy payloads use `value + 1`.
                 if let Type::Option(inner_ty) = &print_ty {
-                    let kind = match inner_ty.as_ref() {
+                    let mut kind = match inner_ty.as_ref() {
                         Type::Int => 0i64,
                         Type::String => 1,
                         Type::Float => 2,
@@ -11152,6 +11345,9 @@ impl LowerCtx<'_, '_> {
                         Type::IntN { signed: false, .. } => 4,
                         _ => return Err("jit print type unsupported".to_string()),
                     };
+                    if Self::uses_result_option_abi(inner) {
+                        kind += 10;
+                    }
                     let flag = self.b.ins().iconst(types::I64, kind);
                     let host_ref = self
                         .module

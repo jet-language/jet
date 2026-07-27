@@ -79,6 +79,16 @@ impl<'a> EvalCtx<'a> {
                         self.write_back_place(place_expr, rhs, scope)?;
                         Ok(Flow::Normal)
                     }
+                    TPlace::Expr(place_expr)
+                        if matches!(place_expr.kind, crate::Codegen::TIR::TExprKind::Deref(_)) =>
+                    {
+                        if let Some(binop) = op {
+                            let current = self.eval_expr(place_expr, scope)?;
+                            rhs = eval_binop(*binop, current, rhs, self.span())?;
+                        }
+                        self.write_back_place(place_expr, rhs, scope)?;
+                        Ok(Flow::Normal)
+                    }
                     TPlace::Expr(_) => Err(unsupported("complex assign place", self.span())),
                 }
             }
@@ -626,7 +636,27 @@ impl<'a> EvalCtx<'a> {
             TStmt::Live { .. } => Err(unsupported("statement `Live`", self.span())),
             TStmt::Shield { .. } => Err(unsupported("statement `Shield`", self.span())),
             TStmt::ScopeMember { .. } => Err(unsupported("statement `ScopeMember`", self.span())),
-            TStmt::Transact { body, .. } => self.exec_stmts(body, scope),
+            TStmt::Transact {
+                body, uses_stm, ..
+            } => {
+                if !uses_stm {
+                    return self.exec_stmts(body, scope);
+                }
+                self.shared_transactions.push(HashMap::new());
+                let flow = self.exec_stmts(body, scope);
+                let staged = self.shared_transactions.pop().unwrap_or_default();
+                match flow {
+                    Ok(Flow::Normal) => {
+                        for (index, value) in staged {
+                            if let Some(slot) = self.shared_values.get_mut(index) {
+                                *slot = value;
+                            }
+                        }
+                        Ok(Flow::Normal)
+                    }
+                    other => other,
+                }
+            }
         }
     }
 

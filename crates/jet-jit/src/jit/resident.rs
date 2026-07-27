@@ -54,6 +54,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         pools: Vec::new(),
         shareds: Vec::new(),
         expirings: Vec::new(),
+        secrets: Vec::new(),
         trapped: None,
         deadline_exceeded: None,
     }
@@ -114,6 +115,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.results.clear();
     rt.solvers.clear();
     rt.rngs.clear();
+    rt.clocks.clear();
     rt.sketches.clear();
     rt.process_specs.clear();
     rt.process_children.clear();
@@ -143,6 +145,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.pools.clear();
     rt.shareds.clear();
     rt.expirings.clear();
+    rt.secrets.clear();
 }
 
 pub(crate) fn resident_teardown() {

@@ -91,6 +91,7 @@ fn lower_spawn_function(
             meta,
             vars: &mut vars,
             var_tys: &mut var_tys,
+            raw_slots: HashMap::new(),
             func_ids,
             spawn_site: &mut spawn_site,
             spawn_func_ids,
@@ -104,6 +105,7 @@ fn lower_spawn_function(
             switch_subject: None,
             yield_sender: None,
             in_shared_transaction: false,
+            shared_transaction_depth: 0,
             unsafe_depth: 0,
         };
         for cap in &lam.captures {
@@ -213,6 +215,7 @@ pub(crate) fn lower_callable_lambda(
             meta,
             vars: &mut vars,
             var_tys: &mut var_tys,
+            raw_slots: HashMap::new(),
             func_ids,
             spawn_site,
             spawn_func_ids,
@@ -226,6 +229,7 @@ pub(crate) fn lower_callable_lambda(
             switch_subject: None,
             yield_sender: None,
             in_shared_transaction: false,
+            shared_transaction_depth: 0,
             unsafe_depth: 0,
         };
         for (i, (name, ty)) in lam
@@ -318,6 +322,7 @@ fn lower_function(
             meta,
             vars: &mut vars,
             var_tys: &mut var_tys,
+            raw_slots: HashMap::new(),
             func_ids,
             spawn_site,
             spawn_func_ids,
@@ -331,6 +336,7 @@ fn lower_function(
             switch_subject: None,
             yield_sender: None,
             in_shared_transaction: false,
+            shared_transaction_depth: 0,
             unsafe_depth: 0,
         };
         if func_has_receiver(tir) {
@@ -474,6 +480,7 @@ fn lower_generator_body(
             meta,
             vars: &mut vars,
             var_tys: &mut var_tys,
+            raw_slots: HashMap::new(),
             func_ids,
             spawn_site,
             spawn_func_ids,
@@ -487,6 +494,7 @@ fn lower_generator_body(
             switch_subject: None,
             yield_sender: Some(sender),
             in_shared_transaction: false,
+            shared_transaction_depth: 0,
             unsafe_depth: 0,
         };
         for (index, (name, ty, _)) in tir.params.iter().enumerate() {
@@ -496,15 +504,14 @@ fn lower_generator_body(
             lctx.var_tys.insert(name.clone(), ty.clone());
         }
         lctx.lower_stmts(&tir.body)?;
-        if lctx.dead {
-            return Err("jit generator body cannot return before sender close".to_string());
+        if !lctx.dead {
+            let close = lctx
+                .module
+                .declare_func_in_func(lctx.host.conc.sender_close, lctx.b.func);
+            lctx.b.ins().call(close, &[sender]);
+            let zero = lctx.b.ins().iconst(types::I64, 0);
+            lctx.b.ins().return_(&[zero]);
         }
-        let close = lctx
-            .module
-            .declare_func_in_func(lctx.host.conc.sender_close, lctx.b.func);
-        lctx.b.ins().call(close, &[sender]);
-        let zero = lctx.b.ins().iconst(types::I64, 0);
-        lctx.b.ins().return_(&[zero]);
         b.finalize();
     }
     cranelift_codegen::verify_function(&ctx.func, module.isa())
@@ -543,7 +550,7 @@ fn lower_generator_wrapper(
         {
             return Err("jit generator parameter ABI unsupported".to_string());
         }
-        let new = module.declare_func_in_func(host.conc.channel_new, b.func);
+        let new = module.declare_func_in_func(host.conc.generator_channel_new, b.func);
         let call = b.ins().call(new, &[]);
         let channel = b.inst_results(call)[0];
         let sender_fn = module.declare_func_in_func(host.conc.channel_sender, b.func);
