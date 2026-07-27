@@ -1841,3 +1841,386 @@ fn run() {
     assert_eq!(methods.last().map(String::as_str), Some("session.end"));
 }
 
+fn run_artifacts(listener: TcpListener) -> Vec<String> {
+    let (mut stream, _) = listener.accept().unwrap();
+    accept_websocket(&mut stream);
+    let mut methods = Vec::new();
+    let mut locate_calls = 0usize;
+    for _ in 0..40 {
+        let request = read_text_frame(&mut stream);
+        let id = field(&request, "id");
+        let method = field(&request, "method");
+        methods.push(method.clone());
+        match method.as_str() {
+            "session.status" => write_text_frame(
+                &mut stream,
+                &format!(
+                    r#"{{"type":"success","id":{id},"result":{{"ready":true,"message":"ready"}}}}"#
+                ),
+            ),
+            "session.new" => write_text_frame(
+                &mut stream,
+                &format!(
+                    r#"{{"type":"success","id":{id},"result":{{"sessionId":"mock-session","capabilities":{{"browserName":"mock","browserVersion":"1"}}}}}}"#
+                ),
+            ),
+            "browser.createUserContext" => write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{{"userContext":"user-1"}}}}"#),
+            ),
+            "browsingContext.create" => write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{{"context":"page-1"}}}}"#),
+            ),
+            "browsingContext.navigate" => write_text_frame(
+                &mut stream,
+                &format!(
+                    r#"{{"type":"success","id":{id},"result":{{"url":"https://example.test/app","navigation":"nav-1"}}}}"#
+                ),
+            ),
+            "storage.setCookie" | "storage.deleteCookies" | "browser.setDownloadBehavior"
+            | "browsingContext.close" | "browser.removeUserContext" | "session.end"
+            | "input.setFiles" => write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{{}}}}"#),
+            ),
+            "storage.getCookies" => write_text_frame(
+                &mut stream,
+                &format!(
+                    r#"{{"type":"success","id":{id},"result":{{"cookies":[{{"name":"session","value":{{"type":"string","value":"cookie-SECRET"}},"domain":"example.test","path":"/"}}],"partitionKey":{{"userContext":"user-1"}}}}}}"#
+                ),
+            ),
+            "script.callFunction" => {
+                // storage_get returns a string; set/clear return undefined-shaped success.
+                let result = if request.contains("getItem") {
+                    r#"{"result":{"type":"string","value":"stored-SECRET"}}"#
+                } else {
+                    r#"{"result":{"type":"undefined"}}"#
+                };
+                write_text_frame(
+                    &mut stream,
+                    &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+                );
+            }
+            "browsingContext.captureScreenshot" => write_text_frame(
+                &mut stream,
+                &format!(
+                    r#"{{"type":"success","id":{id},"result":{{"data":"iVBORw0KGgo="}}}}"#
+                ),
+            ),
+            "browsingContext.print" => write_text_frame(
+                &mut stream,
+                &format!(
+                    r#"{{"type":"success","id":{id},"result":{{"data":"JVBERi0xLjQ="}}}}"#
+                ),
+            ),
+            "browsingContext.locateNodes" => {
+                locate_calls += 1;
+                write_text_frame(
+                    &mut stream,
+                    &format!(
+                        r#"{{"type":"success","id":{id},"result":{{"nodes":[{{"type":"node","sharedId":"file-node-{locate_calls}"}}]}}}}"#
+                    ),
+                );
+            }
+            "session.subscribe" => {
+                write_text_frame(
+                    &mut stream,
+                    &format!(r#"{{"type":"success","id":{id},"result":{{}}}}"#),
+                );
+                write_text_frame(
+                    &mut stream,
+                    r#"{"type":"event","method":"browsingContext.downloadWillBegin","params":{"context":"page-1","navigation":"nav-dl","timestamp":1.0,"url":"https://cdn.example/SECRET_REPORT.pdf","download":"dl-1","suggestedFilename":"SECRET_REPORT.pdf"}}"#,
+                );
+            }
+            other => panic!("unexpected BiDi method {other}: {request}"),
+        }
+        if method == "session.end" {
+            break;
+        }
+    }
+    methods
+}
+
+#[test]
+fn native_bidi_artifacts_storage_files_screenshots_and_pdf() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!(
+        "ws://{}/session?token=ARTIFACT_SECRET",
+        listener.local_addr().unwrap()
+    );
+    let server = thread::spawn(move || run_artifacts(listener));
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    session.allow_downloads("/tmp/jet-downloads") ?? panic("allow_downloads")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    page.goto("https://example.test/app") ?? panic("goto")
+
+    page.set_cookie("session", "cookie-SECRET", "example.test") ?? panic("set_cookie")
+    maybe_cookie :: page.cookie("session") ?? panic("cookie")
+    cookie :: maybe_cookie ?? panic("missing cookie")
+    print(cookie == "cookie-SECRET")
+    page.clear_cookies() ?? panic("clear_cookies")
+
+    page.storage_set("local", "token", "stored-SECRET") ?? panic("storage_set")
+    maybe_stored :: page.storage_get("local", "token") ?? panic("storage_get")
+    stored :: maybe_stored ?? panic("missing storage")
+    print(stored == "stored-SECRET")
+    page.storage_clear("local") ?? panic("storage_clear")
+    page.storage_set("session", "draft", "x") ?? panic("session set")
+    page.storage_clear("session") ?? panic("session clear")
+
+    upload :: page.get_by_css("input[type=file]")
+    upload.set_files("/tmp/upload-SECRET.txt") ?? panic("set_files")
+
+    png :: page.screenshot() ?? panic("screenshot")
+    print(png.len() > 0)
+    pdf :: page.pdf() ?? panic("pdf")
+    print(pdf.len() > 0)
+
+    session.subscribe("browsingContext.downloadWillBegin") ?? panic("subscribe")
+    event :: session.next_event(timeout) ?? panic("next_event")
+    print(event.kind())
+    print(event.download_id())
+    hash :: event.suggested_filename_hash()
+    print(hash.len() == 16)
+    print(hash.contains("SECRET") == false)
+    print(event.url_hash().contains("SECRET") == false)
+
+    trace :: session.trace()
+    print(trace.redacted())
+    print(trace.summary().contains("SECRET") == false)
+    print("artifacts:ok")
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_artifacts",
+        "browser_bidi_artifacts",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert!(stdout.contains("true\n"), "{stdout}");
+    assert!(stdout.contains("browsingContext.downloadWillBegin\n"), "{stdout}");
+    assert!(stdout.contains("dl-1\n"), "{stdout}");
+    assert!(stdout.contains("artifacts:ok\n"), "{stdout}");
+    assert!(!stdout.contains("ARTIFACT_SECRET"), "{stdout}");
+    assert!(!stdout.contains("SECRET_REPORT"), "{stdout}");
+    assert!(!stderr.contains("ARTIFACT_SECRET"), "{stderr}");
+    assert!(!stderr.contains("SECRET_REPORT"), "{stderr}");
+    let methods = server.join().unwrap();
+    for expected in [
+        "browser.setDownloadBehavior",
+        "storage.setCookie",
+        "storage.getCookies",
+        "storage.deleteCookies",
+        "script.callFunction",
+        "input.setFiles",
+        "browsingContext.captureScreenshot",
+        "browsingContext.print",
+        "session.subscribe",
+    ] {
+        assert!(
+            methods.iter().any(|m| m == expected),
+            "missing {expected}: {methods:?}"
+        );
+    }
+    assert_eq!(methods.last().map(String::as_str), Some("session.end"));
+}
+
+#[test]
+fn native_bidi_artifacts_reject_hostile_inputs_without_wire() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!(
+        "ws://{}/session?token=HOSTILE_ARTIFACT_SECRET",
+        listener.local_addr().unwrap()
+    );
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        accept_websocket(&mut stream);
+        let mut methods = Vec::new();
+        for _ in 0..16 {
+            let request = read_text_frame(&mut stream);
+            let id = field(&request, "id");
+            let method = field(&request, "method");
+            methods.push(method.clone());
+            let result = match method.as_str() {
+                "session.status" => r#"{"ready":true,"message":"ready"}"#,
+                "session.new" => {
+                    r#"{"sessionId":"mock-session","capabilities":{"browserName":"mock","browserVersion":"1"}}"#
+                }
+                "browser.createUserContext" => r#"{"userContext":"user-1"}"#,
+                "browsingContext.create" => r#"{"context":"page-1"}"#,
+                "browsingContext.close" | "browser.removeUserContext" | "session.end" => "{}",
+                other => panic!("unexpected BiDi method {other}: {request}"),
+            };
+            write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+            );
+            if method == "session.end" {
+                break;
+            }
+        }
+        methods
+    });
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(200) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+
+    loop attempt; [1] {
+        session.allow_downloads("") ?? next
+        print("unexpected empty folder")
+    }
+    loop attempt; [1] {
+        page.set_cookie("", "v", "example.test") ?? next
+        print("unexpected empty cookie")
+    }
+    loop attempt; [1] {
+        value :: page.cookie("") ?? next
+        print("unexpected empty cookie name {value}")
+    }
+    loop attempt; [1] {
+        value :: page.storage_get("memory", "k") ?? next
+        print("unexpected storage kind {value}")
+    }
+    loop attempt; [1] {
+        page.storage_set("local", "", "v") ?? next
+        print("unexpected empty key")
+    }
+    loop attempt; [1] {
+        page.get_by_css("input").set_files("") ?? next
+        print("unexpected empty path")
+    }
+    print("caught")
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_artifacts_hostile",
+        "browser_bidi_artifacts_hostile",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "caught\n");
+    assert!(!stdout.contains("SECRET"), "{stdout}");
+    assert!(!stderr.contains("SECRET"), "{stderr}");
+    let methods = server.join().unwrap();
+    assert!(
+        !methods.iter().any(|m| {
+            m.starts_with("storage.")
+                || m.starts_with("input.")
+                || *m == "browser.setDownloadBehavior"
+                || *m == "browsingContext.captureScreenshot"
+                || *m == "browsingContext.print"
+                || *m == "script.callFunction"
+        }),
+        "invalid client calls must not hit the wire: {methods:?}"
+    );
+}
+
+#[test]
+fn native_bidi_closed_page_rejects_artifacts() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!(
+        "ws://{}/session?token=CLOSED_ARTIFACT_SECRET",
+        listener.local_addr().unwrap()
+    );
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        accept_websocket(&mut stream);
+        let mut methods = Vec::new();
+        for _ in 0..12 {
+            let request = read_text_frame(&mut stream);
+            let id = field(&request, "id");
+            let method = field(&request, "method");
+            methods.push(method.clone());
+            let result = match method.as_str() {
+                "session.status" => r#"{"ready":true,"message":"ready"}"#,
+                "session.new" => {
+                    r#"{"sessionId":"mock-session","capabilities":{"browserName":"mock","browserVersion":"1"}}"#
+                }
+                "browser.createUserContext" => r#"{"userContext":"user-1"}"#,
+                "browsingContext.create" => r#"{"context":"page-1"}"#,
+                "browsingContext.close" | "browser.removeUserContext" | "session.end" => "{}",
+                other => panic!("unexpected BiDi method {other}: {request}"),
+            };
+            write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+            );
+            if method == "session.end" {
+                break;
+            }
+        }
+        methods
+    });
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(200) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    page.close() ?? panic("page close")
+    loop attempt; [1] {
+        page.screenshot() ?? next
+        print("unexpected screenshot")
+    }
+    loop attempt; [1] {
+        page.pdf() ?? next
+        print("unexpected pdf")
+    }
+    loop attempt; [1] {
+        page.clear_cookies() ?? next
+        print("unexpected cookies")
+    }
+    print("caught")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_artifacts_closed",
+        "browser_bidi_artifacts_closed",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "caught\n");
+    assert!(!stdout.contains("SECRET"), "{stdout}");
+    assert!(!stderr.contains("SECRET"), "{stderr}");
+    let methods = server.join().unwrap();
+    assert!(
+        !methods.iter().any(|m| {
+            *m == "browsingContext.captureScreenshot"
+                || *m == "browsingContext.print"
+                || m.starts_with("storage.")
+        }),
+        "closed page must not call artifact commands: {methods:?}"
+    );
+}
+

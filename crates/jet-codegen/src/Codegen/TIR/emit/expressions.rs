@@ -3108,6 +3108,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             a(1),
                             a(2)
                         ),
+                        ("Browser", "allow_downloads") => format!(
+                            "{}jet_browser_allow_downloads(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
                         ("Browser", "protocol") => format!(
                             "{}jet_browser_protocol(&({}), &({}))",
                             root,
@@ -3181,6 +3187,50 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         ("BrowserPage", "close") => {
                             format!("{}jet_browser_page_close(&({}))", root, recv)
                         }
+                        ("BrowserPage", "screenshot") => {
+                            format!("{}jet_browser_page_screenshot(&({}))", root, recv)
+                        }
+                        ("BrowserPage", "pdf") => {
+                            format!("{}jet_browser_page_pdf(&({}))", root, recv)
+                        }
+                        ("BrowserPage", "set_cookie") => format!(
+                            "{}jet_browser_page_set_cookie(&({}), &({}), &({}), &({}))",
+                            root,
+                            recv,
+                            a(0),
+                            a(1),
+                            a(2)
+                        ),
+                        ("BrowserPage", "cookie") => format!(
+                            "{}jet_browser_page_cookie(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
+                        ("BrowserPage", "clear_cookies") => {
+                            format!("{}jet_browser_page_clear_cookies(&({}))", root, recv)
+                        }
+                        ("BrowserPage", "storage_get") => format!(
+                            "{}jet_browser_page_storage_get(&({}), &({}), &({}))",
+                            root,
+                            recv,
+                            a(0),
+                            a(1)
+                        ),
+                        ("BrowserPage", "storage_set") => format!(
+                            "{}jet_browser_page_storage_set(&({}), &({}), &({}), &({}))",
+                            root,
+                            recv,
+                            a(0),
+                            a(1),
+                            a(2)
+                        ),
+                        ("BrowserPage", "storage_clear") => format!(
+                            "{}jet_browser_page_storage_clear(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
                         ("BrowserFrame", "close") => {
                             format!("{}jet_browser_frame_close(&({}))", root, recv)
                         }
@@ -3214,6 +3264,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             recv,
                             a(0)
                         ),
+                        ("BrowserLocator", "set_files") => format!(
+                            "{}jet_browser_locator_set_files(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
                         ("BrowserIntercept", "remove") => {
                             format!("{}jet_browser_intercept_remove(&({}))", root, recv)
                         }
@@ -3235,6 +3291,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         ("BrowserEvent", "status_code") => {
                             format!("{}jet_browser_event_status_code(&({}))", root, recv)
                         }
+                        ("BrowserEvent", "download_id") => {
+                            format!("{}jet_browser_event_download_id(&({}))", root, recv)
+                        }
+                        ("BrowserEvent", "suggested_filename_hash") => format!(
+                            "{}jet_browser_event_suggested_filename_hash(&({}))",
+                            root, recv
+                        ),
                         ("BrowserProtocol", "send") => format!(
                             "{}jet_browser_protocol_send(&({}), &({}), &({}))",
                             root,

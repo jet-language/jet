@@ -1991,7 +1991,8 @@ pub(crate) fn lower_method_call(
                 ok: Box::new(Type::Named("BrowserIntercept".to_string())),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             },
-            ("Browser", "continue_request" | "fail_request" | "fulfill_request") => Type::Result {
+            ("Browser", "continue_request" | "fail_request" | "fulfill_request"
+                | "allow_downloads") => Type::Result {
                 ok: Box::new(unit_type()),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             },
@@ -2005,15 +2006,25 @@ pub(crate) fn lower_method_call(
                 err: Box::new(Type::Named("BrowserError".to_string())),
             },
             ("BrowserContext", "close")
-            | ("BrowserPage", "goto" | "close")
+            | ("BrowserPage", "goto" | "close" | "clear_cookies" | "set_cookie" | "storage_set"
+                | "storage_clear")
             | ("BrowserFrame", "close")
             | ("BrowserIntercept", "remove")
-            | ("BrowserLocator", "wait" | "wait_gone" | "click" | "hover" | "fill" | "press") => {
+            | ("BrowserLocator", "wait" | "wait_gone" | "click" | "hover" | "fill" | "press"
+                | "set_files") => {
                 Type::Result {
                     ok: Box::new(unit_type()),
                     err: Box::new(Type::Named("BrowserError".to_string())),
                 }
             }
+            ("BrowserPage", "screenshot" | "pdf") => Type::Result {
+                ok: Box::new(Type::String),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            },
+            ("BrowserPage", "cookie" | "storage_get") => Type::Result {
+                ok: Box::new(Type::Option(Box::new(Type::String))),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            },
             ("BrowserPage", "main_frame") => Type::Result {
                 ok: Box::new(Type::Named("BrowserFrame".to_string())),
                 err: Box::new(Type::Named("BrowserError".to_string())),
@@ -2024,7 +2035,8 @@ pub(crate) fn lower_method_call(
             },
             ("BrowserPage", "get_by_role" | "get_by_text" | "get_by_label" | "get_by_placeholder"
                 | "get_by_test_id" | "get_by_css") => Type::Named("BrowserLocator".to_string()),
-            ("BrowserEvent", "kind" | "request_id" | "request_method" | "url_hash")
+            ("BrowserEvent", "kind" | "request_id" | "request_method" | "url_hash"
+                | "download_id" | "suggested_filename_hash")
             | ("BrowserCapabilities", "profile")
             | ("BrowserTrace", "summary")
             | ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => Type::String,
