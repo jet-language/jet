@@ -83,7 +83,7 @@ Verdict: worth keeping as a proposal. It does not clearly break a rule, but I8 n
 
 ## Open questions for the owner (not balloted)
 
-1. **Scope of automatic rollback.** Memory state only? Or also `Fs`/`Db`/`Net` effects through compensations? Memory-only is far simpler and safe; effects need compensation contracts.
+1. **Scope of automatic rollback.** Memory state only? Or also `FS`/`DB`/`Net` effects through compensations? Memory-only is far simpler and safe; effects need compensation contracts.
 2. **The `^T` take case.** If a region takes ownership of a value and then fails, what does the rolled-back state hold? A destructive move has no valid moved-from value to restore.
 3. **Syntax.** `transaction { }`? A marker on the function? This is owner syntax and needs a ballot if the idea proceeds.
 4. **Is it worth it?** Manual undo with `??` and normal code already works. The gain is real only when regions are common and the undo code is error-prone. Do we have that case in Jet's target work?

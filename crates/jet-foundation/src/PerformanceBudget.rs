@@ -52,7 +52,7 @@ impl CanonicalJson {
         let text = std::str::from_utf8(bytes).map_err(|_| "canonical JSON is not UTF-8")?;
         if text.as_bytes().starts_with(&[0xef, 0xbb, 0xbf]) { return Err("canonical JSON has a BOM".into()); }
         if !text.ends_with('\n') || text[..text.len() - 1].ends_with('\n') { return Err("canonical JSON must end in exactly one LF".into()); }
-        let mut parser = JsonParser { bytes: &text.as_bytes()[..text.len() - 1], at: 0 };
+        let mut parser = JSONParser { bytes: &text.as_bytes()[..text.len() - 1], at: 0 };
         let value = parser.value()?;
         if parser.at != parser.bytes.len() { return Err("trailing bytes after canonical JSON value".into()); }
         if value.bytes() != bytes { return Err("JSON is valid but not A-canonical".into()); }
@@ -60,8 +60,8 @@ impl CanonicalJson {
     }
 }
 
-struct JsonParser<'a> { bytes: &'a [u8], at: usize }
-impl<'a> JsonParser<'a> {
+struct JSONParser<'a> { bytes: &'a [u8], at: usize }
+impl<'a> JSONParser<'a> {
     fn peek(&self) -> Option<u8> { self.bytes.get(self.at).copied() }
     fn take(&mut self) -> Option<u8> { let byte = self.peek()?; self.at += 1; Some(byte) }
     fn value(&mut self) -> Result<CanonicalJson, String> {

@@ -11,7 +11,7 @@ pub enum BuildResourcePool {
     Memory,
     Linker,
     Console,
-    Gpu,
+    GPU,
     Custom(String),
 }
 
@@ -22,7 +22,7 @@ impl BuildResourcePool {
             BuildResourcePool::Memory => "memory",
             BuildResourcePool::Linker => "linker",
             BuildResourcePool::Console => "console",
-            BuildResourcePool::Gpu => "gpu",
+            BuildResourcePool::GPU => "gpu",
             BuildResourcePool::Custom(name) => name.as_str(),
         }
     }

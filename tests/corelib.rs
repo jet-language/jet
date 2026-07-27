@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 mod dns_resolver_policy {
-    include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/DnsResolverPolicy.rs");
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs");
 
     pub fn resolv_conf(text: &str) -> Vec<String> {
         jet_net_dns_parse_resolv_conf(text)
@@ -170,13 +170,13 @@ fn core_email_smtp_config_limits_and_trust_follow_ratified_law() {
         if reason.starts_with("max_reply_line_bytes")));
 
     let pem = b"-----BEGIN CERTIFICATE-----\nMAMCAQE=\n-----END CERTIFICATE-----\n".to_vec();
-    let mut config: jet_email::SmtpConfig<()> = jet_email::SmtpConfig {
+    let mut config: jet_email::SMTPConfig<()> = jet_email::SMTPConfig {
         host: "smtp.example.com".to_string(),
         port: 587,
-        security: jet_email::SmtpSecurity::StartTls,
-        auth: jet_email::SmtpAuth::None,
+        security: jet_email::SMTPSecurity::StartTls,
+        auth: jet_email::SMTPAuth::None,
         recipient_policy: jet_email::RecipientPolicy::RequireAll,
-        trust: jet_email::TlsTrust::SystemPlusCa { pem },
+        trust: jet_email::TLSTrust::SystemPlusCa { pem },
         limits: safe.clone(),
         dkim: None,
     };
@@ -194,13 +194,13 @@ fn core_email_smtp_config_limits_and_trust_follow_ratified_law() {
     assert!(matches!(jet_email::validate_smtp_config(&config),
         Err(jet_email::Error::Configuration { reason, .. }) if reason.contains("hop header")));
 
-    let malformed: jet_email::SmtpConfig<()> = jet_email::SmtpConfig {
+    let malformed: jet_email::SMTPConfig<()> = jet_email::SMTPConfig {
         host: "smtp.example.com".to_string(),
         port: 465,
-        security: jet_email::SmtpSecurity::Tls,
-        auth: jet_email::SmtpAuth::None,
+        security: jet_email::SMTPSecurity::TLS,
+        auth: jet_email::SMTPAuth::None,
         recipient_policy: jet_email::RecipientPolicy::DeliverAccepted,
-        trust: jet_email::TlsTrust::SystemPlusCa {
+        trust: jet_email::TLSTrust::SystemPlusCa {
             pem: b"-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----".to_vec(),
         },
         limits: safe,
@@ -219,8 +219,8 @@ fn core_email_smtp_reply_parser_bounds_and_tls_auth_order_are_real() {
     let caps = jet_email::smtp_capabilities(&reply, &limits).unwrap();
     assert_eq!(caps.names, vec!["STARTTLS", "AUTH"]);
 
-    let mut state = jet_email::SmtpState::new();
-    state.greeting(&jet_email::SmtpReply { code: 220, lines: vec!["ready".to_string()] }).unwrap();
+    let mut state = jet_email::SMTPState::new();
+    state.greeting(&jet_email::SMTPReply { code: 220, lines: vec!["ready".to_string()] }).unwrap();
     let caps = state.ehlo(&reply, &limits).unwrap();
     assert!(state.authenticate("PLAIN", 10, &limits).is_err());
     state.start_tls(&caps).unwrap();
@@ -260,9 +260,9 @@ fn core_email_smtp_transaction_starttls_auth_rcpt_and_data_are_real() {
         }
         fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
     }
-    impl jet_email::SmtpTransport for Script {
+    impl jet_email::SMTPTransport for Script {
         fn verified_tls(&self) -> bool { self.verified_tls }
-        fn start_tls(&mut self, _server: &str, _trust: &jet_email::TlsTrust) -> Result<(), String> {
+        fn start_tls(&mut self, _server: &str, _trust: &jet_email::TLSTrust) -> Result<(), String> {
             self.verified_tls = true;
             self.upgrades += 1;
             Ok(())
@@ -277,16 +277,16 @@ fn core_email_smtp_transaction_starttls_auth_rcpt_and_data_are_real() {
         &sender, &vec![accepted.clone(), rejected.clone()], &vec![], &"subject".to_string(),
         &"first\r\n.second".to_string(), &String::new(), &vec![],
     ).unwrap();
-    let config = jet_email::SmtpConfig {
+    let config = jet_email::SMTPConfig {
         host: "smtp.example.com".to_string(),
         port: 587,
-        security: jet_email::SmtpSecurity::StartTls,
-        auth: jet_email::SmtpAuth::Password {
+        security: jet_email::SMTPSecurity::StartTls,
+        auth: jet_email::SMTPAuth::Password {
             username: "mailer".to_string(),
             password: b"secret".to_vec(),
         },
         recipient_policy: jet_email::RecipientPolicy::DeliverAccepted,
-        trust: jet_email::TlsTrust::System,
+        trust: jet_email::TLSTrust::System,
         limits: jet_email::Limits::safe(),
         dkim: None,
     };
@@ -342,16 +342,16 @@ fn core_email_smtp_transaction_require_all_and_delivery_unknown_are_honest() {
         }
         fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
     }
-    impl jet_email::SmtpTransport for Script {
+    impl jet_email::SMTPTransport for Script {
         fn verified_tls(&self) -> bool { true }
-        fn start_tls(&mut self, _server: &str, _trust: &jet_email::TlsTrust) -> Result<(), String> {
+        fn start_tls(&mut self, _server: &str, _trust: &jet_email::TLSTrust) -> Result<(), String> {
             panic!("implicit TLS must not upgrade")
         }
         fn close(&mut self) { self.closed = true; }
     }
-    struct Stop(jet_email::SmtpStop);
-    impl jet_email::SmtpControl for Stop {
-        fn checkpoint(&self, _operation: &str) -> Result<(), jet_email::SmtpStop> { Err(self.0) }
+    struct Stop(jet_email::SMTPStop);
+    impl jet_email::SMTPControl for Stop {
+        fn checkpoint(&self, _operation: &str) -> Result<(), jet_email::SMTPStop> { Err(self.0) }
         fn accepted_at(&self) -> String { panic!("stopped transaction cannot be accepted") }
     }
 
@@ -361,17 +361,17 @@ fn core_email_smtp_transaction_require_all_and_delivery_unknown_are_honest() {
         &sender, &vec![recipient], &vec![], &"subject".to_string(),
         &"body".to_string(), &String::new(), &vec![],
     ).unwrap();
-    let config = |policy| jet_email::SmtpConfig {
+    let config = |policy| jet_email::SMTPConfig {
         host: "smtp.example.com".to_string(), port: 465,
-        security: jet_email::SmtpSecurity::Tls, auth: jet_email::SmtpAuth::None,
-        recipient_policy: policy, trust: jet_email::TlsTrust::System,
+        security: jet_email::SMTPSecurity::TLS, auth: jet_email::SMTPAuth::None,
+        recipient_policy: policy, trust: jet_email::TLSTrust::System,
         limits: jet_email::Limits::safe(),
         dkim: None,
     };
 
     for (stop, timed_out) in [
-        (jet_email::SmtpStop::Cancelled, false),
-        (jet_email::SmtpStop::TimedOut, true),
+        (jet_email::SMTPStop::Cancelled, false),
+        (jet_email::SMTPStop::TimedOut, true),
     ] {
         let mut stopped = Script {
             replies: std::io::Cursor::new(Vec::new()), writes: Vec::new(), closed: false,
@@ -458,11 +458,11 @@ fn run() {
         private_key: dkim_key,
         signed_headers: ["from", "subject", "mime-version", "content-type"],
     }
-    auth := email.SmtpAuth.Password.{ username: "mailer", password: password }
-    config := email.SmtpConfig.{
+    auth := email.SMTPAuth.Password.{ username: "mailer", password: password }
+    config := email.SMTPConfig.{
         host: "localhost",
         port: 465,
-        security: .Tls,
+        security: .TLS,
         auth: auth,
         recipient_policy: .RequireAll,
         trust: .System,
@@ -3968,13 +3968,13 @@ fn run() {{
 
 #[test]
 fn core_net_dns_platform_resolver_policy_uses_native_sources() {
-    let net = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/NetHttp.rs");
+    let net = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs");
     assert!(net.contains("#[cfg(target_os = \"linux\")]"));
     assert!(net.contains("read_to_string(\"/etc/resolv.conf\")"));
     assert!(net.contains("#[cfg(target_os = \"macos\")]"));
     assert!(net.contains("Command::new(\"scutil\").arg(\"--dns\")"));
     assert!(net.contains("#[cfg(windows)]"));
-    assert!(net.contains("Get-DnsClientServerAddress"));
+    assert!(net.contains("Get-DNSClientServerAddress"));
     assert!(net.contains("$_.ServerAddresses"));
     assert!(!net.contains("Command::new(\"ipconfig\")"));
     assert!(!net.contains("1.1.1.1"));
@@ -4309,10 +4309,10 @@ fn core_net_ratified_named_forms_require_exact_labels() {
         ("unix read", "fn check(stream: UnixStream, d: Duration) { result :: stream.read(1, d) }", "deadline:"),
         ("unix write", "fn check(stream: UnixStream, d: Duration) { result :: stream.write_all([1], potato: d) }", "deadline:"),
         ("unix ready", "fn check(stream: UnixStream, d: Duration) { result :: stream.ready(.Write, d) }", "deadline:"),
-        ("tls read", "fn check(stream: TlsStream, d: Duration) { result :: stream.read(1, banana: d) }", "deadline:"),
-        ("tls write", "fn check(stream: TlsStream, d: Duration) { result :: stream.write_all([1], d) }", "deadline:"),
-        ("tls ready", "fn check(stream: TlsStream, d: Duration) { result :: stream.ready(.Read, potato: d) }", "deadline:"),
-        ("tls close write", "fn check(stream: TlsStream, d: Duration) { result :: stream.close_write(d) }", "deadline:"),
+        ("tls read", "fn check(stream: TLSStream, d: Duration) { result :: stream.read(1, banana: d) }", "deadline:"),
+        ("tls write", "fn check(stream: TLSStream, d: Duration) { result :: stream.write_all([1], d) }", "deadline:"),
+        ("tls ready", "fn check(stream: TLSStream, d: Duration) { result :: stream.ready(.Read, potato: d) }", "deadline:"),
+        ("tls close write", "fn check(stream: TLSStream, d: Duration) { result :: stream.close_write(d) }", "deadline:"),
         ("tls version bounds", "fn check() { result :: tls.ClientConfig.default().with_version_bounds(.Tls12, .Tls13) }", "min:"),
         ("tls client identity", "fn check() { result :: tls.ClientIdentity.from_pem([], []) }", "cert_chain:"),
         (
@@ -5423,7 +5423,7 @@ fn main() {
         observed.borrow_mut().push(bytes.to_vec());
     });
     {
-        let identity = JetTlsClientIdentity {
+        let identity = JetTLSClientIdentity {
             cert_chain: vec![1, 2, 3],
             private_key: JetCryptoSecretBytes::new(vec![0xa5; 7]),
         };
@@ -5433,17 +5433,17 @@ fn main() {
         ).unwrap();
         assert!(jet_tls_client_config_with_version_bounds(
             config,
-            JetTlsVersion::Tls13,
-            JetTlsVersion::Tls12,
+            JetTLSVersion::Tls13,
+            JetTLSVersion::Tls12,
         ).is_err());
     }
     jet_crypto_entropy_clear_zeroize_test_observer();
     assert_eq!(&*zeroized.borrow(), &vec![vec![0; 7], vec![0; 7]]);
 
     let cause = "TLS protocol truncation: peer closed without close-notify".to_string();
-    match jet_net_tls_io_result::<()>(Err(cause.clone()), jet_std::IoOperation::Read).unwrap_err() {
-        jet_std::IoError::Protocol(context) => {
-            assert_eq!(context.operation, jet_std::IoOperation::Read);
+    match jet_net_tls_io_result::<()>(Err(cause.clone()), jet_std::IOOperation::Read).unwrap_err() {
+        jet_std::IOError::Protocol(context) => {
+            assert_eq!(context.operation, jet_std::IOOperation::Read);
             assert_eq!(context.cause, Some(cause));
         }
         other => panic!("expected Protocol(Read), got {other:?}"),
@@ -5913,7 +5913,7 @@ use core.email as email
 fn error_text(problem: email.EmailError) => String {
     if problem == {
         .Configuration(_, _, _, _) -> { return "matched" }
-        .Tls(_, _, _, _) -> { return "tls-error" }
+        .TLS(_, _, _, _) -> { return "tls-error" }
     }
     return "unknown"
 }
@@ -5928,8 +5928,8 @@ fn run() {
     envelope :: email.envelope(sender, [~hidden]) ?? panic("envelope")
     replaced :: message.with_envelope(envelope) ?? panic("replace")
     bytes :: email.serialize(replaced) ?? panic("serialize")
-    start_tls := email.SmtpSecurity.StartTls
-    transport_tls := email.SmtpSecurity.Tls
+    start_tls := email.SMTPSecurity.StartTls
+    transport_tls := email.SMTPSecurity.TLS
     require_all := email.RecipientPolicy.RequireAll
     recipient := email.RecipientReport.{
         address: hidden,
@@ -5951,14 +5951,14 @@ fn run() {
         code: Val(451),
         reason: "stopped",
     }
-    tls_problem := email.EmailError.Tls.{
+    tls_problem := email.EmailError.TLS.{
         operation: "handshake",
         server: Val("smtp.example.com"),
         code: Val(525),
         reason: "certificate",
     }
     print(start_tls == .StartTls)
-    print(transport_tls == .Tls)
+    print(transport_tls == .TLS)
     print(require_all == .RequireAll)
     print(default_envelope.recipients.len())
     print(original_bytes == bytes)
@@ -6429,7 +6429,7 @@ fn main() {
             &[], &[], &[],
         ).err()
     }).collect::<Vec<_>>();
-    assert!(errors.into_iter().all(|error| matches!(error, Some(bridge::JetHttpBridgeError::Timeout))));
+    assert!(errors.into_iter().all(|error| matches!(error, Some(bridge::JetHTTPBridgeError::Timeout))));
     let unsupported_url = url.replacen("http://", "ftp://", 1);
     let url_errors = ["http://[".to_string(), unsupported_url].map(|url| {
         bridge::jet_http_client_send_impl(
@@ -6437,35 +6437,35 @@ fn main() {
             &[], &[], &[],
         ).unwrap_err()
     });
-    assert!(url_errors.into_iter().all(|error| matches!(error, bridge::JetHttpBridgeError::InvalidUrl)));
+    assert!(url_errors.into_iter().all(|error| matches!(error, bridge::JetHTTPBridgeError::InvalidUrl)));
     let refused_url = "http://127.0.0.1:0/".to_string();
     let connection_error = bridge::jet_http_client_send_impl(
         "GET", &refused_url, &[], None, None, None, None, None, None, None, None, None, None, None,
         &[], &[], &[],
     ).unwrap_err();
-    assert!(matches!(connection_error, bridge::JetHttpBridgeError::Connect));
+    assert!(matches!(connection_error, bridge::JetHTTPBridgeError::Connect));
     let proxy_error = bridge::jet_http_client_send_impl(
         "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, Some("ftp://proxy.invalid"),
         &[], &[], &[],
     ).unwrap_err();
-    assert!(matches!(proxy_error, bridge::JetHttpBridgeError::Proxy));
+    assert!(matches!(proxy_error, bridge::JetHTTPBridgeError::Proxy));
     let proxy_connection_error = bridge::jet_http_client_send_impl(
         "GET", &"https://example.invalid/".to_string(), &[], None, None, None, None, None, None, None, None, None, None,
         Some(url.as_str()),
         &[], &[], &[],
     ).unwrap_err();
-    assert!(matches!(proxy_connection_error, bridge::JetHttpBridgeError::Proxy));
+    assert!(matches!(proxy_connection_error, bridge::JetHTTPBridgeError::Proxy));
     let proxy_auth_error = bridge::jet_http_client_send_impl(
         "GET", &"https://auth.invalid/".to_string(), &[], None, None, None, None, None, None, None, None, None, None,
         Some(url.as_str()),
         &[], &[], &[],
     ).unwrap_err();
-    assert!(matches!(proxy_auth_error, bridge::JetHttpBridgeError::Proxy));
+    assert!(matches!(proxy_auth_error, bridge::JetHTTPBridgeError::Proxy));
     let io_error = bridge::jet_http_client_send_impl(
         "GET", &format!("{url}io"), &[], None, None, None, None, None, None, None, None, None, None, None,
         &[], &[], &[],
     ).unwrap_err();
-    assert!(matches!(io_error, bridge::JetHttpBridgeError::Io));
+    assert!(matches!(io_error, bridge::JetHTTPBridgeError::IO));
 }
 "#,
     )
@@ -6582,7 +6582,7 @@ fn main() {
             &[], &[], &[],
         ).err()
     }).collect::<Vec<_>>();
-    assert!(errors.into_iter().all(|error| matches!(error, Some(bridge::JetHttpBridgeError::Redirect))));
+    assert!(errors.into_iter().all(|error| matches!(error, Some(bridge::JetHTTPBridgeError::Redirect))));
     let stopped = bridge::jet_http_client_send_impl(
         "GET", &url, &[], None, None, None, None, None, None, None, None, None, Some(0), None,
         &[], &[], &[],
@@ -6599,7 +6599,7 @@ fn main() {
         "GET", &url, &[], None, None, None, None, None, None, None, None, None, Some(1), None,
         &[], &[], &[],
     ).unwrap_err();
-    assert!(matches!(explicit, bridge::JetHttpBridgeError::Redirect));
+    assert!(matches!(explicit, bridge::JetHTTPBridgeError::Redirect));
     let within = bridge::jet_http_client_send_impl(
         "GET", &format!("{base}/within/0"), &[], None, None, None, None, None, None, None, None, None,
         None, None, &[], &[], &[],
@@ -6610,7 +6610,7 @@ fn main() {
         "GET", &format!("{base}/over/0"), &[], None, None, None, None, None, None, None, None, None,
         None, None, &[], &[], &[],
     ).unwrap_err();
-    assert!(matches!(over, bridge::JetHttpBridgeError::Redirect));
+    assert!(matches!(over, bridge::JetHTTPBridgeError::Redirect));
 }
 "#,
     )
@@ -6857,7 +6857,7 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     addr :: listener.local_addr() ?? panic("address")
     mux :: server.mux()
-    mux.get("/", (req: HttpRequest) =>
+    mux.get("/", (req: HTTPRequest) =>
         Ok(server.response(200, "ok")
             .header("Set-Cookie", "a=1")
             .header("Set-Cookie", "b=2"))
@@ -8297,7 +8297,7 @@ fn run() {
         "INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)",
         "INSERT INTO missing_table VALUES (1)"
     ]) ?? 0
-    row :: conn.query_one("SELECT id, name, active FROM person WHERE id = ?", [DbValue.Int(7)]) ?? panic("query")
+    row :: conn.query_one("SELECT id, name, active FROM person WHERE id = ?", [DBValue.Int(7)]) ?? panic("query")
     found :: row ?? panic("missing")
     count :: conn.query_one("SELECT COUNT(*) AS n FROM person", []) ?? panic("count")
     counted :: count ?? panic("missing count")

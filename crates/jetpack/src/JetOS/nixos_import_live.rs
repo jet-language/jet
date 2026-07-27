@@ -92,7 +92,7 @@ pub(super) fn live_import_plan(args: &NixosImportArgs) -> Result<Option<NixosImp
     Ok(Some(plan_from_live_facts(args, &host, root)?))
 }
 
-fn run_live_extractor(source: &Path, host: &str) -> Result<JSON::Json, String> {
+fn run_live_extractor(source: &Path, host: &str) -> Result<JSON::JSONValue, String> {
     let attr = format!(
         "{}#nixosConfigurations.{}.config",
         source.display(),
@@ -119,29 +119,29 @@ fn run_live_extractor(source: &Path, host: &str) -> Result<JSON::Json, String> {
     JSON::parse(&text).map_err(|e| format!("parsing `nix eval` output failed: {e}"))
 }
 
-fn live_str(root: &std::collections::BTreeMap<String, JSON::Json>, key: &str) -> String {
+fn live_str(root: &std::collections::BTreeMap<String, JSON::JSONValue>, key: &str) -> String {
     import_json_string(root, key).unwrap_or_default()
 }
 
-fn live_bool(root: &std::collections::BTreeMap<String, JSON::Json>, key: &str) -> bool {
-    matches!(root.get(key), Some(JSON::Json::Bool(true)))
+fn live_bool(root: &std::collections::BTreeMap<String, JSON::JSONValue>, key: &str) -> bool {
+    matches!(root.get(key), Some(JSON::JSONValue::Bool(true)))
 }
 
-fn live_num(root: &std::collections::BTreeMap<String, JSON::Json>, key: &str) -> Option<f64> {
+fn live_num(root: &std::collections::BTreeMap<String, JSON::JSONValue>, key: &str) -> Option<f64> {
     match root.get(key) {
-        Some(JSON::Json::Num(n)) => Some(*n),
+        Some(JSON::JSONValue::Num(n)) => Some(*n),
         _ => None,
     }
 }
 
-fn live_num_list(root: &std::collections::BTreeMap<String, JSON::Json>, key: &str) -> Vec<i64> {
+fn live_num_list(root: &std::collections::BTreeMap<String, JSON::JSONValue>, key: &str) -> Vec<i64> {
     root.get(key)
         .and_then(|v| v.as_array().ok())
         .map(|values| {
             values
                 .iter()
                 .filter_map(|v| match v {
-                    JSON::Json::Num(n) => Some(*n as i64),
+                    JSON::JSONValue::Num(n) => Some(*n as i64),
                     _ => None,
                 })
                 .collect()
@@ -404,7 +404,7 @@ fn merge_sourced_packages(
 fn plan_from_live_facts(
     args: &NixosImportArgs,
     host: &str,
-    root: &std::collections::BTreeMap<String, JSON::Json>,
+    root: &std::collections::BTreeMap<String, JSON::JSONValue>,
 ) -> Result<NixosImportPlan, String> {
     let mut options: Vec<(String, String)> = Vec::new();
     let mut services: Vec<String> = Vec::new();
@@ -476,19 +476,19 @@ fn plan_from_live_facts(
                 .to_string(),
         );
     }
-    if let Some(JSON::Json::Object(sysctl)) = root.get("sysctl") {
+    if let Some(JSON::JSONValue::Object(sysctl)) = root.get("sysctl") {
         for (key, value) in sysctl {
             // Values embedding store paths are NixOS machinery echoes (e.g.
             // `kernel.poweroff_cmd` from shutdown.nix), not configuration
             // intent — the target system regenerates them itself, and
             // re-declaring them collides with the module that owns them.
-            if matches!(value, JSON::Json::Str(s) if s.contains("/nix/store/")) {
+            if matches!(value, JSON::JSONValue::Str(s) if s.contains("/nix/store/")) {
                 continue;
             }
             let rendered = match value {
-                JSON::Json::Num(n) => render_live_number(*n),
-                JSON::Json::Bool(b) => b.to_string(),
-                JSON::Json::Str(s) => import_render_string(s),
+                JSON::JSONValue::Num(n) => render_live_number(*n),
+                JSON::JSONValue::Bool(b) => b.to_string(),
+                JSON::JSONValue::Str(s) => import_render_string(s),
                 other => {
                     omissions.push(format!(
                         "boot.kernel.sysctl.{key} has a shape jetos cannot encode yet: {other:?}"

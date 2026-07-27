@@ -62,7 +62,7 @@ pub(crate) fn typed_text_mismatch(want: &Type, got: &Type, span: Span) -> Option
     let Type::Named(tn) = want else {
         return None;
     };
-    if (tn != "Sql" && tn != "Html" && tn != Syntax::TYPE_SH) || *got != Type::String {
+    if (tn != "SQL" && tn != "HTML" && tn != Syntax::TYPE_SH) || *got != Type::String {
         return None;
     }
     Some(Diagnostic::error(
@@ -279,8 +279,8 @@ fn builtin_resource_type(name: &str) -> bool {
             | "FileLock"
             | "TcpStream"
             | "UnixStream"
-            | "TlsStream"
-            | "DbConnection"
+            | "TLSStream"
+            | "DBConnection"
             | "Arena"
             | "Bump"
             | "Pool"

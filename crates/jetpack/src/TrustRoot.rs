@@ -386,7 +386,7 @@ pub enum TrustError {
     InvalidPublisher { detail: String },
     IdentityKindMismatch { kind: IdentityKind, detail: String },
     RotationRejected { detail: String },
-    Io { detail: String },
+    IO { detail: String },
 }
 
 impl fmt::Display for TrustError {
@@ -438,7 +438,7 @@ impl fmt::Display for TrustError {
             | TrustError::InvalidThreshold { detail }
             | TrustError::InvalidPublisher { detail }
             | TrustError::RotationRejected { detail }
-            | TrustError::Io { detail } => write!(f, "{detail}"),
+            | TrustError::IO { detail } => write!(f, "{detail}"),
             TrustError::IdentityKindMismatch { kind, detail } => {
                 write!(f, "identity kind {}: {detail}", kind.as_str())
             }
@@ -541,14 +541,14 @@ impl RootBootstrap {
 
     pub fn write(&self, roots_dir: &Path) -> Result<(), TrustError> {
         let dir = roots_dir.join("trust");
-        std::fs::create_dir_all(&dir).map_err(|e| TrustError::Io {
+        std::fs::create_dir_all(&dir).map_err(|e| TrustError::IO {
             detail: e.to_string(),
         })?;
         let body = format!(
             "digest={}\nversion={}\nconsistent_snapshot={}\n",
             self.pin_digest, self.root_version, self.consistent_snapshot
         );
-        std::fs::write(Self::path(roots_dir), body).map_err(|e| TrustError::Io {
+        std::fs::write(Self::path(roots_dir), body).map_err(|e| TrustError::IO {
             detail: e.to_string(),
         })
     }

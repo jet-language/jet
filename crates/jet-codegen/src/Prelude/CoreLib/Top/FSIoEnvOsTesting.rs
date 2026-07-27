@@ -1,31 +1,31 @@
-fn jet_std_fs_symlink(from: &String, to: &String) -> Result<(), jet_std::IoError> {
+fn jet_std_fs_symlink(from: &String, to: &String) -> Result<(), jet_std::IOError> {
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(from, to).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Write, to, e))
+        std::os::unix::fs::symlink(from, to).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, to, e))
     }
     #[cfg(windows)]
     {
-        let meta = std::fs::metadata(from).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Read, from, e))?;
+        let meta = std::fs::metadata(from).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, from, e))?;
         if meta.is_dir() {
-            std::os::windows::fs::symlink_dir(from, to).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Write, to, e))
+            std::os::windows::fs::symlink_dir(from, to).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, to, e))
         } else {
-            std::os::windows::fs::symlink_file(from, to).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Write, to, e))
+            std::os::windows::fs::symlink_file(from, to).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, to, e))
         }
     }
 }
-fn jet_std_fs_read_link(path: &String) -> Result<String, jet_std::IoError> {
+fn jet_std_fs_read_link(path: &String) -> Result<String, jet_std::IOError> {
     std::fs::read_link(path)
         .map(|p| p.to_string_lossy().to_string())
-        .map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Read, path, e))
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))
 }
-fn jet_std_fs_hard_link(from: &String, to: &String) -> Result<(), jet_std::IoError> {
-    std::fs::hard_link(from, to).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Write, to, e))
+fn jet_std_fs_hard_link(from: &String, to: &String) -> Result<(), jet_std::IOError> {
+    std::fs::hard_link(from, to).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, to, e))
 }
-fn jet_std_fs_rename(from: &String, to: &String) -> Result<(), jet_std::IoError> {
-    std::fs::rename(from, to).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Write, from, e))
+fn jet_std_fs_rename(from: &String, to: &String) -> Result<(), jet_std::IOError> {
+    std::fs::rename(from, to).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, from, e))
 }
-fn jet_std_fs_stat(path: &String) -> Result<jet_std::Stat, jet_std::IoError> {
-    let meta = std::fs::symlink_metadata(path).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Read, path, e))?;
+fn jet_std_fs_stat(path: &String) -> Result<jet_std::Stat, jet_std::IOError> {
+    let meta = std::fs::symlink_metadata(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
     let ft = meta.file_type();
     let modified_ms = meta.modified().ok().and_then(system_time_ms).unwrap_or(0);
     let created_ms = meta.created().ok().and_then(system_time_ms).unwrap_or(0);
@@ -54,45 +54,45 @@ fn system_time_ms(t: std::time::SystemTime) -> Option<i64> {
         .ok()
         .map(|d| d.as_millis() as i64)
 }
-fn jet_std_fs_canonicalize(path: &String) -> Result<String, jet_std::IoError> {
+fn jet_std_fs_canonicalize(path: &String) -> Result<String, jet_std::IOError> {
     std::fs::canonicalize(path)
         .map(|p| p.to_string_lossy().to_string())
-        .map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Resolve, path, e))
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Resolve, path, e))
 }
-fn jet_std_fs_absolute(path: &String) -> Result<String, jet_std::IoError> {
+fn jet_std_fs_absolute(path: &String) -> Result<String, jet_std::IOError> {
     let p = std::path::Path::new(path);
     let abs = if p.is_absolute() {
         p.to_path_buf()
     } else {
         std::env::current_dir()
-            .map_err(|e| jet_std::IoError::other(jet_std::IoOperation::Resolve, None, e))?
+            .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, None, e))?
             .join(p)
     };
     Ok(abs.to_string_lossy().to_string())
 }
-fn jet_std_fs_copy_dir(from: &String, to: &String) -> Result<(), jet_std::IoError> {
+fn jet_std_fs_copy_dir(from: &String, to: &String) -> Result<(), jet_std::IOError> {
     fn copy_tree(
         src: &std::path::Path,
         dst: &std::path::Path,
         shown: &str,
-    ) -> Result<(), jet_std::IoError> {
-        std::fs::create_dir_all(dst).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Write, shown, e))?;
-        for entry in std::fs::read_dir(src).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Read, shown, e))? {
-            let entry = entry.map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Read, shown, e))?;
+    ) -> Result<(), jet_std::IOError> {
+        std::fs::create_dir_all(dst).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, shown, e))?;
+        for entry in std::fs::read_dir(src).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, shown, e))? {
+            let entry = entry.map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, shown, e))?;
             let src_path = entry.path();
             let dst_path = dst.join(entry.file_name());
-            let ft = entry.file_type().map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Read, shown, e))?;
+            let ft = entry.file_type().map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, shown, e))?;
             if ft.is_dir() {
                 copy_tree(&src_path, &dst_path, shown)?;
             } else if ft.is_file() {
-                std::fs::copy(&src_path, &dst_path).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Write, shown, e))?;
+                std::fs::copy(&src_path, &dst_path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, shown, e))?;
             }
         }
         Ok(())
     }
     copy_tree(std::path::Path::new(from), std::path::Path::new(to), from)
 }
-fn jet_std_fs_walk(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IoError> {
+fn jet_std_fs_walk(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::IOError> {
     let root = std::path::PathBuf::from(path);
     let mut out = Vec::new();
     fn walk_dir(
@@ -101,10 +101,10 @@ fn jet_std_fs_walk(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::Io
         depth: i64,
         out: &mut Vec<jet_std::WalkEntry>,
         shown: &str,
-    ) -> Result<(), jet_std::IoError> {
+    ) -> Result<(), jet_std::IOError> {
         let mut entries = Vec::new();
-        for entry in std::fs::read_dir(dir).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Read, shown, e))? {
-            entries.push(entry.map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Read, shown, e))?);
+        for entry in std::fs::read_dir(dir).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, shown, e))? {
+            entries.push(entry.map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, shown, e))?);
         }
         entries.sort_by_key(|e| e.file_name());
         for entry in entries {
@@ -130,7 +130,7 @@ fn jet_std_fs_walk(path: &String) -> Result<Vec<jet_std::WalkEntry>, jet_std::Io
     walk_dir(&root, &root, 0, &mut out, path)?;
     Ok(out)
 }
-fn jet_std_fs_glob(pattern: &String) -> Result<Vec<String>, jet_std::IoError> {
+fn jet_std_fs_glob(pattern: &String) -> Result<Vec<String>, jet_std::IOError> {
     let split = pattern.find(['*', '?']).unwrap_or(pattern.len());
     let base = pattern[..split]
         .rsplit_once(std::path::MAIN_SEPARATOR)
@@ -159,13 +159,13 @@ fn glob_match(pattern: &str, text: &str) -> bool {
     }
     inner(pattern.as_bytes(), text.as_bytes())
 }
-fn jet_std_fs_read_at(path: &String, offset: i64, len: i64) -> Result<Vec<u8>, jet_std::IoError> {
+fn jet_std_fs_read_at(path: &String, offset: i64, len: i64) -> Result<Vec<u8>, jet_std::IOError> {
     use std::io::{Read, Seek, SeekFrom};
-    let mut f = std::fs::File::open(path).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Read, path, e))?;
+    let mut f = std::fs::File::open(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
     f.seek(SeekFrom::Start(offset.max(0) as u64))
-        .map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Read, path, e))?;
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
     let mut buf = vec![0u8; len.max(0) as usize];
-    let n = f.read(&mut buf).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Read, path, e))?;
+    let n = f.read(&mut buf).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
     buf.truncate(n);
     Ok(buf)
 }
@@ -173,53 +173,53 @@ fn jet_std_fs_write_at(
     path: &String,
     offset: i64,
     bytes: &Vec<u8>,
-) -> Result<(), jet_std::IoError> {
+) -> Result<(), jet_std::IOError> {
     use std::io::{Seek, SeekFrom, Write};
     let mut f = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .open(path)
-        .map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Write, path, e))?;
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))?;
     f.seek(SeekFrom::Start(offset.max(0) as u64))
-        .map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Write, path, e))?;
-    f.write_all(bytes).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Write, path, e))
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))?;
+    f.write_all(bytes).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
-fn jet_std_fs_fsync(path: &String) -> Result<(), jet_std::IoError> {
+fn jet_std_fs_fsync(path: &String) -> Result<(), jet_std::IOError> {
     std::fs::OpenOptions::new()
         .read(true)
         .open(path)
         .and_then(|f| f.sync_all())
-        .map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Flush, path, e))
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Flush, path, e))
 }
-fn jet_std_fs_write_atomic(path: &String, bytes: &Vec<u8>) -> Result<(), jet_std::IoError> {
+fn jet_std_fs_write_atomic(path: &String, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
     jet_path_write_atomic(&jet_path_from(path), bytes)
 }
-fn jet_std_fs_temp_dir(prefix: &String) -> Result<jet_std::TempDir, jet_std::IoError> {
+fn jet_std_fs_temp_dir(prefix: &String) -> Result<jet_std::TempDir, jet_std::IOError> {
     let path = jet_temp_path(prefix);
-    std::fs::create_dir(&path).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Write, &path, e))?;
+    std::fs::create_dir(&path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, &path, e))?;
     Ok(jet_std::TempDir {
         path,
         cleanup: std::rc::Rc::new(()),
     })
 }
-fn jet_std_fs_temp_file(prefix: &String) -> Result<jet_std::TempFile, jet_std::IoError> {
+fn jet_std_fs_temp_file(prefix: &String) -> Result<jet_std::TempFile, jet_std::IOError> {
     let path = jet_temp_path(prefix);
     std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
         .open(&path)
-        .map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Write, &path, e))?;
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, &path, e))?;
     Ok(jet_std::TempFile {
         path,
         cleanup: std::rc::Rc::new(()),
     })
 }
-fn jet_std_fs_lock(path: &String) -> Result<jet_std::FileLock, jet_std::IoError> {
+fn jet_std_fs_lock(path: &String) -> Result<jet_std::FileLock, jet_std::IOError> {
     std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
         .open(path)
-        .map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Write, path, e))?;
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))?;
     Ok(jet_std::FileLock {
         path: path.clone(),
         cleanup: std::rc::Rc::new(()),
@@ -239,7 +239,7 @@ fn jet_temp_path(prefix: &String) -> String {
         .to_string_lossy()
         .to_string()
 }
-fn jet_watcher_files(path: &String) -> Result<jet_std::WatchHandle, jet_std::IoError> {
+fn jet_watcher_files(path: &String) -> Result<jet_std::WatchHandle, jet_std::IOError> {
     jet_std::WatchHandle::files(path.clone())
 }
 fn jet_watcher_process_pid(pid: i64) -> jet_std::WatchHandle {
@@ -255,29 +255,29 @@ fn jet_watcher_set() -> jet_std::WatchSet {
 fn jet_std_io_args() -> Vec<String> {
     std::env::args().collect()
 }
-fn jet_std_io_input(prompt: Option<&String>) -> Result<String, jet_std::IoError> {
+fn jet_std_io_input(prompt: Option<&String>) -> Result<String, jet_std::IOError> {
     use std::io::Write;
     if let Some(p) = prompt {
         print!("{}", p);
         std::io::stdout()
             .flush()
-            .map_err(|e| jet_std::IoError::other(jet_std::IoOperation::Flush, None, e))?;
+            .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Flush, None, e))?;
     }
     let mut s = String::new();
     std::io::stdin()
         .read_line(&mut s)
-        .map_err(|e| jet_std::IoError::other(jet_std::IoOperation::Read, Some("stdin".to_string()), e))?;
+        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), e))?;
     while s.ends_with('\n') || s.ends_with('\r') {
         s.pop();
     }
     Ok(s)
 }
-fn jet_std_io_read_all_input() -> Result<String, jet_std::IoError> {
+fn jet_std_io_read_all_input() -> Result<String, jet_std::IOError> {
     use std::io::Read;
     let mut s = String::new();
     std::io::stdin()
         .read_to_string(&mut s)
-        .map_err(|e| jet_std::IoError::other(jet_std::IoOperation::Read, Some("stdin".to_string()), e))?;
+        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), e))?;
     Ok(s)
 }
 
@@ -290,7 +290,7 @@ fn jet_std_io_stdin() -> JetStdinReader {
         inner: std::io::BufReader::new(std::io::stdin()),
     }
 }
-fn jet_std_io_stdin_read_line(r: &mut JetStdinReader) -> Result<Option<String>, jet_std::IoError> {
+fn jet_std_io_stdin_read_line(r: &mut JetStdinReader) -> Result<Option<String>, jet_std::IOError> {
     use std::io::BufRead;
     let mut line = String::new();
     match r.inner.read_line(&mut line) {
@@ -301,7 +301,7 @@ fn jet_std_io_stdin_read_line(r: &mut JetStdinReader) -> Result<Option<String>, 
             }
             Ok(Some(line))
         }
-        Err(e) => Err(jet_std::IoError::other(jet_std::IoOperation::Read, Some("stdin".to_string()), e)),
+        Err(e) => Err(jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), e)),
     }
 }
 
@@ -309,8 +309,8 @@ fn jet_std_io_stdin_read_line(r: &mut JetStdinReader) -> Result<Option<String>, 
 struct JetStdout;
 struct JetStderr;
 
-fn jet_stdio_error(operation: jet_std::IoOperation, resource: &str, e: std::io::Error) -> jet_std::IoError {
-    jet_std::IoError::other(operation, Some(resource.to_string()), e)
+fn jet_stdio_error(operation: jet_std::IOOperation, resource: &str, e: std::io::Error) -> jet_std::IOError {
+    jet_std::IOError::other(operation, Some(resource.to_string()), e)
 }
 
 fn jet_std_io_stdout() -> JetStdout {
@@ -319,49 +319,49 @@ fn jet_std_io_stdout() -> JetStdout {
 fn jet_std_io_stderr() -> JetStderr {
     JetStderr
 }
-fn jet_std_io_stdout_write(_s: &mut JetStdout, text: &String) -> Result<(), jet_std::IoError> {
+fn jet_std_io_stdout_write(_s: &mut JetStdout, text: &String) -> Result<(), jet_std::IOError> {
     use std::io::Write;
     std::io::stdout()
         .write_all(text.as_bytes())
-        .map_err(|e| jet_stdio_error(jet_std::IoOperation::Write, "stdout", e))
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
 }
-fn jet_std_io_stdout_write_line(_s: &mut JetStdout, text: &String) -> Result<(), jet_std::IoError> {
+fn jet_std_io_stdout_write_line(_s: &mut JetStdout, text: &String) -> Result<(), jet_std::IOError> {
     use std::io::Write;
     let mut out = std::io::stdout();
-    out.write_all(text.as_bytes()).map_err(|e| jet_stdio_error(jet_std::IoOperation::Write, "stdout", e))?;
-    out.write_all(b"\n").map_err(|e| jet_stdio_error(jet_std::IoOperation::Write, "stdout", e))
+    out.write_all(text.as_bytes()).map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
+    out.write_all(b"\n").map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
 }
-fn jet_std_io_stdout_write_bytes(_s: &mut JetStdout, bytes: &Vec<u8>) -> Result<(), jet_std::IoError> {
+fn jet_std_io_stdout_write_bytes(_s: &mut JetStdout, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
     use std::io::Write;
-    std::io::stdout().write_all(bytes).map_err(|e| jet_stdio_error(jet_std::IoOperation::Write, "stdout", e))
+    std::io::stdout().write_all(bytes).map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
 }
-fn jet_std_io_stdout_flush(_s: &mut JetStdout) -> Result<(), jet_std::IoError> {
+fn jet_std_io_stdout_flush(_s: &mut JetStdout) -> Result<(), jet_std::IOError> {
     use std::io::Write;
-    std::io::stdout().flush().map_err(|e| jet_stdio_error(jet_std::IoOperation::Flush, "stdout", e))
+    std::io::stdout().flush().map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
 }
 fn jet_std_io_stdout_is_tty(_s: &JetStdout) -> bool {
     use std::io::IsTerminal;
     std::io::stdout().is_terminal()
 }
-fn jet_std_io_stderr_write(_s: &mut JetStderr, text: &String) -> Result<(), jet_std::IoError> {
+fn jet_std_io_stderr_write(_s: &mut JetStderr, text: &String) -> Result<(), jet_std::IOError> {
     use std::io::Write;
     std::io::stderr()
         .write_all(text.as_bytes())
-        .map_err(|e| jet_stdio_error(jet_std::IoOperation::Write, "stderr", e))
+        .map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
 }
-fn jet_std_io_stderr_write_line(_s: &mut JetStderr, text: &String) -> Result<(), jet_std::IoError> {
+fn jet_std_io_stderr_write_line(_s: &mut JetStderr, text: &String) -> Result<(), jet_std::IOError> {
     use std::io::Write;
     let mut out = std::io::stderr();
-    out.write_all(text.as_bytes()).map_err(|e| jet_stdio_error(jet_std::IoOperation::Write, "stderr", e))?;
-    out.write_all(b"\n").map_err(|e| jet_stdio_error(jet_std::IoOperation::Write, "stderr", e))
+    out.write_all(text.as_bytes()).map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))?;
+    out.write_all(b"\n").map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
 }
-fn jet_std_io_stderr_write_bytes(_s: &mut JetStderr, bytes: &Vec<u8>) -> Result<(), jet_std::IoError> {
+fn jet_std_io_stderr_write_bytes(_s: &mut JetStderr, bytes: &Vec<u8>) -> Result<(), jet_std::IOError> {
     use std::io::Write;
-    std::io::stderr().write_all(bytes).map_err(|e| jet_stdio_error(jet_std::IoOperation::Write, "stderr", e))
+    std::io::stderr().write_all(bytes).map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stderr", e))
 }
-fn jet_std_io_stderr_flush(_s: &mut JetStderr) -> Result<(), jet_std::IoError> {
+fn jet_std_io_stderr_flush(_s: &mut JetStderr) -> Result<(), jet_std::IOError> {
     use std::io::Write;
-    std::io::stderr().flush().map_err(|e| jet_stdio_error(jet_std::IoOperation::Flush, "stderr", e))
+    std::io::stderr().flush().map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stderr", e))
 }
 fn jet_std_io_stderr_is_tty(_s: &JetStderr) -> bool {
     use std::io::IsTerminal;
@@ -426,16 +426,16 @@ fn jet_std_io_style_force(style: &String, text: &String) -> String {
         None => text.clone(),
     }
 }
-fn jet_std_io_progress(text: &String) -> Result<(), jet_std::IoError> {
+fn jet_std_io_progress(text: &String) -> Result<(), jet_std::IOError> {
     use std::io::{IsTerminal, Write};
     let mut out = std::io::stdout();
     if out.is_terminal() {
-        out.write_all(b"\r").map_err(|e| jet_stdio_error(jet_std::IoOperation::Write, "stdout", e))?;
-        out.write_all(text.as_bytes()).map_err(|e| jet_stdio_error(jet_std::IoOperation::Write, "stdout", e))?;
-        out.flush().map_err(|e| jet_stdio_error(jet_std::IoOperation::Flush, "stdout", e))
+        out.write_all(b"\r").map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
+        out.write_all(text.as_bytes()).map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
+        out.flush().map_err(|e| jet_stdio_error(jet_std::IOOperation::Flush, "stdout", e))
     } else {
-        out.write_all(text.as_bytes()).map_err(|e| jet_stdio_error(jet_std::IoOperation::Write, "stdout", e))?;
-        out.write_all(b"\n").map_err(|e| jet_stdio_error(jet_std::IoOperation::Write, "stdout", e))
+        out.write_all(text.as_bytes()).map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))?;
+        out.write_all(b"\n").map_err(|e| jet_stdio_error(jet_std::IOOperation::Write, "stdout", e))
     }
 }
 
@@ -523,10 +523,10 @@ fn jet_std_env_vars() -> Result<Vec<String>, jet_std::EnvError> {
 fn jet_std_env_snapshot_raw() -> JetEnvEntries {
     jet_env_read().clone()
 }
-fn jet_std_env_current_dir() -> Result<String, jet_std::IoError> {
+fn jet_std_env_current_dir() -> Result<String, jet_std::IOError> {
     std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
-        .map_err(|e| jet_std::IoError::other(jet_std::IoOperation::Resolve, None, e))
+        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, None, e))
 }
 fn jet_std_env_home_dir() -> Option<String> {
     jet_std_env_get(&"HOME".to_string())
@@ -571,8 +571,8 @@ fn jet_std_os_username() -> String {
         .or_else(|| std::env::var("USERNAME").ok())
         .unwrap_or_default()
 }
-fn jet_std_os_set_current_dir(path: &String) -> Result<(), jet_std::IoError> {
-    std::env::set_current_dir(path).map_err(|e| jet_std::IoError::other(jet_std::IoOperation::Resolve, Some(path.clone()), e))
+fn jet_std_os_set_current_dir(path: &String) -> Result<(), jet_std::IOError> {
+    std::env::set_current_dir(path).map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Resolve, Some(path.clone()), e))
 }
 
 mod jet_os_interrupt {
@@ -825,7 +825,7 @@ fn jet_std_process_cmd(cmd: &Vec<String>) -> jet_std::ProcessSpec {
         detached: false,
     }
 }
-fn jet_std_process_run(cmd: &Vec<String>) -> Result<jet_std::ProcessResult, jet_std::IoError> {
+fn jet_std_process_run(cmd: &Vec<String>) -> Result<jet_std::ProcessResult, jet_std::IOError> {
     jet_process_spec_run_inner(&jet_std_process_cmd(cmd))
 }
 // D-PROCESS1=A: `process.pipeline([ProcessSpec, ...])` — argv-only pipelines,
@@ -834,10 +834,10 @@ fn jet_std_process_run(cmd: &Vec<String>) -> Result<jet_std::ProcessResult, jet_
 // piped internally, to chain / collect) are overridden.
 fn jet_std_process_pipeline(
     specs: &Vec<jet_std::ProcessSpec>,
-) -> Result<jet_std::ProcessResult, jet_std::IoError> {
+) -> Result<jet_std::ProcessResult, jet_std::IOError> {
     if specs.is_empty() {
-        return Err(jet_std::IoError::InvalidInput(jet_std::IoContext::new(
-            jet_std::IoOperation::Resolve,
+        return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+            jet_std::IOOperation::Resolve,
             None,
             None,
             Some("process.pipeline needs at least one command".to_string()),
@@ -853,7 +853,7 @@ fn jet_std_process_pipeline(
         command.stdout(std::process::Stdio::piped());
         command.stderr(std::process::Stdio::piped());
         let mut child = command.spawn().map_err(|error| {
-            jet_std::IoError::other(jet_std::IoOperation::Resolve, spec.cmd.first().cloned(), error)
+            jet_std::IOError::other(jet_std::IOOperation::Resolve, spec.cmd.first().cloned(), error)
         })?;
         prev_stdout = child.stdout.take();
         children.push(child);
@@ -861,7 +861,7 @@ fn jet_std_process_pipeline(
     let mut output = String::new();
     if let Some(mut stdout) = prev_stdout.take() {
         std::io::Read::read_to_string(&mut stdout, &mut output).map_err(|error| {
-            jet_std::IoError::other(jet_std::IoOperation::Read, Some("pipeline stdout".to_string()), error)
+            jet_std::IOError::other(jet_std::IOOperation::Read, Some("pipeline stdout".to_string()), error)
         })?;
     }
     let mut errors = String::new();
@@ -870,12 +870,12 @@ fn jet_std_process_pipeline(
         if let Some(mut stderr) = child.stderr.take() {
             let mut text = String::new();
             std::io::Read::read_to_string(&mut stderr, &mut text).map_err(|error| {
-                jet_std::IoError::other(jet_std::IoOperation::Read, Some("pipeline stderr".to_string()), error)
+                jet_std::IOError::other(jet_std::IOOperation::Read, Some("pipeline stderr".to_string()), error)
             })?;
             errors.push_str(&text);
         }
         let status = child.wait().map_err(|error| {
-            jet_std::IoError::other(jet_std::IoOperation::Close, Some("pipeline process".to_string()), error)
+            jet_std::IOError::other(jet_std::IOOperation::Close, Some("pipeline process".to_string()), error)
         })?;
         code = status.code().unwrap_or(-1) as i64;
         if !status.success() {

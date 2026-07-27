@@ -61,7 +61,7 @@ An effect row sits inside the callable arrow:
 ```jet
 fn fetch(url: String) =[Net]=> Response
 
-fn save(record: Record) =[Db.Write, Log]=> Void
+fn save(record: Record) =[DB.Write, Log]=> Void
 
 fn hash(data: [U8]) =[]=> Digest
 ```
@@ -195,9 +195,9 @@ fn log_user(user: User) {
 Put effects inside the callable arrow:
 
 ```jet
-fn fetch(url: String) =[Net]=> Response ? HttpError
+fn fetch(url: String) =[Net]=> Response ? HTTPError
 
-fn store(record: Record) =[Db.Write, Log]=> Receipt ? StoreError
+fn store(record: Record) =[DB.Write, Log]=> Receipt ? StoreError
 
 fn checksum(data: [U8]) =[]=> Digest
 ```
@@ -205,7 +205,7 @@ fn checksum(data: [U8]) =[]=> Digest
 An explicit effect row always names a result type. Use `Void` when needed:
 
 ```jet
-fn run() =[Io]=> Void {
+fn run() =[IO]=> Void {
     print("ready")
 }
 ```
@@ -223,7 +223,7 @@ Use the same callable arrow:
 ```jet
 fn(Int) => String
 
-fn(Request) =[Net, Log]=> Response ? HttpError
+fn(Request) =[Net, Log]=> Response ? HTTPError
 
 fn() =[]=> Int
 ```
@@ -514,7 +514,7 @@ Value selection:
 ```jet
 backend :: comptime if build.os == {
     .Linux -> LinuxBackend.{}
-    .Macos -> MacosBackend.{}
+    .MacOS -> MacOSBackend.{}
     .Windows -> WindowsBackend.{}
 }
 ```
@@ -984,7 +984,7 @@ rows :: loop team; teams,
 ```jet
 fn parse(text: String) => Number ? ParseError
 
-fn fetch(url: String) =[Net, Log]=> Response ? HttpError
+fn fetch(url: String) =[Net, Log]=> Response ? HTTPError
 ```
 
 Do not align effect arrows with added spaces.
@@ -1216,7 +1216,7 @@ Use current implicit capture ownership and capture-time copies.
 ### Dense effect arrow
 
 ```jet
-=[Net, Db.Write, Log]=>
+=[Net, DB.Write, Log]=>
 ```
 
 This is visually heavier than `--[Effects]->`.

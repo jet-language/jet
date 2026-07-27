@@ -510,13 +510,13 @@ impl<'a> Parser<'a> {
                     return Err(Diagnostic::error(
                         "E3212",
                         format!("unknown C ABI marker `#{}`", marker.name),
-                        "C declarations only accept the per-function `#Abi(name)` marker"
+                        "C declarations only accept the per-function `#ABI(name)` marker"
                             .to_string(),
-                        "use `#Abi(system)` or remove the marker for the default C ABI".to_string(),
+                        "use `#ABI(system)` or remove the marker for the default C ABI".to_string(),
                         Some(marker.name_span),
                     ));
                 }
-                let marker = marker.expect("one Abi marker");
+                let marker = marker.expect("one ABI marker");
                 let arguments = self.bound_registered_rule_arguments(marker)?;
                 let Some(crate::AST::Expr::Ident(name, span)) = arguments.parameter(0) else {
                     return Err(crate::Policy::marker_argument_shape_error(Syntax::ATTR_ABI, marker.span));

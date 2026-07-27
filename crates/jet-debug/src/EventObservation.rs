@@ -2,7 +2,7 @@
 //! Runtime records are payload-free; this consumer accepts only the closed
 //! schema and preserves every numeric/runtime enum fact exactly.
 
-use jet_foundation::JSON::{json_get, json_str, parse_json, JsonValue};
+use jet_foundation::JSON::{json_get, json_str, parse_json, JSONValue};
 
 const MAX_SNAPSHOT_BYTES: usize = 1024 * 1024;
 const MAX_EVENTS: usize = 256;
@@ -14,8 +14,8 @@ pub fn render(snapshot: &str) -> Result<String, String> {
     let root = parse_json(snapshot)
         .map_err(|()| "runtime observation is not valid JSON".to_string())?;
     let events = match json_get(&root, "event_observations") {
-        Some(JsonValue::Array(events)) if events.len() <= MAX_EVENTS => events,
-        Some(JsonValue::Array(_)) => {
+        Some(JSONValue::Array(events)) if events.len() <= MAX_EVENTS => events,
+        Some(JSONValue::Array(_)) => {
             return Err("runtime event observation exceeds the 256-record limit".to_string())
         }
         _ => return Err("runtime observation has no event sequence".to_string()),
@@ -24,7 +24,7 @@ pub fn render(snapshot: &str) -> Result<String, String> {
     let mut previous = 0;
     let mut lines = Vec::with_capacity(events.len());
     for event in events {
-        let JsonValue::Object(fields) = event else {
+        let JSONValue::Object(fields) = event else {
             return Err("runtime event observation is not an object".to_string());
         };
         const KEYS: [&str; 15] = [
@@ -108,28 +108,28 @@ pub fn render(snapshot: &str) -> Result<String, String> {
     Ok(lines.join("\n"))
 }
 
-fn integer(object: &JsonValue, key: &str) -> Result<i64, String> {
+fn integer(object: &JSONValue, key: &str) -> Result<i64, String> {
     match json_get(object, key) {
-        Some(JsonValue::Number(value)) => Ok(*value),
+        Some(JSONValue::Number(value)) => Ok(*value),
         _ => Err(format!("runtime event observation has invalid `{key}`")),
     }
 }
 
-fn unsigned(object: &JsonValue, key: &str) -> Result<i64, String> {
+fn unsigned(object: &JSONValue, key: &str) -> Result<i64, String> {
     let value = integer(object, key)?;
     (value >= 0)
         .then_some(value)
         .ok_or_else(|| format!("runtime event observation has negative `{key}`"))
 }
 
-fn count(object: &JsonValue, key: &str) -> Result<i64, String> {
+fn count(object: &JSONValue, key: &str) -> Result<i64, String> {
     let value = integer(object, key)?;
     (value >= -1)
         .then_some(value)
         .ok_or_else(|| format!("runtime event observation has invalid `{key}`"))
 }
 
-fn closed<'a>(object: &'a JsonValue, key: &str, allowed: &[&str]) -> Result<&'a str, String> {
+fn closed<'a>(object: &'a JSONValue, key: &str, allowed: &[&str]) -> Result<&'a str, String> {
     let value = json_get(object, key)
         .and_then(json_str)
         .ok_or_else(|| format!("runtime event observation has invalid `{key}`"))?;

@@ -641,7 +641,7 @@ mod tests {
             run.effects
         );
         assert!(
-            run.effects.iter().any(|e| e == "Io" || e == "Log"),
+            run.effects.iter().any(|e| e == "IO" || e == "Log"),
             "print must solve to a real effect; got {:?}",
             run.effects
         );

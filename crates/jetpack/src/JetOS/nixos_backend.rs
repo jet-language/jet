@@ -12,7 +12,7 @@ use super::options_rendering::{
     clean_bool_json, clean_symbol, clean_value, collect_names, is_option_priority_metadata,
     parse_list_items, resolved_option_value, service_extra,
 };
-use super::types::OsFlags;
+use super::types::OSFlags;
 use super::vm_proof::{file_sha256, require_real_vm_tools};
 use jet_env_model::ModuleEval::SystemPlan;
 use crate::Output::Theme;
@@ -994,7 +994,7 @@ pub(super) fn cmd_migrate_compare_nixos(
     table: &RefSpec::SourceTable,
     system: &SystemPlan,
     out: &Path,
-    flags: &OsFlags,
+    flags: &OSFlags,
 ) -> i32 {
     if out.exists() {
         theme.error(
@@ -1414,7 +1414,7 @@ fn require_nixos_guest_fact(report: &str) -> Result<ObservedGuestIdentity, Strin
         JSON::parse(report).map_err(|_| "invalid guest fact JSON; guest payload was suppressed")?;
     let field = |name| -> Result<String, String> {
         fact.get(name)
-            .and_then(JSON::Json::as_str)
+            .and_then(JSON::JSONValue::as_str)
             .map(str::to_string)
             .map_err(|_| {
                 "guest fact omitted a required identity field; guest payload was suppressed"

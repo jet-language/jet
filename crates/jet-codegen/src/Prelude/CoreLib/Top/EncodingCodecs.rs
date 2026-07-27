@@ -445,8 +445,8 @@ fn jet_cbor_read_len(input: &[u8], i: &mut usize, add: u8, start: usize, canonic
     }
     Ok(n)
 }
-struct JetCborAllocBudget { limit: usize, live: usize, peak: usize }
-impl JetCborAllocBudget {
+struct JetCBORAllocBudget { limit: usize, live: usize, peak: usize }
+impl JetCBORAllocBudget {
     fn new(limit: i64) -> Self { Self { limit: limit as usize, live: 0, peak: 0 } }
     fn reserve(&mut self, count: usize, unit: usize, offset: usize, path: &str, what: &str) -> Result<usize, jet_std::CBORError> {
         let available = self.limit - self.live;
@@ -460,7 +460,7 @@ impl JetCborAllocBudget {
     }
     fn release(&mut self, requested: usize) { self.live -= requested; }
 }
-fn jet_cbor_index_path(path: &str, index: usize, budget: &mut JetCborAllocBudget, offset: usize) -> Result<(String, usize), jet_std::CBORError> {
+fn jet_cbor_index_path(path: &str, index: usize, budget: &mut JetCBORAllocBudget, offset: usize) -> Result<(String, usize), jet_std::CBORError> {
     let mut digits = [0u8; 20];
     let mut cursor = digits.len();
     let mut n = index;
@@ -471,7 +471,7 @@ fn jet_cbor_index_path(path: &str, index: usize, budget: &mut JetCborAllocBudget
     out.push_str(path); out.push('['); out.push_str(std::str::from_utf8(&digits[cursor..]).unwrap()); out.push(']');
     Ok((out, charged))
 }
-fn jet_cbor_key_path(path: &str, key: &str, budget: &mut JetCborAllocBudget, offset: usize) -> Result<(String, usize), jet_std::CBORError> {
+fn jet_cbor_key_path(path: &str, key: &str, budget: &mut JetCBORAllocBudget, offset: usize) -> Result<(String, usize), jet_std::CBORError> {
     let escaped = key.chars().map(|c| c.escape_debug().map(|x| x.len_utf8()).sum::<usize>()).sum::<usize>();
     let capacity = path.len().checked_add(escaped).and_then(|n| n.checked_add(4)).ok_or_else(|| jet_cbor_error(jet_std::CBORErrorKind::Limit, offset, path, "CBOR path allocation exceeds target capacity"))?;
     let charged = budget.reserve(capacity, 1, offset, path, "CBOR path")?;
@@ -491,7 +491,7 @@ fn jet_cbor_indefinite_error(options: &jet_std::CBOROptions, offset: usize, path
         Ok(())
     }
 }
-fn jet_cbor_decode_indefinite_string(input: &[u8], i: &mut usize, options: &jet_std::CBOROptions, budget: &mut JetCborAllocBudget, depth: i64, items: &mut i64, path: &str, major: u8, start: usize, allow_bytes: bool) -> Result<jet_std::DataTree, jet_std::CBORError> {
+fn jet_cbor_decode_indefinite_string(input: &[u8], i: &mut usize, options: &jet_std::CBOROptions, budget: &mut JetCBORAllocBudget, depth: i64, items: &mut i64, path: &str, major: u8, start: usize, allow_bytes: bool) -> Result<jet_std::DataTree, jet_std::CBORError> {
     jet_cbor_indefinite_error(options, start, path)?;
     if depth + 1 > options.max_depth { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, start, path, format!("max_depth {} exceeded", options.max_depth))); }
     if major == 2 && !allow_bytes { return Err(jet_cbor_error(jet_std::CBORErrorKind::Unsupported, start, path, "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>")); }
@@ -516,7 +516,7 @@ fn jet_cbor_decode_indefinite_string(input: &[u8], i: &mut usize, options: &jet_
     if major == 2 { Ok(jet_std::DataTree::Bytes(bytes)) }
     else { String::from_utf8(bytes).map(jet_std::DataTree::Text).map_err(|_| jet_cbor_error(jet_std::CBORErrorKind::Syntax, start, path, "CBOR text is not UTF-8")) }
 }
-fn jet_cbor_decode_val(input: &[u8], i: &mut usize, options: &jet_std::CBOROptions, budget: &mut JetCborAllocBudget, depth: i64, items: &mut i64, path: &str, allow_bytes: bool) -> Result<jet_std::DataTree, jet_std::CBORError> {
+fn jet_cbor_decode_val(input: &[u8], i: &mut usize, options: &jet_std::CBOROptions, budget: &mut JetCBORAllocBudget, depth: i64, items: &mut i64, path: &str, allow_bytes: bool) -> Result<jet_std::DataTree, jet_std::CBORError> {
     if *i >= input.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::Truncated, input.len(), path, "CBOR value is missing")); }
     let start = *i; let b = input[*i]; *i += 1;
     jet_cbor_count_item(items, options, start, path)?;
@@ -635,7 +635,7 @@ fn jet_enc_cbor_parse(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<
     if bytes.len() as i64 > options.max_bytes { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, 0, "$", format!("input exceeds max_bytes {}", options.max_bytes))); }
     let mut i = 0usize;
     let mut items = 0i64;
-    let mut budget = JetCborAllocBudget::new(options.max_bytes);
+    let mut budget = JetCBORAllocBudget::new(options.max_bytes);
     let v = jet_cbor_decode_val(bytes, &mut i, &options, &mut budget, 0, &mut items, "$", false)?;
     if i != bytes.len() { return Err(jet_cbor_error(jet_std::CBORErrorKind::TrailingData, i, "$", "trailing CBOR data after root value")); }
     Ok(v)
@@ -643,7 +643,7 @@ fn jet_enc_cbor_parse(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<
 fn jet_enc_cbor_decode<T: user_Decode>(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<T, jet_std::CBORError> {
     jet_cbor_validate_options(&options)?;
     if bytes.len() as i64 > options.max_bytes { return Err(jet_cbor_error(jet_std::CBORErrorKind::Limit, 0, "$", format!("input exceeds max_bytes {}", options.max_bytes))); }
-    let mut i=0usize; let mut items=0i64; let mut budget=JetCborAllocBudget::new(options.max_bytes);
+    let mut i=0usize; let mut items=0i64; let mut budget=JetCBORAllocBudget::new(options.max_bytes);
     let tree=jet_cbor_decode_val(bytes,&mut i,&options,&mut budget,0,&mut items,"$",true)?;
     if i!=bytes.len(){return Err(jet_cbor_error(jet_std::CBORErrorKind::TrailingData,i,"$","trailing CBOR data after root value"));}
     T::jet_decode_traced(&tree).map(|(value,_)|value).map_err(|mut error| {

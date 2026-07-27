@@ -28,18 +28,18 @@ impl<'a> Checker<'a> {
                 ("core.game", "Scene") => Some(Type::Named("GameSceneType".to_string())),
                 ("core.game", "Replay") => Some(Type::Named("GameReplayType".to_string())),
                 ("core.game", "Backend") => Some(Type::Named("GameBackendType".to_string())),
-                ("core.tls", "ClientConfig") => Some(Type::Named("TlsClientConfigType".to_string())),
-                ("core.http.client", "Client") => Some(Type::Named("HttpClientType".to_string())),
-                ("core.http.client", "Proxy") => Some(Type::Named("HttpProxy".to_string())),
+                ("core.tls", "ClientConfig") => Some(Type::Named("TLSClientConfigType".to_string())),
+                ("core.http.client", "Client") => Some(Type::Named("HTTPClientType".to_string())),
+                ("core.http.client", "Proxy") => Some(Type::Named("HTTPProxy".to_string())),
                 ("core.http.client", "RedirectPolicy") => {
-                    Some(Type::Named("HttpRedirectPolicy".to_string()))
+                    Some(Type::Named("HTTPRedirectPolicy".to_string()))
                 },
                 ("core.http.client", "CookieJar") => {
-                    Some(Type::Named("HttpCookieJar".to_string()))
+                    Some(Type::Named("HTTPCookieJar".to_string()))
                 },
-                ("core.tls", "RootCertificates") => Some(Type::Named("TlsRootCertificatesType".to_string())),
-                ("core.tls", "ClientIdentity") => Some(Type::Named("TlsClientIdentityType".to_string())),
-                ("core.tls", "TlsVersion") => Some(Type::Named("TlsVersion".to_string())),
+                ("core.tls", "RootCertificates") => Some(Type::Named("TLSRootCertificatesType".to_string())),
+                ("core.tls", "ClientIdentity") => Some(Type::Named("TLSClientIdentityType".to_string())),
+                ("core.tls", "TLSVersion") => Some(Type::Named("TLSVersion".to_string())),
                 // D-FIDELITY-API1=A: `core.perf.Perf` static API sentinel.
                 ("core.perf", "Perf") => Some(Type::Named("Perf".to_string())),
                 // D-ENCSTREAM-SURFACE1=A: shared encoding values are module fields on

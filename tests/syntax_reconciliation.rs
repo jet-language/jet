@@ -380,7 +380,7 @@ fn documentation_consistency_sweep_stays_current() {
         fs::read_to_string("docs/spec/release-policy.md").expect("read release policy");
 
     assert!(!spec.contains("[ \"~\" | \"^\" | \"&\" ]"));
-    assert!(!spec.contains("Result(String, IoError)"));
+    assert!(!spec.contains("Result(String, IOError)"));
     assert!(spec.contains("String ? IOError"));
     assert!(roadmap.contains("Self-hosting → **Epoch 9** (Bootstrapping)"));
     for current_path in [
@@ -430,7 +430,7 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "PubFile",
         "NoPrelude",
         "Target",
-        "Html",
+        "HTML",
         "WasmExport",
         "Layout",
         "SingleUse",
@@ -451,7 +451,7 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "Post",
         "Inline",
         "Persist",
-        "Cli",
+        "CLI",
         "Numeric",
         "Printable",
         "CodableAsBase",

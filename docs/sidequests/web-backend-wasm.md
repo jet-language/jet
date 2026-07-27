@@ -6,8 +6,8 @@ Criterion 5 (this doc, examples, focused tests, scoped proof) is card #705.
 Breadth beyond the lists below is **not** claimed complete.
 
 Ratified: D-WEBBACKEND1, D-WASM1, D-JSBIND1, D-WEBKIND1, D-DOMGEN1 (all =A).
-Per-function partition pins use `#Target(Wasm)` / `#Target(Js)` only
-(D-MARK-TARGET1 retired bare `#Wasm` / `#Js`). `#WasmExport` marks a Wasm entry
+Per-function partition pins use `#Target(Wasm)` / `#Target(JS)` only
+(D-MARK-TARGET1 retired bare `#Wasm` / `#JS`). `#WasmExport` marks a Wasm entry
 called from generated JS.
 
 ## What ships today
@@ -18,8 +18,8 @@ called from generated JS.
 | Effect-based partition + qualified identity | JS vs Wasm buckets, same-leaf collisions, cross-file imports | `web_partition` (15) |
 | D-JSBIND1 ABI round-trips | scalars, `String`, `[Int]`/`[String]`, `Map<String,Int>`, Codable structs, callbacks/errors | `web_build` hostile harnesses |
 | DOM shim + reactive UI | `ui.null_backend()` → `jet_dom_runtime.js`; signals/effects | `web_hello`, `ui_web_reactive`, browser harness |
-| Wasm compute bridge | `#WasmExport` + `#Target(Js) run()` calling Wasm | `web_compute`, `web_wasm_*` examples |
-| Companion HTML pages | `#Html("page.html")`, `#Target(Web)` inference | `ui_web_click`, `ui_showcase` |
+| Wasm compute bridge | `#WasmExport` + `#Target(JS) run()` calling Wasm | `web_compute`, `web_wasm_*` examples |
+| Companion HTML pages | `#HTML("page.html")`, `#Target(Web)` inference | `ui_web_click`, `ui_showcase` |
 | Dev server + live reload | `fn dev()` + `core.web.devserver` | `web_dev` (7/8; canvas panel test unrelated) |
 | Source maps + manifest | `web.manifest.json` partitions, JS source maps | `web_build` |
 | Real browser acceptance | DOM, reactive, Wasm, bundle, maps | `web_browser` (1) |
@@ -48,9 +48,9 @@ backend without `--target=web`. `jet run` never infers web.
 | File | Teaches |
 |------|---------|
 | `web_hello.jet` | DOM shim round-trip via `core.ui` null backend |
-| `web_compute.jet` | `#WasmExport` compute called from `#Target(Js) run` |
+| `web_compute.jet` | `#WasmExport` compute called from `#Target(JS) run` |
 | `ui_web_reactive.jet` | `reactive_render` + DOM command stream |
-| `ui_web_click.jet` + `ui_web_click.html` | Real clickable page, `#Html`, exported `render` |
+| `ui_web_click.jet` + `ui_web_click.html` | Real clickable page, `#HTML`, exported `render` |
 | `ui_showcase.jet` + `ui_showcase.html` | Flagship reactive UI + companion host page |
 | `web_wasm_range.jet` | Wasm `for` range loops across the bridge |
 | `web_wasm_for_in.jet` | Wasm `for-in` collection loops |

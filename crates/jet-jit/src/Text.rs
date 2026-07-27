@@ -10,7 +10,7 @@ use cranelift_module::{FuncId, Linkage, Module};
 pub(crate) mod text_rt {
     pub mod jet_std {
         #[derive(Clone, Copy, Debug, PartialEq)]
-        pub enum IoOperation {
+        pub enum IOOperation {
             Read,
             Write,
             Flush,
@@ -22,16 +22,16 @@ pub(crate) mod text_rt {
         }
 
         #[derive(Clone, Debug, PartialEq)]
-        pub struct IoContext {
-            pub operation: IoOperation,
+        pub struct IOContext {
+            pub operation: IOOperation,
             pub resource: Option<String>,
             pub os_code: Option<i64>,
             pub cause: Option<String>,
         }
 
-        impl IoContext {
+        impl IOContext {
             pub fn new(
-                operation: IoOperation,
+                operation: IOOperation,
                 resource: Option<String>,
                 os_code: Option<i64>,
                 cause: Option<String>,
@@ -46,19 +46,19 @@ pub(crate) mod text_rt {
         }
 
         #[derive(Clone, Debug, PartialEq)]
-        pub enum IoError {
-            InvalidInput(IoContext),
-            NotFound(IoContext),
-            PermissionDenied(IoContext),
-            TimedOut(IoContext),
-            Cancelled(IoContext),
-            Closed(IoContext),
-            Protocol(IoContext),
-            Other(IoContext),
+        pub enum IOError {
+            InvalidInput(IOContext),
+            NotFound(IOContext),
+            PermissionDenied(IOContext),
+            TimedOut(IOContext),
+            Cancelled(IOContext),
+            Closed(IOContext),
+            Protocol(IOContext),
+            Other(IOContext),
         }
 
-        pub fn io_error_at(operation: IoOperation, path: &str, e: std::io::Error) -> IoError {
-            let context = IoContext::new(
+        pub fn io_error_at(operation: IOOperation, path: &str, e: std::io::Error) -> IOError {
+            let context = IOContext::new(
                 operation,
                 Some(path.to_string()),
                 e.raw_os_error().map(i64::from),
@@ -66,15 +66,15 @@ pub(crate) mod text_rt {
             );
             match e.kind() {
                 std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
-                    IoError::InvalidInput(context)
+                    IOError::InvalidInput(context)
                 }
-                std::io::ErrorKind::NotFound => IoError::NotFound(context),
-                std::io::ErrorKind::PermissionDenied => IoError::PermissionDenied(context),
-                std::io::ErrorKind::TimedOut => IoError::TimedOut(context),
+                std::io::ErrorKind::NotFound => IOError::NotFound(context),
+                std::io::ErrorKind::PermissionDenied => IOError::PermissionDenied(context),
+                std::io::ErrorKind::TimedOut => IOError::TimedOut(context),
                 std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => {
-                    IoError::Closed(context)
+                    IOError::Closed(context)
                 }
-                _ => IoError::Other(context),
+                _ => IOError::Other(context),
             }
         }
 

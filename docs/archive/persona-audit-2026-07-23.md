@@ -18,8 +18,8 @@ She built a ~30-line revenue report with core.encoding.csv, a map, and interpola
 - VERDICT: usable-with-friction. The language is fine. The wait is not.
 
 ## P3 Devon — TypeScript backend dev · todo CLI
-He built add/list/done subcommands with the `@Cli` enum derive and a `@Codable` JSON store. The full session works. The JSON on disk round-trips.
-- PULL: The `@Cli` derive beats commander/yargs. Each command gets free help. An unknown command lists the known ones. `@Codable` beats hand-written JSON checks. The bounds panic names the count and the index.
+He built add/list/done subcommands with the `@CLI` enum derive and a `@Codable` JSON store. The full session works. The JSON on disk round-trips.
+- PULL: The `@CLI` derive beats commander/yargs. Each command gets free help. An unknown command lists the known ones. `@Codable` beats hand-written JSON checks. The bounds panic names the count and the index.
 - PUSH: The derive has no positional args. `add "buy milk"` fails and wants `--text`. The builder API has `.positional(…)`; the derive does not. A Node dev tries the positional form first. He also hit E0121 on `items[i] = item` before a print. That error taught the `~` copy fix on first read.
 - VERDICT: usable-with-friction.
 

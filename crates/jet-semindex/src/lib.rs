@@ -4,7 +4,7 @@
 #![deny(warnings)]
 
 mod Build;
-mod Json;
+mod JSON;
 mod Symbols;
 mod Types;
 

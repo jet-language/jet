@@ -146,7 +146,7 @@ fn as_string_rows(v: &CtValue, span: Span) -> Result<Vec<Vec<String>>, Diagnosti
     }
 }
 
-/// Mirrors AOT's `JetUrl` field shape 1:1 so `.scheme`/`.host`/`.path`/
+/// Mirrors AOT's `JetURL` field shape 1:1 so `.scheme`/`.host`/`.path`/
 /// `.query`/`.fragment` struct-field reads (generic member access,
 /// `Interpreter.rs`) work the same as any other `CtValue::Struct`.
 fn url_parts_to_ct(u: &super::super::UrlLite::UrlParts) -> CtValue {
@@ -344,7 +344,7 @@ pub(super) fn io_error_value(path: &str, e: std::io::Error) -> CtValue {
         _ => "Other",
     };
     CtValue::Struct {
-        type_name: "IoError".to_string(),
+        type_name: "IOError".to_string(),
         fields: if kind == "Other" {
             vec![
                 ("kind".to_string(), CtValue::Str(kind.to_string())),
@@ -1130,10 +1130,10 @@ pub fn apply_core_call(
         // --- core.encoding.json ---
         ("core.encoding.json", "parse") => {
             let text = as_string(one(0)?, span)?;
-            match super::super::JsonInterp::parse_json(text) {
+            match super::super::JSONInterp::parse_json(text) {
                 Ok(v) => Ok(CtValue::ResOk(Box::new(v))),
                 Err(e) => Ok(CtValue::ResErr(Box::new(
-                    super::super::JsonInterp::json_error_value(e),
+                    super::super::JSONInterp::json_error_value(e),
                 ))),
             }
         }
@@ -1146,13 +1146,13 @@ pub fn apply_core_call(
         }
         ("core.encoding.json", "to_string") => {
             let v = one(0)?;
-            Ok(CtValue::Str(super::super::JsonInterp::render_json_pretty(
+            Ok(CtValue::Str(super::super::JSONInterp::render_json_pretty(
                 v, false, 0,
             )))
         }
         ("core.encoding.json", "to_string_pretty") => {
             let v = one(0)?;
-            Ok(CtValue::Str(super::super::JsonInterp::render_json_pretty(
+            Ok(CtValue::Str(super::super::JSONInterp::render_json_pretty(
                 v, true, 0,
             )))
         }
@@ -1570,7 +1570,7 @@ pub fn apply_core_call(
         }
         // --- D-ANY-JAI1: core.reflect (the runtime reflection floor, pure).
         // `"__Reflect"`/`"__ReflectField"` are internal-only tags (like
-        // `"TypeInfo"`/`"Match"`/`"IoError"` elsewhere in this file) — never a
+        // `"TypeInfo"`/`"Match"`/`"IOError"` elsewhere in this file) — never a
         // real Jet type name a user can write, so no `Syntax.rs` entry (I7 is
         // about user-typeable names). `.type_name`/`.fields` are plain reads
         // (`Builtins::apply_method`); `.display` needs `&mut self` (it may
@@ -1661,7 +1661,7 @@ pub fn apply_core_call(
             })
         }
         // --- D-URL1=A: core.url (pure RFC-3986-shaped parser, ported
-        // verbatim from AOT's `JetUrl`/`jet_url_*` in `UrlMime.rs` — see
+        // verbatim from AOT's `JetURL`/`jet_url_*` in `UrlMime.rs` — see
         // `UrlLite.rs`) ---
         ("core.url", "parse") => {
             let s = as_string(one(0)?, span)?;
@@ -1693,7 +1693,7 @@ pub fn apply_core_call(
             // (D-URL1's `Mime` type) with `top`/`sub`/`params` fields — the
             // `core.mime` module port isn't in this card's slice, so render
             // its essence + params here the same way AOT's
-            // `JetMime::to_string_value` does, matching field-for-field.
+            // `JetMIME::to_string_value` does, matching field-for-field.
             let mime = one(0)?;
             let text = as_string(one(1)?, span)?;
             let rendered = match mime {
@@ -2316,7 +2316,7 @@ pub fn apply_impure_core_call(
             };
             if cmd.is_empty() {
                 return Ok(CtValue::ResErr(Box::new(CtValue::Struct {
-                    type_name: "IoError".to_string(),
+                    type_name: "IOError".to_string(),
                     fields: vec![(
                         "message".to_string(),
                         CtValue::Str("process.run needs at least one command word".to_string()),

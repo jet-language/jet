@@ -18,7 +18,7 @@ const MAX_INPUTS: usize = 4096;
 const MAX_STRING_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CliValueKind {
+pub enum CLIValueKind {
     Bool,
     Int,
     Float,
@@ -26,64 +26,64 @@ pub enum CliValueKind {
     Path,
 }
 
-impl CliValueKind {
+impl CLIValueKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            CliValueKind::Bool => "Bool",
-            CliValueKind::Int => "Int",
-            CliValueKind::Float => "Float",
-            CliValueKind::String => "String",
-            CliValueKind::Path => "Path",
+            CLIValueKind::Bool => "Bool",
+            CLIValueKind::Int => "Int",
+            CLIValueKind::Float => "Float",
+            CLIValueKind::String => "String",
+            CLIValueKind::Path => "Path",
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum CliDefault {
+pub enum CLIDefault {
     TypeDefault,
     Value(CtValue),
     /// Canonical display value recovered from an executable metadata record.
     Recorded(String),
 }
 
-impl CliDefault {
+impl CLIDefault {
     pub fn display(&self) -> String {
         match self {
-            CliDefault::TypeDefault => "type default".to_string(),
-            CliDefault::Value(value) => value.jet_show(),
-            CliDefault::Recorded(value) => value.clone(),
+            CLIDefault::TypeDefault => "type default".to_string(),
+            CLIDefault::Value(value) => value.jet_show(),
+            CLIDefault::Recorded(value) => value.clone(),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum CliInputShape {
+pub enum CLIInputShape {
     Flag,
     Value {
-        kind: CliValueKind,
+        kind: CLIValueKind,
         optional: bool,
-        default: Option<CliDefault>,
+        default: Option<CLIDefault>,
     },
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CliInputSchema {
+pub struct CLIInputSchema {
     pub field: String,
     pub flag: String,
     pub help: String,
     pub metavar: Option<String>,
-    pub shape: CliInputShape,
+    pub shape: CLIInputShape,
     /// D-CLI-POS1=A: `Some(order)` when this required value also fills from a
     /// bare argv slot (declaration order among positional fields). `None` for
     /// Bool flags, optional/defaulted values, and `#[Flag]` opt-outs.
     pub positional: Option<u16>,
 }
 
-impl CliInputSchema {
+impl CLIInputSchema {
     pub fn required(&self) -> bool {
         matches!(
             self.shape,
-            CliInputShape::Value {
+            CLIInputShape::Value {
                 optional: false,
                 default: None,
                 ..
@@ -91,41 +91,41 @@ impl CliInputSchema {
         )
     }
 
-    pub fn value_kind(&self) -> CliValueKind {
+    pub fn value_kind(&self) -> CLIValueKind {
         match self.shape {
-            CliInputShape::Flag => CliValueKind::Bool,
-            CliInputShape::Value { kind, .. } => kind,
+            CLIInputShape::Flag => CLIValueKind::Bool,
+            CLIInputShape::Value { kind, .. } => kind,
         }
     }
 
     pub fn default_display(&self) -> Option<String> {
         match &self.shape {
-            CliInputShape::Value { default, .. } => {
-                default.as_ref().map(CliDefault::display)
+            CLIInputShape::Value { default, .. } => {
+                default.as_ref().map(CLIDefault::display)
             }
-            CliInputShape::Flag => Some("false".to_string()),
+            CLIInputShape::Flag => Some("false".to_string()),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CliCommandSchema {
+pub struct CLICommandSchema {
     pub entry_type: String,
-    pub inputs: Vec<CliInputSchema>,
-    pub commands: Vec<CliSubcommandSchema>,
+    pub inputs: Vec<CLIInputSchema>,
+    pub commands: Vec<CLISubcommandSchema>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CliSubcommandSchema {
+pub struct CLISubcommandSchema {
     pub name: String,
-    pub inputs: Vec<CliInputSchema>,
+    pub inputs: Vec<CLIInputSchema>,
 }
 
 /// Checked command surface for an executable. Plain `fn run()` deliberately
 /// produces an empty record so external completion can still register the
 /// built-in `--help` surface without executing the program.
-pub fn executable_schema(bundle: &ProgramBundle) -> CliCommandSchema {
-    entry_schema_for_bundle(bundle).unwrap_or(CliCommandSchema {
+pub fn executable_schema(bundle: &ProgramBundle) -> CLICommandSchema {
+    entry_schema_for_bundle(bundle).unwrap_or(CLICommandSchema {
         entry_type: String::new(),
         inputs: Vec::new(),
         commands: Vec::new(),
@@ -186,7 +186,7 @@ fn selected_entry_type_source(bundle: &ProgramBundle) -> Option<(usize, &str)> {
     })
 }
 
-pub fn schema_for_type(items: &[Item], name: &str) -> Option<CliCommandSchema> {
+pub fn schema_for_type(items: &[Item], name: &str) -> Option<CLICommandSchema> {
     if let Some(structure) = items.iter().find_map(|item| match item {
         Item::Struct(structure) if structure.name == name => command_schema(structure),
         _ => None,
@@ -204,9 +204,9 @@ pub fn schema_for_type(items: &[Item], name: &str) -> Option<CliCommandSchema> {
             _ => None,
         })?;
         let payload = command_schema(structure)?;
-        Some(CliSubcommandSchema { name: variant.name.to_lowercase(), inputs: payload.inputs })
+        Some(CLISubcommandSchema { name: variant.name.to_lowercase(), inputs: payload.inputs })
     }).collect();
-    Some(CliCommandSchema { entry_type: name.to_string(), inputs: Vec::new(), commands })
+    Some(CLICommandSchema { entry_type: name.to_string(), inputs: Vec::new(), commands })
 }
 
 /// Module containing the entry parameter's checked CLI type. Local types win;
@@ -245,7 +245,7 @@ pub fn entry_type_module(bundle: &ProgramBundle) -> Option<usize> {
 
 /// Checked schema for a typed `fn run`, including a CLI type declared in a
 /// directly imported module. Codegen, dossier, metadata, and completion share it.
-pub fn entry_schema_for_bundle(bundle: &ProgramBundle) -> Option<CliCommandSchema> {
+pub fn entry_schema_for_bundle(bundle: &ProgramBundle) -> Option<CLICommandSchema> {
     let (_, name) = selected_entry_type_source(bundle)?;
     let leaf = name.rsplit('.').next().unwrap_or(name);
     let module = entry_type_module(bundle)?;
@@ -253,7 +253,7 @@ pub fn entry_schema_for_bundle(bundle: &ProgramBundle) -> Option<CliCommandSchem
 }
 
 /// Checked schema for a typed `fn run` in one module.
-pub fn entry_schema(items: &[Item]) -> Option<CliCommandSchema> {
+pub fn entry_schema(items: &[Item]) -> Option<CLICommandSchema> {
     let name = selected_entry_type(items)?;
     schema_for_type(items, name.rsplit('.').next().unwrap_or(name))
 }
@@ -261,7 +261,7 @@ pub fn entry_schema(items: &[Item]) -> Option<CliCommandSchema> {
 /// Canonical, versioned JetCommandSchema record. The digest makes corruption
 /// fail closed; embedding these bytes before linking binds them into the
 /// executable and therefore its cache/signing identity.
-pub fn encode_record(schema: &CliCommandSchema) -> Vec<u8> {
+pub fn encode_record(schema: &CLICommandSchema) -> Vec<u8> {
     let mut payload = Vec::new();
     put_string(&mut payload, &schema.entry_type);
     put_u32(&mut payload, schema.inputs.len() as u32);
@@ -304,7 +304,7 @@ impl std::fmt::Display for MetadataError {
     }
 }
 
-pub fn read_executable(bytes: &[u8]) -> Result<CliCommandSchema, MetadataError> {
+pub fn read_executable(bytes: &[u8]) -> Result<CLICommandSchema, MetadataError> {
     let sections = if bytes.starts_with(b"\x7fELF") {
         elf_sections(bytes)?
     } else if bytes.starts_with(b"MZ") {
@@ -321,7 +321,7 @@ pub fn read_executable(bytes: &[u8]) -> Result<CliCommandSchema, MetadataError> 
     decode_record(sections[0])
 }
 
-pub fn decode_record(record: &[u8]) -> Result<CliCommandSchema, MetadataError> {
+pub fn decode_record(record: &[u8]) -> Result<CLICommandSchema, MetadataError> {
     if record.len() < 46 || &record[..8] != RECORD_MAGIC {
         return Err(MetadataError::Malformed("bad record header"));
     }
@@ -352,26 +352,26 @@ pub fn decode_record(record: &[u8]) -> Result<CliCommandSchema, MetadataError> {
         if input_count > MAX_INPUTS { return Err(MetadataError::Malformed("too many command inputs")); }
         let mut command_inputs = Vec::with_capacity(input_count);
         for _ in 0..input_count { command_inputs.push(decode_input(&mut cursor)?); }
-        commands.push(CliSubcommandSchema { name, inputs: command_inputs });
+        commands.push(CLISubcommandSchema { name, inputs: command_inputs });
     }
     if !cursor.done() { return Err(MetadataError::Malformed("trailing payload bytes")); }
-    Ok(CliCommandSchema { entry_type, inputs, commands })
+    Ok(CLICommandSchema { entry_type, inputs, commands })
 }
 
-fn encode_input(payload: &mut Vec<u8>, input: &CliInputSchema) {
+fn encode_input(payload: &mut Vec<u8>, input: &CLIInputSchema) {
     put_string(payload, &input.field);
     put_string(payload, &input.flag);
     put_string(payload, &input.help);
     put_optional_string(payload, input.metavar.as_deref());
     match &input.shape {
-        CliInputShape::Flag => payload.push(0),
-        CliInputShape::Value { kind, optional, default } => {
+        CLIInputShape::Flag => payload.push(0),
+        CLIInputShape::Value { kind, optional, default } => {
             payload.push(1);
-            payload.push(match kind { CliValueKind::Bool => 0, CliValueKind::Int => 1, CliValueKind::Float => 2, CliValueKind::String => 3, CliValueKind::Path => 4 });
+            payload.push(match kind { CLIValueKind::Bool => 0, CLIValueKind::Int => 1, CLIValueKind::Float => 2, CLIValueKind::String => 3, CLIValueKind::Path => 4 });
             payload.push(u8::from(*optional));
             match default {
                 None => payload.push(0),
-                Some(CliDefault::TypeDefault) => payload.push(1),
+                Some(CLIDefault::TypeDefault) => payload.push(1),
                 Some(value) => { payload.push(2); put_string(payload, &value.display()); }
             }
         }
@@ -386,28 +386,28 @@ fn encode_input(payload: &mut Vec<u8>, input: &CliInputSchema) {
     }
 }
 
-fn decode_input(cursor: &mut Cursor<'_>) -> Result<CliInputSchema, MetadataError> {
+fn decode_input(cursor: &mut Cursor<'_>) -> Result<CLIInputSchema, MetadataError> {
         let field = cursor.string()?;
         let flag = cursor.string()?;
         let help = cursor.string()?;
         let metavar = cursor.optional_string()?;
         let shape = match cursor.byte()? {
-            0 => CliInputShape::Flag,
+            0 => CLIInputShape::Flag,
             1 => {
                 let kind = match cursor.byte()? {
-                    0 => CliValueKind::Bool, 1 => CliValueKind::Int,
-                    2 => CliValueKind::Float, 3 => CliValueKind::String,
-                    4 => CliValueKind::Path,
+                    0 => CLIValueKind::Bool, 1 => CLIValueKind::Int,
+                    2 => CLIValueKind::Float, 3 => CLIValueKind::String,
+                    4 => CLIValueKind::Path,
                     _ => return Err(MetadataError::Malformed("unknown input kind")),
                 };
                 let optional = match cursor.byte()? { 0 => false, 1 => true, _ => return Err(MetadataError::Malformed("invalid optional bit")) };
                 let default = match cursor.byte()? {
                     0 => None,
-                    1 => Some(CliDefault::TypeDefault),
-                    2 => Some(CliDefault::Recorded(cursor.string()?)),
+                    1 => Some(CLIDefault::TypeDefault),
+                    2 => Some(CLIDefault::Recorded(cursor.string()?)),
                     _ => return Err(MetadataError::Malformed("unknown default kind")),
                 };
-                CliInputShape::Value { kind, optional, default }
+                CLIInputShape::Value { kind, optional, default }
             }
             _ => return Err(MetadataError::Malformed("unknown input shape")),
         };
@@ -422,7 +422,7 @@ fn decode_input(cursor: &mut Cursor<'_>) -> Result<CliInputSchema, MetadataError
             }
             _ => return Err(MetadataError::Malformed("invalid positional bit")),
         };
-    Ok(CliInputSchema { field, flag, help, metavar, shape, positional })
+    Ok(CLIInputSchema { field, flag, help, metavar, shape, positional })
 }
 
 fn put_u32(out: &mut Vec<u8>, value: u32) { out.extend_from_slice(&value.to_le_bytes()); }
@@ -693,12 +693,12 @@ pub fn embed_wasm_record(wasm: &mut Vec<u8>, record: &[u8]) -> Result<(), Metada
     Ok(())
 }
 
-impl CliCommandSchema {
+impl CLICommandSchema {
     /// Candidates legal before any subcommand is selected.
     pub fn completion_words(&self) -> Vec<String> {
         let mut words = vec!["--help".to_string()];
         // Positionals first (D-CLI-POS1 help/completion order), then flags.
-        let mut positionals: Vec<&CliInputSchema> = self
+        let mut positionals: Vec<&CLIInputSchema> = self
             .inputs
             .iter()
             .filter(|input| input.positional.is_some())
@@ -715,7 +715,7 @@ impl CliCommandSchema {
     }
 }
 
-pub fn command_schema(structure: &StructDef) -> Option<CliCommandSchema> {
+pub fn command_schema(structure: &StructDef) -> Option<CLICommandSchema> {
     if !structure
         .derives
         .iter()
@@ -737,16 +737,16 @@ pub fn command_schema(structure: &StructDef) -> Option<CliCommandSchema> {
             let metavar = flag.replace('-', "_").to_uppercase();
             let flag_only = marker(&field.serde_markers, Syntax::CONTRACT_FLAG).is_some();
             let shape = match &field.ty {
-                Type::Bool => CliInputShape::Flag,
-                Type::Option(inner) => CliInputShape::Value {
+                Type::Bool => CLIInputShape::Flag,
+                Type::Option(inner) => CLIInputShape::Value {
                     kind: scalar_kind(inner)
-                        .expect("sema permits only scalar Option fields on a Cli struct"),
+                        .expect("sema permits only scalar Option fields on a CLI struct"),
                     optional: true,
                     default: None,
                 },
-                ty => CliInputShape::Value {
+                ty => CLIInputShape::Value {
                     kind: scalar_kind(ty)
-                        .expect("sema permits only scalar fields on a Cli struct"),
+                        .expect("sema permits only scalar fields on a CLI struct"),
                     optional: false,
                     default: field_default(&field.serde_markers),
                 },
@@ -754,7 +754,7 @@ pub fn command_schema(structure: &StructDef) -> Option<CliCommandSchema> {
             // D-CLI-POS1=A: required value fields (no Default) fill positionally
             // unless #[Flag] opts them out. Bool / optional / defaulted stay flags.
             let positional = match &shape {
-                CliInputShape::Value {
+                CLIInputShape::Value {
                     optional: false,
                     default: None,
                     ..
@@ -765,31 +765,31 @@ pub fn command_schema(structure: &StructDef) -> Option<CliCommandSchema> {
                 }
                 _ => None,
             };
-            CliInputSchema {
+            CLIInputSchema {
                 field: field.name.clone(),
                 flag,
                 help,
-                metavar: (!matches!(shape, CliInputShape::Flag)).then_some(metavar),
+                metavar: (!matches!(shape, CLIInputShape::Flag)).then_some(metavar),
                 shape,
                 positional,
             }
         })
         .collect();
 
-    Some(CliCommandSchema {
+    Some(CLICommandSchema {
         entry_type: structure.name.clone(),
         inputs,
         commands: Vec::new(),
     })
 }
 
-fn scalar_kind(ty: &Type) -> Option<CliValueKind> {
+fn scalar_kind(ty: &Type) -> Option<CLIValueKind> {
     match ty {
-        Type::Bool => Some(CliValueKind::Bool),
-        Type::Int => Some(CliValueKind::Int),
-        Type::Float => Some(CliValueKind::Float),
-        Type::String => Some(CliValueKind::String),
-        Type::Named(name) if name == "Path" => Some(CliValueKind::Path),
+        Type::Bool => Some(CLIValueKind::Bool),
+        Type::Int => Some(CLIValueKind::Int),
+        Type::Float => Some(CLIValueKind::Float),
+        Type::String => Some(CLIValueKind::String),
+        Type::Named(name) if name == "Path" => Some(CLIValueKind::Path),
         _ => None,
     }
 }
@@ -808,11 +808,11 @@ fn marker_string(marker: &Marker) -> Option<String> {
     }
 }
 
-fn field_default(markers: &[Marker]) -> Option<CliDefault> {
+fn field_default(markers: &[Marker]) -> Option<CLIDefault> {
     let marker = marker(markers, Syntax::ATTR_DEFAULT)?;
     Some(match (&marker.args[..], &marker.ct) {
-        ([_, ..], Some(value)) => CliDefault::Value(value.clone()),
-        _ => CliDefault::TypeDefault,
+        ([_, ..], Some(value)) => CLIDefault::Value(value.clone()),
+        _ => CLIDefault::TypeDefault,
     })
 }
 
@@ -820,16 +820,16 @@ fn field_default(markers: &[Marker]) -> Option<CliDefault> {
 mod tests {
     use super::*;
 
-    fn schema() -> CliCommandSchema {
-        CliCommandSchema {
+    fn schema() -> CLICommandSchema {
+        CLICommandSchema {
             entry_type: "Options".to_string(),
-            inputs: vec![CliInputSchema {
+            inputs: vec![CLIInputSchema {
                 field: "output_file".to_string(),
                 flag: "output-file".to_string(),
                 help: "destination".to_string(),
                 metavar: Some("OUTPUT_FILE".to_string()),
-                shape: CliInputShape::Value {
-                    kind: CliValueKind::Path,
+                shape: CLIInputShape::Value {
+                    kind: CLIValueKind::Path,
                     optional: false,
                     default: None,
                 },

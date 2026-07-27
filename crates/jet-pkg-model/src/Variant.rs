@@ -41,7 +41,7 @@ impl VariantRole {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum VariantOs {
     Linux,
-    Macos,
+    MacOS,
     Windows,
 }
 
@@ -49,7 +49,7 @@ impl VariantOs {
     pub fn as_str(self) -> &'static str {
         match self {
             VariantOs::Linux => Platform::OS_LINUX,
-            VariantOs::Macos => Platform::OS_MACOS,
+            VariantOs::MacOS => Platform::OS_MACOS,
             VariantOs::Windows => Platform::OS_WINDOWS,
         }
     }
@@ -57,7 +57,7 @@ impl VariantOs {
     pub fn parse(raw: &str) -> Option<VariantOs> {
         match raw {
             Platform::OS_LINUX | "Linux" => Some(VariantOs::Linux),
-            Platform::OS_MACOS | "Macos" | "Darwin" | "darwin" => Some(VariantOs::Macos),
+            Platform::OS_MACOS | "MacOS" | "Darwin" | "darwin" => Some(VariantOs::MacOS),
             Platform::OS_WINDOWS | "Windows" => Some(VariantOs::Windows),
             _ => None,
         }
@@ -126,7 +126,7 @@ impl VariantLibc {
     pub fn default_for(os: VariantOs) -> VariantLibc {
         match os {
             VariantOs::Linux => VariantLibc::Gnu,
-            VariantOs::Macos => VariantLibc::None,
+            VariantOs::MacOS => VariantLibc::None,
             VariantOs::Windows => VariantLibc::Msvc,
         }
     }
@@ -183,7 +183,7 @@ impl VariantAbi {
     pub fn default_for(os: VariantOs) -> VariantAbi {
         match os {
             VariantOs::Windows => VariantAbi::Ms,
-            VariantOs::Linux | VariantOs::Macos => VariantAbi::Sysv,
+            VariantOs::Linux | VariantOs::MacOS => VariantAbi::Sysv,
         }
     }
 }

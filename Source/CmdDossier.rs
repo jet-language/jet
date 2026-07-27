@@ -110,7 +110,7 @@ fn auxiliary_projections(
     entry: &Path,
 ) -> (
     jet::BudgetView::BudgetProjection,
-    Option<jet_foundation::CliSchema::CliCommandSchema>,
+    Option<jet_foundation::CLISchema::CLICommandSchema>,
 ) {
     let entry_text = entry.to_string_lossy();
     let (diagnostics, bundle, _) = jet::Driver::check_file_with_effect_facts(&entry_text, None, false);
@@ -132,7 +132,7 @@ fn auxiliary_projections(
 
 fn entry_command_schema(
     bundle: &jet::AST::ProgramBundle,
-) -> Option<jet_foundation::CliSchema::CliCommandSchema> {
+) -> Option<jet_foundation::CLISchema::CLICommandSchema> {
     let items = &bundle.modules.get(bundle.entry)?.items;
     items.iter().find_map(|item| match item {
         jet::AST::Item::Func(function)
@@ -142,18 +142,18 @@ fn entry_command_schema(
         }
         _ => None,
     })?;
-    Some(jet_foundation::CliSchema::executable_schema(bundle))
+    Some(jet_foundation::CLISchema::executable_schema(bundle))
 }
 
-fn command_json(command: Option<&jet_foundation::CliSchema::CliCommandSchema>) -> String {
+fn command_json(command: Option<&jet_foundation::CLISchema::CLICommandSchema>) -> String {
     let Some(command) = command else {
         return "null".to_string();
     };
-    let input_json = |input: &jet_foundation::CliSchema::CliInputSchema| {
+    let input_json = |input: &jet_foundation::CLISchema::CLIInputSchema| {
             let shape = match (&input.shape, input.positional) {
-                (jet_foundation::CliSchema::CliInputShape::Flag, _) => "flag",
-                (jet_foundation::CliSchema::CliInputShape::Value { .. }, Some(_)) => "positional",
-                (jet_foundation::CliSchema::CliInputShape::Value { .. }, None) => "option",
+                (jet_foundation::CLISchema::CLIInputShape::Flag, _) => "flag",
+                (jet_foundation::CLISchema::CLIInputShape::Value { .. }, Some(_)) => "positional",
+                (jet_foundation::CLISchema::CLIInputShape::Value { .. }, None) => "option",
             };
             let default = input
                 .default_display()
@@ -204,7 +204,7 @@ fn command_json(command: Option<&jet_foundation::CliSchema::CliCommandSchema>) -
     )
 }
 
-fn command_text(command: Option<&jet_foundation::CliSchema::CliCommandSchema>) -> String {
+fn command_text(command: Option<&jet_foundation::CLISchema::CLICommandSchema>) -> String {
     let Some(command) = command else {
         return "command schema\n  none (plain fn run() or non-command target)\n".to_string();
     };

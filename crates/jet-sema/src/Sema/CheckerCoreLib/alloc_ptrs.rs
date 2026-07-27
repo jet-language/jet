@@ -109,10 +109,10 @@ pub(crate) fn io_error_ty() -> Type {
 
 /// D-DBDRIVER1: the error type `.query`/`.query_one`/`.execute` fail with.
 pub(crate) fn db_error_ty() -> Type {
-    Type::Named("DbError".to_string())
+    Type::Named("DBError".to_string())
 }
 
-/// D-DBDRIVER1: a `Row` is `Map<String, DbValue>` — the built-in `Map` already
+/// D-DBDRIVER1: a `Row` is `Map<String, DBValue>` — the built-in `Map` already
 /// gives `.get`/`.keys`/`.values`/`.contains_key`, so no separate nominal `Row`
 /// type is registered (I8: reuse the existing collection instead of inventing one).
 pub(crate) fn db_row_ty() -> Type {

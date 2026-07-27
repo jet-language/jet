@@ -1750,13 +1750,13 @@ impl<'a> EvalCtx<'a> {
                 type_name: "__JetTirAllocator".to_string(),
                 fields: vec![("ctor".to_string(), CtValue::Str(ctor.clone()))],
             }),
-            TExprKind::JsonLit { variant, arg } => {
+            TExprKind::JSONLit { variant, arg } => {
                 let payload = match arg {
                     Some(inner) => Some(self.eval_expr(&inner.0, scope)?),
                     None => None,
                 };
                 Ok(CtValue::Enum {
-                    type_name: "Json".to_string(),
+                    type_name: "JSON".to_string(),
                     variant: variant.clone(),
                     args: match payload {
                         Some(v) => vec![(None, v)],
@@ -1764,7 +1764,7 @@ impl<'a> EvalCtx<'a> {
                     },
                 })
             }
-            TExprKind::DbValueLit { .. } => Err(unsupported("expr `DbValueLit`", self.span())),
+            TExprKind::DBValueLit { .. } => Err(unsupported("expr `DBValueLit`", self.span())),
             TExprKind::ListSpread { parts } => {
                 let mut values = Vec::new();
                 for part in parts {

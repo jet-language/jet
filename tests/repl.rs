@@ -1275,7 +1275,7 @@ fn repl_core_fs_read_inline() {
     ));
     std::fs::create_dir_all(&root).expect("create fixture root");
     std::fs::write(root.join("payload.txt"), "repl-fs-payload").expect("write fixture");
-    let read_expr = "#Grant(Fs, Io) { caps -> io.eprint(fs.read(\"payload.txt\") ?? panic(\"read failed\")) }";
+    let read_expr = "#Grant(FS, IO) { caps -> io.eprint(fs.read(\"payload.txt\") ?? panic(\"read failed\")) }";
     let inputs = &["use core.files as fs", "use core.io as io", read_expr];
     let out = run_transcript_with_flags(inputs, root.to_str(), &["fs", "io"], &[]);
     std::fs::remove_dir_all(&root).ok();
@@ -1291,7 +1291,7 @@ fn repl_core_process_run_is_authorized_and_captured() {
     let inputs = &[
         "use core.process as process",
         "use core.io as io",
-        "#Grant(Exec, Io) { caps -> io.eprint((process.run([\"sh\", \"-c\", \"read value || printf repl-process-ok\"]) ?? panic(\"run failed\")).output) }",
+        "#Grant(Exec, IO) { caps -> io.eprint((process.run([\"sh\", \"-c\", \"read value || printf repl-process-ok\"]) ?? panic(\"run failed\")).output) }",
     ];
     let out = run_transcript_with_flags(inputs, None, &["exec"], &["io"]);
     assert!(
@@ -1575,9 +1575,9 @@ fn repl_non_tty_denies_ungranted_files_before_execution() {
     let root = std::env::temp_dir().join(format!("jet_repl_deny_{}", std::process::id()));
     std::fs::create_dir_all(&root).expect("create root");
     let target = root.join("must-not-exist.txt");
-    let input = "#Grant(Fs) { caps -> fs.write(\"must-not-exist.txt\", \"bad\") ?? panic(\"write failed\") }";
+    let input = "#Grant(FS) { caps -> fs.write(\"must-not-exist.txt\", \"bad\") ?? panic(\"write failed\") }";
     let out = run_transcript(&["use core.files as fs", input], root.to_str());
-    assert!(out.contains("E1803") && out.contains("Fs.Write"), "missing deterministic deny: {out}");
+    assert!(out.contains("E1803") && out.contains("FS.Write"), "missing deterministic deny: {out}");
     assert!(!target.exists(), "denied effect executed");
     std::fs::remove_dir_all(root).ok();
 }
@@ -1586,7 +1586,7 @@ fn repl_non_tty_denies_ungranted_files_before_execution() {
 fn repl_allow_and_deny_flags_work_in_transcript_mode() {
     let root = std::env::temp_dir().join(format!("jet_repl_flags_{}", std::process::id()));
     std::fs::create_dir_all(&root).expect("create root");
-    let input = "#Grant(Fs) { caps -> fs.write(\"flag.txt\", \"allowed\") ?? panic(\"write failed\") }";
+    let input = "#Grant(FS) { caps -> fs.write(\"flag.txt\", \"allowed\") ?? panic(\"write failed\") }";
     let allowed = run_transcript_with_flags(
         &["use core.files as fs", input],
         root.to_str(),
@@ -1615,7 +1615,7 @@ fn repl_cli_allow_and_deny_flags_control_non_tty_execution() {
 
     let root = std::env::temp_dir().join(format!("jet_repl_cli_flags_{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
-    let input = b"use core.files as fs\n#Grant(Fs) { caps -> fs.write(\"cli.txt\", \"yes\") ?? panic(\"write failed\") }\n:quit\n";
+    let input = b"use core.files as fs\n#Grant(FS) { caps -> fs.write(\"cli.txt\", \"yes\") ?? panic(\"write failed\") }\n:quit\n";
     let run = |extra: &[&str]| {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_jet"));
         cmd.arg("repl").arg("--project").arg(&root).args(extra)
@@ -1661,7 +1661,7 @@ fn repl_allow_fs_still_rejects_paths_outside_project_root() {
     std::fs::remove_file(&outside).ok();
     let escaped = outside.to_string_lossy().replace('\\', "\\\\");
     let input = format!(
-        "#Grant(Fs) {{ caps -> fs.write(\"{escaped}\", \"bad\") ?? panic(\"write failed\") }}"
+        "#Grant(FS) {{ caps -> fs.write(\"{escaped}\", \"bad\") ?? panic(\"write failed\") }}"
     );
     let out = run_transcript_with_flags(
         &["use core.files as fs", &input],
@@ -1670,7 +1670,7 @@ fn repl_allow_fs_still_rejects_paths_outside_project_root() {
         &[],
     );
     assert!(
-        out.contains("E1803") && out.contains("Fs.Write") && out.contains(&escaped),
+        out.contains("E1803") && out.contains("FS.Write") && out.contains(&escaped),
         "absolute escape was not rejected before execution: {out}"
     );
     assert!(!outside.exists(), "confined REPL wrote outside project root");
@@ -1687,7 +1687,7 @@ fn repl_allow_fs_rejects_symlink_components_before_open() {
     std::fs::create_dir_all(&root).unwrap();
     std::fs::create_dir_all(&outside).unwrap();
     symlink(&outside, root.join("escape")).unwrap();
-    let input = "#Grant(Fs) { caps -> fs.write(\"escape/must-not-exist.txt\", \"bad\") ?? panic(\"write failed\") }";
+    let input = "#Grant(FS) { caps -> fs.write(\"escape/must-not-exist.txt\", \"bad\") ?? panic(\"write failed\") }";
     let out = run_transcript_with_flags(
         &["use core.files as fs", input],
         root.to_str(),
@@ -1713,11 +1713,11 @@ fn repl_tty_prompts_and_reuses_exact_session_tuple() {
   sleep 0.2
   printf 'use core.files as fs\r'
   sleep 0.2
-  printf '#Grant(Fs) { caps -> fs.read("value.txt") ?? panic("read failed") }\r'
+  printf '#Grant(FS) { caps -> fs.read("value.txt") ?? panic("read failed") }\r'
   sleep 0.2
   printf 's'
   sleep 0.2
-  printf '#Grant(Fs) { caps -> fs.read("value.txt") ?? panic("read failed") }\r'
+  printf '#Grant(FS) { caps -> fs.read("value.txt") ?? panic("read failed") }\r'
   sleep 0.2
   printf 'c'
   sleep 0.2
@@ -1733,8 +1733,8 @@ fn repl_tty_prompts_and_reuses_exact_session_tuple() {
         .expect("run REPL under PTY");
     let out = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "PTY status: {:?}\n{out}", output.status);
-    assert!(out.contains("Core effect Fs requests runtime authority"), "missing prompt: {out}");
-    assert!(out.contains("Using session Fs.Read authority for `value.txt`"), "missing exact tuple reuse: {out}");
+    assert!(out.contains("Core effect FS requests runtime authority"), "missing prompt: {out}");
+    assert!(out.contains("Using session FS.Read authority for `value.txt`"), "missing exact tuple reuse: {out}");
     assert!(!out.contains("E1803"), "approved tuple denied: {out}");
     std::fs::remove_dir_all(root).ok();
 }
@@ -2560,7 +2560,7 @@ fn repl_core_encoding_base32_and_base64url_dispatch() {
 }
 
 // ── card #392 pass 3: `core.url` (D-URL1=A) now dispatches at comptime,
-// ported verbatim from AOT's `JetUrl`/`jet_url_*` (`UrlMime.rs` +
+// ported verbatim from AOT's `JetURL`/`jet_url_*` (`UrlMime.rs` +
 // `MathRandomTime.rs`, see `UrlLite.rs`). `Url` instance methods
 // (`.scheme()`/`.host()`/`.join()`/...) are a separate, pre-existing gap
 // (`net_text_time.rs`'s sema dispatch, not `fixed_sigs.rs`'s `"core.url"`

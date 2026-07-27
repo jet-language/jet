@@ -3,7 +3,7 @@
 pub mod AST;
 mod BuildEffects;
 pub mod CanonicalAST;
-pub mod CliSchema;
+pub mod CLISchema;
 pub mod Collections;
 pub mod Diagnostics;
 mod ExactUnitConversion;
@@ -13,7 +13,7 @@ pub mod generated;
 pub mod JitBackend;
 pub mod JSON;
 pub mod Numeric;
-pub mod OsTarget;
+pub mod OSTarget;
 pub mod JetTrace;
 pub mod PerformanceBudget;
 pub mod Persist;

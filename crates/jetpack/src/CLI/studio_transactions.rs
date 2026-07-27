@@ -260,7 +260,7 @@ pub(super) fn handle_studio_transaction(
 
 fn studio_changeset_status(
     context: &StudioContext,
-    request: &std::collections::BTreeMap<String, JSON::Json>,
+    request: &std::collections::BTreeMap<String, JSON::JSONValue>,
 ) -> (&'static str, String) {
     match context.changeset.lock() {
         Ok(changeset) => {
@@ -289,7 +289,7 @@ fn studio_changeset_status(
 
 fn studio_changeset_discard(
     context: &StudioContext,
-    request: &std::collections::BTreeMap<String, JSON::Json>,
+    request: &std::collections::BTreeMap<String, JSON::JSONValue>,
 ) -> (&'static str, String) {
     match context.changeset.lock() {
         Ok(mut changeset) => {
@@ -314,7 +314,7 @@ fn studio_changeset_discard(
 
 fn studio_changeset_apply(
     context: &StudioContext,
-    request: &std::collections::BTreeMap<String, JSON::Json>,
+    request: &std::collections::BTreeMap<String, JSON::JSONValue>,
 ) -> (&'static str, String) {
     let _source_write = match context.source_write.lock() {
         Ok(lock) => lock,
@@ -437,7 +437,7 @@ fn studio_changeset_apply(
 
 fn studio_changeset_stage_rollback(
     context: &StudioContext,
-    request: &std::collections::BTreeMap<String, JSON::Json>,
+    request: &std::collections::BTreeMap<String, JSON::JSONValue>,
 ) -> (&'static str, String) {
     let _source_write = match context.source_write.lock() {
         Ok(lock) => lock,
@@ -842,11 +842,11 @@ fn validate_studio_generation_binding(proved: &StudioProvedSource) -> Result<(),
         .map_err(|error| format!("reading proved generation source proof failed: {error}"))?;
     let parsed = JSON::parse(&source_proof)
         .map_err(|error| format!("proved generation source proof is invalid: {error}"))?;
-    let JSON::Json::Object(fields) = parsed else {
+    let JSON::JSONValue::Object(fields) = parsed else {
         return Err("proved generation source proof is not an object".to_string());
     };
     let string = |name: &str| match fields.get(name) {
-        Some(JSON::Json::Str(value)) => Some(value.as_str()),
+        Some(JSON::JSONValue::Str(value)) => Some(value.as_str()),
         _ => None,
     };
     let plan = std::fs::read(proved.generation_path.join("plan.json"))
@@ -881,14 +881,14 @@ fn validate_studio_proof_artifact(
 ) -> Result<StudioProofArtifact, String> {
     let parsed = JSON::parse(proof.trim())
         .map_err(|error| format!("generation proof JSON is invalid: {error}"))?;
-    let JSON::Json::Object(root) = parsed else {
+    let JSON::JSONValue::Object(root) = parsed else {
         return Err("generation proof is not a JSON object".to_string());
     };
-    let Some(JSON::Json::Object(source_proof)) = root.get("source_proof") else {
+    let Some(JSON::JSONValue::Object(source_proof)) = root.get("source_proof") else {
         return Err("generation proof is missing source_proof".to_string());
     };
     let field = |name: &str| match source_proof.get(name) {
-        Some(JSON::Json::Str(value)) => Some(value.as_str()),
+        Some(JSON::JSONValue::Str(value)) => Some(value.as_str()),
         _ => None,
     };
     if field("source_sha256") != Some(source_revision) {
@@ -897,7 +897,7 @@ fn validate_studio_proof_artifact(
     if field("input_plan_sha256") != Some(input_plan_revision) {
         return Err("generation proof input plan hash does not match captured plan".to_string());
     }
-    let Some(JSON::Json::Str(plan)) = root.get("plan") else {
+    let Some(JSON::JSONValue::Str(plan)) = root.get("plan") else {
         return Err("generation proof is missing its plan artifact".to_string());
     };
     let artifact_plan_revision = studio_source_revision(plan);
@@ -905,11 +905,11 @@ fn validate_studio_proof_artifact(
         return Err("generation proof plan hash does not match its plan artifact".to_string());
     }
     let generation = match root.get("generation") {
-        Some(JSON::Json::Str(value)) => value.clone(),
+        Some(JSON::JSONValue::Str(value)) => value.clone(),
         _ => return Err("generation proof is missing its generation ID".to_string()),
     };
     let path = match root.get("path") {
-        Some(JSON::Json::Str(value)) => PathBuf::from(value),
+        Some(JSON::JSONValue::Str(value)) => PathBuf::from(value),
         _ => return Err("generation proof is missing its generation path".to_string()),
     };
     Ok(StudioProofArtifact {
@@ -1357,29 +1357,29 @@ fn source_diff(path: &Path, before: &str, after: &str) -> String {
 
 fn studio_request(
     body: &str,
-) -> Result<std::collections::BTreeMap<String, JSON::Json>, String> {
+) -> Result<std::collections::BTreeMap<String, JSON::JSONValue>, String> {
     let parsed = JSON::parse(body).map_err(|error| format!("invalid Studio JSON request: {error}"))?;
     match parsed {
-        JSON::Json::Object(object) => Ok(object),
+        JSON::JSONValue::Object(object) => Ok(object),
         _ => Err("Studio request must be a JSON object".to_string()),
     }
 }
 
 fn studio_request_string(
-    request: &std::collections::BTreeMap<String, JSON::Json>,
+    request: &std::collections::BTreeMap<String, JSON::JSONValue>,
     key: &str,
 ) -> Option<String> {
     match request.get(key) {
-        Some(JSON::Json::Str(value)) => Some(value.clone()),
+        Some(JSON::JSONValue::Str(value)) => Some(value.clone()),
         _ => None,
     }
 }
 
 fn studio_request_bool(
-    request: &std::collections::BTreeMap<String, JSON::Json>,
+    request: &std::collections::BTreeMap<String, JSON::JSONValue>,
     key: &str,
 ) -> bool {
-    matches!(request.get(key), Some(JSON::Json::Bool(true)))
+    matches!(request.get(key), Some(JSON::JSONValue::Bool(true)))
 }
 
 fn studio_source_revision(source: &str) -> String {
@@ -1544,7 +1544,7 @@ fn studio_changeset_token(source: &str, session_id: &str) -> String {
 }
 
 fn studio_request_owns_changeset(
-    request: &std::collections::BTreeMap<String, JSON::Json>,
+    request: &std::collections::BTreeMap<String, JSON::JSONValue>,
     changeset: &StudioChangeSet,
 ) -> bool {
     studio_request_string(request, "session_id").as_deref()

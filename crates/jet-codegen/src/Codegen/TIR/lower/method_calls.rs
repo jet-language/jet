@@ -518,20 +518,20 @@ pub(crate) fn lower_method_call(
             })),
         };
     }
-    // D-TYPEDTEXT1=D: `Sql.raw("…")` / `Html.raw("…")` — the audited escape.
-    // `Sql`/`Html` name the type here (sema already confirmed no local shadows
+    // D-TYPEDTEXT1=D: `SQL.raw("…")` / `HTML.raw("…")` — the audited escape.
+    // `SQL`/`HTML` name the type here (sema already confirmed no local shadows
     // it), so `recv_type` was never set for this call; check the receiver
     // shape directly instead.
     if method == "raw" {
         if let Expr::Ident(n, _) = receiver {
-            if n == "Sql" || n == "Html" || n == Syntax::TYPE_SH {
+            if n == "SQL" || n == "HTML" || n == Syntax::TYPE_SH {
                 let arg = lower_expr(&args[0].expr, cx, env);
-                let kind = if n == "Sql" {
-                    crate::Codegen::TIR::TTypedTextForm::SqlRaw
+                let kind = if n == "SQL" {
+                    crate::Codegen::TIR::TTypedTextForm::SQLRaw
                 } else if n == Syntax::TYPE_SH {
                     crate::Codegen::TIR::TTypedTextForm::ShRaw
                 } else {
-                    crate::Codegen::TIR::TTypedTextForm::HtmlRaw
+                    crate::Codegen::TIR::TTypedTextForm::HTMLRaw
                 };
                 return TExpr {
                     ty: Type::Named(n.clone()),
@@ -543,14 +543,14 @@ pub(crate) fn lower_method_call(
             }
         }
     }
-    // D-TYPEDTEXT1=D: `.template()`/`.params()` split a checked `Sql` value;
-    // `.text()` reads the escaped `Html` string.
-    if recv_type.as_deref() == Some("Sql") && matches!(method, "template" | "params") {
+    // D-TYPEDTEXT1=D: `.template()`/`.params()` split a checked `SQL` value;
+    // `.text()` reads the escaped `HTML` string.
+    if recv_type.as_deref() == Some("SQL") && matches!(method, "template" | "params") {
         let recv = lower_expr(receiver, cx, env);
         let kind = if method == "template" {
-            crate::Codegen::TIR::TTypedTextForm::SqlTemplate
+            crate::Codegen::TIR::TTypedTextForm::SQLTemplate
         } else {
-            crate::Codegen::TIR::TTypedTextForm::SqlParams
+            crate::Codegen::TIR::TTypedTextForm::SQLParams
         };
         return TExpr {
             ty: if method == "template" {
@@ -564,7 +564,7 @@ pub(crate) fn lower_method_call(
             })),
         };
     }
-    if recv_type.as_deref() == Some("Html") && method == "text" {
+    if recv_type.as_deref() == Some("HTML") && method == "text" {
         let recv = lower_expr(receiver, cx, env);
         return TExpr {
             ty: Type::String,
@@ -842,8 +842,8 @@ pub(crate) fn lower_method_call(
         };
     }
     // D-ENC-DYN1=A+: a dynamic `Data` construction `Data.<Variant>(arg)` (the gate
-    // proved the receiver is a `Data`/`Json`/… type-name ident and `method` is a `Data`
-    // variant). Lower to `TExprKind::JsonLit`, carrying the payload's `implicit_clone`
+    // proved the receiver is a `Data`/`JSON`/… type-name ident and `method` is a `Data`
+    // variant). Lower to `TExprKind::JSONLit`, carrying the payload's `implicit_clone`
     // flag as a total fact. The result type is `Data`.
     if let Expr::Ident(type_name, _) = receiver {
         if !env.locals.contains_key(type_name)
@@ -855,16 +855,16 @@ pub(crate) fn lower_method_call(
                 .map(|a| Box::new((lower_expr(&a.expr, cx, env), a.flags.implicit_clone)));
             return TExpr {
                 ty: Type::Named(Syntax::TYPE_DATA.to_string()),
-                kind: TExprKind::JsonLit {
+                kind: TExprKind::JSONLit {
                     variant: method.to_string(),
                     arg,
                 },
             };
         }
     }
-    // D-DBDRIVER1: a `DbValue` construction `DbValue.Int(n)` / `.Float(f)` /
-    // `.Text(s)` / `.Bool(b)` (the gate proved the receiver is `DbValue` and
-    // `method` a `DbValue` variant). Same shape as the `Data` construction above.
+    // D-DBDRIVER1: a `DBValue` construction `DBValue.Int(n)` / `.Float(f)` /
+    // `.Text(s)` / `.Bool(b)` (the gate proved the receiver is `DBValue` and
+    // `method` a `DBValue` variant). Same shape as the `Data` construction above.
     if let Expr::Ident(type_name, _) = receiver {
         if !env.locals.contains_key(type_name)
             && is_db_value_type_name(type_name)
@@ -875,7 +875,7 @@ pub(crate) fn lower_method_call(
                 .map(|a| Box::new((lower_expr(&a.expr, cx, env), a.flags.implicit_clone)));
             return TExpr {
                 ty: Type::Named(Syntax::TYPE_DB_VALUE.to_string()),
-                kind: TExprKind::DbValueLit {
+                kind: TExprKind::DBValueLit {
                     variant: method.to_string(),
                     arg,
                 },
@@ -1016,13 +1016,13 @@ pub(crate) fn lower_method_call(
         }
         if let Some(op) = tls_static_op(receiver, method, cx, &locals) {
             let ty = match op {
-                THandleOp::TlsClientConfigDefault => Type::Named("TlsClientConfig".to_string()),
-                THandleOp::TlsRootCertificatesFromPem => Type::Result {
-                    ok: Box::new(Type::Named("TlsRootCertificates".to_string())),
+                THandleOp::TLSClientConfigDefault => Type::Named("TLSClientConfig".to_string()),
+                THandleOp::TLSRootCertificatesFromPem => Type::Result {
+                    ok: Box::new(Type::Named("TLSRootCertificates".to_string())),
                     err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
                 },
-                THandleOp::TlsClientIdentityFromPem => Type::Result {
-                    ok: Box::new(Type::Named("TlsClientIdentity".to_string())),
+                THandleOp::TLSClientIdentityFromPem => Type::Result {
+                    ok: Box::new(Type::Named("TLSClientIdentity".to_string())),
                     err: Box::new(Type::Named(Syntax::TYPE_IO_ERROR.to_string())),
                 },
                 _ => unit_type(),
@@ -1041,7 +1041,7 @@ pub(crate) fn lower_method_call(
         }
         if let Some(op) = http_client_static_op(receiver, method, cx, &locals) {
             return TExpr {
-                ty: Type::Named("HttpClient".to_string()),
+                ty: Type::Named("HTTPClient".to_string()),
                 kind: TExprKind::HandleMethod {
                     recv: Box::new(TExpr {
                         ty: unit_type(),
@@ -1876,86 +1876,86 @@ pub(crate) fn lower_method_call(
     }
     // D-NETDEP1=A / D-HTTPLIB1=A: an HTTP type method (gate shape d10).
     if is_http_type(recv_type.as_deref()) && is_http_method_name(recv_type.as_deref(), method) {
-        let kind = recv_type.as_deref().unwrap_or("HttpRequest").to_string();
+        let kind = recv_type.as_deref().unwrap_or("HTTPRequest").to_string();
         let recv_t = lower_expr(receiver, cx, env);
         let result_ty = match (kind.as_str(), method) {
-            ("HttpRequest", "header" | "body" | "timeout" | "connect_timeout" | "read_timeout"
+            ("HTTPRequest", "header" | "body" | "timeout" | "connect_timeout" | "read_timeout"
                 | "total_timeout" | "dns_timeout" | "tls_timeout" | "write_timeout"
                 | "first_byte_timeout" | "redirects" | "proxy" | "cookie" | "form" | "multipart_text")
                 if !args.is_empty() && !(method == "header" && args.len() == 1) => {
-                    Type::Named("HttpRequest".to_string())
+                    Type::Named("HTTPRequest".to_string())
                 }
-            ("HttpRequest", "send") => Type::Result {
-                ok: Box::new(Type::Named("HttpResponse".to_string())),
-                err: Box::new(Type::Named("HttpError".to_string())),
+            ("HTTPRequest", "send") => Type::Result {
+                ok: Box::new(Type::Named("HTTPResponse".to_string())),
+                err: Box::new(Type::Named("HTTPError".to_string())),
             },
-            ("HttpRequest", "method" | "path") => Type::String,
-            ("HttpRequest", "body") => Type::Named("HttpBody".to_string()),
-            ("HttpRequest", "trailers") => Type::Result {
-                ok: Box::new(Type::Named("HttpHeaders".to_string())),
-                err: Box::new(Type::Named("HttpError".to_string())),
+            ("HTTPRequest", "method" | "path") => Type::String,
+            ("HTTPRequest", "body") => Type::Named("HTTPBody".to_string()),
+            ("HTTPRequest", "trailers") => Type::Result {
+                ok: Box::new(Type::Named("HTTPHeaders".to_string())),
+                err: Box::new(Type::Named("HTTPError".to_string())),
             },
-            ("HttpRequest", "body_len") => Type::Int,
-            ("HttpRequest", "under_limit") => Type::Bool,
-            ("HttpRequest", "param" | "header") => Type::Option(Box::new(Type::String)),
-            ("HttpClient", "cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding" | "proxy" | "tls" | "allow_http_downgrade" | "retries") => Type::Named("HttpClient".to_string()),
-            ("HttpClient", "send") => Type::Result {
-                ok: Box::new(Type::Named("HttpResponse".to_string())),
-                err: Box::new(Type::Named("HttpError".to_string())),
+            ("HTTPRequest", "body_len") => Type::Int,
+            ("HTTPRequest", "under_limit") => Type::Bool,
+            ("HTTPRequest", "param" | "header") => Type::Option(Box::new(Type::String)),
+            ("HTTPClient", "cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding" | "proxy" | "tls" | "allow_http_downgrade" | "retries") => Type::Named("HTTPClient".to_string()),
+            ("HTTPClient", "send") => Type::Result {
+                ok: Box::new(Type::Named("HTTPResponse".to_string())),
+                err: Box::new(Type::Named("HTTPError".to_string())),
             },
-            ("HttpResponse", "header") if args.len() == 2 => Type::Named("HttpResponse".to_string()),
-            ("HttpResponse", "status") => Type::Int,
-            ("HttpResponse", "body") => Type::Named("HttpBody".to_string()),
-            ("HttpResponse", "header") => Type::Option(Box::new(Type::String)),
-            ("HttpResponse", "cookies") => Type::List(Box::new(Type::String)),
-            ("HttpResponse", "trailers") => Type::Result {
-                ok: Box::new(Type::Named("HttpResponse".to_string())),
-                err: Box::new(Type::Named("HttpError".to_string())),
+            ("HTTPResponse", "header") if args.len() == 2 => Type::Named("HTTPResponse".to_string()),
+            ("HTTPResponse", "status") => Type::Int,
+            ("HTTPResponse", "body") => Type::Named("HTTPBody".to_string()),
+            ("HTTPResponse", "header") => Type::Option(Box::new(Type::String)),
+            ("HTTPResponse", "cookies") => Type::List(Box::new(Type::String)),
+            ("HTTPResponse", "trailers") => Type::Result {
+                ok: Box::new(Type::Named("HTTPResponse".to_string())),
+                err: Box::new(Type::Named("HTTPError".to_string())),
             },
-            ("HttpResponse", "protocol" | "remote_address") => Type::String,
-            ("HttpResponse", "redirect_history") => Type::List(Box::new(Type::String)),
-            ("HttpResponse", "timings") => Type::List(Box::new(Type::Int)),
-            ("HttpResponse", "reused_connection") => Type::Bool,
-            ("HttpResponse", "raw_content_encoding") => Type::Option(Box::new(Type::String)),
-            ("HttpHeaders", "first") => Type::Option(Box::new(Type::String)),
-            ("HttpHeaders", "all") => Type::List(Box::new(Type::String)),
-            ("HttpHeaders", "append" | "set") => Type::Result {
-                ok: Box::new(Type::Named("HttpHeaders".to_string())),
-                err: Box::new(Type::Named("HttpError".to_string())),
+            ("HTTPResponse", "protocol" | "remote_address") => Type::String,
+            ("HTTPResponse", "redirect_history") => Type::List(Box::new(Type::String)),
+            ("HTTPResponse", "timings") => Type::List(Box::new(Type::Int)),
+            ("HTTPResponse", "reused_connection") => Type::Bool,
+            ("HTTPResponse", "raw_content_encoding") => Type::Option(Box::new(Type::String)),
+            ("HTTPHeaders", "first") => Type::Option(Box::new(Type::String)),
+            ("HTTPHeaders", "all") => Type::List(Box::new(Type::String)),
+            ("HTTPHeaders", "append" | "set") => Type::Result {
+                ok: Box::new(Type::Named("HTTPHeaders".to_string())),
+                err: Box::new(Type::Named("HTTPError".to_string())),
             },
-            ("HttpHeaders", "remove") => Type::Named("HttpHeaders".to_string()),
-            ("HttpMux", _) => unit_type(),
-            ("HttpHandler", "handle") => Type::Result {
-                ok: Box::new(Type::Named("HttpResponse".to_string())),
-                err: Box::new(Type::Named("HttpError".to_string())),
+            ("HTTPHeaders", "remove") => Type::Named("HTTPHeaders".to_string()),
+            ("HTTPMux", _) => unit_type(),
+            ("HTTPHandler", "handle") => Type::Result {
+                ok: Box::new(Type::Named("HTTPResponse".to_string())),
+                err: Box::new(Type::Named("HTTPError".to_string())),
             },
-            ("HttpBody", "bytes") => Type::Result {
+            ("HTTPBody", "bytes") => Type::Result {
                 ok: Box::new(Type::List(Box::new(Type::Named("U8".to_string())))),
-                err: Box::new(Type::Named("HttpError".to_string())),
+                err: Box::new(Type::Named("HTTPError".to_string())),
             },
-            ("HttpBody", "text") => Type::Result {
+            ("HTTPBody", "text") => Type::Result {
                 ok: Box::new(Type::String),
-                err: Box::new(Type::Named("HttpError".to_string())),
+                err: Box::new(Type::Named("HTTPError".to_string())),
             },
-            ("HttpBody", "json") => type_args.first().map_or_else(
+            ("HTTPBody", "json") => type_args.first().map_or_else(
                 || resolved_ret.cloned().unwrap_or_else(|| Type::Result {
                     ok: Box::new(Type::Named("Unknown".to_string())),
-                    err: Box::new(Type::Named("HttpError".to_string())),
+                    err: Box::new(Type::Named("HTTPError".to_string())),
                 }),
                 |target| Type::Result {
                     ok: Box::new(target.clone()),
-                    err: Box::new(Type::Named("HttpError".to_string())),
+                    err: Box::new(Type::Named("HTTPError".to_string())),
                 },
             ),
-            ("HttpBody", "chunks") => Type::Named("HttpBodyChunks".to_string()),
-            ("HttpBody", "copy_to") => Type::Result {
+            ("HTTPBody", "chunks") => Type::Named("HTTPBodyChunks".to_string()),
+            ("HTTPBody", "copy_to") => Type::Result {
                 ok: Box::new(Type::Int),
-                err: Box::new(Type::Named("HttpError".to_string())),
+                err: Box::new(Type::Named("HTTPError".to_string())),
             },
-            ("HttpServer", "local_addr") => Type::Result { ok: Box::new(Type::String), err: Box::new(Type::Named("HttpError".to_string())) },
-            ("HttpServer", "serve" | "shutdown") => Type::Result {
-                ok: Box::new(Type::Named("HttpShutdownReport".to_string())),
-                err: Box::new(Type::Named("HttpError".to_string())),
+            ("HTTPServer", "local_addr") => Type::Result { ok: Box::new(Type::String), err: Box::new(Type::Named("HTTPError".to_string())) },
+            ("HTTPServer", "serve" | "shutdown") => Type::Result {
+                ok: Box::new(Type::Named("HTTPShutdownReport".to_string())),
+                err: Box::new(Type::Named("HTTPError".to_string())),
             },
             ("WsConn", "send_text" | "send_bytes" | "close") => Type::Result {
                 ok: Box::new(unit_type()),
@@ -2019,7 +2019,7 @@ pub(crate) fn lower_method_call(
             .iter()
             .enumerate()
             .map(|(i, a)| {
-                if kind == "HttpMux"
+                if kind == "HTTPMux"
                     && matches!(
                         method,
                         "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
@@ -2027,10 +2027,10 @@ pub(crate) fn lower_method_call(
                     && i == 1
                 {
                     if let Expr::Lambda(lam) = &a.expr {
-                        let params = vec![Type::Named("HttpRequest".to_string())];
+                        let params = vec![Type::Named("HTTPRequest".to_string())];
                         let ret = Type::Result {
-                            ok: Box::new(Type::Named("HttpResponse".to_string())),
-                            err: Box::new(Type::Named("HttpError".to_string())),
+                            ok: Box::new(Type::Named("HTTPResponse".to_string())),
+                            err: Box::new(Type::Named("HTTPError".to_string())),
                         };
                         return TExpr {
                             ty: Type::Fn {
@@ -2049,16 +2049,16 @@ pub(crate) fn lower_method_call(
             .collect();
         let server_message_method = matches!(
             (kind.as_str(), method, args.len()),
-            ("HttpRequest", "method" | "path" | "param" | "body_len" | "under_limit", _)
-                | ("HttpRequest", "header", 1)
-                | ("HttpRequest", "body", 0)
-                | ("HttpRequest", "trailers", 0)
-                | ("HttpResponse", "header", 2)
-                | ("HttpResponse", "trailers", 1)
+            ("HTTPRequest", "method" | "path" | "param" | "body_len" | "under_limit", _)
+                | ("HTTPRequest", "header", 1)
+                | ("HTTPRequest", "body", 0)
+                | ("HTTPRequest", "trailers", 0)
+                | ("HTTPResponse", "header", 2)
+                | ("HTTPResponse", "trailers", 1)
         );
-        let op = if kind.starts_with("HttpServer")
-            || kind == "HttpMux"
-            || kind == "HttpHandler"
+        let op = if kind.starts_with("HTTPServer")
+            || kind == "HTTPMux"
+            || kind == "HTTPHandler"
             || kind == "WsConn"
             || kind == "WsMessage"
             || matches!(
@@ -2074,12 +2074,12 @@ pub(crate) fn lower_method_call(
             )
             || server_message_method
         {
-            THandleOp::HttpServerMethod {
+            THandleOp::HTTPServerMethod {
                 kind,
                 method: method.to_string(),
             }
         } else {
-            THandleOp::HttpClientMethod {
+            THandleOp::HTTPClientMethod {
                 kind,
                 method: method.to_string(),
             }
@@ -2243,7 +2243,7 @@ pub(crate) fn lower_method_call(
     // (Prelude/CoreLib.rs), so there's no free-function indirection to model
     // (unlike `Pool`/`Shared` INDEXING, which needs a real mutable-place
     // helper — see the `Expr::Index`/`LValue::Field` arms). `ConstInline` is
-    // the pragmatic vehicle, same as the concurrency/Sql/Html escapes nearby.
+    // the pragmatic vehicle, same as the concurrency/SQL/HTML escapes nearby.
     {
         let recv_peek = tir_recv_jet_ty(receiver, env);
         // Sema normally sets `recv_type` to `"Pool"`/`"Shared"` explicitly for
@@ -2567,12 +2567,12 @@ pub(crate) fn lower_method_call(
             }
         }
     }
-    // c109 Phase 25: HttpRouter route registration `router.get/post/put/delete(path,
+    // c109 Phase 25: HTTPRouter route registration `router.get/post/put/delete(path,
     // handler)` (D-ROUTE1=A). The gate (`router_register_in_subset`) proved the receiver
     // + path in-subset and the handler a named-fn/lambda. Render the handler closure HERE
     // (the `emit_router_handler` reproduction); emit assembles the register call. Result
     // is Unit (the registration is a statement effect).
-    if recv_type.as_deref() == Some("HttpRouter")
+    if recv_type.as_deref() == Some("HTTPRouter")
         && matches!(method, "get" | "post" | "put" | "delete")
         && args.len() == 2
     {
@@ -2591,7 +2591,7 @@ pub(crate) fn lower_method_call(
             ty: unit_type(),
             kind: TExprKind::HandleMethod {
                 recv: Box::new(recv_t),
-                op: THandleOp::HttpRouterRegister {
+                op: THandleOp::HTTPRouterRegister {
                     verb,
                     handler,
                     file: cx.file.clone(),
@@ -2936,18 +2936,18 @@ pub(crate) fn lower_method_call(
     // (Expression.rs ~L1644): `user_<Type>::user_<method>(args)`.
     if let Some(type_name) = static_call_type_name_lower(receiver, env) {
         if matches!(type_name.as_str(),
-            "HttpMethod" | "HttpStatus" | "HttpVersion" | "HttpHeaderName"
-            | "HttpHeaderValue" | "HttpHeaders" | "HttpBody")
+            "HTTPMethod" | "HTTPStatus" | "HTTPVersion" | "HTTPHeaderName"
+            | "HTTPHeaderValue" | "HTTPHeaders" | "HTTPBody")
         {
             let method_rust = match (type_name.as_str(), method, args.len()) {
-                ("HttpBody", "bytes", 1) => "from_bytes",
-                ("HttpBody", "text", 1) => "from_text",
-                ("HttpBody", "text", 2) => "from_text_with_mime",
-                ("HttpBody", "json", 1) => "from_json",
-                ("HttpBody", "form", 1) => "from_form",
-                ("HttpBody", "multipart", 1) => "from_multipart",
-                ("HttpBody", "reader", 1) => "from_reader",
-                ("HttpBody", "reader", 2) => "from_reader_with_length",
+                ("HTTPBody", "bytes", 1) => "from_bytes",
+                ("HTTPBody", "text", 1) => "from_text",
+                ("HTTPBody", "text", 2) => "from_text_with_mime",
+                ("HTTPBody", "json", 1) => "from_json",
+                ("HTTPBody", "form", 1) => "from_form",
+                ("HTTPBody", "multipart", 1) => "from_multipart",
+                ("HTTPBody", "reader", 1) => "from_reader",
+                ("HTTPBody", "reader", 2) => "from_reader_with_length",
                 _ => method,
             };
             return TExpr {

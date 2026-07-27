@@ -61,7 +61,7 @@ pub(crate) fn try_resident(bundle: &ProgramBundle) -> Result<RunOutcome, super::
         Some(program) => program,
         None => return Err(plan_tiers(bundle, None)),
     };
-    crate::Cli::prepare_cli_from_bundle(bundle);
+    crate::CLI::prepare_cli_from_bundle(bundle);
     let plan = plan_tiers(bundle, Some(&program));
     if plan.whole_interp {
         return Err(plan);
@@ -115,7 +115,7 @@ pub(crate) fn try_resident_hot_swap(
         Some(program) => program,
         None => return Err(plan_tiers(bundle, None)),
     };
-    crate::Cli::prepare_cli_from_bundle(bundle);
+    crate::CLI::prepare_cli_from_bundle(bundle);
     let plan = plan_tiers(bundle, Some(&program));
     if plan.whole_interp || !plan.deopt.is_empty() {
         // Hot-swap keeps the simple path: whole-program deopt when any gap.
@@ -156,7 +156,7 @@ pub(crate) fn try_resident_restart(
         Some(program) => program,
         None => return Err(plan_tiers(bundle, None)),
     };
-    crate::Cli::prepare_cli_from_bundle(bundle);
+    crate::CLI::prepare_cli_from_bundle(bundle);
     let plan = plan_tiers(bundle, Some(&program));
     if plan.whole_interp {
         return Err(plan);
@@ -214,13 +214,13 @@ pub fn try_compile_bundle(bundle: &ProgramBundle) -> Result<(), String> {
             TIR::lower_jit_program_fail_reason(bundle)
         )
     })?;
-    crate::Cli::prepare_cli_from_bundle(bundle);
+    crate::CLI::prepare_cli_from_bundle(bundle);
     catch_jit_panic("compile", || {
         resident_teardown();
         crate::Encoding::register_migrations(bundle);
         super::types_meta::install_struct_redact(bundle);
         // Teardown must not wipe CLI plan — reinstall after.
-        crate::Cli::prepare_cli_from_bundle(bundle);
+        crate::CLI::prepare_cli_from_bundle(bundle);
         crate::Ffi::bind_bundle_ffi(bundle)?;
         RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime()));
         ensure_resident_module(&program)

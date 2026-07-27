@@ -11,8 +11,8 @@
 //
 // D-DBDRIVER1: the generic driver interface is parameterized-query only — no
 // raw-string execute escape. `query`/`execute` take SQL text plus a separate
-// `[DbValue]` bind list; values never get concatenated into the SQL string.
-// The always-compiled prelude (Source/Prelude/CoreLib.rs, `jet_std::DbValue`)
+// `[DBValue]` bind list; values never get concatenated into the SQL string.
+// The always-compiled prelude (Source/Prelude/CoreLib.rs, `jet_std::DBValue`)
 // and this bridge crate are two independently built crates linked at the
 // program's final `rustc` invocation, so they can't share Rust types — they
 // exchange bind params and result rows as a small tagged-length wire text
@@ -84,7 +84,7 @@ pub fn jet_db_rollback(handle: u64) -> bool {
 }
 
 /// Run a SELECT with bound parameters. `params_wire` is the tagged-value-list
-/// encoding of a `[DbValue]` (see `encode_value_list`/`decode_value_list` in
+/// encoding of a `[DBValue]` (see `encode_value_list`/`decode_value_list` in
 /// `jet_std`, mirrored here as `decode_params`). Returns `"O:"` + the
 /// tagged-rows wire encoding on success, or `"E:"` + a plain error message.
 pub fn jet_db_query(handle: u64, sql: &str, params_wire: &str) -> String {
@@ -126,7 +126,7 @@ pub fn jet_db_query(handle: u64, sql: &str, params_wire: &str) -> String {
                     ValueRef::Text(b) => rusqlite::types::Value::Text(
                         std::str::from_utf8(b).unwrap_or("").to_string(),
                     ),
-                    // Blobs have no `DbValue` shape yet — surface as NULL (same
+                    // Blobs have no `DBValue` shape yet — surface as NULL (same
                     // posture as the old `jet_db_query_json`).
                     ValueRef::Blob(_) => rusqlite::types::Value::Null,
                 };

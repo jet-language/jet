@@ -42,7 +42,7 @@ pub fn datatree_method_return(method: &str, n_args: usize) -> Option<Type> {
     }
 }
 
-/// D-DBDRIVER1: accessor methods on `DbValue` — read back the tagged value a
+/// D-DBDRIVER1: accessor methods on `DBValue` — read back the tagged value a
 /// query bound or a row column carried. Mirrors `datatree_method_return`'s
 /// shape exactly (`Result<T, String>`); `int` stays 64-bit (never `Float`).
 pub fn db_value_method_return(method: &str, n_args: usize) -> Option<Type> {

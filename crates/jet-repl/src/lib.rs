@@ -137,7 +137,7 @@ impl ReplAuthorization<'_> {
     }
 
     fn validate_file_target(&self, request: &crate::Comptime::ReplEffectRequest, span: crate::Diagnostics::Span) -> Result<(), Diagnostic> {
-        if request.root != "Fs" { return Ok(()); }
+        if request.root != "FS" { return Ok(()); }
         let relative = std::path::Path::new(&request.resource);
         if relative.is_absolute() || relative.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_))) {
             return Err(self.e1803(request, "filesystem authority is confined to the REPL project root and rejects absolute or parent paths", span));
@@ -157,7 +157,7 @@ impl ReplAuthorization<'_> {
 
 impl crate::Comptime::ReplAuthorizer for ReplAuthorization<'_> {
     fn preflight(&mut self, request: &crate::Comptime::ReplEffectRequest, span: crate::Diagnostics::Span) -> Result<(), Diagnostic> {
-        let needs_handles = request.root == "Fs"
+        let needs_handles = request.root == "FS"
             || (request.root == "Exec" && request.operation == "Run");
         if needs_handles && !self.policy.handles_available {
             return Err(self.e1803(
@@ -1863,7 +1863,7 @@ fn program_bundle(src: &str, mut prog: crate::AST::Program) -> crate::AST::Progr
         web_partition_enforced: false,
         web_partition_report: None,
         dep_roots: std::collections::HashMap::new(),
-        active_os: crate::Syntax::OsTarget::host(),
+        active_os: crate::Syntax::OSTarget::host(),
         edition: crate::Manifest::latest_edition().to_string(),
     }
 }
@@ -3214,7 +3214,7 @@ mod tests {
         policy.handles_available = false;
         let mut prompt = CountingPrompt(0);
         let request = crate::Comptime::ReplEffectRequest {
-            root: "Fs".to_string(),
+            root: "FS".to_string(),
             operation: "Write".to_string(),
             resource: "must-not-exist.txt".to_string(),
         };

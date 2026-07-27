@@ -45,7 +45,7 @@ impl<'a> Checker<'a> {
         }
 
         /// D-SERDE: a value type the `#[Codable]`/`#[Encode]` derive (or a blanket impl)
-        /// can serialize. Primitives, the dynamic `Json` tree, and lists/options/maps of
+        /// can serialize. Primitives, the dynamic `JSON` tree, and lists/options/maps of
         /// encodables qualify; a user type must derive `Encode`.
         pub(crate) fn is_encodable(&self, t: &Type) -> bool {
             match t {
@@ -81,7 +81,7 @@ impl<'a> Checker<'a> {
         }
     
         /// D-SERDE: a type `decode<T>` can construct. Mirrors [`Self::is_encodable`] but a
-        /// user type must derive `Decode` (the dynamic `Json` tree is reached by bare
+        /// user type must derive `Decode` (the dynamic `JSON` tree is reached by bare
         /// `decode`, not the typed path).
         pub(crate) fn is_decodable(&self, t: &Type) -> bool {
             match t {

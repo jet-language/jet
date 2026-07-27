@@ -1173,7 +1173,7 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_impl(&mut self, i: &ImplDef) {
-        // D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(Os.Linux|Os.Macos|Os.Windows)`
+        // D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(OS.Linux|OS.MacOS|OS.Windows)`
         // precedes the `impl` block it gates, on its own line.
         if let Some(os) = i.os_target {
             self.write(&format!(

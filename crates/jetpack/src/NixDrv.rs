@@ -26,7 +26,7 @@ pub enum NixDrvError {
     Path(String),
     Unsupported(String),
     Divergence { what: String, expected: String, actual: String },
-    Io(String),
+    IO(String),
 }
 
 impl fmt::Display for NixDrvError {
@@ -38,7 +38,7 @@ impl fmt::Display for NixDrvError {
             NixDrvError::Divergence { what, expected, actual } => {
                 write!(f, "nix compat divergence ({what}): expected `{expected}`, got `{actual}`")
             }
-            NixDrvError::Io(m) => write!(f, "nix drv io: {m}"),
+            NixDrvError::IO(m) => write!(f, "nix drv io: {m}"),
         }
     }
 }
@@ -601,11 +601,11 @@ pub trait DrvStore {
 }
 
 /// Filesystem `/nix/store` reader with parse cache.
-pub struct FsDrvStore {
+pub struct FSDrvStore {
     cache: BTreeMap<String, Derivation>,
 }
 
-impl FsDrvStore {
+impl FSDrvStore {
     pub fn new() -> Self {
         Self {
             cache: BTreeMap::new(),
@@ -613,18 +613,18 @@ impl FsDrvStore {
     }
 }
 
-impl Default for FsDrvStore {
+impl Default for FSDrvStore {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl DrvStore for FsDrvStore {
+impl DrvStore for FSDrvStore {
     fn read_drv(&mut self, drv_path: &str) -> Result<Derivation> {
         if let Some(d) = self.cache.get(drv_path) {
             return Ok(d.clone());
         }
-        let text = fs::read_to_string(drv_path).map_err(|e| NixDrvError::Io(format!("{drv_path}: {e}")))?;
+        let text = fs::read_to_string(drv_path).map_err(|e| NixDrvError::IO(format!("{drv_path}: {e}")))?;
         let drv = parse_derive(&text)?;
         self.cache.insert(drv_path.to_string(), drv.clone());
         Ok(drv)
@@ -641,7 +641,7 @@ impl DrvStore for MapDrvStore {
         self.map
             .get(drv_path)
             .cloned()
-            .ok_or_else(|| NixDrvError::Io(format!("missing drv in map store: {drv_path}")))
+            .ok_or_else(|| NixDrvError::IO(format!("missing drv in map store: {drv_path}")))
     }
 }
 
@@ -848,7 +848,7 @@ pub fn differential_corpus(store_dir: &str, limit: usize) -> Result<CorpusReport
         return Ok(CorpusReport::default());
     }
     let mut paths: Vec<PathBuf> = fs::read_dir(dir)
-        .map_err(|e| NixDrvError::Io(e.to_string()))?
+        .map_err(|e| NixDrvError::IO(e.to_string()))?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("drv"))
@@ -857,7 +857,7 @@ pub fn differential_corpus(store_dir: &str, limit: usize) -> Result<CorpusReport
     paths.truncate(limit);
 
     let mut report = CorpusReport::default();
-    let mut store = FsDrvStore::new();
+    let mut store = FSDrvStore::new();
     for path in paths {
         let path_str = path.to_string_lossy().into_owned();
         let aterm = match fs::read_to_string(&path) {

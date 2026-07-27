@@ -1,12 +1,12 @@
     // ── core.db: the tagged SQL parameter/column value (D-DBDRIVER1) ───────────
-    // `DbValue` mirrors `Json`'s dynamic-value construction mechanism
-    // (`DbValue.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)` / `.Null`) but is
+    // `DBValue` mirrors `JSON`'s dynamic-value construction mechanism
+    // (`DBValue.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)` / `.Null`) but is
     // SQL-shaped: `Int` keeps the full 64-bit width SQLite integers carry (never
     // routed through `f64`, which would lose precision above 2^53). A `Row` is
-    // `Map<String, DbValue>` — the built-in `Map` type already gives `.get`/
+    // `Map<String, DBValue>` — the built-in `Map` type already gives `.get`/
     // `.keys`/`.values`, so no separate nominal `Row` type is needed (I8).
     #[derive(Clone, Debug, PartialEq)]
-    pub enum DbValue {
+    pub enum DBValue {
         Null,
         Int(i64),
         Float(f64),
@@ -14,98 +14,98 @@
         Bool(bool),
     }
 
-    impl super::JetShow for DbValue {
+    impl super::JetShow for DBValue {
         fn jet_show(&self) -> String {
             render_db_value(self)
         }
     }
 
-    fn render_db_value(v: &DbValue) -> String {
+    fn render_db_value(v: &DBValue) -> String {
         match v {
-            DbValue::Null => "null".to_string(),
-            DbValue::Int(n) => n.to_string(),
-            DbValue::Float(f) => f.to_string(),
-            DbValue::Text(s) => s.clone(),
-            DbValue::Bool(b) => b.to_string(),
+            DBValue::Null => "null".to_string(),
+            DBValue::Int(n) => n.to_string(),
+            DBValue::Float(f) => f.to_string(),
+            DBValue::Text(s) => s.clone(),
+            DBValue::Bool(b) => b.to_string(),
         }
     }
 
-    impl DbValue {
+    impl DBValue {
         pub fn is_null(&self) -> bool {
-            matches!(self, DbValue::Null)
+            matches!(self, DBValue::Null)
         }
         pub fn int(&self) -> Result<i64, String> {
             match self {
-                DbValue::Int(n) => Ok(*n),
+                DBValue::Int(n) => Ok(*n),
                 _ => Err(format!("expected an int, got {}", render_db_value(self))),
             }
         }
         pub fn float(&self) -> Result<f64, String> {
             match self {
-                DbValue::Float(f) => Ok(*f),
-                DbValue::Int(n) => Ok(*n as f64),
+                DBValue::Float(f) => Ok(*f),
+                DBValue::Int(n) => Ok(*n as f64),
                 _ => Err(format!("expected a float, got {}", render_db_value(self))),
             }
         }
         pub fn text(&self) -> Result<String, String> {
             match self {
-                DbValue::Text(s) => Ok(s.clone()),
+                DBValue::Text(s) => Ok(s.clone()),
                 _ => Err(format!("expected text, got {}", render_db_value(self))),
             }
         }
         pub fn bool(&self) -> Result<bool, String> {
             match self {
-                DbValue::Bool(b) => Ok(*b),
+                DBValue::Bool(b) => Ok(*b),
                 _ => Err(format!("expected a bool, got {}", render_db_value(self))),
             }
         }
     }
 
     pub fn jet_db_row_value(
-        row: &std::collections::BTreeMap<String, DbValue>,
+        row: &std::collections::BTreeMap<String, DBValue>,
         key: &String,
-    ) -> Result<DbValue, String> {
+    ) -> Result<DBValue, String> {
         row.get(key)
             .cloned()
             .ok_or_else(|| format!("missing column `{}`", key))
     }
 
     pub fn jet_db_row_int(
-        row: &std::collections::BTreeMap<String, DbValue>,
+        row: &std::collections::BTreeMap<String, DBValue>,
         key: &String,
     ) -> Result<i64, String> {
         jet_db_row_value(row, key).and_then(|v| v.int())
     }
 
     pub fn jet_db_row_float(
-        row: &std::collections::BTreeMap<String, DbValue>,
+        row: &std::collections::BTreeMap<String, DBValue>,
         key: &String,
     ) -> Result<f64, String> {
         jet_db_row_value(row, key).and_then(|v| v.float())
     }
 
     pub fn jet_db_row_text(
-        row: &std::collections::BTreeMap<String, DbValue>,
+        row: &std::collections::BTreeMap<String, DBValue>,
         key: &String,
     ) -> Result<String, String> {
         jet_db_row_value(row, key).and_then(|v| v.text())
     }
 
     pub fn jet_db_row_bool(
-        row: &std::collections::BTreeMap<String, DbValue>,
+        row: &std::collections::BTreeMap<String, DBValue>,
         key: &String,
     ) -> Result<bool, String> {
         jet_db_row_value(row, key).and_then(|v| v.bool())
     }
 
-    /// D-DBDRIVER1: `.query`/`.query_one`/`.execute` fail with a `DbError`
+    /// D-DBDRIVER1: `.query`/`.query_one`/`.execute` fail with a `DBError`
     /// carrying the driver's message (SQLite's error text) — never the raw SQL.
     #[derive(Clone, Debug, PartialEq)]
-    pub struct DbError {
+    pub struct DBError {
         pub message: String,
     }
 
-    impl super::JetShow for DbError {
+    impl super::JetShow for DBError {
         fn jet_show(&self) -> String {
             self.message.clone()
         }
@@ -116,7 +116,7 @@
     // and this always-compiled prelude are two independently built Rust crates —
     // they can't share types, so bind params and result rows cross that boundary as
     // plain `String`s in a small tagged-length wire format (mirrored byte-for-byte
-    // in Source/Prelude/Db.rs). A value is `<tag><decimal-length>:<payload-bytes>`;
+    // in Source/Prelude/DB.rs). A value is `<tag><decimal-length>:<payload-bytes>`;
     // a list is a decimal item count + `:` + that many back-to-back items. Every
     // length is a byte count, so arbitrary text — including an "injection-looking"
     // literal — round-trips exactly with no escaping.
@@ -124,17 +124,17 @@
         format!("{tag}{}:{payload}", payload.len())
     }
 
-    pub fn jet_db_encode_params(params: &Vec<DbValue>) -> String {
+    pub fn jet_db_encode_params(params: &Vec<DBValue>) -> String {
         let mut out = String::new();
         out.push_str(&params.len().to_string());
         out.push(':');
         for p in params {
             out.push_str(&match p {
-                DbValue::Null => db_encode_tagged('N', ""),
-                DbValue::Int(n) => db_encode_tagged('I', &n.to_string()),
-                DbValue::Float(f) => db_encode_tagged('F', &f.to_string()),
-                DbValue::Text(s) => db_encode_tagged('T', s),
-                DbValue::Bool(b) => db_encode_tagged('B', if *b { "1" } else { "0" }),
+                DBValue::Null => db_encode_tagged('N', ""),
+                DBValue::Int(n) => db_encode_tagged('I', &n.to_string()),
+                DBValue::Float(f) => db_encode_tagged('F', &f.to_string()),
+                DBValue::Text(s) => db_encode_tagged('T', s),
+                DBValue::Bool(b) => db_encode_tagged('B', if *b { "1" } else { "0" }),
             });
         }
         out
@@ -159,23 +159,23 @@
         Some((tag, payload))
     }
 
-    fn db_decode_value(tag: char, payload: &str) -> DbValue {
+    fn db_decode_value(tag: char, payload: &str) -> DBValue {
         match tag {
-            'I' => DbValue::Int(payload.parse().unwrap_or(0)),
-            'F' => DbValue::Float(payload.parse().unwrap_or(0.0)),
-            'T' => DbValue::Text(payload.to_string()),
-            'B' => DbValue::Bool(payload == "1"),
-            _ => DbValue::Null,
+            'I' => DBValue::Int(payload.parse().unwrap_or(0)),
+            'F' => DBValue::Float(payload.parse().unwrap_or(0.0)),
+            'T' => DBValue::Text(payload.to_string()),
+            'B' => DBValue::Bool(payload == "1"),
+            _ => DBValue::Null,
         }
     }
 
     /// Decode the `"O:" + rows`/`"E:" + message` wire produced by `jet_db_query`.
     pub fn jet_db_decode_query_result(
         wire: &str,
-    ) -> Result<Vec<std::collections::BTreeMap<String, DbValue>>, DbError> {
+    ) -> Result<Vec<std::collections::BTreeMap<String, DBValue>>, DBError> {
         let Some(body) = wire.strip_prefix("O:") else {
             let msg = wire.strip_prefix("E:").unwrap_or(wire);
-            return Err(DbError {
+            return Err(DBError {
                 message: msg.to_string(),
             });
         };
@@ -215,18 +215,18 @@
     }
 
     /// Decode the `"O:" + count`/`"E:" + message` wire produced by `jet_db_execute`.
-    pub fn jet_db_decode_execute_result(wire: &str) -> Result<i64, DbError> {
+    pub fn jet_db_decode_execute_result(wire: &str) -> Result<i64, DBError> {
         if let Some(n) = wire.strip_prefix("O:") {
             return Ok(n.parse().unwrap_or(0));
         }
         let msg = wire.strip_prefix("E:").unwrap_or(wire);
-        Err(DbError {
+        Err(DBError {
             message: msg.to_string(),
         })
     }
 
-    pub fn jet_db_params_from_sql(sql: &(String, Vec<String>)) -> Vec<DbValue> {
-        sql.1.iter().map(|s| DbValue::Text(s.clone())).collect()
+    pub fn jet_db_params_from_sql(sql: &(String, Vec<String>)) -> Vec<DBValue> {
+        sql.1.iter().map(|s| DBValue::Text(s.clone())).collect()
     }
 
     pub fn jet_db_migration_checksum(steps: &Vec<String>) -> String {

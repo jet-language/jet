@@ -730,7 +730,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             Item::Func(function)
                 if function.name == "run"
                     && function.params.len() == 1
-                    && jet_foundation::CliSchema::entry_schema(&module.items).is_some() =>
+                    && jet_foundation::CLISchema::entry_schema(&module.items).is_some() =>
             {
                 Some(function.name.clone())
             }
@@ -738,7 +738,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                 (output.selected
                     && output.module == bundle.entry
                     && output.params.len() == 1
-                    && jet_foundation::CliSchema::entry_schema(&module.items).is_some())
+                    && jet_foundation::CLISchema::entry_schema(&module.items).is_some())
                 .then(|| output.semantic_name.clone())
             }),
             _ => None,
@@ -1262,7 +1262,7 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
             }
             _ => None,
         })).or_else(|| {
-            jet_foundation::CliSchema::entry_schema(&module.items).map(|_| "__jet_cli_main".to_string())
+            jet_foundation::CLISchema::entry_schema(&module.items).map(|_| "__jet_cli_main".to_string())
         });
     let Some(selected) = selected else {
         return "no zero-parameter runnable entry".to_string();
@@ -1547,11 +1547,11 @@ pub struct TIndexFieldAssign {
 }
 
 
-/// Injected prelude struct fields (HttpRequest route metadata). Emit spells lines.
+/// Injected prelude struct fields (HTTPRequest route metadata). Emit spells lines.
 #[derive(Clone)]
 pub enum TStructExtra {
-    /// HttpRequest: `params: BTreeMap::new(), route_template: None`
-    HttpRequestParams,
+    /// HTTPRequest: `params: BTreeMap::new(), route_template: None`
+    HTTPRequestParams,
 }
 
 /// Host/prelude call assembled only in emit — structured pieces, no Rust source text.
@@ -1620,7 +1620,7 @@ pub enum THostCall {
     YieldSend {
         value: Box<TExpr>,
     },
-    /// Sql/Html/Sh typed-text constructor from literals + hole exprs.
+    /// SQL/HTML/Sh typed-text constructor from literals + hole exprs.
     TypedTextInterp {
         kind: TTypedTextInterpKind,
         literals: Vec<String>,
@@ -1701,18 +1701,18 @@ pub enum TOptionProbe {
 
 #[derive(Clone, Copy)]
 pub enum TTypedTextForm {
-    SqlRaw,
-    HtmlRaw,
+    SQLRaw,
+    HTMLRaw,
     ShRaw,
-    SqlTemplate,
-    SqlParams,
-    HtmlText,
+    SQLTemplate,
+    SQLParams,
+    HTMLText,
 }
 
 #[derive(Clone, Copy)]
 pub enum TTypedTextInterpKind {
-    Sql,
-    Html,
+    SQL,
+    HTML,
     Sh,
 }
 
@@ -1806,7 +1806,7 @@ pub enum TStmt {
     /// lowering, reproducing `emit_let` (Source/Codegen/Statement.rs) byte-for-byte:
     /// `kw` is `"let"` or `"let mut"` (the `mut` accounts for the source `mutable`
     /// flag AND the forced-mut cases — a handle binding FileReader/FileWriter/
-    /// TcpStream/HttpRouter/Arena/… needs `let mut` even when bound immutably, and an
+    /// TcpStream/HTTPRouter/Arena/… needs `let mut` even when bound immutably, and an
     /// escaping FnMut lambda binding); `let_ty` is the structured annotation (emit
     /// spells the `: …` clause). The binding's resolved type is carried on the
     /// `LowerEnv` slot (for downstream facts), so it is not duplicated on the node.
@@ -2485,7 +2485,7 @@ pub enum TExprKind {
     StructLit {
         /// Each field: Jet name, value, and `boxed` for self-referential `Box<…>` edges.
         fields: Vec<(String, TExpr, bool)>,
-        /// c109 Phase 17: injected prelude fields (HttpRequest route metadata).
+        /// c109 Phase 17: injected prelude fields (HTTPRequest route metadata).
         /// Structured — emit spells the Rust field lines.
         extra: Option<TStructExtra>,
         /// c109 Phase 30: TRAIT-OBJECT coercion — `(trait, concrete owner)`.
@@ -2534,23 +2534,23 @@ pub enum TExprKind {
     /// c109 Phase 24: a prelude `JSON` enum construction (`JSON.Null` /
     /// `JSON.Boolean(b)` / `JSON.Number(n)` / `JSON.Text(s)` / `JSON.Array(xs)` /
     /// `JSON.Object(map)`). The JSON enum is FOREIGN: its variants render non-mangled
-    /// (`{root}jet_std::Json::Object`, NOT `user_…`), distinct from a user enum's
+    /// (`{root}jet_std::JSON::Object`, NOT `user_…`), distinct from a user enum's
     /// `EnumLit`. `variant` is the bare variant name (`Object`/`Text`/…). `arg` is the
     /// payload `TExpr` plus the resolved `implicit_clone` flag (sema's `CallArg.flags`,
     /// total) — `true` → `(…).clone()`, reproducing `emit_core_json_lit` (Expression.rs)
-    /// byte-for-byte. `JSON.Null` has no arg (`None`). The `{root}jet_std::Json` prefix
+    /// byte-for-byte. `JSON.Null` has no arg (`None`). The `{root}jet_std::JSON` prefix
     /// is rendered at emit (`cx.root_prefix` is program-level, read there).
-    JsonLit {
+    JSONLit {
         variant: String,
         arg: Option<Box<(TExpr, bool)>>,
     },
-    /// D-DBDRIVER1: a `DbValue` construction (`DbValue.Int(n)` / `.Float(f)` /
+    /// D-DBDRIVER1: a `DBValue` construction (`DBValue.Int(n)` / `.Float(f)` /
     /// `.Text(s)` / `.Bool(b)` / `.Null`) — the tagged SQL parameter/column value.
-    /// Same shape as `JsonLit` (a FOREIGN prelude enum, not a user `EnumLit`), kept
-    /// as its own node rather than reusing `JsonLit` because `DbValue` renders to
-    /// a DIFFERENT prelude type (`jet_std::DbValue`, not `jet_std::DataTree`) and
+    /// Same shape as `JSONLit` (a FOREIGN prelude enum, not a user `EnumLit`), kept
+    /// as its own node rather than reusing `JSONLit` because `DBValue` renders to
+    /// a DIFFERENT prelude type (`jet_std::DBValue`, not `jet_std::DataTree`) and
     /// has no recursive `Array`/`Object`-style payload to special-case.
-    DbValueLit {
+    DBValueLit {
         variant: String,
         arg: Option<Box<(TExpr, bool)>>,
     },
@@ -2885,7 +2885,7 @@ pub enum TExprKind {
         rhs: Box<TExpr>,
     },
     /// c109 Phase 13: a method ON a handle (FileReader/FileWriter/StdinHandle/
-    /// Stopwatch/TcpListener/TcpStream/HttpRequest/HttpResponse) — the handle arms of
+    /// Stopwatch/TcpListener/TcpStream/HTTPRequest/HTTPResponse) — the handle arms of
     /// `emit_builtin_method` (Source/Codegen/Expression.rs). The handle-receiver
     /// dispatch (`rty == Some(Named(<handle>))`) is resolved at lowering into a total
     /// `THandleOp`, so emit makes no type decision (I3). Args are emitted PLAINLY
@@ -3651,37 +3651,37 @@ pub enum THandleOp {
     UnixStreamReady,
     UnixStreamClose,
     UnixStreamSetTimeout,
-    TlsStreamReadDeadline,
-    TlsStreamWriteAllDeadline,
-    TlsStreamReady,
-    TlsStreamClose,
-    TlsStreamCloseWrite,
-    TlsStreamPeerIdentity,
-    TlsClientConfigDefault,
-    TlsClientConfigWithAlpn,
-    TlsRootCertificatesFromPem,
-    TlsClientIdentityFromPem,
-    TlsClientConfigWithTrust,
-    TlsClientConfigWithIdentity,
-    TlsClientConfigWithVersionBounds,
-    HttpClientNew,
+    TLSStreamReadDeadline,
+    TLSStreamWriteAllDeadline,
+    TLSStreamReady,
+    TLSStreamClose,
+    TLSStreamCloseWrite,
+    TLSStreamPeerIdentity,
+    TLSClientConfigDefault,
+    TLSClientConfigWithAlpn,
+    TLSRootCertificatesFromPem,
+    TLSClientIdentityFromPem,
+    TLSClientConfigWithTrust,
+    TLSClientConfigWithIdentity,
+    TLSClientConfigWithVersionBounds,
+    HTTPClientNew,
     /// c109 Phase 19: Arena/Bump/Pool/Fixed `alloc(v)` → `(recv).alloc(a0)` (hands back a
     /// `&mut T` view into the allocator's storage). The arg is emitted plainly.
     AllocAlloc,
     /// c109 Phase 19: Arena/Bump/Pool/Fixed `reset()` → `(recv).reset()`.
     AllocReset,
-    /// c109 Phase 20: HttpRequest `method()`/`path()`/`body()` → `(recv).<field>.clone()`.
-    HttpReqField(&'static str),
-    /// c109 Phase 20: HttpRequest `header(name)` → `(recv).headers.get(&a0).cloned()`.
-    HttpReqHeader,
-    /// c109 Phase 20: HttpRequest `param(name)` → `{root}jet_http_request_param(&(recv), &(a0))`.
-    HttpReqParam,
-    HttpReqTrailers,
-    /// c109 Phase 20: HttpResponse `status()`/`body()` → `(recv).<field>.clone()`.
-    HttpRespField(&'static str),
-    /// c109 Phase 20: HttpResponse `header(name)` → `(recv).headers.get(&a0).cloned()`.
-    HttpRespHeader,
-    HttpRespTrailers,
+    /// c109 Phase 20: HTTPRequest `method()`/`path()`/`body()` → `(recv).<field>.clone()`.
+    HTTPReqField(&'static str),
+    /// c109 Phase 20: HTTPRequest `header(name)` → `(recv).headers.get(&a0).cloned()`.
+    HTTPReqHeader,
+    /// c109 Phase 20: HTTPRequest `param(name)` → `{root}jet_http_request_param(&(recv), &(a0))`.
+    HTTPReqParam,
+    HTTPReqTrailers,
+    /// c109 Phase 20: HTTPResponse `status()`/`body()` → `(recv).<field>.clone()`.
+    HTTPRespField(&'static str),
+    /// c109 Phase 20: HTTPResponse `header(name)` → `(recv).headers.get(&a0).cloned()`.
+    HTTPRespHeader,
+    HTTPRespTrailers,
     /// D-ARGS1: ArgsSpec `.flag(name, help)` → `(recv).flag(&a0, &a1)` → `JetArgsSpec`.
     ArgsSpecFlag,
     ArgsSpecFlagShort,
@@ -3753,12 +3753,12 @@ pub enum THandleOp {
     ChannelReceive,
     /// c109 Phase 21: Sender `send(v)` → `(recv).send(a0)`. Returns unit.
     SenderSend,
-    /// c109 Phase 25: HttpRouter `get`/`post`/`put`/`delete` route registration
+    /// c109 Phase 25: HTTPRouter `get`/`post`/`put`/`delete` route registration
     /// (D-ROUTE1=A). Emits `{root}jet_http_router_register(&mut (recv), "<VERB>".to_string(),
     /// <path>, <handler>)` where `<path>` is the lowered first arg (args[0]) and `<handler>`
     /// is a pre-rendered boxed-closure string (`emit_router_handler` reproduction, resolved
     /// at lowering). `verb` is the uppercase HTTP method literal.
-    HttpRouterRegister {
+    HTTPRouterRegister {
         verb: &'static str,
         handler: String,
         file: String,
@@ -3840,13 +3840,13 @@ pub enum THandleOp {
         kind: String,
         method: String,
     },
-    /// D-NETDEP1=A / D-HTTPLIB1=A: method call on an HTTP client type (HttpRequest/HttpResponse).
-    HttpClientMethod {
+    /// D-NETDEP1=A / D-HTTPLIB1=A: method call on an HTTP client type (HTTPRequest/HTTPResponse).
+    HTTPClientMethod {
         kind: String,
         method: String,
     },
-    /// D-NETDEP1=A / D-HTTPLIB1=A: method call on an HTTP server type (HttpMux/HttpRequest/HttpResponse).
-    HttpServerMethod {
+    /// D-NETDEP1=A / D-HTTPLIB1=A: method call on an HTTP server type (HTTPMux/HTTPRequest/HTTPResponse).
+    HTTPServerMethod {
         kind: String,
         method: String,
     },
@@ -3866,13 +3866,13 @@ pub enum THandleOp {
     DataTreeDecode(Type),
     /// D-SERDE2=A: `value.encode()` dispatches the public Encode protocol.
     SerdeEncode,
-    /// D-SERDE-ACCESS=B: same accessors on `Json`/`Data`.
-    JsonField,
-    JsonAt,
-    JsonInt,
-    JsonText,
-    JsonBool,
-    JsonFloat,
+    /// D-SERDE-ACCESS=B: same accessors on `JSON`/`Data`.
+    JSONField,
+    JSONAt,
+    JSONInt,
+    JSONText,
+    JSONBool,
+    JSONFloat,
     /// D-PATHFS1: `Path.from(str)` constructor → `{root}jet_path_from(&(recv))`.
     PathFrom,
     /// D-PATHFS1: `path.join(other)` → `{root}jet_path_join(&(recv), &(a0))` → `JetPath`.
@@ -3885,7 +3885,7 @@ pub enum THandleOp {
     PathStem,
     /// D-PATHFS1: `path.to_string()` → `(recv).jet_show()` → `String`.
     PathToString,
-    /// D-PATHFS1: `path.write_atomic(bytes)` → `{root}jet_path_write_atomic(&(recv), &(a0))` → `Result<(), IoError>`.
+    /// D-PATHFS1: `path.write_atomic(bytes)` → `{root}jet_path_write_atomic(&(recv), &(a0))` → `Result<(), IOError>`.
     PathWriteAtomic,
     /// D-PATHFS1: `path.walk()` → `{root}jet_path_walk(&(recv))` → `Vec<JetPath>`.
     PathWalk,
@@ -3902,30 +3902,30 @@ pub enum THandleOp {
     WebAppMethod {
         method: String,
     },
-    /// D-DBDRIVER1: `conn.query(sql, params)` → `Result<Vec<Row>, DbError>`. Encodes
+    /// D-DBDRIVER1: `conn.query(sql, params)` → `Result<Vec<Row>, DBError>`. Encodes
     /// `params` via `jet_std::jet_db_encode_params`, calls the FFI bridge's
     /// `jet_db_query`, decodes the wire result via `jet_std::jet_db_decode_query_result`.
-    DbQuery,
-    /// D-DBDRIVER1: `conn.query_one(sql, params)` → `Result<Option<Row>, DbError>`.
-    /// Same as `DbQuery` but takes only the first row (if any).
-    DbQueryOne,
-    /// D-DBDRIVER1: `conn.execute(sql, params)` → `Result<Int, DbError>` (affected rows).
-    DbExecute,
+    DBQuery,
+    /// D-DBDRIVER1: `conn.query_one(sql, params)` → `Result<Option<Row>, DBError>`.
+    /// Same as `DBQuery` but takes only the first row (if any).
+    DBQueryOne,
+    /// D-DBDRIVER1: `conn.execute(sql, params)` → `Result<Int, DBError>` (affected rows).
+    DBExecute,
     /// D-DBDRIVER1: `conn.begin()` → `{ffi}::jet_db_begin((recv).handle)` → `Bool`.
-    DbBegin,
+    DBBegin,
     /// D-DBDRIVER1: `conn.commit()` → `{ffi}::jet_db_commit((recv).handle)` → `Bool`.
-    DbCommit,
+    DBCommit,
     /// D-DBDRIVER1: `conn.rollback()` → `{ffi}::jet_db_rollback((recv).handle)` → `Bool`.
-    DbRollback,
+    DBRollback,
     /// D-DBDRIVER1: `conn.close()` → `{ffi}::jet_db_close((recv).handle)` → `Bool`.
-    DbClose,
-    /// D-DBDRIVER1: `DbValue` accessor methods (`.int()`/`.float()`/`.text()`/
-    /// `.bool()`/`.is_null()`) → `(recv).<method>()`, same shape as `JsonInt`/….
-    DbValueInt,
-    DbValueFloat,
-    DbValueText,
-    DbValueBool,
-    DbValueIsNull,
+    DBClose,
+    /// D-DBDRIVER1: `DBValue` accessor methods (`.int()`/`.float()`/`.text()`/
+    /// `.bool()`/`.is_null()`) → `(recv).<method>()`, same shape as `JSONInt`/….
+    DBValueInt,
+    DBValueFloat,
+    DBValueText,
+    DBValueBool,
+    DBValueIsNull,
     /// D-DEP-WASM1=A / D-PLUGIN1=B (c81): `plugin.call(name, args)` →
     /// `Result<Float, String>`, a homogeneous `[Float]` call across the
     /// sandboxed Component Model boundary (wire-encoded, see `Prelude/Plugin.rs`).

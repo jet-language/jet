@@ -1,14 +1,14 @@
-    // JSON/DataTree bridges layered on the canonical JsonCodec.rs core.
-    pub fn io_error_at(operation: IoOperation, path: &str, e: std::io::Error) -> IoError {
-        let context = IoContext::new(operation, Some(path.to_string()), e.raw_os_error().map(i64::from), Some(e.to_string()));
+    // JSON/DataTree bridges layered on the canonical JSONCodec.rs core.
+    pub fn io_error_at(operation: IOOperation, path: &str, e: std::io::Error) -> IOError {
+        let context = IOContext::new(operation, Some(path.to_string()), e.raw_os_error().map(i64::from), Some(e.to_string()));
         match e.kind() {
-            std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => IoError::InvalidInput(context),
-            std::io::ErrorKind::NotFound => IoError::NotFound(context),
-            std::io::ErrorKind::PermissionDenied => IoError::PermissionDenied(context),
-            std::io::ErrorKind::TimedOut => IoError::TimedOut(context),
-            std::io::ErrorKind::WouldBlock => IoError::Other(context),
-            std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => IoError::Closed(context),
-            _ => IoError::Other(context),
+            std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => IOError::InvalidInput(context),
+            std::io::ErrorKind::NotFound => IOError::NotFound(context),
+            std::io::ErrorKind::PermissionDenied => IOError::PermissionDenied(context),
+            std::io::ErrorKind::TimedOut => IOError::TimedOut(context),
+            std::io::ErrorKind::WouldBlock => IOError::Other(context),
+            std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => IOError::Closed(context),
+            _ => IOError::Other(context),
         }
     }
 
@@ -79,13 +79,13 @@
         }
     }
 
-    // Json (dynamic, BTreeMap-keyed) → DataTree. Numbers that are integral collapse
+    // JSON (dynamic, BTreeMap-keyed) → DataTree. Numbers that are integral collapse
     // to `Int`, so a round-trip through JSON keeps `5` an Int.
-    pub fn datatree_from_json(j: &Json) -> DataTree {
+    pub fn datatree_from_json(j: &JSON) -> DataTree {
         match j {
-            Json::Null => DataTree::Null,
-            Json::Boolean(b) => DataTree::Bool(*b),
-            Json::Number(n) => {
+            JSON::Null => DataTree::Null,
+            JSON::Boolean(b) => DataTree::Bool(*b),
+            JSON::Number(n) => {
                 if n.fract() == 0.0
                     && n.is_finite()
                     && *n >= i64::MIN as f64
@@ -96,9 +96,9 @@
                     DataTree::Float(*n)
                 }
             }
-            Json::Text(s) => DataTree::Text(s.clone()),
-            Json::Array(items) => DataTree::Array(items.iter().map(datatree_from_json).collect()),
-            Json::Object(m) => DataTree::Object(
+            JSON::Text(s) => DataTree::Text(s.clone()),
+            JSON::Array(items) => DataTree::Array(items.iter().map(datatree_from_json).collect()),
+            JSON::Object(m) => DataTree::Object(
                 m.iter()
                     .map(|(k, v)| (k.clone(), datatree_from_json(v)))
                     .collect(),

@@ -107,7 +107,7 @@ int32_t abi_explicit(int32_t a, int32_t b) { return a + b; }
     run_ok(&mut archive, "C archiver");
 
     let explicit_abi = match abi.as_str() {
-        "sysv64" => "#Abi(sysv64) ",
+        "sysv64" => "#ABI(sysv64) ",
         "default" => "",
         other => panic!("unsupported matrix ABI {other}"),
     };

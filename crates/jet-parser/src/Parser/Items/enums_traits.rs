@@ -399,7 +399,7 @@ impl<'a> Parser<'a> {
             }))
         }
     
-        /// D-OSTARGET1=A: parse the `impl` block that must follow a `#Target(Os.X)`
+        /// D-OSTARGET1=A: parse the `impl` block that must follow a `#Target(OS.X)`
         /// marker and attach `os` to it. Reuses `impl_or_error_conv` (same grammar,
         /// same `impl Type.Trait { … }` / delegation / error-conversion forms) and
         /// stamps the OS gate onto the resulting `ImplDef` afterward — no need to
@@ -407,7 +407,7 @@ impl<'a> Parser<'a> {
         /// caller (`Modules.rs`'s inline-module item loop calls this same helper).
         pub(in crate::Parser) fn os_gated_impl(
             &mut self,
-            os: crate::Syntax::OsTarget,
+            os: crate::Syntax::OSTarget,
         ) -> Result<Item, Diagnostic> {
             // S6-R: a synthetic statement-terminator `;` may follow the marker
             // line (same as the `TokKind::Semi` skip at the top of the top-level
@@ -419,9 +419,9 @@ impl<'a> Parser<'a> {
                 let span = self.peek().span;
                 return Err(Diagnostic::error(
                     "E0003",
-                    format!("`#Target(Os.{})` isn't valid here", os.name()),
-                    "`Os.Linux`/`Os.Macos`/`Os.Windows` gates a whole `impl` block, not a module, function, or any other item".to_string(),
-                    format!("write `#Target(Os.{}) impl Type.Trait {{ … }}`", os.name()),
+                    format!("`#Target(OS.{})` isn't valid here", os.name()),
+                    "`OS.Linux`/`OS.MacOS`/`OS.Windows` gates a whole `impl` block, not a module, function, or any other item".to_string(),
+                    format!("write `#Target(OS.{}) impl Type.Trait {{ … }}`", os.name()),
                     Some(span),
                 ));
             }
@@ -432,9 +432,9 @@ impl<'a> Parser<'a> {
                 }
                 Item::ErrorConv(ec) => Err(Diagnostic::error(
                     "E0003",
-                    format!("`#Target(Os.{})` isn't valid on an error-conversion `impl`", os.name()),
+                    format!("`#Target(OS.{})` isn't valid on an error-conversion `impl`", os.name()),
                     "`impl Source => Target { … }` error conversions run on every platform; OS gating only makes sense for a real trait/inherent impl".to_string(),
-                    format!("remove the `#Target(Os.{})` marker", os.name()),
+                    format!("remove the `#Target(OS.{})` marker", os.name()),
                     Some(ec.from_span),
                 )),
                 other => Ok(other),

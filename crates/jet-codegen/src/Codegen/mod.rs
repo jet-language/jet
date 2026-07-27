@@ -66,16 +66,16 @@ fn push_prelude(out: &mut String) {
 
 fn emit_command_metadata(
     bundle: &ProgramBundle,
-    active_os: Syntax::OsTarget,
+    active_os: Syntax::OSTarget,
     out: &mut String,
 ) {
-    let record = jet_foundation::CliSchema::encode_record(
-        &jet_foundation::CliSchema::executable_schema(bundle),
+    let record = jet_foundation::CLISchema::encode_record(
+        &jet_foundation::CLISchema::executable_schema(bundle),
     );
     let section = match active_os {
-        Syntax::OsTarget::Linux => jet_foundation::CliSchema::ELF_SECTION,
-        Syntax::OsTarget::Macos => "__DATA,__jetcmd",
-        Syntax::OsTarget::Windows => jet_foundation::CliSchema::PE_SECTION,
+        Syntax::OSTarget::Linux => jet_foundation::CLISchema::ELF_SECTION,
+        Syntax::OSTarget::MacOS => "__DATA,__jetcmd",
+        Syntax::OSTarget::Windows => jet_foundation::CLISchema::PE_SECTION,
     };
     let bytes = record.iter().map(u8::to_string).collect::<Vec<_>>().join(",");
     out.push_str(&format!(
@@ -331,22 +331,22 @@ const CORELIB_PRELUDE_PARTS: &[&str] = &[
     "\n}\n",
     include_str!("../Prelude/CoreLib/JetStd/Open.rs"),
     include_str!("../Prelude/CoreLib/JetStd/UrlMime.rs"),
-    include_str!("../Prelude/CoreLib/JetStd/JsonCodec.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/JSONCodec.rs"),
     include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),
-    include_str!("../Prelude/CoreLib/JetStd/DbPluginWire.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/DBPluginWire.rs"),
     include_str!("../Prelude/CoreLib/JetStd/DataTree.rs"),
     include_str!("../Prelude/CoreLib/JetStd/MathTaskMem.rs"),
     include_str!("../Prelude/CoreLib/JetStd/ReactiveEventWatch.rs"),
-    include_str!("../Prelude/CoreLib/JetStd/JsonDataTree.rs"),
-    include_str!("../Prelude/CoreLib/JetStd/Toml.rs"),
-    include_str!("../Prelude/CoreLib/JetStd/Yaml.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/JSONDataTree.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/TOML.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/YAML.rs"),
     include_str!("../Prelude/CoreLib/Email.rs"),
     include_str!("../Prelude/CoreLib/Top/HandlesRaylib.rs"),
     include_str!("../Prelude/CoreLib/Top/Game.rs"),
     include_str!("../Prelude/CoreLib/Top/PathFiles.rs"),
     include_str!("../Prelude/CoreLib/Top/UnicodeTables.rs"),
     include_str!("../Prelude/CoreLib/Top/Text.rs"),
-    include_str!("../Prelude/CoreLib/Top/FsIoEnvOsTesting.rs"),
+    include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"),
     include_str!("../Prelude/CoreLib/Top/CryptoEntropy.rs"),
     include_str!("../Prelude/CoreLib/Top/Process.rs"),
     include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"),
@@ -358,12 +358,12 @@ const CORELIB_PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/CoreLib/Top/DataFlow.rs"),
     include_str!("../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"),
     include_str!("../Prelude/CoreLib/Top/EncodingCodecs.rs"),
-    include_str!("../Prelude/CoreLib/Top/DnsResolverPolicy.rs"),
-    include_str!("../Prelude/CoreLib/Top/HttpMessage.rs"),
-    include_str!("../Prelude/CoreLib/Top/HttpRoute.rs"),
-    include_str!("../Prelude/CoreLib/Top/NetHttp.rs"),
-    include_str!("../Prelude/CoreLib/Top/HttpClient.rs"),
-    include_str!("../Prelude/CoreLib/Top/HttpServer.rs"),
+    include_str!("../Prelude/CoreLib/Top/DNSResolverPolicy.rs"),
+    include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs"),
+    include_str!("../Prelude/CoreLib/Top/HTTPRoute.rs"),
+    include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"),
+    include_str!("../Prelude/CoreLib/Top/HTTPClient.rs"),
+    include_str!("../Prelude/CoreLib/Top/HTTPServer.rs"),
     include_str!("../Prelude/CoreLib/Top/WsClient.rs"),
     include_str!("../Prelude/CoreLib/Top/Ws.rs"),
     include_str!("../Prelude/CoreLib/Top/Browser.rs"),
@@ -1024,13 +1024,13 @@ pub(crate) fn emit_synthetic_close_builtin_impls(cx: &Cx, items: &[Item], out: &
         }
     }
     if uses("core.net") {
-        for ty in [format!("{root}JetTcpStream"), format!("{root}JetUnixStream")] {
+        for ty in [format!("{root}JetTCPStream"), format!("{root}JetUnixStream")] {
             out.push_str(&format!(
                 "impl user_Close for {ty} {{ fn close(self) {{ drop(self); }} }}\n"
             ));
         }
         out.push_str(&format!(
-            "impl user_Close for {root}JetTlsStream {{ fn close(mut self) {{ let _ = {root}jet_net_tls_close(&mut self); }} }}\n"
+            "impl user_Close for {root}JetTLSStream {{ fn close(mut self) {{ let _ = {root}jet_net_tls_close(&mut self); }} }}\n"
         ));
     }
     let uses_mem = uses(crate::Syntax::CORE_MEM_MODULE)
@@ -1474,7 +1474,7 @@ mod tests {
             comptime_inputs: Vec::new(), import_targets: HashMap::new(), layer_ceiling: None,
             inferred_layer: crate::Syntax::RuntimeLayer::Core, web_partitions: HashMap::new(),
             web_partition_enforced: false, web_partition_report: None, dep_roots: HashMap::new(),
-            active_os: crate::Syntax::OsTarget::host(),
+            active_os: crate::Syntax::OSTarget::host(),
             edition: "2027".to_string(),
         };
         let diagnostics = crate::Sema::check_bundle(&mut bundle, CompileMode::Run);
@@ -1556,7 +1556,7 @@ mod tests {
             web_partition_enforced: false,
             web_partition_report: None,
             dep_roots: HashMap::new(),
-            active_os: crate::Syntax::OsTarget::host(),
+            active_os: crate::Syntax::OSTarget::host(),
             edition: "2027".to_string(),
         };
 
@@ -2018,12 +2018,12 @@ fn emit_test_body(cx: &Cx, body: &[crate::AST::Stmt], out: &mut String) {
 /// Linux-only). The `.Linux` dispatch arm's construction is likewise folded out
 /// of `main` on those targets, so nothing references it.
 fn uses_gtk_backend(bundle: &ProgramBundle) -> bool {
-    bundle.active_os == Syntax::OsTarget::Linux
+    bundle.active_os == Syntax::OSTarget::Linux
         && bundle.used_core.iter().any(|u| u == "core.ui::gtk_backend")
 }
 
 pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&FfiLink>) -> String {
-    emit_bundle_dbg(bundle, link, false, Syntax::OsTarget::host())
+    emit_bundle_dbg(bundle, link, false, Syntax::OSTarget::host())
 }
 
 /// D-DBG3 step 2 (dap-debugger): identical to `emit_bundle`, but with
@@ -2034,13 +2034,13 @@ pub fn emit_bundle(bundle: &ProgramBundle, _mode: CompileMode, link: Option<&Ffi
 ///
 /// D-OSTARGET1=A (ratified 2026-07-01, c134): `active_os` is the resolved
 /// native OS bucket this build targets (from `--target=<triple>`, or the host
-/// OS when absent) — an `impl` gated to a different `#Target(Os.*)` is
+/// OS when absent) — an `impl` gated to a different `#Target(OS.*)` is
 /// skipped entirely (`Codegen/Imports.rs::emit_program_items`).
 pub fn emit_bundle_dbg(
     bundle: &ProgramBundle,
     link: Option<&FfiLink>,
     debug_linemap: bool,
-    active_os: Syntax::OsTarget,
+    active_os: Syntax::OSTarget,
 ) -> String {
     // D-DATAFLOW1 / D-REL3: fixed_sigs and edition-gated helpers read the TLS
     // package edition. Keep codegen on the same edition sema checked.
@@ -2148,7 +2148,7 @@ pub fn emit_bundle_dbg(
     // D-CLIFLAG1: a typed `fn run(args: T)` is the Jet entry (S12). Synthesize
     // the Rust `fn main` wrapper that parses `io.args()` and dispatches to it.
     // No-op when the entry file has no `run` (sema's E0101 already rejected it).
-    let cli_items = jet_foundation::CliSchema::entry_type_module(bundle)
+    let cli_items = jet_foundation::CLISchema::entry_type_module(bundle)
         .map(|module| bundle.modules[module].items.as_slice())
         .unwrap_or(entry.items.as_slice());
     emit_cli_entry_if_needed(&cx, &entry.items, cli_items, &mut out);

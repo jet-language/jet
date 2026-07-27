@@ -600,7 +600,7 @@ impl<'a> Parser<'a> {
                                                 self.diags.push(Diagnostic::error(
                                                     "E0003",
                                                     "this grouped `#Target` duplicates or cannot attach at file scope".to_string(),
-                                                    "a file marker list may contain one file target and one companion `#Html` marker".to_string(),
+                                                    "a file marker list may contain one file target and one companion `#HTML` marker".to_string(),
                                                     "remove the duplicate, or move an OS target directly onto its `impl`".to_string(),
                                                     Some(marker.span),
                                                 ));
@@ -619,9 +619,9 @@ impl<'a> Parser<'a> {
                                             Ok(_) => {
                                                 self.diags.push(Diagnostic::error(
                                                     "E0003",
-                                                    "only one `#Html(…)` marker is allowed per file".to_string(),
+                                                    "only one `#HTML(…)` marker is allowed per file".to_string(),
                                                     "a file may declare at most one companion host page".to_string(),
-                                                    "remove the duplicate `#Html(…)` marker".to_string(),
+                                                    "remove the duplicate `#HTML(…)` marker".to_string(),
                                                     Some(marker.span),
                                                 ));
                                                 failed = true;
@@ -662,7 +662,7 @@ impl<'a> Parser<'a> {
                         }
                         continue;
                     }
-                    // D-MARK-TARGET1=A: `#Target(Wasm)`/`#Target(Js)` immediately
+                    // D-MARK-TARGET1=A: `#Target(Wasm)`/`#Target(JS)` immediately
                     // attached to a following `fn`/`pub fn` is the per-function
                     // bucket override (routed to `at_web_partition_fn` below,
                     // parsed inside `func()`), not the file/module ceiling.
@@ -674,7 +674,7 @@ impl<'a> Parser<'a> {
                                         "E0003",
                                         "`#Target(Web)` isn't valid on a module".to_string(),
                                         "`Web` is a file-level default-backend marker, not a partition ceiling".to_string(),
-                                        "move `#Target(Web)` to the top of the file, outside any module; use `#Target(Wasm)` or `#Target(Js)` on a module".to_string(),
+                                        "move `#Target(Web)` to the top of the file, outside any module; use `#Target(Wasm)` or `#Target(JS)` on a module".to_string(),
                                         Some(span),
                                     ));
                                 self.sync_top();
@@ -712,7 +712,7 @@ impl<'a> Parser<'a> {
                                     "E0003",
                                     "only one `#Target(…)` ceiling is allowed per file".to_string(),
                                     "a file may declare at most one web partition ceiling".to_string(),
-                                    "remove the duplicate `#Target(Wasm)` or `#Target(Js)` marker"
+                                    "remove the duplicate `#Target(Wasm)` or `#Target(JS)` marker"
                                         .to_string(),
                                     Some(span),
                                 ));
@@ -722,9 +722,9 @@ impl<'a> Parser<'a> {
                             web_target_ceiling = Some(target);
                             continue;
                         }
-                        // D-OSTARGET1=A: `#Target(Os.X)` attaches to the `impl` block
+                        // D-OSTARGET1=A: `#Target(OS.X)` attaches to the `impl` block
                         // that immediately follows — item scope, not file scope.
-                        Ok(TargetMarker::Os(os)) => {
+                        Ok(TargetMarker::OS(os)) => {
                             match self.os_gated_impl(os) {
                                 Ok(item) => items.push(item),
                                 Err(d) => {
@@ -740,7 +740,7 @@ impl<'a> Parser<'a> {
                             continue;
                         }
                     },
-                    // D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — explicit
+                    // D-HTMLPAIR1 (ratified 2026-07-01, c134): `#HTML("path.html")` — explicit
                     // companion host page for `--target=web` builds.
                     TokKind::Hash if self.at_html_marker() => match self.parse_html_marker() {
                         Ok((marker, path)) => {
@@ -748,9 +748,9 @@ impl<'a> Parser<'a> {
                                 let span = self.peek().span;
                                 self.diags.push(Diagnostic::error(
                                     "E0003",
-                                    "only one `#Html(…)` marker is allowed per file".to_string(),
+                                    "only one `#HTML(…)` marker is allowed per file".to_string(),
                                     "a file may declare at most one companion host page".to_string(),
-                                    "remove the duplicate `#Html(…)` marker".to_string(),
+                                    "remove the duplicate `#HTML(…)` marker".to_string(),
                                     Some(span),
                                 ));
                                 self.sync_top();

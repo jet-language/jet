@@ -102,8 +102,8 @@ fn lower_lambda_expecting_with_host_borrow(
         })
         .collect();
     let body_ty = lambda_body_ty_expecting(lam, cx, env, expected_params);
-    // Http handlers cross the server boundary as owned requests. Their public
-    // callback type is `Fn(HttpRequest)`, never Jet's ordinary read-borrowed
+    // HTTP handlers cross the server boundary as owned requests. Their public
+    // callback type is `Fn(HTTPRequest)`, never Jet's ordinary read-borrowed
     // function convention.
     let http_handler = lam.meta.escapes
         && lam.params.len() == 1
@@ -112,7 +112,7 @@ fn lower_lambda_expecting_with_host_borrow(
                 .ty
                 .as_ref()
                 .or_else(|| expected_params.and_then(|params| params.first())),
-            Some(Type::Named(name)) if name == "HttpRequest"
+            Some(Type::Named(name)) if name == "HTTPRequest"
         );
     let by_value = by_value || http_handler;
     // `emit_lambda` clones the env (`lam_env = env.clone()`), so a `??` panic inside the
@@ -564,7 +564,7 @@ pub(crate) fn render_lambda_str_expecting_value(
 
 /// c109 Phase 25: render the router handler (arg 1) exactly as `emit_router_handler`
 /// (Source/Codegen/Expression.rs) does, at lowering. A bare top-level fn name (not a
-/// local) becomes the canonical shared `JetHttpHandler`; a lambda does the same.
+/// local) becomes the canonical shared `JetHTTPHandler`; a lambda does the same.
 pub(crate) fn render_router_handler(
     args: &[crate::AST::CallArg],
     cx: &Cx,
@@ -572,14 +572,14 @@ pub(crate) fn render_router_handler(
 ) -> String {
     let root = &cx.root_prefix;
     let handler_dyn = format!(
-        "as std::sync::Arc<dyn Fn({0}JetHttpRequest) -> Result<{0}JetHttpResponse, {0}JetHttpError> + Send + Sync>",
+        "as std::sync::Arc<dyn Fn({0}JetHTTPRequest) -> Result<{0}JetHTTPResponse, {0}JetHTTPError> + Send + Sync>",
         root
     );
     match &args[1].expr {
         Expr::Ident(name, _) if !env.locals.contains_key(name) => {
             let rust_name = mangle(name);
             format!(
-                "std::sync::Arc::new(move |__req: {}JetHttpRequest| {}(&__req)) {}",
+                "std::sync::Arc::new(move |__req: {}JetHTTPRequest| {}(&__req)) {}",
                 root, rust_name, handler_dyn
             )
         }

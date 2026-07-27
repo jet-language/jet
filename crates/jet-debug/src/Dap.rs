@@ -21,7 +21,7 @@ use std::path::Path;
 use super::Inferior::{Inferior, ResumeResult};
 use super::LineMap::LineMap;
 use jet_foundation::JSON::{
-    json_escape, json_get, json_str, json_u32, parse_json, read_protocol_content_length, JsonValue,
+    json_escape, json_get, json_str, json_u32, parse_json, read_protocol_content_length, JSONValue,
     MAX_PROTOCOL_MESSAGE_BYTES,
 };
 
@@ -83,7 +83,7 @@ impl DapServer {
 
     /// Dispatch one DAP request. `Some(())` to keep the loop going, `None` to
     /// stop (a `disconnect`/`terminate` request, or an unrecoverable error).
-    fn handle(&mut self, msg: &JsonValue, out: &mut impl Write) -> Option<()> {
+    fn handle(&mut self, msg: &JSONValue, out: &mut impl Write) -> Option<()> {
         let command = json_get(msg, "command").and_then(json_str)?;
         let request_seq = i64::from(json_get(msg, "seq").and_then(json_u32)?);
         let args = json_get(msg, "arguments");
@@ -374,9 +374,9 @@ impl DapServer {
     }
 }
 
-fn parse_dap_request(body: &str) -> Result<JsonValue, &'static str> {
+fn parse_dap_request(body: &str) -> Result<JSONValue, &'static str> {
     let message = parse_json(body).map_err(|()| "invalid JSON")?;
-    let JsonValue::Object(_) = &message else {
+    let JSONValue::Object(_) = &message else {
         return Err("request must be an object");
     };
     if json_get(&message, "type").and_then(json_str) != Some("request") {
@@ -394,17 +394,17 @@ fn parse_dap_request(body: &str) -> Result<JsonValue, &'static str> {
     if command.is_empty() {
         return Err("command must not be empty");
     }
-    if !matches!(json_get(&message, "arguments"), None | Some(JsonValue::Object(_))) {
+    if !matches!(json_get(&message, "arguments"), None | Some(JSONValue::Object(_))) {
         return Err("arguments must be an object");
     }
     Ok(message)
 }
 
-fn breakpoint_lines(args: Option<&JsonValue>) -> Result<Vec<usize>, &'static str> {
+fn breakpoint_lines(args: Option<&JSONValue>) -> Result<Vec<usize>, &'static str> {
     let Some(value) = args.and_then(|args| json_get(args, "breakpoints")) else {
         return Ok(Vec::new());
     };
-    let JsonValue::Array(items) = value else {
+    let JSONValue::Array(items) = value else {
         return Err("breakpoints must be an array");
     };
     items

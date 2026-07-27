@@ -181,10 +181,10 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             let is_precise_ctor = !locals.contains(&c.name)
                 && (c.name == crate::Syntax::TYPE_BIGINT || c.name == crate::Syntax::TYPE_DECIMAL)
                 && !cx.type_names.contains(&c.name);
-            // D-TYPEDTEXT1=D: the synthetic `Sql`/`Html` call sema rewrote a typed
+            // D-TYPEDTEXT1=D: the synthetic `SQL`/`HTML` call sema rewrote a typed
             // text literal into (see `lower_expr`'s matching case).
             let is_typed_text_ctor = !locals.contains(&c.name)
-                && (c.name == "Sql" || c.name == "Html" || c.name == "Sh")
+                && (c.name == "SQL" || c.name == "HTML" || c.name == "Sh")
                 && !cx.type_names.contains(&c.name);
             // c109 Phase 14: FFI extern + unqualified module-import calls are now
             // covered. Each lowers to its own resolved call form (`emit_call`'s
@@ -282,7 +282,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         } => {
             let core_email_struct = import_ns.as_deref().is_some_and(|alias| {
                 cx.core_imports.get(alias).map(String::as_str) == Some(crate::Syntax::CORE_EMAIL_MODULE)
-                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SmtpConfig")
+                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig")
             });
             let core_cbor_struct = import_ns.as_deref().is_some_and(|alias| {
                 cx.core_imports.get(alias).map(String::as_str) == Some("core.encoding.cbor")
@@ -365,9 +365,9 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             if cx.foreign_types.contains_key(type_name) {
                 return fields.iter().all(|(_, _, e)| expr_in_subset(e, cx, locals));
             }
-            // c109 Phase 17: a PRELUDE struct literal (HttpRequest/HttpResponse) — the
+            // c109 Phase 17: a PRELUDE struct literal (HTTPRequest/HTTPResponse) — the
             // `is_prelude_struct` branch of `emit_struct_lit` (a `<root>Jet…` head, PLAIN
-            // field names, and an auto `params: BTreeMap::new()` for HttpRequest).
+            // field names, and an auto `params: BTreeMap::new()` for HTTPRequest).
             // Reproduced in `lower_expr`'s StructLit arm. Otherwise the named type must be a
             // covered user struct (`user_<name>` head, mangled fields).
             // c109: a recursive (boxed) struct is CONSTRUCTIBLE (the boxed field value is
@@ -417,10 +417,10 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     .core_qualified_rust_type_name(enum_name)
                     .unwrap_or(enum_name.as_str());
                 if !locals.contains(enum_name)
-                    && ((resolved_enum == "SmtpSecurity" && matches!(member.as_str(), "StartTls" | "Tls"))
+                    && ((resolved_enum == "SMTPSecurity" && matches!(member.as_str(), "StartTls" | "TLS"))
                         || (resolved_enum == "RecipientPolicy" && matches!(member.as_str(), "RequireAll" | "DeliverAccepted"))
-                        || (resolved_enum == "SmtpAuth" && member == "None")
-                        || (resolved_enum == "TlsTrust" && member == "System"))
+                        || (resolved_enum == "SMTPAuth" && member == "None")
+                        || (resolved_enum == "TLSTrust" && member == "System"))
                 {
                     return true;
                 }
@@ -451,12 +451,12 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     return true;
                 }
                 // c109 Phase 24: the `JSON.Null` unit construction reaches codegen as a
-                // `Field` (the AST `emit_expr` Field arm emits `{root}jet_std::Json::Null`,
+                // `Field` (the AST `emit_expr` Field arm emits `{root}jet_std::JSON::Null`,
                 // Expression.rs ~L222). Cover it (the only no-arg JSON variant).
                 if !locals.contains(enum_name) && is_json_type_name(enum_name) && member == "Null" {
                     return true;
                 }
-                // D-DBDRIVER1: `DbValue.Null` — the same no-arg-`Field` shape as
+                // D-DBDRIVER1: `DBValue.Null` — the same no-arg-`Field` shape as
                 // `JSON.Null` above, for the tagged SQL parameter/column value.
                 if !locals.contains(enum_name)
                     && is_db_value_type_name(enum_name)
@@ -516,23 +516,23 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             let resolved_type = cx
                 .core_qualified_rust_type_name(type_name)
                 .unwrap_or(type_name.as_str());
-            if (resolved_type == "SmtpSecurity" && matches!(variant.as_str(), "StartTls" | "Tls"))
+            if (resolved_type == "SMTPSecurity" && matches!(variant.as_str(), "StartTls" | "TLS"))
                 || (resolved_type == "RecipientPolicy" && matches!(variant.as_str(), "RequireAll" | "DeliverAccepted"))
             {
                 return args.is_empty();
             }
-            if (resolved_type == "SmtpAuth" && matches!(variant.as_str(), "None" | "Password"))
-                || (resolved_type == "TlsTrust" && matches!(variant.as_str(), "System" | "SystemPlusCa"))
+            if (resolved_type == "SMTPAuth" && matches!(variant.as_str(), "None" | "Password"))
+                || (resolved_type == "TLSTrust" && matches!(variant.as_str(), "System" | "SystemPlusCa"))
             {
                 return args.iter().all(|arg| match arg {
                     EnumLitArg::Positional(expr) => expr_in_subset(expr, cx, locals),
                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
                 });
             }
-            if resolved_type == "TlsVersion" {
+            if resolved_type == "TLSVersion" {
                 return args.is_empty() && matches!(variant.as_str(), "Tls12" | "Tls13");
             }
-            if resolved_type == "TlsClientTrust"
+            if resolved_type == "TLSClientTrust"
                 && matches!(variant.as_str(), "System" | "SystemPlus" | "CustomOnly")
             {
                 return args.iter().all(|arg| match arg {
@@ -540,7 +540,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
                 });
             }
-            if resolved_type == "HttpProxy"
+            if resolved_type == "HTTPProxy"
                 && matches!(variant.as_str(), "FromEnvironment" | "None" | "Url")
             {
                 return args.iter().all(|arg| match arg {
@@ -548,21 +548,21 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
                 });
             }
-            if resolved_type == "HttpRedirectPolicy" && variant == "Follow" {
+            if resolved_type == "HTTPRedirectPolicy" && variant == "Follow" {
                 return args.iter().all(|arg| match arg {
                     EnumLitArg::Positional(expr) => expr_in_subset(expr, cx, locals),
                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
                 });
             }
-            if resolved_type == "HttpRetryPolicy"
+            if resolved_type == "HTTPRetryPolicy"
                 && matches!(variant.as_str(), "None" | "Safe" | "Idempotent")
             {
                 return args.is_empty();
             }
-            if resolved_type == "HttpCookieJar" && variant == "Memory" {
+            if resolved_type == "HTTPCookieJar" && variant == "Memory" {
                 return args.is_empty();
             }
-            if resolved_type == "HttpCompressEncoding" && variant == "Gzip" {
+            if resolved_type == "HTTPCompressEncoding" && variant == "Gzip" {
                 return args.is_empty();
             }
             // D-TERM1 (ratified 2026-06-22): `Key` is a core prelude enum, not in

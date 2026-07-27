@@ -8,7 +8,7 @@
 //! and the `DecodeError{path,reason}` / `MigrationStatus{migrated,from,steps}`
 //! shapes `jet_std` defines.
 //!
-//! Operates directly on the `Json`-tagged `CtValue` tree `JsonInterp`/
+//! Operates directly on the `JSON`-tagged `CtValue` tree `JSONInterp`/
 //! `EncodingLite` already build for every codec (json/csv/toml/yaml) — its
 //! variant tags (`Null`/`Bool`/`Int`/`Float`/`Text`/`Array`/`Object`) are
 //! exactly AOT's `DataTree` shape (see `datatree_from_json`), so no separate
@@ -21,7 +21,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 
 use super::Diagnostics::unsupported;
 use super::Interpreter::Interp;
-use super::JsonInterp::{json_payload, json_variant};
+use super::JSONInterp::{json_payload, json_variant};
 use super::Value::CtValue;
 
 // ── DecodeError / MigrationStatus / DecodeResult CtValue shapes ────────────
@@ -100,27 +100,13 @@ fn serde_marker<'a>(markers: &'a [Marker], name: &str) -> Option<&'a Marker> {
 fn serde_has(markers: &[Marker], name: &str) -> bool {
     markers.iter().any(|m| m.name == name)
 }
-fn cap_word(w: &str) -> String {
-    let mut c = w.chars();
-    match c.next() {
-        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-        None => String::new(),
-    }
-}
 fn apply_rename_all(style: &str, name: &str) -> String {
-    let words: Vec<&str> = name.split('_').filter(|w| !w.is_empty()).collect();
     match style {
-        crate::Syntax::RENAME_ALL_CAMEL => {
-            let mut it = words.iter();
-            let first = it.next().copied().unwrap_or("").to_string();
-            first + &it.map(|w| cap_word(w)).collect::<String>()
-        }
-        crate::Syntax::RENAME_ALL_PASCAL => words.iter().map(|w| cap_word(w)).collect(),
-        crate::Syntax::RENAME_ALL_KEBAB => words.join("-"),
-        crate::Syntax::RENAME_ALL_SCREAMING => {
-            words.iter().map(|w| w.to_uppercase()).collect::<Vec<_>>().join("_")
-        }
-        _ => words.join("_"),
+        crate::Syntax::RENAME_ALL_CAMEL => crate::Syntax::to_camel_acronym(name),
+        crate::Syntax::RENAME_ALL_PASCAL => crate::Syntax::to_pascal_acronym(name),
+        crate::Syntax::RENAME_ALL_KEBAB => crate::Syntax::to_snake_acronym(name).replace('_', "-"),
+        crate::Syntax::RENAME_ALL_SCREAMING => crate::Syntax::to_shouty_acronym(name),
+        _ => crate::Syntax::to_snake_acronym(name),
     }
 }
 fn container_rename_all(markers: &[Marker]) -> Option<String> {
@@ -161,11 +147,11 @@ fn migration_wire_key(style: Option<&str>, s: &StructDef, name: &str) -> String 
     }
 }
 
-// ── Json-tagged CtValue tree helpers (the `DataTree` shape) ────────────────
+// ── JSON-tagged CtValue tree helpers (the `DataTree` shape) ────────────────
 
 fn variant_of(tree: &CtValue) -> Option<(&str, Option<&CtValue>)> {
     match tree {
-        CtValue::Enum { type_name, variant, args } if type_name == "Json" => {
+        CtValue::Enum { type_name, variant, args } if type_name == "JSON" => {
             Some((variant.as_str(), args.first().map(|(_, v)| v)))
         }
         _ => None,
@@ -220,7 +206,7 @@ fn text_cell(cell: String) -> CtValue {
     json_variant("Text", Some(CtValue::Str(cell)))
 }
 
-/// Generic encode of a `CtValue` back into the `Json`-tagged tree shape —
+/// Generic encode of a `CtValue` back into the `JSON`-tagged tree shape —
 /// mirrors the `user_Encode` blanket impls (`EncodingTraits.rs`) used by a
 /// migration `add`/`change` step to write its new field's value onto the
 /// wire before re-decoding. Struct encoding recurses using the type's own
@@ -633,8 +619,8 @@ impl<'a> Interp<'a> {
             return self.eval_typed_csv_decode(method, text, ty, span);
         }
         let parsed: Result<CtValue, CtValue> = match module {
-            "core.encoding.json" => super::JsonInterp::parse_json(text)
-                .map_err(|e| json_parse_err_to_decode("JSON", super::JsonInterp::json_error_value(e))),
+            "core.encoding.json" => super::JSONInterp::parse_json(text)
+                .map_err(|e| json_parse_err_to_decode("JSON", super::JSONInterp::json_error_value(e))),
             "core.encoding.toml" => super::EncodingLite::toml_parse(text).map_err(|e| json_parse_err_to_decode("TOML", e)),
             "core.encoding.yaml" => super::EncodingLite::yaml_parse(text).map_err(|e| json_parse_err_to_decode("YAML", e)),
             "core.encoding.xml" => {

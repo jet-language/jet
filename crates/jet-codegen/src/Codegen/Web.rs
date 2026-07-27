@@ -31,7 +31,7 @@ pub struct WebArtifacts {
     /// (a button calling an exported function) ships its own companion HTML
     /// alongside the `.jet` source instead of relying on this default.
     pub index_html: String,
-    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): the entry file's `#Html("path.html")`
+    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): the entry file's `#HTML("path.html")`
     /// marker, if any — relative to the `.jet` source's own directory.
     pub explicit_html_path: Option<String>,
     /// D-SHAPE-CLI-CARRIER1=A: canonical record embedded as a Wasm custom
@@ -68,13 +68,13 @@ struct FuncWeb {
     tir: TIR::TFunc,
 }
 
-struct JsSource {
+struct JSSource {
     display: String,
     name: String,
     content: String,
 }
 
-struct JsMapping {
+struct JSMapping {
     generated_line: usize,
     generated_column: usize,
     source: usize,
@@ -103,8 +103,8 @@ pub fn emit_web(
         dom_runtime: DOM_RUNTIME.to_string(),
         index_html: emit_index_html(),
         explicit_html_path: bundle.modules[bundle.entry].html_path.clone(),
-        command_record: jet_foundation::CliSchema::encode_record(
-            &jet_foundation::CliSchema::executable_schema(bundle),
+        command_record: jet_foundation::CLISchema::encode_record(
+            &jet_foundation::CLISchema::executable_schema(bundle),
         ),
     })
 }
@@ -159,7 +159,7 @@ pub fn build_wasm_jet_source_map(
             continue;
         }
         last_offset = Some(file_offset);
-        mappings.push(JsMapping {
+        mappings.push(JSMapping {
             generated_line: 0,
             generated_column: file_offset,
             source,
@@ -272,7 +272,7 @@ fn validate_web_items_tir(
                 // `dev()` is the host-side programmable dev-server entry. It
                 // executes before the web build and is never web-runtime code.
                 let emitted = key != "dev"
-                    && (bucket == WebBucket::Js || !explicit_html || has_wasm_export);
+                    && (bucket == WebBucket::JS || !explicit_html || has_wasm_export);
                 validate_web_func_tir(f, cx, bundle, file_prefix, bucket, emitted, diags);
             }
             Item::CodeModule(cm) => {
@@ -316,7 +316,7 @@ fn validate_web_func_tir(
         let tir = TIR::lower_web_func(f, cx);
         let supported = if !require_web_emit {
             true
-        } else if bucket == WebBucket::Js {
+        } else if bucket == WebBucket::JS {
             web_stmts_supported(&tir.body)
                 && (tir.ret.is_none() || web_stmts_guarantee_return(&tir.body))
         } else {
@@ -697,7 +697,7 @@ fn emit_index_html() -> String {
 fn collect_web_funcs(
     bundle: &ProgramBundle,
     source_marker: &str,
-    sources: &[JsSource],
+    sources: &[JSSource],
 ) -> Vec<FuncWeb> {
     let mut out = Vec::new();
     let extern_funcs = bundle_extern_funcs(bundle);
@@ -826,7 +826,7 @@ fn source_marker_for_texts<'a>(texts: impl Iterator<Item = &'a str>) -> String {
     }
 }
 
-fn js_sources(bundle: &ProgramBundle) -> Vec<JsSource> {
+fn js_sources(bundle: &ProgramBundle) -> Vec<JSSource> {
     let mut sources: Vec<_> = bundle
         .modules
         .iter()
@@ -855,7 +855,7 @@ fn js_sources(bundle: &ProgramBundle) -> Vec<JsSource> {
                 .map(safe_source_name)
                 .filter(|name| !name.is_empty())
                 .unwrap_or(fallback);
-            JsSource {
+            JSSource {
                 display: module.display.clone(),
                 name,
                 content: module.source.clone(),
@@ -876,7 +876,7 @@ fn safe_source_name(path: &std::path::Path) -> String {
         .join("/")
 }
 
-fn js_source_index(sources: &[JsSource], display: &str) -> usize {
+fn js_source_index(sources: &[JSSource], display: &str) -> usize {
     sources
         .iter()
         .position(|source| source.display == display)
@@ -2268,7 +2268,7 @@ fn web_emit_error(f: &FuncWeb) -> WebTirUnsupported {
 fn emit_js_app(
     bundle: &ProgramBundle,
     funcs: &[FuncWeb],
-    sources: &[JsSource],
+    sources: &[JSSource],
     source_marker: &str,
 ) -> WebEmitResult<(String, String, Vec<(String, String)>)> {
     let mut out = String::from(
@@ -2339,14 +2339,14 @@ fn emit_js_app(
 
     let js_funcs: Vec<&FuncWeb> = funcs
         .iter()
-        .filter(|f| f.bucket == WebBucket::Js && f.key != "run" && f.key != "dev")
+        .filter(|f| f.bucket == WebBucket::JS && f.key != "run" && f.key != "dev")
         .collect();
     for f in &js_funcs {
         emit_js_fn(f, &mut out, funcs, sources, &mut handlers)?;
     }
 
     if let Some(main_fn) = funcs.iter().find(|f| f.key == "run") {
-        if main_fn.bucket == WebBucket::Js {
+        if main_fn.bucket == WebBucket::JS {
             out.push_str("export async function jet_main() {\n");
             out.push_str(&format!(
                 "  jetDom.enterRenderScope({});\n",
@@ -2392,10 +2392,10 @@ fn emit_js_fn(
     f: &FuncWeb,
     out: &mut String,
     all: &[FuncWeb],
-    sources: &[JsSource],
+    sources: &[JSSource],
     handlers: &mut Vec<(String, String)>,
 ) -> WebEmitResult<()> {
-    // D-DOMGEN1=A (Phase 7 extension): every top-level #Js function is
+    // D-DOMGEN1=A (Phase 7 extension): every top-level #JS function is
     // exported, not just `main` — a hand-written host page (index.html) can
     // call any of them directly (e.g. a click handler invoking a Jet-compiled
     // render function), the same way #WasmExport functions are callable via
@@ -2456,7 +2456,7 @@ fn bind_inline_handler_symbols(body: &str, owner: &FuncWeb, handlers: &mut Vec<(
 
 fn finish_js_source_map(
     raw: &str,
-    sources: &[JsSource],
+    sources: &[JSSource],
     source_marker: &str,
 ) -> (String, String) {
     let mut js = String::with_capacity(raw.len());
@@ -2491,7 +2491,7 @@ fn finish_js_source_map(
                 .char_indices()
                 .find_map(|(byte, c)| (!matches!(c, ' ' | '\t' | '\r' | '\n')).then_some(byte))
             {
-                mappings.push(JsMapping {
+                mappings.push(JSMapping {
                     generated_line,
                     generated_column: line[..generated_column].encode_utf16().count(),
                     source,
@@ -2523,7 +2523,7 @@ fn finish_js_source_map(
     (js, map)
 }
 
-fn encode_source_mappings(mappings: &[JsMapping]) -> String {
+fn encode_source_mappings(mappings: &[JSMapping]) -> String {
     let mut out = String::new();
     let mut generated_line = 0usize;
     let mut generated_column = 0i64;
@@ -3122,7 +3122,7 @@ mod source_map_tests {
 
     #[test]
     fn source_map_markers_strip_and_encode_v3_segments() {
-        let sources = vec![JsSource {
+        let sources = vec![JSSource {
             display: "main.jet".to_string(),
             name: "main.jet".to_string(),
             content: "first\nsecond\n".to_string(),

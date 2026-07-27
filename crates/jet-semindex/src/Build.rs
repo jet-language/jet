@@ -7,7 +7,7 @@ use jet_foundation::AST::{self, Item, LoadedModule, ProgramBundle};
 use jet_sema::{effect_key, SemIndexEffectFacts};
 use std::collections::HashMap;
 
-use crate::Json::{convert_defs, convert_effects, convert_refs};
+use crate::JSON::{convert_defs, convert_effects, convert_refs};
 use crate::Types::{BypassFact, BypassKind, CallEdge, DefinitionAnchor, DefinitionFact, InstanceApplicationFact, InstanceFact, MemberFact, MemberKind, MemberOrigin, OutputEntryFact, OutputFact, SemIndex, StructuralNode, StructuralSlotBoundary, StructuralSlotKind, SymbolDef, SymbolKind};
 use crate::Symbols::{build_semantic_symbol_index, SemanticSymbolIndex};
 

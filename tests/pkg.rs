@@ -1168,12 +1168,12 @@ fn manifest_parse_e1209_reserved_nonempty() {
 #[test]
 fn manifest_parse_effects_block() {
     let raw = min_manifest("app", "0.1.0")
-        + "\neffects: {\n    allow: [Fs, Time],\n    deny: [Net],\n}\n";
+        + "\neffects: {\n    allow: [FS, Time],\n    deny: [Net],\n}\n";
     let pm = jetpack::PackageManifest::parse(&raw).expect("effects block should parse");
     assert!(pm.effects_enabled);
     assert_eq!(
         pm.effects_allow,
-        Some(vec!["Fs".to_string(), "Time".to_string()])
+        Some(vec!["FS".to_string(), "Time".to_string()])
     );
     assert_eq!(pm.effects_deny, Some(vec!["Net".to_string()]));
 }
@@ -1246,7 +1246,7 @@ fn manifest_parse_effects_e1221_unknown_effect() {
 
 #[test]
 fn manifest_parse_effects_e1221_unknown_field() {
-    let raw = min_manifest("app", "0.1.0") + "\neffects: {\n    nope: [Fs],\n}\n";
+    let raw = min_manifest("app", "0.1.0") + "\neffects: {\n    nope: [FS],\n}\n";
     let diag = jet::Manifest::parse(&PathBuf::from("pkg.jet"), &raw)
         .expect_err("unknown effects field should fail E1221");
     assert_eq!(diag.code, "E1221");
@@ -1261,7 +1261,7 @@ fn effect_budget_load_ok_reports_via_compile_with_path() {
     write(
         &tmp,
         "pkg.jet",
-        &(min_manifest("app", "0.1.0") + "\neffects: {\n    allow: [Io],\n}\n"),
+        &(min_manifest("app", "0.1.0") + "\neffects: {\n    allow: [IO],\n}\n"),
     );
     let entry = tmp.join("main.jet");
     fs::write(&entry, "fn run() { print(\"hi\"); }\n").unwrap();
@@ -1306,8 +1306,8 @@ fn cli_build_prints_effect_summary() {
     // (U7 / D-DEVMODE1 byte-identity).
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("effects:") && stderr.contains("Fs"),
-        "expected an effect summary naming Fs on stderr, got:\n{stderr}"
+        stderr.contains("effects:") && stderr.contains("FS"),
+        "expected an effect summary naming FS on stderr, got:\n{stderr}"
     );
 
     let _ = fs::remove_dir_all(&tmp);
@@ -1316,7 +1316,7 @@ fn cli_build_prints_effect_summary() {
 #[test]
 fn cli_build_enforces_effect_budget_e1220() {
     // A dependency that reaches `Net` while the root's budget only allows
-    // `Fs` must fail the build naming the dependency (E1220).
+    // `FS` must fail the build naming the dependency (E1220).
     if !jet_bin().is_file() {
         eprintln!(
             "note: skipping cli_build_enforces_effect_budget_e1220 (run `cargo build` first)"
@@ -1338,7 +1338,7 @@ fn cli_build_enforces_effect_budget_e1220() {
         &tmp,
         "pkg.jet",
         &(manifest_with_deps("app", "0.1.0", "    netdep: ./netdep,")
-            + "\neffects: {\n    allow: [Fs],\n}\n"),
+            + "\neffects: {\n    allow: [FS],\n}\n"),
     );
     write(
         &tmp,
@@ -2821,7 +2821,7 @@ fn inferred_public_effect_drift_is_breaking() {
     let pure_api = extract_public_api(pure, pure_path.to_str().unwrap());
     let io_api = extract_public_api(io, io_path.to_str().unwrap());
     assert!(pure_api[0].signature.contains("=[]=>"));
-    assert!(io_api[0].signature.contains("=[Io]=>"));
+    assert!(io_api[0].signature.contains("=[IO]=>"));
     assert_eq!(diff_public_api(&pure_api, &io_api).len(), 1);
 
     let _ = fs::remove_dir_all(&dir);
@@ -2849,7 +2849,7 @@ fn inferred_inline_module_effects_are_published() {
         .iter()
         .find(|item| item.name == "files.report")
         .expect("inline module function is public API");
-    assert!(report.signature.contains("=[Io]=>"), "{}", report.signature);
+    assert!(report.signature.contains("=[IO]=>"), "{}", report.signature);
     assert!(old_api.iter().any(|item| item.name == "bench.report"));
     assert_eq!(diff_public_api(&old_api, &new_api).len(), 1);
 
@@ -2921,15 +2921,15 @@ fn public_trait_effect_contract_drift_is_breaking() {
     let dir = tmp_dir("trait_effect_api_drift");
     let old_path = dir.join("old.jet");
     let new_path = dir.join("new.jet");
-    let old = "pub trait Render { fn draw(self) =[Io]=> Int; }\n";
-    let new = "pub trait Render { fn draw(self) =[Gpu]=> Int; }\n";
+    let old = "pub trait Render { fn draw(self) =[IO]=> Int; }\n";
+    let new = "pub trait Render { fn draw(self) =[GPU]=> Int; }\n";
     fs::write(&old_path, old).unwrap();
     fs::write(&new_path, new).unwrap();
 
     let old_api = extract_public_api(old, old_path.to_str().unwrap());
     let new_api = extract_public_api(new, new_path.to_str().unwrap());
-    assert!(old_api[0].signature.contains("=[Io]=>"));
-    assert!(new_api[0].signature.contains("=[Gpu]=>"));
+    assert!(old_api[0].signature.contains("=[IO]=>"));
+    assert!(new_api[0].signature.contains("=[GPU]=>"));
     assert!(
         !diff_public_api(&old_api, &new_api).is_empty(),
         "trait method effect drift must be breaking"

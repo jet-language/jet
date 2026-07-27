@@ -174,52 +174,52 @@ pub(super) fn eval_handle(
         THandleOp::UnixStreamReady => Err(unsupported("handle `UnixStreamReady`", span)),
         THandleOp::UnixStreamClose => Err(unsupported("handle `UnixStreamClose`", span)),
         THandleOp::UnixStreamSetTimeout => Err(unsupported("handle `UnixStreamSetTimeout`", span)),
-        THandleOp::TlsStreamReadDeadline => {
-            Err(unsupported("handle `TlsStreamReadDeadline`", span))
+        THandleOp::TLSStreamReadDeadline => {
+            Err(unsupported("handle `TLSStreamReadDeadline`", span))
         }
-        THandleOp::TlsStreamWriteAllDeadline => {
-            Err(unsupported("handle `TlsStreamWriteAllDeadline`", span))
+        THandleOp::TLSStreamWriteAllDeadline => {
+            Err(unsupported("handle `TLSStreamWriteAllDeadline`", span))
         }
-        THandleOp::TlsStreamReady => Err(unsupported("handle `TlsStreamReady`", span)),
-        THandleOp::TlsStreamClose => Err(unsupported("handle `TlsStreamClose`", span)),
-        THandleOp::TlsStreamCloseWrite => Err(unsupported("handle `TlsStreamCloseWrite`", span)),
-        THandleOp::TlsStreamPeerIdentity => {
-            Err(unsupported("handle `TlsStreamPeerIdentity`", span))
+        THandleOp::TLSStreamReady => Err(unsupported("handle `TLSStreamReady`", span)),
+        THandleOp::TLSStreamClose => Err(unsupported("handle `TLSStreamClose`", span)),
+        THandleOp::TLSStreamCloseWrite => Err(unsupported("handle `TLSStreamCloseWrite`", span)),
+        THandleOp::TLSStreamPeerIdentity => {
+            Err(unsupported("handle `TLSStreamPeerIdentity`", span))
         }
-        THandleOp::TlsClientConfigDefault => {
-            Err(unsupported("handle `TlsClientConfigDefault`", span))
+        THandleOp::TLSClientConfigDefault => {
+            Err(unsupported("handle `TLSClientConfigDefault`", span))
         }
-        THandleOp::TlsClientConfigWithAlpn => {
-            Err(unsupported("handle `TlsClientConfigWithAlpn`", span))
+        THandleOp::TLSClientConfigWithAlpn => {
+            Err(unsupported("handle `TLSClientConfigWithAlpn`", span))
         }
-        THandleOp::TlsRootCertificatesFromPem => {
-            Err(unsupported("handle `TlsRootCertificatesFromPem`", span))
+        THandleOp::TLSRootCertificatesFromPem => {
+            Err(unsupported("handle `TLSRootCertificatesFromPem`", span))
         }
-        THandleOp::TlsClientIdentityFromPem => {
-            Err(unsupported("handle `TlsClientIdentityFromPem`", span))
+        THandleOp::TLSClientIdentityFromPem => {
+            Err(unsupported("handle `TLSClientIdentityFromPem`", span))
         }
-        THandleOp::TlsClientConfigWithTrust => {
-            Err(unsupported("handle `TlsClientConfigWithTrust`", span))
+        THandleOp::TLSClientConfigWithTrust => {
+            Err(unsupported("handle `TLSClientConfigWithTrust`", span))
         }
-        THandleOp::TlsClientConfigWithIdentity => {
-            Err(unsupported("handle `TlsClientConfigWithIdentity`", span))
+        THandleOp::TLSClientConfigWithIdentity => {
+            Err(unsupported("handle `TLSClientConfigWithIdentity`", span))
         }
-        THandleOp::TlsClientConfigWithVersionBounds => {
-            Err(unsupported("handle `TlsClientConfigWithVersionBounds`", span))
+        THandleOp::TLSClientConfigWithVersionBounds => {
+            Err(unsupported("handle `TLSClientConfigWithVersionBounds`", span))
         }
-        THandleOp::HttpClientNew => Err(unsupported("handle `HttpClientNew`", span)),
+        THandleOp::HTTPClientNew => Err(unsupported("handle `HTTPClientNew`", span)),
         THandleOp::AllocAlloc => args
             .first()
             .cloned()
             .ok_or_else(|| unsupported("allocator value", span)),
         THandleOp::AllocReset => Ok(CtValue::Unit),
-        THandleOp::HttpReqField(_) => Err(unsupported("handle `HttpReqField`", span)),
-        THandleOp::HttpReqHeader => Err(unsupported("handle `HttpReqHeader`", span)),
-        THandleOp::HttpReqParam => Err(unsupported("handle `HttpReqParam`", span)),
-        THandleOp::HttpReqTrailers => Err(unsupported("handle `HttpReqTrailers`", span)),
-        THandleOp::HttpRespField(_) => Err(unsupported("handle `HttpRespField`", span)),
-        THandleOp::HttpRespHeader => Err(unsupported("handle `HttpRespHeader`", span)),
-        THandleOp::HttpRespTrailers => Err(unsupported("handle `HttpRespTrailers`", span)),
+        THandleOp::HTTPReqField(_) => Err(unsupported("handle `HTTPReqField`", span)),
+        THandleOp::HTTPReqHeader => Err(unsupported("handle `HTTPReqHeader`", span)),
+        THandleOp::HTTPReqParam => Err(unsupported("handle `HTTPReqParam`", span)),
+        THandleOp::HTTPReqTrailers => Err(unsupported("handle `HTTPReqTrailers`", span)),
+        THandleOp::HTTPRespField(_) => Err(unsupported("handle `HTTPRespField`", span)),
+        THandleOp::HTTPRespHeader => Err(unsupported("handle `HTTPRespHeader`", span)),
+        THandleOp::HTTPRespTrailers => Err(unsupported("handle `HTTPRespTrailers`", span)),
         THandleOp::ArgsSpecFlag => Err(unsupported("handle `ArgsSpecFlag`", span)),
         THandleOp::ArgsSpecFlagShort => Err(unsupported("handle `ArgsSpecFlagShort`", span)),
         THandleOp::ArgsSpecOption => Err(unsupported("handle `ArgsSpecOption`", span)),
@@ -274,8 +274,8 @@ pub(super) fn eval_handle(
         THandleOp::TaskTrace => Err(unsupported("handle `TaskTrace`", span)),
         THandleOp::ChannelReceive => Err(unsupported("handle `ChannelReceive`", span)),
         THandleOp::SenderSend => Err(unsupported("handle `SenderSend`", span)),
-        THandleOp::HttpRouterRegister { .. } => {
-            Err(unsupported("handle `HttpRouterRegister`", span))
+        THandleOp::HTTPRouterRegister { .. } => {
+            Err(unsupported("handle `HTTPRouterRegister`", span))
         }
         THandleOp::MathMethod {
             method,
@@ -304,8 +304,8 @@ pub(super) fn eval_handle(
         THandleOp::UrlMimeMethod { method, .. } => apply_method(recv, method, args.to_vec(), span),
         THandleOp::EmailMethod { method } => apply_method(recv, method, args.to_vec(), span),
         THandleOp::RegexMethod { method, .. } => apply_method(recv, method, args.to_vec(), span),
-        THandleOp::HttpClientMethod { .. } => Err(unsupported("handle `HttpClientMethod`", span)),
-        THandleOp::HttpServerMethod { .. } => Err(unsupported("handle `HttpServerMethod`", span)),
+        THandleOp::HTTPClientMethod { .. } => Err(unsupported("handle `HTTPClientMethod`", span)),
+        THandleOp::HTTPServerMethod { .. } => Err(unsupported("handle `HTTPServerMethod`", span)),
         THandleOp::DataTreeField => Err(unsupported("handle `DataTreeField`", span)),
         THandleOp::DataTreeAt => Err(unsupported("handle `DataTreeAt`", span)),
         THandleOp::DataTreeInt => Err(unsupported("handle `DataTreeInt`", span)),
@@ -314,12 +314,12 @@ pub(super) fn eval_handle(
         THandleOp::DataTreeFloat => Err(unsupported("handle `DataTreeFloat`", span)),
         THandleOp::DataTreeDecode(_) => Err(unsupported("handle `DataTreeDecode`", span)),
         THandleOp::SerdeEncode => Err(unsupported("handle `SerdeEncode`", span)),
-        THandleOp::JsonField => Err(unsupported("handle `JsonField`", span)),
-        THandleOp::JsonAt => Err(unsupported("handle `JsonAt`", span)),
-        THandleOp::JsonInt => Err(unsupported("handle `JsonInt`", span)),
-        THandleOp::JsonText => Err(unsupported("handle `JsonText`", span)),
-        THandleOp::JsonBool => Err(unsupported("handle `JsonBool`", span)),
-        THandleOp::JsonFloat => Err(unsupported("handle `JsonFloat`", span)),
+        THandleOp::JSONField => Err(unsupported("handle `JSONField`", span)),
+        THandleOp::JSONAt => Err(unsupported("handle `JSONAt`", span)),
+        THandleOp::JSONInt => Err(unsupported("handle `JSONInt`", span)),
+        THandleOp::JSONText => Err(unsupported("handle `JSONText`", span)),
+        THandleOp::JSONBool => Err(unsupported("handle `JSONBool`", span)),
+        THandleOp::JSONFloat => Err(unsupported("handle `JSONFloat`", span)),
         THandleOp::PathFrom => Err(unsupported("handle `PathFrom`", span)),
         THandleOp::PathJoin => Err(unsupported("handle `PathJoin`", span)),
         THandleOp::PathParent => Err(unsupported("handle `PathParent`", span)),
@@ -331,18 +331,18 @@ pub(super) fn eval_handle(
         THandleOp::UiBackendMethod { .. } => Err(unsupported("handle `UiBackendMethod`", span)),
         THandleOp::DevServerMethod { .. } => Err(unsupported("handle `DevServerMethod`", span)),
         THandleOp::WebAppMethod { .. } => Err(unsupported("handle `WebAppMethod`", span)),
-        THandleOp::DbQuery => Err(unsupported("handle `DbQuery`", span)),
-        THandleOp::DbQueryOne => Err(unsupported("handle `DbQueryOne`", span)),
-        THandleOp::DbExecute => Err(unsupported("handle `DbExecute`", span)),
-        THandleOp::DbBegin => Err(unsupported("handle `DbBegin`", span)),
-        THandleOp::DbCommit => Err(unsupported("handle `DbCommit`", span)),
-        THandleOp::DbRollback => Err(unsupported("handle `DbRollback`", span)),
-        THandleOp::DbClose => Err(unsupported("handle `DbClose`", span)),
-        THandleOp::DbValueInt => Err(unsupported("handle `DbValueInt`", span)),
-        THandleOp::DbValueFloat => Err(unsupported("handle `DbValueFloat`", span)),
-        THandleOp::DbValueText => Err(unsupported("handle `DbValueText`", span)),
-        THandleOp::DbValueBool => Err(unsupported("handle `DbValueBool`", span)),
-        THandleOp::DbValueIsNull => Err(unsupported("handle `DbValueIsNull`", span)),
+        THandleOp::DBQuery => Err(unsupported("handle `DBQuery`", span)),
+        THandleOp::DBQueryOne => Err(unsupported("handle `DBQueryOne`", span)),
+        THandleOp::DBExecute => Err(unsupported("handle `DBExecute`", span)),
+        THandleOp::DBBegin => Err(unsupported("handle `DBBegin`", span)),
+        THandleOp::DBCommit => Err(unsupported("handle `DBCommit`", span)),
+        THandleOp::DBRollback => Err(unsupported("handle `DBRollback`", span)),
+        THandleOp::DBClose => Err(unsupported("handle `DBClose`", span)),
+        THandleOp::DBValueInt => Err(unsupported("handle `DBValueInt`", span)),
+        THandleOp::DBValueFloat => Err(unsupported("handle `DBValueFloat`", span)),
+        THandleOp::DBValueText => Err(unsupported("handle `DBValueText`", span)),
+        THandleOp::DBValueBool => Err(unsupported("handle `DBValueBool`", span)),
+        THandleOp::DBValueIsNull => Err(unsupported("handle `DBValueIsNull`", span)),
         THandleOp::PluginCall => Err(unsupported("handle `PluginCall`", span)),
         THandleOp::PluginCallInt => Err(unsupported("handle `PluginCallInt`", span)),
         THandleOp::ReaderOver => Err(unsupported("handle `ReaderOver`", span)),

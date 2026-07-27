@@ -841,15 +841,15 @@ impl<'a> Parser<'a> {
                             super::TargetMarker::Bucket(crate::Syntax::WebBucket::Wasm) => {
                                 crate::Syntax::WebPartitionMarker::Wasm
                             }
-                            super::TargetMarker::Bucket(crate::Syntax::WebBucket::Js) => {
-                                crate::Syntax::WebPartitionMarker::Js
+                            super::TargetMarker::Bucket(crate::Syntax::WebBucket::JS) => {
+                                crate::Syntax::WebPartitionMarker::JS
                             }
                             _ => {
                                 return Err(Diagnostic::error(
                                     "E0003",
-                                    "`#Target` on a function needs `Wasm` or `Js`".to_string(),
+                                    "`#Target` on a function needs `Wasm` or `JS`".to_string(),
                                     "function target rules select one web partition".to_string(),
-                                    "write `#Target(Wasm)` or `#Target(Js)`".to_string(),
+                                    "write `#Target(Wasm)` or `#Target(JS)`".to_string(),
                                     Some(marker.span),
                                 ));
                             }
@@ -930,10 +930,10 @@ impl<'a> Parser<'a> {
                     Syntax::ATTR_ABI => {
                         return Err(Diagnostic::error(
                             "E3212",
-                            "`#Abi` only applies to C declarations".to_string(),
+                            "`#ABI` only applies to C declarations".to_string(),
                             "ordinary Jet functions do not select a native C calling convention"
                                 .to_string(),
-                            "move the function into a `#Extern module c.<library> { … }` declaration or remove `#Abi`"
+                            "move the function into a `#Extern module c.<library> { … }` declaration or remove `#ABI`"
                                 .to_string(),
                             Some(marker.span),
                         ));

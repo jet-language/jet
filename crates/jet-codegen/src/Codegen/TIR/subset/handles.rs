@@ -12,9 +12,9 @@ use std::collections::HashSet;
 /// `THandleOp`, reproducing the handle arms of `emit_builtin_method`
 /// (Source/Codegen/Expression.rs). Returns `None` for anything not covered (so the
 /// caller falls through to other shapes). Excluded (with reason): `lines` on
-/// FileReader/StdinHandle (dead — E2502, loop-source-only); all HttpRouter `get`/
-/// `post`/`put`/`delete` (closure handler → `emit_router_handler`); HttpRequest/
-/// HttpResponse accessors (serve-lambda-param slot may be unresolved → AST handle arm
+/// FileReader/StdinHandle (dead — E2502, loop-source-only); all HTTPRouter `get`/
+/// `post`/`put`/`delete` (closure handler → `emit_router_handler`); HTTPRequest/
+/// HTTPResponse accessors (serve-lambda-param slot may be unresolved → AST handle arm
 /// wouldn't fire); Arena/Bump/Pool/Fixed (`alloc`/`reset` — the producer
 /// `mem.*.new` isn't a covered call, so an allocator never binds in a covered fn);
 /// Channel/Sender/Task (`receive`/`send`/`sender`/`detach` — producers not covered);
@@ -133,9 +133,9 @@ pub(crate) fn tls_static_op(
         return None;
     }
     match (static_type.as_str(), method) {
-        ("ClientConfig", "default") => Some(THandleOp::TlsClientConfigDefault),
-        ("RootCertificates", "from_pem") => Some(THandleOp::TlsRootCertificatesFromPem),
-        ("ClientIdentity", "from_pem") => Some(THandleOp::TlsClientIdentityFromPem),
+        ("ClientConfig", "default") => Some(THandleOp::TLSClientConfigDefault),
+        ("RootCertificates", "from_pem") => Some(THandleOp::TLSRootCertificatesFromPem),
+        ("ClientIdentity", "from_pem") => Some(THandleOp::TLSClientIdentityFromPem),
         _ => None,
     }
 }
@@ -154,7 +154,7 @@ pub(crate) fn http_client_static_op(
         return None;
     }
     matches!((static_type.as_str(), method), ("Client", "new"))
-        .then_some(THandleOp::HttpClientNew)
+        .then_some(THandleOp::HTTPClientNew)
 }
 
 /// c109 Phase 25: is `router.get(path, handler)` (and `.post`/`.put`/`.delete`) inside
@@ -297,16 +297,16 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("UnixStream", "ready", 2) => THandleOp::UnixStreamReady,
         ("UnixStream", "close", 0) => THandleOp::UnixStreamClose,
         ("UnixStream", "set_timeout", 1) => THandleOp::UnixStreamSetTimeout,
-        ("TlsStream", "read", 2) => THandleOp::TlsStreamReadDeadline,
-        ("TlsStream", "write_all", 2) => THandleOp::TlsStreamWriteAllDeadline,
-        ("TlsStream", "ready", 2) => THandleOp::TlsStreamReady,
-        ("TlsStream", "close", 0) => THandleOp::TlsStreamClose,
-        ("TlsStream", "close_write", 1) => THandleOp::TlsStreamCloseWrite,
-        ("TlsStream", "peer_identity", 0) => THandleOp::TlsStreamPeerIdentity,
-        ("TlsClientConfig", "with_alpn", 1) => THandleOp::TlsClientConfigWithAlpn,
-        ("TlsClientConfig", "with_trust", 1) => THandleOp::TlsClientConfigWithTrust,
-        ("TlsClientConfig", "with_client_identity", 1) => THandleOp::TlsClientConfigWithIdentity,
-        ("TlsClientConfig", "with_version_bounds", 2) => THandleOp::TlsClientConfigWithVersionBounds,
+        ("TLSStream", "read", 2) => THandleOp::TLSStreamReadDeadline,
+        ("TLSStream", "write_all", 2) => THandleOp::TLSStreamWriteAllDeadline,
+        ("TLSStream", "ready", 2) => THandleOp::TLSStreamReady,
+        ("TLSStream", "close", 0) => THandleOp::TLSStreamClose,
+        ("TLSStream", "close_write", 1) => THandleOp::TLSStreamCloseWrite,
+        ("TLSStream", "peer_identity", 0) => THandleOp::TLSStreamPeerIdentity,
+        ("TLSClientConfig", "with_alpn", 1) => THandleOp::TLSClientConfigWithAlpn,
+        ("TLSClientConfig", "with_trust", 1) => THandleOp::TLSClientConfigWithTrust,
+        ("TLSClientConfig", "with_client_identity", 1) => THandleOp::TLSClientConfigWithIdentity,
+        ("TLSClientConfig", "with_version_bounds", 2) => THandleOp::TLSClientConfigWithVersionBounds,
         // c109 Phase 19: the four arena allocators (`alloc`/`reset`). Sema sets
         // `recv_type == Some(<allocator>)` via `alloc_method_return`; the AST
         // `emit_builtin_method` arms key on the same `rty`. `Arena`/`Bump`/`Pool`/`Fixed`
@@ -345,21 +345,21 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("ParsedArgs", "subcommand", 0) => THandleOp::ParsedArgsSubcommand,
         ("Arena" | "Bump" | "Pool" | "Fixed", "alloc", 1) => THandleOp::AllocAlloc,
         ("Arena" | "Bump" | "Pool" | "Fixed", "reset", 0) => THandleOp::AllocReset,
-        // c109 Phase 20: HttpRequest/HttpResponse accessors (E2-M10, D-ROUTE1=A).
+        // c109 Phase 20: HTTPRequest/HTTPResponse accessors (E2-M10, D-ROUTE1=A).
         // Now reachable because the `http.serve` lambda param type is written back
         // onto `p.ty` (sema), so the slot type is total. The AST `emit_builtin_method`
-        // arms key on the same `rty == Some(HttpRequest|HttpResponse)`. Reproduced
+        // arms key on the same `rty == Some(HTTPRequest|HTTPResponse)`. Reproduced
         // byte-for-byte in `emit_tir_handle_method`.
-        ("HttpRequest", "method", 0) => THandleOp::HttpReqField("method"),
-        ("HttpRequest", "path", 0) => THandleOp::HttpReqField("path"),
-        ("HttpRequest", "body", 0) => THandleOp::HttpReqField("body"),
-        ("HttpRequest", "header", 1) => THandleOp::HttpReqHeader,
-        ("HttpRequest", "param", 1) => THandleOp::HttpReqParam,
-        ("HttpRequest", "trailers", 0) => THandleOp::HttpReqTrailers,
-        ("HttpResponse", "status", 0) => THandleOp::HttpRespField("status"),
-        ("HttpResponse", "body", 0) => THandleOp::HttpRespField("body"),
-        ("HttpResponse", "header", 1) => THandleOp::HttpRespHeader,
-        ("HttpResponse", "trailers", 1) => THandleOp::HttpRespTrailers,
+        ("HTTPRequest", "method", 0) => THandleOp::HTTPReqField("method"),
+        ("HTTPRequest", "path", 0) => THandleOp::HTTPReqField("path"),
+        ("HTTPRequest", "body", 0) => THandleOp::HTTPReqField("body"),
+        ("HTTPRequest", "header", 1) => THandleOp::HTTPReqHeader,
+        ("HTTPRequest", "param", 1) => THandleOp::HTTPReqParam,
+        ("HTTPRequest", "trailers", 0) => THandleOp::HTTPReqTrailers,
+        ("HTTPResponse", "status", 0) => THandleOp::HTTPRespField("status"),
+        ("HTTPResponse", "body", 0) => THandleOp::HTTPRespField("body"),
+        ("HTTPResponse", "header", 1) => THandleOp::HTTPRespHeader,
+        ("HTTPResponse", "trailers", 1) => THandleOp::HTTPRespTrailers,
         // D-SERDE-ACCESS=B: DataTree accessor methods.
         ("DataTree", "field", 1) => THandleOp::DataTreeField,
         ("DataTree", "at", 1) => THandleOp::DataTreeAt,
@@ -367,13 +367,13 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("DataTree", "text", 0) => THandleOp::DataTreeText,
         ("DataTree", "bool", 0) => THandleOp::DataTreeBool,
         ("DataTree", "float", 0) => THandleOp::DataTreeFloat,
-        // D-SERDE-ACCESS=B: same accessors on Json/Data (the dynamic parse result).
-        ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "field", 1) => THandleOp::JsonField,
-        ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "at", 1) => THandleOp::JsonAt,
-        ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "int", 0) => THandleOp::JsonInt,
-        ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "text", 0) => THandleOp::JsonText,
-        ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "bool", 0) => THandleOp::JsonBool,
-        ("Data" | "Json" | "Toml" | "Yaml" | "Csv", "float", 0) => THandleOp::JsonFloat,
+        // D-SERDE-ACCESS=B: same accessors on JSON/Data (the dynamic parse result).
+        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "field", 1) => THandleOp::JSONField,
+        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "at", 1) => THandleOp::JSONAt,
+        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "int", 0) => THandleOp::JSONInt,
+        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "text", 0) => THandleOp::JSONText,
+        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "bool", 0) => THandleOp::JSONBool,
+        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "float", 0) => THandleOp::JSONFloat,
         (
             "Url",
             "scheme" | "host" | "port" | "path" | "path_segments" | "query" | "query_pairs"
@@ -432,20 +432,20 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Path", "to_string", 0) => THandleOp::PathToString,
         ("Path", "write_atomic", 1) => THandleOp::PathWriteAtomic,
         ("Path", "walk", 0) => THandleOp::PathWalk,
-        // D-DBDRIVER1: `DbConnection` instance methods.
-        ("DbConnection", "query", 2) => THandleOp::DbQuery,
-        ("DbConnection", "query_one", 2) => THandleOp::DbQueryOne,
-        ("DbConnection", "execute", 2) => THandleOp::DbExecute,
-        ("DbConnection", "begin", 0) => THandleOp::DbBegin,
-        ("DbConnection", "commit", 0) => THandleOp::DbCommit,
-        ("DbConnection", "rollback", 0) => THandleOp::DbRollback,
-        ("DbConnection", "close", 0) => THandleOp::DbClose,
-        // D-DBDRIVER1: `DbValue` accessor methods.
-        ("DbValue", "int", 0) => THandleOp::DbValueInt,
-        ("DbValue", "float", 0) => THandleOp::DbValueFloat,
-        ("DbValue", "text", 0) => THandleOp::DbValueText,
-        ("DbValue", "bool", 0) => THandleOp::DbValueBool,
-        ("DbValue", "is_null", 0) => THandleOp::DbValueIsNull,
+        // D-DBDRIVER1: `DBConnection` instance methods.
+        ("DBConnection", "query", 2) => THandleOp::DBQuery,
+        ("DBConnection", "query_one", 2) => THandleOp::DBQueryOne,
+        ("DBConnection", "execute", 2) => THandleOp::DBExecute,
+        ("DBConnection", "begin", 0) => THandleOp::DBBegin,
+        ("DBConnection", "commit", 0) => THandleOp::DBCommit,
+        ("DBConnection", "rollback", 0) => THandleOp::DBRollback,
+        ("DBConnection", "close", 0) => THandleOp::DBClose,
+        // D-DBDRIVER1: `DBValue` accessor methods.
+        ("DBValue", "int", 0) => THandleOp::DBValueInt,
+        ("DBValue", "float", 0) => THandleOp::DBValueFloat,
+        ("DBValue", "text", 0) => THandleOp::DBValueText,
+        ("DBValue", "bool", 0) => THandleOp::DBValueBool,
+        ("DBValue", "is_null", 0) => THandleOp::DBValueIsNull,
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `Plugin` instance methods.
         ("Plugin", "call", 2) => THandleOp::PluginCall,
         ("Plugin", "call_int", 2) => THandleOp::PluginCallInt,
@@ -521,7 +521,7 @@ pub(crate) fn handle_method_return_ty(handle: &str, method: &str, nargs: usize) 
         .or_else(|| crate::Sema::net_method_return(handle, method, nargs, span, &mut sink))
         .or_else(|| crate::Sema::path_method_return(handle, method, nargs, span, &mut sink))
         .or_else(|| {
-            if handle == "DbConnection" {
+            if handle == "DBConnection" {
                 Some(crate::Sema::db_connection_method_return_ty(method))
             } else {
                 None
@@ -680,12 +680,12 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
     // c109 Phase 25: the http producer/parse/dispatch calls aren't in `core_fixed_sig`;
     // their return types are fixed (sema's `infer_core_call`). Carried total per the
     // design principle (the binding's annotation/inference is the load-bearing fact, but
-    // this keeps the node's `ty` honest — `dispatch` → HttpResponse composes with the
+    // this keeps the node's `ty` honest — `dispatch` → HTTPResponse composes with the
     // `.status()`/`.body()` accessors that read it).
     match (module, method) {
-        ("jet.http", "router") => return Type::Named("HttpRouter".to_string()),
-        ("jet.http", "parse") => return Type::Named("HttpRequest".to_string()),
-        ("jet.http", "dispatch") => return Type::Named("HttpResponse".to_string()),
+        ("jet.http", "router") => return Type::Named("HTTPRouter".to_string()),
+        ("jet.http", "parse") => return Type::Named("HTTPRequest".to_string()),
+        ("jet.http", "dispatch") => return Type::Named("HTTPResponse".to_string()),
         // c109 Phase 29: qualified `io.input(prompt)`. NOT in `core_fixed_sig` — its return
         // type is fixed (`Result<String, IOError>`) but lives in sema's bespoke
         // `infer_core_call` arm (CheckerCoreLib.rs `("core.io", "input")`), NOT the table.
@@ -792,12 +792,12 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP constructors.
         ("core.http.client", "get") | ("core.http.client", "post") => {
             return Type::Result {
-                ok: Box::new(Type::Named("HttpResponse".to_string())),
+                ok: Box::new(Type::Named("HTTPResponse".to_string())),
                 err: Box::new(Type::String),
             }
         }
-        ("core.http.client", "request") => return Type::Named("HttpRequest".to_string()),
-        ("core.http.server", "mux") => return Type::Named("HttpMux".to_string()),
+        ("core.http.client", "request") => return Type::Named("HTTPRequest".to_string()),
+        ("core.http.server", "mux") => return Type::Named("HTTPMux".to_string()),
         ("core.ws", "connect") | ("core.ws", "upgrade") => {
             return Type::Result {
                 ok: Box::new(Type::Named("WsConn".to_string())),
@@ -823,10 +823,10 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
             };
         }
         ("core.http.server", "bind") => return Type::Result {
-            ok: Box::new(Type::Named("HttpServer".to_string())),
+            ok: Box::new(Type::Named("HTTPServer".to_string())),
             err: Box::new(Type::String),
         },
-        ("core.http.server", "tls") => return Type::Named("HttpServerTls".to_string()),
+        ("core.http.server", "tls") => return Type::Named("HTTPServerTls".to_string()),
         ("core.http.server", "serve" | "serve_once" | "serve_once_listener") => {
             return Type::Result {
                 ok: Box::new(Type::Tuple(vec![])),
@@ -835,12 +835,12 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         }
         ("core.http.server", "static_file" | "static_file_range") => {
             return Type::Result {
-                ok: Box::new(Type::Named("HttpResponse".to_string())),
+                ok: Box::new(Type::Named("HTTPResponse".to_string())),
                 err: Box::new(Type::String),
             }
         }
-        ("core.http.server", "response") => return Type::Named("HttpResponse".to_string()),
-        ("core.http.server", "sse") => return Type::Named("HttpResponse".to_string()),
+        ("core.http.server", "response") => return Type::Named("HTTPResponse".to_string()),
+        ("core.http.server", "sse") => return Type::Named("HTTPResponse".to_string()),
         ("core.http.server", "access_log") => return Type::String,
         ("core.http.server", "request_id") => return unit_type(),
         _ => {}

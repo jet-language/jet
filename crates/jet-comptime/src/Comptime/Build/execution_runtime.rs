@@ -34,7 +34,7 @@ pub struct BuildExecutionResult {
 pub enum BuildExecutionError {
     MissingGrant { action: String, capability: BuildCapability },
     SandboxUnavailable,
-    Io { action: String, detail: String },
+    IO { action: String, detail: String },
     ActionFailed { action: String, exit_code: i32, stderr: String },
     ProbeFailed { probe: String, detail: String },
     InvalidGraph(BuildError),
@@ -86,7 +86,7 @@ pub fn execute_build_plan_with_front_end(
     let model = plan.execution_model().map_err(BuildExecutionError::InvalidGraph)?;
     let cas = LocalCas::new(project_root.join(".jet/build-cache/cas"));
     let records = project_root.join(".jet/build-cache/actions");
-    fs::create_dir_all(&records).map_err(|e| BuildExecutionError::Io {
+    fs::create_dir_all(&records).map_err(|e| BuildExecutionError::IO {
         action: "cache".to_string(), detail: e.to_string()
     })?;
     let mut outcomes = Vec::new();
@@ -128,7 +128,7 @@ pub fn execute_build_plan_with_front_end(
                     .collect::<Vec<_>>();
                 jobs.into_iter()
                     .map(|(handle, job)| {
-                        let result = job.join().map_err(|_| BuildExecutionError::Io {
+                        let result = job.join().map_err(|_| BuildExecutionError::IO {
                             action: plan.actions[handle.id.0].name.clone(),
                             detail: "sandbox worker panicked".to_string(),
                         })?;
@@ -181,7 +181,7 @@ fn execute_one_action(
     front_end: FrontEndCompletion,
 ) -> Result<ActionOutcome, BuildExecutionError> {
     let snapshots = cas.snapshot_declared_inputs(project_root, action).map_err(|e| io_action(action, e))?;
-    let executable = find_program_path(&action.argv[0]).ok_or_else(|| BuildExecutionError::Io {
+    let executable = find_program_path(&action.argv[0]).ok_or_else(|| BuildExecutionError::IO {
         action: action.name.clone(), detail: format!("tool `{}` was not found", action.argv[0])
     })?;
     let executable_bytes = fs::read(&executable).map_err(|e| io_action(action, e))?;
@@ -391,7 +391,7 @@ fn write_last_rebuild_record(
             .map(|code| format!("failed:{code}\n"))
             .unwrap_or_default()
     );
-    atomic_restore_file(project_root, &path, text.as_bytes()).map_err(|error| BuildExecutionError::Io {
+    atomic_restore_file(project_root, &path, text.as_bytes()).map_err(|error| BuildExecutionError::IO {
         action: format!("rebuild explanation {}", action.name),
         detail: error.to_string(),
     })
@@ -520,5 +520,5 @@ pub(super) fn read_action_record(
 }
 
 fn io_action(action: &BuildAction, error: io::Error) -> BuildExecutionError {
-    BuildExecutionError::Io { action: action.name.clone(), detail: error.to_string() }
+    BuildExecutionError::IO { action: action.name.clone(), detail: error.to_string() }
 }

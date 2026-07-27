@@ -510,7 +510,7 @@ mod vault_key_tests {
             JetVaultError::InvalidEncoding,
             JetVaultError::DurabilityUnknown,
             JetVaultError::Crypto(JetCryptoError::OpenFailed),
-            JetVaultError::Io { operation: "read", redacted_path: "<vault-store>" },
+            JetVaultError::IO { operation: "read", redacted_path: "<vault-store>" },
             JetVaultError::Internal { incident_id: "vault-17" },
         ];
         let tags = errors.iter().map(|error| match error {
@@ -525,7 +525,7 @@ mod vault_key_tests {
             JetVaultError::InvalidEncoding => "invalid-encoding",
             JetVaultError::DurabilityUnknown => "durability-unknown",
             JetVaultError::Crypto(_) => "crypto",
-            JetVaultError::Io { .. } => "io",
+            JetVaultError::IO { .. } => "io",
             JetVaultError::Internal { .. } => "internal",
         }).collect::<Vec<_>>();
         assert_eq!(tags, ["invalid-name", "not-found", "wrong-type", "revoked", "locked", "authority-denied", "conflict", "unsupported-provider", "invalid-encoding", "durability-unknown", "crypto", "io", "internal"]);

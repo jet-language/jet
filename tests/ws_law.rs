@@ -1,6 +1,6 @@
 #![allow(dead_code, non_camel_case_types, unexpected_cfgs)]
 
-struct JetTcpListener {
+struct JetTCPListener {
     inner: std::net::TcpListener,
 }
 
@@ -35,9 +35,9 @@ mod jet_std {
         pub ms: i64,
     }
 
-    pub struct JetMime(pub String);
+    pub struct JetMIME(pub String);
 
-    impl JetMime {
+    impl JetMIME {
         pub fn to_string_value(&self) -> String {
             self.0.clone()
         }
@@ -113,10 +113,10 @@ struct LogField {
 
 fn jet_log_emit(_level: &str, _msg: &str, _fields: &[LogField]) {}
 
-include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpMessage.rs");
-include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpRoute.rs");
-include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpClient.rs");
-include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpServer.rs");
+include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs");
+include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs");
+include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs");
+include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/Ws.rs");
 include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
@@ -443,7 +443,7 @@ fn client_and_server_echo_text_over_live_sockets() {
         jet_http_server_handle_stream(
             &mut stream,
             &mux,
-            &JetHttpServerOptions::safe(),
+            &JetHTTPServerOptions::safe(),
             &std::sync::atomic::AtomicBool::new(false),
             None,
             None,
@@ -477,7 +477,7 @@ fn oversized_client_frame_is_rejected() {
         jet_http_server_handle_stream(
             &mut stream,
             &mux,
-            &JetHttpServerOptions::safe(),
+            &JetHTTPServerOptions::safe(),
             &std::sync::atomic::AtomicBool::new(false),
             None,
             None,
@@ -508,7 +508,7 @@ fn ambient_deadline_cancels_recv() {
         jet_http_server_handle_stream(
             &mut stream,
             &mux,
-            &JetHttpServerOptions::safe(),
+            &JetHTTPServerOptions::safe(),
             &std::sync::atomic::AtomicBool::new(false),
             None,
             None,
@@ -537,7 +537,7 @@ fn hostile_handshake_missing_version_fails_closed() {
         jet_http_server_handle_stream(
             &mut stream,
             &mux,
-            &JetHttpServerOptions::safe(),
+            &JetHTTPServerOptions::safe(),
             &std::sync::atomic::AtomicBool::new(false),
             None,
             None,

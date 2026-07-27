@@ -26,8 +26,8 @@ use crate::Syntax;
 
 fn is_http_route_registration(type_name: &str, method: &str) -> bool {
     match type_name {
-        "HttpRouter" => matches!(method, "get" | "post" | "put" | "delete"),
-        "HttpMux" => matches!(method, "get" | "post" | "put" | "delete" | "patch" | "head" | "options"),
+        "HTTPRouter" => matches!(method, "get" | "post" | "put" | "delete"),
+        "HTTPMux" => matches!(method, "get" | "post" | "put" | "delete" | "patch" | "head" | "options"),
         "WebApp" => matches!(method, "route" | "page" | "layout"),
         _ => false,
     }
@@ -116,13 +116,13 @@ impl<'a> Checker<'a> {
                 ));
                 return None;
             }
-            // D-TYPEDTEXT1=D: `Sql.raw("…")` / `Html.raw("…")` — the sole audited
-            // escape from a runtime `String` into a typed-text position. `Sql`/
-            // `Html` here name the type, not a value (checked via `lookup` so a
+            // D-TYPEDTEXT1=D: `SQL.raw("…")` / `HTML.raw("…")` — the sole audited
+            // escape from a runtime `String` into a typed-text position. `SQL`/
+            // `HTML` here name the type, not a value (checked via `lookup` so a
             // shadowing local of that name still resolves normally below).
             if method == "raw" {
                 if let Expr::Ident(n, _) = receiver.as_ref() {
-                    if (n == "Sql" || n == "Html" || n == Syntax::TYPE_SH) && self.lookup(n).is_none() {
+                    if (n == "SQL" || n == "HTML" || n == Syntax::TYPE_SH) && self.lookup(n).is_none() {
                         let type_name = n.clone();
                         if args.len() != 1 {
                             self.diags.push(Diagnostic::error(
@@ -274,8 +274,8 @@ impl<'a> Checker<'a> {
                                     self.infer(&mut arg.expr);
                                 }
                             }
-                            *recv_type_out = Some("TlsClientConfigType".to_string());
-                            return Some(Type::Named("TlsClientConfig".to_string()));
+                            *recv_type_out = Some("TLSClientConfigType".to_string());
+                            return Some(Type::Named("TLSClientConfig".to_string()));
                         }
                         if ns == "core.http.client" && leaf == "Client" && method == "new" {
                             if !args.is_empty() {
@@ -285,8 +285,8 @@ impl<'a> Checker<'a> {
                                     self.infer(&mut arg.expr);
                                 }
                             }
-                            *recv_type_out = Some("HttpClientType".to_string());
-                            return Some(Type::Named("HttpClient".to_string()));
+                            *recv_type_out = Some("HTTPClientType".to_string());
+                            return Some(Type::Named("HTTPClient".to_string()));
                         }
                         if ns == "core.tls" && leaf == "RootCertificates" && method == "from_pem" {
                             if args.len() != 1 {
@@ -295,9 +295,9 @@ impl<'a> Checker<'a> {
                             if let Some(arg) = args.first_mut() {
                                 self.expect_core_arg("RootCertificates.from_pem", 0, &Type::List(Box::new(u8_ty())), arg);
                             }
-                            *recv_type_out = Some("TlsRootCertificatesType".to_string());
+                            *recv_type_out = Some("TLSRootCertificatesType".to_string());
                             return Some(result_ty(
-                                Type::Named("TlsRootCertificates".to_string()),
+                                Type::Named("TLSRootCertificates".to_string()),
                                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
                             ));
                         }
@@ -312,9 +312,9 @@ impl<'a> Checker<'a> {
                             for (index, arg) in args.iter_mut().enumerate() {
                                 self.expect_core_arg("ClientIdentity.from_pem", index, &Type::List(Box::new(u8_ty())), arg);
                             }
-                            *recv_type_out = Some("TlsClientIdentityType".to_string());
+                            *recv_type_out = Some("TLSClientIdentityType".to_string());
                             return Some(result_ty(
-                                Type::Named("TlsClientIdentity".to_string()),
+                                Type::Named("TLSClientIdentity".to_string()),
                                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
                             ));
                         }
@@ -347,9 +347,9 @@ impl<'a> Checker<'a> {
                                 match leaf.as_str() {
                                     "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
                                     | "Headers" | "Request" | "Response" | "Body" | "Handler" | "Error" | "Proxy" => {
-                                        format!("Http{leaf}")
+                                        format!("HTTP{leaf}")
                                     }
-                                    "HttpError" => "HttpError".to_string(),
+                                    "HTTPError" => "HTTPError".to_string(),
                                     _ => leaf.clone(),
                                 }
                             } else {
@@ -462,44 +462,44 @@ impl<'a> Checker<'a> {
                                 return Some(ret);
                             }
                             let ty = Type::Named(type_name.clone());
-                            let http_error = || Type::Named("HttpError".to_string());
+                            let http_error = || Type::Named("HTTPError".to_string());
                             let http_result = |ok: Type| Type::Result {
                                 ok: Box::new(ok),
                                 err: Box::new(http_error()),
                             };
                             let http_static = match (type_name.as_str(), method, args.len()) {
-                                ("HttpMethod", "custom", 1) => {
+                                ("HTTPMethod", "custom", 1) => {
                                     self.expect_core_arg("Method.custom", 0, &Type::String, &mut args[0]);
                                     Some(http_result(ty.clone()))
                                 }
-                                ("HttpMethod", "get" | "head" | "post" | "put" | "delete"
+                                ("HTTPMethod", "get" | "head" | "post" | "put" | "delete"
                                     | "connect" | "options" | "trace" | "patch", 0) => Some(ty.clone()),
-                                ("HttpStatus", "new", 1) => {
+                                ("HTTPStatus", "new", 1) => {
                                     self.expect_core_arg("Status.new", 0, &Type::Int, &mut args[0]);
                                     Some(http_result(ty.clone()))
                                 }
-                                ("HttpVersion", "http_1_0" | "http_1_1" | "http_2", 0) => Some(ty.clone()),
-                                ("HttpHeaderName", "new", 1) | ("HttpHeaderValue", "new", 1) => {
+                                ("HTTPVersion", "http_1_0" | "http_1_1" | "http_2", 0) => Some(ty.clone()),
+                                ("HTTPHeaderName", "new", 1) | ("HTTPHeaderValue", "new", 1) => {
                                     self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
                                     Some(http_result(ty.clone()))
                                 }
-                                ("HttpHeaders", "new", 0) | ("HttpBody", "empty", 0) => Some(ty.clone()),
-                                ("HttpBody", "bytes", 1) => {
+                                ("HTTPHeaders", "new", 0) | ("HTTPBody", "empty", 0) => Some(ty.clone()),
+                                ("HTTPBody", "bytes", 1) => {
                                     self.expect_core_arg("Body.bytes", 0, &Type::List(Box::new(u8_ty())), &mut args[0]);
                                     Some(ty.clone())
                                 }
-                                ("HttpBody", "text", 1 | 2) => {
+                                ("HTTPBody", "text", 1 | 2) => {
                                     self.expect_core_arg("Body.text", 0, &Type::String, &mut args[0]);
                                     if args.len() == 2 {
                                         self.expect_core_arg("Body.text", 1, &Type::Named("Mime".to_string()), &mut args[1]);
                                     }
                                     Some(ty.clone())
                                 }
-                                ("HttpBody", "json", 1) => {
+                                ("HTTPBody", "json", 1) => {
                                     self.infer(&mut args[0].expr);
                                     Some(ty.clone())
                                 }
-                                ("HttpBody", "form" | "multipart", 1) => {
+                                ("HTTPBody", "form" | "multipart", 1) => {
                                     self.expect_core_arg(
                                         method,
                                         0,
@@ -508,7 +508,7 @@ impl<'a> Checker<'a> {
                                     );
                                     Some(ty.clone())
                                 }
-                                ("HttpBody", "reader", 1 | 2) => {
+                                ("HTTPBody", "reader", 1 | 2) => {
                                     self.expect_core_arg_moving("Body.reader", 0, &Type::Named("FileReader".to_string()), &mut args[0]);
                                     args[0].convention = AccessConvention::Move;
                                     if args.len() == 2 {
@@ -767,16 +767,16 @@ impl<'a> Checker<'a> {
                         Type::Named("CryptoError".to_string()),
                     ));
                 }
-                // D-ENC-DYN1=A+: `DataTree`/`Json`/`Toml`/`Yaml`/`Csv` name the one dynamic
+                // D-ENC-DYN1=A+: `DataTree`/`JSON`/`TOML`/`YAML`/`CSV` name the one dynamic
                 // value; they are reserved core type names (a user type may not redefine them).
                 if is_json_type_name(type_name) {
                     if let Some(ret) = self.check_core_json_lit(method, args, span) {
                         return Some(ret);
                     }
                 }
-                // D-DBDRIVER1: `DbValue.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)` —
+                // D-DBDRIVER1: `DBValue.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)` —
                 // the tagged SQL parameter/column value construction (same mechanism as
-                // `Data`/`Json` above). `DbValue.Null` (no args) is a `Field`, not a
+                // `Data`/`JSON` above). `DBValue.Null` (no args) is a `Field`, not a
                 // `MethodCall` — handled in `infer_field` alongside `Data.Null`.
                 if type_name == Syntax::TYPE_DB_VALUE {
                     if let Some(ret) = self.check_core_dbvalue_lit(method, args, span) {
@@ -1517,10 +1517,10 @@ impl<'a> Checker<'a> {
                 if n == Syntax::TYPE_SELECT_BUILDER {
                     return self.infer_select_method(receiver, method, span, args, recv_type_out);
                 }
-                // D-TYPEDTEXT1=D: inspect a checked `Sql`/`Html` value. `.template()`/
-                // `.params()` expose the bound-parameter split (Sql never re-embeds a
-                // hole's text into the query string); `.text()` reads the escaped Html.
-                if n == "Sql" && matches!(method, "template" | "params") {
+                // D-TYPEDTEXT1=D: inspect a checked `SQL`/`HTML` value. `.template()`/
+                // `.params()` expose the bound-parameter split (SQL never re-embeds a
+                // hole's text into the query string); `.text()` reads the escaped HTML.
+                if n == "SQL" && matches!(method, "template" | "params") {
                     if !args.is_empty() {
                         self.diags
                             .push(wrong_core_arity(method, 0, args.len(), span));
@@ -1532,7 +1532,7 @@ impl<'a> Checker<'a> {
                         Type::List(Box::new(Type::String))
                     });
                 }
-                if n == "Html" && method == "text" {
+                if n == "HTML" && method == "text" {
                     if !args.is_empty() {
                         self.diags
                             .push(wrong_core_arity(method, 0, args.len(), span));
@@ -1738,14 +1738,14 @@ impl<'a> Checker<'a> {
                     return Some(Type::Named("TransactionGuard".to_string()));
                 }
             }
-            // D-DBDRIVER1: method calls on a `DbConnection` handle. A bespoke block
+            // D-DBDRIVER1: method calls on a `DBConnection` handle. A bespoke block
             // (like the `#Transact` handle above) rather than the generic
             // `file_handle_method_return` table, because `.query`/`.query_one`/
             // `.execute` need real expected-type-directed arg elaboration
-            // (`sql: String, params: [DbValue]`) — an empty `[]` params literal must
+            // (`sql: String, params: [DBValue]`) — an empty `[]` params literal must
             // resolve its element type from the parameter, not blind inference.
             if let Type::Named(handle_ty) = &recv_ty {
-                if handle_ty == "DbConnection" {
+                if handle_ty == "DBConnection" {
                     if let Some(ret) = self.check_db_connection_method(method, args, span) {
                         *recv_type_out = Some(handle_ty.clone());
                         return ret;
@@ -1753,7 +1753,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-DEP-WASM1=A / D-PLUGIN1=B (c81): method calls on a `Plugin` handle
-            // — same bespoke-block shape as `DbConnection` above (`.call`/
+            // — same bespoke-block shape as `DBConnection` above (`.call`/
             // `.call_int` need `(name: String, args: [T])` elaboration, not the
             // generic `file_handle_method_return` table).
             if let Type::Named(handle_ty) = &recv_ty {
@@ -1963,7 +1963,7 @@ impl<'a> Checker<'a> {
                     require_net_method_labels(handle_ty, method, args, span, &mut self.diags);
                     if self.check_browser_method_args(handle_ty, method, args, span) {
                         // Browser handles share one exact argument checker.
-                    } else if handle_ty == "TlsClientConfig" && method == "with_alpn" {
+                    } else if handle_ty == "TLSClientConfig" && method == "with_alpn" {
                         if let Some(arg) = args.first_mut() {
                             self.expect_core_arg(
                                 "with_alpn",
@@ -1972,28 +1972,28 @@ impl<'a> Checker<'a> {
                                 arg,
                             );
                         }
-                    } else if handle_ty == "TlsClientConfig" && method == "with_trust" {
+                    } else if handle_ty == "TLSClientConfig" && method == "with_trust" {
                         if let Some(arg) = args.first_mut() {
-                            self.expect_core_arg("with_trust", 0, &Type::Named("TlsClientTrust".to_string()), arg);
+                            self.expect_core_arg("with_trust", 0, &Type::Named("TLSClientTrust".to_string()), arg);
                         }
-                    } else if handle_ty == "TlsClientConfig" && method == "with_client_identity" {
+                    } else if handle_ty == "TLSClientConfig" && method == "with_client_identity" {
                         if let Some(arg) = args.first_mut() {
-                            self.expect_core_arg("with_client_identity", 0, &Type::Named("TlsClientIdentity".to_string()), arg);
+                            self.expect_core_arg("with_client_identity", 0, &Type::Named("TLSClientIdentity".to_string()), arg);
                         }
-                    } else if handle_ty == "TlsClientConfig" && method == "with_version_bounds" {
+                    } else if handle_ty == "TLSClientConfig" && method == "with_version_bounds" {
                         for (index, arg) in args.iter_mut().enumerate() {
-                            self.expect_core_arg("with_version_bounds", index, &Type::Named("TlsVersion".to_string()), arg);
+                            self.expect_core_arg("with_version_bounds", index, &Type::Named("TLSVersion".to_string()), arg);
                         }
-                    } else if handle_ty == "TlsStream" && method == "close_write" {
+                    } else if handle_ty == "TLSStream" && method == "close_write" {
                         if let Some(arg) = args.first_mut() {
                             self.expect_core_arg("close_write", 0, &Type::Named("Duration".to_string()), arg);
                         }
-                    } else if handle_ty == "HttpResponse" && method == "trailers" {
+                    } else if handle_ty == "HTTPResponse" && method == "trailers" {
                         if let Some(arg) = args.first_mut() {
                             self.expect_core_arg_moving(
                                 "Response.trailers",
                                 0,
-                                &Type::Named("HttpHeaders".to_string()),
+                                &Type::Named("HTTPHeaders".to_string()),
                                 arg,
                             );
                             arg.convention = AccessConvention::Move;
@@ -2171,8 +2171,8 @@ impl<'a> Checker<'a> {
                 return ret;
             }
             // D-NETDEP1=A / D-HTTPLIB1=A: method calls on HTTP types.
-            if matches!(&recv_ty, Type::Named(name) if name == "HttpBody") {
-                let error = Type::Named("HttpError".to_string());
+            if matches!(&recv_ty, Type::Named(name) if name == "HTTPBody") {
+                let error = Type::Named("HTTPError".to_string());
                 let result = |ok| Type::Result { ok: Box::new(ok), err: Box::new(error.clone()) };
                 let special = match (method, args.len()) {
                     ("json", 1) => {
@@ -2208,8 +2208,8 @@ impl<'a> Checker<'a> {
                         None
                     }
                     ("chunks", 0) => {
-                        *recv_type_out = Some("HttpBody".to_string());
-                        return Some(Type::Named("HttpBodyChunks".to_string()));
+                        *recv_type_out = Some("HTTPBody".to_string());
+                        return Some(Type::Named("HTTPBodyChunks".to_string()));
                     }
                     ("chunks", 1) => {
                         self.expect_core_arg("Body.chunks", 0, &Type::Int, &mut args[0]);
@@ -2218,7 +2218,7 @@ impl<'a> Checker<'a> {
                     _ => None,
                 };
                 if let Some(ret) = special {
-                    *recv_type_out = Some("HttpBody".to_string());
+                    *recv_type_out = Some("HTTPBody".to_string());
                     return Some(ret);
                 }
             }
@@ -2226,7 +2226,7 @@ impl<'a> Checker<'a> {
                 if let Type::Named(name) = &recv_ty {
                     self.check_http_route_constant(name, method, args);
                 }
-                if matches!(&recv_ty, Type::Named(name) if name == "HttpMux")
+                if matches!(&recv_ty, Type::Named(name) if name == "HTTPMux")
                     && matches!(method, "get" | "post" | "put" | "delete" | "patch" | "head" | "options")
                     && args.len() == 2
                 {
@@ -2235,16 +2235,16 @@ impl<'a> Checker<'a> {
                         method,
                         1,
                         &Type::Fn {
-                            params: vec![Type::Named("HttpRequest".to_string())],
+                            params: vec![Type::Named("HTTPRequest".to_string())],
                             ret: Some(Box::new(Type::Result {
-                                ok: Box::new(Type::Named("HttpResponse".to_string())),
-                                err: Box::new(Type::Named("HttpError".to_string())),
+                                ok: Box::new(Type::Named("HTTPResponse".to_string())),
+                                err: Box::new(Type::Named("HTTPError".to_string())),
                             })),
                             effect_bound: None,
                         },
                         &mut args[1],
                     );
-                } else if matches!(&recv_ty, Type::Named(name) if name == "HttpClient") {
+                } else if matches!(&recv_ty, Type::Named(name) if name == "HTTPClient") {
                     let want = match method {
                         "cookies" | "redirects" | "send" | "proxy" | "tls" | "allow_http_downgrade" | "retries" => 1,
                         "protocols" => 3,
@@ -2256,14 +2256,14 @@ impl<'a> Checker<'a> {
                         self.diags.push(wrong_core_arity(method, want, args.len(), span));
                     }
                     let expected = match method {
-                        "cookies" => Some(Type::Named("HttpCookieJar".to_string())),
+                        "cookies" => Some(Type::Named("HTTPCookieJar".to_string())),
                         "protocols" | "allow_http_downgrade" => Some(Type::Bool),
                         "timeouts" => Some(Type::Int),
-                        "redirects" => Some(Type::Named("HttpRedirectPolicy".to_string())),
-                        "retries" => Some(Type::Named("HttpRetryPolicy".to_string())),
-                        "send" => Some(Type::Named("HttpRequest".to_string())),
-                        "proxy" => Some(Type::Named("HttpProxy".to_string())),
-                        "tls" => Some(Type::Named("TlsClientConfig".to_string())),
+                        "redirects" => Some(Type::Named("HTTPRedirectPolicy".to_string())),
+                        "retries" => Some(Type::Named("HTTPRetryPolicy".to_string())),
+                        "send" => Some(Type::Named("HTTPRequest".to_string())),
+                        "proxy" => Some(Type::Named("HTTPProxy".to_string())),
+                        "tls" => Some(Type::Named("TLSClientConfig".to_string())),
                         _ => None,
                     };
                     for (index, arg) in args.iter_mut().enumerate() {
@@ -2280,7 +2280,7 @@ impl<'a> Checker<'a> {
                 }
                 *recv_type_out = Some(match &recv_ty {
                     Type::Named(n) => n.clone(),
-                    _ => "HttpRequest".to_string(),
+                    _ => "HTTPRequest".to_string(),
                 });
                 return ret;
             }
@@ -3138,7 +3138,7 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            // D-SERDE-ACCESS=B: accessor methods on Data/Json/DataTree.
+            // D-SERDE-ACCESS=B: accessor methods on Data/JSON/DataTree.
             if let Type::Named(ref tn) = recv_ty {
                 if is_json_type_name(tn) {
                     if let Some(ret) = datatree_method_return(method, args.len()) {
@@ -3169,7 +3169,7 @@ impl<'a> Checker<'a> {
                         return Some(ret);
                     }
                 }
-                // D-DBDRIVER1: accessor methods on `DbValue` (`.int()`/`.text()`/
+                // D-DBDRIVER1: accessor methods on `DBValue` (`.int()`/`.text()`/
                 // `.bool()`/`.float()`/`.is_null()`) — read back a bound/column value.
                 if is_db_value_type_name(tn) {
                     if let Some(ret) = db_value_method_return(method, args.len()) {
@@ -3181,7 +3181,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 // D-ANY-JAI1 (c7jaiany §6): accessor methods on `reflect.of(x)`'s
-                // `Value`/`Field` handles — same zero-arg-getter shape as `DbValue`
+                // `Value`/`Field` handles — same zero-arg-getter shape as `DBValue`
                 // above. `Value`/`Field` are common enough words a user struct might
                 // reuse them (`examples/features/memory/zerocopy.jet` already has its
                 // own `struct Field`) — `!self.registry.contains(tn)` makes a

@@ -678,7 +678,7 @@ pub struct TraitMethodSig {
     /// as its upper bound. Every impl's inferred effects must be empty (E0742),
     /// and a dynamic-dispatch call sees the empty set.
     pub is_pure: bool,
-    /// D-EFF3: `fn render(self) =[Gpu]=>` — an effect upper bound on the method.
+    /// D-EFF3: `fn render(self) =[GPU]=>` — an effect upper bound on the method.
     /// `None` = un-annotated (per-impl effects under static dispatch; a
     /// trait-object call under an effect ceiling is E0743). `Some(list)` is BOTH
     /// the impl obligation (inferred ⊆ bound, else E0742) AND the dispatch
@@ -827,7 +827,7 @@ pub struct Func {
     /// inputs are tainted; this is the one place taint is cleared before a sink.
     /// Static, erased in codegen (I3).
     pub is_sanitizer: bool,
-    /// D-EFF1 / D-QUAL1: a `#(Net, Db)` effect bound on the signature, between
+    /// D-EFF1 / D-QUAL1: a `#(Net, DB)` effect bound on the signature, between
     /// the parameter list and the return arrow. `None` = unannotated (effects
     /// inferred). `Some(list)` = a declared upper bound; the inferred set must be
     /// a subset (E0740). Names are validated in sema, not the parser. Erased in
@@ -856,7 +856,7 @@ pub struct Func {
     /// D-DATARACE1=C: upgrade-report lines for reactive boxes that crossed a boundary.
     pub reactive_upgrades: Vec<String>,
     /// D-REPLAY1: `#Replayable fn` — the reachable effect set must not include
-    /// ambient Time/Rand/Net/Io unless routed through deterministic capabilities.
+    /// ambient Time/Rand/Net/IO unless routed through deterministic capabilities.
     pub is_replayable: bool,
     pub replayable_span: Option<Span>,
     /// D-JPK-TASKRUN1 / D-SCHEDULE1 (card #505): `#Task fn` — a top-level
@@ -890,7 +890,7 @@ pub struct Func {
     /// Span of whichever `#Inline`/`#Inline(Always)` marker was written (for
     /// diagnostics); `None` when neither is present.
     pub inline_span: Option<Span>,
-    /// D-WASM1: `#Wasm` / `#Js` / `#WasmExport` partition marker on the function.
+    /// D-WASM1: `#Wasm` / `#JS` / `#WasmExport` partition marker on the function.
     pub web_marker: Option<crate::WebPartition::WebPartitionMarker>,
     /// D-PREPOST1: `#Pre(cond, "msg")` clauses — a claim about the arguments,
     /// checked at function entry. Repeatable; empty when none.
@@ -1447,7 +1447,7 @@ pub struct EnumDef {
 }
 
 /// D-TAG1: one variant group (`Physical { Blunt, Pierce }`). `path` is the full
-/// dotted path from the enum root (`Physical`, or `Net.Http` when nested);
+/// dotted path from the enum root (`Physical`, or `Net.HTTP` when nested);
 /// `name_span` covers the group's own name segment.
 #[derive(Debug, Clone)]
 pub struct EnumGroup {
@@ -1506,12 +1506,12 @@ pub struct ImplDef {
     /// True only for codec impls synthesized from a serde derive. Parsed user
     /// impls are always false, even when type and trait names match.
     pub is_generated_serde: bool,
-    /// D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(Os.Linux|Os.Macos|Os.Windows)`
+    /// D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(OS.Linux|OS.MacOS|OS.Windows)`
     /// before this `impl` block — native OS gating (Phase 8 native backends).
     /// `None` means this impl compiles for every OS. Only ratified at item
     /// (impl) scope, not per-function — the ballot's worked example gates
     /// whole backend impls, never individual methods.
-    pub os_target: Option<crate::OsTarget::OsTarget>,
+    pub os_target: Option<crate::OSTarget::OSTarget>,
 }
 
 #[derive(Debug, Clone)]

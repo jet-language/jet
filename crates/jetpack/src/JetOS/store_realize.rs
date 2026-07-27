@@ -1,5 +1,5 @@
 use super::options_rendering::{clean_symbol, option_value};
-use super::types::{GNOME_DESKTOP_PACKAGES, OsFlags};
+use super::types::{GNOME_DESKTOP_PACKAGES, OSFlags};
 use jet_env_model::ModuleEval::SystemPlan;
 use crate::Output::Theme;
 use crate::Provider;
@@ -137,7 +137,7 @@ pub(super) fn desktop_default_required_packages(system: &SystemPlan) -> &'static
 pub(super) fn realize_ref(
     theme: &Theme,
     roots: &Store::Roots,
-    flags: &OsFlags,
+    flags: &OSFlags,
     table: &RefSpec::SourceTable,
     spec: &RefSpec::RefSpec,
     name_w: usize,
@@ -211,7 +211,7 @@ pub(super) fn realize_ref(
 pub(super) fn try_realize_ref(
     theme: &Theme,
     roots: &Store::Roots,
-    flags: &OsFlags,
+    flags: &OSFlags,
     table: &RefSpec::SourceTable,
     spec: &RefSpec::RefSpec,
     name_w: usize,

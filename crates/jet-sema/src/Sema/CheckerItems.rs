@@ -972,7 +972,7 @@ impl<'a> Checker<'a> {
         if is_io_error_type_name(enum_name) || enum_name == Syntax::TYPE_IO_OPERATION {
             return true;
         }
-        if matches!(enum_name, "SmtpSecurity" | "RecipientPolicy" | "EmailError") {
+        if matches!(enum_name, "SMTPSecurity" | "RecipientPolicy" | "EmailError") {
             return true;
         }
         if enum_name == "AuthError" {
@@ -1158,15 +1158,15 @@ impl<'a> Checker<'a> {
         // D-HTTP-CORE2=A: shared HTTP messages enforce typed headers and a
         // single-use byte Body. The old public-field literals cannot preserve
         // those invariants and ended at this core API break.
-        if matches!(type_name, "HttpRequest" | "HttpResponse") {
-            let (what, fix) = if type_name == "HttpResponse" {
+        if matches!(type_name, "HTTPRequest" | "HTTPResponse") {
+            let (what, fix) = if type_name == "HTTPResponse" {
                 (
-                    "`HttpResponse.{ ... }` was replaced by the shared HTTP response constructor",
+                    "`HTTPResponse.{ ... }` was replaced by the shared HTTP response constructor",
                     "use `server.response(status, text)`, then add headers with `.header(...)`",
                 )
             } else {
                 (
-                    "`HttpRequest.{ ... }` was replaced by the shared HTTP request constructor",
+                    "`HTTPRequest.{ ... }` was replaced by the shared HTTP request constructor",
                     "use `client.request(method, url)`, then configure it with request methods",
                 )
             };
@@ -1179,7 +1179,7 @@ impl<'a> Checker<'a> {
             ));
             return Type::Named(type_name.to_string());
         }
-        // E2-M10: compiler-known constructable struct types (HttpRequest, HttpResponse).
+        // E2-M10: compiler-known constructable struct types (HTTPRequest, HTTPResponse).
         // These have no user-module owner but are valid in struct literals.
         if let Some(core_fields) = core_constructable_fields(type_name) {
             let str_map_ty = Type::Map {

@@ -152,7 +152,7 @@ fn publish_build(case_dir: &Path, serve_name: &str, serve_root: &Path) {
 }
 
 fn write_callback_source(dest: &Path) {
-    let mut src = String::from("#Target(Web)\n#Html(\"index.html\")\n");
+    let mut src = String::from("#Target(Web)\n#HTML(\"index.html\")\n");
     src.push_str(include_str!("../examples/features/web/web_wasm_callback.jet"));
     fs::write(dest, src).expect("write callback source");
 }
@@ -208,7 +208,7 @@ fn prepare_acceptance_root(root: &Path) {
     let lifecycle = root.join("lifecycle_src");
     fs::create_dir_all(&lifecycle).unwrap();
     let lifecycle_src = format!(
-        "#Html(\"index.html\")\n{}",
+        "#HTML(\"index.html\")\n{}",
         include_str!("fixtures/web_browser_lifecycle.jet")
     );
     fs::write(lifecycle.join("app.jet"), lifecycle_src).unwrap();

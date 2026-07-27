@@ -16,7 +16,7 @@
 
 extern crate alloc;
 
-mod Json;
+mod JSON;
 
 mod Authority {
     #![allow(dead_code)] // Ordered slices B-F consume this authority.
@@ -65,7 +65,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
-use Json::Json as JsonValue;
+use JSON::JSON as JSONValue;
 
 const ORACLE_JSON: &str = include_str!("../../../tests/fixtures/nix-compat/oracle.json");
 const NIX_VERSION: &str = "2.34.8";
@@ -169,11 +169,11 @@ impl ValidatedOracleManifest {
     }
 
     fn parse_raw(text: &str) -> Result<Self> {
-        let root = Json::parse(text).map_err(BoundaryError::Manifest)?;
+        let root = JSON::parse(text).map_err(BoundaryError::Manifest)?;
         let root = object(&root, "root")?;
         exact_keys(root, &["schema", "nix", "nixpkgs", "corpus_status"], "root")?;
         let schema = root.get("schema").ok_or_else(|| missing("root.schema"))?;
-        if !matches!(schema, JsonValue::Num(value) if *value == 1.0) {
+        if !matches!(schema, JSONValue::Num(value) if *value == 1.0) {
             return Err(BoundaryError::Manifest("`schema` must be 1".into()));
         }
 
@@ -364,21 +364,21 @@ impl VerifiedOracle {
     }
 }
 
-fn object<'a>(value: &'a JsonValue, path: &str) -> Result<&'a BTreeMap<String, JsonValue>> {
+fn object<'a>(value: &'a JSONValue, path: &str) -> Result<&'a BTreeMap<String, JSONValue>> {
     value
         .as_object()
         .map_err(|_| BoundaryError::Manifest(format!("`{path}` must be an object")))
 }
 
 fn child_object<'a>(
-    parent: &'a BTreeMap<String, JsonValue>,
+    parent: &'a BTreeMap<String, JSONValue>,
     key: &str,
-) -> Result<&'a BTreeMap<String, JsonValue>> {
+) -> Result<&'a BTreeMap<String, JSONValue>> {
     let value = parent.get(key).ok_or_else(|| missing(key))?;
     object(value, key)
 }
 
-fn required_string(parent: &BTreeMap<String, JsonValue>, key: &str) -> Result<String> {
+fn required_string(parent: &BTreeMap<String, JSONValue>, key: &str) -> Result<String> {
     parent
         .get(key)
         .ok_or_else(|| missing(key))?
@@ -387,9 +387,9 @@ fn required_string(parent: &BTreeMap<String, JsonValue>, key: &str) -> Result<St
         .map_err(|_| BoundaryError::Manifest(format!("`{key}` must be a string")))
 }
 
-fn required_u64(parent: &BTreeMap<String, JsonValue>, key: &str) -> Result<u64> {
+fn required_u64(parent: &BTreeMap<String, JSONValue>, key: &str) -> Result<u64> {
     match parent.get(key).ok_or_else(|| missing(key))? {
-        JsonValue::Num(value)
+        JSONValue::Num(value)
             if value.is_finite()
                 && *value >= 0.0
                 && *value <= u64::MAX as f64
@@ -403,10 +403,10 @@ fn required_u64(parent: &BTreeMap<String, JsonValue>, key: &str) -> Result<u64> 
     }
 }
 
-fn optional_sri(parent: &BTreeMap<String, JsonValue>, key: &'static str) -> Result<Option<String>> {
+fn optional_sri(parent: &BTreeMap<String, JSONValue>, key: &'static str) -> Result<Option<String>> {
     match parent.get(key).ok_or_else(|| missing(key))? {
-        JsonValue::Null => Ok(None),
-        JsonValue::Str(value) => {
+        JSONValue::Null => Ok(None),
+        JSONValue::Str(value) => {
             canonical_sha256_sri(value).map_err(|_| {
                 BoundaryError::Manifest(format!(
                     "`{key}` must be canonical SHA-256 SRI"
@@ -421,7 +421,7 @@ fn optional_sri(parent: &BTreeMap<String, JsonValue>, key: &'static str) -> Resu
 }
 
 fn exact_keys(
-    parent: &BTreeMap<String, JsonValue>,
+    parent: &BTreeMap<String, JSONValue>,
     expected: &[&str],
     path: &str,
 ) -> Result<()> {

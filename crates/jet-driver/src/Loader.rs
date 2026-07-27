@@ -515,7 +515,7 @@ fn load_entry_with_overlays_mode(
         dep_roots,
         // D-OSTARGET2=B: default to the host OS; the driver overrides this from
         // `--target=<triple>` before sema runs (LSP/tests keep the host bucket).
-        active_os: Syntax::OsTarget::host(),
+        active_os: Syntax::OSTarget::host(),
         edition: package_edition,
     };
     // S59 (E2-M14): fold every `#Extern`/`#Bindgen module c.<lib>` into merged

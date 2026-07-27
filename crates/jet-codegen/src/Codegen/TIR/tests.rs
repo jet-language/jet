@@ -66,7 +66,7 @@
             web_partition_enforced: false,
             web_partition_report: None,
             dep_roots: std::collections::HashMap::new(),
-            active_os: crate::Syntax::OsTarget::host(),
+            active_os: crate::Syntax::OSTarget::host(),
             edition: "2027".to_string(),
         };
         // No C imports in unit tests; CFfi::default() is the correct empty state.
@@ -612,7 +612,7 @@ fn mk() {
     #[test]
     fn covers_enum_payload_range_pattern() {
         // A range pattern in a payload slot (guard-emitted) plus a wildcard slot.
-        let src = "enum Http {\n Good(Int)\n Fail(Int)\n}\nfn classify(r: Http) => String {\n if r == {\n Good(200..299) -> { return \"ok\" }\n Good(_) -> { return \"other\" }\n Fail(_) -> { return \"err\" }\n }\n return \"unknown\"\n}\n";
+        let src = "enum HTTP {\n Good(Int)\n Fail(Int)\n}\nfn classify(r: HTTP) => String {\n if r == {\n Good(200..299) -> { return \"ok\" }\n Good(_) -> { return \"other\" }\n Fail(_) -> { return \"err\" }\n }\n return \"unknown\"\n}\n";
         assert!(covers(src, "classify"));
     }
 
@@ -1144,17 +1144,17 @@ fn mk() {
         assert!(handle_method_op("Arena", "alloc", 1).is_some());
         assert!(handle_method_op("Bump", "reset", 0).is_some());
         assert!(handle_method_op("Pool", "free", 0).is_none());
-        // c109 Phase 20: HttpRequest/HttpResponse accessors are now covered (the
+        // c109 Phase 20: HTTPRequest/HTTPResponse accessors are now covered (the
         // `http.serve` lambda-param type is written back onto `p.ty`, so the slot
         // type is total and the AST `rty`-keyed handle arm fires identically).
-        assert!(handle_method_op("HttpRequest", "method", 0).is_some());
-        assert!(handle_method_op("HttpRequest", "path", 0).is_some());
-        assert!(handle_method_op("HttpRequest", "header", 1).is_some());
-        assert!(handle_method_op("HttpRequest", "param", 1).is_some());
-        assert!(handle_method_op("HttpRequest", "trailers", 0).is_some());
-        assert!(handle_method_op("HttpResponse", "status", 0).is_some());
-        assert!(handle_method_op("HttpResponse", "body", 0).is_some());
-        assert!(handle_method_op("HttpResponse", "trailers", 1).is_some());
+        assert!(handle_method_op("HTTPRequest", "method", 0).is_some());
+        assert!(handle_method_op("HTTPRequest", "path", 0).is_some());
+        assert!(handle_method_op("HTTPRequest", "header", 1).is_some());
+        assert!(handle_method_op("HTTPRequest", "param", 1).is_some());
+        assert!(handle_method_op("HTTPRequest", "trailers", 0).is_some());
+        assert!(handle_method_op("HTTPResponse", "status", 0).is_some());
+        assert!(handle_method_op("HTTPResponse", "body", 0).is_some());
+        assert!(handle_method_op("HTTPResponse", "trailers", 1).is_some());
         // D-ARGS1: ArgsSpec builder and ParsedArgs query methods.
         assert!(handle_method_op("ArgsSpec", "flag", 2).is_some());
         assert!(handle_method_op("ArgsSpec", "option", 3).is_some());
@@ -1199,7 +1199,7 @@ fn mk() {
         // shape — it has its own bespoke `CoreClosureCall` shape (a `move |…|` closure).
         assert!(core_call_covered("core.tasks", "channel"));
         assert!(!core_call_covered("core.tasks", "spawn"));
-        // c109 Phase 25: the HttpRouter producer + parse/dispatch core calls are covered
+        // c109 Phase 25: the HTTPRouter producer + parse/dispatch core calls are covered
         // (fixed-string emits; their return types live in sema's `infer_core_call`, not
         // `core_fixed_sig`). `http.serve` stays out (closure-taking → `CoreClosureCall`).
         assert!(core_call_covered("jet.http", "router"));
@@ -1287,16 +1287,16 @@ fn greet() => String { return input() }
 
     #[test]
     fn covers_caps_block() {
-        // c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region erases to a plain
+        // c109 Phase 26: a `#Caps(IO) { … }` effect-restriction region erases to a plain
         // block (byte-for-byte `Stmt::Region`); its body is checked on the SAME locals, so
         // an out-of-subset body keeps the whole fn off the TIR path.
-        assert!(covers("fn f() { #Caps(Io) { print(\"x\") } }", "f"));
+        assert!(covers("fn f() { #Caps(IO) { print(\"x\") } }", "f"));
         // c109: a single-uppercase-letter DECLARED struct name (`P`) is a concrete
         // type, not a type variable — the `is_type_var_name` heuristic is now guarded
         // on non-declaration (`cx.struct_fields` lookup). So `P{x: 1}` and the
         // `P{x} :: p` struct-destructure are both covered; the fn routes through TIR.
         assert!(covers(
-            "struct P { x: Int }\nfn f() { p :: P.{x: 1}\n#Caps(Io) { P.{x} :: p\nprint(x) } }",
+            "struct P { x: Int }\nfn f() { p :: P.{x: 1}\n#Caps(IO) { P.{x} :: p\nprint(x) } }",
             "f"
         ));
     }
@@ -1651,7 +1651,7 @@ fn consume(ch: Receiver<Int>) => Int {
         // `DataTree.Bool`/`DataTree.Array`/`DataTree.Null`) + a `[DataTree]` list value
         // type. A fn that builds and returns `DataTree` values routes (the dynamic value
         // type is a covered foreign value type;
-        // construction is the `JsonLit` shape). The if-let MATCHING + index-assign need
+        // construction is the `JSONLit` shape). The if-let MATCHING + index-assign need
         // full sema (the `DataTree` pattern / `IndexKind`), proven by the TIR feature
         // integration targets + the whole-suite byte-parity diff; here we gate the
         // sema-independent construction.

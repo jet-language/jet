@@ -724,10 +724,10 @@ mod tests {
     #[test]
     fn sig_carries_normalized_inferred_effects() {
         let f = func("load", true, vec![], Some(Type::String));
-        let effects = EffectSet::from(["Fs.Read".to_string(), "Io".to_string()]);
+        let effects = EffectSet::from(["FS.Read".to_string(), "IO".to_string()]);
         assert_eq!(
             fn_signature_with_effects(&f, Some(&effects)),
-            "fn load() =[Fs.Read, Io]=> String"
+            "fn load() =[FS.Read, IO]=> String"
         );
         assert_eq!(
             fn_signature_with_effects(&f, Some(&EffectSet::new())),
@@ -754,7 +754,7 @@ mod tests {
         });
         let solved = std::collections::HashMap::from([(
             "main::files__load".to_string(),
-            EffectSet::from(["Fs.Read".to_string()]),
+            EffectSet::from(["FS.Read".to_string()]),
         )]);
         let snapshot = snapshot_from_items_with_effects(
             &[module],
@@ -767,7 +767,7 @@ mod tests {
         assert_eq!(snapshot.api_version, API_SNAPSHOT_VERSION);
         assert_eq!(
             snapshot.funcs[0].signature,
-            "fn files.load() =[Fs.Read]=> String"
+            "fn files.load() =[FS.Read]=> String"
         );
         let parsed = ApiSnapshot::parse(&snapshot.write()).expect("v3 snapshot round trip");
         assert_eq!(parsed.funcs[0].name, "files.load");
@@ -776,7 +776,7 @@ mod tests {
     #[test]
     fn pre_v3_comparison_normalizes_added_metadata_and_type_glosses() {
         assert_eq!(
-            signature_without_effect_row("fn load(path: String) =[Fs.Read, Io]=> String"),
+            signature_without_effect_row("fn load(path: String) =[FS.Read, IO]=> String"),
             "fn load(path: String) -> String"
         );
         assert_eq!(
@@ -789,7 +789,7 @@ mod tests {
         );
         assert_eq!(legacy_api_name("files.load"), "load");
         assert_eq!(
-            legacy_api_signature("fn files.load() =[Fs.Read]=> String"),
+            legacy_api_signature("fn files.load() =[FS.Read]=> String"),
             "fn load() -> String"
         );
         assert_eq!(

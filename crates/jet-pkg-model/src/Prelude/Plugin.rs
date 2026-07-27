@@ -14,14 +14,14 @@
 // boundary; there is no `#Unsafe` gate anywhere in this file or the generated
 // call sites (I1).
 //
-// Handles are u64 keys into a thread-local HashMap, mirroring `Db.rs`. Handle
+// Handles are u64 keys into a thread-local HashMap, mirroring `DB.rs`. Handle
 // 0 is the error sentinel (never a live plugin instance).
 //
-// Wire protocol (mirrors `Db.rs`'s tagged-length encoding — byte-exact,
+// Wire protocol (mirrors `DB.rs`'s tagged-length encoding — byte-exact,
 // nothing to escape): a scalar value is `I<len>:<int>` (Jet `Int`) or
 // `F<len>:<float>` (Jet `Float`) — v1's supported plugin-call scalar types. A
 // call result or error is `O:<value>` / `E:<message>`. Helper names are
-// prefixed `plugin_` so they never collide with `Db.rs`'s identically-shaped
+// prefixed `plugin_` so they never collide with `DB.rs`'s identically-shaped
 // `encode_tagged`/`read_tagged` helpers when both runtimes are concatenated
 // into the same bridge crate.
 
@@ -182,7 +182,7 @@ fn plugin_from_val(v: &Val) -> Option<String> {
     }
 }
 
-// ── wire encoding: tagged, length-prefixed, byte-exact (mirrors Db.rs) ──────
+// ── wire encoding: tagged, length-prefixed, byte-exact (mirrors DB.rs) ──────
 
 fn plugin_encode_tagged(tag: char, payload: &str) -> String {
     format!("{tag}{}:{payload}", payload.len())
@@ -202,7 +202,7 @@ fn plugin_read_tagged(bytes: &[u8], pos: &mut usize) -> Option<(char, String)> {
     Some((tag, payload))
 }
 
-/// Decode a count-prefixed tagged-value list (the same shape `Db.rs` uses for
+/// Decode a count-prefixed tagged-value list (the same shape `DB.rs` uses for
 /// bind params): `"<count>:<tag><len>:<payload>…"`.
 fn plugin_decode_params(wire: &str) -> Vec<(char, String)> {
     let bytes = wire.as_bytes();

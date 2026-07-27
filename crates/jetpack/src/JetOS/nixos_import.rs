@@ -1,5 +1,5 @@
 use super::nixos_import_live::live_import_plan;
-use super::types::OsFlags;
+use super::types::OSFlags;
 use crate::Output::Theme;
 use crate::Syntax;
 use crate::JSON;
@@ -48,7 +48,7 @@ pub(super) struct NixosImportUser {
     pub(super) home_manager: bool,
 }
 
-pub(super) fn cmd_import(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+pub(super) fn cmd_import(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
     let Some(mut import_args) = parse_nixos_import_args(theme, args) else {
         return 2;
     };
@@ -353,7 +353,7 @@ fn import_plan_from_scan(args: &NixosImportArgs) -> Result<NixosImportPlan, Stri
 }
 
 pub(super) fn import_json_string(
-    root: &std::collections::BTreeMap<String, JSON::Json>,
+    root: &std::collections::BTreeMap<String, JSON::JSONValue>,
     key: &str,
 ) -> Option<String> {
     root.get(key)
@@ -362,7 +362,7 @@ pub(super) fn import_json_string(
 }
 
 pub(super) fn import_json_string_array(
-    root: &std::collections::BTreeMap<String, JSON::Json>,
+    root: &std::collections::BTreeMap<String, JSON::JSONValue>,
     key: &str,
 ) -> Vec<String> {
     root.get(key)
@@ -377,7 +377,7 @@ pub(super) fn import_json_string_array(
 }
 
 pub(super) fn import_package_list(
-    root: &std::collections::BTreeMap<String, JSON::Json>,
+    root: &std::collections::BTreeMap<String, JSON::JSONValue>,
     key: &str,
 ) -> (Vec<String>, Vec<String>) {
     let mut kept = Vec::new();
@@ -409,10 +409,10 @@ fn import_is_package_name(value: &str) -> bool {
 }
 
 fn import_json_option_object(
-    root: &std::collections::BTreeMap<String, JSON::Json>,
+    root: &std::collections::BTreeMap<String, JSON::JSONValue>,
     key: &str,
 ) -> Vec<(String, String)> {
-    let Some(JSON::Json::Object(map)) = root.get(key) else {
+    let Some(JSON::JSONValue::Object(map)) = root.get(key) else {
         return Vec::new();
     };
     map.iter()
@@ -421,7 +421,7 @@ fn import_json_option_object(
 }
 
 fn import_json_users(
-    root: &std::collections::BTreeMap<String, JSON::Json>,
+    root: &std::collections::BTreeMap<String, JSON::JSONValue>,
     selected: &[String],
 ) -> Result<Vec<NixosImportUser>, String> {
     let Some(users_json) = root.get("users") else {
@@ -443,7 +443,7 @@ fn import_json_users(
             packages,
             sourced_packages: Vec::new(),
             omitted_packages,
-            home_manager: matches!(user.get("homeManager"), Some(JSON::Json::Bool(true))),
+            home_manager: matches!(user.get("homeManager"), Some(JSON::JSONValue::Bool(true))),
         });
     }
     Ok(users)
@@ -592,7 +592,7 @@ fn render_nixos_import_audit(plan: &NixosImportPlan) -> String {
 
 fn write_nixos_import_output(
     args: &NixosImportArgs,
-    flags: &OsFlags,
+    flags: &OSFlags,
     config: &str,
     audit: &str,
 ) -> Result<(PathBuf, PathBuf), String> {
@@ -630,19 +630,19 @@ fn write_nixos_import_output(
     Ok((config_path, audit_path))
 }
 
-fn import_render_json_value(value: &JSON::Json) -> String {
+fn import_render_json_value(value: &JSON::JSONValue) -> String {
     match value {
-        JSON::Json::Null => "null".to_string(),
-        JSON::Json::Bool(value) => value.to_string(),
-        JSON::Json::Num(value) => {
+        JSON::JSONValue::Null => "null".to_string(),
+        JSON::JSONValue::Bool(value) => value.to_string(),
+        JSON::JSONValue::Num(value) => {
             if value.fract() == 0.0 {
                 format!("{}", *value as i64)
             } else {
                 value.to_string()
             }
         }
-        JSON::Json::Str(value) => import_render_string(value),
-        JSON::Json::Array(values) => {
+        JSON::JSONValue::Str(value) => import_render_string(value),
+        JSON::JSONValue::Array(values) => {
             let rendered = values
                 .iter()
                 .map(import_render_json_value)
@@ -650,17 +650,17 @@ fn import_render_json_value(value: &JSON::Json) -> String {
                 .join(", ");
             format!("[{rendered}]")
         }
-        JSON::Json::Object(_) => import_render_string(&import_render_json_for_audit(value)),
+        JSON::JSONValue::Object(_) => import_render_string(&import_render_json_for_audit(value)),
     }
 }
 
-fn import_render_json_for_audit(value: &JSON::Json) -> String {
+fn import_render_json_for_audit(value: &JSON::JSONValue) -> String {
     match value {
-        JSON::Json::Null => "null".to_string(),
-        JSON::Json::Bool(value) => value.to_string(),
-        JSON::Json::Num(value) => value.to_string(),
-        JSON::Json::Str(value) => JSON::quote(value),
-        JSON::Json::Array(values) => {
+        JSON::JSONValue::Null => "null".to_string(),
+        JSON::JSONValue::Bool(value) => value.to_string(),
+        JSON::JSONValue::Num(value) => value.to_string(),
+        JSON::JSONValue::Str(value) => JSON::quote(value),
+        JSON::JSONValue::Array(values) => {
             let parts = values
                 .iter()
                 .map(import_render_json_for_audit)
@@ -668,7 +668,7 @@ fn import_render_json_for_audit(value: &JSON::Json) -> String {
                 .join(",");
             format!("[{parts}]")
         }
-        JSON::Json::Object(map) => {
+        JSON::JSONValue::Object(map) => {
             let parts = map
                 .iter()
                 .map(|(key, value)| {

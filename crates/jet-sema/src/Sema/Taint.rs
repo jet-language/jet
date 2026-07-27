@@ -6,7 +6,7 @@
 //! field/index read, arithmetic, return) is tainted. A `#Sanitizer fn` is the
 //! one blessed way to strip it — its return value is untainted by contract, even
 //! when its inputs were tainted (the audited cleaning step). A tainted value
-//! reaching a **sink effect** (`Db`/`Exec`/`Net` — a security-sensitive Core
+//! reaching a **sink effect** (`DB`/`Exec`/`Net` — a security-sensitive Core
 //! operation) without first passing through a sanitizer is **E0721**.
 //!
 //! **D-TAINT2 (option A)**: the kind is named in parens — `#Tainted(Credential)
@@ -36,10 +36,10 @@ use crate::AST::{
 use std::collections::{HashMap, HashSet};
 
 /// The injection sink effects (D-TAINT1): a tainted value reaching a Core call
-/// carrying one of these without a sanitizer is E0721. `Db` (query injection),
+/// carrying one of these without a sanitizer is E0721. `DB` (query injection),
 /// `Exec` (command injection), `Net` (SSRF / request smuggling).
 fn is_sink_effect(e: Effect) -> bool {
-    matches!(e, Effect::Db | Effect::Exec | Effect::Net)
+    matches!(e, Effect::DB | Effect::Exec | Effect::Net)
 }
 
 /// D-TAINT2: the credential log/print/serialize sinks. A `#Tainted(Credential)`
@@ -280,7 +280,7 @@ impl<'a> TaintCtx<'a> {
     }
 
     /// Walk an expression for sink violations:
-    /// - E0721: a tainted (any kind) value reaches an injection sink (Db/Exec/Net).
+    /// - E0721: a tainted (any kind) value reaches an injection sink (DB/Exec/Net).
     /// - E0722: a `#Tainted(Credential)` value reaches a log/print/serialize sink.
     /// Recurses into every sub-expression so a nested sink is still checked.
     fn check_expr(&mut self, e: &Expr) {
@@ -767,7 +767,7 @@ pub fn e0721(alias: &str, method: &str, effect: Effect, span: Span) -> Diagnosti
         format!("{alias}.{method}")
     };
     let kind = match effect {
-        Effect::Db => "a database query",
+        Effect::DB => "a database query",
         Effect::Exec => "a subprocess command",
         Effect::Net => "a network request",
         _ => "a sink",

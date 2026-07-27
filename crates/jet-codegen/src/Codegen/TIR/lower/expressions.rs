@@ -783,14 +783,14 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     kind: TExprKind::Close(Box::new(resource)),
                 };
             }
-            // D-TYPEDTEXT1=D: the synthetic `Sql`/`Html` call sema rewrote a typed
+            // D-TYPEDTEXT1=D: the synthetic `SQL`/`HTML` call sema rewrote a typed
             // text literal into (mirrors D-UNITLIT1's rewrite pattern). Args
             // alternate literal-segment, hole, literal-segment, ..., always closing
             // on a literal (`literals.len() == holes.len() + 1`) — even index is a
             // compile-time-known literal segment, odd index is a hole value. A hole
-            // never re-enters the template text: `Sql` keeps it as a separate bound
-            // param, `Html` HTML-escapes it before joining.
-            if (call.name == "Sql" || call.name == "Html" || call.name == "Sh")
+            // never re-enters the template text: `SQL` keeps it as a separate bound
+            // param, `HTML` HTML-escapes it before joining.
+            if (call.name == "SQL" || call.name == "HTML" || call.name == "Sh")
                 && !cx.sigs.contains_key(&call.name)
             {
                 let mut literals: Vec<String> = Vec::new();
@@ -810,9 +810,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     }
                 }
                 let kind = match call.name.as_str() {
-                    "Sql" => crate::Codegen::TIR::TTypedTextInterpKind::Sql,
+                    "SQL" => crate::Codegen::TIR::TTypedTextInterpKind::SQL,
                     "Sh" => crate::Codegen::TIR::TTypedTextInterpKind::Sh,
-                    _ => crate::Codegen::TIR::TTypedTextInterpKind::Html,
+                    _ => crate::Codegen::TIR::TTypedTextInterpKind::HTML,
                 };
                 return TExpr {
                     ty: Type::Named(call.name.clone()),
@@ -1322,7 +1322,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     };
                 }
                 if cx.core_imports.get(alias).map(String::as_str) == Some(crate::Syntax::CORE_EMAIL_MODULE)
-                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SmtpConfig")
+                    && matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig")
                 {
                     let tfields = fields
                         .iter()
@@ -1364,15 +1364,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
-            // c109 Phase 17: a PRELUDE struct literal (HttpRequest/HttpResponse).
+            // c109 Phase 17: a PRELUDE struct literal (HTTPRequest/HTTPResponse).
             if net_handle_rust_type(type_name).is_some() {
                 // A prelude struct has no boxed (recursive) edges.
                 let mut tfields: Vec<(String, TExpr, bool)> = fields
                     .iter()
                     .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))
                     .collect();
-                let extra = if type_name == "HttpRequest" {
-                    Some(crate::Codegen::TIR::TStructExtra::HttpRequestParams)
+                let extra = if type_name == "HTTPRequest" {
+                    Some(crate::Codegen::TIR::TStructExtra::HTTPRequestParams)
                 } else {
                     None
                 };
@@ -1387,7 +1387,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             }
             // D-TEXTWIDTH1=B: `TextWidth.{ ambiguous: .Wide, controls: .Reject }` —
             // a plain dot-ctor core struct, `jet_std::TextWidth` head, no injected
-            // extra field (unlike HttpRequest's `params`).
+            // extra field (unlike HTTPRequest's `params`).
             if type_name == "TextWidth" {
                 let tfields: Vec<(String, TExpr, bool)> = fields
                     .iter()
@@ -1466,7 +1466,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             }
-            if matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SmtpConfig") {
+            if matches!(type_name.as_str(), "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig") {
                 let tfields = fields
                     .iter()
                     .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
@@ -1625,11 +1625,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     };
                 }
                 if env.ty_of(enum_name).is_none()
-                    && matches!(resolved_enum, "SmtpSecurity" | "RecipientPolicy" | "SmtpAuth" | "TlsTrust")
-                    && ((resolved_enum == "SmtpSecurity" && matches!(member.as_str(), "StartTls" | "Tls"))
+                    && matches!(resolved_enum, "SMTPSecurity" | "RecipientPolicy" | "SMTPAuth" | "TLSTrust")
+                    && ((resolved_enum == "SMTPSecurity" && matches!(member.as_str(), "StartTls" | "TLS"))
                         || (resolved_enum == "RecipientPolicy" && matches!(member.as_str(), "RequireAll" | "DeliverAccepted"))
-                        || (resolved_enum == "SmtpAuth" && member == "None")
-                        || (resolved_enum == "TlsTrust" && member == "System"))
+                        || (resolved_enum == "SMTPAuth" && member == "None")
+                        || (resolved_enum == "TLSTrust" && member == "System"))
                 {
                     return TExpr {
                         ty: Type::Named(resolved_enum.to_string()),
@@ -1675,20 +1675,20 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 {
                     return TExpr {
                         ty: Type::Named(Syntax::TYPE_DATA.to_string()),
-                        kind: TExprKind::JsonLit {
+                        kind: TExprKind::JSONLit {
                             variant: "Null".to_string(),
                             arg: None,
                         },
                     };
                 }
-                // D-DBDRIVER1: `DbValue.Null` — same no-arg-`Field` shape as `Data.Null`.
+                // D-DBDRIVER1: `DBValue.Null` — same no-arg-`Field` shape as `Data.Null`.
                 if env.ty_of(enum_name).is_none()
                     && is_db_value_type_name(enum_name)
                     && member == "Null"
                 {
                     return TExpr {
                         ty: Type::Named(Syntax::TYPE_DB_VALUE.to_string()),
-                        kind: TExprKind::DbValueLit {
+                        kind: TExprKind::DBValueLit {
                             variant: "Null".to_string(),
                             arg: None,
                         },
@@ -1806,7 +1806,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
             }
             let field_ty = struct_field_type(cx, &recv.ty, member).unwrap_or(Type::Int);
-            // A field of a CORE struct (`ProcessResult.code`, `JsonError.message`, …) is
+            // A field of a CORE struct (`ProcessResult.code`, `JSONError.message`, …) is
             // emitted by its PLAIN Rust name, never `user_<name>` (the core structs in
             // Source/Prelude/Core.rs declare unprefixed fields — B2). Reproduce
             // `core_struct_field_rust_name` (Expression.rs) from the resolved receiver
@@ -1867,10 +1867,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 if matches!(
                                     resolved_type,
                                     "EmailError"
-                                        | "SmtpAuth"
-                                        | "TlsTrust"
+                                        | "SMTPAuth"
+                                        | "TLSTrust"
                                         | "AuthError"
-                                        | "HttpRedirectPolicy"
+                                        | "HTTPRedirectPolicy"
                                 ) {
                                     label.clone()
                                 } else {
@@ -2110,7 +2110,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // clone of `T` via `jet_pool_get` (panics on a stale `id`, mirroring the
             // array-oob panic precedent). `ConstInline` is the pragmatic vehicle: no
             // new `TExprKind` needed for a single free-function call, same as the
-            // `Sql.raw`/`.context` escapes in `lower_method_call` below.
+            // `SQL.raw`/`.context` escapes in `lower_method_call` below.
             if matches!(kind, IndexKind::Pool) {
                 let elem_ty = match &base_t.ty {
                     Type::Apply { name, args } if name == "Pool" && !args.is_empty() => {

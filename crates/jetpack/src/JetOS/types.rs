@@ -21,7 +21,7 @@ pub(super) const VM_GUEST_PROOF_MARKER: &str = "JETOS_GUEST_PROOF:";
 pub(super) const VM_PROOF_TIMEOUT_MS: u64 = 300_000;
 
 #[derive(Clone)]
-pub struct OsFlags {
+pub struct OSFlags {
     pub fixtures: Option<PathBuf>,
     pub offline: bool,
     pub name: Option<String>,

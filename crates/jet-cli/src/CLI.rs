@@ -853,7 +853,7 @@ pub fn completions_powershell() -> String {
 pub fn completions_for_program(
     shell: &str,
     command_name: &str,
-    schema: &jet_foundation::CliSchema::CliCommandSchema,
+    schema: &jet_foundation::CLISchema::CLICommandSchema,
 ) -> Option<String> {
     debug_assert!(!command_name.chars().any(char::is_control));
     let root_words = schema.completion_words();
@@ -862,7 +862,7 @@ pub fn completions_for_program(
             if schema.commands.is_empty() {
                 return Some(format!(
                     "# bash completion from JetCommandSchema v{}\n_jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n}}\ncomplete -F _jet_program_completion -- {}\n",
-                    jet_foundation::CliSchema::RECORD_VERSION,
+                    jet_foundation::CLISchema::RECORD_VERSION,
                     shell_single_quote(&root_words.join(" ")),
                     shell_single_quote(command_name),
                 ));
@@ -874,7 +874,7 @@ pub fn completions_for_program(
             )).collect::<Vec<_>>().join("\n");
             Some(format!(
                 "# bash completion from JetCommandSchema v{}\n_jet_program_completion() {{\n    local cur flags\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    if [[ $COMP_CWORD -eq 1 ]]; then\n        COMPREPLY=( $(compgen -W {} -- \"$cur\") )\n        return 0\n    fi\n    flags={}\n    case \"${{COMP_WORDS[1]}}\" in\n{}\n    esac\n    if [[ \"$cur\" == -* ]]; then\n        COMPREPLY=( $(compgen -W \"$flags\" -- \"$cur\") )\n    fi\n}}\ncomplete -F _jet_program_completion -- {}\n",
-                jet_foundation::CliSchema::RECORD_VERSION,
+                jet_foundation::CLISchema::RECORD_VERSION,
                 shell_single_quote(&root_words.join(" ")),
                 shell_single_quote(&input_words(&schema.inputs).join(" ")),
                 cases,
@@ -886,7 +886,7 @@ pub fn completions_for_program(
                 let args = zsh_input_specs(&schema.inputs).join(" \\\n");
                 return Some(format!(
                     "#compdef {}\n# zsh completion from JetCommandSchema v{}\n_arguments \\\n{}\n",
-                    shell_single_quote(command_name), jet_foundation::CliSchema::RECORD_VERSION, args,
+                    shell_single_quote(command_name), jet_foundation::CLISchema::RECORD_VERSION, args,
                 ));
             }
             let commands = schema.commands.iter().map(|command| shell_single_quote(&command.name)).collect::<Vec<_>>().join(" ");
@@ -897,11 +897,11 @@ pub fn completions_for_program(
             )).collect::<Vec<_>>().join("\n");
             Some(format!(
                 "#compdef {}\n# zsh completion from JetCommandSchema v{}\nif (( CURRENT == 2 )); then\n    _values 'command' '--help[show help]' {}\nelse\n    case $words[2] in\n{}\n    esac\nfi\n",
-                shell_single_quote(command_name), jet_foundation::CliSchema::RECORD_VERSION, commands, cases,
+                shell_single_quote(command_name), jet_foundation::CLISchema::RECORD_VERSION, commands, cases,
             ))
         }
         "fish" => {
-            let mut out = format!("# fish completion from JetCommandSchema v{}\n", jet_foundation::CliSchema::RECORD_VERSION);
+            let mut out = format!("# fish completion from JetCommandSchema v{}\n", jet_foundation::CLISchema::RECORD_VERSION);
             let root_condition = if schema.commands.is_empty() { "" } else { " -n '__fish_use_subcommand'" };
             out.push_str(&format!("complete -c {}{} -l help -d 'show help'\n", fish_single(command_name), root_condition));
             for input in &schema.inputs {
@@ -919,7 +919,7 @@ pub fn completions_for_program(
         "powershell" => {
             let root = root_words.iter().map(|word| ps_single(word)).collect::<Vec<_>>().join(",");
             if schema.commands.is_empty() {
-                return Some(format!("# PowerShell completion from JetCommandSchema v{}\nRegister-ArgumentCompleter -Native -CommandName {} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) @({root}) | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n", jet_foundation::CliSchema::RECORD_VERSION, ps_single(command_name)));
+                return Some(format!("# PowerShell completion from JetCommandSchema v{}\nRegister-ArgumentCompleter -Native -CommandName {} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) @({root}) | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n", jet_foundation::CLISchema::RECORD_VERSION, ps_single(command_name)));
             }
             let flags = input_words(&schema.inputs).iter().map(|word| ps_single(word)).collect::<Vec<_>>().join(",");
             let command_flags = schema.commands.iter().map(|command| format!(
@@ -927,7 +927,7 @@ pub fn completions_for_program(
                 ps_single(&command.name),
                 input_words(&command.inputs).iter().map(|word| ps_single(word)).collect::<Vec<_>>().join(","),
             )).collect::<Vec<_>>().join("; ");
-            Some(format!("# PowerShell completion from JetCommandSchema v{}\nRegister-ArgumentCompleter -Native -CommandName {} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) $root = @({root}); $flags = @({flags}); $commandFlags = @{{ {command_flags} }}; $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }}); $selected = if ($words.Count -ge 2) {{ $words[1] }} else {{ '' }}; $choices = if ($commandFlags.ContainsKey($selected)) {{ $commandFlags[$selected] }} elseif ($wordToComplete.StartsWith('-')) {{ $flags }} else {{ $root }}; $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n", jet_foundation::CliSchema::RECORD_VERSION, ps_single(command_name)))
+            Some(format!("# PowerShell completion from JetCommandSchema v{}\nRegister-ArgumentCompleter -Native -CommandName {} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) $root = @({root}); $flags = @({flags}); $commandFlags = @{{ {command_flags} }}; $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }}); $selected = if ($words.Count -ge 2) {{ $words[1] }} else {{ '' }}; $choices = if ($commandFlags.ContainsKey($selected)) {{ $commandFlags[$selected] }} elseif ($wordToComplete.StartsWith('-')) {{ $flags }} else {{ $root }}; $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n", jet_foundation::CLISchema::RECORD_VERSION, ps_single(command_name)))
         }
         _ => None,
     }
@@ -946,9 +946,9 @@ pub fn completion_command_name(program: &str) -> Result<String, &'static str> {
     Ok(name.to_string())
 }
 
-fn input_words(inputs: &[jet_foundation::CliSchema::CliInputSchema]) -> Vec<String> {
+fn input_words(inputs: &[jet_foundation::CLISchema::CLIInputSchema]) -> Vec<String> {
     let mut words = vec!["--help".to_string()];
-    let mut positionals: Vec<&jet_foundation::CliSchema::CliInputSchema> = inputs
+    let mut positionals: Vec<&jet_foundation::CLISchema::CLIInputSchema> = inputs
         .iter()
         .filter(|input| input.positional.is_some())
         .collect();
@@ -960,9 +960,9 @@ fn input_words(inputs: &[jet_foundation::CliSchema::CliInputSchema]) -> Vec<Stri
     words
 }
 
-fn zsh_input_specs(inputs: &[jet_foundation::CliSchema::CliInputSchema]) -> Vec<String> {
+fn zsh_input_specs(inputs: &[jet_foundation::CLISchema::CLIInputSchema]) -> Vec<String> {
     let mut specs = Vec::new();
-    let mut positionals: Vec<&jet_foundation::CliSchema::CliInputSchema> = inputs
+    let mut positionals: Vec<&jet_foundation::CLISchema::CLIInputSchema> = inputs
         .iter()
         .filter(|input| input.positional.is_some())
         .collect();
@@ -1072,7 +1072,7 @@ mod tests {
 
     #[test]
     fn external_completion_rejects_hostile_program_names() {
-        let schema = jet_foundation::CliSchema::CliCommandSchema {
+        let schema = jet_foundation::CLISchema::CLICommandSchema {
             entry_type: String::new(),
             inputs: Vec::new(),
             commands: Vec::new(),

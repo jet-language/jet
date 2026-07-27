@@ -7,7 +7,7 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     addr :: listener.local_addr() ?? panic("address")
     mux :: http_server.mux()
-    mux.post("/", (req: HttpRequest) => Ok(http_server.response(200, "handler ran")))
+    mux.post("/", (req: HTTPRequest) => Ok(http_server.response(200, "handler ran")))
     server :: tasks.spawn(() => {
         http_server.serve_once_listener(listener, mux) ?? panic("serve smuggling")
         http_server.serve_once_listener(listener, mux) ?? panic("serve body limit")

@@ -98,13 +98,13 @@ pub(crate) fn method_call_in_subset(
     // value (E0311 otherwise), so any `.raw()` that survives to codegen is on a distinct
     // — covering an in-subset 0-arg `.raw()` is safe (and `recv_type` is `None` here,
     // since sema's `.raw()` arm returns the base type without the recv_type writeback).
-    // D-TYPEDTEXT1=D: `Sql.raw("…")` / `Html.raw("…")` — `Sql`/`Html` name the
+    // D-TYPEDTEXT1=D: `SQL.raw("…")` / `HTML.raw("…")` — `SQL`/`HTML` name the
     // type (not a value), so `recv_type` is unset here. Checked BEFORE the
     // distinct-type `.raw()` below (same method name, disjoint receiver shape —
     // a distinct value's `.raw()` never takes an argument).
     if method == "raw" {
         if let Expr::Ident(n, _) = receiver {
-            if n == "Sql" || n == "Html" || n == Syntax::TYPE_SH {
+            if n == "SQL" || n == "HTML" || n == Syntax::TYPE_SH {
                 return args.len() == 1 && expr_in_subset(&args[0].expr, cx, locals);
             }
         }
@@ -119,12 +119,12 @@ pub(crate) fn method_call_in_subset(
     if method == Syntax::METHOD_DISTINCT_RAW {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }
-    // D-TYPEDTEXT1=D: `.template()`/`.params()` (Sql) and `.text()` (Html) —
+    // D-TYPEDTEXT1=D: `.template()`/`.params()` (SQL) and `.text()` (HTML) —
     // 0-arg accessors on a checked typed-text value.
-    if recv_type.as_deref() == Some("Sql") && matches!(method, "template" | "params") {
+    if recv_type.as_deref() == Some("SQL") && matches!(method, "template" | "params") {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }
-    if recv_type.as_deref() == Some("Html") && method == "text" {
+    if recv_type.as_deref() == Some("HTML") && method == "text" {
         return args.is_empty() && expr_in_subset(receiver, cx, locals);
     }
     // D-TXN3/D-TXN4: `<handle>.on_commit(() => { … })` on a `#Transact` handle.
@@ -255,7 +255,7 @@ pub(crate) fn method_call_in_subset(
                 .all(|a| a.label.is_none() && expr_in_subset(&a.expr, cx, locals));
         }
     }
-    // D-DBDRIVER1: a `DbValue` construction `DbValue.Int(n)` / `.Float(f)` /
+    // D-DBDRIVER1: a `DBValue` construction `DBValue.Int(n)` / `.Float(f)` /
     // `.Text(s)` / `.Bool(b)` — same shape as the JSON construction just above.
     if let Expr::Ident(type_name, _) = receiver {
         if !locals.contains(type_name)
@@ -357,9 +357,9 @@ pub(crate) fn method_call_in_subset(
     }
     if let Some(op) = tls_static_op(receiver, method, cx, locals) {
         let want = match op {
-            THandleOp::TlsClientConfigDefault => 0,
-            THandleOp::TlsRootCertificatesFromPem => 1,
-            THandleOp::TlsClientIdentityFromPem => 2,
+            THandleOp::TLSClientConfigDefault => 0,
+            THandleOp::TLSRootCertificatesFromPem => 1,
+            THandleOp::TLSClientIdentityFromPem => 2,
             _ => return false,
         };
         return args.len() == want && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
@@ -456,17 +456,17 @@ pub(crate) fn method_call_in_subset(
                     }
                     // D-HTTP-CORE2=A: exact nominal HTTP constructors exported
                     // as `http.Type.method(...)` and rewritten by sema to their
-                    // internal `Http*` type names.
-                    ("HttpMethod", "custom", 1)
-                    | ("HttpMethod", "get" | "head" | "post" | "put" | "delete"
+                    // internal `HTTP*` type names.
+                    ("HTTPMethod", "custom", 1)
+                    | ("HTTPMethod", "get" | "head" | "post" | "put" | "delete"
                         | "connect" | "options" | "trace" | "patch", 0)
-                    | ("HttpStatus", "new", 1)
-                    | ("HttpVersion", "http_1_0" | "http_1_1" | "http_2", 0)
-                    | ("HttpHeaderName" | "HttpHeaderValue", "new", 1)
-                    | ("HttpHeaders", "new", 0)
-                    | ("HttpBody", "empty", 0)
-                    | ("HttpBody", "bytes" | "json" | "form" | "multipart", 1)
-                    | ("HttpBody", "text" | "reader", 1 | 2) => {
+                    | ("HTTPStatus", "new", 1)
+                    | ("HTTPVersion", "http_1_0" | "http_1_1" | "http_2", 0)
+                    | ("HTTPHeaderName" | "HTTPHeaderValue", "new", 1)
+                    | ("HTTPHeaders", "new", 0)
+                    | ("HTTPBody", "empty", 0)
+                    | ("HTTPBody", "bytes" | "json" | "form" | "multipart", 1)
+                    | ("HTTPBody", "text" | "reader", 1 | 2) => {
                         return args.iter().all(|argument| {
                             argument.label.is_none() && expr_in_subset(&argument.expr, cx, locals)
                         });
@@ -719,16 +719,16 @@ pub(crate) fn method_call_in_subset(
             return expr_in_subset(receiver, cx, locals);
         }
     }
-    // Shape (h2) [c109 Phase 25]: HttpRouter route registration `router.get(path, handler)`
-    // / `.post`/`.put`/`.delete` (D-ROUTE1=A). Sema sets `recv_type == Some("HttpRouter")`.
-    // The AST `emit_builtin_method` keys these on `rty == Some(HttpRouter)` BEFORE the
+    // Shape (h2) [c109 Phase 25]: HTTPRouter route registration `router.get(path, handler)`
+    // / `.post`/`.put`/`.delete` (D-ROUTE1=A). Sema sets `recv_type == Some("HTTPRouter")`.
+    // The AST `emit_builtin_method` keys these on `rty == Some(HTTPRouter)` BEFORE the
     // generic `get`/`post` collection arms, and emits the handler via `emit_router_handler`
-    // (a boxed `Fn(HttpRequest)=>HttpResponse` closure). We cover it when the receiver is
+    // (a boxed `Fn(HTTPRequest)=>HTTPResponse` closure). We cover it when the receiver is
     // in-subset, the path arg is in-subset, and the handler arg is one `emit_router_handler`
     // reproduces byte-for-byte: a bare top-level-fn name (NOT a local → the `Box::new(move
     // |__req| user_<fn>(&__req)) as …` wrapper) or an in-subset literal lambda. Tried BEFORE
-    // the numeric/handle/builtin shapes so the HttpRouter `get`/`post` is claimed here.
-    if recv_type.as_deref() == Some("HttpRouter")
+    // the numeric/handle/builtin shapes so the HTTPRouter `get`/`post` is claimed here.
+    if recv_type.as_deref() == Some("HTTPRouter")
         && matches!(method, "get" | "post" | "put" | "delete")
         && args.len() == 2
     {
@@ -742,7 +742,7 @@ pub(crate) fn method_call_in_subset(
     // handle-producing core call (`files.open`/`time.start`/`net.tcp_connect`/…) or
     // another covered handle method (`listener.accept()`), so its slot type is total
     // (`Some(<handle>)`) — `rty == recv_type` always, and the rty-keyed branch fires
-    // identically. (c109 Phase 20: HttpRequest/HttpResponse accessors are NOW covered —
+    // identically. (c109 Phase 20: HTTPRequest/HTTPResponse accessors are NOW covered —
     // sema writes the `http.serve` lambda-param type back onto `p.ty`, so the slot type
     // is total even for an unannotated `(req)` param; the AST `rty`-keyed handle arm then
     // fires identically. They join `handle_method_op`.) Disjoint from

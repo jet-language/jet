@@ -10,7 +10,7 @@
 //! against packages already realized into the hangar, without depending on
 //! Jetpack's realization engine.
 
-use crate::JSON::{self, Json};
+use crate::JSON::{self, JSONValue};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -264,7 +264,7 @@ pub struct ParsedMeta {
 
 pub fn parse_meta(text: &str) -> Option<ParsedMeta> {
     let j = JSON::parse(text).ok()?;
-    let get = |k: &str| j.get(k).and_then(Json::as_str).map(str::to_string).ok();
+    let get = |k: &str| j.get(k).and_then(JSONValue::as_str).map(str::to_string).ok();
     let name = get("name")?;
     let reference = get("ref")?;
     let out = get("out")?;

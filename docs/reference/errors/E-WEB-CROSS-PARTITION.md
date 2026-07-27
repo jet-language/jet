@@ -1,10 +1,10 @@
-# E-WEB-CROSS-PARTITION: `wasm_caller` is compiled to Wasm but calls `js_helper`, which lives in Js
+# E-WEB-CROSS-PARTITION: `wasm_caller` is compiled to Wasm but calls `js_helper`, which lives in JS
 
 **Code:** `E-WEB-CROSS-PARTITION`
 
 ## What
 
-`wasm_caller` is compiled to Wasm but calls `js_helper`, which lives in Js
+`wasm_caller` is compiled to Wasm but calls `js_helper`, which lives in JS
 
 ## Why
 
@@ -12,7 +12,7 @@ the web backend keeps DOM/view code in JS and compute in WASM; a direct call acr
 
 ## Fix
 
-move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm|Js)` markers
+move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm|JS)` markers
 
 ## Example
 

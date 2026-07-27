@@ -1188,16 +1188,16 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             }
             _ => false,
         },
-        // Codable encode lowers to `JsonLit` (DataTree/Json foreign enum).
-        TExprKind::JsonLit { arg, .. } => match arg.as_ref() {
+        // Codable encode lowers to `JSONLit` (DataTree/JSON foreign enum).
+        TExprKind::JSONLit { arg, .. } => match arg.as_ref() {
             None => true,
             Some(boxed) => {
                 let (inner, _) = boxed.as_ref();
                 enum_payload_value_type(&inner.ty) && resident_safe_expr(inner, callees)
             }
         },
-        // D-DBDRIVER1: `DbValue.Int(n)` / `.Text(s)` / … — foreign prelude enum.
-        TExprKind::DbValueLit { arg, .. } => match arg.as_ref() {
+        // D-DBDRIVER1: `DBValue.Int(n)` / `.Text(s)` / … — foreign prelude enum.
+        TExprKind::DBValueLit { arg, .. } => match arg.as_ref() {
             None => true,
             Some(boxed) => {
                 let (inner, _) = boxed.as_ref();
@@ -1468,7 +1468,7 @@ fn resident_safe_enum_payload(payload: &TEnumPayload, callees: &HashSet<String>)
     }
 }
 
-/// DataTree/Json Object/Array payloads are Map/List handles; scalars stay as before.
+/// DataTree/JSON Object/Array payloads are Map/List handles; scalars stay as before.
 fn enum_payload_value_type(ty: &Type) -> bool {
     matches!(
         ty,
@@ -2127,7 +2127,7 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             let map_ok = method_kind.is_none()
                 && var2.is_some()
                 && jit_map_string_type(&collection.ty);
-            // `by_value` marks Stream/Iter/HttpBodyChunks. Only Iter<T> is list-
+            // `by_value` marks Stream/Iter/HTTPBodyChunks. Only Iter<T> is list-
             // backed under the JIT host ABI (true lazy handles don't cross).
             let by_value_ok = !*by_value
                 || jet_foundation::Collections::is_iter_type(&collection.ty)
@@ -2847,13 +2847,13 @@ pub(crate) fn opaque_host_handle_ty(ty: &Type) -> bool {
                 | "UdpSocket"
                 | "UnixListener"
                 | "UnixStream"
-                | "HttpMux"
-                | "HttpServer"
-                | "HttpHandler"
-                | "HttpRequest"
-                | "HttpResponse"
-                | "HttpBody"
-                | "HttpHeaders"
+                | "HTTPMux"
+                | "HTTPServer"
+                | "HTTPHandler"
+                | "HTTPRequest"
+                | "HTTPResponse"
+                | "HTTPBody"
+                | "HTTPHeaders"
                 | "WsConn"
                 | "WsMessage"
         ),
@@ -3086,16 +3086,16 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             true
         }
         THandleOp::StderrFlush | THandleOp::StderrIsTty if args.is_empty() => true,
-        THandleOp::DbQuery | THandleOp::DbQueryOne | THandleOp::DbExecute if args.len() == 2 => true,
-        THandleOp::DbBegin
-        | THandleOp::DbCommit
-        | THandleOp::DbRollback
-        | THandleOp::DbClose
-        | THandleOp::DbValueInt
-        | THandleOp::DbValueFloat
-        | THandleOp::DbValueText
-        | THandleOp::DbValueBool
-        | THandleOp::DbValueIsNull
+        THandleOp::DBQuery | THandleOp::DBQueryOne | THandleOp::DBExecute if args.len() == 2 => true,
+        THandleOp::DBBegin
+        | THandleOp::DBCommit
+        | THandleOp::DBRollback
+        | THandleOp::DBClose
+        | THandleOp::DBValueInt
+        | THandleOp::DBValueFloat
+        | THandleOp::DBValueText
+        | THandleOp::DBValueBool
+        | THandleOp::DBValueIsNull
             if args.is_empty() =>
         {
             true
@@ -3182,17 +3182,17 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             _ => false,
         },
         THandleOp::DataTreeField
-        | THandleOp::JsonField
+        | THandleOp::JSONField
         | THandleOp::DataTreeAt
-        | THandleOp::JsonAt => args.len() == 1,
+        | THandleOp::JSONAt => args.len() == 1,
         THandleOp::DataTreeInt
-        | THandleOp::JsonInt
+        | THandleOp::JSONInt
         | THandleOp::DataTreeText
-        | THandleOp::JsonText
+        | THandleOp::JSONText
         | THandleOp::DataTreeBool
-        | THandleOp::JsonBool
+        | THandleOp::JSONBool
         | THandleOp::DataTreeFloat
-        | THandleOp::JsonFloat => args.is_empty(),
+        | THandleOp::JSONFloat => args.is_empty(),
         THandleOp::SerdeEncode => args.is_empty(),
         THandleOp::DataTreeDecode(_) => args.is_empty(),
         THandleOp::JSONReaderNext
@@ -3287,21 +3287,21 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::TcpListenerLocalAddr
         | THandleOp::TcpStreamClose => args.is_empty(),
         THandleOp::TcpStreamReadText | THandleOp::TcpStreamWriteAllBytes if args.len() == 1 => true,
-        THandleOp::HttpClientMethod { kind, method } => match (kind.as_str(), method.as_str()) {
-            ("HttpResponse", "status" | "body" | "cookies") if args.is_empty() => true,
-            ("HttpResponse", "header") if args.len() == 1 => true,
-            ("HttpBody", "text") if args.len() == 1 => true,
-            ("HttpRequest", "form" | "cookie" | "header") if args.len() == 2 => true,
-            ("HttpRequest", "redirects" | "connect_timeout" | "read_timeout")
+        THandleOp::HTTPClientMethod { kind, method } => match (kind.as_str(), method.as_str()) {
+            ("HTTPResponse", "status" | "body" | "cookies") if args.is_empty() => true,
+            ("HTTPResponse", "header") if args.len() == 1 => true,
+            ("HTTPBody", "text") if args.len() == 1 => true,
+            ("HTTPRequest", "form" | "cookie" | "header") if args.len() == 2 => true,
+            ("HTTPRequest", "redirects" | "connect_timeout" | "read_timeout")
                 if args.len() == 1 =>
             {
                 true
             }
-            ("HttpRequest", "send") if args.is_empty() => true,
+            ("HTTPRequest", "send") if args.is_empty() => true,
             _ => false,
         },
-        THandleOp::HttpServerMethod { kind, method } => match (kind.as_str(), method.as_str()) {
-            ("HttpMux", m)
+        THandleOp::HTTPServerMethod { kind, method } => match (kind.as_str(), method.as_str()) {
+            ("HTTPMux", m)
                 if matches!(
                     m,
                     "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
@@ -3309,27 +3309,27 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             {
                 true
             }
-            ("HttpMux", "middleware") if args.len() == 1 => true,
-            ("HttpHandler", "handle") if args.len() == 1 => true,
-            ("HttpRequest", "body" | "method" | "path" | "trailers" | "body_len")
+            ("HTTPMux", "middleware") if args.len() == 1 => true,
+            ("HTTPHandler", "handle") if args.len() == 1 => true,
+            ("HTTPRequest", "body" | "method" | "path" | "trailers" | "body_len")
                 if args.is_empty() =>
             {
                 true
             }
-            ("HttpRequest", "param" | "header" | "under_limit") if args.len() == 1 => true,
-            ("HttpBody", "text") if args.len() == 1 => true,
-            ("HttpResponse", "status" | "body") if args.is_empty() => true,
-            ("HttpResponse", "trailers") if args.len() == 1 => true,
-            ("HttpServer", "local_addr" | "serve") if args.is_empty() => true,
-            ("HttpServer", "shutdown") if args.len() == 1 => true,
+            ("HTTPRequest", "param" | "header" | "under_limit") if args.len() == 1 => true,
+            ("HTTPBody", "text") if args.len() == 1 => true,
+            ("HTTPResponse", "status" | "body") if args.is_empty() => true,
+            ("HTTPResponse", "trailers") if args.len() == 1 => true,
+            ("HTTPServer", "local_addr" | "serve") if args.is_empty() => true,
+            ("HTTPServer", "shutdown") if args.len() == 1 => true,
             ("WsConn", "recv") if args.is_empty() => true,
             ("WsConn", "send_text") if args.len() == 1 => true,
             ("WsConn", "close") if args.len() == 2 => true,
             ("WsMessage", "is_text" | "text") if args.is_empty() => true,
             _ => false,
         },
-        THandleOp::HttpReqTrailers => args.is_empty(),
-        THandleOp::HttpRespTrailers => args.len() == 1,
+        THandleOp::HTTPReqTrailers => args.is_empty(),
+        THandleOp::HTTPRespTrailers => args.len() == 1,
         THandleOp::MathMethod { .. } => true,
         _ => false,
     }

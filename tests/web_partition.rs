@@ -108,7 +108,7 @@ fn recursive_map_export_remains_an_honest_unsupported_error() {
 #WasmExport
 fn echo(values: [String: [Int]]) => [String: [Int]] { return ~values }
 
-#Target(Js)
+#Target(JS)
 fn run() {}
 "#;
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_recursive_map.jet")
@@ -125,7 +125,7 @@ fn unsigned_sized_map_export_remains_an_honest_unsupported_error() {
 #WasmExport
 fn echo(values: [String: U64]) => [String: U64] { return ~values }
 
-#Target(Js)
+#Target(JS)
 fn run() {}
 "#;
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_map_u64.jet")
@@ -142,7 +142,7 @@ fn narrow_sized_map_export_remains_an_honest_unsupported_error() {
 #WasmExport
 fn echo(values: [String: I32]) => [String: I32] { return ~values }
 
-#Target(Js)
+#Target(JS)
 fn run() {}
 "#;
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_map_i32.jet")
@@ -210,13 +210,13 @@ fn dom_fn() {
         web_partition_enforced: false,
         web_partition_report: None,
         dep_roots: Default::default(),
-        active_os: jet::Syntax::OsTarget::host(),
+        active_os: jet::Syntax::OSTarget::host(),
         edition: "2026".to_string(),
     };
     jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert_eq!(
         bundle.web_partitions.get("dom_fn"),
-        Some(&jet::Syntax::WebBucket::Js)
+        Some(&jet::Syntax::WebBucket::JS)
     );
 }
 
@@ -257,11 +257,11 @@ fn imported_same_leaf_helpers_keep_distinct_buckets() {
         &[
             (
                 "main.jet",
-                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#Target(Js)\nfn run() { print(left.value() + right.value()) }\n",
+                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#Target(JS)\nfn run() { print(left.value() + right.value()) }\n",
             ),
             (
                 "left.jet",
-                "#Target(Js)\nfn helper() => Int { return 1 }\n#Target(Js)\npub fn value() => Int { return helper() }\n",
+                "#Target(JS)\nfn helper() => Int { return 1 }\n#Target(JS)\npub fn value() => Int { return helper() }\n",
             ),
             (
                 "right.jet",
@@ -275,11 +275,11 @@ fn imported_same_leaf_helpers_keep_distinct_buckets() {
     let mut parts = manifest_partitions(&web.manifest_json);
     parts.sort();
     let mut expected = [
-        ("left__helper".into(), "Js".into()),
-        ("left__value".into(), "Js".into()),
+        ("left__helper".into(), "JS".into()),
+        ("left__value".into(), "JS".into()),
         ("right__helper".into(), "Wasm".into()),
         ("right__value".into(), "Wasm".into()),
-        ("run".into(), "Js".into()),
+        ("run".into(), "JS".into()),
     ];
     expected.sort();
     assert_eq!(parts, expected);
@@ -295,7 +295,7 @@ fn exported() => Int { return 3 }
 #Target(Wasm)
 fn pinned() => Int { return 4 }
 
-#Target(Js)
+#Target(JS)
 fn run() { print(exported()) }
 "#;
     let out = jet::compile_web_with_path(src, "tests/fixtures/web_partition_pins.jet")
@@ -306,7 +306,7 @@ fn run() { print(exported()) }
     let mut expected = [
         ("exported".into(), "Wasm".into()),
         ("pinned".into(), "Wasm".into()),
-        ("run".into(), "Js".into()),
+        ("run".into(), "JS".into()),
     ];
     expected.sort();
     assert_eq!(parts, expected);
@@ -324,10 +324,10 @@ fn run() { print(exported()) }
 fn inline_module_callback_keeps_qualified_js_partition() {
     let src = r#"#Target(Web)
 module handlers {
-    #Target(Js)
+    #Target(JS)
     pub fn init() { print("ready") }
 }
-#Target(Js)
+#Target(JS)
 fn run() { handlers.init() }
 "#;
     let out = jet::compile_web_with_path(src, "tests/fixtures/web_partition_callback.jet")
@@ -335,11 +335,11 @@ fn run() { handlers.init() }
     let web = out.web.expect("web artifacts");
     let parts = manifest_partitions(&web.manifest_json);
     assert!(
-        parts.iter().any(|(k, b)| k == "handlers__init" && b == "Js"),
+        parts.iter().any(|(k, b)| k == "handlers__init" && b == "JS"),
         "callback module must stay JS-qualified: {parts:?}"
     );
     assert!(
-        parts.iter().any(|(k, b)| k == "run" && b == "Js"),
+        parts.iter().any(|(k, b)| k == "run" && b == "JS"),
         "entry must stay JS: {parts:?}"
     );
 }

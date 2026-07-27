@@ -1,15 +1,15 @@
 //! D-OSTARGET1=A (ratified 2026-07-01, c134): native OS platform gating.
 //! Mirrors `WebPartition.rs`'s shape — one structural check, one signature
-//! check — for the second, mutually-exclusive `#Target(Os.*)` axis of the
+//! check — for the second, mutually-exclusive `#Target(OS.*)` axis of the
 //! same `#Target(...)` marker family.
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Syntax::{self, OsTarget as Os};
+use crate::Syntax::{self, OSTarget as OS};
 use crate::AST::{Expr, Func, Item, LambdaBody, Pattern, ProgramBundle, Stmt, SwitchArm, Type};
 use std::collections::HashMap;
 
 /// D-OSTARGET2=B (ratified 2026-07-03): fold every `comptime if build.os == {
-/// .Linux -> … .Macos -> … .Windows -> … [else -> …] }` switch to the arm
+/// .Linux -> … .MacOS -> … .Windows -> … [else -> …] }` switch to the arm
 /// matching this build's active OS (`bundle.active_os`), discarding the rest.
 ///
 /// Runs as the very first step of `check_bundle`, before any other sema pass or
@@ -17,7 +17,7 @@ use std::collections::HashMap;
 /// only ever meet the *taken* arm (constructing an OS-gated type inside it is
 /// legal; the dead arms never trip `E-OSTARGET-UNMATCHED-CALL` and never reach
 /// rustc). The rewrite lowers each switch into a chain of `Stmt::ComptimeIf`
-/// whose arm conditions are the compile-time constants `build.os == .Os`
+/// whose arm conditions are the compile-time constants `build.os == .OS`
 /// (emitted here as a `Bool` literal), so all the existing `comptime if`
 /// machinery — arm selection, dropped-arm name resolution (D-WHEN2), codegen —
 /// handles it unchanged. `build.os` is meaningful only as this switch's
@@ -60,7 +60,7 @@ pub fn desugar_os_switches(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
 /// Recurse through every body-bearing statement, rewriting `ComptimeSwitch` in
 /// place. Also descends into lambda block bodies and value-position `if`
 /// branches so a switch nested in an expression is still folded.
-fn desugar_stmts(stmts: &mut Vec<Stmt>, active: Os, diags: &mut Vec<Diagnostic>) {
+fn desugar_stmts(stmts: &mut Vec<Stmt>, active: OS, diags: &mut Vec<Diagnostic>) {
     for stmt in stmts.iter_mut() {
         // Recurse into child blocks first, then fold this node if it is a switch.
         match stmt {
@@ -86,7 +86,7 @@ fn desugar_stmts(stmts: &mut Vec<Stmt>, active: Os, diags: &mut Vec<Diagnostic>)
 }
 
 /// Descend into every statement body a non-switch statement carries.
-fn desugar_child_blocks(stmt: &mut Stmt, active: Os, diags: &mut Vec<Diagnostic>) {
+fn desugar_child_blocks(stmt: &mut Stmt, active: OS, diags: &mut Vec<Diagnostic>) {
     match stmt {
         Stmt::Expr(e) | Stmt::Yield(e, _) => desugar_expr(e, active, diags),
         Stmt::Val(b) => desugar_expr(&mut b.init, active, diags),
@@ -138,7 +138,7 @@ fn desugar_child_blocks(stmt: &mut Stmt, active: Os, diags: &mut Vec<Diagnostic>
     }
 }
 
-fn desugar_if(ifs: &mut crate::AST::IfStmt, active: Os, diags: &mut Vec<Diagnostic>) {
+fn desugar_if(ifs: &mut crate::AST::IfStmt, active: OS, diags: &mut Vec<Diagnostic>) {
     desugar_stmts(&mut ifs.then_body, active, diags);
     match &mut ifs.else_branch {
         Some(crate::AST::ElseBranch::ElseIf(inner)) => desugar_if(inner, active, diags),
@@ -149,7 +149,7 @@ fn desugar_if(ifs: &mut crate::AST::IfStmt, active: Os, diags: &mut Vec<Diagnost
 
 /// Descend into the few expression shapes that can hold statement blocks
 /// (lambda block bodies, value-position `if` branches).
-fn desugar_expr(e: &mut Expr, active: Os, diags: &mut Vec<Diagnostic>) {
+fn desugar_expr(e: &mut Expr, active: OS, diags: &mut Vec<Diagnostic>) {
     match e {
         Expr::Lambda(l) => {
             if let LambdaBody::Block(body) = &mut l.body {
@@ -172,7 +172,7 @@ fn desugar_expr(e: &mut Expr, active: Os, diags: &mut Vec<Diagnostic>) {
 /// Validate one `comptime if build.os == { … }` switch and rewrite it into the
 /// nested `ComptimeIf` chain. On a validation error, returns an empty block
 /// (`ComptimeBlock` with no body) so the surrounding statements still check.
-fn fold_switch(sw: Stmt, active: Os, diags: &mut Vec<Diagnostic>) -> Stmt {
+fn fold_switch(sw: Stmt, active: OS, diags: &mut Vec<Diagnostic>) -> Stmt {
     let Stmt::ComptimeSwitch {
         subject,
         arms,
@@ -196,8 +196,8 @@ fn fold_switch(sw: Stmt, active: Os, diags: &mut Vec<Diagnostic>) -> Stmt {
     }
 
     // Each arm head must be a bare, payload-free OS variant; collect them.
-    let mut arm_os: Vec<(Os, Vec<Stmt>, Span)> = Vec::new();
-    let mut seen: Vec<Os> = Vec::new();
+    let mut arm_os: Vec<(OS, Vec<Stmt>, Span)> = Vec::new();
+    let mut seen: Vec<OS> = Vec::new();
     let mut had_error = false;
     for arm in arms {
         match arm_variant(&arm) {
@@ -227,7 +227,7 @@ fn fold_switch(sw: Stmt, active: Os, diags: &mut Vec<Diagnostic>) -> Stmt {
 
     // Exhaustiveness (build-independent): every OS covered, or an `else`.
     if else_body.is_none() {
-        let missing: Vec<&str> = [Os::Linux, Os::Macos, Os::Windows]
+        let missing: Vec<&str> = [OS::Linux, OS::MacOS, OS::Windows]
             .into_iter()
             .filter(|os| !seen.contains(os))
             .map(|os| os.name())
@@ -260,8 +260,8 @@ fn fold_switch(sw: Stmt, active: Os, diags: &mut Vec<Diagnostic>) -> Stmt {
 }
 
 /// The OS variant an arm head names, or `None` if it isn't a bare payload-free
-/// OS variant (`.Linux`/`.Macos`/`.Windows`).
-fn arm_variant(arm: &SwitchArm) -> Option<Os> {
+/// OS variant (`.Linux`/`.MacOS`/`.Windows`).
+fn arm_variant(arm: &SwitchArm) -> Option<OS> {
     let Expr::PatternTest { pattern, .. } = &arm.cond else {
         return None;
     };
@@ -274,7 +274,7 @@ fn arm_variant(arm: &SwitchArm) -> Option<Os> {
     if !bindings.is_empty() {
         return None;
     }
-    Os::parse(variant)
+    OS::parse(variant)
 }
 
 /// A short display of a bad arm head for the diagnostic.
@@ -295,8 +295,8 @@ fn empty_stmt(span: Span) -> Stmt {
     }
 }
 
-/// Walk the bundle: flag a `#Target(Os.*)`-gated impl whose enclosing file/
-/// module also carries a web-bucket ceiling (`#Target(Wasm)`/`#Target(Js)`)
+/// Walk the bundle: flag a `#Target(OS.*)`-gated impl whose enclosing file/
+/// module also carries a web-bucket ceiling (`#Target(Wasm)`/`#Target(JS)`)
 /// — a structural conflict between the two mutually-exclusive axes
 /// (E-OSTARGET-MIXED-AXIS) — and flag a function/method that isn't itself
 /// gated to match but takes or returns a value of a gated type
@@ -313,7 +313,7 @@ fn empty_stmt(span: Span) -> Stmt {
 /// it can't see a caller reaching a gated `impl`'s methods either way.
 pub fn check_os_target(bundle: &ProgramBundle) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
-    let mut gate_of_type: HashMap<String, Os> = HashMap::new();
+    let mut gate_of_type: HashMap<String, OS> = HashMap::new();
 
     for module in &bundle.modules {
         for item in &module.items {
@@ -348,7 +348,7 @@ pub fn check_os_target(bundle: &ProgramBundle) -> Vec<Diagnostic> {
 
 fn check_items_signatures(
     items: &[Item],
-    gate_of_type: &HashMap<String, Os>,
+    gate_of_type: &HashMap<String, OS>,
     diags: &mut Vec<Diagnostic>,
 ) {
     for item in items {
@@ -376,8 +376,8 @@ fn check_items_signatures(
 
 fn check_func_sig(
     f: &Func,
-    own_gate: Option<Os>,
-    gate_of_type: &HashMap<String, Os>,
+    own_gate: Option<OS>,
+    gate_of_type: &HashMap<String, OS>,
     diags: &mut Vec<Diagnostic>,
 ) {
     let mut flag = |type_name: &str| {

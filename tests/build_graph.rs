@@ -18,7 +18,7 @@ fn registers_typed_targets_and_default_plan() {
             ActionSpec::cached(["jet-tool", "pack"])
                 .with_inputs(["assets/sprite.png"])
                 .with_outputs([".jet/generated/assets.jet"])
-                .with_cap(BuildCapability::Fs),
+                .with_cap(BuildCapability::FS),
         )
         .unwrap();
     let lib = b
@@ -417,7 +417,7 @@ fn outputless_commands_are_explicit_uncached_phony_actions() {
         .action(
             "clean-generated",
             ActionSpec::uncached_phony(["rm", "-rf", ".jet/generated"])
-                .with_cap(BuildCapability::Fs),
+                .with_cap(BuildCapability::FS),
         )
         .unwrap();
 
@@ -623,7 +623,7 @@ fn action_keys_are_deterministic_and_cover_cache_contract() {
             "release",
             "src/main.jet",
             "build/main.o",
-            BuildCapability::Fs,
+            BuildCapability::FS,
             "x86_64-linux",
             "sqlite3",
             "developer-id:ACME",
@@ -1038,7 +1038,7 @@ fn graph_query_explain_and_rebuild_reasons_share_plan_provenance() {
             ActionSpec::cached(["schema-gen", "schema/app.sql"])
                 .with_inputs(["schema/app.sql"])
                 .with_outputs([".jet/generated/schema.jet"])
-                .with_cap(BuildCapability::Fs),
+                .with_cap(BuildCapability::FS),
         )
         .unwrap();
     let lib = b
@@ -1114,7 +1114,7 @@ fn legacy_wrappers_are_typed_declared_and_policy_denied_without_ambient_authorit
             .with_inputs(["legacy/project"])
             .with_outputs([format!("build/{}", kind.as_str())])
             .with_cap(BuildCapability::Exec)
-            .with_cap(BuildCapability::Fs)
+            .with_cap(BuildCapability::FS)
             .into_action_spec(&policy)
             .unwrap();
         assert_eq!(action.legacy_wrapper, Some(kind));
@@ -1151,10 +1151,10 @@ fn legacy_wrappers_are_typed_declared_and_policy_denied_without_ambient_authorit
 fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
     let mut b = BuildContext::new();
     let plugin = WasmComponentPluginSpec::new("shader-tools", "1.2.0", "sha256:plugin")
-        .with_capability(BuildCapability::Fs)
+        .with_capability(BuildCapability::FS)
         .with_capability(BuildCapability::Exec);
     let policy = BuildPolicy::allow_all()
-        .with_plugin_grant("shader-tools", BuildCapability::Fs)
+        .with_plugin_grant("shader-tools", BuildCapability::FS)
         .with_plugin_grant("shader-tools", BuildCapability::Exec);
     let contribution = PluginContribution::new()
         .with_action(
@@ -1162,7 +1162,7 @@ fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
             ActionSpec::cached(["shaderc", "assets/main.glsl"])
                 .with_inputs(["assets/main.glsl"])
                 .with_outputs([".jet/generated/shaders.jet"])
-                .with_cap(BuildCapability::Fs)
+                .with_cap(BuildCapability::FS)
                 .with_cap(BuildCapability::Exec),
         )
         .with_target(
@@ -1225,14 +1225,14 @@ fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
     let contributed_cap_denied = BuildContext::new()
         .apply_wasm_component_plugin(
             WasmComponentPluginSpec::new("net-plugin", "1.0.0", "sha256:net")
-                .with_capability(BuildCapability::Fs),
+                .with_capability(BuildCapability::FS),
             PluginContribution::new().with_action(
                 "probe-network",
                 ActionSpec::cached(["curl", "https://example.invalid"])
                     .with_outputs(["build/net.txt"])
                     .with_cap(BuildCapability::Net),
             ),
-            &BuildPolicy::allow_all().with_plugin_grant("net-plugin", BuildCapability::Fs),
+            &BuildPolicy::allow_all().with_plugin_grant("net-plugin", BuildCapability::FS),
         )
         .unwrap_err();
     assert!(matches!(

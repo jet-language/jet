@@ -363,7 +363,7 @@ pub fn apply_static_type_method(
             Some(Ok(match String::from_utf8(bytes) {
                 Ok(text) => CtValue::ResOk(Box::new(CtValue::Str(text))),
                 Err(error) => CtValue::ResErr(Box::new(CtValue::Struct {
-                    type_name: "Utf8Error".to_string(),
+                    type_name: "UTF8Error".to_string(),
                     fields: vec![(
                         "message".to_string(),
                         CtValue::Str(error.to_string()),
@@ -697,14 +697,14 @@ pub fn apply_method(
             _ => CtValue::None(Type::Int),
         }),
         (CtValue::None(t), "zip") => Ok(CtValue::None(t.clone())),
-        // D-SERDE-ACCESS=B: dynamic `Json`/`Data` accessors — `Option`-returning
-        // reads over the tagged tree `JsonInterp::json_variant` builds
-        // (`.parse()`'s result, or a value built by hand with `Json.Object(…)`).
+        // D-SERDE-ACCESS=B: dynamic `JSON`/`Data` accessors — `Option`-returning
+        // reads over the tagged tree `JSONInterp::json_variant` builds
+        // (`.parse()`'s result, or a value built by hand with `JSON.Object(…)`).
         // `.field`/`.at` don't match a non-Object/Array receiver or a missing
         // key/index; `.int`/`.text`/`.bool`/`.float` don't match a value tagged
         // with a different variant — all four report absence via `None` rather
         // than an error, matching the `?? panic(…)` call-site convention.
-        // Guarded to an actual `Json`-tagged value (`v @ CtValue::Enum { .. }`)
+        // Guarded to an actual `JSON`-tagged value (`v @ CtValue::Enum { .. }`)
         // rather than matching any receiver — `.int`/`.float` in particular
         // would otherwise shadow the `core.random` RNG struct's own same-named
         // methods further down (match arms are tried in order).
@@ -713,46 +713,46 @@ pub fn apply_method(
                 Some(CtValue::Str(s)) => s,
                 _ => return Err(unsupported("`.field` requires a string argument", span)),
             };
-            Ok(match super::JsonInterp::json_payload(v, "Object") {
+            Ok(match super::JSONInterp::json_payload(v, "Object") {
                 Some(CtValue::Map(m)) => match m.get(&CtKey::Str(key)) {
                     Some(found) => CtValue::Some(Box::new(found.clone())),
-                    None => CtValue::None(Type::Named("Json".to_string())),
+                    None => CtValue::None(Type::Named("JSON".to_string())),
                 },
                 Some(CtValue::Struct { fields, .. }) => match fields.iter().find(|(n, _)| n == &key)
                 {
                     Some((_, found)) => CtValue::Some(Box::new(found.clone())),
-                    None => CtValue::None(Type::Named("Json".to_string())),
+                    None => CtValue::None(Type::Named("JSON".to_string())),
                 },
-                _ => CtValue::None(Type::Named("Json".to_string())),
+                _ => CtValue::None(Type::Named("JSON".to_string())),
             })
         }
         (v @ CtValue::Enum { .. }, "at") => {
             let i = as_int(args.first().unwrap_or(&CtValue::Int(-1)), span)?;
-            Ok(match super::JsonInterp::json_payload(v, "Array") {
+            Ok(match super::JSONInterp::json_payload(v, "Array") {
                 Some(CtValue::List(xs)) if i >= 0 && (i as usize) < xs.len() => {
                     CtValue::Some(Box::new(xs[i as usize].clone()))
                 }
-                _ => CtValue::None(Type::Named("Json".to_string())),
+                _ => CtValue::None(Type::Named("JSON".to_string())),
             })
         }
-        (v @ CtValue::Enum { .. }, "int") => Ok(match super::JsonInterp::json_payload(v, "Int") {
+        (v @ CtValue::Enum { .. }, "int") => Ok(match super::JSONInterp::json_payload(v, "Int") {
             Some(n) => CtValue::Some(Box::new(n.clone())),
             None => CtValue::None(Type::Int),
         }),
         (v @ CtValue::Enum { .. }, "text") => {
-            Ok(match super::JsonInterp::json_payload(v, "Text") {
+            Ok(match super::JSONInterp::json_payload(v, "Text") {
                 Some(s) => CtValue::Some(Box::new(s.clone())),
                 None => CtValue::None(Type::String),
             })
         }
         (v @ CtValue::Enum { .. }, "bool") => {
-            Ok(match super::JsonInterp::json_payload(v, "Bool") {
+            Ok(match super::JSONInterp::json_payload(v, "Bool") {
                 Some(b) => CtValue::Some(Box::new(b.clone())),
                 None => CtValue::None(Type::Bool),
             })
         }
         (v @ CtValue::Enum { .. }, "float") => {
-            Ok(match super::JsonInterp::json_payload(v, "Float") {
+            Ok(match super::JSONInterp::json_payload(v, "Float") {
                 Some(f) => CtValue::Some(Box::new(f.clone())),
                 None => CtValue::None(Type::Float),
             })

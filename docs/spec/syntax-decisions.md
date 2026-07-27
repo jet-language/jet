@@ -37,8 +37,14 @@ constants. The compiler enforces the law; casing drift is a coded diagnostic,
 not a convention. Foreign names in FFI bindings are exempt inside binding
 modules per D-SHAPE-CASE2=A (FFI section).
 
-**S66 — Standard acronyms fully capitalized** *(D-ACRONYM-CANON1)*: `JSON`,
-`TOML`, `YAML`, `CSV`, `IOError`, `UTF8Error`, `U8`. No PascalCase aliases.
+**S66 — Standard acronyms fully capitalized** *(D-ACRONYM-CANON1; applied by
+D-ACRO-CASE1=A + D-ACRO-LEX1=A)*: initials-formed names stay all-caps inside
+PascalCase — `JSON`, `TOML`, `YAML`, `CSV`, `HTTP`, `CLI`, `SQL`, `IOError`,
+`UTF8Error`, `U8`, `MacOS`, and the closed lexicon in
+`Syntax::ACRONYM_RESPILLS`. Glued compounds (`HTTPHeader`); underscore only
+between touching capital runs (`HTTP_API`). Coined contractions stay words:
+`Wasm`, `WasmExport`, `Bindgen`. No PascalCase aliases; retired spellings get
+one teaching fix (E0358 / E0927).
 
 **S84 — Hyphens in package/module/system/image/env names**: kebab-case allowed
 in these *name* positions (`image.halcyon-iso`, `module web-app`). Grammar:
@@ -119,7 +125,7 @@ named callable uses `= expression` after its result type:
 ```jet
 fn double(value: Int) => Int = value * 2
 
-fn load(path: String) =[Fs]=> String {
+fn load(path: String) =[FS]=> String {
     text :: core.files.read(path)?
     text.trim()
 }
@@ -133,7 +139,7 @@ form. A Void callable with no explicit effect ceiling needs no arrow.
 `fn run() => Void ?` (S80, D-S80-RUN1). **D-CLIFLAG1** (implemented, c7cliflag): a
 typed entry parameter optionally opts into CLI parsing — `fn run(args: ServeArgs)`
 derives `--flag` names/defaults/help from the struct's fields
-(`#Cli`/`#Doc("...")` markers, bracket form matching `#Codable`); an
+(`#CLI`/`#Doc("...")` markers, bracket form matching `#Codable`); an
 `enum` param derives subcommands. There is no Jet `main` entry and no
 variadic entry signature. Raw argv access stays explicit inside `fn run()`
 via `core.args`/`core.io.args`. See docs/spec/spec.md
@@ -143,7 +149,7 @@ for non-entry parsing; the typed layer generates onto it rather than adding
 a second parser.
 
 **D-CLI-POS1=A — positional by default, `#Flag` to opt out** *(ratified
-2026-07-23, card #748)*: on a `#Cli` struct, required value fields fill from
+2026-07-23, card #748)*: on a `#CLI` struct, required value fields fill from
 bare argv in declaration order. Boolean flags and optional/defaulted fields stay
 flag-only. Every field still accepts its named `--field` spelling; when both the
 named form and a bare value appear for the same field, the named value wins.
@@ -832,7 +838,7 @@ there is no public `enumerate` adapter.
 `Bag<T>`, `BitSet`, and `ByteBuffer` in Core (E0506). `[K: V]` is the default
 ordered map spelling; specialized map names stay reserved. **D-ENC-DYN1**:
 `DataTree` is the single dynamic value
-(`.Object/.Array/.Int/.Float/.Text/.Bool/.Null`); `Json`/`Toml`/`Yaml`/`Csv`
+(`.Object/.Array/.Int/.Float/.Text/.Bool/.Null`); `JSON`/`TOML`/`YAML`/`CSV`
 are aliases over it. **Declined**: `[..]T` spelling — zero-copy comes as
 `View<T>` library type (D-DYNARRAY1).
 
@@ -878,12 +884,12 @@ holes with no literal text between them is E0147 (add an anchor, or type
 them so the boundary is unambiguous); a hole-free string in pattern position
 is plain text equality, not a pattern (I8). **D-TYPEDTEXT1 — Typed text**: a
 string literal (with or without interpolation) in a position whose expected
-type is `Sql`/`Html` elaborates to that checked value instead of `String` —
-each `{hole}` becomes a bound parameter (Sql) or an HTML-escaped insertion
-(Html); a runtime `String` reaching the position directly is E0149.
-`Sql.raw("…")`/`Html.raw("…")` is the sole audited escape. Implemented for
+type is `SQL`/`HTML` elaborates to that checked value instead of `String` —
+each `{hole}` becomes a bound parameter (SQL) or an HTML-escaped insertion
+(HTML); a runtime `String` reaching the position directly is E0149.
+`SQL.raw("…")`/`HTML.raw("…")` is the sole audited escape. Implemented for
 the expected-type path (function params, bindings); `.template()`/
-`.params()` (Sql) and `.text()` (Html) read the checked value back.
+`.params()` (SQL) and `.text()` (HTML) read the checked value back.
 **D-TYPEDTEXT2 — Typed text amendment**: hole-free string literals also
 elaborate (not just interpolated ones); `sql"…"`/`html"…"` prefixes for
 bindings without an expected type use the same typed-text rewrite as
@@ -1158,7 +1164,7 @@ with the canonical `#Rule` fix.
 **D-SHAPE2=A — One applied-rule marker** *(ratified 2026-07-14, card #534;
 sigil assignment superseded by D-VERDICT-732-1)*: every typed rule uses the
 single `#Rule` mechanism. Non-rule `#` constructs remain unchanged: effect sets
-`#(Fs)`, fixed lists
+`#(FS)`, fixed lists
 `[T#N]`, package selectors `pkg#1.2.3`, and the compile-time value `#Caller()`.
 `$` is splice-only.
 
@@ -1226,8 +1232,8 @@ teaches `{value#Debug}` because `@` belongs to the location/address/source plane
 
 **D-MARK-TARGET1=A — one target-marker family** *(ratified 2026-07-11, card
 #498)*: `#Target(…)` is the only target-partition spelling, for every axis —
-`#Target(Wasm)`, `#Target(Js)`, `#Target(Web)`, `#Target(Os.Linux)`. The
-bare `#Wasm` and `#Js` markers are removed from the grammar (ordinary
+`#Target(Wasm)`, `#Target(JS)`, `#Target(Web)`, `#Target(OS.Linux)`. The
+bare `#Wasm` and `#JS` markers are removed from the grammar (ordinary
 unknown-marker errors, no teaching residue). `#WasmExport` is a different
 job (export surface) and is untouched.
 
@@ -1590,7 +1596,7 @@ exits — deadline first, then cancel.
 ### Effects & safety
 
 **D-EFF1 — Effect system**: inferred per-fn effect sets (Koka-style rows),
-erased in codegen. Assert or restrict via `=[Net, Db]=>` on a signature and
+erased in codegen. Assert or restrict via `=[Net, DB]=>` on a signature and
 `#Caps(Net) { … }` regions.
 
 **D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,
@@ -1605,20 +1611,20 @@ spellings are retired; no alias exists.
 empty effect row `=[]=>` is the checked purity signature; violations name the
 impure call path. The same empty row works in function-type bounds.
 
-**D-EFF4 / D-EFF5 — Vocabulary**: closed set of ten tree ROOTS — `Net`, `Fs`,
-`Io`, `Db`, `Time`, `Rand`, `Env`, `Exec`, `Log`, `Gpu`; unknown root E0119.
-Amended by D-EFFTREE1: a root may be dotted into an open leaf path (`Fs.Read`)
+**D-EFF4 / D-EFF5 — Vocabulary**: closed set of ten tree ROOTS — `Net`, `FS`,
+`IO`, `DB`, `Time`, `Rand`, `Env`, `Exec`, `Log`, `GPU`; unknown root E0119.
+Amended by D-EFFTREE1: a root may be dotted into an open leaf path (`FS.Read`)
 and ancestor matching is subsumption. `effect <Name>` user declarations
 reserved, unminted.
 
 **D-EFFTREE1 — Effect tree** *(ratified 2026-07-03, card #181)*: the ten
 D-EFF4/5 names are tree roots; a signature/`#Caps`/`#Grant`/`=[!…]=>` entry may
-be a dotted path rooted at one (`Fs.Read`, `Net.Http.Get`) — root closed
+be a dotted path rooted at one (`FS.Read`, `Net.HTTP.Get`) — root closed
 (E0119), leaf open/user-chosen, no fixed vocabulary or depth limit. Ancestor
 matching is subsumption, the same rule as D-TAG1's tag-tree subtree matching
-learned once and reused: `=[Fs]=>` accepts any `Fs.*` callee; `=[Fs.Read]=>`
-rejects a sibling `Fs.Write` callee; `#Grant(Fs.Read)` doesn't authorize
-`Fs.Write`; `=[!Fs]=>` prohibits the whole `Fs.*` subtree. Reverses E0740 for
+learned once and reused: `=[FS]=>` accepts any `FS.*` callee; `=[FS.Read]=>`
+rejects a sibling `FS.Write` callee; `#Grant(FS.Read)` doesn't authorize
+`FS.Write`; `=[!FS]=>` prohibits the whole `FS.*` subtree. Reverses E0740 for
 the ancestor case, keeps it for out-of-tree/sibling cases. Flat root names
 stay valid (no migration break) — Core stdlib calls are still tagged with a
 bare root; leaf precision is a user-declared-contract concept.
@@ -1637,7 +1643,7 @@ functions may omit an effect bound. `=>` defines the result and never asserts
 purity. A function is pure when its inferred row is empty, or when `=[]=>`
 bounds it empty. Public API snapshots store the inferred normalized
 row and provenance, and semver rejects row changes; an explicit row is
-always available as an upper bound (`=[Fs.Read]=>`). D-EFF3 is unchanged:
+always available as an upper bound (`=[FS.Read]=>`). D-EFF3 is unchanged:
 static calls use each implementation's inferred row, while a trait method
 used through dynamic dispatch keeps its declared upper-bound contract.
 
@@ -1646,26 +1652,26 @@ fn twice(n: Int) => Int = n * 2
 // inferred []: pure
 
 pub fn load(path: String) => String { core.files.read(path)? }
-// API snapshot: load =[Fs.Read]=> String
+// API snapshot: load =[FS.Read]=> String
 
-pub fn bounded(path: String) =[Fs.Read]=> String { core.files.read(path)? }
+pub fn bounded(path: String) =[FS.Read]=> String { core.files.read(path)? }
 fn hash(text: String) =[]=> Int { text.length() }
 
-trait Renderer { fn render(self) =[Gpu]=> Image }
+trait Renderer { fn render(self) =[GPU]=> Image }
 ```
 
 **D-PROP1 / D-PROP2 — Prohibition**: `=[!Net]=>` — the fn and every reachable
 callee must not use the effect (E0749).
 
 **D-SCAP1 — Scoped capabilities** *(amended by D-ARROW-CONTROL1)*:
-`#Grant(caps: Fs) { … }` authorizes effects in a lexical scope and binds an
+`#Grant(caps: FS) { … }` authorizes effects in a lexical scope and binds an
 erased first-class handle in the marker head. An effect
 without backing grant E0712; handle escape E0711.
 
 **D-TAINT1 — Taint** *(D-TAINT-SAN, D-IFC1)*: `#Tainted expr` marks untrusted
 values (closed kinds `.Input`/`.PII`/`.Secret`/`.Credential`; bare = `.Input`);
 taint spreads by dataflow; `#Sanitizer fn` strips by contract (bare
-`sanitizer` E0059); tainted value reaching a `Db`/`Exec`/`Net` sink is E0721.
+`sanitizer` E0059); tainted value reaching a `DB`/`Exec`/`Net` sink is E0721.
 Full IFC deferred post-Epoch 3.
 
 **D-TAINT2=A — Credential taint** *(ratified 2026-07-13)*:
@@ -1679,7 +1685,7 @@ wall-clock/OS-rng/fs/net rejected (E3401/E3403); injectable `Clock`
 (`now/tick/advance/wait`) and `Rng` (`int/float/bool/pick/shuffle`) are the
 pure-callable capabilities; `#Nondeterministic("reason") { }` expert escape (respelled by D-BLOCKPLANE1, 2026-07-12).
 
-**D-REPLAY1**: `#Replayable` rejects any reachable `Time`/`Rand`/`Net`/`Io`
+**D-REPLAY1**: `#Replayable` rejects any reachable `Time`/`Rand`/`Net`/`IO`
 not routed through a deterministic/mockable capability. Implemented by the
 effect fixpoint as E0725; deterministic `Clock`/`Rng` handles remain pure.
 
@@ -1687,7 +1693,7 @@ effect fixpoint as E0725; deterministic `Clock`/`Rng` handles remain pure.
 `?`-failure, mutated locals restore LIFO from auto-snapshots (layer 1);
 `Rollback` trait for custom snapshots (layer 2); `name.on_rollback(() => …)`
 and `name.on_commit(() => …)` explicit hooks (layer 3, Drop-backed).
-Irreversible effects (`Net`/`Fs`/`Exec`) inside the block are E0746 — move
+Irreversible effects (`Net`/`FS`/`Exec`) inside the block are E0746 — move
 after the block or register via `on_commit`.
 
 **D-LIN1 — Single-use values** *(D-LIN1-DROP)*: `#SingleUse` values must be
@@ -2049,7 +2055,7 @@ nullable callback, or alternate callback ABI. Unsupported cases are E3203.
 Generic `Result<T, E>` remains illegal in C declarations: expose a raw C status
 plus out-pointer function and write an ordinary Jet wrapper that initializes
 the out value and maps the status. The compiler invents no error adapter.
-`#Abi(name)` is a per-function marker with no module inheritance. Omission means
+`#ABI(name)` is a per-function marker with no module inheritance. Omission means
 C. `system` selects the target-native convention; `cdecl`, `stdcall`, and
 `fastcall` exist only on Windows x86, `win64` only on Windows x86_64, and
 `sysv64` only on non-Windows x86_64. ARM/AArch64 accept only C/system.
@@ -2473,8 +2479,8 @@ index, not a substitute for that law.
   extension mapping plus `type/subtype; param=value` parsing. `core.http` and
   `core.web` consume typed values instead of re-solving string escaping.
 - **D-EMAIL1=A**: `core.email` is the one provider-neutral email mechanism.
-  `Address`, `Message`, `Attachment`, `Envelope`, `Mailer`, `SmtpConfig`,
-  `SmtpSecurity`, `SmtpAuth`, `DkimConfig`, `SendReport`, `RecipientReport`,
+  `Address`, `Message`, `Attachment`, `Envelope`, `Mailer`, `SMTPConfig`,
+  `SMTPSecurity`, `SMTPAuth`, `DkimConfig`, `SendReport`, `RecipientReport`,
   and `EmailError` cover construction, transport, signing, and honest relay
   acceptance. `smtp_from_env` supplies verified STARTTLS beginner defaults;
   `smtp(config)` exposes the same Mailer with expert policy. Port 587 requires
@@ -2492,14 +2498,14 @@ index, not a substitute for that law.
   `Mailer.send(message)` mechanism. `Envelope` contains `from:Address` and
   `recipients:[Address]`; `email.envelope` validates it, and
   `message.with_envelope(envelope)` replaces only SMTP routing. MIME headers
-  remain unchanged, so Bcc stays envelope-only. `SmtpConfig` contains host,
-  port, `.StartTls`/`.Tls` security, `.None`/`.Password` auth,
+  remain unchanged, so Bcc stays envelope-only. `SMTPConfig` contains host,
+  port, `.StartTls`/`.TLS` security, `.None`/`.Password` auth,
   `.RequireAll`/`.DeliverAccepted` recipient policy, verified system or
   system-plus-CA trust, and bounded `Limits`. Ambient `#Context` alone owns
   deadline and cancellation. `SendReport` records server, accepted and rejected
   recipient reports, final response, and acceptance time; acceptance never
-  claims inbox delivery. `EmailError` is the closed Configuration, Dns, Connect,
-  Tls, Auth, Protocol, Rejected, Transient, TimedOut, Cancelled, and
+  claims inbox delivery. `EmailError` is the closed Configuration, DNS, Connect,
+  TLS, Auth, Protocol, Rejected, Transient, TimedOut, Cancelled, and
   DeliveryUnknown set, each with operation, optional server/code, and reason.
   No trust-all mode, TLS downgrade, plaintext password auth, or automatic retry
   exists.
@@ -2516,7 +2522,7 @@ index, not a substitute for that law.
   bytes as UTF-8 only inside authentication and rejects invalid UTF-8 as
   configuration.
 - **D-EMAIL-DKIM-CONFIG1=A**: optional DKIM policy is the
-  `dkim:DkimConfig?` field on `SmtpConfig`; `None` sends unsigned and `Val(dkim)`
+  `dkim:DkimConfig?` field on `SMTPConfig`; `None` sends unsigned and `Val(dkim)`
   signs every message through that `Mailer`. `DkimConfig` contains exactly
   `domain:String`, `selector:String`, `private_key:Secret`, and
   `signed_headers:[String]`. Signing is fixed to `ed25519-sha256` with
@@ -2630,11 +2636,11 @@ index, not a substitute for that law.
 - **D-NETSOCKET1=A**: `core.net` exposes typed blocking-looking
   TCP/UDP/Unix/DNS/TLS APIs over handles compatible with the task runtime, so
   deadlines, cancellation, readiness, and high-concurrency serving stay one
-  socket model. String entrypoints remain the beginner path; `IpAddr` and
+  socket model. String entrypoints remain the beginner path; `IPAddr` and
   `SocketAddr` are the expert/control path over the same semantics.
 - **D-NETDNS2=A**: ordinary IP resolution delegates to the host resolver and
   therefore preserves hosts files, search domains, VPNs, and enterprise
-  policy. `DnsResolver.at` is the one expert wire-resolver escape hatch. It
+  policy. `DNSResolver.at` is the one expert wire-resolver escape hatch. It
   uses unpredictable transaction IDs, validates sender/header/question and
   every packet bound, follows bounded compression and CNAME chains, retries a
   truncated UDP answer over bounded TCP, and never invents a public resolver.
@@ -2687,7 +2693,7 @@ index, not a substitute for that law.
   Windows IOCP, and remaining platform proof stay tracked by #300;
   #306's shared cancellation/runtime prerequisite is complete.
 - **D-NETTLSSTREAM1=A**: `core.tls.client` consumes a connected `TcpStream` and
-  returns a `TlsStream` with the same byte and close law. Safe defaults verify the server name
+  returns a `TLSStream` with the same byte and close law. Safe defaults verify the server name
   with system roots. The stream uses shared socket readiness, deadlines, cancellation,
   explicit close-notify, underlying write half-close, and idempotent close.
   `ClientConfig.default().with_alpn(protocols)` and the ratified labeled
@@ -2937,7 +2943,7 @@ overlapping gzip rows of D-DEP-ARCHIVE1/D-CODECS1.
 D-LINALG1). `core.db`: backend-neutral `Driver` trait, parameterized-only
 API, SQLite first; explicit `.begin/.commit/.rollback` distinct from
 `#Transact` (D-DBDRIVER1). D-DBMIGRATE1 ships the hybrid database floor:
-checked `Sql` literals feed `db.params(sql)`, rows stay inspectable maps with
+checked `SQL` literals feed `db.params(sql)`, rows stay inspectable maps with
 typed `db.row_*` reads, and `db.transaction`/`db.migrate` provide rollback and
 checksum-recorded migration helpers over the same parameterized path. `core.http`: client+server submodules; client
 supports HTTPS by default via rustls + system roots (D-TLS1=A); server is
@@ -3009,7 +3015,7 @@ widget FFI, all three desktop platforms against one trait seam *(gated)*.
 
 **D-LIVEQUERY1=A — live queries** *(ratified by owner 2026-07-11, card
 #505)*: `app.live(query, args)` accepts only a function whose effect row
-is inside `Db.Read` and whose body has no effects beyond those reads;
+is inside `DB.Read` and whose body has no effects beyond those reads;
 anything else is a compile error naming the offending effect. Sema
 records the query's read footprint; a committed `#Transact` whose write
 set intersects a live footprint invalidates exactly those subscriptions,
@@ -3022,27 +3028,27 @@ tracker, and an `every:` interval option for untracked queries.
 **D-EFFDBREAD1=A — how a live query proves it only reads** *(ratified by
 owner 2026-07-12, card #505)*: the compiler's own closed `core.db` method
 table infers effect **leaves** — `conn.query`/`conn.query_one` carry
-`Db.Read`, `conn.execute` carries `Db.Write` (arbitrary DDL/DML), and the
+`DB.Read`, `conn.execute` carries `DB.Write` (arbitrary DDL/DML), and the
 transaction-control/`close` calls (`begin`/`commit`/`rollback`/`close`)
-keep the plain `Db` root, since they neither read nor write rows
+keep the plain `DB` root, since they neither read nor write rows
 themselves. This is the one exception to D-EFFTREE1's rule that a real
 Core call is only ever tagged with a bare root (leaf precision otherwise
 being a user-declared-contract concept): the shape is rustc special-casing
 a small closed list of known intrinsics, and it touches only the finite
 table the compiler already keeps for its own stdlib signatures — inference
 through ordinary user calls stays bare-root, exactly as D-EFFTREE1
-decided. A read-only query function can therefore *prove* `=[Db.Read]=>` —
+decided. A read-only query function can therefore *prove* `=[DB.Read]=>` —
 the read-footprint qualification `app.live` demands — and a write hiding
 inside such a function is caught by the existing `E0740` check (no new
 diagnostic code). *Reconciliation:* D-LIVEQUERY1's `inWild` stacked
-`#Pure` on top of `#(Db.Read)`; D-SHAPE8 later retired both spellings, so a live
-query now qualifies by its `=[Db.Read]=>` bound alone. `DbConnection` (and
-`DbError`) are now nameable types so a query function can annotate its
+`#Pure` on top of `#(DB.Read)`; D-SHAPE8 later retired both spellings, so a live
+query now qualifies by its `=[DB.Read]=>` bound alone. `DBConnection` (and
+`DBError`) are now nameable types so a query function can annotate its
 connection parameter.
 *Shipped 2026-07-12 (card #505, slice 4 — leaf-inference layer only)*: the
-`Db.Read`/`Db.Write` leaf inference above, the `=[Db.Read]=>` qualification
+`DB.Read`/`DB.Write` leaf inference above, the `=[DB.Read]=>` qualification
 proof, the `E0740` hidden-write reject (`tests/ui/db_read_query_hidden_write`),
-and `DbConnection`/`DbError` nameability, with a runnable example
+and `DBConnection`/`DBError` nameability, with a runnable example
 (`examples/features/io/db_read_footprint.jet`). The remaining `app.live`
 legs — the `app` namespace / app graph (D-WEBAPP1, card #438), the
 `core.ws` push transport (D-WS1; a native std-only WebSocket, I6 forbids a
@@ -3054,17 +3060,17 @@ by cards #438 and #134 and are not yet implemented.
 D-WEBDEFAULT1, D-HTMLPAIR1)*: browser target is `wasm32-unknown-unknown` +
 generated JS loader; DOM work goes through a tiny first-party `JetDom` shim
 (no vdom); hybrid: view emits JS, compute may compile to WASM. `#Target(…)`
-takes `Web`/`Browser`/`Wasm`/`Js` and `Os.Linux`/`Os.Macos`/`Os.Windows`
+takes `Web`/`Browser`/`Wasm`/`JS` and `OS.Linux`/`OS.MacOS`/`OS.Windows`
 (mixing web+OS on one item rejected). Default target: CLI `--target` >
-`pkg.jet` `target:` > file marker. `#Html("path.html")` names a companion
+`pkg.jet` `target:` > file marker. `#HTML("path.html")` names a companion
 page (explicit > sibling `<stem>.html` > generated; missing path = build
-error). `Os.*` gates a single `impl` block (item-scoped), not a file/module —
+error). `OS.*` gates a single `impl` block (item-scoped), not a file/module —
 `E-OSTARGET-MIXED-AXIS`/`E-OSTARGET-UNMATCHED-CALL` enforce it.
 **D-OSTARGET2 (=B, ratified 2026-07-03, c2qj06uq)**: ungated code reaches
 the surviving OS-gated impl through a comptime dispatch on `build.os` — a
-compiler-known comptime value matched with `.Linux`/`.Macos`/`.Windows`
+compiler-known comptime value matched with `.Linux`/`.MacOS`/`.Windows`
 arms; non-matching arms are discarded before OS-gating checks run.
-fn-level `#Target(Os.*)` gating (option A) rejected.
+fn-level `#Target(OS.*)` gating (option A) rejected.
 *Shipped spelling (2026-07-03):* the ballot wrote the dispatch loosely as `match
 build.os { … }`; reconciled to Jet's one canonical branching form (D-IF1/D-IF3
 `if subject == { }` if-table) with the existing `comptime if` lead (D-WHEN1) —
@@ -3074,7 +3080,7 @@ build.os { … }`; reconciled to Jet's one canonical branching form (D-IF1/D-IF3
 fn run() {
     comptime if build.os == {
         .Linux   -> { b :: LinuxBackend.{ name: "gtk" }    print(b.label()) }
-        .Macos   -> { b :: MacosBackend.{ name: "appkit" } print(b.label()) }
+        .MacOS   -> { b :: MacOSBackend.{ name: "appkit" } print(b.label()) }
         .Windows -> { b :: WinBackend.{ name: "win32" }    print(b.label()) }
     }
 }
@@ -3082,13 +3088,13 @@ fn run() {
 
 `build.os` resolves to `ProgramBundle.active_os` (the `--target=<triple>` OS
 bucket, host OS when omitted; a web/wasm target falls back to the host per
-`OsTarget::active`). Sema desugars the dispatch into a `comptime if` chain
+`OSTarget::active`). Sema desugars the dispatch into a `comptime if` chain
 (D-WHEN1/D-WHEN2 machinery) as the *first* step of `check_bundle`, folding to
 the arm matching `active_os` and discarding the rest before any OS-gating
 check, type-check, or codegen sees a body — so constructing an OS-gated type
 inside the taken arm is legal and dead arms never trip
 `E-OSTARGET-UNMATCHED-CALL`. **Exhaustiveness** is build-independent: the arm
-set must cover `.Linux`, `.Macos`, and `.Windows`, or carry an `else` — missing
+set must cover `.Linux`, `.MacOS`, and `.Windows`, or carry an `else` — missing
 an OS with no `else` is `E-OSTARGET-DISPATCH-EXHAUSTIVE` (so the same source
 compiles or fails identically on every platform). A non-`build.os` subject is
 `E-OSTARGET-BUILD-CONTEXT`; a non-OS arm head is `E-OSTARGET-DISPATCH-ARM`.
@@ -3496,7 +3502,7 @@ component plugins under policy; both emit the same BuildPlan graph. D-FRONTENDAP
 `core.compiler` exposes stable read-only lexer/parser/check/semindex/source-map
 value APIs plus a CLI JSON mirror; internal compiler crates stay private and no
 AST mutation enters compilation. D-DSLBLOCK1=A: stdlib-only PascalCase
-directive DSL blocks such as `#Sql<Row> { ... }` and `#Html { ... }` are a
+directive DSL blocks such as `#SQL<Row> { ... }` and `#HTML { ... }` are a
 fixed whitelist in `Syntax.rs`; third-party grammar mutation is rejected.
 D-METAMUTATE1=A: Jai-style AST mutation/message loop/user macros are rejected;
 the power surface is additive generated modules/overlays, registered
@@ -4523,7 +4529,7 @@ zero-copy. Differentiability is a transform property, not a second type;
 relational tables convert explicitly through audited `to_tensor`.
 
 **D-COMPUTE-PLACE1=D — automatic placement with receipts**: `.Auto` is the
-beginner default and carries `Gpu` because an accelerator may be selected.
+beginner default and carries `GPU` because an accelerator may be selected.
 Experts pin device, memory, precision, and transfer policy. Project/deployment
 policy may only narrow call-site authority. Transfers, excess allocations, and
 fallbacks emit stable receipts; fallback must be named and cannot change

@@ -18,7 +18,7 @@ pub(super) fn handle(
     args: &[CtValue],
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
-    let THandleOp::HttpServerMethod { kind, method } = op else {
+    let THandleOp::HTTPServerMethod { kind, method } = op else {
         return None;
     };
     if !matches!(

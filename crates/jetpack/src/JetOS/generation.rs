@@ -11,7 +11,7 @@ use super::store_realize::{
     desktop_default_required_packages, first_party_package_ref, jetos_runtime_package_ref,
     realize_ref, try_realize_ref,
 };
-use super::types::{CACHYOS_KERNEL_PACKAGE, Generation, OsFlags, SYSTEMD_INIT_PACKAGE};
+use super::types::{CACHYOS_KERNEL_PACKAGE, Generation, OSFlags, SYSTEMD_INIT_PACKAGE};
 use jet_env_model::ModuleEval::{EnvPlan, SystemPlan};
 use crate::Output::Theme;
 use crate::RefSpec;
@@ -26,7 +26,7 @@ pub(super) fn build_generation(
     theme: &Theme,
     plan: &EnvPlan,
     system: &SystemPlan,
-    flags: &OsFlags,
+    flags: &OSFlags,
     source_config: &Path,
 ) -> Option<Generation> {
     let roots = Store::resolve();

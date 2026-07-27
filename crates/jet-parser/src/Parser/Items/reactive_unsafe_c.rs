@@ -9,7 +9,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-MARK-TARGET1=A (ratified 2026-07-11, card #498): is the cursor at
-        /// `#Target(Wasm) fn` / `#Target(Js) fn` (per-function bucket
+        /// `#Target(Wasm) fn` / `#Target(JS) fn` (per-function bucket
         /// override, unified with the file/module ceiling spelling) or the
         /// untouched `#WasmExport fn`?
         pub(crate) fn at_web_partition_fn(&self) -> bool {
@@ -20,7 +20,7 @@ impl<'a> Parser<'a> {
             if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_WASM_EXPORT) {
                 return self.token_after_web_marker_is_fn(2);
             }
-            // `#Target(Wasm) fn` / `#Target(Js) fn` per-function override.
+            // `#Target(Wasm) fn` / `#Target(JS) fn` per-function override.
             if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_TARGET)
                 && matches!(self.peek3().kind, TokKind::LParen)
             {

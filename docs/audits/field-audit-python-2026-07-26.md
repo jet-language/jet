@@ -191,7 +191,7 @@ syntax. A Python-to-Jet cookbook should show the direct replacement for common
 
 ### Command-line programs
 
-Jet's `#Cli` derive is a strong conversion surface. Typed arguments, generated
+Jet's `#CLI` derive is a strong conversion surface. Typed arguments, generated
 help, validation, and native distribution can beat Python's standard
 `argparse` experience. Python libraries such as Typer can match the declarative
 style, but they add an environment and dependency.
@@ -246,7 +246,7 @@ production maintenance through `#Codable`, typed fields, bounded input, and
 named decode failures.
 
 The shipped `examples/features/serde/json.jet` used an obsolete mixture of
-`Json` and `DataTree` constructors. The example-quality pass repaired the
+`JSON` and `DataTree` constructors. The example-quality pass repaired the
 source contract, and the example now passes `jet check`. The default JIT still
 reports an E0956 support gap on this path, so complete executable parity remains
 compiler work. See `docs/audits/example-quality-2026-07-26.md`.
@@ -464,7 +464,7 @@ environment at deployment, and no async rewrite when work becomes concurrent.
 
 ### P0 — Conversion blockers
 
-1. **Finish the shipped JSON execution path.** The `Json`/`DataTree` source
+1. **Finish the shipped JSON execution path.** The `JSON`/`DataTree` source
    mismatch is repaired and `jet check` passes. Close the remaining default-JIT
    E0956 and golden execution gap with the current encoding/golden owner rather
    than creating a parallel mechanism.

@@ -129,7 +129,7 @@ fn run_session(action: &str, args: &[String]) -> i32 {
     let pid = child.id();
     let started = Instant::now();
     let mut last_snapshot = None;
-    let mut io_timeline = IoTimeline::default();
+    let mut io_timeline = IOTimeline::default();
     let mut native_timing = NativeTimingInput::unavailable(0);
     let status = loop {
         match child.try_wait() {
@@ -726,7 +726,7 @@ fn capture_from_source(
     snapshot: Option<&str>,
     wall_ns: u64,
     cpu_ns: Option<u64>,
-    io_timeline: Option<&IoTimeline>,
+    io_timeline: Option<&IOTimeline>,
     native_timing: Option<&NativeTimingInput>,
 ) -> Result<CaptureBundle, String> {
     let path = PathBuf::from(source_path);
@@ -779,7 +779,7 @@ fn capture_from_source(
     }
     // Tasks: only rows observe published. Never invent ids/parents/states.
     let mut observed_tasks = io_timeline
-        .map(IoTimeline::tasks)
+        .map(IOTimeline::tasks)
         .unwrap_or_else(|| snapshot_tasks.rows.clone());
     observed_tasks.sort_by_key(ObservedTask::key);
     let trace_task_ids = trace_task_id_map(&observed_tasks);
@@ -1209,7 +1209,7 @@ struct ObservedTaskSpan {
 }
 
 #[derive(Default)]
-struct IoTimeline {
+struct IOTimeline {
     active: BTreeMap<(ObservedTaskKey, String), (String, u64)>,
     completed: Vec<ObservedIoSpan>,
     io_rows_truncated: bool,
@@ -1220,7 +1220,7 @@ struct IoTimeline {
     tasks: BTreeMap<ObservedTaskKey, ObservedTask>,
 }
 
-impl IoTimeline {
+impl IOTimeline {
     fn observe(&mut self, observed_tasks: &ObservedTasks, now_ns: u64) {
         self.task_rows_truncated |= observed_tasks.truncated;
         self.io_rows_truncated |= observed_tasks.truncated;
@@ -1668,12 +1668,12 @@ fn view(args: &[String]) -> i32 {
     while i < args.len() {
         let arg = args[i].as_str();
         if arg == "--json" {
-            mode = ViewMode::Json;
+            mode = ViewMode::JSON;
             i += 1;
             continue;
         }
         if arg == "--html" {
-            mode = ViewMode::Html;
+            mode = ViewMode::HTML;
             i += 1;
             continue;
         }
@@ -1735,11 +1735,11 @@ fn view(args: &[String]) -> i32 {
             render_view_text(&trace, frames, use_color());
             0
         }
-        ViewMode::Json => {
+        ViewMode::JSON => {
             print!("{}", String::from_utf8_lossy(&view_json(&trace, frames).bytes()));
             0
         }
-        ViewMode::Html => {
+        ViewMode::HTML => {
             print!("{}", view_html(&trace, frames));
             0
         }
@@ -1748,8 +1748,8 @@ fn view(args: &[String]) -> i32 {
 
 enum ViewMode {
     Text,
-    Json,
-    Html,
+    JSON,
+    HTML,
 }
 
 #[derive(Clone, Copy)]
@@ -2191,13 +2191,13 @@ fn budget_compare_line(base: &CanonicalJson, head: &CanonicalJson, baseline: Opt
 
 fn export(args: &[String]) -> i32 {
     let mut path = None;
-    let mut mode = ExportMode::Json;
+    let mut mode = ExportMode::JSON;
     let mut i = 0usize;
     while i < args.len() {
         let arg = args[i].as_str();
         match arg {
             "--json" => {
-                mode = ExportMode::Json;
+                mode = ExportMode::JSON;
                 i += 1;
                 continue;
             }
@@ -2249,7 +2249,7 @@ fn export(args: &[String]) -> i32 {
         }
     };
     let projection = match mode {
-        ExportMode::Json => export_json_envelope(&trace),
+        ExportMode::JSON => export_json_envelope(&trace),
         ExportMode::Pprof => export_pprof_projection(&trace),
         ExportMode::Otel => export_otel_projection(&trace),
         ExportMode::Chrome => export_chrome_projection(&trace),
@@ -2260,7 +2260,7 @@ fn export(args: &[String]) -> i32 {
 }
 
 enum ExportMode {
-    Json,
+    JSON,
     Pprof,
     Otel,
     Chrome,
@@ -2850,7 +2850,7 @@ mod tests {
         assert_eq!(observed.rows.len(), TRACE_TASK_ROW_LIMIT as usize);
         assert!(observed.truncated);
 
-        let mut timeline = IoTimeline::default();
+        let mut timeline = IOTimeline::default();
         timeline.observe(&observed, 10);
         timeline.finish(20);
         assert_eq!(timeline.tasks.len(), TRACE_TASK_ROW_LIMIT as usize);
@@ -2866,7 +2866,7 @@ mod tests {
         let snapshot = "{\"tasks\":[{\"id\":1,\"parent\":0,\"state\":\"running\",\"wait\":\"\",\"cancelled\":false},{\"id\":2,\"parent\":1,\"state\":\"blocked\",\"wait\":\"tcp accept\",\"cancelled\":false}]}";
         let first = observe_tasks(snapshot, 100);
         let second = observe_tasks(snapshot, 200);
-        let mut timeline = IoTimeline::default();
+        let mut timeline = IOTimeline::default();
         timeline.observe(&first, 10);
         timeline.observe(&second, 20);
         timeline.finish(30);

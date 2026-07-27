@@ -31,11 +31,11 @@ function jetDomContainer() {
 // D-UISHOWCASE1 (c134 Phase 8): stable per-node DOM identity without adding
 // any argument to the Jet-level `ui.null_backend()` call (I7/I8 — no new
 // language surface for what's purely a codegen bookkeeping concern). Every
-// exported top-level `#Js` function's generated body is wrapped in
+// exported top-level `#JS` function's generated body is wrapped in
 // `enterRenderScope(name)` / `exitRenderScope()` (see Web.rs's `emit_js_fn`).
 // `enterRenderScope` only resets the scope name + counter when call depth is
 // 0 — i.e. only for the OUTERMOST exported call, not for a shared helper
-// (also exported, since every `#Js` function is) invoked *from* that outer
+// (also exported, since every `#JS` function is) invoked *from* that outer
 // call. `createBackend()` then stamps each new backend with
 // `"{scope}#{ordinal}"`, and `paint()` looks its box up in a scope-keyed
 // registry instead of caching one element per backend OBJECT. That's what

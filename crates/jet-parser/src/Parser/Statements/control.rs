@@ -788,7 +788,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-EFF1 / D-QUAL1: parse a `#Caps(Net, Db) { … }` effect-restriction region
+    /// D-EFF1 / D-QUAL1: parse a `#Caps(Net, DB) { … }` effect-restriction region
     /// in statement position. Cursor is on the `#` token. Effect names are bare
     /// idents; sema validates them against the known effect vocabulary (E0119).
     pub(super) fn at_caps_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -813,7 +813,7 @@ impl<'a> Parser<'a> {
     }
 
     /// D-SCAP1 + D-ARROW-CONTROL1: parse a
-    /// `#Grant(caps: Fs, Net) { … }` scoped-capability grant region
+    /// `#Grant(caps: FS, Net) { … }` scoped-capability grant region
     /// in statement position. Cursor is on the `#` token. Effect names are bare
     /// idents (sema validates them, E0119); `caps` binds the first-class
     /// capability handle for the block. The dual of `#Caps`: `#Grant` authorizes
@@ -858,7 +858,7 @@ impl<'a> Parser<'a> {
             "this scoped grant uses the retired body binding".to_string(),
             "the capability handle is part of the grant header; `->` is reserved for selected or yielded values"
                 .to_string(),
-            "write `#Grant(caps: Fs, Net) { ... }`".to_string(),
+            "write `#Grant(caps: FS, Net) { ... }`".to_string(),
             Some(marker.span),
         ));
         let arguments = self.bound_registered_rule_arguments(&marker)?;
@@ -1760,11 +1760,11 @@ impl<'a> Parser<'a> {
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_NONDETERMINISTIC) {
                     return self.at_nondeterministic_stmt();
                 }
-                // D-EFF1 / D-QUAL1: `#Caps(Net, Db) { … }` effect-restriction region.
+                // D-EFF1 / D-QUAL1: `#Caps(Net, DB) { … }` effect-restriction region.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_CAPS) {
                     return self.at_caps_stmt();
                 }
-                // D-SCAP1: `#grant(Fs) { caps -> … }` scoped-capability grant region.
+                // D-SCAP1: `#grant(FS) { caps -> … }` scoped-capability grant region.
                 if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_GRANT) {
                     return self.at_grant_stmt();
                 }

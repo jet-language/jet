@@ -122,7 +122,7 @@ This is the largest avoidable cause.
 Across the four Jet adapters, the relevant compact terminals appear almost
 nowhere. The code does not use:
 
-- `#Cli`;
+- `#CLI`;
 - `map`, `filter`, or `filter_map`;
 - `group_by` or `count_by`;
 - `indexed`;
@@ -402,7 +402,7 @@ compiler replaces work that Python authors must write, configure, or test.
 ### Typed command lines
 
 ```jet
-#Cli
+#CLI
 struct Args {
     input: Path
 }
@@ -510,7 +510,7 @@ For every pair:
 
 Rewrite in this order:
 
-1. Use `#Cli` where the task has a command contract.
+1. Use `#CLI` where the task has a command contract.
 2. Replace repeated `?? panic` with contextual `?` where behavior permits.
 3. Replace split and nested lookup with exact destructuring or text patterns.
 4. Replace manual indexes with `indexed`.

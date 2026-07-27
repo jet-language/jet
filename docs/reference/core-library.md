@@ -368,7 +368,7 @@ never serialized headers.
 `smtp_from_env()` reads `SMTP_HOST`, optional `SMTP_PORT` and `SMTP_SECURITY`
 (`starttls` by default, or `tls`), paired `SMTP_USERNAME`/`SMTP_PASSWORD`,
 optional `SMTP_CA_PEM`, and optional `SMTP_RECIPIENT_POLICY` (`require_all` by
-default, or `deliver_accepted`). It constructs the same `SmtpConfig` accepted
+default, or `deliver_accepted`). It constructs the same `SMTPConfig` accepted
 by `smtp(config)`; missing or unsafe values are configuration errors.
 
 Optional DKIM uses the same Mailer policy. Set `SMTP_DKIM_DOMAIN`,
@@ -392,7 +392,7 @@ acceptance, not inbox delivery.
 
 ```jet
 password :: crypto.Secret.from_text(env.get("SMTP_PASSWORD") ?? return)
-config := email.SmtpConfig.{
+config := email.SMTPConfig.{
     host: "smtp.example.com", port: 587, security: .StartTls,
     auth: .Password.{ username: "mailer", password: password },
     recipient_policy: .RequireAll, trust: .System,
@@ -424,7 +424,7 @@ use core.http.server as server
 
 fn run() {
     mux :: server.mux()
-    mux.post("/api/:name/*path", (req: HttpSrvReq) =>
+    mux.post("/api/:name/*path", (req: HTTPSrvReq) =>
         server.response(200, req.body())
     )
 
@@ -442,20 +442,20 @@ Client surface:
 
 | Function / method | Returns | What it does |
 |-------------------|---------|--------------|
-| `client.get(url)` / `client.post(url, body)` | `HttpClientResp ? String` | One-shot request helpers |
-| `client.request(method, url)` | `HttpClientReq` | Start a typed request builder; malformed or unsupported URLs fail with a stable Jet error before transport |
-| `req.header(name, value)` / `.body(text|Body)` | `HttpClientReq` | Add headers or a string/`Body` upload; `Body.reader` streams in 64 KiB wire chunks without materializing through `Body.bytes(1GiB)` first |
-| `req.form(name, value)` / `.multipart_text(name, value)` | `HttpClientReq` | Encode form or text multipart fields; multipart names percent-encode quotes and line breaks, and bounded RFC-valid boundary selection avoids every supplied name and value |
-| `req.cookie(name, value)` / `.redirects(n)` | `HttpClientReq` | Set Cookie header or a redirect limit from 0 through 4,294,967,295; unset follows at most 10, and out-of-range limits fail before transport |
-| `req.timeout(ms)` / `.connect_timeout(ms)` / `.read_timeout(ms)` / `.total_timeout(ms)` / `.dns_timeout(ms)` / `.tls_timeout(ms)` / `.write_timeout(ms)` / `.first_byte_timeout(ms)` | `HttpClientReq` | Set nonnegative global/per-phase deadlines; request overrides beat `Client.timeouts`; negative milliseconds fail before transport; an ambient `#Context(deadline: …)` remaining budget is converted to an absolute Instant at send entry and upper-bounds the request total |
-| `req.proxy(url)` | `HttpClientReq` | Use an explicit proxy; malformed URLs, refused tunnels, and rejected proxy authentication return stable Jet errors; env proxies are honored by default |
-| `Client.new().proxy(policy)` | `HttpClient` | Typed client proxy policy: `.FromEnvironment` (default), `.None` (ignore env), or `.Url(proxy)` |
-| `Client.new().tls(config)` | `HttpClient` | Apply a `core.tls.ClientConfig`; `CustomOnly` trust, mTLS client identity, and inclusive `.Tls12`/`.Tls13` version bounds are live-proven on HTTPS send (`http_client_law`) |
-| `Client.new().cookies(.Memory)` | `HttpClient` | Opt into one clone-shared, bounded RFC6265bis memory jar; shortcuts stay stateless |
-| `Client.new().redirects(.Follow.{ max:, same_origin_credentials: })` | `HttpClient` | Typed redirect policy (D-HTTP-CLIENT2); default unset is Follow(max:10, same_origin_credentials:true). Cross-origin always strips Authorization / Proxy-Authorization / Cookie; `same_origin_credentials: false` also strips them on same-origin hops |
-| `Client.new().allow_http_downgrade(true)` | `HttpClient` | Opt in to following HTTPS→HTTP redirects; denied by default (D-HTTP-CLIENT2) |
-| `Client.new().retries(.Safe/.Idempotent/.None)` | `HttpClient` | Stale pooled-connection retry before request bytes only (D-HTTP-CLIENT2): default unset is Safe (GET/HEAD/OPTIONS/TRACE); `.Idempotent` opts in PUT/DELETE; `.None` disables; max one attempt; Io-only (never Timeout/status); POST/PATCH never auto-retry |
-| `req.send()` / `client.send(req)` | `HttpClientResp ? String` | Execute the request; connection, pre-response I/O, and malformed response framing failures return stable Jet errors |
+| `client.get(url)` / `client.post(url, body)` | `HTTPClientResp ? String` | One-shot request helpers |
+| `client.request(method, url)` | `HTTPClientReq` | Start a typed request builder; malformed or unsupported URLs fail with a stable Jet error before transport |
+| `req.header(name, value)` / `.body(text|Body)` | `HTTPClientReq` | Add headers or a string/`Body` upload; `Body.reader` streams in 64 KiB wire chunks without materializing through `Body.bytes(1GiB)` first |
+| `req.form(name, value)` / `.multipart_text(name, value)` | `HTTPClientReq` | Encode form or text multipart fields; multipart names percent-encode quotes and line breaks, and bounded RFC-valid boundary selection avoids every supplied name and value |
+| `req.cookie(name, value)` / `.redirects(n)` | `HTTPClientReq` | Set Cookie header or a redirect limit from 0 through 4,294,967,295; unset follows at most 10, and out-of-range limits fail before transport |
+| `req.timeout(ms)` / `.connect_timeout(ms)` / `.read_timeout(ms)` / `.total_timeout(ms)` / `.dns_timeout(ms)` / `.tls_timeout(ms)` / `.write_timeout(ms)` / `.first_byte_timeout(ms)` | `HTTPClientReq` | Set nonnegative global/per-phase deadlines; request overrides beat `Client.timeouts`; negative milliseconds fail before transport; an ambient `#Context(deadline: …)` remaining budget is converted to an absolute Instant at send entry and upper-bounds the request total |
+| `req.proxy(url)` | `HTTPClientReq` | Use an explicit proxy; malformed URLs, refused tunnels, and rejected proxy authentication return stable Jet errors; env proxies are honored by default |
+| `Client.new().proxy(policy)` | `HTTPClient` | Typed client proxy policy: `.FromEnvironment` (default), `.None` (ignore env), or `.Url(proxy)` |
+| `Client.new().tls(config)` | `HTTPClient` | Apply a `core.tls.ClientConfig`; `CustomOnly` trust, mTLS client identity, and inclusive `.Tls12`/`.Tls13` version bounds are live-proven on HTTPS send (`http_client_law`) |
+| `Client.new().cookies(.Memory)` | `HTTPClient` | Opt into one clone-shared, bounded RFC6265bis memory jar; shortcuts stay stateless |
+| `Client.new().redirects(.Follow.{ max:, same_origin_credentials: })` | `HTTPClient` | Typed redirect policy (D-HTTP-CLIENT2); default unset is Follow(max:10, same_origin_credentials:true). Cross-origin always strips Authorization / Proxy-Authorization / Cookie; `same_origin_credentials: false` also strips them on same-origin hops |
+| `Client.new().allow_http_downgrade(true)` | `HTTPClient` | Opt in to following HTTPS→HTTP redirects; denied by default (D-HTTP-CLIENT2) |
+| `Client.new().retries(.Safe/.Idempotent/.None)` | `HTTPClient` | Stale pooled-connection retry before request bytes only (D-HTTP-CLIENT2): default unset is Safe (GET/HEAD/OPTIONS/TRACE); `.Idempotent` opts in PUT/DELETE; `.None` disables; max one attempt; IO-only (never Timeout/status); POST/PATCH never auto-retry |
+| `req.send()` / `client.send(req)` | `HTTPClientResp ? String` | Execute the request; connection, pre-response I/O, and malformed response framing failures return stable Jet errors |
 | `resp.status()` / `.body()` / `.header(name)` / `.cookies()` | mixed | Inspect response status, text body, headers, and Set-Cookie values |
 
 The compatibility text response path accepts at most 8 MiB of transfer-decoded
@@ -467,20 +467,20 @@ Server surface:
 
 | Function / method | Returns | What it does |
 |-------------------|---------|--------------|
-| `server.mux()` | `HttpMux` | Create a function-first router |
-| `mux.get/post/put/delete/patch(path, handler)` | nothing | Register `fn(HttpSrvReq) => HttpSrvResp` handlers |
-| `server.bind(addr, mux)` / `server.bind(addr, mux, tls: server.tls(cert, key))` | `HttpServer ? String` | Bind plaintext or HTTPS; pair with `serve`/`shutdown` |
+| `server.mux()` | `HTTPMux` | Create a function-first router |
+| `mux.get/post/put/delete/patch(path, handler)` | nothing | Register `fn(HTTPSrvReq) => HTTPSrvResp` handlers |
+| `server.bind(addr, mux)` / `server.bind(addr, mux, tls: server.tls(cert, key))` | `HTTPServer ? String` | Bind plaintext or HTTPS; pair with `serve`/`shutdown` |
 | `server.serve(addr, mux)` | `() ? String` | Serve HTTP/1.1 forever |
 | `server.serve(addr, mux, tls: server.tls(cert, key))` | `() ? String` | Serve HTTPS with explicit TLS material |
 | `server.serve_once(addr, mux)` / `server.serve_once_listener(listener, mux)` | `() ? String` | Testable one-request serving |
-| `server.response(status, body)` / `resp.header(name, value)` | `HttpSrvResp` | Build a response |
-| `resp.trailers(^headers)` | `HttpSrvResp ? HttpError` | Consume and attach validated ordered response trailers; HTTP/1.0 and body-forbidden responses fail before publishing |
-| `server.sse(data)` | `HttpSrvResp` | Server-sent event response |
-| `server.static_file(path, mime)` / `.static_file_range(req, path, mime)` | `HttpSrvResp ? String` | Static file response, with Range support |
+| `server.response(status, body)` / `resp.header(name, value)` | `HTTPSrvResp` | Build a response |
+| `resp.trailers(^headers)` | `HTTPSrvResp ? HTTPError` | Consume and attach validated ordered response trailers; HTTP/1.0 and body-forbidden responses fail before publishing |
+| `server.sse(data)` | `HTTPSrvResp` | Server-sent event response |
+| `server.static_file(path, mime)` / `.static_file_range(req, path, mime)` | `HTTPSrvResp ? String` | Static file response, with Range support |
 | `server.access_log(req, status)` | `String` | Stable access-log line |
 | `server.request_id(mux)` | nothing | Install D-HTTP-SERVER2 built-in `request_id` middleware on `mux` |
 | `req.method()` / `.path()` / `.param(name)` / `.header(name)` / `.body()` / `.body_len()` / `.under_limit(max)` | mixed | Inspect request data and enforce body limits |
-| `req.trailers()` | `HttpHeaders ? HttpError` | Read ordered request trailers after Body reaches EOF; returns empty headers when none were sent |
+| `req.trailers()` | `HTTPHeaders ? HTTPError` | Read ordered request trailers after Body reaches EOF; returns empty headers when none were sent |
 
 Card 301 audit state:
 
@@ -488,7 +488,7 @@ Card 301 audit state:
 |------|-------|
 | HTTPS client / server TLS | Shipped: client default HTTPS, server `tls:` named option |
 | Typed URL input | Shipped: client calls accept `Url` or `String` |
-| Redirects, cookies, forms, multipart, proxy, phase timeouts | Shipped: request builder methods above including per-request dns/tls/write/first_byte overrides; Client exposes typed `.cookies(.Memory)`, `.proxy(HttpProxy)`, `.tls(TlsClientConfig)`, `.redirects(.Follow.{ max:, same_origin_credentials: })`, `.allow_http_downgrade(Bool)`, and `.retries(.Safe/.Idempotent/.None)` (default Safe); ambient `#Context(deadline:)` upper-bounds send totals; live RFC6265bis cookie scope/bounds, CustomOnly HTTPS trust, mTLS client identity, inclusive TLS 1.2/1.3 version bounds, HTTPS→HTTP deny/opt-in, same-origin credential strip on Follow, request `.first_byte_timeout` overriding Client phase budgets, and stale-pool write-before-bytes Io retry (reuse-proven) / POST no-retry / `.retries(.None)` / `.retries(.Idempotent)` opt-in proven |
+| Redirects, cookies, forms, multipart, proxy, phase timeouts | Shipped: request builder methods above including per-request dns/tls/write/first_byte overrides; Client exposes typed `.cookies(.Memory)`, `.proxy(HTTPProxy)`, `.tls(TLSClientConfig)`, `.redirects(.Follow.{ max:, same_origin_credentials: })`, `.allow_http_downgrade(Bool)`, and `.retries(.Safe/.Idempotent/.None)` (default Safe); ambient `#Context(deadline:)` upper-bounds send totals; live RFC6265bis cookie scope/bounds, CustomOnly HTTPS trust, mTLS client identity, inclusive TLS 1.2/1.3 version bounds, HTTPS→HTTP deny/opt-in, same-origin credential strip on Follow, request `.first_byte_timeout` overriding Client phase budgets, and stale-pool write-before-bytes IO retry (reuse-proven) / POST no-retry / `.retries(.None)` / `.retries(.Idempotent)` opt-in proven |
 | Router params and wildcard routes | Shipped: `:name` params plus final `*` wildcard (`param("wildcard")`) |
 | SSE, static files, Range, access log, request body limits | Shipped: server helpers above |
 | Middleware engine | Partial: the one Handler wrapper chain is declaration-order outermost-first, supports request/response mutation and short-circuiting, and runs routed responses plus automatic 400/404/405 and redacted 500 recovery responses through the same boundary. Each composed layer is total: handler errors/panics and middleware factory/runtime errors/panics become bounded responses that reached outer wrappers can observe. An outer short-circuit does not run inner middleware. The boundary is shared by plaintext pipelines and TLS-backed HTTP/1.1 or HTTP/2. The real Jet AOT example is executable; the dev/JIT status remains listed in `tests/jit_gaps.txt`. |
@@ -1929,7 +1929,7 @@ errs :: Signup.validate(bad_signup) // Signup ? [FieldError]
 [FieldError]` — `FieldError` carries `.path`/`.reason`, the same shape as
 `DecodeError`. Rule expressions are purity-checked (S60/E3401): a `check`'s
 condition and message may reference only the struct's own fields and pure
-calls, never Net/Db/Io. Card #506 slice 1 ships the block and
+calls, never Net/DB/IO. Card #506 slice 1 ships the block and
 `Type.validate(value)`; `decode<T>()` auto-run and the `Validate.over(s)`
 use-site escape (for rules needing outside context, like a database lookup)
 are follow-on work — see docs/spec/syntax-decisions.md's D-VALIDATE1 entry.
@@ -2396,7 +2396,7 @@ Canvas reports no runtime Event facts.
 ```jet
 use core.web as web
 
-#Target(Js)
+#Target(JS)
 fn init() {
     saved :: web.storage.local.get("tasks") ?? "[]"
     web.storage.local.set("tasks", saved)
@@ -2708,11 +2708,11 @@ surface. On Unix, TCP, UDP, and Unix-socket operations park through the shared
 scheduler readiness backend and observe task cancellation and available
 `#Context` deadlines. Windows IOCP lifecycle and platform proof remains #527.
 Beginner calls accept strings; expert calls accept typed
-`IpAddr` / `SocketAddr` values.
+`IPAddr` / `SocketAddr` values.
 
 | Function | Returns | Notes |
 |----------|---------|-------|
-| `ip_addr(text)` | `IpAddr ? NetError` | Parse IPv4/IPv6 |
+| `ip_addr(text)` | `IPAddr ? NetError` | Parse IPv4/IPv6 |
 | `ip_to_string(ip)` / `ip_is_ipv4(ip)` | `String` / `Bool` | Inspect typed IP values |
 | `socket_addr(host, port)` | `SocketAddr ? NetError` | Resolve/parse host and port |
 | `socket_addr_parse(text)` | `SocketAddr ? NetError` | Parse `host:port` |
@@ -2735,8 +2735,8 @@ Beginner calls accept strings; expert calls accept typed
 | `udp_set_timeout(socket, ms)` | `() ? NetError` | Persistent read/write deadline budget; earliest ambient deadline wins |
 | `socket.ready(.Read/.Write/.ReadWrite, deadline: Duration)` / `socket.close()` | `NetReady ? NetError` / `() ? NetError` | Same UDP handle readiness and idempotent lifecycle |
 | `udp_send_bytes_to(socket, bytes, addr)` | `Int ? NetError` | Send one arbitrary-byte datagram |
-| `udp_receive(socket, limit)` | `UdpPacket ? NetError` | Full datagram receive with bounded returned payload |
-| `socket.send_to(bytes, addr, deadline: Duration)` / `socket.receive(limit, deadline: Duration)` | `Int ? NetError` / `UdpPacket ? NetError` | Datagram-preserving per-call deadline overrides |
+| `udp_receive(socket, limit)` | `UDPPacket ? NetError` | Full datagram receive with bounded returned payload |
+| `socket.send_to(bytes, addr, deadline: Duration)` / `socket.receive(limit, deadline: Duration)` | `Int ? NetError` / `UDPPacket ? NetError` | Datagram-preserving per-call deadline overrides |
 | `udp_packet_bytes/address/original_len/truncated(packet)` | `[U8]` / `SocketAddr` / `Int` / `Bool` | Packet data, source, wire length, and truncation fact |
 | `unix_listen(path)` / `unix_connect(path)` | `UnixListener ? NetError` / `UnixStream ? NetError` | Unix-domain sockets where supported |
 | `unix_accept(listener)` | `UnixStream ? NetError` | Accept one Unix stream; scheduler-aware cancellation and deadlines |
@@ -2744,9 +2744,9 @@ Beginner calls accept strings; expert calls accept typed
 | `unix_read_bytes(stream, limit)` / `unix_write_all_bytes(stream, bytes)` | `[U8] ? NetError` / `() ? NetError` | Unix byte stream operations; same deadline/close law as TCP |
 | `unix_shutdown(stream, how)` / `unix_close(stream)` | `() ? NetError` | Explicit shutdown and idempotent close |
 | `stream.set_timeout(Duration)` / `stream.read(limit, deadline: Duration)` / `stream.write_all(bytes, deadline: Duration)` / `stream.ready(interest, deadline: Duration)` / `stream.close()` | matching stream results | Same-handle Unix persistent/per-call deadlines, readiness, and lifecycle |
-| `dns_a(name, ms)` / `dns_aaaa(name, ms)` | `[IpAddr] ? NetError` | System resolver config, timeout in ms |
+| `dns_a(name, ms)` / `dns_aaaa(name, ms)` | `[IPAddr] ? NetError` | System resolver config, timeout in ms |
 | `dns_txt(name, ms)` | `[String] ? NetError` | TXT records |
-| `dns_srv(name, ms)` | `[DnsSrv] ? NetError` | SRV records |
+| `dns_srv(name, ms)` | `[DNSSrv] ? NetError` | SRV records |
 | `dns_*_at(server, name, ms)` | same as matching lookup | Expert override for a specific DNS server |
 | `dns_srv_target(srv)` / `dns_srv_port(srv)` | `String` / `Int` | Inspect SRV records |
 `NetError` has stable variants for input, permission, address, connection,
@@ -2770,20 +2770,20 @@ The built module exposes only this byte/text stream surface:
 
 | Function | Returns | Notes |
 |----------|---------|-------|
-| `ClientConfig.default().with_alpn(protocols)` | `TlsClientConfig ? IOError` | Validate and offer ALPN protocols before any stream is consumed, without disabling verification |
+| `ClientConfig.default().with_alpn(protocols)` | `TLSClientConfig ? IOError` | Validate and offer ALPN protocols before any stream is consumed, without disabling verification |
 | `RootCertificates.from_pem(bytes)` | `RootCertificates ? IOError` | Validate a custom PEM root bundle before any network use |
 | `ClientIdentity.from_pem(cert_chain: bytes, private_key: bytes)` | `ClientIdentity ? IOError` | Validate one PEM identity chain and matching PKCS#8, PKCS#1, or SEC1 private key; key bytes are secret and wiped on drop |
-| `config.with_trust(policy)` | `TlsClientConfig ? IOError` | Select `.System`, `.SystemPlus(roots)`, or `.CustomOnly(roots)` on a new immutable config |
-| `config.with_client_identity(identity)` | `TlsClientConfig ? IOError` | Add a validated mTLS client identity on a new immutable config |
-| `config.with_version_bounds(min: version, max: version)` | `TlsClientConfig ? IOError` | Select inclusive `.Tls12` / `.Tls13` bounds; reversed bounds fail before network use |
-| `client(stream, server_name)` | `TlsStream ? NetError` | Consume the `TcpStream`; verify the server name with system roots; preserve its deadline budgets |
-| `client(stream, server_name: name, config: config, deadline: duration)` | `TlsStream ? NetError` | Use the explicit client configuration and earliest handshake deadline on the same consumed stream |
+| `config.with_trust(policy)` | `TLSClientConfig ? IOError` | Select `.System`, `.SystemPlus(roots)`, or `.CustomOnly(roots)` on a new immutable config |
+| `config.with_client_identity(identity)` | `TLSClientConfig ? IOError` | Add a validated mTLS client identity on a new immutable config |
+| `config.with_version_bounds(min: version, max: version)` | `TLSClientConfig ? IOError` | Select inclusive `.Tls12` / `.Tls13` bounds; reversed bounds fail before network use |
+| `client(stream, server_name)` | `TLSStream ? NetError` | Consume the `TcpStream`; verify the server name with system roots; preserve its deadline budgets |
+| `client(stream, server_name: name, config: config, deadline: duration)` | `TLSStream ? NetError` | Use the explicit client configuration and earliest handshake deadline on the same consumed stream |
 | `read(stream, limit)` / `read_text(stream)` | `[U8] ? IOError` / `String ? IOError` | Scheduler-aware byte or checked-text read; empty bytes mean clean EOF |
 | `write(stream, bytes)` / `write_all(stream, bytes)` | `Int ? IOError` / `() ? IOError` | Scheduler-aware partial or complete byte write |
 | `write_text(stream, text)` | `() ? IOError` | Write the complete text payload |
 | `close(stream)` | `() ? IOError` | Send close-notify; repeated close is harmless |
 | `stream.read(limit, deadline: Duration)` / `stream.write_all(bytes, deadline: Duration)` / `stream.ready(interest, deadline: Duration)` / `stream.close()` | matching stream results | Same TLS handle, explicit per-call deadlines, readiness, and close-notify lifecycle |
-| `stream.peer_identity()` | `TlsPeerIdentity` | Retained verified name plus immutable exact-DER wire-order chain; leaf exposes DER, certificate/SPKI SHA-256, DNS SANs, validity milliseconds, subject, and issuer |
+| `stream.peer_identity()` | `TLSPeerIdentity` | Retained verified name plus immutable exact-DER wire-order chain; leaf exposes DER, certificate/SPKI SHA-256, DNS SANs, validity milliseconds, subject, and issuer |
 | `stream.close_write(deadline: Duration)` | `() ? IOError` | Flush close-notify and close only writes; repeated calls are harmless, reads continue, and later writes return `.Closed` |
 
 TLS handshake, read, write, and close-notify use the consumed socket's shared
@@ -2799,23 +2799,23 @@ truncation.
 ## core.db
 
 `core.db` opens SQLite connections through `db.open(path)` or
-`db.open_memory()`. Queries use one path: SQL text plus `[DbValue]` parameters.
-Checked `Sql` literals feed that path through `db.params(sql)`, so holes become
+`db.open_memory()`. Queries use one path: SQL text plus `[DBValue]` parameters.
+Checked `SQL` literals feed that path through `db.params(sql)`, so holes become
 bound parameters, not string interpolation. The runtime uses SQLite's prepared
 statement cache under that same path; there is no separate unsafe raw-query or
 prepare-only API.
 
 | API | Returns | Notes |
 |-----|---------|-------|
-| `conn.execute(sql, params)` | `Int ? DbError` | Affected row count |
-| `conn.query(sql, params)` | `[Row] ? DbError` | `Row` is `Map<String, DbValue>` |
-| `conn.query_one(sql, params)` | `Row? ? DbError` | First row, if any |
+| `conn.execute(sql, params)` | `Int ? DBError` | Affected row count |
+| `conn.query(sql, params)` | `[Row] ? DBError` | `Row` is `Map<String, DBValue>` |
+| `conn.query_one(sql, params)` | `Row? ? DBError` | First row, if any |
 | `conn.begin()` / `commit()` / `rollback()` / `close()` | `Bool` | Explicit transaction control |
 | `db.row_int(row, key)` / `row_float` / `row_text` / `row_bool` | `T ? String` | Typed column read with missing/type errors |
-| `db.transaction(conn, label, statements)` | `Int ? DbError` | Runs statements in one transaction, rollback on first error |
-| `db.migrate(conn, name, statements)` | `Int ? DbError` | Records migration checksum in `__jet_migrations`; rerun returns `0`, changed checksum errors |
+| `db.transaction(conn, label, statements)` | `Int ? DBError` | Runs statements in one transaction, rollback on first error |
+| `db.migrate(conn, name, statements)` | `Int ? DBError` | Records migration checksum in `__jet_migrations`; rerun returns `0`, changed checksum errors |
 
-`DbValue` variants are `Null`, `Int`, `Float`, `Text`, and `Bool`.
+`DBValue` variants are `Null`, `Int`, `Float`, `Text`, and `Bool`.
 
 ---
 

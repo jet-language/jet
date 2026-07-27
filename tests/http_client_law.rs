@@ -224,7 +224,7 @@ fn main() {
     assert_eq!(bridge::jet_http_client_body_read_impl(response.1, 5).unwrap(), None);
     assert_eq!(bridge::jet_http_client_send_with_impl(
         root, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
-    ).unwrap_err(), bridge::JetHttpBridgeError::UnsupportedEncoding);
+    ).unwrap_err(), bridge::JetHTTPBridgeError::UnsupportedEncoding);
 }
 "#,
     )
@@ -307,7 +307,7 @@ fn native_bridge_removes_ureq_from_generated_dependency_graph() {
         !source.contains("\"ureq\","),
         "HTTP client still emits ureq"
     );
-    let runtime = std::fs::read_to_string("crates/jet-pkg-model/src/Prelude/Http.rs").unwrap();
+    let runtime = std::fs::read_to_string("crates/jet-pkg-model/src/Prelude/HTTP.rs").unwrap();
     assert!(
         !runtime.contains("ureq::"),
         "native runtime still calls ureq"
@@ -1625,7 +1625,7 @@ fn main() {{
     let mut file = std::fs::File::open(path).unwrap();
     let mut offset = 0usize;
     let total = {body_len}usize;
-    let mut body_read = || -> Result<Option<Vec<u8>>, bridge::JetHttpBridgeError> {{
+    let mut body_read = || -> Result<Option<Vec<u8>>, bridge::JetHTTPBridgeError> {{
         if offset >= total {{
             return Ok(None);
         }}
@@ -1633,7 +1633,7 @@ fn main() {{
         let mut chunk = vec![0; want];
         let mut filled = 0usize;
         while filled < want {{
-            let read = file.read(&mut chunk[filled..]).map_err(|_| bridge::JetHttpBridgeError::Io)?;
+            let read = file.read(&mut chunk[filled..]).map_err(|_| bridge::JetHTTPBridgeError::IO)?;
             if read == 0 {{
                 break;
             }}
@@ -2263,7 +2263,7 @@ fn main() {
         client, "GET", &url, &[], None, None, None, None, None, None, None, None, None, None, None, &[], &[], &[],
     )
     .unwrap_err();
-    assert!(matches!(denied, bridge::JetHttpBridgeError::Redirect));
+    assert!(matches!(denied, bridge::JetHTTPBridgeError::Redirect));
     assert_eq!(
         bridge::jet_http_client_open_body_count_impl(),
         0,
@@ -2576,7 +2576,7 @@ fn main() {{
         &[], &[], &[],
     )
     .unwrap_err();
-    assert!(matches!(err, bridge::JetHttpBridgeError::Redirect), "{{err:?}}");
+    assert!(matches!(err, bridge::JetHTTPBridgeError::Redirect), "{{err:?}}");
     assert_eq!(
         bridge::jet_http_client_open_body_count_impl(),
         0,
@@ -2652,7 +2652,7 @@ use std::time::Duration;
 fn main() {
     let url = "http://127.0.0.1:9/slow".to_string();
     let client = bridge::jet_http_client_new_impl();
-    let _guard = bridge::JetHttpAmbientDeadline::push(Some(60)).expect("ambient push");
+    let _guard = bridge::JetHTTPAmbientDeadline::push(Some(60)).expect("ambient push");
     std::thread::sleep(Duration::from_millis(80));
     let err = bridge::jet_http_client_send_with_impl(
         client, "GET", &url, &[], None,
@@ -2662,7 +2662,7 @@ fn main() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, bridge::JetHttpBridgeError::Timeout),
+        matches!(err, bridge::JetHTTPBridgeError::Timeout),
         "expected Timeout after prep delay past absolute ambient deadline, got {err:?}"
     );
 }
@@ -2878,7 +2878,7 @@ fn stale_pooled_safe_retries_and_opt_in_are_bounded() {
                 }
             }
         };
-        // 1) Same TCP proves pool reuse, then RST forces write-path Io reconnect.
+        // 1) Same TCP proves pool reuse, then RST forces write-path IO reconnect.
         let mut stream = accept();
         assert!(request_head(&mut stream).starts_with(b"GET /warm HTTP/1.1\r\n"));
         stream
@@ -2898,7 +2898,7 @@ fn stale_pooled_safe_retries_and_opt_in_are_bounded() {
         let mut stream = accept();
         assert!(
             request_head(&mut stream).starts_with(b"GET /retry HTTP/1.1\r\n"),
-            "Safe must reconnect once after write-before-bytes Io on a reused pool socket"
+            "Safe must reconnect once after write-before-bytes IO on a reused pool socket"
         );
         stream
             .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\nok")
@@ -2979,7 +2979,7 @@ fn send(
     method: &str,
     url: &String,
     body: Option<&[u8]>,
-) -> Result<(i64, i64, Option<i64>, Vec<String>), bridge::JetHttpBridgeError> {
+) -> Result<(i64, i64, Option<i64>, Vec<String>), bridge::JetHTTPBridgeError> {
     bridge::jet_http_client_send_with_impl(
         client,
         method,
@@ -3091,7 +3091,7 @@ fn main() {
     let second = send(safe, "GET", &retry, None).unwrap();
     assert!(
         !bridge::jet_http_client_response_reused_impl(second.1),
-        "write-before-bytes Io reconnect must dial fresh"
+        "write-before-bytes IO reconnect must dial fresh"
     );
     assert_eq!(drain(second.1), b"ok");
     wait_for_pooled_rst();

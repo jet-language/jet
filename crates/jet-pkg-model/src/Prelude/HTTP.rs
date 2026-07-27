@@ -21,14 +21,14 @@ thread_local! {
 ///
 /// Converts remaining milliseconds into an absolute Instant at push time so later
 /// request prep cannot revive a stale residual budget with `Instant::now() + ms`.
-pub struct JetHttpAmbientDeadline {
+pub struct JetHTTPAmbientDeadline {
     previous: Option<Instant>,
 }
 
-impl JetHttpAmbientDeadline {
-    pub fn push(remaining_ms: Option<i64>) -> Result<Self, JetHttpBridgeError> {
+impl JetHTTPAmbientDeadline {
+    pub fn push(remaining_ms: Option<i64>) -> Result<Self, JetHTTPBridgeError> {
         let absolute = match remaining_ms {
-            Some(ms) if ms <= 0 => return Err(JetHttpBridgeError::Timeout),
+            Some(ms) if ms <= 0 => return Err(JetHTTPBridgeError::Timeout),
             Some(ms) => Some(Instant::now() + validated_timeout("ambient deadline", ms)?),
             None => None,
         };
@@ -37,7 +37,7 @@ impl JetHttpAmbientDeadline {
     }
 }
 
-impl Drop for JetHttpAmbientDeadline {
+impl Drop for JetHTTPAmbientDeadline {
     fn drop(&mut self) {
         HTTP_AMBIENT_DEADLINE.with(|cell| cell.set(self.previous));
     }
@@ -49,9 +49,9 @@ fn ambient_deadline_instant() -> Option<Instant> {
 
 fn compose_total_deadline(
     configured: Option<Duration>,
-) -> Result<Option<Instant>, JetHttpBridgeError> {
+) -> Result<Option<Instant>, JetHTTPBridgeError> {
     let ambient = match ambient_deadline_instant() {
-        Some(deadline) if deadline <= Instant::now() => return Err(JetHttpBridgeError::Timeout),
+        Some(deadline) if deadline <= Instant::now() => return Err(JetHTTPBridgeError::Timeout),
         other => other,
     };
     Ok(match (configured, ambient) {
@@ -69,21 +69,21 @@ const HTTP_UPLOAD_CHUNK: usize = 64 * 1024;
 const HTTP_UPLOAD_REPLAY_CAP: usize = 1024 * 1024 * 1024;
 
 /// Private, typed transport failures. Generated code exhaustively projects these
-/// to the public closed HttpError without carrying backend prose across the seam.
+/// to the public closed HTTPError without carrying backend prose across the seam.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum JetHttpBridgeError {
+pub enum JetHTTPBridgeError {
     InvalidUrl,
     InvalidHeader,
     InvalidFraming,
     UnsupportedEncoding,
     Resolve,
     Connect,
-    Tls,
+    TLS,
     Timeout,
     Proxy,
     Redirect,
     Protocol,
-    Io,
+    IO,
     ResourceUnavailable,
     Cancelled,
     UnsupportedTarget,
@@ -103,7 +103,7 @@ struct PoolKey {
 }
 
 struct IdleConnection {
-    stream: HttpStream,
+    stream: HTTPStream,
     idle_since: Instant,
 }
 
@@ -114,29 +114,29 @@ struct ClientPool {
 }
 
 impl ClientPool {
-    fn take(&mut self, key: &PoolKey) -> Option<HttpStream> {
+    fn take(&mut self, key: &PoolKey) -> Option<HTTPStream> {
         self.expire();
         let entries = self.idle.get_mut(key)?;
         if let Some(IdleConnection {
-            stream: HttpStream::H2(connection),
+            stream: HTTPStream::H2(connection),
             idle_since,
         }) = entries.back_mut()
         {
             *idle_since = Instant::now();
-            return Some(HttpStream::H2(connection.clone()));
+            return Some(HTTPStream::H2(connection.clone()));
         }
         let stream = entries.pop_back()?.stream;
         self.idle_total = self.idle_total.saturating_sub(1);
         Some(stream)
     }
 
-    fn put(&mut self, key: PoolKey, stream: HttpStream) {
+    fn put(&mut self, key: PoolKey, stream: HTTPStream) {
         self.expire();
         let origin = self.idle.entry(key).or_default();
-        if matches!(&stream, HttpStream::H2(_))
+        if matches!(&stream, HTTPStream::H2(_))
             && origin
                 .iter()
-                .any(|entry| matches!(&entry.stream, HttpStream::H2(_)))
+                .any(|entry| matches!(&entry.stream, HTTPStream::H2(_)))
         {
             return;
         }
@@ -158,7 +158,7 @@ impl ClientPool {
         entries.retain(|entry| {
             !matches!(
                 &entry.stream,
-                HttpStream::H2(connection) if Arc::ptr_eq(connection, stale)
+                HTTPStream::H2(connection) if Arc::ptr_eq(connection, stale)
             )
         });
         self.idle_total = self
@@ -172,7 +172,7 @@ impl ClientPool {
             while entries.front().is_some_and(|entry| {
                 entry.idle_since <= cutoff
                     && match &entry.stream {
-                        HttpStream::H2(connection) => Arc::strong_count(connection) == 1,
+                        HTTPStream::H2(connection) => Arc::strong_count(connection) == 1,
                         _ => true,
                     }
             }) {
@@ -199,11 +199,11 @@ impl OriginLimits {
         self: &Arc<Self>,
         key: PoolKey,
         deadline: Option<Instant>,
-    ) -> Result<OriginPermit, JetHttpBridgeError> {
+    ) -> Result<OriginPermit, JetHTTPBridgeError> {
         let mut counts = self
             .counts
             .lock()
-            .map_err(|_| JetHttpBridgeError::Internal)?;
+            .map_err(|_| JetHTTPBridgeError::Internal)?;
         loop {
             let count = counts.entry(key.clone()).or_default();
             if *count < 64 {
@@ -217,20 +217,20 @@ impl OriginLimits {
                 Some(deadline) => {
                     let remaining = deadline
                         .checked_duration_since(Instant::now())
-                        .ok_or(JetHttpBridgeError::Timeout)?;
+                        .ok_or(JetHTTPBridgeError::Timeout)?;
                     let (counts, waited) = self
                         .ready
                         .wait_timeout(counts, remaining)
-                        .map_err(|_| JetHttpBridgeError::Internal)?;
+                        .map_err(|_| JetHTTPBridgeError::Internal)?;
                     if waited.timed_out() {
-                        return Err(JetHttpBridgeError::Timeout);
+                        return Err(JetHTTPBridgeError::Timeout);
                     }
                     counts
                 }
                 None => self
                     .ready
                     .wait(counts)
-                    .map_err(|_| JetHttpBridgeError::Internal)?,
+                    .map_err(|_| JetHTTPBridgeError::Internal)?,
             };
         }
     }
@@ -348,7 +348,7 @@ impl Default for ClientPolicy {
 struct ClientShared {
     pool: Arc<Mutex<ClientPool>>,
     jar: Arc<Mutex<CookieJar>>,
-    dns: Arc<Mutex<DnsCache>>,
+    dns: Arc<Mutex<DNSCache>>,
     limits: Arc<OriginLimits>,
 }
 
@@ -360,7 +360,7 @@ struct ClientHandle {
 }
 
 #[derive(Clone, Copy)]
-struct TlsSettings<'a> {
+struct TLSSettings<'a> {
     system_roots: bool,
     custom_roots: &'a [Vec<u8>],
     min_version: i64,
@@ -369,7 +369,7 @@ struct TlsSettings<'a> {
     identity_key: &'a [u8],
 }
 
-impl TlsSettings<'static> {
+impl TLSSettings<'static> {
     const SYSTEM: Self = Self {
         system_roots: true,
         custom_roots: &[],
@@ -381,8 +381,8 @@ impl TlsSettings<'static> {
 }
 
 impl ClientPolicy {
-    fn tls_settings(&self) -> TlsSettings<'_> {
-        TlsSettings {
+    fn tls_settings(&self) -> TLSSettings<'_> {
+        TLSSettings {
             system_roots: self.system_roots,
             custom_roots: &self.custom_roots,
             min_version: self.tls_min_version,
@@ -410,7 +410,7 @@ pub fn jet_http_client_new_impl() -> i64 {
         shared: Arc::new(ClientShared {
             pool: Arc::new(Mutex::new(ClientPool::default())),
             jar: Arc::new(Mutex::new(CookieJar::default())),
-            dns: Arc::new(Mutex::new(DnsCache::default())),
+            dns: Arc::new(Mutex::new(DNSCache::default())),
             limits: Arc::new(OriginLimits::default()),
         }),
         policy: ClientPolicy::default(),
@@ -425,14 +425,14 @@ pub fn jet_http_client_new_impl() -> i64 {
 fn clone_client_with(
     id: i64,
     change: impl FnOnce(&mut ClientPolicy),
-) -> Result<i64, JetHttpBridgeError> {
+) -> Result<i64, JetHTTPBridgeError> {
     let mut handles = client_handles()
         .lock()
-        .map_err(|_| JetHttpBridgeError::Internal)?;
+        .map_err(|_| JetHTTPBridgeError::Internal)?;
     let mut handle = handles
         .get(&id)
         .cloned()
-        .ok_or(JetHttpBridgeError::Internal)?;
+        .ok_or(JetHTTPBridgeError::Internal)?;
     change(&mut handle.policy);
     let next = next_client_handle();
     handle.namespace = next;
@@ -440,7 +440,7 @@ fn clone_client_with(
     Ok(next)
 }
 
-pub fn jet_http_client_cookies_impl(id: i64, enabled: bool) -> Result<i64, JetHttpBridgeError> {
+pub fn jet_http_client_cookies_impl(id: i64, enabled: bool) -> Result<i64, JetHTTPBridgeError> {
     clone_client_with(id, |policy| policy.cookies = enabled)
 }
 
@@ -448,8 +448,8 @@ pub fn jet_http_client_redirects_impl(
     id: i64,
     limit: i64,
     same_origin_credentials: bool,
-) -> Result<i64, JetHttpBridgeError> {
-    let limit = u32::try_from(limit).map_err(|_| JetHttpBridgeError::Redirect)?;
+) -> Result<i64, JetHTTPBridgeError> {
+    let limit = u32::try_from(limit).map_err(|_| JetHTTPBridgeError::Redirect)?;
     clone_client_with(id, |policy| {
         policy.redirect_limit = limit;
         policy.same_origin_credentials = same_origin_credentials;
@@ -459,33 +459,33 @@ pub fn jet_http_client_redirects_impl(
 pub fn jet_http_client_allow_http_downgrade_impl(
     id: i64,
     allow: bool,
-) -> Result<i64, JetHttpBridgeError> {
+) -> Result<i64, JetHTTPBridgeError> {
     clone_client_with(id, |policy| policy.allow_http_downgrade = allow)
 }
 
 /// `mode`: 0 = None, 1 = Safe, 2 = Idempotent (D-HTTP-CLIENT2).
-pub fn jet_http_client_retries_impl(id: i64, mode: i64) -> Result<i64, JetHttpBridgeError> {
+pub fn jet_http_client_retries_impl(id: i64, mode: i64) -> Result<i64, JetHTTPBridgeError> {
     let retry_policy = match mode {
         0 => RetryPolicy::None,
         1 => RetryPolicy::Safe,
         2 => RetryPolicy::Idempotent,
-        _ => return Err(JetHttpBridgeError::Internal),
+        _ => return Err(JetHTTPBridgeError::Internal),
     };
     clone_client_with(id, |policy| policy.retry_policy = retry_policy)
 }
 
-pub fn jet_http_client_proxy_from_environment_impl(id: i64) -> Result<i64, JetHttpBridgeError> {
+pub fn jet_http_client_proxy_from_environment_impl(id: i64) -> Result<i64, JetHTTPBridgeError> {
     clone_client_with(id, |policy| {
         policy.proxy = None;
         policy.use_environment_proxy = true;
     })
 }
 
-pub fn jet_http_client_proxy_impl(id: i64, proxy: Option<&str>) -> Result<i64, JetHttpBridgeError> {
+pub fn jet_http_client_proxy_impl(id: i64, proxy: Option<&str>) -> Result<i64, JetHTTPBridgeError> {
     let proxy = proxy
         .map(parse_url)
         .transpose()
-        .map_err(|_| JetHttpBridgeError::Proxy)?
+        .map_err(|_| JetHTTPBridgeError::Proxy)?
         .map(|url| format!("{}://{}:{}", url.scheme, url.host, url.port));
     clone_client_with(id, |policy| {
         policy.proxy = proxy;
@@ -498,9 +498,9 @@ pub fn jet_http_client_protocols_impl(
     http2: bool,
     http11: bool,
     h2c: bool,
-) -> Result<i64, JetHttpBridgeError> {
+) -> Result<i64, JetHTTPBridgeError> {
     if !http2 && !http11 {
-        return Err(JetHttpBridgeError::Protocol);
+        return Err(JetHTTPBridgeError::Protocol);
     }
     clone_client_with(id, |policy| {
         policy.http2 = http2;
@@ -512,7 +512,7 @@ pub fn jet_http_client_protocols_impl(
 pub fn jet_http_client_decompression_impl(
     id: i64,
     enabled: bool,
-) -> Result<i64, JetHttpBridgeError> {
+) -> Result<i64, JetHTTPBridgeError> {
     clone_client_with(id, |policy| policy.decompress = enabled)
 }
 
@@ -520,9 +520,9 @@ pub fn jet_http_client_root_certificate_impl(
     id: i64,
     certificate_der: &[u8],
     include_system_roots: bool,
-) -> Result<i64, JetHttpBridgeError> {
+) -> Result<i64, JetHTTPBridgeError> {
     if certificate_der.is_empty() || certificate_der.len() > 1024 * 1024 {
-        return Err(JetHttpBridgeError::Tls);
+        return Err(JetHTTPBridgeError::TLS);
     }
     clone_client_with(id, |policy| {
         policy.system_roots = include_system_roots;
@@ -538,26 +538,26 @@ pub fn jet_http_client_tls_impl(
     identity_key_pem: &[u8],
     min_version: i64,
     max_version: i64,
-) -> Result<i64, JetHttpBridgeError> {
+) -> Result<i64, JetHTTPBridgeError> {
     if !matches!(trust_mode, 0 | 1 | 2) {
-        return Err(JetHttpBridgeError::Tls);
+        return Err(JetHTTPBridgeError::TLS);
     }
     if min_version > max_version || !matches!(min_version, 12 | 13) || !matches!(max_version, 12 | 13)
     {
-        return Err(JetHttpBridgeError::Tls);
+        return Err(JetHTTPBridgeError::TLS);
     }
     if (identity_cert_pem.is_empty()) != (identity_key_pem.is_empty()) {
-        return Err(JetHttpBridgeError::Tls);
+        return Err(JetHTTPBridgeError::TLS);
     }
     let custom_roots = if matches!(trust_mode, 1 | 2) {
         http_tls_pem_certificates(custom_ca_pem)?
     } else if !custom_ca_pem.is_empty() {
-        return Err(JetHttpBridgeError::Tls);
+        return Err(JetHTTPBridgeError::TLS);
     } else {
         Vec::new()
     };
     if matches!(trust_mode, 1 | 2) && custom_roots.is_empty() {
-        return Err(JetHttpBridgeError::Tls);
+        return Err(JetHTTPBridgeError::TLS);
     }
     if !identity_cert_pem.is_empty() {
         let _ = http_tls_pem_certificates(identity_cert_pem)?;
@@ -582,7 +582,7 @@ pub fn jet_http_client_timeouts_impl(
     first_byte_ms: i64,
     read_idle_ms: i64,
     total_ms: Option<i64>,
-) -> Result<i64, JetHttpBridgeError> {
+) -> Result<i64, JetHTTPBridgeError> {
     let dns = validated_timeout("DNS timeout", dns_ms)?;
     let connect = validated_timeout("connect timeout", connect_ms)?;
     let tls = validated_timeout("TLS timeout", tls_ms)?;
@@ -628,13 +628,13 @@ pub fn jet_http_client_send_with_impl(
     cookies_flat: &[String],
     form_flat: &[String],
     multipart_flat: &[String],
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
+) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
     let handle = client_handles()
         .lock()
-        .map_err(|_| JetHttpBridgeError::Internal)?
+        .map_err(|_| JetHTTPBridgeError::Internal)?
         .get(&id)
         .cloned()
-        .ok_or(JetHttpBridgeError::Internal)?;
+        .ok_or(JetHTTPBridgeError::Internal)?;
     let phases = resolve_request_phase_timeouts(
         timeout_ms,
         connect_timeout_ms,
@@ -649,7 +649,7 @@ pub fn jet_http_client_send_with_impl(
     )?;
     let (redirect_limit, explicit_redirect_limit) = match redirects {
         Some(value) => (
-            u32::try_from(value).map_err(|_| JetHttpBridgeError::Redirect)?,
+            u32::try_from(value).map_err(|_| JetHTTPBridgeError::Redirect)?,
             true,
         ),
         None => (handle.policy.redirect_limit, false),
@@ -1107,17 +1107,17 @@ fn path_matches(request: &str, cookie: &str) -> bool {
             && (cookie.ends_with('/') || request.as_bytes().get(cookie.len()) == Some(&b'/'))
 }
 
-enum HttpStream {
+enum HTTPStream {
     Plain(TcpStream),
-    Tls(Box<rustls::StreamOwned<rustls::ClientConnection, TcpStream>>),
+    TLS(Box<rustls::StreamOwned<rustls::ClientConnection, TcpStream>>),
     H2(Arc<Mutex<H2Connection>>),
 }
 
-impl Read for HttpStream {
+impl Read for HTTPStream {
     fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
         match self {
             Self::Plain(stream) => stream.read(out),
-            Self::Tls(stream) => stream.read(out),
+            Self::TLS(stream) => stream.read(out),
             Self::H2(_) => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "HTTP/2 uses frames",
@@ -1126,11 +1126,11 @@ impl Read for HttpStream {
     }
 }
 
-impl Write for HttpStream {
+impl Write for HTTPStream {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
         match self {
             Self::Plain(stream) => stream.write(bytes),
-            Self::Tls(stream) => stream.write(bytes),
+            Self::TLS(stream) => stream.write(bytes),
             Self::H2(_) => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "HTTP/2 uses frames",
@@ -1141,7 +1141,7 @@ impl Write for HttpStream {
     fn flush(&mut self) -> std::io::Result<()> {
         match self {
             Self::Plain(stream) => stream.flush(),
-            Self::Tls(stream) => stream.flush(),
+            Self::TLS(stream) => stream.flush(),
             Self::H2(_) => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "HTTP/2 uses frames",
@@ -1150,11 +1150,11 @@ impl Write for HttpStream {
     }
 }
 
-impl HttpStream {
+impl HTTPStream {
     fn peer_addr(&self) -> Option<SocketAddr> {
         match self {
             Self::Plain(stream) => stream.peer_addr().ok(),
-            Self::Tls(stream) => stream.get_ref().peer_addr().ok(),
+            Self::TLS(stream) => stream.get_ref().peer_addr().ok(),
             Self::H2(connection) => connection
                 .lock()
                 .ok()
@@ -1175,7 +1175,7 @@ struct H2Frame {
 }
 
 struct H2Connection {
-    io: HttpStream,
+    io: HTTPStream,
     next_stream: u32,
     decoder: HpackDecoder,
     pending: VecDeque<H2Frame>,
@@ -1188,7 +1188,7 @@ struct H2Connection {
 }
 
 impl H2Connection {
-    fn new(mut io: HttpStream) -> Result<Self, JetHttpBridgeError> {
+    fn new(mut io: HTTPStream) -> Result<Self, JetHTTPBridgeError> {
         io.write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
             .map_err(map_h2_io)?;
         h2_write_frame(&mut io, 4, 0, 0, &[])?;
@@ -1207,14 +1207,14 @@ impl H2Connection {
         })
     }
 
-    fn control(&mut self, frame: &H2Frame) -> Result<bool, JetHttpBridgeError> {
+    fn control(&mut self, frame: &H2Frame) -> Result<bool, JetHTTPBridgeError> {
         match frame.kind {
             4 => {
                 if frame.stream != 0
                     || frame.flags & 1 != 0 && !frame.payload.is_empty()
                     || frame.payload.len() % 6 != 0
                 {
-                    return Err(JetHttpBridgeError::Protocol);
+                    return Err(JetHTTPBridgeError::Protocol);
                 }
                 if frame.flags & 1 == 0 {
                     for setting in frame.payload.chunks_exact(6) {
@@ -1222,7 +1222,7 @@ impl H2Connection {
                         let value = u32::from_be_bytes(
                             setting[2..]
                                 .try_into()
-                                .map_err(|_| JetHttpBridgeError::Protocol)?,
+                                .map_err(|_| JetHTTPBridgeError::Protocol)?,
                         );
                         match id {
                             4 if value <= 0x7fff_ffff => {
@@ -1232,14 +1232,14 @@ impl H2Connection {
                                 for window in self.stream_send_windows.values_mut() {
                                     *window = window
                                         .checked_add(delta)
-                                        .ok_or(JetHttpBridgeError::Protocol)?;
+                                        .ok_or(JetHTTPBridgeError::Protocol)?;
                                 }
                             }
-                            4 => return Err(JetHttpBridgeError::Protocol),
+                            4 => return Err(JetHTTPBridgeError::Protocol),
                             5 if (16_384..=16_777_215).contains(&value) => {
                                 self.max_frame = value as usize
                             }
-                            5 => return Err(JetHttpBridgeError::Protocol),
+                            5 => return Err(JetHTTPBridgeError::Protocol),
                             _ => {}
                         }
                     }
@@ -1250,37 +1250,37 @@ impl H2Connection {
             }
             6 => {
                 if frame.stream != 0 || frame.payload.len() != 8 {
-                    return Err(JetHttpBridgeError::Protocol);
+                    return Err(JetHTTPBridgeError::Protocol);
                 }
                 if frame.flags & 1 == 0 {
                     h2_write_frame(&mut self.io, 6, 1, 0, &frame.payload)?;
                 }
                 Ok(true)
             }
-            7 => Err(JetHttpBridgeError::Protocol),
+            7 => Err(JetHTTPBridgeError::Protocol),
             8 => {
                 if frame.payload.len() != 4 {
-                    return Err(JetHttpBridgeError::Protocol);
+                    return Err(JetHTTPBridgeError::Protocol);
                 }
                 let amount = u32::from_be_bytes(
                     frame.payload[..4]
                         .try_into()
-                        .map_err(|_| JetHttpBridgeError::Protocol)?,
+                        .map_err(|_| JetHTTPBridgeError::Protocol)?,
                 ) & 0x7fff_ffff;
                 if amount == 0 {
-                    return Err(JetHttpBridgeError::Protocol);
+                    return Err(JetHTTPBridgeError::Protocol);
                 }
                 if frame.stream == 0 {
                     self.connection_send_window = self
                         .connection_send_window
                         .checked_add(i64::from(amount))
                         .filter(|value| *value <= 0x7fff_ffff)
-                        .ok_or(JetHttpBridgeError::Protocol)?;
+                        .ok_or(JetHTTPBridgeError::Protocol)?;
                 } else if let Some(window) = self.stream_send_windows.get_mut(&frame.stream) {
                     *window = window
                         .checked_add(i64::from(amount))
                         .filter(|value| *value <= 0x7fff_ffff)
-                        .ok_or(JetHttpBridgeError::Protocol)?;
+                        .ok_or(JetHTTPBridgeError::Protocol)?;
                 }
                 Ok(true)
             }
@@ -1288,7 +1288,7 @@ impl H2Connection {
         }
     }
 
-    fn probe(&mut self) -> Result<(), JetHttpBridgeError> {
+    fn probe(&mut self) -> Result<(), JetHTTPBridgeError> {
         const PAYLOAD: &[u8; 8] = b"JETPING!";
         h2_write_frame(&mut self.io, 6, 0, 0, PAYLOAD)?;
         self.io.flush().map_err(map_h2_io)?;
@@ -1318,18 +1318,18 @@ impl H2Connection {
         headers: &[(String, String)],
         body_len: Option<usize>,
         has_body: bool,
-        body_read: &mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHttpBridgeError>,
+        body_read: &mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHTTPBridgeError>,
         tee: &mut Option<Vec<u8>>,
         decompress: bool,
         facts: &Arc<Mutex<ResponseFacts>>,
-    ) -> Result<u32, JetHttpBridgeError> {
+    ) -> Result<u32, JetHTTPBridgeError> {
         let write_started = Instant::now();
         let stream = self.next_stream;
         self.next_stream = self
             .next_stream
             .checked_add(2)
             .filter(|id| *id <= 0x7fff_ffff)
-            .ok_or(JetHttpBridgeError::Protocol)?;
+            .ok_or(JetHTTPBridgeError::Protocol)?;
         let block = hpack_request(method, url, headers, body_len, decompress)?;
         self.stream_send_windows
             .insert(stream, self.initial_send_window);
@@ -1379,7 +1379,7 @@ impl H2Connection {
                 *self
                     .stream_send_windows
                     .get_mut(&stream)
-                    .ok_or(JetHttpBridgeError::Protocol)? -= count as i64;
+                    .ok_or(JetHTTPBridgeError::Protocol)? -= count as i64;
                 let chunk = pending.drain(..count).collect::<Vec<_>>();
                 let flags = if finished && pending.is_empty() { 1 } else { 0 };
                 h2_write_frame(&mut self.io, 0, flags, stream, &chunk)?;
@@ -1398,7 +1398,7 @@ impl H2Connection {
     fn poll_response_headers(
         &mut self,
         stream: u32,
-    ) -> Result<Option<(i64, Vec<(String, String)>, bool)>, JetHttpBridgeError> {
+    ) -> Result<Option<(i64, Vec<(String, String)>, bool)>, JetHTTPBridgeError> {
         loop {
             let frame = match self
                 .streams
@@ -1409,7 +1409,7 @@ impl H2Connection {
                 Some(frame) => frame,
                 None => match h2_read_frame(&mut self.io) {
                     Ok(frame) => frame,
-                    Err(JetHttpBridgeError::Timeout) => return Ok(None),
+                    Err(JetHTTPBridgeError::Timeout) => return Ok(None),
                     Err(error) => return Err(error),
                 },
             };
@@ -1425,7 +1425,7 @@ impl H2Connection {
             }
             if frame.kind == 3 {
                 self.active_streams.remove(&stream);
-                return Err(JetHttpBridgeError::Protocol);
+                return Err(JetHTTPBridgeError::Protocol);
             }
             if frame.kind != 1 {
                 self.pending.push_back(frame);
@@ -1442,26 +1442,26 @@ impl H2Connection {
     }
 }
 
-fn map_h2_io(error: std::io::Error) -> JetHttpBridgeError {
+fn map_h2_io(error: std::io::Error) -> JetHTTPBridgeError {
     if matches!(
         error.kind(),
         std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
     ) {
-        JetHttpBridgeError::Timeout
+        JetHTTPBridgeError::Timeout
     } else {
-        JetHttpBridgeError::Io
+        JetHTTPBridgeError::IO
     }
 }
 
 fn h2_write_frame(
-    io: &mut HttpStream,
+    io: &mut HTTPStream,
     kind: u8,
     flags: u8,
     stream: u32,
     payload: &[u8],
-) -> Result<(), JetHttpBridgeError> {
+) -> Result<(), JetHTTPBridgeError> {
     if payload.len() > 0x00ff_ffff || stream > 0x7fff_ffff {
-        return Err(JetHttpBridgeError::Protocol);
+        return Err(JetHTTPBridgeError::Protocol);
     }
     let length = payload.len() as u32;
     let mut head = [0u8; 9];
@@ -1475,17 +1475,17 @@ fn h2_write_frame(
         .map_err(map_h2_io)
 }
 
-fn h2_read_frame(io: &mut HttpStream) -> Result<H2Frame, JetHttpBridgeError> {
+fn h2_read_frame(io: &mut HTTPStream) -> Result<H2Frame, JetHTTPBridgeError> {
     let mut head = [0u8; 9];
     io.read_exact(&mut head).map_err(map_h2_io)?;
     let length = usize::from(head[0]) << 16 | usize::from(head[1]) << 8 | usize::from(head[2]);
     if length > 64 * 1024 {
-        return Err(JetHttpBridgeError::Protocol);
+        return Err(JetHTTPBridgeError::Protocol);
     }
     let stream = u32::from_be_bytes(
         head[5..]
             .try_into()
-            .map_err(|_| JetHttpBridgeError::Protocol)?,
+            .map_err(|_| JetHTTPBridgeError::Protocol)?,
     ) & 0x7fff_ffff;
     let mut payload = vec![0; length];
     io.read_exact(&mut payload).map_err(map_h2_io)?;
@@ -1498,56 +1498,56 @@ fn h2_read_frame(io: &mut HttpStream) -> Result<H2Frame, JetHttpBridgeError> {
 }
 
 fn h2_header_block(
-    io: &mut HttpStream,
+    io: &mut HTTPStream,
     first: H2Frame,
-) -> Result<(Vec<u8>, bool), JetHttpBridgeError> {
+) -> Result<(Vec<u8>, bool), JetHTTPBridgeError> {
     let stream = first.stream;
     let end = first.flags & 1 != 0;
     let mut complete = first.flags & 4 != 0;
     let mut block = first.payload;
     if first.flags & 8 != 0 {
-        let padding = usize::from(*block.first().ok_or(JetHttpBridgeError::Protocol)?);
+        let padding = usize::from(*block.first().ok_or(JetHTTPBridgeError::Protocol)?);
         block.remove(0);
         block.truncate(
             block
                 .len()
                 .checked_sub(padding)
-                .ok_or(JetHttpBridgeError::Protocol)?,
+                .ok_or(JetHTTPBridgeError::Protocol)?,
         );
     }
     while !complete && block.len() <= 64 * 1024 {
         let frame = h2_read_frame(io)?;
         if frame.kind != 9 || frame.stream != stream {
-            return Err(JetHttpBridgeError::Protocol);
+            return Err(JetHTTPBridgeError::Protocol);
         }
         complete = frame.flags & 4 != 0;
         block.extend_from_slice(&frame.payload);
     }
     if !complete || block.len() > 64 * 1024 {
-        return Err(JetHttpBridgeError::InvalidHeader);
+        return Err(JetHTTPBridgeError::InvalidHeader);
     }
     Ok((block, end))
 }
 
 fn h2_response_headers(
     decoded: Vec<(String, String)>,
-) -> Result<(i64, Vec<(String, String)>), JetHttpBridgeError> {
+) -> Result<(i64, Vec<(String, String)>), JetHTTPBridgeError> {
     let mut status = None;
     let mut regular = false;
     let mut out = Vec::new();
     for (name, value) in decoded {
         if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
-            return Err(JetHttpBridgeError::InvalidHeader);
+            return Err(JetHTTPBridgeError::InvalidHeader);
         }
         if name.starts_with(':') {
             if regular || name != ":status" || status.is_some() {
-                return Err(JetHttpBridgeError::Protocol);
+                return Err(JetHTTPBridgeError::Protocol);
             }
             let value = value
                 .parse::<i64>()
-                .map_err(|_| JetHttpBridgeError::Protocol)?;
+                .map_err(|_| JetHTTPBridgeError::Protocol)?;
             if !(100..=599).contains(&value) {
-                return Err(JetHttpBridgeError::Protocol);
+                return Err(JetHTTPBridgeError::Protocol);
             }
             status = Some(value);
         } else {
@@ -1556,12 +1556,12 @@ fn h2_response_headers(
                 name.as_str(),
                 "connection" | "proxy-connection" | "keep-alive" | "upgrade" | "transfer-encoding"
             ) {
-                return Err(JetHttpBridgeError::Protocol);
+                return Err(JetHTTPBridgeError::Protocol);
             }
             out.push((name, value));
         }
     }
-    Ok((status.ok_or(JetHttpBridgeError::Protocol)?, out))
+    Ok((status.ok_or(JetHTTPBridgeError::Protocol)?, out))
 }
 
 #[derive(Clone, Debug)]
@@ -1573,20 +1573,20 @@ struct ParsedUrl {
     target: String,
 }
 
-fn parse_url(url: &str) -> Result<ParsedUrl, JetHttpBridgeError> {
+fn parse_url(url: &str) -> Result<ParsedUrl, JetHTTPBridgeError> {
     let (scheme, rest) = url
         .split_once("://")
-        .ok_or(JetHttpBridgeError::InvalidUrl)?;
+        .ok_or(JetHTTPBridgeError::InvalidUrl)?;
     if !matches!(scheme, "http" | "https") || rest.is_empty() {
-        return Err(JetHttpBridgeError::InvalidUrl);
+        return Err(JetHTTPBridgeError::InvalidUrl);
     }
     let split = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let authority = &rest[..split];
     if authority.is_empty() || authority.contains('@') || rest[split..].contains('#') {
-        return Err(JetHttpBridgeError::InvalidUrl);
+        return Err(JetHTTPBridgeError::InvalidUrl);
     }
     let (host, port) = if let Some(tail) = authority.strip_prefix('[') {
-        let close = tail.find(']').ok_or(JetHttpBridgeError::InvalidUrl)?;
+        let close = tail.find(']').ok_or(JetHTTPBridgeError::InvalidUrl)?;
         let host = &tail[..close];
         let suffix = &tail[close + 1..];
         let port = if suffix.is_empty() {
@@ -1595,7 +1595,7 @@ fn parse_url(url: &str) -> Result<ParsedUrl, JetHttpBridgeError> {
             Some(
                 suffix
                     .strip_prefix(':')
-                    .ok_or(JetHttpBridgeError::InvalidUrl)?,
+                    .ok_or(JetHTTPBridgeError::InvalidUrl)?,
             )
         };
         (host, port)
@@ -1610,13 +1610,13 @@ fn parse_url(url: &str) -> Result<ParsedUrl, JetHttpBridgeError> {
             .bytes()
             .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
     {
-        return Err(JetHttpBridgeError::InvalidUrl);
+        return Err(JetHTTPBridgeError::InvalidUrl);
     }
     let port = port
         .map(|value| {
             value
                 .parse::<u16>()
-                .map_err(|_| JetHttpBridgeError::InvalidUrl)
+                .map_err(|_| JetHTTPBridgeError::InvalidUrl)
         })
         .transpose()?
         .unwrap_or(if scheme == "https" { 443 } else { 80 });
@@ -1624,7 +1624,7 @@ fn parse_url(url: &str) -> Result<ParsedUrl, JetHttpBridgeError> {
         "" => "/".to_string(),
         value if value.starts_with('?') => format!("/{value}"),
         value if value.starts_with('/') => value.to_string(),
-        _ => return Err(JetHttpBridgeError::InvalidUrl),
+        _ => return Err(JetHTTPBridgeError::InvalidUrl),
     };
     Ok(ParsedUrl {
         scheme: scheme.to_string(),
@@ -1635,33 +1635,33 @@ fn parse_url(url: &str) -> Result<ParsedUrl, JetHttpBridgeError> {
     })
 }
 
-fn resolve(url: &ParsedUrl) -> Result<Vec<SocketAddr>, JetHttpBridgeError> {
+fn resolve(url: &ParsedUrl) -> Result<Vec<SocketAddr>, JetHTTPBridgeError> {
     (url.host.as_str(), url.port)
         .to_socket_addrs()
         .map(|addresses| addresses.collect())
-        .map_err(|_| JetHttpBridgeError::Resolve)
+        .map_err(|_| JetHTTPBridgeError::Resolve)
 }
 
 #[derive(Clone)]
-struct DnsEntry {
-    result: Result<Vec<SocketAddr>, JetHttpBridgeError>,
+struct DNSEntry {
+    result: Result<Vec<SocketAddr>, JetHTTPBridgeError>,
     expires: Instant,
 }
 
 #[derive(Default)]
-struct DnsCache {
-    entries: HashMap<(String, u16), DnsEntry>,
+struct DNSCache {
+    entries: HashMap<(String, u16), DNSEntry>,
 }
 
-impl DnsCache {
-    fn get(&self, key: &(String, u16)) -> Option<Result<Vec<SocketAddr>, JetHttpBridgeError>> {
+impl DNSCache {
+    fn get(&self, key: &(String, u16)) -> Option<Result<Vec<SocketAddr>, JetHTTPBridgeError>> {
         self.entries
             .get(key)
             .filter(|entry| entry.expires > Instant::now())
             .map(|entry| entry.result.clone())
     }
 
-    fn put(&mut self, key: (String, u16), result: Result<Vec<SocketAddr>, JetHttpBridgeError>) {
+    fn put(&mut self, key: (String, u16), result: Result<Vec<SocketAddr>, JetHTTPBridgeError>) {
         let ttl = if result.is_ok() {
             Duration::from_secs(60)
         } else {
@@ -1669,7 +1669,7 @@ impl DnsCache {
         };
         self.entries.insert(
             key,
-            DnsEntry {
+            DNSEntry {
                 result,
                 expires: Instant::now() + ttl,
             },
@@ -1677,24 +1677,24 @@ impl DnsCache {
     }
 }
 
-fn default_dns_cache() -> &'static Arc<Mutex<DnsCache>> {
-    static CACHE: OnceLock<Arc<Mutex<DnsCache>>> = OnceLock::new();
-    CACHE.get_or_init(|| Arc::new(Mutex::new(DnsCache::default())))
+fn default_dns_cache() -> &'static Arc<Mutex<DNSCache>> {
+    static CACHE: OnceLock<Arc<Mutex<DNSCache>>> = OnceLock::new();
+    CACHE.get_or_init(|| Arc::new(Mutex::new(DNSCache::default())))
 }
 
 fn connect_plain(
-    dns: &Arc<Mutex<DnsCache>>,
+    dns: &Arc<Mutex<DNSCache>>,
     facts: &Arc<Mutex<ResponseFacts>>,
     url: &ParsedUrl,
     dns_timeout: Duration,
     timeout: Duration,
-) -> Result<TcpStream, JetHttpBridgeError> {
-    let mut last = JetHttpBridgeError::Connect;
+) -> Result<TcpStream, JetHTTPBridgeError> {
+    let mut last = JetHTTPBridgeError::Connect;
     let dns_started = Instant::now();
     let key = (url.host.clone(), url.port);
     let cached = dns
         .lock()
-        .map_err(|_| JetHttpBridgeError::Internal)?
+        .map_err(|_| JetHTTPBridgeError::Internal)?
         .get(&key);
     let cache_miss = cached.is_none();
     let result = if let Some(cached) = cached {
@@ -1706,17 +1706,17 @@ fn connect_plain(
             let result = resolve(&target).and_then(|addresses| {
                 (!addresses.is_empty())
                     .then_some(addresses)
-                    .ok_or(JetHttpBridgeError::Resolve)
+                    .ok_or(JetHTTPBridgeError::Resolve)
             });
             let _ = send.send(result);
         });
         receive
             .recv_timeout(dns_timeout)
-            .map_err(|_| JetHttpBridgeError::Timeout)?
+            .map_err(|_| JetHTTPBridgeError::Timeout)?
     };
     if cache_miss {
         dns.lock()
-            .map_err(|_| JetHttpBridgeError::Internal)?
+            .map_err(|_| JetHTTPBridgeError::Internal)?
             .put(key, result.clone());
     }
     set_timing(facts, 0, elapsed_ms(dns_started));
@@ -1729,51 +1729,51 @@ fn connect_plain(
                 return Ok(stream);
             }
             Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
-                last = JetHttpBridgeError::Timeout;
+                last = JetHTTPBridgeError::Timeout;
             }
-            Err(_) => last = JetHttpBridgeError::Connect,
+            Err(_) => last = JetHTTPBridgeError::Connect,
         }
     }
     set_timing(facts, 1, elapsed_ms(connect_started));
     Err(last)
 }
 
-fn http_tls_pem_certificates(pem: &[u8]) -> Result<Vec<Vec<u8>>, JetHttpBridgeError> {
+fn http_tls_pem_certificates(pem: &[u8]) -> Result<Vec<Vec<u8>>, JetHTTPBridgeError> {
     const BEGIN: &str = "-----BEGIN CERTIFICATE-----";
     const END: &str = "-----END CERTIFICATE-----";
-    let text = std::str::from_utf8(pem).map_err(|_| JetHttpBridgeError::Tls)?;
+    let text = std::str::from_utf8(pem).map_err(|_| JetHTTPBridgeError::TLS)?;
     let mut rest = text;
     let mut out = Vec::new();
     while let Some(start) = rest.find(BEGIN) {
         if !rest[..start].trim().is_empty() {
-            return Err(JetHttpBridgeError::Tls);
+            return Err(JetHTTPBridgeError::TLS);
         }
         rest = &rest[start + BEGIN.len()..];
-        let stop = rest.find(END).ok_or(JetHttpBridgeError::Tls)?;
+        let stop = rest.find(END).ok_or(JetHTTPBridgeError::TLS)?;
         out.push(http_tls_pem_base64(&rest[..stop])?);
         rest = &rest[stop + END.len()..];
     }
     if out.is_empty() || !rest.trim().is_empty() {
-        return Err(JetHttpBridgeError::Tls);
+        return Err(JetHTTPBridgeError::TLS);
     }
     Ok(out)
 }
 
 fn http_tls_private_key(
     pem: &[u8],
-) -> Result<rustls::pki_types::PrivateKeyDer<'static>, JetHttpBridgeError> {
-    let text = std::str::from_utf8(pem).map_err(|_| JetHttpBridgeError::Tls)?;
-    let parse = |begin: &str, end: &str| -> Result<Option<Vec<u8>>, JetHttpBridgeError> {
+) -> Result<rustls::pki_types::PrivateKeyDer<'static>, JetHTTPBridgeError> {
+    let text = std::str::from_utf8(pem).map_err(|_| JetHTTPBridgeError::TLS)?;
+    let parse = |begin: &str, end: &str| -> Result<Option<Vec<u8>>, JetHTTPBridgeError> {
         let Some(start) = text.find(begin) else {
             return Ok(None);
         };
         if !text[..start].trim().is_empty() {
-            return Err(JetHttpBridgeError::Tls);
+            return Err(JetHTTPBridgeError::TLS);
         }
         let rest = &text[start + begin.len()..];
-        let stop = rest.find(end).ok_or(JetHttpBridgeError::Tls)?;
+        let stop = rest.find(end).ok_or(JetHTTPBridgeError::TLS)?;
         if !rest[stop + end.len()..].trim().is_empty() {
-            return Err(JetHttpBridgeError::Tls);
+            return Err(JetHTTPBridgeError::TLS);
         }
         Ok(Some(http_tls_pem_base64(&rest[..stop])?))
     };
@@ -1792,13 +1792,13 @@ fn http_tls_private_key(
             rustls::pki_types::PrivateSec1KeyDer::from(der),
         ));
     }
-    Err(JetHttpBridgeError::Tls)
+    Err(JetHTTPBridgeError::TLS)
 }
 
-fn http_tls_pem_base64(text: &str) -> Result<Vec<u8>, JetHttpBridgeError> {
+fn http_tls_pem_base64(text: &str) -> Result<Vec<u8>, JetHTTPBridgeError> {
     let filtered: Vec<u8> = text.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
     if filtered.len() % 4 != 0 {
-        return Err(JetHttpBridgeError::Tls);
+        return Err(JetHTTPBridgeError::TLS);
     }
     let mut out = Vec::new();
     let mut i = 0;
@@ -1817,14 +1817,14 @@ fn http_tls_pem_base64(text: &str) -> Result<Vec<u8>, JetHttpBridgeError> {
                     pad += 1;
                     0
                 }
-                _ => return Err(JetHttpBridgeError::Tls),
+                _ => return Err(JetHTTPBridgeError::TLS),
             };
             if byte == b'=' && j < 2 {
-                return Err(JetHttpBridgeError::Tls);
+                return Err(JetHTTPBridgeError::TLS);
             }
         }
         if pad > 2 {
-            return Err(JetHttpBridgeError::Tls);
+            return Err(JetHTTPBridgeError::TLS);
         }
         out.push((vals[0] << 2) | (vals[1] >> 4));
         if pad < 2 {
@@ -1844,37 +1844,37 @@ fn tls_stream(
     timeout: Duration,
     http2: bool,
     http11: bool,
-    tls: TlsSettings<'_>,
-) -> Result<HttpStream, JetHttpBridgeError> {
+    tls: TLSSettings<'_>,
+) -> Result<HTTPStream, JetHTTPBridgeError> {
     static PROVIDER: std::sync::Once = std::sync::Once::new();
     PROVIDER.call_once(|| {
         let _ = rustls::crypto::ring::default_provider().install_default();
     });
     tcp.set_read_timeout(Some(timeout))
-        .map_err(|_| JetHttpBridgeError::Tls)?;
+        .map_err(|_| JetHTTPBridgeError::TLS)?;
     tcp.set_write_timeout(Some(timeout))
-        .map_err(|_| JetHttpBridgeError::Tls)?;
+        .map_err(|_| JetHTTPBridgeError::TLS)?;
     let mut roots = rustls::RootCertStore::empty();
     if tls.system_roots {
         let native =
-            rustls_native_certs::load_native_certs().map_err(|_| JetHttpBridgeError::Tls)?;
+            rustls_native_certs::load_native_certs().map_err(|_| JetHTTPBridgeError::TLS)?;
         for cert in native {
-            roots.add(cert).map_err(|_| JetHttpBridgeError::Tls)?;
+            roots.add(cert).map_err(|_| JetHTTPBridgeError::TLS)?;
         }
     }
     for cert in tls.custom_roots {
         roots
             .add(rustls::pki_types::CertificateDer::from(cert.clone()))
-            .map_err(|_| JetHttpBridgeError::Tls)?;
+            .map_err(|_| JetHTTPBridgeError::TLS)?;
     }
     if roots.is_empty() {
-        return Err(JetHttpBridgeError::Tls);
+        return Err(JetHTTPBridgeError::TLS);
     }
     if tls.min_version > tls.max_version
         || !matches!(tls.min_version, 12 | 13)
         || !matches!(tls.max_version, 12 | 13)
     {
-        return Err(JetHttpBridgeError::Tls);
+        return Err(JetHTTPBridgeError::TLS);
     }
     let versions: &[&'static rustls::SupportedProtocolVersion] = match (tls.min_version, tls.max_version) {
         (12, 12) => &[&rustls::version::TLS12],
@@ -1893,7 +1893,7 @@ fn tls_stream(
         let key = http_tls_private_key(tls.identity_key)?;
         builder
             .with_client_auth_cert(certs, key)
-            .map_err(|_| JetHttpBridgeError::Tls)?
+            .map_err(|_| JetHTTPBridgeError::TLS)?
     };
     config.alpn_protocols = [
         http2.then(|| b"h2".to_vec()),
@@ -1903,23 +1903,23 @@ fn tls_stream(
     .flatten()
     .collect();
     let name = rustls::pki_types::ServerName::try_from(host.to_string())
-        .map_err(|_| JetHttpBridgeError::Tls)?;
+        .map_err(|_| JetHTTPBridgeError::TLS)?;
     let mut connection = rustls::ClientConnection::new(Arc::new(config), name)
-        .map_err(|_| JetHttpBridgeError::Tls)?;
+        .map_err(|_| JetHTTPBridgeError::TLS)?;
     let mut tcp = tcp;
     while connection.is_handshaking() {
         connection
             .complete_io(&mut tcp)
-            .map_err(|_| JetHttpBridgeError::Tls)?;
+            .map_err(|_| JetHTTPBridgeError::TLS)?;
     }
     let selected = connection.alpn_protocol().map(<[u8]>::to_vec);
-    let stream = HttpStream::Tls(Box::new(rustls::StreamOwned::new(connection, tcp)));
+    let stream = HTTPStream::TLS(Box::new(rustls::StreamOwned::new(connection, tcp)));
     match selected.as_deref() {
-        Some(b"h2") if http2 => Ok(HttpStream::H2(Arc::new(Mutex::new(H2Connection::new(
+        Some(b"h2") if http2 => Ok(HTTPStream::H2(Arc::new(Mutex::new(H2Connection::new(
             stream,
         )?)))),
         Some(b"http/1.1") | None if http11 => Ok(stream),
-        _ => Err(JetHttpBridgeError::Protocol),
+        _ => Err(JetHTTPBridgeError::Protocol),
     }
 }
 
@@ -1941,24 +1941,24 @@ fn register_body(reader: Box<dyn Read + Send>) -> i64 {
 pub fn jet_http_client_body_read_impl(
     handle: i64,
     max_chunk: usize,
-) -> Result<Option<Vec<u8>>, JetHttpBridgeError> {
+) -> Result<Option<Vec<u8>>, JetHTTPBridgeError> {
     let reader = body_readers()
         .lock()
-        .map_err(|_| JetHttpBridgeError::Internal)?
+        .map_err(|_| JetHTTPBridgeError::Internal)?
         .get(&handle)
         .cloned()
-        .ok_or(JetHttpBridgeError::Internal)?;
+        .ok_or(JetHTTPBridgeError::Internal)?;
     let mut chunk = vec![0; max_chunk];
     let read = reader
         .lock()
-        .map_err(|_| JetHttpBridgeError::Internal)?
+        .map_err(|_| JetHTTPBridgeError::Internal)?
         .read(&mut chunk)
         .map_err(|error| match error.kind() {
-            std::io::ErrorKind::InvalidData => JetHttpBridgeError::InvalidFraming,
+            std::io::ErrorKind::InvalidData => JetHTTPBridgeError::InvalidFraming,
             std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => {
-                JetHttpBridgeError::Timeout
+                JetHTTPBridgeError::Timeout
             }
-            _ => JetHttpBridgeError::Io,
+            _ => JetHTTPBridgeError::IO,
         })?;
     if read == 0 {
         let _ = body_readers()
@@ -1984,10 +1984,10 @@ pub fn jet_http_client_open_body_count_impl() -> usize {
         .unwrap_or(0)
 }
 
-fn validated_timeout(name: &str, milliseconds: i64) -> Result<Duration, JetHttpBridgeError> {
+fn validated_timeout(name: &str, milliseconds: i64) -> Result<Duration, JetHTTPBridgeError> {
     let milliseconds = u64::try_from(milliseconds).map_err(|_| {
         let _ = name;
-        JetHttpBridgeError::Timeout
+        JetHTTPBridgeError::Timeout
     })?;
     Ok(Duration::from_millis(milliseconds))
 }
@@ -2007,7 +2007,7 @@ fn resolve_phase_timeout(
     name: &str,
     blanket: Option<Duration>,
     policy: Duration,
-) -> Result<Duration, JetHttpBridgeError> {
+) -> Result<Duration, JetHTTPBridgeError> {
     if let Some(ms) = explicit {
         return validated_timeout(name, ms);
     }
@@ -2025,7 +2025,7 @@ fn resolve_request_phase_timeouts(
     first_byte_ms: Option<i64>,
     policy: &ClientPolicy,
     oneshot_default: bool,
-) -> Result<PhaseTimeouts, JetHttpBridgeError> {
+) -> Result<PhaseTimeouts, JetHTTPBridgeError> {
     let blanket = if oneshot_default {
         Some(validated_timeout(
             "timeout",
@@ -2066,7 +2066,7 @@ fn resolve_request_phase_timeouts(
 /// is alternating [key, value, key, value, ...].
 pub fn jet_http_client_get_impl(
     url: &String,
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
+) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
     jet_http_client_send_impl(
         "GET",
         url,
@@ -2092,7 +2092,7 @@ pub fn jet_http_client_get_impl(
 pub fn jet_http_client_post_impl(
     url: &String,
     body: &String,
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
+) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
     jet_http_client_send_impl(
         "POST",
         url,
@@ -2123,7 +2123,7 @@ pub fn jet_http_client_send_stream_impl(
     headers_flat: &[String],
     body_len: Option<i64>,
     has_user_body: bool,
-    body_read: &mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHttpBridgeError>,
+    body_read: &mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHTTPBridgeError>,
     timeout_ms: Option<i64>,
     connect_timeout_ms: Option<i64>,
     read_timeout_ms: Option<i64>,
@@ -2137,7 +2137,7 @@ pub fn jet_http_client_send_stream_impl(
     cookies_flat: &[String],
     form_flat: &[String],
     multipart_flat: &[String],
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
+) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
     let phases = resolve_request_phase_timeouts(
         timeout_ms,
         connect_timeout_ms,
@@ -2151,7 +2151,7 @@ pub fn jet_http_client_send_stream_impl(
         true,
     )?;
     let redirects = redirects
-        .map(|limit| u32::try_from(limit).map_err(|_| JetHttpBridgeError::Redirect))
+        .map(|limit| u32::try_from(limit).map_err(|_| JetHTTPBridgeError::Redirect))
         .transpose()?;
     let explicit_redirect_limit = redirects.is_some();
     let redirect_limit = redirects.unwrap_or(HTTP_CLIENT_DEFAULT_REDIRECTS);
@@ -2194,7 +2194,7 @@ pub fn jet_http_client_send_stream_impl(
         true,
         true,
         false,
-        TlsSettings::SYSTEM,
+        TLSSettings::SYSTEM,
     )
 }
 
@@ -2205,7 +2205,7 @@ pub fn jet_http_client_send_with_stream_impl(
     headers_flat: &[String],
     body_len: Option<i64>,
     has_user_body: bool,
-    body_read: &mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHttpBridgeError>,
+    body_read: &mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHTTPBridgeError>,
     timeout_ms: Option<i64>,
     connect_timeout_ms: Option<i64>,
     read_timeout_ms: Option<i64>,
@@ -2219,13 +2219,13 @@ pub fn jet_http_client_send_with_stream_impl(
     cookies_flat: &[String],
     form_flat: &[String],
     multipart_flat: &[String],
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
+) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
     let handle = client_handles()
         .lock()
-        .map_err(|_| JetHttpBridgeError::Internal)?
+        .map_err(|_| JetHTTPBridgeError::Internal)?
         .get(&id)
         .cloned()
-        .ok_or(JetHttpBridgeError::Internal)?;
+        .ok_or(JetHTTPBridgeError::Internal)?;
     let phases = resolve_request_phase_timeouts(
         timeout_ms,
         connect_timeout_ms,
@@ -2240,7 +2240,7 @@ pub fn jet_http_client_send_with_stream_impl(
     )?;
     let (redirect_limit, explicit_redirect_limit) = match redirects {
         Some(value) => (
-            u32::try_from(value).map_err(|_| JetHttpBridgeError::Redirect)?,
+            u32::try_from(value).map_err(|_| JetHTTPBridgeError::Redirect)?,
             true,
         ),
         None => (handle.policy.redirect_limit, false),
@@ -2309,7 +2309,7 @@ pub fn jet_http_client_send_impl(
     cookies_flat: &[String],
     form_flat: &[String],
     multipart_flat: &[String],
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
+) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
     #[cfg(not(any(
         target_os = "linux",
         target_os = "android",
@@ -2326,7 +2326,7 @@ pub fn jet_http_client_send_impl(
             total_timeout_ms, dns_timeout_ms, tls_timeout_ms, write_timeout_ms, first_byte_timeout_ms,
             redirects, proxy, cookies_flat, form_flat, multipart_flat,
         );
-        return Err(JetHttpBridgeError::UnsupportedTarget);
+        return Err(JetHTTPBridgeError::UnsupportedTarget);
     }
 
     let phases = resolve_request_phase_timeouts(
@@ -2342,7 +2342,7 @@ pub fn jet_http_client_send_impl(
         true,
     )?;
     let redirects = redirects
-        .map(|limit| u32::try_from(limit).map_err(|_| JetHttpBridgeError::Redirect))
+        .map(|limit| u32::try_from(limit).map_err(|_| JetHTTPBridgeError::Redirect))
         .transpose()?;
     let explicit_redirect_limit = redirects.is_some();
     let redirect_limit = redirects.unwrap_or(HTTP_CLIENT_DEFAULT_REDIRECTS);
@@ -2375,7 +2375,7 @@ pub fn jet_http_client_send_impl(
         true,
         true,
         false,
-        TlsSettings::SYSTEM,
+        TLSSettings::SYSTEM,
     )
 }
 
@@ -2419,7 +2419,7 @@ fn prepare_request_parts(
 fn send_following_redirects(
     pool: Arc<Mutex<ClientPool>>,
     namespace: i64,
-    dns: Arc<Mutex<DnsCache>>,
+    dns: Arc<Mutex<DNSCache>>,
     limits: Arc<OriginLimits>,
     jar: Option<Arc<Mutex<CookieJar>>>,
     decompress: bool,
@@ -2443,8 +2443,8 @@ fn send_following_redirects(
     http2: bool,
     http11: bool,
     h2c: bool,
-    tls: TlsSettings<'_>,
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
+    tls: TLSSettings<'_>,
+) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
     send_following_redirects_upload(
         pool,
         namespace,
@@ -2481,7 +2481,7 @@ fn send_following_redirects(
 fn send_following_redirects_upload(
     pool: Arc<Mutex<ClientPool>>,
     namespace: i64,
-    dns: Arc<Mutex<DnsCache>>,
+    dns: Arc<Mutex<DNSCache>>,
     limits: Arc<OriginLimits>,
     jar: Option<Arc<Mutex<CookieJar>>>,
     decompress: bool,
@@ -2489,7 +2489,7 @@ fn send_following_redirects_upload(
     original_url: &str,
     mut headers: Vec<(String, String)>,
     mut body: Option<Vec<u8>>,
-    mut body_stream: Option<&mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHttpBridgeError>>,
+    mut body_stream: Option<&mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHTTPBridgeError>>,
     stream_len: Option<usize>,
     dns_timeout: Duration,
     connect_timeout: Duration,
@@ -2507,8 +2507,8 @@ fn send_following_redirects_upload(
     http2: bool,
     http11: bool,
     h2c: bool,
-    tls: TlsSettings<'_>,
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
+    tls: TLSSettings<'_>,
+) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
     let mut method = original_method.to_string();
     let mut url = original_url.to_string();
     let mut visited = std::collections::HashSet::new();
@@ -2517,7 +2517,7 @@ fn send_following_redirects_upload(
     let cookie_site = schemeful_site(&parse_url(original_url)?);
     for followed in 0..=redirect_limit {
         if !visited.insert(url.clone()) {
-            return Err(JetHttpBridgeError::Redirect);
+            return Err(JetHTTPBridgeError::Redirect);
         }
         let parsed = parse_url(&url)?;
         let proxy = select_proxy(&parsed, explicit_proxy)?;
@@ -2658,14 +2658,14 @@ fn send_following_redirects_upload(
                 finalize_response(response, redirect_history, started)
             } else {
                 jet_http_client_body_close_impl(response.body_handle);
-                Err(JetHttpBridgeError::Redirect)
+                Err(JetHTTPBridgeError::Redirect)
             };
         }
         let next = resolve_redirect(&parsed, location)?;
         let next_parsed = parse_url(&next)?;
         if parsed.scheme == "https" && next_parsed.scheme == "http" && !allow_http_downgrade {
             jet_http_client_body_close_impl(response.body_handle);
-            return Err(JetHttpBridgeError::Redirect);
+            return Err(JetHTTPBridgeError::Redirect);
         }
         let cross_origin = parsed.host != next_parsed.host
             || parsed.port != next_parsed.port
@@ -2694,23 +2694,23 @@ fn send_following_redirects_upload(
             && !matches!(method.as_str(), "GET" | "HEAD" | "OPTIONS" | "TRACE")
         {
             jet_http_client_body_close_impl(response.body_handle);
-            return Err(JetHttpBridgeError::Redirect);
+            return Err(JetHTTPBridgeError::Redirect);
         }
         redirect_history.push(url.clone());
         drain_redirect_body(response.body_handle);
         url = next;
     }
-    Err(JetHttpBridgeError::Redirect)
+    Err(JetHTTPBridgeError::Redirect)
 }
 
 fn finalize_response(
     response: NativeResponse,
     redirect_history: Vec<String>,
     started: Instant,
-) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHttpBridgeError> {
+) -> Result<(i64, i64, Option<i64>, Vec<String>), JetHTTPBridgeError> {
     let facts = response.facts.clone();
     {
-        let mut facts = facts.lock().map_err(|_| JetHttpBridgeError::Internal)?;
+        let mut facts = facts.lock().map_err(|_| JetHTTPBridgeError::Internal)?;
         facts.protocol = response.protocol.clone();
         facts.remote_address = response.remote_address.clone();
         facts.redirect_history = redirect_history;
@@ -2721,7 +2721,7 @@ fn finalize_response(
     let public = response.into_public();
     response_facts()
         .lock()
-        .map_err(|_| JetHttpBridgeError::Internal)?
+        .map_err(|_| JetHTTPBridgeError::Internal)?
         .insert(handle, facts);
     Ok(public)
 }
@@ -2752,7 +2752,7 @@ fn drain_redirect_body(handle: i64) {
     }
 }
 
-fn resolve_redirect(base: &ParsedUrl, location: &str) -> Result<String, JetHttpBridgeError> {
+fn resolve_redirect(base: &ParsedUrl, location: &str) -> Result<String, JetHTTPBridgeError> {
     if location.starts_with("http://") || location.starts_with("https://") {
         parse_url(location)?;
         return Ok(location.to_string());
@@ -2787,14 +2787,14 @@ fn resolve_redirect(base: &ParsedUrl, location: &str) -> Result<String, JetHttpB
 fn select_proxy(
     url: &ParsedUrl,
     explicit: Option<&str>,
-) -> Result<Option<ParsedUrl>, JetHttpBridgeError> {
+) -> Result<Option<ParsedUrl>, JetHTTPBridgeError> {
     if let Some(value) = explicit {
         if value.is_empty() {
             return Ok(None);
         }
         return parse_url(value)
             .map(Some)
-            .map_err(|_| JetHttpBridgeError::Proxy);
+            .map_err(|_| JetHTTPBridgeError::Proxy);
     }
     let no_proxy = std::env::var("no_proxy")
         .ok()
@@ -2815,7 +2815,7 @@ fn select_proxy(
             if !value.is_empty() {
                 return parse_url(&value)
                     .map(Some)
-                    .map_err(|_| JetHttpBridgeError::Proxy);
+                    .map_err(|_| JetHTTPBridgeError::Proxy);
             }
         }
     }
@@ -2952,12 +2952,12 @@ pub fn jet_http_client_response_facts_drop_impl(handle: i64) {
 fn remaining_timeout(
     default: Duration,
     deadline: Option<Instant>,
-) -> Result<Duration, JetHttpBridgeError> {
+) -> Result<Duration, JetHTTPBridgeError> {
     match deadline {
         Some(deadline) => deadline
             .checked_duration_since(Instant::now())
             .map(|remaining| remaining.min(default))
-            .ok_or(JetHttpBridgeError::Timeout),
+            .ok_or(JetHTTPBridgeError::Timeout),
         None => Ok(default),
     }
 }
@@ -2965,7 +2965,7 @@ fn remaining_timeout(
 fn send_once(
     pool: Arc<Mutex<ClientPool>>,
     namespace: i64,
-    dns: Arc<Mutex<DnsCache>>,
+    dns: Arc<Mutex<DNSCache>>,
     limits: Arc<OriginLimits>,
     method: &str,
     url: &ParsedUrl,
@@ -2984,9 +2984,9 @@ fn send_once(
     http2: bool,
     http11: bool,
     h2c: bool,
-    tls: TlsSettings<'_>,
+    tls: TLSSettings<'_>,
     retry_policy: RetryPolicy,
-) -> Result<NativeResponse, JetHttpBridgeError> {
+) -> Result<NativeResponse, JetHTTPBridgeError> {
     let body_len = body.map(|bytes| bytes.len());
     let has_body = body.is_some();
     let mut offset = 0usize;
@@ -3027,7 +3027,7 @@ fn send_once(
 fn send_once_upload(
     pool: Arc<Mutex<ClientPool>>,
     namespace: i64,
-    dns: Arc<Mutex<DnsCache>>,
+    dns: Arc<Mutex<DNSCache>>,
     limits: Arc<OriginLimits>,
     method: &str,
     url: &ParsedUrl,
@@ -3035,7 +3035,7 @@ fn send_once_upload(
     body_len: Option<usize>,
     chunked: bool,
     has_body: bool,
-    body_read: &mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHttpBridgeError>,
+    body_read: &mut dyn FnMut() -> Result<Option<Vec<u8>>, JetHTTPBridgeError>,
     tee: &mut Option<Vec<u8>>,
     dns_timeout: Duration,
     connect_timeout: Duration,
@@ -3050,18 +3050,18 @@ fn send_once_upload(
     http2: bool,
     http11: bool,
     h2c: bool,
-    tls: TlsSettings<'_>,
+    tls: TLSSettings<'_>,
     retry_policy: RetryPolicy,
-) -> Result<NativeResponse, JetHttpBridgeError> {
+) -> Result<NativeResponse, JetHTTPBridgeError> {
     if method.is_empty() || !method.bytes().all(http_token_byte) {
-        return Err(JetHttpBridgeError::InvalidHeader);
+        return Err(JetHTTPBridgeError::InvalidHeader);
     }
     for (name, value) in headers {
         if name.is_empty()
             || !name.bytes().all(http_token_byte)
             || value.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | 0))
         {
-            return Err(JetHttpBridgeError::InvalidHeader);
+            return Err(JetHTTPBridgeError::InvalidHeader);
         }
     }
     let proxy_key = proxy.map(|proxy| format!("{}://{}:{}", proxy.scheme, proxy.host, proxy.port));
@@ -3080,7 +3080,7 @@ fn send_once_upload(
     h2_key.protocol = "h2";
     let mut h1_key = base_key;
     h1_key.protocol = "http/1.1";
-    let mut pool_guard = pool.lock().map_err(|_| JetHttpBridgeError::Internal)?;
+    let mut pool_guard = pool.lock().map_err(|_| JetHTTPBridgeError::Internal)?;
     let mut stream = if http2 {
         pool_guard.take(&h2_key)
     } else {
@@ -3111,11 +3111,11 @@ fn send_once_upload(
     }
     let mut stream = stream.unwrap();
     if reused {
-        if let HttpStream::H2(connection) = &stream {
+        if let HTTPStream::H2(connection) = &stream {
             let probe = {
                 let mut connection = connection
                     .lock()
-                    .map_err(|_| JetHttpBridgeError::Internal)?;
+                    .map_err(|_| JetHTTPBridgeError::Internal)?;
                 if connection.active_streams.is_empty() {
                     set_stream_timeouts(
                         &mut connection.io,
@@ -3130,7 +3130,7 @@ fn send_once_upload(
             };
             if probe.is_err() {
                 pool.lock()
-                    .map_err(|_| JetHttpBridgeError::Internal)?
+                    .map_err(|_| JetHTTPBridgeError::Internal)?
                     .remove_h2(&h2_key, connection);
                 stream = connect(
                     &dns,
@@ -3152,18 +3152,18 @@ fn send_once_upload(
     }
     let key = if stream.is_h2() { h2_key } else { h1_key };
     if stream.is_h2() {
-        let HttpStream::H2(connection) = stream else {
+        let HTTPStream::H2(connection) = stream else {
             unreachable!()
         };
         if !reused {
             pool.lock()
-                .map_err(|_| JetHttpBridgeError::Internal)?
-                .put(key.clone(), HttpStream::H2(connection.clone()));
+                .map_err(|_| JetHTTPBridgeError::Internal)?
+                .put(key.clone(), HTTPStream::H2(connection.clone()));
         }
         let (stream_id, remote_address) = {
             let mut connection = connection
                 .lock()
-                .map_err(|_| JetHttpBridgeError::Internal)?;
+                .map_err(|_| JetHTTPBridgeError::Internal)?;
             set_stream_timeouts(
                 &mut connection.io,
                 first_byte_timeout,
@@ -3192,15 +3192,15 @@ fn send_once_upload(
         let first_deadline = Instant::now()
             .checked_add(first_byte_timeout)
             .map(|deadline| total_deadline.map_or(deadline, |total| total.min(deadline)))
-            .ok_or(JetHttpBridgeError::Timeout)?;
+            .ok_or(JetHTTPBridgeError::Timeout)?;
         let (status, response_headers, end_stream) = loop {
             if Instant::now() >= first_deadline {
-                return Err(JetHttpBridgeError::Timeout);
+                return Err(JetHTTPBridgeError::Timeout);
             }
             let polled = {
                 let mut connection = connection
                     .lock()
-                    .map_err(|_| JetHttpBridgeError::Internal)?;
+                    .map_err(|_| JetHTTPBridgeError::Internal)?;
                 let slice = first_deadline
                     .saturating_duration_since(Instant::now())
                     .min(Duration::from_millis(10));
@@ -3240,11 +3240,11 @@ fn send_once_upload(
     )?;
     let write_started = Instant::now();
     if let Err((error, wrote_any)) = write_request(&mut stream, &request) {
-        // D-HTTP-CLIENT2: reconnect only on stale-pool Io before any request
+        // D-HTTP-CLIENT2: reconnect only on stale-pool IO before any request
         // bytes — never Timeout / post-write first-byte failures.
         if reused
             && !wrote_any
-            && matches!(error, JetHttpBridgeError::Io)
+            && matches!(error, JetHTTPBridgeError::IO)
             && connection_retry_allowed(retry_policy, method)
         {
             let mut fresh = connect(
@@ -3339,7 +3339,7 @@ fn redirect_may_replay_body(method: &str) -> bool {
 }
 
 fn connect(
-    dns: &Arc<Mutex<DnsCache>>,
+    dns: &Arc<Mutex<DNSCache>>,
     facts: &Arc<Mutex<ResponseFacts>>,
     url: &ParsedUrl,
     proxy: Option<&ParsedUrl>,
@@ -3350,8 +3350,8 @@ fn connect(
     http2: bool,
     http11: bool,
     h2c: bool,
-    tls: TlsSettings<'_>,
-) -> Result<HttpStream, JetHttpBridgeError> {
+    tls: TLSSettings<'_>,
+) -> Result<HTTPStream, JetHTTPBridgeError> {
     let destination = proxy.unwrap_or(url);
     let timeout = remaining_timeout(connect_timeout, deadline)?;
     let mut tcp = connect_plain(
@@ -3363,18 +3363,18 @@ fn connect(
     )?;
     if url.scheme == "https" && proxy.is_some() {
         tcp.set_read_timeout(Some(remaining_timeout(tls_timeout, deadline)?))
-            .map_err(|_| JetHttpBridgeError::Proxy)?;
+            .map_err(|_| JetHTTPBridgeError::Proxy)?;
         tcp.set_write_timeout(Some(remaining_timeout(tls_timeout, deadline)?))
-            .map_err(|_| JetHttpBridgeError::Proxy)?;
+            .map_err(|_| JetHTTPBridgeError::Proxy)?;
         let authority = format!("{}:{}", url.host, url.port);
         write!(tcp, "CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\nProxy-Connection: keep-alive\r\n\r\n")
-            .map_err(|_| JetHttpBridgeError::Proxy)?;
-        let (head, _, _) = read_head_bytes(&mut tcp).map_err(|_| JetHttpBridgeError::Proxy)?;
+            .map_err(|_| JetHTTPBridgeError::Proxy)?;
+        let (head, _, _) = read_head_bytes(&mut tcp).map_err(|_| JetHTTPBridgeError::Proxy)?;
         let status = parse_status_and_headers(&head)
-            .map_err(|_| JetHttpBridgeError::Proxy)?
+            .map_err(|_| JetHTTPBridgeError::Proxy)?
             .0;
         if status != 200 {
-            return Err(JetHttpBridgeError::Proxy);
+            return Err(JetHTTPBridgeError::Proxy);
         }
     }
     if url.scheme == "https" {
@@ -3390,38 +3390,38 @@ fn connect(
         set_timing(facts, 2, elapsed_ms(started));
         stream
     } else if h2c && http2 && proxy.is_none() {
-        Ok(HttpStream::H2(Arc::new(Mutex::new(H2Connection::new(
-            HttpStream::Plain(tcp),
+        Ok(HTTPStream::H2(Arc::new(Mutex::new(H2Connection::new(
+            HTTPStream::Plain(tcp),
         )?))))
     } else if http11 {
-        Ok(HttpStream::Plain(tcp))
+        Ok(HTTPStream::Plain(tcp))
     } else {
-        Err(JetHttpBridgeError::Protocol)
+        Err(JetHTTPBridgeError::Protocol)
     }
 }
 
 fn set_stream_timeouts(
-    stream: &mut HttpStream,
+    stream: &mut HTTPStream,
     read: Duration,
     write: Duration,
     deadline: Option<Instant>,
-) -> Result<(), JetHttpBridgeError> {
+) -> Result<(), JetHTTPBridgeError> {
     let read = remaining_timeout(read, deadline)?;
     let write = remaining_timeout(write, deadline)?;
     let tcp = match stream {
-        HttpStream::Plain(stream) => stream,
-        HttpStream::Tls(stream) => stream.get_mut(),
-        HttpStream::H2(connection) => {
+        HTTPStream::Plain(stream) => stream,
+        HTTPStream::TLS(stream) => stream.get_mut(),
+        HTTPStream::H2(connection) => {
             let mut connection = connection
                 .lock()
-                .map_err(|_| JetHttpBridgeError::Internal)?;
+                .map_err(|_| JetHTTPBridgeError::Internal)?;
             return set_stream_timeouts(&mut connection.io, read, write, deadline);
         }
     };
     tcp.set_read_timeout(Some(read))
-        .map_err(|_| JetHttpBridgeError::Io)?;
+        .map_err(|_| JetHTTPBridgeError::IO)?;
     tcp.set_write_timeout(Some(write))
-        .map_err(|_| JetHttpBridgeError::Io)?;
+        .map_err(|_| JetHTTPBridgeError::IO)?;
     Ok(())
 }
 
@@ -3433,7 +3433,7 @@ fn encode_request(
     body_len: Option<usize>,
     chunked: bool,
     decompress: bool,
-) -> Result<Vec<u8>, JetHttpBridgeError> {
+) -> Result<Vec<u8>, JetHTTPBridgeError> {
     let target = if proxy.is_some() && url.scheme == "http" {
         format!("{}://{}{}", url.scheme, url.authority, url.target)
     } else {
@@ -3473,27 +3473,27 @@ fn encode_request(
     Ok(out)
 }
 
-fn tee_upload_chunk(tee: &mut Option<Vec<u8>>, chunk: &[u8]) -> Result<(), JetHttpBridgeError> {
+fn tee_upload_chunk(tee: &mut Option<Vec<u8>>, chunk: &[u8]) -> Result<(), JetHTTPBridgeError> {
     let Some(buffer) = tee.as_mut() else {
         return Ok(());
     };
     let new_len = buffer
         .len()
         .checked_add(chunk.len())
-        .ok_or(JetHttpBridgeError::ResourceUnavailable)?;
+        .ok_or(JetHTTPBridgeError::ResourceUnavailable)?;
     if new_len > HTTP_UPLOAD_REPLAY_CAP {
-        return Err(JetHttpBridgeError::ResourceUnavailable);
+        return Err(JetHTTPBridgeError::ResourceUnavailable);
     }
     buffer.extend_from_slice(chunk);
     Ok(())
 }
 
 fn write_upload_body(
-    stream: &mut HttpStream,
+    stream: &mut HTTPStream,
     chunked: bool,
-    mut body_read: impl FnMut() -> Result<Option<Vec<u8>>, JetHttpBridgeError>,
+    mut body_read: impl FnMut() -> Result<Option<Vec<u8>>, JetHTTPBridgeError>,
     tee: &mut Option<Vec<u8>>,
-) -> Result<(), (JetHttpBridgeError, bool)> {
+) -> Result<(), (JetHTTPBridgeError, bool)> {
     let mut wrote_any = false;
     loop {
         let chunk = body_read().map_err(|error| (error, wrote_any))?;
@@ -3524,7 +3524,7 @@ fn write_upload_body(
 fn slice_body_reader<'a>(
     bytes: &'a [u8],
     offset: &'a mut usize,
-) -> impl FnMut() -> Result<Option<Vec<u8>>, JetHttpBridgeError> + 'a {
+) -> impl FnMut() -> Result<Option<Vec<u8>>, JetHTTPBridgeError> + 'a {
     move || {
         if *offset >= bytes.len() {
             return Ok(None);
@@ -3536,11 +3536,11 @@ fn slice_body_reader<'a>(
     }
 }
 
-fn write_request(stream: &mut HttpStream, bytes: &[u8]) -> Result<(), (JetHttpBridgeError, bool)> {
+fn write_request(stream: &mut HTTPStream, bytes: &[u8]) -> Result<(), (JetHTTPBridgeError, bool)> {
     let mut written = 0;
     while written < bytes.len() {
         match stream.write(&bytes[written..]) {
-            Ok(0) => return Err((JetHttpBridgeError::Io, written != 0)),
+            Ok(0) => return Err((JetHTTPBridgeError::IO, written != 0)),
             Ok(count) => written += count,
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
             Err(error)
@@ -3549,24 +3549,24 @@ fn write_request(stream: &mut HttpStream, bytes: &[u8]) -> Result<(), (JetHttpBr
                     std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
                 ) =>
             {
-                return Err((JetHttpBridgeError::Timeout, written != 0));
+                return Err((JetHTTPBridgeError::Timeout, written != 0));
             }
-            Err(_) => return Err((JetHttpBridgeError::Io, written != 0)),
+            Err(_) => return Err((JetHTTPBridgeError::IO, written != 0)),
         }
     }
     stream
         .flush()
-        .map_err(|_| (JetHttpBridgeError::Io, written != 0))
+        .map_err(|_| (JetHTTPBridgeError::IO, written != 0))
 }
 
-fn read_head_bytes(stream: &mut impl Read) -> Result<(Vec<u8>, Vec<u8>, i64), JetHttpBridgeError> {
+fn read_head_bytes(stream: &mut impl Read) -> Result<(Vec<u8>, Vec<u8>, i64), JetHTTPBridgeError> {
     read_head_bytes_after(stream, Vec::new())
 }
 
 fn read_head_bytes_after(
     stream: &mut impl Read,
     mut bytes: Vec<u8>,
-) -> Result<(Vec<u8>, Vec<u8>, i64), JetHttpBridgeError> {
+) -> Result<(Vec<u8>, Vec<u8>, i64), JetHTTPBridgeError> {
     const MAX_HEAD: usize = 64 * 1024;
     let mut chunk = [0u8; 4096];
     let started = Instant::now();
@@ -3582,20 +3582,20 @@ fn read_head_bytes_after(
             ));
         }
         if bytes.len() >= MAX_HEAD {
-            return Err(JetHttpBridgeError::InvalidHeader);
+            return Err(JetHTTPBridgeError::InvalidHeader);
         }
         let read = stream.read(&mut chunk).map_err(|error| {
             if matches!(
                 error.kind(),
                 std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
             ) {
-                JetHttpBridgeError::Timeout
+                JetHTTPBridgeError::Timeout
             } else {
-                JetHttpBridgeError::Io
+                JetHTTPBridgeError::IO
             }
         })?;
         if read == 0 {
-            return Err(JetHttpBridgeError::Io);
+            return Err(JetHTTPBridgeError::IO);
         }
         if first_byte_ms.is_none() {
             first_byte_ms = Some(elapsed_ms(started));
@@ -3606,47 +3606,47 @@ fn read_head_bytes_after(
 
 fn parse_status_and_headers(
     head: &[u8],
-) -> Result<(i64, String, Vec<(String, String)>), JetHttpBridgeError> {
-    let text = std::str::from_utf8(head).map_err(|_| JetHttpBridgeError::InvalidHeader)?;
+) -> Result<(i64, String, Vec<(String, String)>), JetHTTPBridgeError> {
+    let text = std::str::from_utf8(head).map_err(|_| JetHTTPBridgeError::InvalidHeader)?;
     let mut lines = text
         .strip_suffix("\r\n\r\n")
-        .ok_or(JetHttpBridgeError::InvalidFraming)?
+        .ok_or(JetHTTPBridgeError::InvalidFraming)?
         .split("\r\n");
-    let status_line = lines.next().ok_or(JetHttpBridgeError::InvalidFraming)?;
+    let status_line = lines.next().ok_or(JetHTTPBridgeError::InvalidFraming)?;
     let mut status_parts = status_line.splitn(3, ' ');
     let version = status_parts
         .next()
-        .ok_or(JetHttpBridgeError::InvalidFraming)?;
+        .ok_or(JetHTTPBridgeError::InvalidFraming)?;
     if !version.starts_with("HTTP/") {
-        return Err(JetHttpBridgeError::InvalidFraming);
+        return Err(JetHTTPBridgeError::InvalidFraming);
     }
     if !matches!(version, "HTTP/1.0" | "HTTP/1.1") {
-        return Err(JetHttpBridgeError::Protocol);
+        return Err(JetHTTPBridgeError::Protocol);
     }
     let status = status_parts
         .next()
-        .ok_or(JetHttpBridgeError::InvalidFraming)?
+        .ok_or(JetHTTPBridgeError::InvalidFraming)?
         .parse::<i64>()
-        .map_err(|_| JetHttpBridgeError::InvalidFraming)?;
+        .map_err(|_| JetHTTPBridgeError::InvalidFraming)?;
     if !(100..=599).contains(&status) || status_parts.next().is_none() {
-        return Err(JetHttpBridgeError::InvalidFraming);
+        return Err(JetHTTPBridgeError::InvalidFraming);
     }
     let mut headers = Vec::new();
     for line in lines {
         if headers.len() == 100 {
-            return Err(JetHttpBridgeError::InvalidHeader);
+            return Err(JetHTTPBridgeError::InvalidHeader);
         }
         if line.starts_with([' ', '\t']) {
-            return Err(JetHttpBridgeError::InvalidHeader);
+            return Err(JetHTTPBridgeError::InvalidHeader);
         }
         let (name, value) = line
             .split_once(':')
-            .ok_or(JetHttpBridgeError::InvalidHeader)?;
+            .ok_or(JetHTTPBridgeError::InvalidHeader)?;
         if name.is_empty()
             || !name.bytes().all(http_token_byte)
             || value.bytes().any(|byte| matches!(byte, 0 | b'\r' | b'\n'))
         {
-            return Err(JetHttpBridgeError::InvalidHeader);
+            return Err(JetHTTPBridgeError::InvalidHeader);
         }
         headers.push((
             name.to_ascii_lowercase(),
@@ -3663,7 +3663,7 @@ fn header_first<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a s
         .map(|(_, value)| value.as_str())
 }
 
-fn content_length(headers: &[(String, String)]) -> Result<Option<usize>, JetHttpBridgeError> {
+fn content_length(headers: &[(String, String)]) -> Result<Option<usize>, JetHTTPBridgeError> {
     let mut found = None;
     for value in headers
         .iter()
@@ -3671,13 +3671,13 @@ fn content_length(headers: &[(String, String)]) -> Result<Option<usize>, JetHttp
         .flat_map(|(_, value)| value.split(','))
     {
         if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
-            return Err(JetHttpBridgeError::InvalidFraming);
+            return Err(JetHTTPBridgeError::InvalidFraming);
         }
         let length = value
             .parse::<usize>()
-            .map_err(|_| JetHttpBridgeError::InvalidFraming)?;
+            .map_err(|_| JetHTTPBridgeError::InvalidFraming)?;
         if found.is_some_and(|prior| prior != length) {
-            return Err(JetHttpBridgeError::InvalidFraming);
+            return Err(JetHTTPBridgeError::InvalidFraming);
         }
         found = Some(length);
     }
@@ -3687,7 +3687,7 @@ fn content_length(headers: &[(String, String)]) -> Result<Option<usize>, JetHttp
 fn decoded_gzip(
     headers: &[(String, String)],
     decompress: bool,
-) -> Result<bool, JetHttpBridgeError> {
+) -> Result<bool, JetHTTPBridgeError> {
     let Some(encoding) = header_first(headers, "content-encoding") else {
         return Ok(false);
     };
@@ -3697,7 +3697,7 @@ fn decoded_gzip(
     if encoding.eq_ignore_ascii_case("gzip") {
         Ok(true)
     } else {
-        Err(JetHttpBridgeError::UnsupportedEncoding)
+        Err(JetHTTPBridgeError::UnsupportedEncoding)
     }
 }
 
@@ -3717,7 +3717,7 @@ fn read_h2_response(
     permit: OriginPermit,
     reused_connection: bool,
     remote_address: String,
-) -> Result<NativeResponse, JetHttpBridgeError> {
+) -> Result<NativeResponse, JetHTTPBridgeError> {
     if let Ok(mut response_facts) = facts.lock() {
         response_facts.raw_content_encoding =
             header_first(&headers, "content-encoding").map(str::to_string);
@@ -3931,9 +3931,9 @@ impl Drop for H2BodyReader {
     }
 }
 
-fn h2_reader_error(error: JetHttpBridgeError) -> std::io::Error {
+fn h2_reader_error(error: JetHTTPBridgeError) -> std::io::Error {
     std::io::Error::new(
-        if error == JetHttpBridgeError::Timeout {
+        if error == JetHTTPBridgeError::Timeout {
             std::io::ErrorKind::TimedOut
         } else {
             std::io::ErrorKind::InvalidData
@@ -3990,7 +3990,7 @@ impl Read for H2BodyReader {
 }
 
 fn read_response(
-    mut stream: HttpStream,
+    mut stream: HTTPStream,
     key: PoolKey,
     pool: Arc<Mutex<ClientPool>>,
     head_request: bool,
@@ -4000,7 +4000,7 @@ fn read_response(
     read_timeout: Duration,
     total_deadline: Option<Instant>,
     permit: OriginPermit,
-) -> Result<NativeResponse, JetHttpBridgeError> {
+) -> Result<NativeResponse, JetHTTPBridgeError> {
     let (status, version, headers, initial) = {
         let mut pending = Vec::new();
         let mut first_byte_ms = None;
@@ -4010,12 +4010,12 @@ fn read_response(
             first_byte_ms.get_or_insert(elapsed);
             let (status, version, headers) = parse_status_and_headers(&head)?;
             if status == 101 {
-                return Err(JetHttpBridgeError::Protocol);
+                return Err(JetHTTPBridgeError::Protocol);
             }
             if (100..=199).contains(&status) {
                 interim_count += 1;
                 if interim_count > 16 {
-                    return Err(JetHttpBridgeError::InvalidFraming);
+                    return Err(JetHTTPBridgeError::InvalidFraming);
                 }
                 pending = after;
                 continue;
@@ -4036,11 +4036,11 @@ fn read_response(
         .map(|value| value.trim().to_ascii_lowercase())
         .collect::<Vec<_>>();
     if transfer.len() > 1 || transfer.first().is_some_and(|value| value != "chunked") {
-        return Err(JetHttpBridgeError::InvalidFraming);
+        return Err(JetHTTPBridgeError::InvalidFraming);
     }
     let length = content_length(&headers)?;
     if !transfer.is_empty() && length.is_some() {
-        return Err(JetHttpBridgeError::InvalidFraming);
+        return Err(JetHTTPBridgeError::InvalidFraming);
     }
     let bodyless = head_request || matches!(status, 100..=199 | 204 | 304);
     let close = version == "HTTP/1.0"
@@ -4116,7 +4116,7 @@ enum BodyFraming {
 }
 
 struct ResponseBodyReader {
-    stream: Option<HttpStream>,
+    stream: Option<HTTPStream>,
     key: PoolKey,
     pool: Arc<Mutex<ClientPool>>,
     initial: Vec<u8>,
@@ -4172,7 +4172,7 @@ impl ResponseBodyReader {
         )
         .map_err(|error| {
             std::io::Error::new(
-                if error == JetHttpBridgeError::Timeout {
+                if error == JetHTTPBridgeError::Timeout {
                     std::io::ErrorKind::TimedOut
                 } else {
                     std::io::ErrorKind::Other
@@ -4846,7 +4846,7 @@ fn hpack_request(
     headers: &[(String, String)],
     body_len: Option<usize>,
     decompress: bool,
-) -> Result<Vec<u8>, JetHttpBridgeError> {
+) -> Result<Vec<u8>, JetHTTPBridgeError> {
     let mut out = Vec::new();
     match method {
         "GET" => out.push(0x82),
@@ -4871,7 +4871,7 @@ fn hpack_request(
             continue;
         }
         if name == "te" && !value.eq_ignore_ascii_case("trailers") {
-            return Err(JetHttpBridgeError::InvalidHeader);
+            return Err(JetHTTPBridgeError::InvalidHeader);
         }
         has_length |= name == "content-length";
         has_accept_encoding |= name == "accept-encoding";
@@ -4912,9 +4912,9 @@ impl HpackDecoder {
         }
     }
 
-    fn entry(&self, index: usize) -> Result<(String, String), JetHttpBridgeError> {
+    fn entry(&self, index: usize) -> Result<(String, String), JetHTTPBridgeError> {
         if index == 0 {
-            return Err(JetHttpBridgeError::Protocol);
+            return Err(JetHTTPBridgeError::Protocol);
         }
         if index <= HPACK_STATIC.len() {
             let (name, value) = HPACK_STATIC[index - 1];
@@ -4923,7 +4923,7 @@ impl HpackDecoder {
         self.dynamic
             .get(index - HPACK_STATIC.len() - 1)
             .cloned()
-            .ok_or(JetHttpBridgeError::Protocol)
+            .ok_or(JetHTTPBridgeError::Protocol)
     }
 
     fn insert(&mut self, name: String, value: String) {
@@ -4944,7 +4944,7 @@ impl HpackDecoder {
         self.size += size;
     }
 
-    fn decode(&mut self, bytes: &[u8]) -> Result<Vec<(String, String)>, JetHttpBridgeError> {
+    fn decode(&mut self, bytes: &[u8]) -> Result<Vec<(String, String)>, JetHTTPBridgeError> {
         let mut cursor = 0usize;
         let mut out = Vec::new();
         let mut saw_field = false;
@@ -4967,18 +4967,18 @@ impl HpackDecoder {
                 saw_field = true;
             } else if first & 0x20 != 0 {
                 if saw_field {
-                    return Err(JetHttpBridgeError::Protocol);
+                    return Err(JetHTTPBridgeError::Protocol);
                 }
                 let max = hpack_read_integer(bytes, &mut cursor, 5)?;
                 if max > 4096 {
-                    return Err(JetHttpBridgeError::Protocol);
+                    return Err(JetHTTPBridgeError::Protocol);
                 }
                 self.max = max;
                 while self.size > self.max {
                     let (name, value) = self
                         .dynamic
                         .pop_back()
-                        .ok_or(JetHttpBridgeError::Protocol)?;
+                        .ok_or(JetHTTPBridgeError::Protocol)?;
                     self.size -= name.len() + value.len() + 32;
                 }
             } else {
@@ -4999,7 +4999,7 @@ impl HpackDecoder {
                     .sum::<usize>()
                     > 64 * 1024
             {
-                return Err(JetHttpBridgeError::InvalidHeader);
+                return Err(JetHTTPBridgeError::InvalidHeader);
             }
         }
         Ok(out)
@@ -5010,8 +5010,8 @@ fn hpack_read_integer(
     bytes: &[u8],
     cursor: &mut usize,
     prefix: u8,
-) -> Result<usize, JetHttpBridgeError> {
-    let first = *bytes.get(*cursor).ok_or(JetHttpBridgeError::Protocol)?;
+) -> Result<usize, JetHTTPBridgeError> {
+    let first = *bytes.get(*cursor).ok_or(JetHTTPBridgeError::Protocol)?;
     *cursor += 1;
     let mask = (1usize << prefix) - 1;
     let mut value = usize::from(first) & mask;
@@ -5020,14 +5020,14 @@ fn hpack_read_integer(
     }
     let mut shift = 0usize;
     loop {
-        let byte = *bytes.get(*cursor).ok_or(JetHttpBridgeError::Protocol)?;
+        let byte = *bytes.get(*cursor).ok_or(JetHTTPBridgeError::Protocol)?;
         *cursor += 1;
         if shift > usize::BITS as usize - 7 {
-            return Err(JetHttpBridgeError::Protocol);
+            return Err(JetHTTPBridgeError::Protocol);
         }
         value = value
             .checked_add(usize::from(byte & 0x7f) << shift)
-            .ok_or(JetHttpBridgeError::Protocol)?;
+            .ok_or(JetHTTPBridgeError::Protocol)?;
         if byte & 0x80 == 0 {
             return Ok(value);
         }
@@ -5035,26 +5035,26 @@ fn hpack_read_integer(
     }
 }
 
-fn hpack_read_string(bytes: &[u8], cursor: &mut usize) -> Result<String, JetHttpBridgeError> {
+fn hpack_read_string(bytes: &[u8], cursor: &mut usize) -> Result<String, JetHTTPBridgeError> {
     let huffman = bytes.get(*cursor).is_some_and(|byte| byte & 0x80 != 0);
     let length = hpack_read_integer(bytes, cursor, 7)?;
     if length > 64 * 1024 {
-        return Err(JetHttpBridgeError::InvalidHeader);
+        return Err(JetHTTPBridgeError::InvalidHeader);
     }
     let end = cursor
         .checked_add(length)
         .filter(|end| *end <= bytes.len())
-        .ok_or(JetHttpBridgeError::Protocol)?;
+        .ok_or(JetHTTPBridgeError::Protocol)?;
     let value = if huffman {
         hpack_huffman_decode(&bytes[*cursor..end])?
     } else {
         bytes[*cursor..end].to_vec()
     };
     *cursor = end;
-    String::from_utf8(value).map_err(|_| JetHttpBridgeError::InvalidHeader)
+    String::from_utf8(value).map_err(|_| JetHTTPBridgeError::InvalidHeader)
 }
 
-fn hpack_huffman_decode(bytes: &[u8]) -> Result<Vec<u8>, JetHttpBridgeError> {
+fn hpack_huffman_decode(bytes: &[u8]) -> Result<Vec<u8>, JetHTTPBridgeError> {
     const CODES: [u32; 257] = [
         0x1ff8, 0x7fffd8, 0xfffffe2, 0xfffffe3, 0xfffffe4, 0xfffffe5, 0xfffffe6, 0xfffffe7,
         0xfffffe8, 0xffffea, 0x3ffffffc, 0xfffffe9, 0xfffffea, 0x3ffffffd, 0xfffffeb, 0xfffffec,
@@ -5136,26 +5136,26 @@ fn hpack_huffman_decode(bytes: &[u8]) -> Result<Vec<u8>, JetHttpBridgeError> {
             tail = tail << 1 | ((byte >> shift) & 1);
             let next = tree[node].next[bit];
             if next < 0 {
-                return Err(JetHttpBridgeError::Protocol);
+                return Err(JetHTTPBridgeError::Protocol);
             }
             node = next as usize;
             if tree[node].symbol >= 0 {
                 let symbol = tree[node].symbol as usize;
                 if symbol == 256 {
-                    return Err(JetHttpBridgeError::Protocol);
+                    return Err(JetHTTPBridgeError::Protocol);
                 }
                 out.push(symbol as u8);
                 node = 0;
                 length = 0;
                 tail = 0;
                 if out.len() > 64 * 1024 {
-                    return Err(JetHttpBridgeError::InvalidHeader);
+                    return Err(JetHTTPBridgeError::InvalidHeader);
                 }
             }
         }
     }
     if length > 7 || length != 0 && tail != (1u8 << length) - 1 {
-        return Err(JetHttpBridgeError::Protocol);
+        return Err(JetHTTPBridgeError::Protocol);
     }
     Ok(out)
 }

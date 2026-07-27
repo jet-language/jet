@@ -603,23 +603,23 @@ fn run() { validators() }
     let source = r#"
 use core.browser as browser
 
-fn connect() =[Fs]=> Unit { browser.connect("ws://127.0.0.1:1") ?? return }
-fn context(session: Browser) =[Fs]=> Unit { session.context() ?? return }
-fn subscribe(session: Browser) =[Fs]=> Unit { session.subscribe("log.entryAdded") ?? return }
-fn next(session: Browser, timeout: BrowserTimeout) =[Fs]=> Unit { session.next_event(timeout) ?? return }
-fn protocol(session: Browser) =[Fs]=> Unit { session.protocol("bidi") ?? return }
-fn close(session: Browser) =[Fs]=> Unit { session.close() ?? return }
-fn page(context: BrowserContext) =[Fs]=> Unit { context.page() ?? return }
-fn goto(page: BrowserPage) =[Fs]=> Unit { page.goto("https://example.test") ?? return }
-fn wait(locator: BrowserLocator, timeout: BrowserTimeout) =[Fs]=> Unit { locator.wait(timeout) ?? return }
-fn click(locator: BrowserLocator) =[Fs]=> Unit { locator.click() ?? return }
-fn send(protocol: BrowserProtocol) =[Fs]=> Unit { protocol.send("session.status", "{{}}") ?? return }
+fn connect() =[FS]=> Unit { browser.connect("ws://127.0.0.1:1") ?? return }
+fn context(session: Browser) =[FS]=> Unit { session.context() ?? return }
+fn subscribe(session: Browser) =[FS]=> Unit { session.subscribe("log.entryAdded") ?? return }
+fn next(session: Browser, timeout: BrowserTimeout) =[FS]=> Unit { session.next_event(timeout) ?? return }
+fn protocol(session: Browser) =[FS]=> Unit { session.protocol("bidi") ?? return }
+fn close(session: Browser) =[FS]=> Unit { session.close() ?? return }
+fn page(context: BrowserContext) =[FS]=> Unit { context.page() ?? return }
+fn goto(page: BrowserPage) =[FS]=> Unit { page.goto("https://example.test") ?? return }
+fn wait(locator: BrowserLocator, timeout: BrowserTimeout) =[FS]=> Unit { locator.wait(timeout) ?? return }
+fn click(locator: BrowserLocator) =[FS]=> Unit { locator.click() ?? return }
+fn send(protocol: BrowserProtocol) =[FS]=> Unit { protocol.send("session.status", "{{}}") ?? return }
 fn run() {}
 "#;
     let diags = jet::compile(source).expect_err("Browser I/O methods must infer Net");
     assert!(
         diags.iter().filter(|diag| diag.code == "E0740").count() >= 11,
-        "Browser connect and every I/O method must violate an Fs-only bound: {diags:?}"
+        "Browser connect and every I/O method must violate an FS-only bound: {diags:?}"
     );
 }
 

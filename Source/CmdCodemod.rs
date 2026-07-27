@@ -1,7 +1,7 @@
 //! D-CODEMOD1 / D-CODEMOD-BATCH1=A: one replayable semantic codemod engine.
 
-#[path = "CmdCodemod/Json.rs"]
-mod Json;
+#[path = "CmdCodemod/JSON.rs"]
+mod JSON;
 #[path = "CmdCodemod/Transaction.rs"]
 mod Transaction;
 
@@ -17,7 +17,7 @@ use jet_semindex::{
     open, open_with_overlays_and_diagnostics, open_with_overlays_diagnostics_and_inputs, SemIndex,
     DefinitionAnchor, SemIndexError, SymbolKind,
 };
-use Json::Value;
+use JSON::Value;
 use Transaction::Change;
 
 #[derive(Clone)]
@@ -110,7 +110,7 @@ fn run_object(raw: &str, apply: bool, yes: bool) {
     let path = absolutize(raw);
     let text = fs::read_to_string(&path)
         .unwrap_or_else(|e| fail(&format!("could not read codemod `{}`: {e}", path.display())));
-    let value = Json::parse(&text).unwrap_or_else(|e| fail(&format!("invalid codemod JSON: {e}")));
+    let value = JSON::parse(&text).unwrap_or_else(|e| fail(&format!("invalid codemod JSON: {e}")));
     let version = match &value {
         Value::Object(o) => number_default(o, "version", 1),
         _ => fail("codemod object must be a JSON object"),
@@ -1333,7 +1333,7 @@ fn undo(path: &Path) {
             path.display()
         ))
     });
-    let value = Json::parse(&raw).unwrap_or_else(|e| fail(&format!("invalid codemod log: {e}")));
+    let value = JSON::parse(&raw).unwrap_or_else(|e| fail(&format!("invalid codemod log: {e}")));
     let schema = match &value {
         Value::Object(o) => number_default(o, "schema", 1),
         _ => fail("codemod log must be an object"),

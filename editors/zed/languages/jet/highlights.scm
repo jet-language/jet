@@ -107,7 +107,7 @@
   "true"
 ] @constant.builtin
 
-; type.builtin: BTreeMap BigInt BitSet Bool Budget BudgetApplies ByteBuffer Char Computed Csv DataTree DbValue Decimal Deque Derived Effect Error Event EventPolicy EventScope EventTrace F32 F64 Float HashMap Hook I16 I32 I64 I8 IOError Int Iter JSON JSONError Json Key Lru Measurement PriorityQueue Ptr SelectBuilder Set Shared Signal SortedSet Stream String Subscription TaskGroup Toml U16 U32 U64 U8 UTF8Error Void WatchEvent WatchHandle WatchSet Yaml
+; type.builtin: BTreeMap BigInt BitSet Bool Budget BudgetApplies ByteBuffer CSV Char Computed DBValue DataTree Decimal Deque Derived Effect Error Event EventPolicy EventScope EventTrace F32 F64 Float HashMap Hook I16 I32 I64 I8 IOError Int Iter JSON JSONError Key Lru Measurement PriorityQueue Ptr SelectBuilder Set Shared Signal SortedSet Stream String Subscription TOML TaskGroup U16 U32 U64 U8 UTF8Error Void WatchEvent WatchHandle WatchSet YAML
 [
   "Bool"
   "Char"
@@ -129,7 +129,7 @@
 ] @type.builtin
 
 ; builtin: check input print
-; marker.rule: Abi Authority Bench Bindgen Caps Cli Codable CodableAsBase Comparable Context DebugOnly Decode Default DenyUnknownFields Doc Encode Every Extern FFI Flag Flatten Grant Html Impure Inline Invariant Layout Live Local Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable Sanitizer Shared Shield SingleUse Skip Sql State Static Summarize Tag Tainted Target Task Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport allow wire
+; marker.rule: ABI Authority Bench Bindgen CLI Caps Codable CodableAsBase Comparable Context DebugOnly Decode Default DenyUnknownFields Doc Encode Every Extern FFI Flag Flatten Grant HTML Impure Inline Invariant Layout Live Local Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable SQL Sanitizer Shared Shield SingleUse Skip State Static Summarize Tag Tainted Target Task Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport allow wire
 ; sigil: # & ... :: := ^ ~
 ; operator: ! != % %= && &= * *= + ++ += - -- -= -> .. ..< .[ .{ / /= < << <<= <= == => > >= >> >>= ? ?. ?? ^= | |= ||
 ; END GENERATED JET SYNTAX HIGHLIGHTS

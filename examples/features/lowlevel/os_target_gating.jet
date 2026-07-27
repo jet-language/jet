@@ -5,7 +5,7 @@
 // separately as Phase 8).
 //
 // Three dummy structs implement the same `Backend` trait, each `impl` gated to
-// one OS with `#Target(Os.*)`. `jet build --target=<triple>` only emits/links
+// one OS with `#Target(OS.*)`. `jet build --target=<triple>` only emits/links
 // the `impl` matching that triple's OS (host OS when `--target` is omitted) —
 // `tests/cross.rs` proves this by inspecting the generated Rust per triple.
 //
@@ -24,7 +24,7 @@ struct LinuxBackend {
     name: String
 }
 
-struct MacosBackend {
+struct MacOSBackend {
     name: String
 }
 
@@ -32,17 +32,17 @@ struct WindowsBackend {
     name: String
 }
 
-#Target(Os.Linux)
+#Target(OS.Linux)
 impl LinuxBackend.Backend {
     fn label(self) => String = "linux: {self.name}"
 }
 
-#Target(Os.Macos)
-impl MacosBackend.Backend {
+#Target(OS.MacOS)
+impl MacOSBackend.Backend {
     fn label(self) => String = "macos: {self.name}"
 }
 
-#Target(Os.Windows)
+#Target(OS.Windows)
 impl WindowsBackend.Backend {
     fn label(self) => String = "windows: {self.name}"
 }
@@ -53,8 +53,8 @@ fn run() {
             b :: LinuxBackend.{name: "gtk"}
             print(b.label())
         }
-        .Macos -> {
-            b :: MacosBackend.{name: "appkit"}
+        .MacOS -> {
+            b :: MacOSBackend.{name: "appkit"}
             print(b.label())
         }
         .Windows -> {

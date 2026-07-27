@@ -339,7 +339,7 @@ pub const TAR_CRATE_SPEC: (&str, &str) = ("tar", "0");
 pub const DB_CRATE_SPEC: (&str, &str) = ("rusqlite", "0.31");
 
 /// Native HTTP client runtime emitted into the bridge crate when `core.http.client` is used.
-const HTTP_CLIENT_RUNTIME: &str = include_str!("Prelude/Http.rs");
+const HTTP_CLIENT_RUNTIME: &str = include_str!("Prelude/HTTP.rs");
 /// Mozilla Public Suffix List snapshot, IDNA-ToASCII and whitespace compacted.
 /// Source: https://publicsuffix.org/list/public_suffix_list.dat (MPL-2.0).
 const HTTP_PUBLIC_SUFFIX_LIST: &str = include_str!("Prelude/public_suffix_list.dat");
@@ -356,13 +356,13 @@ pub const RUSTLS_NATIVE_CERTS_CRATE_SPEC: (&str, &str) = ("rustls-native-certs",
 
 /// Hand-written HTTP server TLS runtime emitted into the bridge crate when
 /// `core.http.server.tls` is used.
-const HTTP_SERVER_TLS_RUNTIME: &str = include_str!("Prelude/HttpServerTls.rs");
+const HTTP_SERVER_TLS_RUNTIME: &str = include_str!("Prelude/HTTPServerTLS.rs");
 
 #[cfg(test)]
 mod http_server_tls_persist_tests {
     #![allow(dead_code)]
 
-    include!("Prelude/HttpServerTls.rs");
+    include!("Prelude/HTTPServerTLS.rs");
 
     fn fixture_tls() -> (String, String) {
         (
@@ -376,7 +376,7 @@ mod http_server_tls_persist_tests {
     ) -> rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream> {
         use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
         use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-        use rustls::{DigitallySignedStruct, Error as TlsError, SignatureScheme};
+        use rustls::{DigitallySignedStruct, Error as TLSError, SignatureScheme};
 
         let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -390,7 +390,7 @@ mod http_server_tls_persist_tests {
                 _server_name: &ServerName<'_>,
                 _ocsp_response: &[u8],
                 _now: UnixTime,
-            ) -> Result<ServerCertVerified, TlsError> {
+            ) -> Result<ServerCertVerified, TLSError> {
                 Ok(ServerCertVerified::assertion())
             }
             fn verify_tls12_signature(
@@ -398,7 +398,7 @@ mod http_server_tls_persist_tests {
                 _message: &[u8],
                 _cert: &CertificateDer<'_>,
                 _dss: &DigitallySignedStruct,
-            ) -> Result<HandshakeSignatureValid, TlsError> {
+            ) -> Result<HandshakeSignatureValid, TLSError> {
                 Ok(HandshakeSignatureValid::assertion())
             }
             fn verify_tls13_signature(
@@ -406,7 +406,7 @@ mod http_server_tls_persist_tests {
                 _message: &[u8],
                 _cert: &CertificateDer<'_>,
                 _dss: &DigitallySignedStruct,
-            ) -> Result<HandshakeSignatureValid, TlsError> {
+            ) -> Result<HandshakeSignatureValid, TLSError> {
                 Ok(HandshakeSignatureValid::assertion())
             }
             fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
@@ -968,16 +968,16 @@ mod net_tls_close_tests {
     }
 
     #[derive(Clone, Copy)]
-    enum SmtpFixture { Success, CloseAfterData, RejectAuth, StallGreeting }
+    enum SMTPFixture { Success, CloseAfterData, RejectAuth, StallGreeting }
 
     fn smtp_tls_session<T: std::io::Read + std::io::Write>(
         io: &mut T,
         greeting: bool,
-        fixture: SmtpFixture,
+        fixture: SMTPFixture,
         transcript: &std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     ) {
         if greeting {
-            if matches!(fixture, SmtpFixture::StallGreeting) {
+            if matches!(fixture, SMTPFixture::StallGreeting) {
                 let mut byte = [0u8; 1];
                 let _ = io.read(&mut byte);
                 return;
@@ -989,7 +989,7 @@ mod net_tls_close_tests {
         io.write_all(b"250-relay\r\n250 AUTH PLAIN LOGIN\r\n").unwrap(); io.flush().unwrap();
         let auth = smtp_read_line(io); transcript.lock().unwrap().push(auth.clone());
         assert!(auth.starts_with("AUTH PLAIN ")); assert!(!auth.contains("swordfish"));
-        if matches!(fixture, SmtpFixture::RejectAuth) {
+        if matches!(fixture, SMTPFixture::RejectAuth) {
             io.write_all(b"535 bad credentials\r\n").unwrap(); io.flush().unwrap();
             return;
         }
@@ -1011,7 +1011,7 @@ mod net_tls_close_tests {
             if body.ends_with(b"\r\n.\r\n") { break; }
         }
         transcript.lock().unwrap().push(String::from_utf8_lossy(&body).into_owned());
-        if matches!(fixture, SmtpFixture::CloseAfterData) { return; }
+        if matches!(fixture, SMTPFixture::CloseAfterData) { return; }
         io.write_all(b"250 queued q-1\r\n").unwrap(); io.flush().unwrap();
         let quit = smtp_read_line(io); transcript.lock().unwrap().push(quit);
         let _ = io.write_all(b"221 bye\r\n"); let _ = io.flush();
@@ -1019,7 +1019,7 @@ mod net_tls_close_tests {
 
     fn spawn_smtp_server(
         starttls: bool,
-        fixture: SmtpFixture,
+        fixture: SMTPFixture,
     ) -> (std::net::SocketAddr, std::sync::Arc<std::sync::Mutex<Vec<String>>>, std::thread::JoinHandle<()>) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -1054,14 +1054,14 @@ mod net_tls_close_tests {
             &"first\r\n.second".to_string(), &String::new(), &vec![]).unwrap()
     }
 
-    fn smtp_config(port: u16, starttls: bool) -> smtp_adapter::jet_email::SmtpConfig<Vec<u8>> {
+    fn smtp_config(port: u16, starttls: bool) -> smtp_adapter::jet_email::SMTPConfig<Vec<u8>> {
         use smtp_adapter::jet_email as email;
-        email::SmtpConfig {
+        email::SMTPConfig {
             host: "localhost".to_string(), port: port as i64,
-            security: if starttls { email::SmtpSecurity::StartTls } else { email::SmtpSecurity::Tls },
-            auth: email::SmtpAuth::Password { username: "mailer".to_string(), password: b"swordfish".to_vec() },
+            security: if starttls { email::SMTPSecurity::StartTls } else { email::SMTPSecurity::TLS },
+            auth: email::SMTPAuth::Password { username: "mailer".to_string(), password: b"swordfish".to_vec() },
             recipient_policy: email::RecipientPolicy::RequireAll,
-            trust: email::TlsTrust::SystemPlusCa {
+            trust: email::TLSTrust::SystemPlusCa {
                 pem: include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem").to_vec(),
             },
             limits: email::Limits::safe(),
@@ -1146,7 +1146,7 @@ mod net_tls_close_tests {
         SMTP_CANCELLED.store(false, std::sync::atomic::Ordering::SeqCst);
         SMTP_DEADLINE_MS.store(i64::MAX, std::sync::atomic::Ordering::SeqCst);
         for starttls in [false, true] {
-            let (address, transcript, server) = spawn_smtp_server(starttls, SmtpFixture::Success);
+            let (address, transcript, server) = spawn_smtp_server(starttls, SMTPFixture::Success);
             let config = smtp_config(address.port(), starttls);
             let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
             let report = mailer.send(smtp_message()).unwrap();
@@ -1158,14 +1158,14 @@ mod net_tls_close_tests {
             if starttls { assert!(transcript.contains("STARTTLS\r\nEHLO localhost\r\n")); }
         }
 
-        let (address, transcript, server) = spawn_smtp_server(false, SmtpFixture::CloseAfterData);
+        let (address, transcript, server) = spawn_smtp_server(false, SMTPFixture::CloseAfterData);
         let config = smtp_config(address.port(), false);
         let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
         assert!(matches!(mailer.send(smtp_message()), Err(email::Error::DeliveryUnknown { .. })));
         server.join().unwrap();
         assert_eq!(transcript.lock().unwrap().join("").matches("DATA\r\n").count(), 1);
 
-        let (address, _, server) = spawn_smtp_server(false, SmtpFixture::RejectAuth);
+        let (address, _, server) = spawn_smtp_server(false, SMTPFixture::RejectAuth);
         let config = smtp_config(address.port(), false);
         let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
         let auth_error = mailer.send(smtp_message()).unwrap_err();
@@ -1173,7 +1173,7 @@ mod net_tls_close_tests {
         assert!(!format!("{auth_error:?}").contains("swordfish"));
         server.join().unwrap();
 
-        let (address, _, server) = spawn_smtp_server(false, SmtpFixture::StallGreeting);
+        let (address, _, server) = spawn_smtp_server(false, SMTPFixture::StallGreeting);
         let config = smtp_config(address.port(), false);
         let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
         let cancel = std::thread::spawn(|| {
@@ -1184,7 +1184,7 @@ mod net_tls_close_tests {
         cancel.join().unwrap(); server.join().unwrap();
         SMTP_CANCELLED.store(false, std::sync::atomic::Ordering::SeqCst);
 
-        let (address, _, server) = spawn_smtp_server(false, SmtpFixture::StallGreeting);
+        let (address, _, server) = spawn_smtp_server(false, SMTPFixture::StallGreeting);
         SMTP_DEADLINE_MS.store(smtp_now_ms() + 60, std::sync::atomic::Ordering::SeqCst);
         let config = smtp_config(address.port(), false);
         let mut mailer = email::smtp(&config, |secret| secret.clone(), smtp_runtime()).unwrap();
@@ -1199,7 +1199,7 @@ mod net_tls_close_tests {
         let seed = [7u8; 32];
         let mut wires = Vec::new();
         for _ in 0..2 {
-            let (address, transcript, server) = spawn_smtp_server(false, SmtpFixture::Success);
+            let (address, transcript, server) = spawn_smtp_server(false, SMTPFixture::Success);
             let mut config = smtp_config(address.port(), false);
             config.dkim = Some(email::DkimConfig {
                 domain: "example.com".to_string(), selector: "login-2026".to_string(),
@@ -1358,7 +1358,7 @@ const ARCHIVE_RUNTIME: &str =
 
 /// Hand-written database runtime emitted into the bridge crate when `jet.db`
 /// is used. This is the only code that touches the `rusqlite` crate.
-const DB_RUNTIME: &str = include_str!("Prelude/Db.rs");
+const DB_RUNTIME: &str = include_str!("Prelude/DB.rs");
 
 /// The `aes-gcm` crate version backing `core.crypto` envelope (D-DEP-CRYPTO1).
 pub const AES_GCM_CRATE_SPEC: (&str, &str) = ("aes-gcm", "=0.10.3");
@@ -2606,7 +2606,7 @@ fn emit_wrapper_lib(
     if needs_net_tls {
         // D-NETSOCKET1=A / D-TLS1=A: client stream TLS over an existing TcpStream.
         // When the native HTTP client is also present, nest the stream runtime so
-        // its std imports do not collide with Http.rs at the bridge crate root.
+        // its std imports do not collide with HTTP.rs at the bridge crate root.
         if needs_http_client {
             out.push_str("mod __jet_net_tls {\n");
             out.push_str(NET_TLS_RUNTIME);

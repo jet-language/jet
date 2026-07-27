@@ -420,7 +420,7 @@ fn emit_columnar_storage(cx: &Cx, s: &StructDef, out: &mut String) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// D-CLIFLAG1 (c7cliflag): `#[Cli]` derive codegen — sibling of the
+// D-CLIFLAG1 (c7cliflag): `#[CLI]` derive codegen — sibling of the
 // `#[Codable]` serde codegen just above, generating onto `core.args`'s
 // `ArgsSpec`/`ParsedArgs` builder (the same `jet_args_*`/`jet_parsed_*`
 // prelude functions a hand-written `.flag()/.option()` chain compiles to,
@@ -450,10 +450,10 @@ fn cli_scalar_from_string(ty: &Type, var: &str, flag: &str, root_prefix: &str) -
 }
 
 /// D-CLIFLAG1: emit `__jet_cli_spec_<Name>`/`__jet_cli_decode_<Name>` for a
-/// `#[Cli]`-derived struct. See the pinned field-mapping rule in
+/// `#[CLI]`-derived struct. See the pinned field-mapping rule in
 /// docs/spec/spec.md ("Typed entry-signature CLI parsing (D-CLIFLAG1)").
 fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
-    let Some(schema) = jet_foundation::CliSchema::command_schema(s) else {
+    let Some(schema) = jet_foundation::CLISchema::command_schema(s) else {
         return;
     };
     let cn = user_type_rust(&s.name);
@@ -463,20 +463,20 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
     spec_body.push_str(&format!("    let __s = {root}jet_args_spec();\n"));
     let mut decode_lines = String::new();
 
-    // CliSchema is the checked projection shared with `jet inspect dossier`.
+    // CLISchema is the checked projection shared with `jet inspect dossier`.
     // Codegen consumes it rather than reconstructing shell mapping rules.
     for input in &schema.inputs {
         let f = s
             .fields
             .iter()
             .find(|field| field.name == input.field)
-            .expect("CliSchema fields originate from this struct");
+            .expect("CLISchema fields originate from this struct");
         let flag = &input.flag;
         let help = &input.help;
         let m = mangle(&input.field);
 
         match &input.shape {
-            jet_foundation::CliSchema::CliInputShape::Flag => {
+            jet_foundation::CLISchema::CLIInputShape::Flag => {
                 spec_body.push_str(&format!(
                     "    let __s = {root}jet_args_flag(__s, &{flag:?}.to_string(), &{help:?}.to_string());\n"
                 ));
@@ -484,11 +484,11 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                     "    let {m}: bool = {root}jet_parsed_flag(__parsed, &{flag:?}.to_string());\n"
                 ));
             }
-            jet_foundation::CliSchema::CliInputShape::Value {
+            jet_foundation::CLISchema::CLIInputShape::Value {
                 optional: true, ..
             } => {
                 let Type::Option(inner) = &f.ty else {
-                    unreachable!("optional CliSchema input comes from an Option field")
+                    unreachable!("optional CLISchema input comes from an Option field")
                 };
                 let metavar = input.metavar.as_deref().unwrap_or("VALUE");
                 spec_body.push_str(&format!(
@@ -500,7 +500,7 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                     "    let {m}: Option<{rust}> = match {root}jet_parsed_option(__parsed, &{flag:?}.to_string()) {{ Some(__v) => Some({conv}), None => None }};\n"
                 ));
             }
-            jet_foundation::CliSchema::CliInputShape::Value {
+            jet_foundation::CLISchema::CLIInputShape::Value {
                 optional: false,
                 default,
                 ..
@@ -521,13 +521,13 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                 let rust = cx.rust_type(ty);
                 let conv = cli_scalar_from_string(ty, "__v", &flag, root);
                 let absent = match default {
-                    Some(jet_foundation::CliSchema::CliDefault::Value(value)) => {
+                    Some(jet_foundation::CLISchema::CLIDefault::Value(value)) => {
                         value.serialize()
                     }
-                    Some(jet_foundation::CliSchema::CliDefault::TypeDefault) => {
+                    Some(jet_foundation::CLISchema::CLIDefault::TypeDefault) => {
                         "Default::default()".to_string()
                     }
-                    Some(jet_foundation::CliSchema::CliDefault::Recorded(_)) => {
+                    Some(jet_foundation::CLISchema::CLIDefault::Recorded(_)) => {
                         unreachable!("recorded defaults are read from artifacts, never sema input")
                     }
                     None if input.positional.is_some() => format!(
@@ -710,7 +710,7 @@ pub(crate) fn emit_cli_entry_if_needed(
         Item::Struct(s) if &s.name == name => Some(s),
         _ => None,
     }) {
-        if s.derives.iter().any(|(t, _)| t == "Cli") {
+        if s.derives.iter().any(|(t, _)| t == "CLI") {
             let call_arg = arg_expr("__args");
             let invoke = emit_entry_invocation(
                 &callable,
@@ -731,7 +731,7 @@ pub(crate) fn emit_cli_entry_if_needed(
         Item::Enum(e) if &e.name == name => Some(e),
         _ => None,
     }) {
-        let schema = jet_foundation::CliSchema::schema_for_type(cli_items, name)
+        let schema = jet_foundation::CLISchema::schema_for_type(cli_items, name)
             .expect("sema-approved enum entry has one checked command schema");
         emit_cli_subcommand_entry(
             cx,
@@ -797,7 +797,7 @@ fn fallible_void_entry_error(ty: &Type, cx: &Cx) -> Option<EntryError> {
 
 /// D-CLIFLAG1: the `enum Cmd { Serve(ServeArgs) Import(ImportArgs) }` case.
 /// The first positional token picks the variant by its lowercased name; the
-/// rest of argv is re-parsed against that variant's own `#[Cli]` spec. Given
+/// rest of argv is re-parsed against that variant's own `#[CLI]` spec. Given
 /// zero arguments (no subcommand token at all — the shape the zero-arg
 /// golden-example convention exercises), the generated `main` prints the
 /// command list and exits 0 rather than erroring: a bare invocation asking
@@ -805,7 +805,7 @@ fn fallible_void_entry_error(ty: &Type, cx: &Cx) -> Option<EntryError> {
 fn emit_cli_subcommand_entry(
     cx: &Cx,
     e: &EnumDef,
-    schema: &jet_foundation::CliSchema::CliCommandSchema,
+    schema: &jet_foundation::CLISchema::CLICommandSchema,
     helper_prefix: &str,
     enum_rust: &str,
     callable: &str,
@@ -1323,31 +1323,16 @@ fn marker_str_arg(m: &Marker) -> Option<String> {
         _ => None,
     }
 }
-fn cap_word(w: &str) -> String {
-    let mut c = w.chars();
-    match c.next() {
-        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-        None => String::new(),
-    }
-}
-// D-SERDE3 (= C): wire-casing transform on a snake_case Jet field name.
+// D-SERDE3 (= C) + D-ACRO-CASE1=A: wire-casing transform. Snake field names are
+// the common path; PascalCase inputs use the mechanical acronym split.
 fn apply_rename_all(style: &str, name: &str) -> String {
-    let words: Vec<&str> = name.split('_').filter(|w| !w.is_empty()).collect();
     match style {
-        crate::Syntax::RENAME_ALL_CAMEL => {
-            let mut it = words.iter();
-            let first = it.next().copied().unwrap_or("").to_string();
-            first + &it.map(|w| cap_word(w)).collect::<String>()
-        }
-        crate::Syntax::RENAME_ALL_PASCAL => words.iter().map(|w| cap_word(w)).collect(),
-        crate::Syntax::RENAME_ALL_KEBAB => words.join("-"),
-        crate::Syntax::RENAME_ALL_SCREAMING => words
-            .iter()
-            .map(|w| w.to_uppercase())
-            .collect::<Vec<_>>()
-            .join("_"),
+        crate::Syntax::RENAME_ALL_CAMEL => crate::Syntax::to_camel_acronym(name),
+        crate::Syntax::RENAME_ALL_PASCAL => crate::Syntax::to_pascal_acronym(name),
+        crate::Syntax::RENAME_ALL_KEBAB => crate::Syntax::to_snake_acronym(name).replace('_', "-"),
+        crate::Syntax::RENAME_ALL_SCREAMING => crate::Syntax::to_shouty_acronym(name),
         // snake (and any unrecognized — sema rejects those with E2409)
-        _ => words.join("_"),
+        _ => crate::Syntax::to_snake_acronym(name),
     }
 }
 fn container_rename_all(markers: &[Marker]) -> Option<String> {

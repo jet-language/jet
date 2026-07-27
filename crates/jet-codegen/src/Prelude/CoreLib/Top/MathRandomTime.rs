@@ -335,8 +335,8 @@ fn jet_zoned_add_duration(z: &JetZonedDateTime, d: &crate::jet_std::Duration) ->
     z.add_duration_ms(d.ms)
 }
 
-fn jet_url_parse(s: &String) -> Result<crate::jet_std::JetUrl, String> {
-    crate::jet_std::JetUrl::parse(s)
+fn jet_url_parse(s: &String) -> Result<crate::jet_std::JetURL, String> {
+    crate::jet_std::JetURL::parse(s)
 }
 fn jet_url_from_parts(
     scheme: &String,
@@ -344,14 +344,14 @@ fn jet_url_from_parts(
     path: &String,
     query: &Vec<Vec<String>>,
     fragment: &String,
-) -> Result<crate::jet_std::JetUrl, String> {
-    crate::jet_std::JetUrl::from_parts(scheme, host, path, query, fragment)
+) -> Result<crate::jet_std::JetURL, String> {
+    crate::jet_std::JetURL::from_parts(scheme, host, path, query, fragment)
 }
-fn jet_url_file(path: &String) -> crate::jet_std::JetUrl {
-    crate::jet_std::JetUrl::file(path)
+fn jet_url_file(path: &String) -> crate::jet_std::JetURL {
+    crate::jet_std::JetURL::file(path)
 }
-fn jet_url_data(mime: &crate::jet_std::JetMime, text: &String) -> crate::jet_std::JetUrl {
-    crate::jet_std::JetUrl::data(mime, text)
+fn jet_url_data(mime: &crate::jet_std::JetMIME, text: &String) -> crate::jet_std::JetURL {
+    crate::jet_std::JetURL::data(mime, text)
 }
 fn jet_url_query(pairs: &Vec<Vec<String>>) -> String {
     let rows: Vec<(String, String)> = pairs
@@ -381,8 +381,8 @@ fn jet_url_percent_encode_component(s: &String) -> String {
 fn jet_url_percent_decode_component(s: &String) -> Result<String, String> {
     crate::jet_std::jet_url_percent_decode_str(s)
 }
-fn jet_mime_parse(s: &String) -> Result<crate::jet_std::JetMime, String> {
-    crate::jet_std::JetMime::parse(s)
+fn jet_mime_parse(s: &String) -> Result<crate::jet_std::JetMIME, String> {
+    crate::jet_std::JetMIME::parse(s)
 }
 fn jet_mime_from_extension(ext: &String) -> Option<String> {
     crate::jet_std::jet_mime_from_extension(ext).map(|s| s.to_string())
@@ -430,11 +430,11 @@ fn jet_decimal_to_string(a: &jet_std::JetDecimal) -> String {
 }
 
 // D-ENC-DYN1=A+: the dynamic `parse` returns the one rich `Data` value (the
-// user-facing face of `DataTree`). JSON text parses through the internal `Json`
+// user-facing face of `DataTree`). JSON text parses through the internal `JSON`
 // enum, then collapses onto `DataTree` (integral numbers become `Int`, fractional
-// `Float`). Object keys arrive in sorted order (the internal `Json` enum is
+// `Float`). Object keys arrive in sorted order (the internal `JSON` enum is
 // `BTreeMap`-keyed), matching the pre-`Data` dynamic JSON behavior.
-fn jet_std_json_parse(text: &String) -> Result<jet_std::DataTree, jet_std::JsonError> {
+fn jet_std_json_parse(text: &String) -> Result<jet_std::DataTree, jet_std::JSONError> {
     jet_std::parse_json(text).map(|j| jet_std::datatree_from_json(&j))
 }
 fn jet_std_json_render(d: &jet_std::DataTree) -> String {
@@ -511,7 +511,7 @@ fn jet_std_json_events(d: &jet_std::DataTree) -> String {
     walk(String::new(), d, &mut out);
     out.join("\n")
 }
-fn jet_std_jsonl_parse(text: &String) -> Result<Vec<jet_std::DataTree>, jet_std::JsonError> {
+fn jet_std_jsonl_parse(text: &String) -> Result<Vec<jet_std::DataTree>, jet_std::JSONError> {
     let mut out = Vec::new();
     for (idx, line) in text.lines().enumerate() {
         let trimmed = line.trim();
@@ -521,7 +521,7 @@ fn jet_std_jsonl_parse(text: &String) -> Result<Vec<jet_std::DataTree>, jet_std:
         match jet_std_json_parse(&trimmed.to_string()) {
             Ok(v) => out.push(v),
             Err(e) => {
-                return Err(jet_std::JsonError {
+                return Err(jet_std::JSONError {
                     line: idx as i64 + e.line,
                     message: e.message,
                 })
@@ -547,35 +547,35 @@ fn jet_std_jsonl_render(rows: &Vec<jet_std::DataTree>) -> String {
 // number or boolean is coerced to that type; one log line is emitted per
 // coercion naming the field and the from→to types. The coerced value collapses
 // onto `Data` (D-ENC-DYN1=A+).
-fn jet_std_json_decode_lenient(text: &String) -> Result<jet_std::DataTree, jet_std::JsonError> {
+fn jet_std_json_decode_lenient(text: &String) -> Result<jet_std::DataTree, jet_std::JSONError> {
     let parsed = jet_std::parse_json(text)?;
     Ok(jet_std::datatree_from_json(&jet_std_json_coerce_walk(
         &parsed, "",
     )))
 }
 
-fn jet_std_json_coerce_walk(value: &jet_std::Json, path: &str) -> jet_std::Json {
+fn jet_std_json_coerce_walk(value: &jet_std::JSON, path: &str) -> jet_std::JSON {
     match value {
-        jet_std::Json::Text(s) => {
+        jet_std::JSON::Text(s) => {
             // try bool first (exact match only)
             if s == "true" {
                 jet_std_json_emit_coerce(path, "string", "boolean");
-                return jet_std::Json::Boolean(true);
+                return jet_std::JSON::Boolean(true);
             }
             if s == "false" {
                 jet_std_json_emit_coerce(path, "string", "boolean");
-                return jet_std::Json::Boolean(false);
+                return jet_std::JSON::Boolean(false);
             }
             // try number (must parse as valid f64 and round-trip cleanly)
             if let Ok(n) = s.parse::<f64>() {
                 if n.is_finite() {
                     jet_std_json_emit_coerce(path, "string", "number");
-                    return jet_std::Json::Number(n);
+                    return jet_std::JSON::Number(n);
                 }
             }
             value.clone()
         }
-        jet_std::Json::Object(entries) => {
+        jet_std::JSON::Object(entries) => {
             let mut out = std::collections::BTreeMap::new();
             for (k, v) in entries {
                 let child_path = if path.is_empty() {
@@ -585,10 +585,10 @@ fn jet_std_json_coerce_walk(value: &jet_std::Json, path: &str) -> jet_std::Json 
                 };
                 out.insert(k.clone(), jet_std_json_coerce_walk(v, &child_path));
             }
-            jet_std::Json::Object(out)
+            jet_std::JSON::Object(out)
         }
-        jet_std::Json::Array(items) => {
-            let coerced: Vec<jet_std::Json> = items
+        jet_std::JSON::Array(items) => {
+            let coerced: Vec<jet_std::JSON> = items
                 .iter()
                 .enumerate()
                 .map(|(i, v)| {
@@ -600,7 +600,7 @@ fn jet_std_json_coerce_walk(value: &jet_std::Json, path: &str) -> jet_std::Json 
                     jet_std_json_coerce_walk(v, &child_path)
                 })
                 .collect();
-            jet_std::Json::Array(coerced)
+            jet_std::JSON::Array(coerced)
         }
         // Null, Boolean, Number — already the right type, no coercion.
         other => other.clone(),
@@ -623,8 +623,8 @@ fn jet_std_json_emit_coerce(path: &str, from: &str, to: &str) {
 fn jet_string_bytes(s: &String) -> Vec<u8> {
     s.as_bytes().to_vec()
 }
-fn jet_string_from_bytes(bs: &Vec<u8>) -> Result<String, jet_std::Utf8Error> {
-    String::from_utf8(bs.clone()).map_err(|e| jet_std::Utf8Error {
+fn jet_string_from_bytes(bs: &Vec<u8>) -> Result<String, jet_std::UTF8Error> {
+    String::from_utf8(bs.clone()).map_err(|e| jet_std::UTF8Error {
         message: e.to_string(),
     })
 }

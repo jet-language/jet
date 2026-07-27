@@ -1,15 +1,15 @@
 // D-HTTP-ROUTE-SYNTAX2=A: one route grammar for every HTTP entry point.
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum JetHttpRouteSegment {
+enum JetHTTPRouteSegment {
     Static(String),
     Param(String),
     CatchAll(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct JetHttpRoutePattern {
-    segments: Vec<JetHttpRouteSegment>,
+struct JetHTTPRoutePattern {
+    segments: Vec<JetHTTPRouteSegment>,
 }
 
 fn jet_http_route_name(name: &str) -> bool {
@@ -57,7 +57,7 @@ fn jet_http_route_decode_segment(segment: &str) -> Result<String, String> {
     Ok(decoded)
 }
 
-fn jet_http_route_parse(pattern: &str) -> Result<JetHttpRoutePattern, String> {
+fn jet_http_route_parse(pattern: &str) -> Result<JetHTTPRoutePattern, String> {
     if !pattern.starts_with('/') {
         return Err(format!("E2805: invalid HTTP route `{pattern}`: routes must start with `/`"));
     }
@@ -84,7 +84,7 @@ fn jet_http_route_parse(pattern: &str) -> Result<JetHttpRoutePattern, String> {
             if !names.insert(name.to_string()) {
                 return Err(format!("E2805: invalid HTTP route `{pattern}`: duplicate parameter `{name}`"));
             }
-            JetHttpRouteSegment::Param(name.to_string())
+            JetHTTPRouteSegment::Param(name.to_string())
         } else if let Some(name) = segment.strip_prefix('*') {
             if index + 1 != raw_segments.len() {
                 return Err(format!("E2805: invalid HTTP route `{pattern}`: `*name` catch-all must be final"));
@@ -95,15 +95,15 @@ fn jet_http_route_parse(pattern: &str) -> Result<JetHttpRoutePattern, String> {
             if !names.insert(name.to_string()) {
                 return Err(format!("E2805: invalid HTTP route `{pattern}`: duplicate parameter `{name}`"));
             }
-            JetHttpRouteSegment::CatchAll(name.to_string())
+            JetHTTPRouteSegment::CatchAll(name.to_string())
         } else {
-            JetHttpRouteSegment::Static(jet_http_route_decode_segment(segment).map_err(|reason| {
+            JetHTTPRouteSegment::Static(jet_http_route_decode_segment(segment).map_err(|reason| {
                 format!("E2805: invalid HTTP route `{pattern}`: {reason}")
             })?)
         };
         segments.push(parsed);
     }
-    Ok(JetHttpRoutePattern { segments })
+    Ok(JetHTTPRoutePattern { segments })
 }
 
 fn jet_http_route_path(path: &str) -> Result<Vec<String>, String> {
@@ -119,10 +119,10 @@ fn jet_http_route_path(path: &str) -> Result<Vec<String>, String> {
 }
 
 fn jet_http_route_match(
-    pattern: &JetHttpRoutePattern,
+    pattern: &JetHTTPRoutePattern,
     path: &[String],
 ) -> Option<std::collections::BTreeMap<String, String>> {
-    let has_catch_all = matches!(pattern.segments.last(), Some(JetHttpRouteSegment::CatchAll(_)));
+    let has_catch_all = matches!(pattern.segments.last(), Some(JetHTTPRouteSegment::CatchAll(_)));
     let required = pattern.segments.len() - usize::from(has_catch_all);
     if path.len() < required || !has_catch_all && path.len() != required {
         return None;
@@ -130,12 +130,12 @@ fn jet_http_route_match(
     let mut params = std::collections::BTreeMap::new();
     for (index, segment) in pattern.segments.iter().enumerate() {
         match segment {
-            JetHttpRouteSegment::Static(expected) if path.get(index) == Some(expected) => {}
-            JetHttpRouteSegment::Static(_) => return None,
-            JetHttpRouteSegment::Param(name) => {
+            JetHTTPRouteSegment::Static(expected) if path.get(index) == Some(expected) => {}
+            JetHTTPRouteSegment::Static(_) => return None,
+            JetHTTPRouteSegment::Param(name) => {
                 params.insert(name.clone(), path[index].clone());
             }
-            JetHttpRouteSegment::CatchAll(name) => {
+            JetHTTPRouteSegment::CatchAll(name) => {
                 params.insert(name.clone(), path[index..].join("/"));
                 break;
             }
@@ -144,18 +144,18 @@ fn jet_http_route_match(
     Some(params)
 }
 
-fn jet_http_route_rank(segment: &JetHttpRouteSegment) -> u8 {
+fn jet_http_route_rank(segment: &JetHTTPRouteSegment) -> u8 {
     match segment {
-        JetHttpRouteSegment::Static(_) => 2,
-        JetHttpRouteSegment::Param(_) => 1,
-        JetHttpRouteSegment::CatchAll(_) => 0,
+        JetHTTPRouteSegment::Static(_) => 2,
+        JetHTTPRouteSegment::Param(_) => 1,
+        JetHTTPRouteSegment::CatchAll(_) => 0,
     }
 }
 
 fn jet_http_route_selection_cmp(
-    left: &JetHttpRoutePattern,
+    left: &JetHTTPRoutePattern,
     left_order: usize,
-    right: &JetHttpRoutePattern,
+    right: &JetHTTPRoutePattern,
     right_order: usize,
 ) -> std::cmp::Ordering {
     for (left, right) in left.segments.iter().zip(&right.segments) {
@@ -171,10 +171,10 @@ fn jet_http_route_selection_cmp(
         .then_with(|| right_order.cmp(&left_order))
 }
 
-fn jet_http_route_shape(pattern: &JetHttpRoutePattern) -> String {
+fn jet_http_route_shape(pattern: &JetHTTPRoutePattern) -> String {
     pattern.segments.iter().map(|segment| match segment {
-        JetHttpRouteSegment::Static(value) => format!("s{}:{value}", value.len()),
-        JetHttpRouteSegment::Param(_) => "p".to_string(),
-        JetHttpRouteSegment::CatchAll(_) => "w".to_string(),
+        JetHTTPRouteSegment::Static(value) => format!("s{}:{value}", value.len()),
+        JetHTTPRouteSegment::Param(_) => "p".to_string(),
+        JetHTTPRouteSegment::CatchAll(_) => "w".to_string(),
     }).collect::<Vec<_>>().join("/")
 }

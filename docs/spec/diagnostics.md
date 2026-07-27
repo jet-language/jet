@@ -228,7 +228,7 @@ renumbered, and no new `W` code may be allocated.
 | E0145 | parse | `#Persist` on a binding that isn't module-level (D-PERSIST1) |
 | E0147 | parse | two `{}` holes in a str-match pattern with no literal text between them (D-PARSESTR1/D-PARSESTR2) |
 | E0148 | sema  | a str-match pattern used in an `if == {}` table with no `else` arm (D-PARSESTR1) |
-| E0149 | sema  | a runtime `String` used where `Sql`/`Html` is expected (D-TYPEDTEXT1) |
+| E0149 | sema  | a runtime `String` used where `SQL`/`HTML` is expected (D-TYPEDTEXT1) |
 | E0150 | sema  | typestate: an operation is called on a value in the wrong state (D-STATE1) |
 | E0151 | sema  | typestate: `#State(X)` or `#Transition(A, B)` references a state not in the `state TypeName { … }` declaration (D-STATE-DECL) |
 | E0153 | sema  | protocol expansion failed to parse a generated handle fragment (D-PROTO1) |
@@ -318,6 +318,7 @@ renumbered, and no new `W` code may be allocated.
 | E0355 | parse/sema | invalid scoped policy: unknown key, prohibited scope, conflict, or widening (D-MARK-SCOPE1) |
 | E0356 | sema  | inferred `.new(...)` has no expected receiver type (D-SHAPE3a) |
 | E0357 | sema  | an identifier violates Jet's machine-enforced casing category (D-SHAPE-CASE1) |
+| E0358 | sema  | retired word-cased acronym spelling; use the caps form (D-ACRO-CASE1, D-ACRO-LEX1) |
 | E0359 | sema  | physical quantity dimensions are incompatible for the requested operator (D-SHAPE-QUANTITY1) |
 | E0360 | sema  | a nominal type uses arithmetic without the required operator hook (D-OPDEF1) |
 | E0361 | sema  | an operator hook directly dispatches back to itself through its symbol (D-OPDEF1) |
@@ -402,13 +403,13 @@ renumbered, and no new `W` code may be allocated.
 | E0743 | sema  | dynamic trait dispatch has no declared effect bound under an enclosing effect ceiling (D-EFF3) |
 | E0711 | sema  | the capability handle bound by a `#Grant(…)` region escapes its scope — returned, stored, or captured (D-SCAP1) |
 | E0712 | sema  | an effect used inside a `#Grant(…)` region has no capability — it isn't in the grant's list (D-SCAP1) |
-| E0721 | sema  | an untrusted (`#Tainted`) value reaches a sink effect (`Db`/`Exec`/`Net`) without passing through a `#Sanitizer fn` (D-TAINT1) |
+| E0721 | sema  | an untrusted (`#Tainted`) value reaches a sink effect (`DB`/`Exec`/`Net`) without passing through a `#Sanitizer fn` (D-TAINT1) |
 | E0722 | sema  | a `#Tainted(Credential)` value reaches a credential sink (`print`/`log`/`serialize`) — credential leakage (D-TAINT2) |
-| E0725 | sema  | a `#Replayable` function reaches ambient `Time`/`Rand`/`Net`/`Io` (D-REPLAY1) |
+| E0725 | sema  | a `#Replayable` function reaches ambient `Time`/`Rand`/`Net`/`IO` (D-REPLAY1) |
 | E0731 | sema  | a `tag` is used where dispatch/methods are expected — `derive`d, or implemented/used as a trait (D-QUAL2) |
 | E0732 | sema  | a method is declared in a `tag` body, but tags have no methods (D-QUAL2) |
 | E0745 | retired | *retired by D-SHAPE8=A* (was: `#Pure fn` combined with a non-empty `#(…)` effect list) |
-| E0746 | sema  | an irreversible effect (Net/Fs/Exec) used directly inside a `#Transact { … }` block — can't be rolled back (D-TXN2) |
+| E0746 | sema  | an irreversible effect (Net/FS/Exec) used directly inside a `#Transact { … }` block — can't be rolled back (D-TXN2) |
 | E0747 | sema  | a callback argument exceeds its parameter's effect bound (`fn(…) =[]=>` / `fn(…) =[E]=>`) (D-EFF2) |
 | E0748 | sema  | `=[via f]=>` names a non-existent parameter, or one that isn't a function type (D-EFF2) |
 | E0749 | sema  | a function reaches an effect it prohibits with `=[!E]=>` in its own call graph (D-PROP1=A) |
@@ -416,10 +417,10 @@ renumbered, and no new `W` code may be allocated.
 | E-WEB-CROSS-PARTITION | sema | a function in one web bucket calls a function in another (D-WASM1) |
 | E-WEB-TARGET-BROWSER | sema | a Wasm-pinned function also carries the `Browser` effect (D-WASM1) |
 | E-WEB-TIR-UNSUPPORTED | driver | a web-targeted executable body is outside the checked TIR boundary (D-WEBTIR1) |
-| E-OSTARGET-MIXED-AXIS | sema | a `#Target(Os.*)`-gated impl's file/module also carries a web-bucket ceiling (D-OSTARGET1) |
-| E-OSTARGET-UNMATCHED-CALL | sema | a function/method not gated to match takes or returns a value of a `#Target(Os.*)`-gated type (D-OSTARGET1) |
+| E-OSTARGET-MIXED-AXIS | sema | a `#Target(OS.*)`-gated impl's file/module also carries a web-bucket ceiling (D-OSTARGET1) |
+| E-OSTARGET-UNMATCHED-CALL | sema | a function/method not gated to match takes or returns a value of a `#Target(OS.*)`-gated type (D-OSTARGET1) |
 | E-OSTARGET-BUILD-CONTEXT | sema | a `comptime if … == { }` OS dispatch's subject is not `build.os` (D-OSTARGET2) |
-| E-OSTARGET-DISPATCH-ARM | sema | a `comptime if build.os == { }` arm head is not a bare `.Linux`/`.Macos`/`.Windows` variant, or repeats one (D-OSTARGET2) |
+| E-OSTARGET-DISPATCH-ARM | sema | a `comptime if build.os == { }` arm head is not a bare `.Linux`/`.MacOS`/`.Windows` variant, or repeats one (D-OSTARGET2) |
 | E-OSTARGET-DISPATCH-EXHAUSTIVE | sema | a `comptime if build.os == { }` dispatch leaves some target OS uncovered with no `else` (D-OSTARGET2) |
 | E0760 | parser | `#Context` field uses `=` instead of `:` (D-CTX1, S17) |
 | E0761 | parser | unknown `#Context` field name (v1 allows only `allocator`, `logger`, `deadline`) |
@@ -454,7 +455,7 @@ renumbered, and no new `W` code may be allocated.
 | E3209 | jet   | linker couldn't find a declared C library at link time |
 | E3210 | jet   | C library auto-provision from nixpkgs failed |
 | E3211 | sema  | string literal with a known interior NUL byte passed to a C-boundary function |
-| E3212 | parse/sema | `#Abi` on `extern rust` (Rust FFI has no C calling convention to pick), or `#Abi(name)` names an unknown C calling convention |
+| E3212 | parse/sema | `#ABI` on `extern rust` (Rust FFI has no C calling convention to pick), or `#ABI(name)` names an unknown C calling convention |
 | E3213 | sema  | named C calling convention exists but isn't available on this target's OS/architecture |
 | E3214 | sema  | variadic C function used with a calling convention other than the default C ABI (or `cdecl` on Windows x86) |
 | E3215 | sema  | `#FFI(<lang>)` inline foreign fn in an unsafe language (`c`/`cpp`/`asm`) lacks the enclosing `#Unsafe("reason")` gate (D-FFI-INLINE1/ASM1/CPP1) |
@@ -575,11 +576,11 @@ renumbered, and no new `W` code may be allocated.
 | E1302 | sema  | `ArgsSpec.option` or `ParsedArgs.option` called with wrong arity (D-ARGS1) |
 | E1303 | sema  | `ArgsSpec.positional` or `ParsedArgs.positional` called with wrong arity (D-ARGS1) |
 | E1304 | sema  | `ArgsSpec.parse` called with wrong arity (D-ARGS1) |
-| E1305 | sema  | `#Cli` struct field has a type with no CLI flag mapping (D-CLIFLAG1) |
-| E1306 | sema  | two `#Cli` fields (or a field and the reserved `--help`) derive the same flag name (D-CLIFLAG1) |
-| E1307 | sema  | subcommand `enum` variant's payload isn't a `#Cli`-derived struct (D-CLIFLAG1) |
-| E1308 | sema  | `fn run`'s entry parameter isn't a `#Cli` struct or an enum of `#Cli` payloads (D-CLIFLAG1) |
-| E1309 | sema  | `#Flag` on a `#Cli` field that is already flag-only (D-CLI-POS1) |
+| E1305 | sema  | `#CLI` struct field has a type with no CLI flag mapping (D-CLIFLAG1) |
+| E1306 | sema  | two `#CLI` fields (or a field and the reserved `--help`) derive the same flag name (D-CLIFLAG1) |
+| E1307 | sema  | subcommand `enum` variant's payload isn't a `#CLI`-derived struct (D-CLIFLAG1) |
+| E1308 | sema  | `fn run`'s entry parameter isn't a `#CLI` struct or an enum of `#CLI` payloads (D-CLIFLAG1) |
+| E1309 | sema  | `#Flag` on a `#CLI` field that is already flag-only (D-CLI-POS1) |
 | E1321 | sema  | a typed `Output` kind, payload, callable reference, callable contract, visibility, or singular selection is invalid (D-SHAPE-OUTPUT-CALLABLE1) |
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
@@ -751,7 +752,7 @@ D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 | E0074 | This yielding loop produces incompatible item types. | One yielding loop builds one `[T]`, so every contributed item must have the same type. | Convert the items to one type, or split the operations into separate loops. |
 | E0075 | This yielding loop cannot use a break payload. | Its result is already the accumulated `[T]`. A second payload would give the same exit two result channels. | Write `break` to return the accumulated list, or return one final value from an ordinary non-yielding loop. |
 | E0076 | This result loop has a missing or incompatible break payload. | An ordinary loop used as a value has one final result type. Every exit that targets it must provide that type. | Add the missing payload and make every payload the same type, or target an inner effect-only loop. |
-| E0077 | This scoped grant uses the retired body binding. | The capability handle belongs in the grant header. `->` is reserved for selected or yielded values. | Write `#Grant(caps: Fs, Net) { ... }`. |
+| E0077 | This scoped grant uses the retired body binding. | The capability handle belongs in the grant header. `->` is reserved for selected or yielded values. | Write `#Grant(caps: FS, Net) { ... }`. |
 | E0986 | This callable marker is detached from its declaration head. | Layout must keep `=>`, `=[Effects]=>`, `=`, or the opening brace attached to the function head so the declaration boundary is unambiguous. | Move the marker or opening brace onto the same logical line as the closing `)`. |
 | E0987 | No enclosing loop is named `{name}`. | `break(name)` and `next(name)` can target only a visible `name :: loop`. Loop names are compile-time control targets. | Correct the name, or add `name ::` before the intended enclosing loop. |
 | E0988 | This uses a retired loop-label or dot-exit form. | Named exits are keyword-led: `break(name)`, `break(name, value)`, and `next(name)`. A loop name is not a runtime object. | Replace the dot or `@` form with the matching target-argument exit. Keep the declaration as `name :: loop`. |
@@ -790,7 +791,7 @@ or query methods are called with the wrong number of arguments.
 
 ### Typed entry-signature CLI parsing (D-CLIFLAG1)
 
-`#Cli` is a derive (sibling of `#Codable`) that turns a struct's fields into
+`#CLI` is a derive (sibling of `#Codable`) that turns a struct's fields into
 `core.args` flag registrations; `fn run(args: T)` / `fn run(cmd: Enum)` is the
 typed form of Jet's only entry point. It parses `io.args()` against
 the derived spec before calling the user's function. See docs/spec/spec.md
@@ -800,10 +801,10 @@ the `core.args` runtime-error voice above (no new code for that).
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E1305 | `` field `name` has no CLI flag mapping (Type) `` | Only `Int`, `Float`, `Bool`, `String`, `Path`, and `T?` of those map to a flag; a nested `#Cli` struct, a `Map`, a closure, or a plain `[T]` don't. | Change the field to a supported type, or drop it from the `#Cli` struct. |
-| E1306 | two `#Cli` fields both derive the same flag | Every field needs a distinct `--flag`; `--help` is also reserved (every generated CLI gets one automatically). | Rename one of the fields. |
-| E1307 | a subcommand variant's payload isn't a `#Cli` struct | Each `enum Cmd { Variant(Payload) }` variant used as a `fn run` parameter needs a single `#Cli`-derived struct payload — that's where the subcommand's own flags come from. | Give the variant a single `#Cli` struct payload. |
-| E1308 | `` `run`'s parameter isn't a CLI-derived type `` | A typed `fn run(args: T)` entry only works when `T` is `#Cli`-derived, or an `enum` whose every variant carries a `#Cli` struct payload. | Mark the struct `#Cli`, or give the enum's variants `#Cli` struct payloads. |
+| E1305 | `` field `name` has no CLI flag mapping (Type) `` | Only `Int`, `Float`, `Bool`, `String`, `Path`, and `T?` of those map to a flag; a nested `#CLI` struct, a `Map`, a closure, or a plain `[T]` don't. | Change the field to a supported type, or drop it from the `#CLI` struct. |
+| E1306 | two `#CLI` fields both derive the same flag | Every field needs a distinct `--flag`; `--help` is also reserved (every generated CLI gets one automatically). | Rename one of the fields. |
+| E1307 | a subcommand variant's payload isn't a `#CLI` struct | Each `enum Cmd { Variant(Payload) }` variant used as a `fn run` parameter needs a single `#CLI`-derived struct payload — that's where the subcommand's own flags come from. | Give the variant a single `#CLI` struct payload. |
+| E1308 | `` `run`'s parameter isn't a CLI-derived type `` | A typed `fn run(args: T)` entry only works when `T` is `#CLI`-derived, or an `enum` whose every variant carries a `#CLI` struct payload. | Mark the struct `#CLI`, or give the enum's variants `#CLI` struct payloads. |
 | E1309 | `` `#Flag` on `name` has nothing to opt out of `` | `#Flag` keeps a required value field flag-only (D-CLI-POS1=A). Bool fields, `T?` fields, and fields with `#Default(...)` are already flag-only. | Remove `#Flag`, or make the field a required scalar without `#Default`. |
 
 ### Checked Output callables (D-SHAPE-OUTPUT-CALLABLE1)
@@ -1043,7 +1044,7 @@ The public runtime projection is closed. `CryptoError` has only
 collapsed before the Jet-visible boundary. `VaultError` has only `InvalidName`,
 `NotFound`, `WrongType`, `Revoked`, `Locked`, `AuthorityDenied`, `Conflict`,
 `UnsupportedProvider`, `InvalidEncoding`, `DurabilityUnknown`,
-`Crypto(CryptoError)`, redacted `Io`, and `Internal`. These values contain only
+`Crypto(CryptoError)`, redacted `IO`, and `Internal`. These values contain only
 the named closed fields. `KeyWrapError` has only `InvalidEncoding`,
 `UnsupportedVersion`, `UnsupportedMode`, `UnsupportedKeyType`, `InvalidLength`,
 `WeakPassphrase`, `OpenFailed`, `EntropyUnavailable`, `ResourceUnavailable`,
@@ -1261,6 +1262,7 @@ already-freed arena), these track the views themselves.
 | E0355 | A scoped policy is unknown, conflicts, widens an inherited constraint, or is attached at a prohibited scope. | One compiler-owned matrix resolves package → module → function → block while keeping the full declaration chain. Audited authority stays at its sound site. | Use `#Policy(no_alloc)`, `#Policy(zero_rc)`, `#Policy(arena_bounded(bytes))`, or `#Policy(gc)`; package policy may only tighten, including `unsafe: .Forbid`. |
 | E0356 | `.new(...)` needs one known receiver type here. | The inferred constructor uses the surrounding expected type; Jet does not search a global constructor registry. | Add a type annotation or write the full `Type.new(...)` form. |
 | E0357 | `{category}` `{name}` must use its category's canonical casing. | Jet has one enforced two-tier law: type-like names are PascalCase and value-like names are snake_case. | Rename it to the spelling shown by the diagnostic. |
+| E0358 | `{old}` is spelled `{canonical}`. | Jet keeps acronyms fully capitalized inside PascalCase names (D-ACRO-CASE1=A, D-ACRO-LEX1=A). | Write the capitalized spelling shown by the diagnostic. |
 | E0359 | Physical quantity dimensions do not match. | Addition, subtraction, and comparison require compatible dimensions; multiplication and division derive a normalized dimension. | Use matching dimensions, or use `*` or `/` to derive a new dimension. |
 
 ## Operator-hook diagnostics (D-OPDEF1)
@@ -1285,7 +1287,7 @@ already-freed arena), these track the views themselves.
 ## Effect system diagnostics (D-EFF1, D-QUAL1)
 
 Every function carries an inferred effect set (the ambient powers its body
-reaches — `Net`, `Fs`, `Io`, `Db`, `Time`, …). A `=[…]=>` list on the signature
+reaches — `Net`, `FS`, `IO`, `DB`, `Time`, …). A `=[…]=>` list on the signature
 declares an upper bound; `=[]=>` explicitly bounds the set empty. The inferred
 set must be a subset of the declared one. Effects are erased in codegen (I3),
 so these are compile-time-only diagnostics. An unknown effect name in a
@@ -1295,15 +1297,15 @@ so these are compile-time-only diagnostics. An unknown effect name in a
 |------|------|-----|-----|
 | E0740 | `{fn}` uses the effect `{effect}`, which its signature doesn't allow. | A `=[…]=>` list is an upper bound on what the body may do; the inferred effects must be a subset. An effect the body reaches that the bound omits breaks that contract. | Add the named effect to the `=[…]=>` list, or stop using it (drop the Core call that introduces it, or move it out of this function). |
 | E0741 | This `#Caps` region uses the effect `{effect}`, which it doesn't allow. | `#Caps(…)` restricts a region to a fixed set of effects; anything reached inside — even transitively through a call — must be in that set, so the region is a hard local ceiling. | Add the named effect to the `#Caps(…)` list, or move that work outside the region. |
-| E0742 | This `{method}` impl uses the effect `{effect}`, which the trait doesn't allow. | A trait method may declare an effect upper bound (`fn hash(self) =[]=>`, `fn render(self) =[Gpu]=>`); every implementation's inferred effects must fit inside it, so the bound holds for all impls (D-EFF3). | Remove the offending work from the impl, or widen the bound on the trait method. |
+| E0742 | This `{method}` impl uses the effect `{effect}`, which the trait doesn't allow. | A trait method may declare an effect upper bound (`fn hash(self) =[]=>`, `fn render(self) =[GPU]=>`); every implementation's inferred effects must fit inside it, so the bound holds for all impls (D-EFF3). | Remove the offending work from the impl, or widen the bound on the trait method. |
 | E0743 | Dynamic call `{trait}::{method}` has no effect bound. | A trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound (D-EFF3). | Declare an effect row on the trait method, such as `=[]=>` for pure dispatch, or move the dynamic call outside the bounded function. |
 | E0745 | *Retired by D-SHAPE8=A.* | This code diagnosed the former contradiction between `#Pure fn` and a non-empty `#(…)` effect list. Both spellings are now rejected earlier by E0066. | Use one canonical effect arrow: `=[]=>` for an empty row or `=[Effects]=>` for a bounded row. |
 | E0711 | The capability `{handle}` can't escape its `#Grant` block. | `#Grant(…)` grants a capability into a lexical scope and revokes it at scope end (RAII, S63); returning, storing, or capturing the handle would let a revoked authority outlive the block (D-SCAP1). | Use the handle only inside the `#Grant` block, or perform the work that needs it there. |
 | E0712 | This `#Grant` region uses the effect `{effect}`, which it has no capability for. | `#Grant(…)` authorizes exactly the listed effects through its handle; the dual of `#Caps`, an effect reached inside — even transitively through a call — that the grant omits has no capability backing it (D-SCAP1). | Add the named effect to the `#Grant(…)` list, or move that work outside the grant. |
-| E0721 | Untrusted (`#Tainted`) data reaches `{api}` without being sanitized. | A `#Tainted` value is untrusted input; it spreads to anything derived from it. `{api}` is a sink effect (`Db`/`Exec`/`Net` — a database query, subprocess command, or network request), and an untrusted value used there unchecked is the classic injection bug (D-TAINT1). | Pass the value through a `#Sanitizer fn` first — its return value is trusted by contract, so it may reach the sink. |
+| E0721 | Untrusted (`#Tainted`) data reaches `{api}` without being sanitized. | A `#Tainted` value is untrusted input; it spreads to anything derived from it. `{api}` is a sink effect (`DB`/`Exec`/`Net` — a database query, subprocess command, or network request), and an untrusted value used there unchecked is the classic injection bug (D-TAINT1). | Pass the value through a `#Sanitizer fn` first — its return value is trusted by contract, so it may reach the sink. |
 | E0722 | A `#Tainted(Credential)` value reaches `{sink}`, which would leak the credential. | Credentials (tokens, keys, passwords) tainted with `#Tainted(Credential)` must never reach display or serialization sinks (`print`, `log`, `serialize`); a credential appearing in logs, output, or a serialized payload is a security incident (D-TAINT2). | Scrub the credential before logging (e.g. `"[redacted]"`), or redesign the flow so the credential never enters a logging path. |
 | E0725 | `{fn}` is `#Replayable` but reaches `{effect}`. | `#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge. | Inject a deterministic clock/RNG or mockable capability, pass recorded data in, or move the ambient effect outside the replayable function. |
-| E0746 | `{api}` has the `{effect}` effect, which can't be rolled back inside a `#Transact` block. | A `#Transact` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`Net`/`Fs`/`Exec`) leaves committed external state a rollback can't take back, so performing it on the block's direct path would break the all-or-nothing contract (D-TXN2). | Move the call after the block, or register it with `<handle>.on_commit(() => { … })` so it runs only after a clean commit. |
+| E0746 | `{api}` has the `{effect}` effect, which can't be rolled back inside a `#Transact` block. | A `#Transact` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`Net`/`FS`/`Exec`) leaves committed external state a rollback can't take back, so performing it on the block's direct path would break the all-or-nothing contract (D-TXN2). | Move the call after the block, or register it with `<handle>.on_commit(() => { … })` so it runs only after a clean commit. |
 | E0747 | This callback uses the effect `{effect}`, which the parameter doesn't allow. | A `fn(…) =[]=>` parameter demands a pure callback, and a `fn(…) =[E]=>` parameter bounds the callback to the listed effects; the actual callback's inferred effects must be a subset (D-EFF2). The bound is checked at the call site, so an impure callback is rejected before it runs. | Pass a callback within the bound (a `fn … =[]=>` for a pure parameter), or widen the parameter's effect bound. |
 | E0748 | `=[via {param}]=>` on `{fn}` names no such parameter or a parameter that isn't a callback. | `=[via f]=>` publishes a function's effects as a tight pass-through of its callback parameter `f` (D-EFF2); `f` must be a parameter of the function whose type is a `fn(…)`. | Point `via` at a function-typed parameter, or drop the `=[via …]=>` annotation. |
 
@@ -1311,19 +1313,19 @@ so these are compile-time-only diagnostics. An unknown effect name in a
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E-WEB-CROSS-PARTITION | `{caller}` is compiled to {caller_bucket} but calls `{callee}`, which lives in {callee_bucket}. | The web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet (D-WASM1). | Move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm\|Js)` markers (D-MARK-TARGET1). Run `jet build --target web --explain-partition` to audit assignments. |
+| E-WEB-CROSS-PARTITION | `{caller}` is compiled to {caller_bucket} but calls `{callee}`, which lives in {callee_bucket}. | The web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet (D-WASM1). | Move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm\|JS)` markers (D-MARK-TARGET1). Run `jet build --target web --explain-partition` to audit assignments. |
 | E-WEB-ABI-TYPE | `{type}` cannot cross the JS/WASM boundary {context}. | Web exports and imports only admit ABI-safe types: scalars, `String`, `List`/`Map` of ABI-safe values, and `#Codable` structs/enums whose fields are ABI-safe (D-JSBIND1). | Use a scalar, `String`, a `List`/`Map` of ABI-safe values, or add `#Codable` to the struct/enum and keep every field ABI-safe. |
-| E-WEB-TARGET-BROWSER | `{fn}` is pinned to Wasm but uses the `Browser` effect. | A Wasm-pinned function cannot call browser/DOM APIs directly; the partition keeps view code in JS (D-WASM1). | Remove the `#Target(Wasm)` pin, move browser work into a `#Target(Js)` function, or drop the browser API calls (D-MARK-TARGET1). |
+| E-WEB-TARGET-BROWSER | `{fn}` is pinned to Wasm but uses the `Browser` effect. | A Wasm-pinned function cannot call browser/DOM APIs directly; the partition keeps view code in JS (D-WASM1). | Remove the `#Target(Wasm)` pin, move browser work into a `#Target(JS)` function, or drop the browser API calls (D-MARK-TARGET1). |
 | E-WEB-TIR-UNSUPPORTED | Web output cannot compile `{fn}` yet. | Web builds use the same checked executable body path as native builds; this function uses a construct the web output cannot lower today (D-WEBTIR1). | Move the unsupported work behind a Wasm export that uses covered Jet constructs, or simplify this function for the web target. |
 
 ## Native OS platform gating diagnostics (c134, D-OSTARGET1)
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
-| E-OSTARGET-MIXED-AXIS | `#Target(Os.{os})` can't combine with `#Target({web})` on `{item}`. | The OS axis (`Os.Linux`/`Os.Macos`/`Os.Windows`, native platform gating) and the web axis (`Wasm`/`Js`/`Web`, D-WASM1's browser partition) are mutually exclusive — one item can't compile for both a specific native OS and a web bucket. | Pick one axis: remove the `#Target(Os.{os})` marker or the web-axis marker. |
-| E-OSTARGET-UNMATCHED-CALL | `{caller}` uses `{gated_type}`, whose `impl` is gated to `#Target(Os.{os})`, without itself being gated to match. | An OS-gated impl only exists in the build for that OS; code reachable on other platforms would hit a missing method, so this is caught at compile time, not left to fail as a link (or a raw rustc) error. | Only use `{gated_type}` from inside an `impl` already gated to `#Target(Os.{os})`, or move `{caller}`'s body into one. |
-| E-OSTARGET-BUILD-CONTEXT | a `comptime if … == { … }` dispatch branches on `build.os`. | `build.os` is the one compiler-known comptime value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2). | write `comptime if build.os == { .Linux -> … .Macos -> … .Windows -> … }`, or use a plain runtime `if` for a value that isn't known at compile time. |
-| E-OSTARGET-DISPATCH-ARM | `{found}` is not an OS arm — a `build.os` dispatch matches `.Linux`, `.Macos`, or `.Windows`. | Each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#Target(Os.*)` uses — and each OS appears at most once. | write `.Linux -> …`, `.Macos -> …`, or `.Windows -> …` (add an `else -> …` for a shared fallback). |
+| E-OSTARGET-MIXED-AXIS | `#Target(OS.{os})` can't combine with `#Target({web})` on `{item}`. | The OS axis (`OS.Linux`/`OS.MacOS`/`OS.Windows`, native platform gating) and the web axis (`Wasm`/`JS`/`Web`, D-WASM1's browser partition) are mutually exclusive — one item can't compile for both a specific native OS and a web bucket. | Pick one axis: remove the `#Target(OS.{os})` marker or the web-axis marker. |
+| E-OSTARGET-UNMATCHED-CALL | `{caller}` uses `{gated_type}`, whose `impl` is gated to `#Target(OS.{os})`, without itself being gated to match. | An OS-gated impl only exists in the build for that OS; code reachable on other platforms would hit a missing method, so this is caught at compile time, not left to fail as a link (or a raw rustc) error. | Only use `{gated_type}` from inside an `impl` already gated to `#Target(OS.{os})`, or move `{caller}`'s body into one. |
+| E-OSTARGET-BUILD-CONTEXT | a `comptime if … == { … }` dispatch branches on `build.os`. | `build.os` is the one compiler-known comptime value this dispatch folds on — it selects the arm matching the build's target OS at compile time (D-OSTARGET2). | write `comptime if build.os == { .Linux -> … .MacOS -> … .Windows -> … }`, or use a plain runtime `if` for a value that isn't known at compile time. |
+| E-OSTARGET-DISPATCH-ARM | `{found}` is not an OS arm — a `build.os` dispatch matches `.Linux`, `.MacOS`, or `.Windows`. | Each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#Target(OS.*)` uses — and each OS appears at most once. | write `.Linux -> …`, `.MacOS -> …`, or `.Windows -> …` (add an `else -> …` for a shared fallback). |
 | E-OSTARGET-DISPATCH-EXHAUSTIVE | this `build.os` dispatch doesn't cover every target OS — missing: {list}. | A build can target any native OS, so the dispatch must handle each one — otherwise a build for a missing OS would have no arm to run. | add an arm for each missing OS ({list}), or an `else -> …` catch-all. |
 
 ## Qualifier taxonomy diagnostics (D-QUAL2)
@@ -1426,9 +1428,9 @@ Error [E0150]: `check_in` needs `Reservation` in state `Confirmed`, but `r` is i
 | E3209 | The linker couldn't find C library `{lib}`. | Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path. | Declare it in `deps:` so Jet provisions it: `{lib}: c@system` (host pkg-config, else fetched from nixpkgs), or `{lib}: c@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package. |
 | E3210 | Couldn't fetch C library `{lib}` from nixpkgs. | `{lib}: c@system` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: `{reason}`. | Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: c@"<path>"`, or install it and use `system`. |
 | E3211 | This string literal has an embedded NUL byte, so it can't cross into a C function. | C strings are NUL-terminated, not length-prefixed — an embedded `\0` would truncate the string on the C side, silently losing everything after it. | Remove the embedded NUL, or split the call so the C function only sees the part before it. |
-| E3212 | `{abi}` is not a known C calling convention. | `#Abi` accepts only the ratified native ABI names — `#Abi` also never applies to `extern rust` (Rust FFI keeps its own declared ABI). | Use `system`, `cdecl`, `stdcall`, `fastcall`, `win64`, or `sysv64`, or remove `#Abi` from the `extern rust` function. |
+| E3212 | `{abi}` is not a known C calling convention. | `#ABI` accepts only the ratified native ABI names — `#ABI` also never applies to `extern rust` (Rust FFI keeps its own declared ABI). | Use `system`, `cdecl`, `stdcall`, `fastcall`, `win64`, or `sysv64`, or remove `#ABI` from the `extern rust` function. |
 | E3213 | `{abi}` is not available on this target. | Native calling conventions are restricted by operating system and architecture (e.g. `stdcall`/`cdecl`/`fastcall` are Windows x86 only; `win64` is Windows x86-64; `sysv64` is non-Windows x86-64). | Use the default C ABI or `system` for portable declarations. |
-| E3214 | Variadic C function `{name}` cannot use `{abi}`. | Variadics allow only the default C ABI, or `cdecl` on Windows x86 — other calling conventions don't define how a variadic argument list is passed. | Remove `#Abi`, or use `#Abi(cdecl)` on Windows x86. |
+| E3214 | Variadic C function `{name}` cannot use `{abi}`. | Variadics allow only the default C ABI, or `cdecl` on Windows x86 — other calling conventions don't define how a variadic argument list is passed. | Remove `#ABI`, or use `#ABI(cdecl)` on Windows x86. |
 
 ## Cross-compilation and freestanding diagnostics (E2-M15)
 
@@ -1588,7 +1590,7 @@ front-end `.jet` diagnostics).
 | E1255 | This project's environment isn't trusted yet. | Entering a project's declared env (`jet env`/`jet dev`) is a supply-chain decision — first entry to a repo that declares packages needs a trust decision (U19, D-JPK-DEVCOMPOSE1). stdin isn't a terminal, so an interactive prompt would hang instead of asking. | Pass `--trust` for this one run, or pre-authorize with `jet config trust add <pattern>`. |
 | E1256 | `{cmd}` needs `nix`, which isn't on PATH. | `jet bridge flake` translates a `flake.nix`'s devShell, and `jet env`'s foreign-flake/`devenv.nix` detection shells out to `nix` as the ratified stopgap (U16); neither works without the `nix` binary. | Install Nix from the official installer, or skip the foreign flake and declare packages in `env.*` instead. |
 | E1257 | This plugin's exported interface changed incompatibly. | A `target: plugin` package's frozen exported interface is the load-time contract (D-PLUGIN-VERSION1=A) — a prior build's `.jet/cache/api/plugin__<name>.api` snapshot shows an export was removed or its signature changed. Adding a new export is always compatible. | Restore the removed/changed export, or accept this as an intentional breaking change (delete the stale snapshot to re-freeze). |
-| E1258 | A plugin can't use any effect. | This package builds as `target: plugin` (D-PLUGIN1=B) — plugins run fully sandboxed with zero host capabilities (the wasmtime host registers no host imports), so any effect (`Fs`/`Net`/`Db`/…) would fail to instantiate at load time. There is no gate or grant to widen this (I1: the sandbox is the safety boundary, not an opt-in). | Remove the effectful call, or move it out of the plugin into the host program that loads it. |
+| E1258 | A plugin can't use any effect. | This package builds as `target: plugin` (D-PLUGIN1=B) — plugins run fully sandboxed with zero host capabilities (the wasmtime host registers no host imports), so any effect (`FS`/`Net`/`DB`/…) would fail to instantiate at load time. There is no gate or grant to widen this (I1: the sandbox is the safety boundary, not an opt-in). | Remove the effectful call, or move it out of the plugin into the host program that loads it. |
 | E1259 | Couldn't build the plugin's WASM Component. | Building a `target: plugin` package shells out to `rustc --target wasm32-unknown-unknown` and `wasm-tools component embed`/`new` (D-DEP-WASM1=A); one of them is missing or failed. | Make sure `rustc` supports `wasm32-unknown-unknown` and `wasm-tools` is on PATH (both ship in the project's `nix develop` shell). |
 | E1260 | A plugin's exported function has an unsupported signature. | v1 plugin exports (D-PLUGIN-EXPORT1=A) support only functions whose parameters and return type are all `Int` or all `Float` — Bool/Text need more of the Component Model's ABI machinery, a real follow-on rather than this increment's scope. | Narrow the signature to all-`Int`/all-`Float`, or drop `pub` if this function isn't meant to be called across the plugin boundary. |
 | E1261 | Service `{name}` never became healthy. | `jet dev`/`jetpack services up` supervises a `services:` process, then polls its readiness contract (`ready:`, else a TCP probe on its first `ports:` entry, else a bare process-alive check) until it passes or a timeout elapses (U12); it never passed in time. | Check `jetpack services logs {name}` for what the process printed, confirm its `init`/`ready` commands are correct, or raise the timeout isn't configurable yet — fix the service itself. |
@@ -1879,7 +1881,7 @@ them:
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `#Wasm`/`#Js` is retired — it no longer does anything ``. | the per-backend target markers were folded into one family. | Write `#Target(Wasm)` or `#Target(Js)` instead (D-MARK-TARGET1=A). |
+| `` `#Wasm`/`#JS` is retired — it no longer does anything ``. | the per-backend target markers were folded into one family. | Write `#Target(Wasm)` or `#Target(JS)` instead (D-MARK-TARGET1=A). |
 | `` `#Suppress` is retired — it no longer does anything ``. | a block-scoped suppression marker isn't the discard mechanism anymore. | Call `.drop("reason")` on the unused value instead (D-MARK-DISCARD1=A). |
 | `` `#Uninit` is retired — it no longer does anything ``. | stored uninitialized-sentinel fields were removed outright. | Give the field a real initial value (D-UNINIT-SENTINEL1). |
 | `` `#Ref` is retired — it no longer does anything ``. | stored-reference fields were deleted outright. | Hold an owned value instead (D-MEM1/S3). |

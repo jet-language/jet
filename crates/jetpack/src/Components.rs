@@ -55,7 +55,7 @@ pub const COMPONENTS_DIR: &str = "components";
 
 #[derive(Debug)]
 pub enum ComponentError {
-    Io(io::Error),
+    IO(io::Error),
     /// The destination file already exists. Never silently clobbered — it
     /// may be a user's already-customized copy.
     AlreadyExists(PathBuf),
@@ -64,7 +64,7 @@ pub enum ComponentError {
 impl std::fmt::Display for ComponentError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ComponentError::Io(e) => write!(f, "{e}"),
+            ComponentError::IO(e) => write!(f, "{e}"),
             ComponentError::AlreadyExists(path) => {
                 write!(f, "{} already exists", path.display())
             }
@@ -74,7 +74,7 @@ impl std::fmt::Display for ComponentError {
 
 impl From<io::Error> for ComponentError {
     fn from(e: io::Error) -> Self {
-        ComponentError::Io(e)
+        ComponentError::IO(e)
     }
 }
 

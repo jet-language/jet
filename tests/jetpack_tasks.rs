@@ -195,7 +195,7 @@ fn jet_run_task_typed_cli_args() {
     write_main(
         &scratch.path,
         r#"
-#Cli
+#CLI
 struct MigrateArgs {
     #[Doc("target"), Default("latest")] to: String
 }

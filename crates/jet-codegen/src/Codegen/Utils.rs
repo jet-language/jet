@@ -5,13 +5,13 @@ pub(crate) fn enum_type_prefix(cx: &Cx, variant: &str) -> String {
         .get(variant)
         .map(|t| {
             if t == crate::Syntax::TYPE_IO_ERROR {
-                format!("{}jet_std::IoError", cx.root_prefix)
+                format!("{}jet_std::IOError", cx.root_prefix)
             } else if t == crate::Syntax::TYPE_IO_OPERATION {
-                format!("{}jet_std::IoOperation", cx.root_prefix)
-            } else if t == "HttpError" {
-                format!("{}JetHttpError", cx.root_prefix)
-            } else if t == "HttpOperation" {
-                format!("{}JetHttpOperation", cx.root_prefix)
+                format!("{}jet_std::IOOperation", cx.root_prefix)
+            } else if t == "HTTPError" {
+                format!("{}JetHTTPError", cx.root_prefix)
+            } else if t == "HTTPOperation" {
+                format!("{}JetHTTPOperation", cx.root_prefix)
             } else if t == "AuthError" {
                 format!("{}JetAuthError", cx.root_prefix)
             } else if t == "HookOutcome" {
@@ -39,7 +39,7 @@ pub(crate) fn is_json_variant(variant: &str) -> bool {
     crate::Syntax::is_data_variant(variant)
 }
 
-// D-DBDRIVER1: the `DbValue` dynamic tagged SQL value's variants.
+// D-DBDRIVER1: the `DBValue` dynamic tagged SQL value's variants.
 pub(crate) fn is_db_value_variant(variant: &str) -> bool {
     crate::Syntax::is_db_value_variant(variant)
 }
@@ -70,7 +70,7 @@ pub(crate) fn variant_rust_name(cx: &Cx, variant: &str) -> String {
         || cx
             .variant_owner
             .get(variant)
-            .is_some_and(|owner| matches!(owner.as_str(), "HttpError" | "HttpOperation"))
+            .is_some_and(|owner| matches!(owner.as_str(), "HTTPError" | "HTTPOperation"))
         || cx.variant_owner.get(variant).is_some_and(|owner| owner == "HookOutcome")
         || cx.variant_owner.get(variant).is_some_and(|owner| owner == "AuthError")
     {

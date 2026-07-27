@@ -4,7 +4,7 @@ use core.crypto as crypto
 use core.vault as vault
 use core.vault.expert as vault_expert
 
-fn provision() =[Secret, Io]=> {
+fn provision() =[Secret, IO]=> {
     plan :: vault.prepare_generate<crypto.SigningKey>("release") ?? return
     write :: vault.authorize_write(&plan, "create release signer") ?? return
     key_ref :: vault.commit_generate(^write, ^plan) ?? return
@@ -41,7 +41,7 @@ fn expert_import_surface() =[Secret]=> {
     }
 }
 
-fn run() =[Secret, Io]=> {
+fn run() =[Secret, IO]=> {
     current :: vault.current<crypto.SigningKey>("release") ?? panic("vault unavailable")
     if current == .Val(key_ref) {
         print("current release key: {key_ref}")

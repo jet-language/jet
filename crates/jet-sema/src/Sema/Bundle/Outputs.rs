@@ -13,49 +13,49 @@ pub(super) fn is_fallible_void_entry_return(ty: &Type, state: &ModuleState) -> b
     )
 }
 /// D-CLIFLAG1: what `fn run`'s single parameter type turned out to be.
-pub(super) enum CliEntryShape {
-    /// A `#[Cli]`-derived struct — flags come straight from its fields.
+pub(super) enum CLIEntryShape {
+    /// A `#[CLI]`-derived struct — flags come straight from its fields.
     Struct,
-    /// An `enum` whose every variant carries a `#[Cli]` struct payload.
+    /// An `enum` whose every variant carries a `#[CLI]` struct payload.
     Enum,
-    /// An `enum` parameter with at least one non-`#[Cli]` variant (E1307).
+    /// An `enum` parameter with at least one non-`#[CLI]` variant (E1307).
     EnumBadVariants(Vec<Diagnostic>),
     /// Neither of the above (E1308).
     Invalid,
 }
 
 /// D-CLIFLAG1: classify `fn run`'s parameter type against its defining module.
-/// The entry signature stays in the entry file; its public `#[Cli]` type may
+/// The entry signature stays in the entry file; its public `#[CLI]` type may
 /// live in one directly imported module.
-pub(super) fn cli_entry_param_shape(items: &[Item], ty: &Type, reg: &TraitRegistry) -> CliEntryShape {
+pub(super) fn cli_entry_param_shape(items: &[Item], ty: &Type, reg: &TraitRegistry) -> CLIEntryShape {
     let Type::Named(name) = ty else {
-        return CliEntryShape::Invalid;
+        return CLIEntryShape::Invalid;
     };
     let name = name.rsplit('.').next().unwrap_or(name);
-    if reg.implements_trait(name, "Cli") {
-        return CliEntryShape::Struct;
+    if reg.implements_trait(name, "CLI") {
+        return CLIEntryShape::Struct;
     }
     let enum_def: Option<&EnumDef> = items.iter().find_map(|i| match i {
         Item::Enum(e) if &e.name == name => Some(e),
         _ => None,
     });
     let Some(e) = enum_def else {
-        return CliEntryShape::Invalid;
+        return CLIEntryShape::Invalid;
     };
     let mut bad = Vec::new();
     for v in &e.variants {
         let ok = matches!(
             &v.payload,
-            VariantPayload::Single(Type::Named(p), _) if reg.implements_trait(p, "Cli")
+            VariantPayload::Single(Type::Named(p), _) if reg.implements_trait(p, "CLI")
         );
         if !ok {
             bad.push(e1307(&v.name, v.name_span));
         }
     }
     if bad.is_empty() {
-        CliEntryShape::Enum
+        CLIEntryShape::Enum
     } else {
-        CliEntryShape::EnumBadVariants(bad)
+        CLIEntryShape::EnumBadVariants(bad)
     }
 }
 
@@ -226,12 +226,12 @@ fn resolve_output_callable(
                 param_ty,
                 &states[target].trait_reg,
             ) {
-                CliEntryShape::Struct | CliEntryShape::Enum => true,
-                CliEntryShape::EnumBadVariants(bad) => {
+                CLIEntryShape::Struct | CLIEntryShape::Enum => true,
+                CLIEntryShape::EnumBadVariants(bad) => {
                     contract_diags.extend(bad);
                     false
                 }
-                CliEntryShape::Invalid => false,
+                CLIEntryShape::Invalid => false,
             }
         }
         crate::AST::OutputKind::Executable => signature.params.is_empty(),

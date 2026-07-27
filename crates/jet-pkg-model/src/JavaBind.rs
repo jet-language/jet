@@ -20,12 +20,12 @@ pub struct BindResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BindError { Source(String), ToolMissing(&'static str), ToolFailed(&'static str, String), Io(String) }
+pub enum BindError { Source(String), ToolMissing(&'static str), ToolFailed(&'static str, String), IO(String) }
 
 impl std::fmt::Display for BindError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Source(v) | Self::Io(v) => f.write_str(v),
+            Self::Source(v) | Self::IO(v) => f.write_str(v),
             Self::ToolMissing(v) => write!(f, "the provisioned `{v}` tool was not found"),
             Self::ToolFailed(tool, detail) => write!(f, "`{tool}` rejected the JVM binding input: {detail}"),
         }
@@ -47,10 +47,10 @@ pub fn bind(source_path: &Path, source: &str, lib: &str, cache: &Path) -> Result
     if !ident(lib) { return Err(BindError::Source(format!("`{lib}` is not a valid Jet library name"))); }
     let class = source_path.file_stem().and_then(|v| v.to_str()).filter(|v| ident(v))
         .ok_or_else(|| BindError::Source("Java source needs an identifier filename matching its public class".into()))?;
-    std::fs::create_dir_all(cache).map_err(|e| BindError::Io(format!("could not create JVM binding cache: {e}")))?;
+    std::fs::create_dir_all(cache).map_err(|e| BindError::IO(format!("could not create JVM binding cache: {e}")))?;
     let classes = cache.join(format!("{lib}.classes"));
     let _ = std::fs::remove_dir_all(&classes);
-    std::fs::create_dir_all(&classes).map_err(|e| BindError::Io(format!("could not create JVM class cache: {e}")))?;
+    std::fs::create_dir_all(&classes).map_err(|e| BindError::IO(format!("could not create JVM class cache: {e}")))?;
     run(Command::new("javac").args(["-encoding", "UTF-8", "-d"]).arg(&classes).arg(source_path), "javac")?;
     let javap = run(Command::new("javap").args(["-s", "-public", "-classpath"]).arg(&classes).arg(class), "javap")?;
     let surface = parse_javap(class, &String::from_utf8_lossy(&javap.stdout))?;
@@ -62,7 +62,7 @@ pub fn bind(source_path: &Path, source: &str, lib: &str, cache: &Path) -> Result
     let bridge = cache.join(format!("{stem}.c"));
     let object = cache.join(format!("{stem}.o"));
     let archive = cache.join(format!("lib{stem}.a"));
-    std::fs::write(&bridge, render_c(lib, &surface, &classes)).map_err(|e| BindError::Io(format!("could not write JNI bridge: {e}")))?;
+    std::fs::write(&bridge, render_c(lib, &surface, &classes)).map_err(|e| BindError::IO(format!("could not write JNI bridge: {e}")))?;
     run(Command::new("cc").args(["-std=c11", "-fPIC", "-c", "-I"]).arg(java_home.join("include"))
         .arg("-I").arg(java_home.join("include").join(os_include())).arg(&bridge).arg("-o").arg(&object), "cc")?;
     run(Command::new("ar").arg("rcs").arg(&archive).arg(&object), "ar")?;
@@ -80,23 +80,23 @@ struct Output { stdout: Vec<u8>, stderr: Vec<u8>, success: bool }
 fn run(command: &mut Command, tool: &'static str) -> Result<Output, BindError> {
     const LIMIT: usize = 64 * 1024;
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { BindError::ToolMissing(tool) } else { BindError::Io(format!("could not start `{tool}`: {e}")) })?;
-    let stdout = child.stdout.take().ok_or_else(|| BindError::Io(format!("could not supervise `{tool}` stdout")))?;
-    let stderr = child.stderr.take().ok_or_else(|| BindError::Io(format!("could not supervise `{tool}` stderr")))?;
+    let mut child = command.spawn().map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { BindError::ToolMissing(tool) } else { BindError::IO(format!("could not start `{tool}`: {e}")) })?;
+    let stdout = child.stdout.take().ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
+    let stderr = child.stderr.take().ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
     let out = std::thread::spawn(move || drain(stdout, LIMIT));
     let err = std::thread::spawn(move || drain(stderr, LIMIT));
     let deadline = Instant::now() + Duration::from_secs(60);
-    let status = loop { match child.try_wait().map_err(|e| BindError::Io(format!("could not supervise `{tool}`: {e}")))? {
+    let status = loop { match child.try_wait().map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))? {
         Some(v) => break v,
         None if Instant::now() >= deadline => { let _ = child.kill(); let _ = child.wait(); let _ = out.join(); let _ = err.join(); return Err(BindError::ToolFailed(tool, "the tool exceeded the 60 second limit".into())); }
         None => std::thread::sleep(Duration::from_millis(10)),
     }};
-    let stdout = out.join().map_err(|_| BindError::Io(format!("`{tool}` stdout reader failed")))??;
-    let stderr = err.join().map_err(|_| BindError::Io(format!("`{tool}` stderr reader failed")))??;
+    let stdout = out.join().map_err(|_| BindError::IO(format!("`{tool}` stdout reader failed")))??;
+    let stderr = err.join().map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
     let result = Output { stdout, stderr, success: status.success() };
     if result.success { Ok(result) } else { Err(BindError::ToolFailed(tool, launder(&result.stderr))) }
 }
-fn drain(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError> { let mut out=Vec::new(); let mut buf=[0u8;8192]; loop { let n=input.read(&mut buf).map_err(|e|BindError::Io(format!("could not read foreign tool output: {e}")))?; if n==0{break} let keep=(limit-out.len()).min(n); out.extend_from_slice(&buf[..keep]); } Ok(out) }
+fn drain(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError> { let mut out=Vec::new(); let mut buf=[0u8;8192]; loop { let n=input.read(&mut buf).map_err(|e|BindError::IO(format!("could not read foreign tool output: {e}")))?; if n==0{break} let keep=(limit-out.len()).min(n); out.extend_from_slice(&buf[..keep]); } Ok(out) }
 fn launder(bytes: &[u8]) -> String { String::from_utf8_lossy(bytes).lines().map(str::trim).find(|v|!v.is_empty()).map(|v|v.rsplit_once(": ").map_or(v,|(_,detail)|detail).chars().take(160).collect()).unwrap_or_else(||"the foreign tool returned a failure status".into()) }
 
 fn parse_javap(class: &str, text: &str) -> Result<Surface, BindError> {

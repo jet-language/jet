@@ -569,7 +569,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "tls_close",
         ],
         "core.tls" => &[
-            "ClientConfig", "RootCertificates", "ClientIdentity", "TlsVersion",
+            "ClientConfig", "RootCertificates", "ClientIdentity", "TLSVersion",
             "client", "read", "read_text", "write", "write_all", "write_text", "close",
         ],
         "jet.http" => &["get", "post", "serve"],
@@ -617,7 +617,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         "core.compress.zstd" => &["compress", "decompress"],
         // D-DEP-DB1: SQLite ring package.
         // D-DBDRIVER1: `close`/`query`/`query_one`/`execute`/`begin`/`commit`/
-        // `rollback` are `DbConnection` instance methods, not module items.
+        // `rollback` are `DBConnection` instance methods, not module items.
         "jet.db" => &[
             "open",
             "open_memory",
@@ -761,10 +761,10 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
         | ("core.auth", "Claims" | "AuthError")
         | ("core.vault", "ExpiringSecret" | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
             | "KeyStatus" | "VaultError" | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError")
-        | ("core.tls", "ClientConfig" | "RootCertificates" | "ClientIdentity" | "TlsVersion")
+        | ("core.tls", "ClientConfig" | "RootCertificates" | "ClientIdentity" | "TLSVersion")
         | ("jet.http" | "core.http.client" | "core.http.server",
             "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
-            | "Headers" | "Request" | "Response" | "Body" | "Handler" | "HttpError" | "Client" | "Proxy")
+            | "Headers" | "Request" | "Response" | "Body" | "Handler" | "HTTPError" | "Client" | "Proxy")
         | ("core.browser",
             "Browser" | "BrowserContext" | "BrowserPage" | "BrowserLocator"
             | "BrowserEvent" | "BrowserTrace" | "BrowserError" | "BrowserCapabilities"

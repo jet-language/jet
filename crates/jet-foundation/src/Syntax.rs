@@ -19,7 +19,7 @@
 // D-UNINIT-SENTINEL2=A amends D-UNINIT-SENTINEL1: `uninit` is legal only as
 // the whole body of a `Type.{ uninit }` head (`name := Type.{ uninit }`).
 // Retires annotated `name: Type := uninit`. KW_UNINIT stays the same token.
-// D-SHAPE-CLI1 reuses the existing `fn run` / `#Cli` surface: a resolved
+// D-SHAPE-CLI1 reuses the existing `fn run` / `#CLI` surface: a resolved
 // entry-parameter type owns typed shell inputs, while zero-parameter `fn run()`
 // stays valid. D-CLI-POS1=A adds field marker `Flag` (`CONTRACT_FLAG`): required
 // value fields fill positionally by declaration order; `#[Flag]` keeps a field
@@ -338,18 +338,11 @@ pub fn canonical_name_case(name: &str, case: NameCase) -> String {
             }).collect();
             if leading { format!("_{out}") } else { out }
         }
+        // D-ACRO-CASE1=A: snake conversion uses the mechanical acronym split.
         NameCase::Snake => {
             let leading = name.starts_with('_');
-            let chars: Vec<char> = name.trim_start_matches('_').chars().collect();
-            let mut out = String::new();
-            for (i, c) in chars.iter().copied().enumerate() {
-                if c.is_uppercase() {
-                    let prev_lower = i > 0 && chars[i - 1].is_lowercase();
-                    let next_lower = chars.get(i + 1).is_some_and(|c| c.is_lowercase());
-                    if !out.is_empty() && (prev_lower || next_lower) && !out.ends_with('_') { out.push('_'); }
-                    out.extend(c.to_lowercase());
-                } else { out.push(c); }
-            }
+            let body = name.trim_start_matches('_');
+            let out = to_snake_acronym(body);
             if leading { format!("_{out}") } else { out }
         }
     }
@@ -374,8 +367,17 @@ mod casing_tests {
         assert_eq!(canonical_name_case("Éclair", NameCase::Snake), "éclair");
         assert_eq!(canonical_name_case("éclair", NameCase::Pascal), "Éclair");
     }
+
+    #[test]
+    fn acronym_pascal_to_snake() {
+        assert_eq!(canonical_name_case("HTTPHeader", NameCase::Snake), "http_header");
+        assert_eq!(canonical_name_case("HTTP_API", NameCase::Snake), "http_api");
+        assert_eq!(canonical_name_case("MacOS", NameCase::Snake), "mac_os");
+    }
 }
 
+mod acronyms;
+pub use acronyms::*;
 mod core_surface;
 pub use core_surface::*;
 mod math_layout;

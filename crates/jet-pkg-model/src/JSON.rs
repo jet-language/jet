@@ -1,44 +1,44 @@
-//! A tiny std-only JSON reader (I6: no external crates).
+//! A tiny std-only JSONValue reader (I6: no external crates).
 //!
 //! Only as much as Jetpack needs to read `nix build --json` output and write
 //! its own small state files. Not a general-purpose library — it parses into a
-//! `Json` tree and offers typed accessors that return clear errors, the same
+//! `JSONValue` tree and offers typed accessors that return clear errors, the same
 //! shape Forge's `nixbridge` used (see forge-salvage.md).
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Json {
+pub enum JSONValue {
     Null,
     Bool(bool),
     Num(f64),
     Str(String),
-    Array(Vec<Json>),
-    Object(BTreeMap<String, Json>),
+    Array(Vec<JSONValue>),
+    Object(BTreeMap<String, JSONValue>),
 }
 
-impl Json {
-    pub fn as_array(&self) -> Result<&Vec<Json>, String> {
+impl JSONValue {
+    pub fn as_array(&self) -> Result<&Vec<JSONValue>, String> {
         match self {
-            Json::Array(v) => Ok(v),
-            _ => Err("expected a JSON array".into()),
+            JSONValue::Array(v) => Ok(v),
+            _ => Err("expected a JSONValue array".into()),
         }
     }
-    pub fn as_object(&self) -> Result<&BTreeMap<String, Json>, String> {
+    pub fn as_object(&self) -> Result<&BTreeMap<String, JSONValue>, String> {
         match self {
-            Json::Object(m) => Ok(m),
-            _ => Err("expected a JSON object".into()),
+            JSONValue::Object(m) => Ok(m),
+            _ => Err("expected a JSONValue object".into()),
         }
     }
     pub fn as_str(&self) -> Result<&str, String> {
         match self {
-            Json::Str(s) => Ok(s),
-            _ => Err("expected a JSON string".into()),
+            JSONValue::Str(s) => Ok(s),
+            _ => Err("expected a JSONValue string".into()),
         }
     }
     /// Look up a key in an object, erroring if absent.
-    pub fn get<'a>(&'a self, key: &str) -> Result<&'a Json, String> {
+    pub fn get<'a>(&'a self, key: &str) -> Result<&'a JSONValue, String> {
         self.as_object()?
             .get(key)
             .ok_or_else(|| format!("missing key `{key}`"))
@@ -47,7 +47,7 @@ impl Json {
 
 // ── parsing ──────────────────────────────────────────────────────────────
 
-pub fn parse(input: &str) -> Result<Json, String> {
+pub fn parse(input: &str) -> Result<JSONValue, String> {
     let mut p = Parser {
         chars: input.chars().collect(),
         pos: 0,
@@ -56,7 +56,7 @@ pub fn parse(input: &str) -> Result<Json, String> {
     let v = p.value()?;
     p.skip_ws();
     if p.pos != p.chars.len() {
-        return Err("trailing characters after JSON value".into());
+        return Err("trailing characters after JSONValue value".into());
     }
     Ok(v)
 }
@@ -83,12 +83,12 @@ impl Parser {
         }
     }
 
-    fn value(&mut self) -> Result<Json, String> {
+    fn value(&mut self) -> Result<JSONValue, String> {
         self.skip_ws();
         match self.peek() {
             Some('{') => self.object(),
             Some('[') => self.array(),
-            Some('"') => Ok(Json::Str(self.string()?)),
+            Some('"') => Ok(JSONValue::Str(self.string()?)),
             Some('t') | Some('f') => self.boolean(),
             Some('n') => self.null(),
             Some(c) if c == '-' || c.is_ascii_digit() => self.number(),
@@ -97,13 +97,13 @@ impl Parser {
         }
     }
 
-    fn object(&mut self) -> Result<Json, String> {
+    fn object(&mut self) -> Result<JSONValue, String> {
         self.bump(); // {
         let mut map = BTreeMap::new();
         self.skip_ws();
         if self.peek() == Some('}') {
             self.bump();
-            return Ok(Json::Object(map));
+            return Ok(JSONValue::Object(map));
         }
         loop {
             self.skip_ws();
@@ -126,16 +126,16 @@ impl Parser {
                 _ => return Err("expected `,` or `}` in object".into()),
             }
         }
-        Ok(Json::Object(map))
+        Ok(JSONValue::Object(map))
     }
 
-    fn array(&mut self) -> Result<Json, String> {
+    fn array(&mut self) -> Result<JSONValue, String> {
         self.bump(); // [
         let mut items = Vec::new();
         self.skip_ws();
         if self.peek() == Some(']') {
             self.bump();
-            return Ok(Json::Array(items));
+            return Ok(JSONValue::Array(items));
         }
         loop {
             let val = self.value()?;
@@ -147,7 +147,7 @@ impl Parser {
                 _ => return Err("expected `,` or `]` in array".into()),
             }
         }
-        Ok(Json::Array(items))
+        Ok(JSONValue::Array(items))
     }
 
     fn string(&mut self) -> Result<String, String> {
@@ -208,7 +208,7 @@ impl Parser {
         Ok(code)
     }
 
-    fn number(&mut self) -> Result<Json, String> {
+    fn number(&mut self) -> Result<JSONValue, String> {
         let start = self.pos;
         if self.peek() == Some('-') {
             self.pos += 1;
@@ -254,22 +254,22 @@ impl Parser {
         if !number.is_finite() {
             return Err(format!("number `{slice}` is out of range"));
         }
-        Ok(Json::Num(number))
+        Ok(JSONValue::Num(number))
     }
 
-    fn boolean(&mut self) -> Result<Json, String> {
+    fn boolean(&mut self) -> Result<JSONValue, String> {
         if self.literal("true") {
-            Ok(Json::Bool(true))
+            Ok(JSONValue::Bool(true))
         } else if self.literal("false") {
-            Ok(Json::Bool(false))
+            Ok(JSONValue::Bool(false))
         } else {
             Err("invalid literal".into())
         }
     }
 
-    fn null(&mut self) -> Result<Json, String> {
+    fn null(&mut self) -> Result<JSONValue, String> {
         if self.literal("null") {
-            Ok(Json::Null)
+            Ok(JSONValue::Null)
         } else {
             Err("invalid literal".into())
         }
@@ -286,10 +286,10 @@ impl Parser {
     }
 }
 
-/// Strict provider JSON plus known noise lines removed before parsing.
+/// Strict provider JSONValue plus known noise lines removed before parsing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilteredJson {
-    pub value: Json,
+    pub value: JSONValue,
     pub noise: Vec<String>,
 }
 
@@ -334,7 +334,7 @@ fn is_known_provider_noise(line: &str) -> bool {
 }
 
 /// Filter only known line-oriented Nix noise, then parse the remaining text
-/// with [`parse`]. The strict parser requires exactly one complete JSON value
+/// with [`parse`]. The strict parser requires exactly one complete JSONValue value
 /// and whitespace-only EOF. Removed lines are retained for caller diagnostics.
 pub fn parse_lenient(input: &str) -> Result<FilteredJson, String> {
     let mut filtered = String::with_capacity(input.len());
@@ -356,7 +356,7 @@ pub fn parse_lenient(input: &str) -> Result<FilteredJson, String> {
 
 // ── writing (for Jetpack's own small state files) ────────────────────────
 
-/// Serialize a string as a JSON string literal (quotes + escapes).
+/// Serialize a string as a JSONValue string literal (quotes + escapes).
 pub fn quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
@@ -379,7 +379,7 @@ pub fn quote(s: &str) -> String {
     out
 }
 
-/// Pretty-print a flat string→string object as JSON (used for store metadata).
+/// Pretty-print a flat string→string object as JSONValue (used for store metadata).
 pub fn object_of(pairs: &[(&str, &str)]) -> String {
     let mut out = String::from("{\n");
     for (i, (k, v)) in pairs.iter().enumerate() {

@@ -19,13 +19,13 @@ pub enum BindError {
     Source(String),
     ToolMissing(&'static str),
     ToolFailed(&'static str, String),
-    Io(String),
+    IO(String),
 }
 
 impl std::fmt::Display for BindError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Source(v) | Self::Io(v) => f.write_str(v),
+            Self::Source(v) | Self::IO(v) => f.write_str(v),
             Self::ToolMissing(v) => write!(f, "the provisioned `{v}` tool was not found"),
             Self::ToolFailed(t, v) => write!(f, "`{t}` rejected the Lua binding input: {v}"),
         }
@@ -52,12 +52,12 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     let root = tool_root(&luac).ok_or_else(|| BindError::Source("the provisioned Lua root could not be resolved".into()))?;
     let include = find_header_dir(&root).ok_or_else(|| BindError::Source("the provisioned Lua runtime has no `lua.h` header".into()))?;
     let lib_dir = find_library_dir(&root).ok_or_else(|| BindError::Source("the provisioned Lua runtime has no embeddable library".into()))?;
-    std::fs::create_dir_all(cache).map_err(|e| BindError::Io(format!("could not create Lua binding cache: {e}")))?;
+    std::fs::create_dir_all(cache).map_err(|e| BindError::IO(format!("could not create Lua binding cache: {e}")))?;
     let abi = format!("jet_lua_{lib}");
     let c = cache.join(format!("{abi}.c"));
     let object = cache.join(format!("{abi}.o"));
     let archive = cache.join(format!("lib{abi}.a"));
-    std::fs::write(&c, render_c(&abi, source, &functions)).map_err(|e| BindError::Io(format!("could not write Lua bridge: {e}")))?;
+    std::fs::write(&c, render_c(&abi, source, &functions)).map_err(|e| BindError::IO(format!("could not write Lua bridge: {e}")))?;
     run(Command::new("cc").args(["-std=c11", "-D_POSIX_C_SOURCE=200809L", "-fPIC", "-c", "-I"]).arg(&include).arg(&c).arg("-o").arg(&object), "cc")?;
     let _ = std::fs::remove_file(&archive);
     run(Command::new("ar").arg("rcs").arg(&archive).arg(&object), "ar")?;
@@ -215,8 +215,8 @@ fn find_library_dir(root:&Path)->Option<PathBuf>{[root.join("lib"),root.join("li
 fn ident(v:&str)->bool{let mut c=v.chars();matches!(c.next(),Some(x)if x.is_ascii_alphabetic()||x=='_')&&c.all(|x|x.is_ascii_alphanumeric()||x=='_')}
 fn reserved(v:&str)->bool{GENERATED_FIXED_FUNCTIONS.iter().any(|(name,_)|*name==v)||matches!(v,"Session"|"TableView"|"LuaError")||crate::Syntax::JET_KEYWORD_LIST.contains(&v)||crate::Syntax::JET_TYPE_LIST.contains(&v)}
 fn c_escape(v:&str)->String{let mut o=String::new();for b in v.bytes(){match b{b'\\'=>o.push_str("\\\\"),b'"'=>o.push_str("\\\""),b'\n'=>o.push_str("\\n"),b'\r'=>o.push_str("\\r"),b'\t'=>o.push_str("\\t"),0x20..=0x7e=>o.push(b as char),_=>o.push_str(&format!("\\{:03o}",b))}}o}
-fn run(command:&mut Command,tool:&'static str)->Result<(),BindError>{const CAP:usize=64*1024;command.stdout(Stdio::null()).stderr(Stdio::piped());let mut child=command.spawn().map_err(|e|if e.kind()==std::io::ErrorKind::NotFound{BindError::ToolMissing(tool)}else{BindError::Io(format!("could not start `{tool}`: {e}"))})?;let stderr=child.stderr.take().ok_or_else(||BindError::Io(format!("could not supervise `{tool}` stderr")))?;let err=std::thread::spawn(move||drain(stderr,CAP));let deadline=Instant::now()+Duration::from_secs(60);let status=loop{match child.try_wait().map_err(|e|BindError::Io(format!("could not supervise `{tool}`: {e}")))?{Some(v)=>break v,None if Instant::now()>=deadline=>{let _=child.kill();let _=child.wait();let _=err.join();return Err(BindError::ToolFailed(tool,"the tool exceeded the 60 second limit".into()))},None=>std::thread::sleep(Duration::from_millis(10))}};let stderr=err.join().map_err(|_|BindError::Io(format!("`{tool}` stderr reader failed")))??;if status.success(){Ok(())}else{Err(BindError::ToolFailed(tool,launder(&stderr)))}}
-fn drain(mut input:impl Read,limit:usize)->Result<Vec<u8>,BindError>{let mut out=Vec::new();let mut buf=[0u8;8192];loop{let n=input.read(&mut buf).map_err(|e|BindError::Io(format!("could not read foreign tool output: {e}")))?;if n==0{break}let keep=(limit-out.len()).min(n);out.extend_from_slice(&buf[..keep]);}Ok(out)}
+fn run(command:&mut Command,tool:&'static str)->Result<(),BindError>{const CAP:usize=64*1024;command.stdout(Stdio::null()).stderr(Stdio::piped());let mut child=command.spawn().map_err(|e|if e.kind()==std::io::ErrorKind::NotFound{BindError::ToolMissing(tool)}else{BindError::IO(format!("could not start `{tool}`: {e}"))})?;let stderr=child.stderr.take().ok_or_else(||BindError::IO(format!("could not supervise `{tool}` stderr")))?;let err=std::thread::spawn(move||drain(stderr,CAP));let deadline=Instant::now()+Duration::from_secs(60);let status=loop{match child.try_wait().map_err(|e|BindError::IO(format!("could not supervise `{tool}`: {e}")))?{Some(v)=>break v,None if Instant::now()>=deadline=>{let _=child.kill();let _=child.wait();let _=err.join();return Err(BindError::ToolFailed(tool,"the tool exceeded the 60 second limit".into()))},None=>std::thread::sleep(Duration::from_millis(10))}};let stderr=err.join().map_err(|_|BindError::IO(format!("`{tool}` stderr reader failed")))??;if status.success(){Ok(())}else{Err(BindError::ToolFailed(tool,launder(&stderr)))}}
+fn drain(mut input:impl Read,limit:usize)->Result<Vec<u8>,BindError>{let mut out=Vec::new();let mut buf=[0u8;8192];loop{let n=input.read(&mut buf).map_err(|e|BindError::IO(format!("could not read foreign tool output: {e}")))?;if n==0{break}let keep=(limit-out.len()).min(n);out.extend_from_slice(&buf[..keep]);}Ok(out)}
 fn launder(v:&[u8])->String{String::from_utf8_lossy(v).lines().map(str::trim).find(|v|!v.is_empty()).map(|v|v.rsplit_once(": ").map_or(v,|x|x.1).chars().take(160).collect()).unwrap_or_else(||"the foreign tool returned a failure status".into())}
 #[cfg(target_os="linux")]fn lib_name()->&'static str{"liblua.so"}
 #[cfg(target_os="macos")]fn lib_name()->&'static str{"liblua.dylib"}

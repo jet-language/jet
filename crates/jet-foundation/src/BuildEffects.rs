@@ -3,58 +3,58 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum BuildEffect {
     Net,
-    Fs,
-    Io,
-    Db,
+    FS,
+    IO,
+    DB,
     Time,
     Rand,
     Env,
     Exec,
     Log,
-    Gpu,
+    GPU,
 }
 
 impl BuildEffect {
     pub const ALL: [BuildEffect; 10] = [
         Self::Net,
-        Self::Fs,
-        Self::Io,
-        Self::Db,
+        Self::FS,
+        Self::IO,
+        Self::DB,
         Self::Time,
         Self::Rand,
         Self::Env,
         Self::Exec,
         Self::Log,
-        Self::Gpu,
+        Self::GPU,
     ];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Net => "Net",
-            Self::Fs => "Fs",
-            Self::Io => "Io",
-            Self::Db => "Db",
+            Self::FS => "FS",
+            Self::IO => "IO",
+            Self::DB => "DB",
             Self::Time => "Time",
             Self::Rand => "Rand",
             Self::Env => "Env",
             Self::Exec => "Exec",
             Self::Log => "Log",
-            Self::Gpu => "Gpu",
+            Self::GPU => "GPU",
         }
     }
 
     pub fn flag(self) -> &'static str {
         match self {
             Self::Net => "net",
-            Self::Fs => "fs",
-            Self::Io => "io",
-            Self::Db => "db",
+            Self::FS => "fs",
+            Self::IO => "io",
+            Self::DB => "db",
             Self::Time => "time",
             Self::Rand => "rand",
             Self::Env => "env",
             Self::Exec => "exec",
             Self::Log => "log",
-            Self::Gpu => "gpu",
+            Self::GPU => "gpu",
         }
     }
 

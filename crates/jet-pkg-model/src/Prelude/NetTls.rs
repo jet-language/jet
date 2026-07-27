@@ -4,10 +4,10 @@ use std::net::TcpStream;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-type TlsStream = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
+type TLSStream = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
 
-struct JetTlsState {
-    stream: TlsStream,
+struct JetTLSState {
+    stream: TLSStream,
     server_name: String,
     pending_read: Vec<u8>,
     read_eof: bool,
@@ -16,7 +16,7 @@ struct JetTlsState {
     write_closed: bool,
 }
 
-pub type JetTlsPeerSnapshot = (
+pub type JetTLSPeerSnapshot = (
     String,
     Vec<Vec<u8>>,
     Vec<Vec<u8>>,
@@ -28,10 +28,10 @@ pub type JetTlsPeerSnapshot = (
 );
 
 static JET_NET_TLS_NEXT: AtomicI64 = AtomicI64::new(1);
-static JET_NET_TLS_STREAMS: OnceLock<Mutex<BTreeMap<i64, JetTlsState>>> = OnceLock::new();
+static JET_NET_TLS_STREAMS: OnceLock<Mutex<BTreeMap<i64, JetTLSState>>> = OnceLock::new();
 static JET_NET_TLS_CLOSED: OnceLock<Mutex<std::collections::BTreeSet<i64>>> = OnceLock::new();
 
-fn jet_net_tls_streams() -> &'static Mutex<BTreeMap<i64, JetTlsState>> {
+fn jet_net_tls_streams() -> &'static Mutex<BTreeMap<i64, JetTLSState>> {
     JET_NET_TLS_STREAMS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
@@ -253,7 +253,7 @@ fn jet_net_tls_begin_inner(
     let id = JET_NET_TLS_NEXT.fetch_add(1, Ordering::Relaxed);
     jet_net_tls_streams().lock().unwrap().insert(
         id,
-        JetTlsState {
+        JetTLSState {
             stream: tls,
             server_name: server_name.clone(),
             pending_read: Vec::new(),
@@ -351,7 +351,7 @@ pub fn jet_net_tls_read_ready_impl(id: i64) -> Result<bool, String> {
     }
 }
 
-pub fn jet_net_tls_peer_identity_impl(id: i64) -> Result<JetTlsPeerSnapshot, String> {
+pub fn jet_net_tls_peer_identity_impl(id: i64) -> Result<JetTLSPeerSnapshot, String> {
     let streams = jet_net_tls_streams().lock().unwrap();
     let state = streams.get(&id).ok_or_else(|| "TLS stream is closed".to_string())?;
     if state.stream.conn.is_handshaking() {

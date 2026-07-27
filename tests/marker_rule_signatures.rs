@@ -95,8 +95,8 @@ fn parser_binds_the_authoritative_declaration_site_matrix() {
             jet::Policy::RuleSite::Method,
         ),
         (
-            "#Html on file",
-            "#Html(\"index.html\")\nfn run() {}",
+            "#HTML on file",
+            "#HTML(\"index.html\")\nfn run() {}",
             jet::Policy::RuleSite::File,
         ),
         (
@@ -329,7 +329,7 @@ fn static_string_products_resolve_before_consumers() {
 comptime label = "shared"
 comptime invariant = "value >= 0 && value < 4"
 comptime page = "index.html"
-#Html(page)
+#HTML(page)
 #Invariant(invariant)
 Tiny :: distinct Int
 #Test(label) {}
@@ -368,7 +368,7 @@ fn run() {}
 #[test]
 fn static_string_products_report_one_shared_type_error_each() {
     for source in [
-        "comptime value = 42\n#Html(value)\nfn run() {}",
+        "comptime value = 42\n#HTML(value)\nfn run() {}",
         "comptime value = 42\n#Invariant(value)\nTiny :: distinct Int\nfn run() {}",
         "comptime value = 42\n#Test(value) {}\nfn run() {}",
         "comptime value = 42\n#Bench(value) {}\nfn run() {}",
@@ -424,7 +424,7 @@ fn run() {}
 #[test]
 fn static_string_products_reject_nonstatic_expressions_once() {
     for source in [
-        "#Html(runtime_name)\nfn run() {}",
+        "#HTML(runtime_name)\nfn run() {}",
         "#Invariant(runtime_name)\nTiny :: distinct Int\nfn run() {}",
         "#Test(runtime_name) {}\nfn run() {}",
         "#Bench(runtime_name) {}\nfn run() {}",
@@ -467,8 +467,8 @@ fn duplicate_html_markers_still_fail_before_resolution() {
     let source = r#"
 comptime first = "first.html"
 comptime second = "second.html"
-#Html(first)
-#Html(second)
+#HTML(first)
+#HTML(second)
 fn run() {}
 "#;
     let dir = std::env::temp_dir().join(format!(
@@ -479,7 +479,7 @@ fn run() {}
     let path = dir.join("main.jet");
     std::fs::write(&path, source).unwrap();
     let diagnostics = jet::Loader::load_entry(path.to_str().unwrap())
-        .expect_err("duplicate Html markers must fail during loading");
+        .expect_err("duplicate HTML markers must fail during loading");
     assert_eq!(
         diagnostics
             .iter()
@@ -548,9 +548,9 @@ fn run() {}
 
 #[test]
 fn formatter_preserves_static_rule_expressions() {
-    let source = "comptime name = \"case\"\n#Test(name) {}\n#Bench(name) {}\n#Html(name)\nfn run() {}\n";
+    let source = "comptime name = \"case\"\n#Test(name) {}\n#Bench(name) {}\n#HTML(name)\nfn run() {}\n";
     let formatted = jet::format_source(source).expect("static rule expressions should format");
     assert!(formatted.contains("#Test(name)"), "{formatted}");
     assert!(formatted.contains("#Bench(name)"), "{formatted}");
-    assert!(formatted.contains("#Html(name)"), "{formatted}");
+    assert!(formatted.contains("#HTML(name)"), "{formatted}");
 }

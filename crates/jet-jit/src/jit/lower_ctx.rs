@@ -490,7 +490,7 @@ impl LowerCtx<'_, '_> {
             let Some(enum_name) = arm.pattern.enum_type.as_deref() else {
                 return false;
             };
-            if matches!(enum_name, "DataTree" | "Json" | "Toml" | "Yaml" | "Csv") {
+            if matches!(enum_name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") {
                 return true;
             }
             self.meta
@@ -503,7 +503,7 @@ impl LowerCtx<'_, '_> {
     fn is_datatree_value_ty(ty: &Type) -> bool {
         matches!(
             ty,
-            Type::Named(n) if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+            Type::Named(n) if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
         )
     }
 
@@ -536,13 +536,13 @@ impl LowerCtx<'_, '_> {
         };
         match op {
             THandleOp::DataTreeField
-            | THandleOp::JsonField
+            | THandleOp::JSONField
             | THandleOp::DataTreeAt
-            | THandleOp::JsonAt => Some(Type::Named("DataTree".into())),
-            THandleOp::DataTreeInt | THandleOp::JsonInt => Some(Type::Int),
-            THandleOp::DataTreeText | THandleOp::JsonText => Some(Type::String),
-            THandleOp::DataTreeBool | THandleOp::JsonBool => Some(Type::Bool),
-            THandleOp::DataTreeFloat | THandleOp::JsonFloat => Some(Type::Float),
+            | THandleOp::JSONAt => Some(Type::Named("DataTree".into())),
+            THandleOp::DataTreeInt | THandleOp::JSONInt => Some(Type::Int),
+            THandleOp::DataTreeText | THandleOp::JSONText => Some(Type::String),
+            THandleOp::DataTreeBool | THandleOp::JSONBool => Some(Type::Bool),
+            THandleOp::DataTreeFloat | THandleOp::JSONFloat => Some(Type::Float),
             // ParsedArgs handle lives in result bits (i64).
             THandleOp::ArgsSpecParse => Some(Type::Int),
             _ => None,
@@ -3380,7 +3380,7 @@ impl LowerCtx<'_, '_> {
                 } else if *columnar {
                     return Err("jit for-in columnar unsupported".to_string());
                 }
-                // `by_value` is set for Stream / Iter / HttpBodyChunks. JIT can
+                // `by_value` is set for Stream / Iter / HTTPBodyChunks. JIT can
                 // only walk Iter<T> because producers materialize list handles
                 // (true JetIter cannot cross the host-shim ABI yet).
                 if *by_value
@@ -5808,7 +5808,7 @@ impl LowerCtx<'_, '_> {
             THostCall::TypedText { kind, arg } => {
                 let val = self.lower_expr(arg)?;
                 match kind {
-                    TTypedTextForm::SqlRaw => {
+                    TTypedTextForm::SQLRaw => {
                         let n = self.b.ins().iconst(types::I64, 2);
                         let new_ref = self
                             .module
@@ -5829,7 +5829,7 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().call(set, &[rec, one, empty]);
                         Ok(rec)
                     }
-                    TTypedTextForm::SqlTemplate => {
+                    TTypedTextForm::SQLTemplate => {
                         let zero = self.b.ins().iconst(types::I64, 0);
                         let get = self
                             .module
@@ -5837,7 +5837,7 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(get, &[val, zero]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    TTypedTextForm::SqlParams => {
+                    TTypedTextForm::SQLParams => {
                         let one = self.b.ins().iconst(types::I64, 1);
                         let get = self
                             .module
@@ -5845,13 +5845,13 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(get, &[val, one]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    TTypedTextForm::HtmlRaw | TTypedTextForm::HtmlText | TTypedTextForm::ShRaw => {
+                    TTypedTextForm::HTMLRaw | TTypedTextForm::HTMLText | TTypedTextForm::ShRaw => {
                         Ok(val)
                     }
                 }
             }
             THostCall::TypedTextInterp {
-                kind: TTypedTextInterpKind::Sql,
+                kind: TTypedTextInterpKind::SQL,
                 literals,
                 holes,
             } => {
@@ -5912,7 +5912,7 @@ impl LowerCtx<'_, '_> {
                 Ok(argv)
             }
             THostCall::TypedTextInterp {
-                kind: TTypedTextInterpKind::Html,
+                kind: TTypedTextInterpKind::HTML,
                 literals,
                 holes,
             } => {
@@ -6004,7 +6004,7 @@ impl LowerCtx<'_, '_> {
         }
     }
 
-    /// `jet_show` for Sql hole params — Int/String/Bool/Float cover checked Sql.
+    /// `jet_show` for SQL hole params — Int/String/Bool/Float cover checked SQL.
     fn lower_jet_show(&mut self, expr: &TExpr) -> Result<Value, String> {
         match &expr.ty {
             Type::String => self.lower_expr(expr),
@@ -6032,7 +6032,7 @@ impl LowerCtx<'_, '_> {
                 let f_v = self.b.ins().iconst(types::I64, f_id);
                 Ok(self.b.ins().select(is_true, t_v, f_v))
             }
-            other => Err(format!("jit Sql hole show unsupported: {other:?}")),
+            other => Err(format!("jit SQL hole show unsupported: {other:?}")),
         }
     }
 
@@ -8510,14 +8510,14 @@ impl LowerCtx<'_, '_> {
                             if matches!(
                                 ok.as_ref(),
                                 Type::Named(n)
-                                    if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                                    if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
                             )
                     );
                     let datatree_arg = args.first().is_some_and(|a| {
                         matches!(
                             &a.ty,
                             Type::Named(n)
-                                if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                                if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
                         )
                     });
                     // Typed Codable decode/to_string (Encode-type path).
@@ -8604,7 +8604,7 @@ impl LowerCtx<'_, '_> {
                                 if matches!(
                                     elem.as_ref(),
                                     Type::Named(n)
-                                        if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                                        if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
                                 ))
                     );
                     let datatree_list_arg = args.first().is_some_and(|a| {
@@ -8614,7 +8614,7 @@ impl LowerCtx<'_, '_> {
                                 if matches!(
                                     elem.as_ref(),
                                     Type::Named(n)
-                                        if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                                        if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
                                 )
                         )
                     });
@@ -8661,14 +8661,14 @@ impl LowerCtx<'_, '_> {
                             if matches!(
                                 ok.as_ref(),
                                 Type::Named(n)
-                                    if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv" | "Xml")
+                                    if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV" | "Xml")
                             )
                     );
                     let datatree_arg = args.first().is_some_and(|a| {
                         matches!(
                             &a.ty,
                             Type::Named(n)
-                                if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv" | "Xml")
+                                if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV" | "Xml")
                         )
                     });
                     let datatree_list_ok = matches!(
@@ -8680,7 +8680,7 @@ impl LowerCtx<'_, '_> {
                                     if matches!(
                                         elem.as_ref(),
                                         Type::Named(n)
-                                            if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv" | "Xml")
+                                            if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV" | "Xml")
                                     )
                             )
                     );
@@ -8802,14 +8802,14 @@ impl LowerCtx<'_, '_> {
                             if matches!(
                                 ok.as_ref(),
                                 Type::Named(n)
-                                    if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                                    if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
                             )
                     );
                     let datatree_arg = args.first().is_some_and(|a| {
                         matches!(
                             &a.ty,
                             Type::Named(n)
-                                if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                                if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
                         )
                     });
                     let bytes_arg = args.first().is_some_and(|a| {
@@ -8868,14 +8868,14 @@ impl LowerCtx<'_, '_> {
                             if matches!(
                                 ok.as_ref(),
                                 Type::Named(n)
-                                    if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                                    if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
                             )
                     );
                     let datatree_arg = args.first().is_some_and(|a| {
                         matches!(
                             &a.ty,
                             Type::Named(n)
-                                if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+                                if matches!(n.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
                         )
                     });
                     if method == "decode" && args.len() == 1 && !datatree_ok {
@@ -10793,7 +10793,7 @@ impl LowerCtx<'_, '_> {
                 let type_name = type_name.ok_or_else(|| {
                     format!("jit field recv type: field `{field}` on {record_ty:?}")
                 })?;
-                if type_name == "HttpShutdownReport" {
+                if type_name == "HTTPShutdownReport" {
                     let field_id = match field.as_str() {
                         "accepted" => 0,
                         "overloaded" => 1,
@@ -10801,7 +10801,7 @@ impl LowerCtx<'_, '_> {
                         "cancelled" => 3,
                         other => {
                             return Err(format!(
-                                "jit field `{other}` on `HttpShutdownReport`"
+                                "jit field `{other}` on `HTTPShutdownReport`"
                             ));
                         }
                     };
@@ -11150,7 +11150,7 @@ impl LowerCtx<'_, '_> {
                 payload,
             } => {
                 let is_datatree =
-                    matches!(enum_type.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv");
+                    matches!(enum_type.as_str(), "DataTree" | "JSON" | "TOML" | "YAML" | "CSV");
                 match payload {
                 TEnumPayload::Unit => {
                     let disc = self
@@ -11165,11 +11165,11 @@ impl LowerCtx<'_, '_> {
                             ("TextWidthAmbiguous", "Wide") => Some(1),
                             ("TextWidthControls", "Zero") => Some(0),
                             ("TextWidthControls", "Reject") => Some(1),
-                            ("SmtpSecurity", "StartTls") => Some(0),
-                            ("SmtpSecurity", "Tls") => Some(1),
+                            ("SMTPSecurity", "StartTls") => Some(0),
+                            ("SMTPSecurity", "TLS") => Some(1),
                             ("RecipientPolicy", "RequireAll") => Some(0),
                             ("RecipientPolicy", "DeliverAccepted") => Some(1),
-                            ("TlsTrust", "System") => Some(0),
+                            ("TLSTrust", "System") => Some(0),
                             ("Overflow", "Block") => Some(0),
                             ("Overflow", "DropNewest") => Some(1),
                             ("Overflow", "DropOldest") => Some(2),
@@ -11222,9 +11222,9 @@ impl LowerCtx<'_, '_> {
                         .meta
                         .enum_variant_index(enum_type, variant)
                         .or_else(|| match (enum_type.as_str(), variant.as_str()) {
-                            ("SmtpAuth", "Password") => Some(1),
-                            ("SmtpAuth", "None") => Some(0),
-                            ("TlsTrust", "SystemPlusCa") => Some(1),
+                            ("SMTPAuth", "Password") => Some(1),
+                            ("SMTPAuth", "None") => Some(0),
+                            ("TLSTrust", "SystemPlusCa") => Some(1),
                             _ => None,
                         })
                         .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
@@ -11638,7 +11638,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[]);
                 Ok(self.b.inst_results(call)[0])
             }
-            TExprKind::JsonLit { variant, arg } => {
+            TExprKind::JSONLit { variant, arg } => {
                 let disc = self
                     .meta
                     .enum_variant_index("DataTree", variant)
@@ -11659,7 +11659,7 @@ impl LowerCtx<'_, '_> {
                     }
                 }
             }
-            TExprKind::DbValueLit { variant, arg } => {
+            TExprKind::DBValueLit { variant, arg } => {
                 let disc = match variant.as_str() {
                     "Null" => 0i64,
                     "Int" => 1,
@@ -11667,7 +11667,7 @@ impl LowerCtx<'_, '_> {
                     "Text" => 3,
                     "Bool" => 4,
                     _ => {
-                        return Err(format!("jit DbValue lit `DbValue::{variant}`"))
+                        return Err(format!("jit DBValue lit `DBValue::{variant}`"))
                     }
                 };
                 match arg.as_ref() {
@@ -11695,7 +11695,7 @@ impl LowerCtx<'_, '_> {
                             Some(types::I64) => payload,
                             other => {
                                 return Err(format!(
-                                    "jit DbValue payload type unsupported: {payload_ty:?} ({other:?})"
+                                    "jit DBValue payload type unsupported: {payload_ty:?} ({other:?})"
                                 ))
                             }
                         };
@@ -11846,7 +11846,7 @@ impl LowerCtx<'_, '_> {
                 if lam.arc
                     || matches!(
                         &expr.ty,
-                        Type::Named(name) if name == "HttpHandler"
+                        Type::Named(name) if name == "HTTPHandler"
                     )
                 {
                     // Prefer host-side packing for the common single-capture
@@ -13475,7 +13475,7 @@ impl LowerCtx<'_, '_> {
             return self.lower_expr(inner);
         }
         if inner.ty == Type::String
-            || matches!(&inner.ty, Type::Named(name) if name == "Html")
+            || matches!(&inner.ty, Type::Named(name) if name == "HTML")
         {
             let val = self.lower_expr(inner)?;
             let host_ref = self.module.declare_func_in_func(self.host.str_clone, self.b.func);
@@ -13526,17 +13526,17 @@ impl LowerCtx<'_, '_> {
                     | "TcpStream"
                     | "SocketAddr"
                     | "UdpSocket"
-                    | "UdpPacket"
+                    | "UDPPacket"
                     | "UnixListener"
                     | "UnixStream"
-                    | "HttpMux"
-                    | "HttpHandler"
-                    | "HttpRequest"
-                    | "HttpResponse"
-                    | "HttpBody"
-                    | "HttpHeaders"
-                    | "HttpServer"
-                    | "HttpShutdownReport"
+                    | "HTTPMux"
+                    | "HTTPHandler"
+                    | "HTTPRequest"
+                    | "HTTPResponse"
+                    | "HTTPBody"
+                    | "HTTPHeaders"
+                    | "HTTPServer"
+                    | "HTTPShutdownReport"
                     | "WsConn"
                     | "WsMessage"
             ) {
@@ -14831,20 +14831,20 @@ impl LowerCtx<'_, '_> {
             | THandleOp::UnixStreamReady
             | THandleOp::UnixStreamClose
             | THandleOp::UnixStreamSetTimeout
-            | THandleOp::TlsStreamReadDeadline
-            | THandleOp::TlsStreamWriteAllDeadline
-            | THandleOp::TlsStreamReady
-            | THandleOp::TlsStreamClose
-            | THandleOp::TlsStreamCloseWrite
-            | THandleOp::TlsStreamPeerIdentity
-            | THandleOp::TlsClientConfigDefault
-            | THandleOp::HttpClientNew
-            | THandleOp::TlsClientConfigWithAlpn
-            | THandleOp::TlsRootCertificatesFromPem
-            | THandleOp::TlsClientIdentityFromPem
-            | THandleOp::TlsClientConfigWithTrust
-            | THandleOp::TlsClientConfigWithIdentity
-            | THandleOp::TlsClientConfigWithVersionBounds => {
+            | THandleOp::TLSStreamReadDeadline
+            | THandleOp::TLSStreamWriteAllDeadline
+            | THandleOp::TLSStreamReady
+            | THandleOp::TLSStreamClose
+            | THandleOp::TLSStreamCloseWrite
+            | THandleOp::TLSStreamPeerIdentity
+            | THandleOp::TLSClientConfigDefault
+            | THandleOp::HTTPClientNew
+            | THandleOp::TLSClientConfigWithAlpn
+            | THandleOp::TLSRootCertificatesFromPem
+            | THandleOp::TLSClientIdentityFromPem
+            | THandleOp::TLSClientConfigWithTrust
+            | THandleOp::TLSClientConfigWithIdentity
+            | THandleOp::TLSClientConfigWithVersionBounds => {
                 Err("jit handle method unsupported".to_string())
             }
             THandleOp::AllocAlloc if args.len() == 1 => {
@@ -14893,11 +14893,11 @@ impl LowerCtx<'_, '_> {
             THandleOp::AllocAlloc | THandleOp::AllocReset => {
                 Err("jit allocator method arity unsupported".to_string())
             }
-            THandleOp::HttpReqField(..) => Err("jit handle method unsupported".to_string()),
-            THandleOp::HttpReqHeader => Err("jit handle method unsupported".to_string()),
-            THandleOp::HttpReqParam => Err("jit handle method unsupported".to_string()),
-            THandleOp::HttpRespField(..) => Err("jit handle method unsupported".to_string()),
-            THandleOp::HttpRespHeader => Err("jit handle method unsupported".to_string()),
+            THandleOp::HTTPReqField(..) => Err("jit handle method unsupported".to_string()),
+            THandleOp::HTTPReqHeader => Err("jit handle method unsupported".to_string()),
+            THandleOp::HTTPReqParam => Err("jit handle method unsupported".to_string()),
+            THandleOp::HTTPRespField(..) => Err("jit handle method unsupported".to_string()),
+            THandleOp::HTTPRespHeader => Err("jit handle method unsupported".to_string()),
             THandleOp::ArgsSpecFlag => {
                 let a0 = self.lower_expr(&args[0])?;
                 let a1 = self.lower_expr(&args[1])?;
@@ -15164,7 +15164,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::HttpRouterRegister { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::HTTPRouterRegister { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::MathMethod {
                 type_name,
                 method,
@@ -15586,23 +15586,23 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[recv_v, method_val, a0, a1]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::HttpClientMethod { kind, method } => {
+            THandleOp::HTTPClientMethod { kind, method } => {
                 match (kind.as_str(), method.as_str()) {
-                    ("HttpResponse", "status") if args.is_empty() => {
+                    ("HTTPResponse", "status") if args.is_empty() => {
                         let host = self
                             .module
                             .declare_func_in_func(self.host.net_http.http_resp_status, self.b.func);
                         let call = self.b.ins().call(host, &[recv_val]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpResponse", "body") if args.is_empty() => {
+                    ("HTTPResponse", "body") if args.is_empty() => {
                         let host = self
                             .module
                             .declare_func_in_func(self.host.net_http.http_resp_body, self.b.func);
                         let call = self.b.ins().call(host, &[recv_val]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpResponse", "header") if args.len() == 1 => {
+                    ("HTTPResponse", "header") if args.len() == 1 => {
                         let name = self.lower_expr(&args[0])?;
                         let host = self
                             .module
@@ -15610,14 +15610,14 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val, name]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpResponse", "cookies") if args.is_empty() => {
+                    ("HTTPResponse", "cookies") if args.is_empty() => {
                         let host = self
                             .module
                             .declare_func_in_func(self.host.net_http.http_resp_cookies, self.b.func);
                         let call = self.b.ins().call(host, &[recv_val]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpBody", "text") if args.len() == 1 => {
+                    ("HTTPBody", "text") if args.len() == 1 => {
                         let limit = self.lower_expr(&args[0])?;
                         let host = self
                             .module
@@ -15625,7 +15625,7 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val, limit]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpRequest", "form") if args.len() == 2 => {
+                    ("HTTPRequest", "form") if args.len() == 2 => {
                         let a0 = self.lower_expr(&args[0])?;
                         let a1 = self.lower_expr(&args[1])?;
                         let host = self.module.declare_func_in_func(
@@ -15635,7 +15635,7 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val, a0, a1]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpRequest", "cookie") if args.len() == 2 => {
+                    ("HTTPRequest", "cookie") if args.len() == 2 => {
                         let a0 = self.lower_expr(&args[0])?;
                         let a1 = self.lower_expr(&args[1])?;
                         let host = self.module.declare_func_in_func(
@@ -15645,7 +15645,7 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val, a0, a1]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpRequest", "header") if args.len() == 2 => {
+                    ("HTTPRequest", "header") if args.len() == 2 => {
                         let a0 = self.lower_expr(&args[0])?;
                         let a1 = self.lower_expr(&args[1])?;
                         let host = self.module.declare_func_in_func(
@@ -15655,7 +15655,7 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val, a0, a1]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpRequest", "redirects") if args.len() == 1 => {
+                    ("HTTPRequest", "redirects") if args.len() == 1 => {
                         let a0 = self.lower_expr(&args[0])?;
                         let host = self.module.declare_func_in_func(
                             self.host.net_http.http_client_request_redirects,
@@ -15664,7 +15664,7 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val, a0]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpRequest", "connect_timeout") if args.len() == 1 => {
+                    ("HTTPRequest", "connect_timeout") if args.len() == 1 => {
                         let a0 = self.lower_expr(&args[0])?;
                         let host = self.module.declare_func_in_func(
                             self.host.net_http.http_client_request_connect_timeout,
@@ -15673,7 +15673,7 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val, a0]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpRequest", "read_timeout") if args.len() == 1 => {
+                    ("HTTPRequest", "read_timeout") if args.len() == 1 => {
                         let a0 = self.lower_expr(&args[0])?;
                         let host = self.module.declare_func_in_func(
                             self.host.net_http.http_client_request_read_timeout,
@@ -15682,7 +15682,7 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val, a0]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpRequest", "send") if args.is_empty() => {
+                    ("HTTPRequest", "send") if args.is_empty() => {
                         let host = self.module.declare_func_in_func(
                             self.host.net_http.http_client_request_send,
                             self.b.func,
@@ -15695,9 +15695,9 @@ impl LowerCtx<'_, '_> {
                     )),
                 }
             }
-            THandleOp::HttpServerMethod { kind, method } => {
+            THandleOp::HTTPServerMethod { kind, method } => {
                 match (kind.as_str(), method.as_str()) {
-                    ("HttpMux", m)
+                    ("HTTPMux", m)
                         if matches!(
                             m,
                             "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
@@ -15716,7 +15716,7 @@ impl LowerCtx<'_, '_> {
                                 .call(host, &[recv_val, method_v, pattern, handler]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpMux", "middleware") if args.len() == 1 => {
+                    ("HTTPMux", "middleware") if args.len() == 1 => {
                         let mw = self.lower_expr(&args[0])?;
                         let host = self.module.declare_func_in_func(
                             self.host.net_http.http_mux_middleware,
@@ -15725,7 +15725,7 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val, mw]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpHandler", "handle") if args.len() == 1 => {
+                    ("HTTPHandler", "handle") if args.len() == 1 => {
                         let req = self.lower_expr(&args[0])?;
                         let host = self.module.declare_func_in_func(
                             self.host.net_http.http_handler_handle,
@@ -15734,28 +15734,28 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val, req]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpRequest", "body") if args.is_empty() => {
+                    ("HTTPRequest", "body") if args.is_empty() => {
                         let host = self
                             .module
                             .declare_func_in_func(self.host.net_http.http_req_body, self.b.func);
                         let call = self.b.ins().call(host, &[recv_val]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpRequest", "method") if args.is_empty() => {
+                    ("HTTPRequest", "method") if args.is_empty() => {
                         let host = self
                             .module
                             .declare_func_in_func(self.host.net_http.http_req_method, self.b.func);
                         let call = self.b.ins().call(host, &[recv_val]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpRequest", "path") if args.is_empty() => {
+                    ("HTTPRequest", "path") if args.is_empty() => {
                         let host = self
                             .module
                             .declare_func_in_func(self.host.net_http.http_req_path, self.b.func);
                         let call = self.b.ins().call(host, &[recv_val]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpRequest", "param") if args.len() == 1 => {
+                    ("HTTPRequest", "param") if args.len() == 1 => {
                         let name = self.lower_expr(&args[0])?;
                         let host = self
                             .module
@@ -15763,7 +15763,7 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val, name]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpRequest", "header") if args.len() == 1 => {
+                    ("HTTPRequest", "header") if args.len() == 1 => {
                         let name = self.lower_expr(&args[0])?;
                         let host = self
                             .module
@@ -15771,7 +15771,7 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val, name]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpRequest", "trailers") if args.is_empty() => {
+                    ("HTTPRequest", "trailers") if args.is_empty() => {
                         let host = self.module.declare_func_in_func(
                             self.host.net_http.http_req_trailers,
                             self.b.func,
@@ -15779,7 +15779,7 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpRequest", "body_len") if args.is_empty() => {
+                    ("HTTPRequest", "body_len") if args.is_empty() => {
                         let host = self.module.declare_func_in_func(
                             self.host.net_http.http_req_body_len,
                             self.b.func,
@@ -15787,7 +15787,7 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpRequest", "under_limit") if args.len() == 1 => {
+                    ("HTTPRequest", "under_limit") if args.len() == 1 => {
                         let max = self.lower_expr(&args[0])?;
                         let host = self.module.declare_func_in_func(
                             self.host.net_http.http_req_under_limit,
@@ -15797,7 +15797,7 @@ impl LowerCtx<'_, '_> {
                         let v = self.b.inst_results(call)[0];
                         Ok(self.b.ins().ireduce(types::I8, v))
                     }
-                    ("HttpResponse", "trailers") if args.len() == 1 => {
+                    ("HTTPResponse", "trailers") if args.len() == 1 => {
                         let trailers = self.lower_expr(&args[0])?;
                         let host = self.module.declare_func_in_func(
                             self.host.net_http.http_resp_trailers,
@@ -15806,7 +15806,7 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val, trailers]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpBody", "text") if args.len() == 1 => {
+                    ("HTTPBody", "text") if args.len() == 1 => {
                         let limit = self.lower_expr(&args[0])?;
                         let host = self
                             .module
@@ -15814,21 +15814,21 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val, limit]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpResponse", "status") if args.is_empty() => {
+                    ("HTTPResponse", "status") if args.is_empty() => {
                         let host = self
                             .module
                             .declare_func_in_func(self.host.net_http.http_resp_status, self.b.func);
                         let call = self.b.ins().call(host, &[recv_val]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpResponse", "body") if args.is_empty() => {
+                    ("HTTPResponse", "body") if args.is_empty() => {
                         let host = self
                             .module
                             .declare_func_in_func(self.host.net_http.http_resp_body, self.b.func);
                         let call = self.b.ins().call(host, &[recv_val]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpServer", "local_addr") if args.is_empty() => {
+                    ("HTTPServer", "local_addr") if args.is_empty() => {
                         let host = self.module.declare_func_in_func(
                             self.host.net_http.http_server_local_addr,
                             self.b.func,
@@ -15836,14 +15836,14 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpServer", "serve") if args.is_empty() => {
+                    ("HTTPServer", "serve") if args.is_empty() => {
                         let host = self
                             .module
                             .declare_func_in_func(self.host.net_http.http_server_serve, self.b.func);
                         let call = self.b.ins().call(host, &[recv_val]);
                         Ok(self.b.inst_results(call)[0])
                     }
-                    ("HttpServer", "shutdown") if args.len() == 1 => {
+                    ("HTTPServer", "shutdown") if args.len() == 1 => {
                         // Duration handle -> ms via DurationIn not available here; pass
                         // duration record bits as ms when it's a Duration milliseconds handle.
                         let grace = self.lower_expr(&args[0])?;
@@ -15899,7 +15899,7 @@ impl LowerCtx<'_, '_> {
                     )),
                 }
             }
-            THandleOp::HttpReqTrailers => {
+            THandleOp::HTTPReqTrailers => {
                 let host = self.module.declare_func_in_func(
                     self.host.net_http.http_req_trailers,
                     self.b.func,
@@ -15907,7 +15907,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::HttpRespTrailers => {
+            THandleOp::HTTPRespTrailers => {
                 let trailers = self.lower_expr(&args[0])?;
                 let host = self.module.declare_func_in_func(
                     self.host.net_http.http_resp_trailers,
@@ -15916,7 +15916,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[recv_val, trailers]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DataTreeField | THandleOp::JsonField => {
+            THandleOp::DataTreeField | THandleOp::JSONField => {
                 let name = self.lower_expr(&args[0])?;
                 let host_ref = self
                     .module
@@ -15924,7 +15924,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_val, name]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DataTreeAt | THandleOp::JsonAt => {
+            THandleOp::DataTreeAt | THandleOp::JSONAt => {
                 let idx = self.lower_expr(&args[0])?;
                 let host_ref = self
                     .module
@@ -15932,28 +15932,28 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_val, idx]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DataTreeInt | THandleOp::JsonInt => {
+            THandleOp::DataTreeInt | THandleOp::JSONInt => {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.encoding.datatree_int, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DataTreeText | THandleOp::JsonText => {
+            THandleOp::DataTreeText | THandleOp::JSONText => {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.encoding.datatree_text, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DataTreeBool | THandleOp::JsonBool => {
+            THandleOp::DataTreeBool | THandleOp::JSONBool => {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.encoding.datatree_bool, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DataTreeFloat | THandleOp::JsonFloat => {
+            THandleOp::DataTreeFloat | THandleOp::JSONFloat => {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.encoding.datatree_float, self.b.func);
@@ -16164,7 +16164,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[recv_val, method_v, a0, a1]);
                 Ok(self.b.inst_results(call)[0])
             },
-            THandleOp::DbQuery => {
+            THandleOp::DBQuery => {
                 let sql = self.lower_expr(&args[0])?;
                 let params = self.lower_expr(&args[1])?;
                 let host_ref = self
@@ -16173,7 +16173,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_val, sql, params]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DbQueryOne => {
+            THandleOp::DBQueryOne => {
                 let sql = self.lower_expr(&args[0])?;
                 let params = self.lower_expr(&args[1])?;
                 let host_ref = self
@@ -16182,7 +16182,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_val, sql, params]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DbExecute => {
+            THandleOp::DBExecute => {
                 let sql = self.lower_expr(&args[0])?;
                 let params = self.lower_expr(&args[1])?;
                 let host_ref = self
@@ -16191,63 +16191,63 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_val, sql, params]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DbBegin => {
+            THandleOp::DBBegin => {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.db.begin, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DbCommit => {
+            THandleOp::DBCommit => {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.db.commit, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DbRollback => {
+            THandleOp::DBRollback => {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.db.rollback, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DbClose => {
+            THandleOp::DBClose => {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.db.close, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DbValueInt => {
+            THandleOp::DBValueInt => {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.db.dbvalue_int, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DbValueFloat => {
+            THandleOp::DBValueFloat => {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.db.dbvalue_float, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DbValueText => {
+            THandleOp::DBValueText => {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.db.dbvalue_text, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DbValueBool => {
+            THandleOp::DBValueBool => {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.db.dbvalue_bool, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::DbValueIsNull => {
+            THandleOp::DBValueIsNull => {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.db.dbvalue_is_null, self.b.func);
@@ -17274,8 +17274,8 @@ impl LowerCtx<'_, '_> {
                     Type::Float | Type::Float32 => self.host.print_f64,
                     Type::Bool => self.host.print_bool,
                     Type::Char => self.host.print_char,
-                    Type::Named(n) if n == "DataTree" || n == "Json" => {
-                        // JetShow DataTree/Json via shared encoding host (same as AOT).
+                    Type::Named(n) if n == "DataTree" || n == "JSON" => {
+                        // JetShow DataTree/JSON via shared encoding host (same as AOT).
                         let host_ref = self
                             .module
                             .declare_func_in_func(self.host.encoding.json_to_string, self.b.func);

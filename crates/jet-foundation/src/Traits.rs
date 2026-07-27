@@ -819,7 +819,7 @@ impl TraitRegistry {
                 .derives
                 .get(type_name)
                 .is_some_and(|d| d.contains(trait_name)),
-            // D-CLIFLAG1: `#[Cli]` is a derive-trait name like the others above,
+            // D-CLIFLAG1: `#[CLI]` is a derive-trait name like the others above,
             // just not one of Generics's built-in constants (it's CLI-parsing
             // specific, not a wire/comparison trait) — same `derives` lookup.
             _ if trait_name == Syntax::CONTRACT_CLI => self
@@ -1179,7 +1179,7 @@ impl TraitRegistry {
         );
         for ty in [
             "FileReader", "FileWriter", "FileLock", "TcpStream", "UnixStream",
-            "TlsStream", "DbConnection", "Arena", "Bump", "Pool", "Fixed",
+            "TLSStream", "DBConnection", "Arena", "Bump", "Pool", "Fixed",
         ] {
             self.trait_impls
                 .insert((ty.to_string(), crate::Syntax::TRAIT_CLOSE.to_string()));
@@ -1265,8 +1265,8 @@ impl TraitRegistry {
         self.trait_impls.insert(("TcpStream".to_string(), Syntax::TRAIT_IO_WRITER.to_string()));
         self.trait_impls.insert(("UnixStream".to_string(), Syntax::TRAIT_IO_READER.to_string()));
         self.trait_impls.insert(("UnixStream".to_string(), Syntax::TRAIT_IO_WRITER.to_string()));
-        self.trait_impls.insert(("TlsStream".to_string(), Syntax::TRAIT_IO_READER.to_string()));
-        self.trait_impls.insert(("TlsStream".to_string(), Syntax::TRAIT_IO_WRITER.to_string()));
+        self.trait_impls.insert(("TLSStream".to_string(), Syntax::TRAIT_IO_READER.to_string()));
+        self.trait_impls.insert(("TLSStream".to_string(), Syntax::TRAIT_IO_WRITER.to_string()));
     }
 
     /// D-ITER-HOOK / D-INDEX-HOOK: register Iterable/Iterator/Index/IndexMut hooks.

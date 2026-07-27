@@ -424,7 +424,7 @@ pub enum Expr {
     /// D-TAINT1 (ratified 2026-06-21): `#Tainted expr` — marks a value as
     /// untrusted at its source. A value-fact tag (D-QUAL1): it rides the value,
     /// taint spreads to anything derived from it, and a tainted value reaching a
-    /// sink effect (`Db`/`Exec`/`Net`) without passing through a `#Sanitizer fn`
+    /// sink effect (`DB`/`Exec`/`Net`) without passing through a `#Sanitizer fn`
     /// is E0721. The tag is static and **erased in codegen** (I3) — lowering
     /// emits the inner expression unchanged, like `Expr::Present` but unwrapped.
     ///

@@ -448,7 +448,7 @@ pub fn parse_build(body: &str) -> Result<Vec<BuildProfileDef>, ManifestError> {
     Ok(profiles)
 }
 
-/// D-CTEFFECT1: typed parser for `build: { allow: #(Fs, Exec) }`.
+/// D-CTEFFECT1: typed parser for `build: { allow: #(FS, Exec) }`.
 pub(super) fn parse_build_allow(body: &str) -> Result<Vec<String>, ManifestError> {
     let mut allow = Vec::new();
     for (name, value) in key_value_entries(body) {
@@ -460,7 +460,7 @@ pub(super) fn parse_build_allow(body: &str) -> Result<Vec<String>, ManifestError
             .strip_prefix("#(")
             .and_then(|value| value.strip_suffix(')'))
             .ok_or_else(|| ManifestError::BadEffectsBlock {
-                detail: "`build.allow:` must be an effect tuple like `#(Fs, Exec)`".to_string(),
+                detail: "`build.allow:` must be an effect tuple like `#(FS, Exec)`".to_string(),
             })?;
         for effect in top_level_commas(inner) {
             let effect = unquote(effect.trim());
@@ -717,13 +717,13 @@ fn is_lint_code_shape(s: &str) -> bool {
     rest.len() == 4 && rest.iter().all(|c| c.is_ascii_digit())
 }
 
-/// A `[ Db, Net ]`-shaped list of effect names, each validated against the
+/// A `[ DB, Net ]`-shaped list of effect names, each validated against the
 /// closed D-EFF4 vocabulary (`crate::Sema::Effects::Effect`). D-EFFTREE1: an
-/// entry may be a dotted effect path (`Fs.Read`) — only the root is checked
+/// entry may be a dotted effect path (`FS.Read`) — only the root is checked
 /// against the closed vocabulary; further segments are an open leaf path.
 fn parse_effect_list(field: &str, value: &str) -> Result<Vec<String>, ManifestError> {
     let names = parse_string_list(value).map_err(|_| ManifestError::BadEffectsBlock {
-        detail: format!("`{field}:` must be a list like `[Db, Net]`"),
+        detail: format!("`{field}:` must be a list like `[DB, Net]`"),
     })?;
     for name in &names {
         if crate::Sema::Effect::parse(crate::Sema::effect_root(name)).is_none() {

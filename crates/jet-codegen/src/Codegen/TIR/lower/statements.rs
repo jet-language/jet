@@ -740,7 +740,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     || n == "XMLReader" || n == "XMLWriter"
                     || n == "CBORReader" || n == "CBORWriter"
                     || n == "Stdout" || n == "Stderr"
-                    || n == "TcpStream" || n == "UnixStream" || n == "HttpRouter"
+                    || n == "TcpStream" || n == "UnixStream" || n == "HTTPRouter"
                     || n == "Arena" || n == "Bump" || n == "Pool" || n == "Fixed"
             )
             // D-DATAFLOW1=A: DataStream.next / stream reducers take &mut.
@@ -1193,9 +1193,9 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                     {
                         Some(args[0].clone())
                     }
-                    Type::Named(name) if name == "HttpBodyChunks" => Some(Type::Result {
+                    Type::Named(name) if name == "HTTPBodyChunks" => Some(Type::Result {
                         ok: Box::new(Type::List(Box::new(Type::Named("U8".to_string())))),
-                        err: Box::new(Type::Named("HttpError".to_string())),
+                        err: Box::new(Type::Named("HTTPError".to_string())),
                     }),
                     // D-DYNARRAY1: `loop x; window` — a `View<T>`'s element type.
                     Type::Apply { name, args }
@@ -1206,7 +1206,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 };
                 let by_value = matches!(&lowered_coll.ty,
                     Type::Apply { name, .. } if name == "Stream" || name == crate::Syntax::TYPE_ITER
-                ) || matches!(&lowered_coll.ty, Type::Named(name) if name == "HttpBodyChunks");
+                ) || matches!(&lowered_coll.ty, Type::Named(name) if name == "HTTPBodyChunks");
                 if method_kind.is_none() {
                     if let Type::Named(n) = &lowered_coll.ty {
                         if let Some(hook) = cx.iterable_hooks.get(n) {
@@ -1408,13 +1408,13 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 body: lowered_body,
             }
         }
-        // c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region (D-EFF1). `emit_stmt`'s
+        // c109 Phase 26: a `#Caps(IO) { … }` effect-restriction region (D-EFF1). `emit_stmt`'s
         // `Stmt::Caps` arm is byte-for-byte `Stmt::Region`; effects erase at codegen (I3).
         Stmt::Caps { body, .. } => {
             let mut scoped = clone_env(env);
             TStmt::Region(lower_stmts(body, cx, &mut scoped))
         }
-        // D-SCAP1: a `#grant(Fs) { caps -> … }` grant region. The capability handle
+        // D-SCAP1: a `#grant(FS) { caps -> … }` grant region. The capability handle
         // is a compile-time-only fact (authority to perform the granted effects),
         // erased here (I3); the body emits as a plain lexical `TStmt::Region`.
         // No runtime grant/revoke value, no `unsafe`.

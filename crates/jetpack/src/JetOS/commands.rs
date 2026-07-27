@@ -12,7 +12,7 @@ use super::installer_media::{write_image_variant_artifacts, write_installer_medi
 use super::load_validate::{load_target, parse_target_or_report};
 use super::nixos_backend::cmd_migrate_compare_nixos;
 use super::nixos_import::cmd_import;
-use super::types::OsFlags;
+use super::types::OSFlags;
 use crate::Output::Theme;
 use crate::Syntax;
 use std::fs;
@@ -35,7 +35,7 @@ pub(super) fn cmd_check(theme: &Theme, args: &[String]) -> i32 {
     }
 }
 
-pub(super) fn cmd_plan(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+pub(super) fn cmd_plan(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
     let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
         return 2;
     };
@@ -52,7 +52,7 @@ pub(super) fn cmd_plan(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     0
 }
 
-pub(super) fn cmd_proof(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+pub(super) fn cmd_proof(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
     let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
         return 2;
     };
@@ -108,7 +108,7 @@ pub(super) fn cmd_proof(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 
     }
 }
 
-pub(super) fn cmd_build(theme: &Theme, args: &[String], flags: &OsFlags, activate: bool) -> i32 {
+pub(super) fn cmd_build(theme: &Theme, args: &[String], flags: &OSFlags, activate: bool) -> i32 {
     let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
         return 2;
     };
@@ -279,7 +279,7 @@ pub(super) fn cmd_generations(args: &[String]) -> i32 {
     0
 }
 
-pub(super) fn cmd_init(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+pub(super) fn cmd_init(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
     let host = args.first().map_or("host", String::as_str);
     let path = default_config_path();
     if path.exists() {
@@ -330,7 +330,7 @@ pub(super) fn cmd_init(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     }
 }
 
-pub(super) fn cmd_lift(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+pub(super) fn cmd_lift(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
     let host = args.first().map_or("host", String::as_str);
     let root = args.get(1).map_or("/", String::as_str);
     let import_args = vec![
@@ -342,7 +342,7 @@ pub(super) fn cmd_lift(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     cmd_import(theme, &import_args, flags)
 }
 
-pub(super) fn cmd_migrate(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+pub(super) fn cmd_migrate(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
     if !invoked_by_root_jet() {
         theme.error(
             "NixOS comparison is available only through root `jet`",
@@ -435,7 +435,7 @@ fn invoked_by_root_jet() -> bool {
     false
 }
 
-pub(super) fn cmd_image(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+pub(super) fn cmd_image(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
     let Some(target) = parse_target_or_report(theme, args.first().map(String::as_str)) else {
         return 2;
     };

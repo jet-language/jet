@@ -22,13 +22,13 @@ pub enum BindError {
     Source(String),
     ToolMissing,
     ToolFailed(String),
-    Io(String),
+    IO(String),
 }
 
 impl std::fmt::Display for BindError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Source(message) | Self::Io(message) => f.write_str(message),
+            Self::Source(message) | Self::IO(message) => f.write_str(message),
             Self::ToolMissing => f.write_str("the provisioned `go` tool was not found"),
             Self::ToolFailed(detail) => write!(f, "`go build -buildmode=c-archive` rejected the source: {detail}"),
         }
@@ -51,7 +51,7 @@ impl Scalar {
 pub fn bind(source_path: &Path, source: &str, lib: &str, cache_dir: &Path) -> Result<BindResult, BindError> {
     if !is_ident(lib) { return Err(BindError::Source(format!("`{lib}` is not a valid Jet library name"))); }
     let functions = parse_exports(source)?;
-    std::fs::create_dir_all(cache_dir).map_err(|e| BindError::Io(format!("could not create binding cache: {e}")))?;
+    std::fs::create_dir_all(cache_dir).map_err(|e| BindError::IO(format!("could not create binding cache: {e}")))?;
     let stem = format!("jet_go_{lib}");
     let archive = cache_dir.join(format!("lib{stem}.a"));
     let header = cache_dir.join(format!("lib{stem}.h"));
@@ -170,15 +170,15 @@ fn supervised_output(command: &mut Command, timeout: Duration) -> Result<Supervi
     let mut child = command.spawn().map_err(|e| if e.kind() == std::io::ErrorKind::NotFound {
         BindError::ToolMissing
     } else {
-        BindError::Io(format!("could not start `go`: {e}"))
+        BindError::IO(format!("could not start `go`: {e}"))
     })?;
-    let stdout = child.stdout.take().ok_or_else(|| BindError::Io("could not supervise `go` stdout".into()))?;
-    let stderr = child.stderr.take().ok_or_else(|| BindError::Io("could not supervise `go` stderr".into()))?;
+    let stdout = child.stdout.take().ok_or_else(|| BindError::IO("could not supervise `go` stdout".into()))?;
+    let stderr = child.stderr.take().ok_or_else(|| BindError::IO("could not supervise `go` stderr".into()))?;
     let stdout_reader = std::thread::spawn(move || bounded_read(stdout, CAPTURE_LIMIT));
     let stderr_reader = std::thread::spawn(move || bounded_read(stderr, CAPTURE_LIMIT));
     let deadline = Instant::now() + timeout;
     let status = loop {
-        match child.try_wait().map_err(|e| BindError::Io(format!("could not supervise `go`: {e}")))? {
+        match child.try_wait().map_err(|e| BindError::IO(format!("could not supervise `go`: {e}")))? {
             Some(status) => break status,
             None if Instant::now() >= deadline => {
                 let _ = child.kill();
@@ -190,8 +190,8 @@ fn supervised_output(command: &mut Command, timeout: Duration) -> Result<Supervi
             None => std::thread::sleep(Duration::from_millis(10)),
         }
     };
-    let _ = stdout_reader.join().map_err(|_| BindError::Io("`go` stdout reader failed".into()))??;
-    let stderr = stderr_reader.join().map_err(|_| BindError::Io("`go` stderr reader failed".into()))??;
+    let _ = stdout_reader.join().map_err(|_| BindError::IO("`go` stdout reader failed".into()))??;
+    let stderr = stderr_reader.join().map_err(|_| BindError::IO("`go` stderr reader failed".into()))??;
     Ok(SupervisedOutput { status, stderr })
 }
 
@@ -199,7 +199,7 @@ fn bounded_read(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError
     let mut captured = Vec::new();
     let mut buffer = [0u8; 8192];
     loop {
-        let count = input.read(&mut buffer).map_err(|e| BindError::Io(format!("could not read foreign compiler output: {e}")))?;
+        let count = input.read(&mut buffer).map_err(|e| BindError::IO(format!("could not read foreign compiler output: {e}")))?;
         if count == 0 { break; }
         let keep = limit.saturating_sub(captured.len()).min(count);
         captured.extend_from_slice(&buffer[..keep]);

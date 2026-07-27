@@ -1,7 +1,7 @@
 use crate::AST::Type;
 use super::alloc_ptrs::{db_error_ty, db_row_ty, result_ty};
 
-/// D-DBDRIVER1: the resolved return type of a covered `DbConnection` method, read
+/// D-DBDRIVER1: the resolved return type of a covered `DBConnection` method, read
 /// from `check_db_connection_method`'s authoritative match (arity/diagnostics
 /// already ran in sema; this is a pure lookup for codegen's TIR totality
 /// bookkeeping, mirroring `handle_method_return_ty`'s other sources).

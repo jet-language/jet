@@ -75,7 +75,7 @@ pub(super) fn evaluate(
         ("core.raylib", "color") => raylib_color(args, span),
         ("core.io", "style_force") => io_style_force(args, span),
         ("core.net", "ip_addr") => net_ip_addr(args, span),
-        ("core.net", "ip_to_string") => net_string_field(args, "IpAddr", "text", span),
+        ("core.net", "ip_to_string") => net_string_field(args, "IPAddr", "text", span),
         ("core.net", "ip_is_ipv4") => net_ip_is_ipv4(args, span),
         ("core.net", "socket_addr_parse") => net_socket_addr_parse(args, span),
         ("core.net", "socket_host") => net_string_field(args, "SocketAddr", "host", span),
@@ -88,15 +88,15 @@ pub(super) fn evaluate(
         ("core.net", "error_name") => net_value_field(args, "NetError", "name", span),
         ("core.net", "error_message") => net_string_field(args, "NetError", "message", span),
         ("core.net", "error_os_code") => net_value_field(args, "NetError", "os_code", span),
-        ("core.net", "dns_srv_target") => net_string_field(args, "DnsSrv", "target", span),
-        ("core.net", "dns_srv_port") => net_value_field(args, "DnsSrv", "port", span),
-        ("core.net", "dns_srv_priority") => net_value_field(args, "DnsSrv", "priority", span),
-        ("core.net", "dns_srv_weight") => net_value_field(args, "DnsSrv", "weight", span),
+        ("core.net", "dns_srv_target") => net_string_field(args, "DNSSrv", "target", span),
+        ("core.net", "dns_srv_port") => net_value_field(args, "DNSSrv", "port", span),
+        ("core.net", "dns_srv_priority") => net_value_field(args, "DNSSrv", "priority", span),
+        ("core.net", "dns_srv_weight") => net_value_field(args, "DNSSrv", "weight", span),
         ("core.net", "udp_packet_data") => net_udp_packet_data(args, span),
-        ("core.net", "udp_packet_bytes") => net_value_field(args, "UdpPacket", "data", span),
-        ("core.net", "udp_packet_addr") => net_value_field(args, "UdpPacket", "addr", span),
-        ("core.net", "udp_packet_original_len") => net_value_field(args, "UdpPacket", "original_len", span),
-        ("core.net", "udp_packet_truncated") => net_value_field(args, "UdpPacket", "truncated", span),
+        ("core.net", "udp_packet_bytes") => net_value_field(args, "UDPPacket", "data", span),
+        ("core.net", "udp_packet_addr") => net_value_field(args, "UDPPacket", "addr", span),
+        ("core.net", "udp_packet_original_len") => net_value_field(args, "UDPPacket", "original_len", span),
+        ("core.net", "udp_packet_truncated") => net_value_field(args, "UDPPacket", "truncated", span),
         ("core.crypto.expert", "ed25519_verify_strict") => crypto_ed25519_verify(args, span),
         ("core.crypto.expert", "ed25519_sign") => crypto_ed25519_sign(args, span),
         ("core.crypto.expert", "hkdf_sha256") => crypto_hkdf(args, span),
@@ -725,7 +725,7 @@ fn net_error(operation: &str, address: Option<String>, message: String) -> CtVal
 fn net_ip_addr(args: &[CtValue], span: Span) -> EvalResult {
     let text = string_arg(args, 0, span)?;
     Ok(match text.parse::<std::net::IpAddr>() {
-        Ok(address) => CtValue::ResOk(Box::new(structure("IpAddr", vec![("text", CtValue::Str(address.to_string()))]))),
+        Ok(address) => CtValue::ResOk(Box::new(structure("IPAddr", vec![("text", CtValue::Str(address.to_string()))]))),
         Err(error) => CtValue::ResErr(Box::new(net_error(
             "parse IP address",
             Some(text.to_string()),
@@ -735,9 +735,9 @@ fn net_ip_addr(args: &[CtValue], span: Span) -> EvalResult {
 }
 
 fn net_ip_is_ipv4(args: &[CtValue], span: Span) -> EvalResult {
-    let text = match field(one(args, 0, "core.net", "ip_is_ipv4", span)?, "IpAddr", "text") {
+    let text = match field(one(args, 0, "core.net", "ip_is_ipv4", span)?, "IPAddr", "text") {
         Some(CtValue::Str(text)) => text,
-        _ => return Err(unsupported("malformed IpAddr value", span)),
+        _ => return Err(unsupported("malformed IPAddr value", span)),
     };
     Ok(CtValue::Bool(text.parse::<std::net::Ipv4Addr>().is_ok()))
 }
@@ -772,9 +772,9 @@ fn net_string_field(args: &[CtValue], type_name: &str, name: &str, span: Span) -
 }
 
 fn net_udp_packet_data(args: &[CtValue], span: Span) -> EvalResult {
-    match net_value_field(args, "UdpPacket", "data", span)? {
+    match net_value_field(args, "UDPPacket", "data", span)? {
         CtValue::Bytes(value) => Ok(CtValue::Str(String::from_utf8_lossy(&value).into_owned())),
-        _ => Err(unsupported("malformed UdpPacket.data value", span)),
+        _ => Err(unsupported("malformed UDPPacket.data value", span)),
     }
 }
 

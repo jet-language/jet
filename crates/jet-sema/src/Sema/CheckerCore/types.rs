@@ -17,7 +17,7 @@ impl<'a> Checker<'a> {
                         let leaf = n.split_once('.').unwrap().1.to_string();
                         crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(leaf))
                     }
-                // D-ENC-DYN1=A+: `Json`/`Toml`/`Yaml`/`Csv` are type aliases over the one
+                // D-ENC-DYN1=A+: `JSON`/`TOML`/`YAML`/`CSV` are type aliases over the one
                 // dynamic `Data` value — canonicalize every alias to `Data` so they unify.
                 Type::Named(n) if crate::Syntax::is_data_type_name(&n) => {
                     Type::Named(crate::Syntax::TYPE_DATA.to_string())
@@ -48,9 +48,9 @@ impl<'a> Checker<'a> {
                         self.core_imports.get(alias).is_some_and(|module| {
                             module == "core.email" && matches!(leaf,
                                 "Address" | "Message" | "Attachment" | "Envelope" |
-                                "SmtpSecurity" | "RecipientPolicy" | "RecipientReport" |
-                                "SendReport" | "EmailError" | "Limits" | "SmtpAuth" |
-                            "TlsTrust" | "DkimConfig" | "SmtpConfig" | "Mailer")
+                                "SMTPSecurity" | "RecipientPolicy" | "RecipientReport" |
+                                "SendReport" | "EmailError" | "Limits" | "SMTPAuth" |
+                            "TLSTrust" | "DkimConfig" | "SMTPConfig" | "Mailer")
                         })
                     }) => Type::Named(n.split_once('.').unwrap().1.to_string()),
                 Type::Named(n)

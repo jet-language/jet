@@ -17,9 +17,9 @@ const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Reacti
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self"];
 const JET_HIGHLIGHT_LITERAL = ["None", "Val", "false", "true"];
-const JET_HIGHLIGHT_TYPE_BUILTIN = ["BTreeMap", "BigInt", "BitSet", "Bool", "Budget", "BudgetApplies", "ByteBuffer", "Char", "Computed", "Csv", "DataTree", "DbValue", "Decimal", "Deque", "Derived", "Effect", "Error", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Int", "Iter", "JSON", "JSONError", "Json", "Key", "Lru", "Measurement", "PriorityQueue", "Ptr", "SelectBuilder", "Set", "Shared", "Signal", "SortedSet", "Stream", "String", "Subscription", "TaskGroup", "Toml", "U16", "U32", "U64", "U8", "UTF8Error", "Void", "WatchEvent", "WatchHandle", "WatchSet", "Yaml"];
+const JET_HIGHLIGHT_TYPE_BUILTIN = ["BTreeMap", "BigInt", "BitSet", "Bool", "Budget", "BudgetApplies", "ByteBuffer", "CSV", "Char", "Computed", "DBValue", "DataTree", "Decimal", "Deque", "Derived", "Effect", "Error", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Int", "Iter", "JSON", "JSONError", "Key", "Lru", "Measurement", "PriorityQueue", "Ptr", "SelectBuilder", "Set", "Shared", "Signal", "SortedSet", "Stream", "String", "Subscription", "TOML", "TaskGroup", "U16", "U32", "U64", "U8", "UTF8Error", "Void", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["check", "input", "print"];
-const JET_HIGHLIGHT_MARKER_RULE = ["Abi", "Authority", "Bench", "Bindgen", "Caps", "Cli", "Codable", "CodableAsBase", "Comparable", "Context", "DebugOnly", "Decode", "Default", "DenyUnknownFields", "Doc", "Encode", "Every", "Extern", "FFI", "Flag", "Flatten", "Grant", "Html", "Impure", "Inline", "Invariant", "Layout", "Live", "Local", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Sanitizer", "Shared", "Shield", "SingleUse", "Skip", "Sql", "State", "Static", "Summarize", "Tag", "Tainted", "Target", "Task", "Test", "Todo", "Track", "Transact", "Transition", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
+const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Authority", "Bench", "Bindgen", "CLI", "Caps", "Codable", "CodableAsBase", "Comparable", "Context", "DebugOnly", "Decode", "Default", "DenyUnknownFields", "Doc", "Encode", "Every", "Extern", "FFI", "Flag", "Flatten", "Grant", "HTML", "Impure", "Inline", "Invariant", "Layout", "Live", "Local", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "SQL", "Sanitizer", "Shared", "Shield", "SingleUse", "Skip", "State", "Static", "Summarize", "Tag", "Tainted", "Target", "Task", "Test", "Todo", "Track", "Transact", "Transition", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
 const JET_HIGHLIGHT_SIGIL = ["#", "&", "...", "::", ":=", "^", "~"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "->", "..", "..<", ".[", ".{", "/", "/=", "<", "<<", "<<=", "<=", "==", "=>", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "|", "|=", "||"];
 // END GENERATED JET SYNTAX HIGHLIGHTS
@@ -550,7 +550,7 @@ module.exports = grammar({
     map_type: ($) =>
       seq("[", $._type, ":", $._type, "]"),
 
-    // `fn(T) =[]=> U` or `fn(T) =[Io]=> U` callback type (D-EFF2).
+    // `fn(T) =[]=> U` or `fn(T) =[IO]=> U` callback type (D-EFF2).
     fn_type: ($) =>
       prec.right(seq(
         "fn",
@@ -582,8 +582,8 @@ module.exports = grammar({
         $.expr_stmt,
       ),
 
-    // A rule-introduced block: `#Caps(Io) { … }` (D-EFF1),
-    // `#Grant(caps: Fs) { … }` (D-SCAP1), `#Transact(order) { … }` (D-TXN4).
+    // A rule-introduced block: `#Caps(IO) { … }` (D-EFF1),
+    // `#Grant(caps: FS) { … }` (D-SCAP1), `#Transact(order) { … }` (D-TXN4).
     marker_block_stmt: ($) =>
       seq(choice($.attribute, $._lower_marker), $.scoped_block),
 

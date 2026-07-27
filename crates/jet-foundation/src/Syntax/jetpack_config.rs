@@ -162,7 +162,7 @@ pub const PERF_BUDGET_ENFORCEMENT: &[&str] = &["Fail", "Warn"];
 pub const PERF_BUDGET_SELECTIONS: &[&str] = &["Current", "All", "Only"];
 pub const PERF_BUDGET_TARGET_SELECTORS: &[&str] = &["Class", "Triple"];
 pub const PERF_BUDGET_TARGET_CLASSES: &[&str] =
-    &["Native", "Web", "Freestanding", "Plugin", "OsImage"];
+    &["Native", "Web", "Freestanding", "Plugin", "OSImage"];
 pub const PERF_BUDGET_PROFILES: &[&str] =
     &["Dev", "Release", "Small", "Test", "Bench", "Named"];
 pub const PERF_BUDGET_UNIT_SUFFIXES: &[&str] =

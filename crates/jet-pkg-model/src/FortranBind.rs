@@ -32,13 +32,13 @@ pub enum BindError {
     Source(String),
     ToolMissing(&'static str),
     ToolFailed { tool: &'static str, detail: String },
-    Io(String),
+    IO(String),
 }
 
 impl std::fmt::Display for BindError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BindError::Source(message) | BindError::Io(message) => f.write_str(message),
+            BindError::Source(message) | BindError::IO(message) => f.write_str(message),
             BindError::ToolMissing(tool) => write!(f, "the provisioned `{tool}` tool was not found"),
             BindError::ToolFailed { tool, detail } => {
                 write!(f, "`{tool}` rejected the ISO_C_BINDING source: {detail}")
@@ -115,7 +115,7 @@ pub fn bind(source_path: &Path, source: &str, lib: &str, cache_dir: &Path) -> Re
         None
     };
     std::fs::create_dir_all(cache_dir)
-        .map_err(|e| BindError::Io(format!("could not create binding cache: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not create binding cache: {e}")))?;
 
     let stem = format!("jet_fortran_{lib}");
     let object = cache_dir.join(format!("{stem}.o"));
@@ -132,7 +132,7 @@ pub fn bind(source_path: &Path, source: &str, lib: &str, cache_dir: &Path) -> Re
             &bridge_source,
             render_bridge(module.as_deref().unwrap_or_default(), lib, &routines),
         )
-            .map_err(|e| BindError::Io(format!("could not write the Fortran array bridge: {e}")))?;
+            .map_err(|e| BindError::IO(format!("could not write the Fortran array bridge: {e}")))?;
         compile_fortran(&bridge_source, &bridge_object, cache_dir)?;
         archive_inputs.push(bridge_object.clone());
     }
@@ -203,15 +203,15 @@ fn supervised_output(command: &mut Command, tool: &'static str) -> Result<ToolOu
     let mut child = command.spawn().map_err(|e| if e.kind() == std::io::ErrorKind::NotFound {
         BindError::ToolMissing(tool)
     } else {
-        BindError::Io(format!("could not start `{tool}`: {e}"))
+        BindError::IO(format!("could not start `{tool}`: {e}"))
     })?;
-    let stdout = child.stdout.take().ok_or_else(|| BindError::Io(format!("could not supervise `{tool}` stdout")))?;
-    let stderr = child.stderr.take().ok_or_else(|| BindError::Io(format!("could not supervise `{tool}` stderr")))?;
+    let stdout = child.stdout.take().ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
+    let stderr = child.stderr.take().ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
     let out = std::thread::spawn(move || bounded_read(stdout, CAPTURE_LIMIT));
     let err = std::thread::spawn(move || bounded_read(stderr, CAPTURE_LIMIT));
     let deadline = Instant::now() + Duration::from_secs(60);
     let status = loop {
-        match child.try_wait().map_err(|e| BindError::Io(format!("could not supervise `{tool}`: {e}")))? {
+        match child.try_wait().map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))? {
             Some(status) => break status,
             None if Instant::now() >= deadline => {
                 let _ = child.kill();
@@ -223,8 +223,8 @@ fn supervised_output(command: &mut Command, tool: &'static str) -> Result<ToolOu
             None => std::thread::sleep(Duration::from_millis(10)),
         }
     };
-    let _ = out.join().map_err(|_| BindError::Io(format!("`{tool}` stdout reader failed")))??;
-    let stderr = err.join().map_err(|_| BindError::Io(format!("`{tool}` stderr reader failed")))??;
+    let _ = out.join().map_err(|_| BindError::IO(format!("`{tool}` stdout reader failed")))??;
+    let stderr = err.join().map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
     Ok(ToolOutput { status, stderr })
 }
 
@@ -232,7 +232,7 @@ fn bounded_read(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError
     let mut captured = Vec::new();
     let mut buffer = [0u8; 8192];
     loop {
-        let count = input.read(&mut buffer).map_err(|e| BindError::Io(format!("could not read foreign tool output: {e}")))?;
+        let count = input.read(&mut buffer).map_err(|e| BindError::IO(format!("could not read foreign tool output: {e}")))?;
         if count == 0 { break; }
         let keep = limit.saturating_sub(captured.len()).min(count);
         captured.extend_from_slice(&buffer[..keep]);

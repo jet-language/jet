@@ -275,7 +275,7 @@ fn fmt_comptime_os_dispatch_round_trips() {
             b :: LinuxBackend.{ name: "gtk" }
             print(b.label())
         }
-        .Macos -> print("mac")
+        .MacOS -> print("mac")
         else -> print("other")
     }
 }
@@ -288,7 +288,7 @@ fn fmt_comptime_os_dispatch_round_trips() {
     // Arms and their bodies survive. Braceless simple arms stay concise; the
     // author-written scoped arm stays braced.
     assert!(
-        out.contains(".Linux -> {") && out.contains(".Macos -> print(\"mac\")"),
+        out.contains(".Linux -> {") && out.contains(".MacOS -> print(\"mac\")"),
         "expected OS arms preserved, got:\n{out}"
     );
     assert!(
@@ -1196,7 +1196,7 @@ fn fmt_rewrites_marker_stacking_to_one_shape_and_is_stable() {
 fn fmt_keeps_cli_doc_and_default_field_markers() {
     // D-SHAPE2: two field rules share one `#[…]` group; one stays bare.
     let src = "\
-#Cli
+#CLI
 struct ServeArgs {
     #[Doc(\"port to listen on\"), Default(3000)] port: Int
     #Doc(\"print extra detail\") verbose: Bool
@@ -1209,7 +1209,7 @@ fn run(args: ServeArgs) {
 ";
     assert_fmt_keeps(
         src,
-        &["#[Doc(\"port to listen on\"), Default(3000)]", "#Cli"],
+        &["#[Doc(\"port to listen on\"), Default(3000)]", "#CLI"],
         "cli #Doc + #Default field markers",
     );
     assert_fmt_stable(src, "cli doc/default field markers");
@@ -1282,11 +1282,11 @@ struct Particle {
 #[test]
 fn fmt_stable_effect_arrows() {
     let src = "\
-fn load(path: String) =[Fs.Read, ..E]=> String {
+fn load(path: String) =[FS.Read, ..E]=> String {
     return path
 }
 
-fn visit(callback: fn(Int) =[Io]=>) =[via callback]=> {
+fn visit(callback: fn(Int) =[IO]=>) =[via callback]=> {
     callback(1)
 }
 
@@ -2258,14 +2258,14 @@ fn run() {
 
 #[test]
 fn fmt_preserves_typed_text() {
-    // D-TYPEDTEXT1=D: a `Sql`/`Html` literal argument and the `.raw()` escape
+    // D-TYPEDTEXT1=D: a `SQL`/`HTML` literal argument and the `.raw()` escape
     // must survive byte-for-byte.
     let src = "\
-fn run_query(q: Sql) {
+fn run_query(q: SQL) {
     print(\"template: {q.template()}\")
 }
 
-fn render(h: Html) {
+fn render(h: HTML) {
     print(\"html: {h.text()}\")
 }
 
@@ -2276,7 +2276,7 @@ fn run() {
     name :: \"Jet\"
     page :: html\"<p>{name}</p>\"
     render(page)
-    trusted :: Html.raw(\"<b>audited</b>\")
+    trusted :: HTML.raw(\"<b>audited</b>\")
     render(trusted)
     arg :: \"two words;*.jet\"
     expected :: \"printf <%s> {arg}\"
@@ -2586,7 +2586,7 @@ fn run() {
 //
 // Formatter round-trip is required for new syntax, not optional (house
 // lesson: a past miss here silently corrupted syntax for months). Before
-// this fix, `#Target(Web)` / `#Html(...)` / `#Target(Os.*)` markers were
+// this fix, `#Target(Web)` / `#HTML(...)` / `#Target(OS.*)` markers were
 // silently DROPPED by `jet fmt` — no error, just gone.
 
 #[test]
@@ -2601,19 +2601,19 @@ fn fmt_target_web_marker_stability() {
 
 #[test]
 fn fmt_html_marker_stability() {
-    // D-HTMLPAIR1=A: `#Html(\"path.html\")` — same marker family as
+    // D-HTMLPAIR1=A: `#HTML(\"path.html\")` — same marker family as
     // `#Target(Web)`, same fixed-position treatment.
-    let src = "use core.ui as ui\n#[Target(Web), Html(\"dashboard.html\")]\n\nfn run() {\n    ui.print(\"hi\")\n}\n";
-    assert_fmt_stable(src, "#Html(...) marker");
+    let src = "use core.ui as ui\n#[Target(Web), HTML(\"dashboard.html\")]\n\nfn run() {\n    ui.print(\"hi\")\n}\n";
+    assert_fmt_stable(src, "#HTML(...) marker");
 }
 
 #[test]
 fn fmt_os_target_marker_stability() {
-    // D-OSTARGET1=A: `#Target(Os.Linux)` precedes the `impl` block it gates,
+    // D-OSTARGET1=A: `#Target(OS.Linux)` precedes the `impl` block it gates,
     // on its own line — item-scoped, not file-scoped, so (unlike the two
     // markers above) it keeps the author's own position.
-    let src = "trait Backend {\n    fn label(self) => String\n}\n\nstruct LinuxBackend {\n    name: String\n}\n\n#Target(Os.Linux)\nimpl LinuxBackend.Backend {\n    fn label(self) => String {\n        return \"linux: {self.name}\"\n    }\n}\n\nfn run() {\n    print(\"hi\")\n}\n";
-    assert_fmt_stable(src, "#Target(Os.Linux) marker");
+    let src = "trait Backend {\n    fn label(self) => String\n}\n\nstruct LinuxBackend {\n    name: String\n}\n\n#Target(OS.Linux)\nimpl LinuxBackend.Backend {\n    fn label(self) => String {\n        return \"linux: {self.name}\"\n    }\n}\n\nfn run() {\n    print(\"hi\")\n}\n";
+    assert_fmt_stable(src, "#Target(OS.Linux) marker");
 }
 
 // ── #177 §5 syntax-lock sweep: 5 formatter bugs found reformatting the full
@@ -2698,12 +2698,12 @@ fn fmt_preserves_pure_callback_bound_sigil() {
 
 #[test]
 fn fmt_preserves_dotted_effect_paths() {
-    // D-EFFTREE1: an effect-list entry may now be a dotted path (`Fs.Read`,
-    // `Net.Http.Get`) — a leaf under one of the ten D-EFF4/5 roots. The name
+    // D-EFFTREE1: an effect-list entry may now be a dotted path (`FS.Read`,
+    // `Net.HTTP.Get`) — a leaf under one of the ten D-EFF4/5 roots. The name
     // is stored as one opaque string end to end, so fmt needs no new emission
     // logic; this pins that the dot survives every printer that touches an
     // effect list (`#(…)` bounds, prohibitions, `#Caps`/`#Grant` regions).
-    let src = "fn load(path: String) =[Fs.Read]=> String {\n    return path\n}\n\nfn archive(path: String) =[Fs.Write]=> {\n    print(path)\n}\n\nfn read_only(path: String) =[Fs.Read, !Fs.Write]=> {\n    load(path)\n}\n\nfn boot() =[Fs]=> {\n    load(\"app.conf\")\n    archive(\"out.tar\")\n    #Caps(Net.Http.Get) {\n        print(\"net\")\n    }\n    #Grant(caps: Fs.Read) {\n        load(\"app.conf\")\n    }\n}\n";
+    let src = "fn load(path: String) =[FS.Read]=> String {\n    return path\n}\n\nfn archive(path: String) =[FS.Write]=> {\n    print(path)\n}\n\nfn read_only(path: String) =[FS.Read, !FS.Write]=> {\n    load(path)\n}\n\nfn boot() =[FS]=> {\n    load(\"app.conf\")\n    archive(\"out.tar\")\n    #Caps(Net.HTTP.Get) {\n        print(\"net\")\n    }\n    #Grant(caps: FS.Read) {\n        load(\"app.conf\")\n    }\n}\n";
     assert_fmt_stable(src, "dotted effect paths (D-EFFTREE1)");
 }
 
@@ -2722,16 +2722,16 @@ fn fmt_preserves_int_literal_radix() {
 #[test]
 fn fmt_preserves_web_partition_markers() {
     // D-WASM1, respelled by D-MARK-TARGET1=A (ratified 2026-07-11, card
-    // #498): `#Target(Js)` / `#Target(Wasm)` / `#WasmExport` per-function
+    // #498): `#Target(JS)` / `#Target(Wasm)` / `#WasmExport` per-function
     // partition overrides, each on its own line before `fn`. fmt dropped the
     // marker entirely (Func.web_marker was never re-emitted) — every
     // browser-side function silently fell back to the Wasm bucket, breaking
     // the cross-partition checks: web_showcase_dashboard_roundtrip and
     // web_compute_wasm_bridge_roundtrip in tests/web_build.rs went red after
     // the #177 §5 tree reformat.
-    let src = "#Target(Js)\nfn render_stat(label: String) => String {\n    return \"<div>{label}</div>\"\n}\n\n#Target(Wasm)\nfn crunch(n: Int) => Int {\n    return n * n\n}\n\n#WasmExport\nfn bridge_total(n: Int) => Int {\n    return crunch(n)\n}\n\nfn run() {\n    print(\"{bridge_total(4)}\")\n}\n";
+    let src = "#Target(JS)\nfn render_stat(label: String) => String {\n    return \"<div>{label}</div>\"\n}\n\n#Target(Wasm)\nfn crunch(n: Int) => Int {\n    return n * n\n}\n\n#WasmExport\nfn bridge_total(n: Int) => Int {\n    return crunch(n)\n}\n\nfn run() {\n    print(\"{bridge_total(4)}\")\n}\n";
     let out = jet::format_source(src).expect("fmt should succeed on web partition markers");
-    for tag in ["#Target(Js)\n", "#Target(Wasm)\n", "#WasmExport\n"] {
+    for tag in ["#Target(JS)\n", "#Target(Wasm)\n", "#WasmExport\n"] {
         assert!(
             out.contains(tag),
             "fmt must keep the `{}` partition marker, got:\n{out}",
@@ -2849,9 +2849,9 @@ fn run() {
 
 #[test]
 fn fmt_preserves_per_function_c_abi() {
-    let src = "use c.demo as c\n#Extern module c.demo {\n    #Abi(system) fn portable(x: I32) => I32 = \"portable\"\n    #Abi(sysv64) fn native(x: I32) => I32 = \"native\"\n}\nfn run() {}\n";
-    let once = jet::format_source(src).expect("#Abi C module should format");
-    assert!(once.contains("#Abi(system)") && once.contains("#Abi(sysv64)"), "fmt dropped #Abi: {once}");
+    let src = "use c.demo as c\n#Extern module c.demo {\n    #ABI(system) fn portable(x: I32) => I32 = \"portable\"\n    #ABI(sysv64) fn native(x: I32) => I32 = \"native\"\n}\nfn run() {}\n";
+    let once = jet::format_source(src).expect("#ABI C module should format");
+    assert!(once.contains("#ABI(system)") && once.contains("#ABI(sysv64)"), "fmt dropped #ABI: {once}");
     assert_eq!(once, jet::format_source(&once).expect("re-fmt"));
 }
 

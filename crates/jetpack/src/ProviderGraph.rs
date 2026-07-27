@@ -4,7 +4,7 @@
 //! module models provider metadata/fetch/lock/sandbox/signature/audit facts.
 
 pub use super::Replacement::ReplacementCandidate as ReplacementOverlay;
-use super::JSON::{self, Json};
+use super::JSON::{self, JSONValue};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ProviderFamily {
@@ -192,13 +192,13 @@ pub fn normalize_npm(package_json: &str) -> MetadataFacts {
         .and_then(|v| v.as_str().ok())
         .unwrap_or("")
         .to_string();
-    if let Some(Json::Object(deps)) = obj.and_then(|m| m.get("dependencies")) {
+    if let Some(JSONValue::Object(deps)) = obj.and_then(|m| m.get("dependencies")) {
         facts.dependencies = deps.keys().cloned().collect();
     }
-    if let Some(Json::Object(scripts)) = obj.and_then(|m| m.get("scripts")) {
+    if let Some(JSONValue::Object(scripts)) = obj.and_then(|m| m.get("scripts")) {
         facts.scripts = scripts.keys().cloned().collect();
     }
-    if let Some(Json::Object(bin)) = obj.and_then(|m| m.get("bin")) {
+    if let Some(JSONValue::Object(bin)) = obj.and_then(|m| m.get("bin")) {
         facts.bins = bin.keys().cloned().collect();
     }
     facts.source_identity = format!("npm:{}@{}", facts.name, facts.version);

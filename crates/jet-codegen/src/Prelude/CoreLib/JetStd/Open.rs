@@ -1,7 +1,7 @@
 mod jet_std {
     // D-IOERROR-TREE1=A: one public context shape for every byte-stream error.
     #[derive(Clone, Copy, Debug, PartialEq)]
-    pub enum IoOperation {
+    pub enum IOOperation {
         Read,
         Write,
         Flush,
@@ -13,34 +13,34 @@ mod jet_std {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct IoContext {
-        pub operation: IoOperation,
+    pub struct IOContext {
+        pub operation: IOOperation,
         pub resource: Option<String>,
         pub os_code: Option<i64>,
         pub cause: Option<String>,
     }
 
-    impl IoContext {
-        pub fn new(operation: IoOperation, resource: Option<String>, os_code: Option<i64>, cause: Option<String>) -> Self {
+    impl IOContext {
+        pub fn new(operation: IOOperation, resource: Option<String>, os_code: Option<i64>, cause: Option<String>) -> Self {
             Self { operation, resource, os_code, cause }
         }
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub enum IoError {
-        InvalidInput(IoContext),
-        NotFound(IoContext),
-        PermissionDenied(IoContext),
-        TimedOut(IoContext),
-        Cancelled(IoContext),
-        Closed(IoContext),
-        Protocol(IoContext),
-        Other(IoContext),
+    pub enum IOError {
+        InvalidInput(IOContext),
+        NotFound(IOContext),
+        PermissionDenied(IOContext),
+        TimedOut(IOContext),
+        Cancelled(IOContext),
+        Closed(IOContext),
+        Protocol(IOContext),
+        Other(IOContext),
     }
 
-    impl IoError {
-        pub fn other(operation: IoOperation, resource: Option<String>, cause: impl ToString) -> Self {
-            Self::Other(IoContext::new(operation, resource, None, Some(cause.to_string())))
+    impl IOError {
+        pub fn other(operation: IOOperation, resource: Option<String>, cause: impl ToString) -> Self {
+            Self::Other(IOContext::new(operation, resource, None, Some(cause.to_string())))
         }
     }
 
@@ -53,7 +53,7 @@ mod jet_std {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct Utf8Error {
+    pub struct UTF8Error {
         pub message: String,
     }
 
@@ -92,7 +92,7 @@ mod jet_std {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct JetUrl {
+    pub struct JetURL {
         pub scheme: String,
         pub host: Option<String>,
         pub port: Option<i64>,
@@ -102,7 +102,7 @@ mod jet_std {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct JetMime {
+    pub struct JetMIME {
         pub top: String,
         pub sub: String,
         pub params: Vec<(String, String)>,

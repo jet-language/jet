@@ -1,4 +1,4 @@
-// `#Grant(caps: Fs) { … }` (D-SCAP1) is the dual of `#Caps`: it GRANTS the
+// `#Grant(caps: FS) { … }` (D-SCAP1) is the dual of `#Caps`: it GRANTS the
 // listed effect(s) into a lexical scope, binding a first-class capability handle
 // (`caps`) that authorizes the work inside. The capability is RAII-revoked at
 // scope end — the handle is bound only for the block, can't escape it (E0711),
@@ -11,9 +11,9 @@ fn run() {
     path :: "/tmp/jet_scap_grant.txt"
     // Filesystem + console authority is granted only for the extent of this
     // block. Like `#Caps`, the block is bounded to the granted set — every effect
-    // used inside (`Fs` for the file work, `Io` for `print`) must be granted, or
+    // used inside (`FS` for the file work, `IO` for `print`) must be granted, or
     // it has no capability (E0712). The handle `caps` may not escape (E0711).
-    #Grant(caps: Fs, Io) {
+    #Grant(caps: FS, IO) {
         fs.write(path, "granted\nthen revoked") ?? panic("write failed")
         text :: fs.read(path) ?? panic("read failed")
         print(text.to_upper())

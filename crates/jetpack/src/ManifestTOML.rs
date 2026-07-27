@@ -51,15 +51,15 @@ pub struct RepoMeta {
 
 /// A parse error — E1214 (malformed line) or E1215 (unknown name).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TomlError {
+pub struct TOMLError {
     pub code: &'static str,
     pub line: usize,
     pub message: String,
 }
 
-impl TomlError {
+impl TOMLError {
     fn e1214(line: usize, detail: &str) -> Self {
-        TomlError {
+        TOMLError {
             code: "E1214",
             line,
             message: format!(
@@ -81,7 +81,7 @@ impl TomlError {
                 Syntax::JETPACK_TOML,
             ),
         };
-        TomlError {
+        TOMLError {
             code: "E1215",
             line,
             message: msg,
@@ -89,7 +89,7 @@ impl TomlError {
     }
 
     fn e1225(line: usize) -> Self {
-        TomlError {
+        TOMLError {
             code: "E1225",
             line,
             message: format!(
@@ -142,16 +142,16 @@ enum Table {
 /// errors and the manifest holds whatever was valid. A syntax error or an
 /// unknown table header puts the parser into a skip state for that section so
 /// one bad header does not cascade E1215s across every entry beneath it.
-pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
+pub fn parse(raw: &str) -> (JetpackToml, Vec<TOMLError>) {
     let mut manifest = JetpackToml::default();
-    let mut errors: Vec<TomlError> = Vec::new();
+    let mut errors: Vec<TOMLError> = Vec::new();
     let mut assigned = HashSet::new();
     let mut declared_tables = HashSet::new();
     let mut dotted_tables = HashSet::new();
 
     let (items, syntax_errors) = TOML::parse(raw);
     for e in syntax_errors {
-        errors.push(TomlError::e1214(e.line, &cap_sentence(&e.message)));
+        errors.push(TOMLError::e1214(e.line, &cap_sentence(&e.message)));
     }
 
     let mut table = Table::None;
@@ -159,7 +159,7 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
         match item {
             TOML::Item::Header { path, array, line } => {
                 if *array {
-                    errors.push(TomlError::e1214(
+                    errors.push(TOMLError::e1214(
                         *line,
                         "`[[…]]` array-of-tables are not used in `jetpack.toml`.",
                     ));
@@ -177,7 +177,7 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
                     || dotted_tables.contains(&name)
                     || assigned.contains(&name)
                 {
-                    errors.push(TomlError::e1214(
+                    errors.push(TOMLError::e1214(
                         *line,
                         &format!("The table `{name}` is defined more than once."),
                     ));
@@ -188,7 +188,7 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
                     [t] if t == Syntax::JTOML_TABLE_REPO => Table::Repo,
                     [t] if t == Syntax::JTOML_TABLE_SOURCES => Table::Sources,
                     [t] if t == Syntax::JTOML_TABLE_PACKAGES => {
-                        errors.push(TomlError::e1225(*line));
+                        errors.push(TOMLError::e1225(*line));
                         Table::Packages
                     }
                     _ => {
@@ -197,7 +197,7 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
                         } else {
                             None
                         };
-                        errors.push(TomlError::e1215(*line, "table", &name, suggest));
+                        errors.push(TOMLError::e1215(*line, "table", &name, suggest));
                         Table::Unknown
                     }
                 };
@@ -212,7 +212,7 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
                         || declared_tables.contains(&full)
                         || prefixes.iter().any(|prefix| assigned.contains(prefix))
                     {
-                        errors.push(TomlError::e1214(
+                        errors.push(TOMLError::e1214(
                             *line,
                             &format!("The dotted key `{full}` collides with an existing value or table."),
                         ));
@@ -228,7 +228,7 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
                             t if t == Syntax::JTOML_TABLE_REPO => (Table::Repo, &path[1..]),
                             t if t == Syntax::JTOML_TABLE_SOURCES => (Table::Sources, &path[1..]),
                             t if t == Syntax::JTOML_TABLE_PACKAGES => {
-                                errors.push(TomlError::e1225(*line));
+                                errors.push(TOMLError::e1225(*line));
                                 (Table::Packages, &path[1..])
                             }
                             _ => (Table::None, &path[..]),
@@ -246,7 +246,7 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
                 };
                 if let Some(qualified) = qualified {
                     if !assigned.insert(qualified.clone()) {
-                        errors.push(TomlError::e1214(
+                        errors.push(TOMLError::e1214(
                             *line,
                             &format!("The key `{qualified}` is assigned more than once."),
                         ));
@@ -257,7 +257,7 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
                 match target {
                     Table::Unknown => {} // header error already reported
                     Table::None => {
-                        errors.push(TomlError::e1215(*line, "key", &key, None));
+                        errors.push(TOMLError::e1215(*line, "key", &key, None));
                     }
                     Table::Repo => {
                         if key_parts.len() == 1 && key == Syntax::JTOML_KEY_NAME {
@@ -276,13 +276,13 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
                             } else {
                                 None
                             };
-                            errors.push(TomlError::e1215(*line, "key", &key, suggest));
+                            errors.push(TOMLError::e1215(*line, "key", &key, suggest));
                         }
                     }
                     Table::Sources | Table::Packages => {
                         if key.is_empty() {
                             errors
-                                .push(TomlError::e1214(*line, "An entry name must not be empty."));
+                                .push(TOMLError::e1214(*line, "An entry name must not be empty."));
                             continue;
                         }
                         match as_string(value, &key, *line) {
@@ -307,10 +307,10 @@ pub fn parse(raw: &str) -> (JetpackToml, Vec<TomlError>) {
 
 /// A `jetpack.toml` value field must be a string. Anything else (number, bool,
 /// array, …) is an E1214 with the offending key named.
-fn as_string(value: &TOML::Value, key: &str, line: usize) -> Result<String, TomlError> {
+fn as_string(value: &TOML::Value, key: &str, line: usize) -> Result<String, TOMLError> {
     match value {
         TOML::Value::String(s) => Ok(s.clone()),
-        _ => Err(TomlError::e1214(
+        _ => Err(TOMLError::e1214(
             line,
             &format!("The value for `{key}` must be a quoted string."),
         )),
@@ -335,7 +335,7 @@ fn cap_sentence(s: &str) -> String {
 /// Load and parse `jetpack.toml` from `dir`. Returns `None` if the file
 /// doesn't exist (that is not an error — a plain package repo has no
 /// `jetpack.toml`).
-pub fn load(dir: &Path) -> Option<(JetpackToml, Vec<TomlError>)> {
+pub fn load(dir: &Path) -> Option<(JetpackToml, Vec<TOMLError>)> {
     let path = dir.join(Syntax::JETPACK_TOML);
     let raw = std::fs::read_to_string(&path).ok()?;
     Some(parse(&raw))
@@ -345,9 +345,9 @@ pub fn load(dir: &Path) -> Option<(JetpackToml, Vec<TomlError>)> {
 // Render (E1214/E1215 → string matching diagnostics.md voice)
 // ──────────────────────────────────────────────
 
-/// Render a list of `TomlError`s as a multi-line string using the standard
+/// Render a list of `TOMLError`s as a multi-line string using the standard
 /// Jet diagnostic format (spanless — no source file context block).
-pub fn render_errors(_path: &str, errors: &[TomlError]) -> String {
+pub fn render_errors(_path: &str, errors: &[TOMLError]) -> String {
     errors
         .iter()
         .map(|e| format!("Error [{}]: {}\n", e.code, e.message))
@@ -369,7 +369,7 @@ mod tests {
         manifest
     }
 
-    fn errs(raw: &str) -> Vec<TomlError> {
+    fn errs(raw: &str) -> Vec<TOMLError> {
         let (_, errors) = parse(raw);
         errors
     }

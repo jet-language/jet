@@ -115,7 +115,7 @@ impl<'a> Checker<'a> {
             {
                 return Some(self.check_overflow_opt_in(call));
             }
-            // D-EFF1: an ambient builtin (`print`/`input`) contributes the `Io`
+            // D-EFF1: an ambient builtin (`print`/`input`) contributes the `IO`
             // effect, unless a user function of the same name shadows it (in which
             // case the edge to that user function is recorded below).
             if !self.funcs.contains_key(&call.name) {
@@ -294,7 +294,7 @@ impl<'a> Checker<'a> {
     
             // D-PRELUDE1 = B: `input` is ambient — no `use core.io` needed.
             // Resolves to the same semantics as `io.input`: optional String prompt,
-            // returns Result(String, IoError). Shadowed by any user-defined `input`.
+            // returns Result(String, IOError). Shadowed by any user-defined `input`.
             // D-PRELUDEX1=A: `#NoPrelude` turns the ambient off.
             if call.name == Syntax::BUILTIN_INPUT
                 && self.funcs.get(Syntax::BUILTIN_INPUT).is_none()
@@ -448,8 +448,8 @@ impl<'a> Checker<'a> {
                     | Syntax::TYPED_TEXT_SH_PREFIX_CALL
             ) {
                 let type_name = match call.name.as_str() {
-                    Syntax::TYPED_TEXT_SQL_PREFIX_CALL => "Sql",
-                    Syntax::TYPED_TEXT_HTML_PREFIX_CALL => "Html",
+                    Syntax::TYPED_TEXT_SQL_PREFIX_CALL => "SQL",
+                    Syntax::TYPED_TEXT_HTML_PREFIX_CALL => "HTML",
                     Syntax::TYPED_TEXT_SH_PREFIX_CALL => Syntax::TYPE_SH,
                     _ => unreachable!(),
                 };
@@ -1177,8 +1177,8 @@ impl<'a> Checker<'a> {
                             && matches!(&arg_ty, Type::Fn { .. })
                             && fn_types_compatible(&param_ty, &arg_ty));
                     if !reported && !compatible {
-                        // D-TYPEDTEXT1=D: a plain runtime `String` reaching a `Sql`/
-                        // `Html` parameter — teach the injection-safety fix instead of
+                        // D-TYPEDTEXT1=D: a plain runtime `String` reaching a `SQL`/
+                        // `HTML` parameter — teach the injection-safety fix instead of
                         // a generic E0112.
                         if let Some(diag) = typed_text_mismatch(&param_ty, &arg_ty, arg.expr.span()) {
                             self.diags.push(diag);

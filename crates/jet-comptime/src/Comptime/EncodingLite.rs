@@ -2,15 +2,15 @@
 //! + `core.encoding.json.{canonical,events}`, ported verbatim into the
 //! comptime/REPL tier-0 interpreter so they match AOT byte-for-byte (R12
 //! parity). Sources (std-only, I6, no changes to logic — only the target
-//! value type changes from `jet_std::DataTree` to the `Json`-tagged
-//! `CtValue` shape `JsonInterp.rs` already established for `core.encoding.json`):
+//! value type changes from `jet_std::DataTree` to the `JSON`-tagged
+//! `CtValue` shape `JSONInterp.rs` already established for `core.encoding.json`):
 //!
 //! - csv: `jet_ring_csv_parse`/`jet_ring_csv_render`,
 //!   `crates/jet-codegen/src/Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs`.
 //! - toml: `pub mod toml` (`parse_to_tree`/`render`),
-//!   `crates/jet-codegen/src/Prelude/CoreLib/JetStd/Toml.rs`.
+//!   `crates/jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs`.
 //! - yaml: `pub mod yaml` (`parse_to_tree`/`render`),
-//!   `crates/jet-codegen/src/Prelude/CoreLib/JetStd/Yaml.rs`.
+//!   `crates/jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs`.
 //! - xml/cbor: `jet_std_xml_parse`/`jet_std_xml_render`/`jet_std_cbor_encode`/
 //!   `jet_std_cbor_decode`, `crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs`.
 //! - jsonl: `jet_std_jsonl_parse`/`jet_std_jsonl_render`,
@@ -21,7 +21,7 @@
 //! sema (`fixed_sigs.rs`) types `core.encoding.{toml,yaml,xml,cbor}`'s
 //! parsed value as the same `json` type as `core.encoding.json` — AOT backs
 //! every one of these with the single `jet_std::DataTree`. Comptime mirrors
-//! that with the same `Json`-tagged `CtValue::Enum` (`JsonInterp::json_variant`/
+//! that with the same `JSON`-tagged `CtValue::Enum` (`JSONInterp::json_variant`/
 //! `json_payload`) every accessor method (`.field`/`.at`/...) already reads,
 //! so no new value machinery is needed — just new parse/render walkers that
 //! build/consume that shape instead of `DataTree`.
@@ -30,7 +30,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::AST::{CtFloat, CtKey, CtValue, StructDef, Type};
 
-use super::JsonInterp::{json_payload, json_variant};
+use super::JSONInterp::{json_payload, json_variant};
 
 // ── core.encoding.csv ───────────────────────────────────────────────────────
 
@@ -130,13 +130,13 @@ pub(super) fn csv_render(rows: &[Vec<String>]) -> String {
         .join("\n")
 }
 
-// ── shared: JsonError-shaped CtValue::Struct (line/message) ────────────────
-// Mirrors `JsonInterp::json_error_value` — toml/yaml `parse` share the same
-// sema-declared `JsonError` return type (`fixed_sigs.rs`'s `json_error_ty()`
+// ── shared: JSONError-shaped CtValue::Struct (line/message) ────────────────
+// Mirrors `JSONInterp::json_error_value` — toml/yaml `parse` share the same
+// sema-declared `JSONError` return type (`fixed_sigs.rs`'s `json_error_ty()`
 // is reused for `core.encoding.{toml,yaml}` exactly like `core.encoding.json`).
 fn json_error_struct(line: i64, message: String) -> CtValue {
     CtValue::Struct {
-        type_name: "JsonError".to_string(),
+        type_name: "JSONError".to_string(),
         fields: vec![
             ("line".to_string(), CtValue::Int(line)),
             ("message".to_string(), CtValue::Str(message)),
@@ -145,28 +145,28 @@ fn json_error_struct(line: i64, message: String) -> CtValue {
 }
 
 // ── core.encoding.toml ──────────────────────────────────────────────────────
-// Ported from `Toml.rs`'s `pub mod toml`, target type swapped from
-// `DataTree` to the `Json`-tagged `CtValue`.
+// Ported from `TOML.rs`'s `pub mod toml`, target type swapped from
+// `DataTree` to the `JSON`-tagged `CtValue`.
 
 #[derive(Clone, Debug, PartialEq)]
-enum TomlValue {
+enum TOMLValue {
     String(String),
     Integer(i64),
     Float(f64),
     Boolean(bool),
     Datetime(String),
-    Array(Vec<TomlValue>),
-    InlineTable(Vec<(String, TomlValue)>),
+    Array(Vec<TOMLValue>),
+    InlineTable(Vec<(String, TOMLValue)>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum TomlItem {
+enum TOMLItem {
     Header { path: Vec<String>, array: bool },
-    KeyVal { path: Vec<String>, value: TomlValue },
+    KeyVal { path: Vec<String>, value: TOMLValue },
 }
 
 pub(super) fn toml_parse(raw: &str) -> Result<CtValue, CtValue> {
-    let mut p = TomlParser {
+    let mut p = TOMLParser {
         chars: raw.chars().collect(),
         pos: 0,
         line: 1,
@@ -185,14 +185,14 @@ pub(super) fn toml_parse(raw: &str) -> Result<CtValue, CtValue> {
     Ok(toml_assemble(items))
 }
 
-// A tagged `Json` `Object` whose payload keeps insertion order — AOT's
+// A tagged `JSON` `Object` whose payload keeps insertion order — AOT's
 // `DataTree::Object(Vec<…>)` does the same; a sorted `BTreeMap` reordered
 // TOML keys (e.g. `port` before `title`) and broke #777 corpus differential.
 fn json_object(entries: Vec<(String, CtValue)>) -> CtValue {
     json_variant(
         "Object",
         Some(CtValue::Struct {
-            type_name: "JsonObject".into(),
+            type_name: "JSONObject".into(),
             fields: entries,
         }),
     )
@@ -226,12 +226,12 @@ fn json_array_items(v: &CtValue) -> Option<Vec<CtValue>> {
     }
 }
 
-fn toml_assemble(items: Vec<TomlItem>) -> CtValue {
+fn toml_assemble(items: Vec<TOMLItem>) -> CtValue {
     let mut root = json_object(Vec::new());
     let mut current: Vec<String> = Vec::new();
     for item in items {
         match item {
-            TomlItem::Header { path, array } => {
+            TOMLItem::Header { path, array } => {
                 if array {
                     toml_push_array_table(&mut root, &path);
                 } else {
@@ -239,7 +239,7 @@ fn toml_assemble(items: Vec<TomlItem>) -> CtValue {
                 }
                 current = path;
             }
-            TomlItem::KeyVal { path, value } => {
+            TOMLItem::KeyVal { path, value } => {
                 toml_set_key(&mut root, &current, &path, toml_value_to_json(value));
             }
         }
@@ -366,23 +366,23 @@ fn toml_push_array_at(root: &CtValue, path: &[String], field: &str) -> CtValue {
     json_object(entries)
 }
 
-fn toml_value_to_json(v: TomlValue) -> CtValue {
+fn toml_value_to_json(v: TOMLValue) -> CtValue {
     match v {
-        TomlValue::String(s) => json_variant("Text", Some(CtValue::Str(s))),
-        TomlValue::Integer(n) => json_variant("Int", Some(CtValue::Int(n))),
-        TomlValue::Float(value) => {
+        TOMLValue::String(s) => json_variant("Text", Some(CtValue::Str(s))),
+        TOMLValue::Integer(n) => json_variant("Int", Some(CtValue::Int(n))),
+        TOMLValue::Float(value) => {
             json_variant("Float", Some(CtValue::Float(CtFloat::f64(value))))
         }
-        TomlValue::Boolean(b) => json_variant("Bool", Some(CtValue::Bool(b))),
-        TomlValue::Datetime(s) => json_variant("Text", Some(CtValue::Str(s))),
-        TomlValue::Array(xs) => json_array(xs.into_iter().map(toml_value_to_json).collect()),
-        TomlValue::InlineTable(es) => {
+        TOMLValue::Boolean(b) => json_variant("Bool", Some(CtValue::Bool(b))),
+        TOMLValue::Datetime(s) => json_variant("Text", Some(CtValue::Str(s))),
+        TOMLValue::Array(xs) => json_array(xs.into_iter().map(toml_value_to_json).collect()),
+        TOMLValue::InlineTable(es) => {
             json_object(es.into_iter().map(|(k, v)| (k, toml_value_to_json(v))).collect())
         }
     }
 }
 
-// ── TOML render: `Json`-tagged CtValue → TOML text ─────────────────────────
+// ── TOML render: `JSON`-tagged CtValue → TOML text ─────────────────────────
 
 pub(super) fn toml_render(v: &CtValue) -> String {
     let mut out = String::new();
@@ -457,16 +457,16 @@ fn toml_render_value(v: &CtValue) -> String {
     }
 }
 
-struct TomlParser {
+struct TOMLParser {
     chars: Vec<char>,
     pos: usize,
     line: usize,
 }
-struct TomlParseError {
+struct TOMLParseError {
     line: usize,
     message: String,
 }
-impl TomlParser {
+impl TOMLParser {
     fn peek(&self) -> Option<char> {
         self.chars.get(self.pos).copied()
     }
@@ -481,8 +481,8 @@ impl TomlParser {
         }
         Some(c)
     }
-    fn err(&self, message: impl Into<String>) -> TomlParseError {
-        TomlParseError {
+    fn err(&self, message: impl Into<String>) -> TOMLParseError {
+        TOMLParseError {
             line: self.line,
             message: message.into(),
         }
@@ -511,7 +511,7 @@ impl TomlParser {
             self.pos += 1;
         }
     }
-    fn finish_line(&mut self) -> Result<(), TomlParseError> {
+    fn finish_line(&mut self) -> Result<(), TOMLParseError> {
         self.skip_inline_ws();
         if self.peek() == Some('#') {
             self.skip_comment();
@@ -521,13 +521,13 @@ impl TomlParser {
             Some(c) => Err(self.err(format!("unexpected `{c}` after value"))),
         }
     }
-    fn statement(&mut self) -> Result<Option<TomlItem>, TomlParseError> {
+    fn statement(&mut self) -> Result<Option<TOMLItem>, TOMLParseError> {
         match self.peek() {
             Some('[') => self.header().map(Some),
             _ => self.key_value().map(Some),
         }
     }
-    fn header(&mut self) -> Result<TomlItem, TomlParseError> {
+    fn header(&mut self) -> Result<TOMLItem, TOMLParseError> {
         self.bump();
         let array = self.peek() == Some('[');
         if array {
@@ -550,9 +550,9 @@ impl TomlParser {
             return Err(self.err("a table header must name a table"));
         }
         self.finish_line()?;
-        Ok(TomlItem::Header { path, array })
+        Ok(TOMLItem::Header { path, array })
     }
-    fn key_value(&mut self) -> Result<TomlItem, TomlParseError> {
+    fn key_value(&mut self) -> Result<TOMLItem, TOMLParseError> {
         let path = self.key_path()?;
         if path.is_empty() {
             return Err(self.err("expected a key"));
@@ -565,9 +565,9 @@ impl TomlParser {
         self.skip_inline_ws();
         let value = self.value()?;
         self.finish_line()?;
-        Ok(TomlItem::KeyVal { path, value })
+        Ok(TOMLItem::KeyVal { path, value })
     }
-    fn key_path(&mut self) -> Result<Vec<String>, TomlParseError> {
+    fn key_path(&mut self) -> Result<Vec<String>, TOMLParseError> {
         let mut path = Vec::new();
         loop {
             self.skip_inline_ws();
@@ -581,7 +581,7 @@ impl TomlParser {
         }
         Ok(path)
     }
-    fn simple_key(&mut self) -> Result<String, TomlParseError> {
+    fn simple_key(&mut self) -> Result<String, TOMLParseError> {
         match self.peek() {
             Some('"') => self.basic_string(),
             Some('\'') => self.literal_string(),
@@ -601,10 +601,10 @@ impl TomlParser {
             None => Err(self.err("expected a key")),
         }
     }
-    fn value(&mut self) -> Result<TomlValue, TomlParseError> {
+    fn value(&mut self) -> Result<TOMLValue, TOMLParseError> {
         match self.peek() {
-            Some('"') => Ok(TomlValue::String(self.basic_string()?)),
-            Some('\'') => Ok(TomlValue::String(self.literal_string()?)),
+            Some('"') => Ok(TOMLValue::String(self.basic_string()?)),
+            Some('\'') => Ok(TOMLValue::String(self.literal_string()?)),
             Some('[') => self.array(),
             Some('{') => self.inline_table(),
             Some('t') | Some('f') => self.boolean(),
@@ -615,11 +615,11 @@ impl TomlParser {
             None => Err(self.err("expected a value")),
         }
     }
-    fn boolean(&mut self) -> Result<TomlValue, TomlParseError> {
+    fn boolean(&mut self) -> Result<TOMLValue, TOMLParseError> {
         if self.try_keyword("true") {
-            Ok(TomlValue::Boolean(true))
+            Ok(TOMLValue::Boolean(true))
         } else if self.try_keyword("false") {
-            Ok(TomlValue::Boolean(false))
+            Ok(TOMLValue::Boolean(false))
         } else {
             Err(self.err("expected `true` or `false`"))
         }
@@ -641,7 +641,7 @@ impl TomlParser {
         }
         true
     }
-    fn basic_string(&mut self) -> Result<String, TomlParseError> {
+    fn basic_string(&mut self) -> Result<String, TOMLParseError> {
         if self.peek() == Some('"') && self.peek_at(1) == Some('"') && self.peek_at(2) == Some('"')
         {
             return self.multiline_basic_string();
@@ -660,7 +660,7 @@ impl TomlParser {
             }
         }
     }
-    fn multiline_basic_string(&mut self) -> Result<String, TomlParseError> {
+    fn multiline_basic_string(&mut self) -> Result<String, TOMLParseError> {
         self.bump();
         self.bump();
         self.bump();
@@ -705,7 +705,7 @@ impl TomlParser {
             }
         }
     }
-    fn string_escape(&mut self) -> Result<char, TomlParseError> {
+    fn string_escape(&mut self) -> Result<char, TOMLParseError> {
         match self.bump() {
             Some('"') => Ok('"'),
             Some('\\') => Ok('\\'),
@@ -720,7 +720,7 @@ impl TomlParser {
             None => Err(self.err("unterminated escape")),
         }
     }
-    fn unicode_escape(&mut self, n: usize) -> Result<char, TomlParseError> {
+    fn unicode_escape(&mut self, n: usize) -> Result<char, TOMLParseError> {
         let mut v = 0u32;
         for _ in 0..n {
             let Some(c) = self.peek() else {
@@ -734,7 +734,7 @@ impl TomlParser {
         }
         char::from_u32(v).ok_or_else(|| self.err("invalid unicode scalar value"))
     }
-    fn literal_string(&mut self) -> Result<String, TomlParseError> {
+    fn literal_string(&mut self) -> Result<String, TOMLParseError> {
         if self.peek() == Some('\'') && self.peek_at(1) == Some('\'') && self.peek_at(2) == Some('\'')
         {
             return self.multiline_literal_string();
@@ -749,7 +749,7 @@ impl TomlParser {
             }
         }
     }
-    fn multiline_literal_string(&mut self) -> Result<String, TomlParseError> {
+    fn multiline_literal_string(&mut self) -> Result<String, TOMLParseError> {
         self.bump();
         self.bump();
         self.bump();
@@ -774,7 +774,7 @@ impl TomlParser {
             }
         }
     }
-    fn array(&mut self) -> Result<TomlValue, TomlParseError> {
+    fn array(&mut self) -> Result<TOMLValue, TOMLParseError> {
         self.bump();
         let mut items = Vec::new();
         loop {
@@ -782,7 +782,7 @@ impl TomlParser {
             match self.peek() {
                 Some(']') => {
                     self.bump();
-                    return Ok(TomlValue::Array(items));
+                    return Ok(TOMLValue::Array(items));
                 }
                 None => return Err(self.err("unterminated array")),
                 _ => {}
@@ -795,7 +795,7 @@ impl TomlParser {
                 }
                 Some(']') => {
                     self.bump();
-                    return Ok(TomlValue::Array(items));
+                    return Ok(TOMLValue::Array(items));
                 }
                 Some(c) => {
                     return Err(self.err(format!("expected `,` or `]` in array, found `{c}`")))
@@ -815,13 +815,13 @@ impl TomlParser {
             }
         }
     }
-    fn inline_table(&mut self) -> Result<TomlValue, TomlParseError> {
+    fn inline_table(&mut self) -> Result<TOMLValue, TOMLParseError> {
         self.bump();
         let mut entries = Vec::new();
         self.skip_inline_ws();
         if self.peek() == Some('}') {
             self.bump();
-            return Ok(TomlValue::InlineTable(entries));
+            return Ok(TOMLValue::InlineTable(entries));
         }
         loop {
             self.skip_inline_ws();
@@ -836,7 +836,7 @@ impl TomlParser {
             self.skip_inline_ws();
             match self.bump() {
                 Some(',') => continue,
-                Some('}') => return Ok(TomlValue::InlineTable(entries)),
+                Some('}') => return Ok(TOMLValue::InlineTable(entries)),
                 Some(c) => {
                     return Err(self.err(format!("expected `,` or `}}` in inline table, found `{c}`")))
                 }
@@ -844,7 +844,7 @@ impl TomlParser {
             }
         }
     }
-    fn number_or_datetime(&mut self) -> Result<TomlValue, TomlParseError> {
+    fn number_or_datetime(&mut self) -> Result<TOMLValue, TOMLParseError> {
         if self.looks_like_date() || self.looks_like_time() {
             return self.datetime();
         }
@@ -866,7 +866,7 @@ impl TomlParser {
         let d = |n: usize| self.peek_at(n).map_or(false, |c| c.is_ascii_digit());
         d(0) && d(1) && self.peek_at(2) == Some(':') && d(3) && d(4)
     }
-    fn datetime(&mut self) -> Result<TomlValue, TomlParseError> {
+    fn datetime(&mut self) -> Result<TOMLValue, TOMLParseError> {
         let mut s = String::new();
         let is_dt = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | ':' | '.' | '+');
         while let Some(c) = self.peek() {
@@ -883,28 +883,28 @@ impl TomlParser {
                 break;
             }
         }
-        Ok(TomlValue::Datetime(s))
+        Ok(TOMLValue::Datetime(s))
     }
-    fn number(&mut self) -> Result<TomlValue, TomlParseError> {
+    fn number(&mut self) -> Result<TOMLValue, TOMLParseError> {
         if self.try_keyword("inf") {
-            return Ok(TomlValue::Float(f64::INFINITY));
+            return Ok(TOMLValue::Float(f64::INFINITY));
         }
         if self.try_keyword("nan") {
-            return Ok(TomlValue::Float(f64::NAN));
+            return Ok(TOMLValue::Float(f64::NAN));
         }
         let mut tok = String::new();
         if matches!(self.peek(), Some('+') | Some('-')) {
             let sign = self.bump().unwrap();
             tok.push(sign);
             if self.try_keyword("inf") {
-                return Ok(TomlValue::Float(if sign == '-' {
+                return Ok(TOMLValue::Float(if sign == '-' {
                     f64::NEG_INFINITY
                 } else {
                     f64::INFINITY
                 }));
             }
             if self.try_keyword("nan") {
-                return Ok(TomlValue::Float(f64::NAN));
+                return Ok(TOMLValue::Float(f64::NAN));
             }
         }
         if self.peek() == Some('0') {
@@ -933,16 +933,16 @@ impl TomlParser {
         if is_float {
             clean
                 .parse::<f64>()
-                .map(TomlValue::Float)
+                .map(TOMLValue::Float)
                 .map_err(|_| self.err(format!("invalid number `{tok}`")))
         } else {
             clean
                 .parse::<i64>()
-                .map(TomlValue::Integer)
+                .map(TOMLValue::Integer)
                 .map_err(|_| self.err(format!("invalid number `{tok}`")))
         }
     }
-    fn radix_integer(&mut self) -> Result<TomlValue, TomlParseError> {
+    fn radix_integer(&mut self) -> Result<TOMLValue, TOMLParseError> {
         self.bump();
         let prefix = self.bump().unwrap();
         let radix = match prefix {
@@ -966,7 +966,7 @@ impl TomlParser {
             return Err(self.err("expected digits after numeric base prefix"));
         }
         i64::from_str_radix(&tok, radix)
-            .map(TomlValue::Integer)
+            .map(TOMLValue::Integer)
             .map_err(|_| self.err(format!("invalid base-{radix} integer `{tok}`")))
     }
 }
@@ -974,8 +974,8 @@ fn toml_is_bare_key_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_' || c == '-'
 }
 
-// Mirrors `JsonInterp::quote_json` (private to that module) — same escape
-// table AOT's `Toml.rs` reuses from `Json.rs`'s `quote_json` for its own
+// Mirrors `JSONInterp::quote_json` (private to that module) — same escape
+// table AOT's `TOML.rs` reuses from `JSON.rs`'s `quote_json` for its own
 // string-value rendering.
 fn quote_json_local(s: &str) -> String {
     let mut out = String::from("\"");
@@ -997,15 +997,15 @@ fn quote_json_local(s: &str) -> String {
 }
 
 // ── core.encoding.yaml ──────────────────────────────────────────────────────
-// Ported from `Yaml.rs`'s `pub mod yaml`, target type swapped from
-// `DataTree` to the `Json`-tagged `CtValue` (same convention as toml above).
+// Ported from `YAML.rs`'s `pub mod yaml`, target type swapped from
+// `DataTree` to the `JSON`-tagged `CtValue` (same convention as toml above).
 
 pub(super) fn yaml_parse(raw: &str) -> Result<CtValue, CtValue> {
     let lines: Vec<String> = raw
         .split('\n')
         .map(|l| l.trim_end_matches('\r').to_string())
         .collect();
-    let mut p = YamlParser {
+    let mut p = YAMLParser {
         lines,
         pos: 0,
         anchors: BTreeMap::new(),
@@ -1023,17 +1023,17 @@ pub(super) fn yaml_parse(raw: &str) -> Result<CtValue, CtValue> {
         .map_err(|e| json_error_struct(e.line as i64, e.message))
 }
 
-struct YamlParser {
+struct YAMLParser {
     lines: Vec<String>,
     pos: usize,
     anchors: BTreeMap<String, CtValue>,
 }
-struct YamlParseError {
+struct YAMLParseError {
     line: usize,
     message: String,
 }
 
-impl YamlParser {
+impl YAMLParser {
     fn indent(&self, i: usize) -> usize {
         self.lines[i].chars().take_while(|c| *c == ' ').count()
     }
@@ -1057,7 +1057,7 @@ impl YamlParser {
         self.pos < self.lines.len() && self.lines[self.pos].trim() == "..."
     }
 
-    fn parse_node(&mut self, min_indent: usize) -> Result<CtValue, YamlParseError> {
+    fn parse_node(&mut self, min_indent: usize) -> Result<CtValue, YAMLParseError> {
         self.skip_ignorable();
         if self.pos >= self.lines.len() || self.at_doc_marker() || self.at_doc_end() {
             return Ok(json_variant("Null", None));
@@ -1077,7 +1077,7 @@ impl YamlParser {
         }
     }
 
-    fn parse_block_seq(&mut self, indent: usize) -> Result<CtValue, YamlParseError> {
+    fn parse_block_seq(&mut self, indent: usize) -> Result<CtValue, YAMLParseError> {
         let mut items = Vec::new();
         loop {
             self.skip_ignorable();
@@ -1109,7 +1109,7 @@ impl YamlParser {
         Ok(json_array(items))
     }
 
-    fn parse_block_map(&mut self, indent: usize) -> Result<CtValue, YamlParseError> {
+    fn parse_block_map(&mut self, indent: usize) -> Result<CtValue, YAMLParseError> {
         let mut entries: Vec<(String, CtValue)> = Vec::new();
         loop {
             self.skip_ignorable();
@@ -1125,7 +1125,7 @@ impl YamlParser {
                 break;
             }
             let line_no = self.pos + 1;
-            let (key, rest) = yaml_split_key(&content).ok_or_else(|| YamlParseError {
+            let (key, rest) = yaml_split_key(&content).ok_or_else(|| YAMLParseError {
                 line: line_no,
                 message: "expected `key: value`".into(),
             })?;
@@ -1195,7 +1195,7 @@ impl YamlParser {
         json_variant("Text", Some(CtValue::Str(text)))
     }
 
-    fn parse_inline_value(&mut self, s: &str) -> Result<CtValue, YamlParseError> {
+    fn parse_inline_value(&mut self, s: &str) -> Result<CtValue, YAMLParseError> {
         let s = s.trim();
         if let Some(rest) = s.strip_prefix('&') {
             let mut it = rest.splitn(2, char::is_whitespace);
@@ -1650,7 +1650,7 @@ pub(super) fn xml_from_ct(
             type_name,
             variant,
             args,
-        } if type_name == "Json" && variant == "Null" && args.is_empty()
+        } if type_name == "JSON" && variant == "Null" && args.is_empty()
     ) {
         return Ok(Value::Null);
     }
@@ -1906,10 +1906,10 @@ pub(super) fn xml_to_bytes(
     let (encoding, lexical) = match options {
         Some(CtValue::Struct { fields, .. }) => {
             let encoding = match fields.iter().find_map(|(name, value)| (name == "encoding").then_some(value)) {
-                Some(CtValue::Enum { variant, .. }) if variant == "UTF8BOM" => jet_foundation::XmlPull::RenderEncoding::Utf8Bom,
+                Some(CtValue::Enum { variant, .. }) if variant == "UTF8BOM" => jet_foundation::XmlPull::RenderEncoding::UTF8Bom,
                 Some(CtValue::Enum { variant, .. }) if variant == "UTF16LE" => jet_foundation::XmlPull::RenderEncoding::Utf16Le,
                 Some(CtValue::Enum { variant, .. }) if variant == "UTF16BE" => jet_foundation::XmlPull::RenderEncoding::Utf16Be,
-                _ => jet_foundation::XmlPull::RenderEncoding::Utf8,
+                _ => jet_foundation::XmlPull::RenderEncoding::UTF8,
             };
             let lexical = match fields.iter().find_map(|(name, value)| (name == "lexical").then_some(value)) {
                 Some(CtValue::Enum { variant, .. }) if variant == "Deterministic" => jet_foundation::XmlPull::LexicalPolicy::Deterministic,
@@ -1918,7 +1918,7 @@ pub(super) fn xml_to_bytes(
             (encoding, lexical)
         }
         _ => (
-            jet_foundation::XmlPull::RenderEncoding::Utf8,
+            jet_foundation::XmlPull::RenderEncoding::UTF8,
             jet_foundation::XmlPull::LexicalPolicy::PreserveValid,
         ),
     };
@@ -2149,7 +2149,7 @@ mod xml_tests {
 
 // ── core.encoding.cbor ──────────────────────────────────────────────────────
 // Ported from `EncodingCodecs.rs`'s `jet_cbor_*`/`jet_std_cbor_*`, target
-// type swapped from `DataTree` to the `Json`-tagged `CtValue`.
+// type swapped from `DataTree` to the `JSON`-tagged `CtValue`.
 
 fn cbor_push_len(out: &mut Vec<u8>, major: u8, n: u64) {
     if n < 24 {
@@ -2436,7 +2436,7 @@ fn cbor_codable_value(
         } if type_name == "Float" && variant == "NAN" && args.is_empty() => {
             Ok(CtValue::Float(CtFloat::f64(f64::NAN)))
         }
-        CtValue::Enum { type_name, .. } if type_name != "Json" => Err(format!(
+        CtValue::Enum { type_name, .. } if type_name != "JSON" => Err(format!(
             "CBOR comptime encoder does not own the Codable schema for enum `{type_name}`"
         )),
         _ => Ok(value.clone()),
@@ -2456,7 +2456,7 @@ pub(super) fn cbor_encode_typed(
     })
 }
 #[derive(Clone)]
-pub(super) struct CborOptions {
+pub(super) struct CBOROptions {
     max_depth: i64,
     max_items: i64,
     max_bytes: i64,
@@ -2464,14 +2464,14 @@ pub(super) struct CborOptions {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct CborError {
+pub(super) struct CBORError {
     kind: &'static str,
     byte_offset: usize,
     path: String,
     pub(super) reason: String,
 }
 
-impl CborError {
+impl CBORError {
     fn new(kind: &'static str, byte_offset: usize, path: &str, reason: impl Into<String>) -> Self {
         Self {
             kind,
@@ -2482,7 +2482,7 @@ impl CborError {
     }
 }
 
-pub(super) fn cbor_error_value(error: CborError) -> CtValue {
+pub(super) fn cbor_error_value(error: CBORError) -> CtValue {
     CtValue::Struct {
         type_name: "CBORError".to_string(),
         fields: vec![
@@ -2504,8 +2504,8 @@ pub(super) fn cbor_error_value(error: CborError) -> CtValue {
     }
 }
 
-pub(super) fn cbor_safe_options() -> CborOptions {
-    CborOptions {
+pub(super) fn cbor_safe_options() -> CBOROptions {
+    CBOROptions {
         max_depth: 256,
         max_items: 1_000_000,
         max_bytes: 1_073_741_824,
@@ -2513,7 +2513,7 @@ pub(super) fn cbor_safe_options() -> CborOptions {
     }
 }
 
-pub(super) fn cbor_options(value: Option<&CtValue>) -> Result<CborOptions, CborError> {
+pub(super) fn cbor_options(value: Option<&CtValue>) -> Result<CBOROptions, CBORError> {
     let mut options = cbor_safe_options();
     if let Some(CtValue::Struct { fields, .. }) = value {
         for (name, value) in fields {
@@ -2527,7 +2527,7 @@ pub(super) fn cbor_options(value: Option<&CtValue>) -> Result<CborOptions, CborE
         }
     }
     if !(1..=4096).contains(&options.max_depth) {
-        return Err(CborError::new(
+        return Err(CBORError::new(
             "Limit",
             0,
             "$",
@@ -2535,7 +2535,7 @@ pub(super) fn cbor_options(value: Option<&CtValue>) -> Result<CborOptions, CborE
         ));
     }
     if !(1..=1_000_000_000).contains(&options.max_items) {
-        return Err(CborError::new(
+        return Err(CBORError::new(
             "Limit",
             0,
             "$",
@@ -2543,7 +2543,7 @@ pub(super) fn cbor_options(value: Option<&CtValue>) -> Result<CborOptions, CborE
         ));
     }
     if !(0..=1_073_741_824).contains(&options.max_bytes) {
-        return Err(CborError::new(
+        return Err(CBORError::new(
             "Limit",
             0,
             "$",
@@ -2560,7 +2560,7 @@ fn cbor_read_len(
     start: usize,
     canonical: bool,
     path: &str,
-) -> Result<u64, CborError> {
+) -> Result<u64, CBORError> {
     let need = match add {
         n @ 0..=23 => return Ok(n as u64),
         24 => 1,
@@ -2568,7 +2568,7 @@ fn cbor_read_len(
         26 => 4,
         27 => 8,
         _ => {
-            return Err(CborError::new(
+            return Err(CBORError::new(
                 "Unsupported",
                 start,
                 path,
@@ -2577,7 +2577,7 @@ fn cbor_read_len(
         }
     };
     if *i + need > input.len() {
-        return Err(CborError::new(
+        return Err(CBORError::new(
             "Truncated",
             input.len(),
             path,
@@ -2595,7 +2595,7 @@ fn cbor_read_len(
             || (add == 26 && n <= u16::MAX as u64)
             || (add == 27 && n <= u32::MAX as u64))
     {
-        return Err(CborError::new(
+        return Err(CBORError::new(
             "NonCanonical",
             start,
             path,
@@ -2626,7 +2626,7 @@ fn cbor_half_to_f64(bits: u16) -> f64 {
         f64::from_bits(sign | (((exp as i32 - 15 + 1023) as u64) << 52) | ((frac as u64) << 42))
     }
 }
-struct CborBudget {
+struct CBORBudget {
     limit: usize,
     live: usize,
 }
@@ -2636,7 +2636,7 @@ struct CborBudget {
 const CBOR_DATA_TREE_SLOT_BYTES: usize = 32;
 const CBOR_MAP_ENTRY_SLOT_BYTES: usize = 56;
 
-impl CborBudget {
+impl CBORBudget {
     fn new(limit: i64) -> Self {
         Self {
             limit: limit as usize,
@@ -2650,10 +2650,10 @@ impl CborBudget {
         offset: usize,
         path: &str,
         what: &str,
-    ) -> Result<usize, CborError> {
+    ) -> Result<usize, CBORError> {
         let available = self.limit - self.live;
         if unit != 0 && count > available / unit {
-            return Err(CborError::new(
+            return Err(CBORError::new(
                 "Limit",
                 offset,
                 path,
@@ -2672,9 +2672,9 @@ impl CborBudget {
 fn cbor_index_path(
     path: &str,
     index: usize,
-    budget: &mut CborBudget,
+    budget: &mut CBORBudget,
     offset: usize,
-) -> Result<(String, usize), CborError> {
+) -> Result<(String, usize), CBORError> {
     let digits = index.to_string();
     let capacity = path.len() + digits.len() + 2;
     let charged = budget.reserve(capacity, 1, offset, path, "CBOR path")?;
@@ -2689,9 +2689,9 @@ fn cbor_index_path(
 fn cbor_key_path(
     path: &str,
     key: &str,
-    budget: &mut CborBudget,
+    budget: &mut CBORBudget,
     offset: usize,
-) -> Result<(String, usize), CborError> {
+) -> Result<(String, usize), CBORError> {
     let escaped = key
         .chars()
         .map(|c| c.escape_debug().map(|x| x.len_utf8()).sum::<usize>())
@@ -2701,7 +2701,7 @@ fn cbor_key_path(
         .checked_add(escaped)
         .and_then(|n| n.checked_add(4))
         .ok_or_else(|| {
-            CborError::new(
+            CBORError::new(
                 "Limit",
                 offset,
                 path,
@@ -2723,15 +2723,15 @@ fn cbor_key_path(
 
 fn cbor_count_item(
     items: &mut i64,
-    options: &CborOptions,
+    options: &CBOROptions,
     offset: usize,
     path: &str,
-) -> Result<(), CborError> {
+) -> Result<(), CBORError> {
     *items = items
         .checked_add(1)
-        .ok_or_else(|| CborError::new("Limit", offset, path, "max_items counter overflow"))?;
+        .ok_or_else(|| CBORError::new("Limit", offset, path, "max_items counter overflow"))?;
     if *items > options.max_items {
-        return Err(CborError::new(
+        return Err(CBORError::new(
             "Limit",
             offset,
             path,
@@ -2741,9 +2741,9 @@ fn cbor_count_item(
     Ok(())
 }
 
-fn cbor_indefinite(options: &CborOptions, offset: usize, path: &str) -> Result<(), CborError> {
+fn cbor_indefinite(options: &CBOROptions, offset: usize, path: &str) -> Result<(), CBORError> {
     if options.require_canonical {
-        Err(CborError::new(
+        Err(CBORError::new(
             "NonCanonical",
             offset,
             path,
@@ -2758,18 +2758,18 @@ fn cbor_indefinite(options: &CborOptions, offset: usize, path: &str) -> Result<(
 fn cbor_indefinite_string(
     input: &[u8],
     i: &mut usize,
-    options: &CborOptions,
-    budget: &mut CborBudget,
+    options: &CBOROptions,
+    budget: &mut CBORBudget,
     depth: i64,
     items: &mut i64,
     path: &str,
     major: u8,
     start: usize,
     allow_bytes: bool,
-) -> Result<CtValue, CborError> {
+) -> Result<CtValue, CBORError> {
     cbor_indefinite(options, start, path)?;
     if depth + 1 > options.max_depth {
-        return Err(CborError::new(
+        return Err(CBORError::new(
             "Limit",
             start,
             path,
@@ -2777,7 +2777,7 @@ fn cbor_indefinite_string(
         ));
     }
     if major == 2 && !allow_bytes {
-        return Err(CborError::new(
+        return Err(CBORError::new(
             "Unsupported",
             start,
             path,
@@ -2787,7 +2787,7 @@ fn cbor_indefinite_string(
     let mut bytes = Vec::new();
     loop {
         if *i >= input.len() {
-            return Err(CborError::new(
+            return Err(CBORError::new(
                 "Truncated",
                 input.len(),
                 path,
@@ -2805,7 +2805,7 @@ fn cbor_indefinite_string(
         let chunk_add = head & 31;
         cbor_count_item(items, options, chunk_start, path)?;
         if chunk_major != major || chunk_add == 31 {
-            return Err(CborError::new(
+            return Err(CBORError::new(
                 "Syntax",
                 chunk_start,
                 path,
@@ -2821,7 +2821,7 @@ fn cbor_indefinite_string(
             path,
         )?)
         .map_err(|_| {
-            CborError::new(
+            CBORError::new(
                 "Limit",
                 chunk_start,
                 path,
@@ -2829,7 +2829,7 @@ fn cbor_indefinite_string(
             )
         })?;
         if n > input.len() - *i {
-            return Err(CborError::new(
+            return Err(CBORError::new(
                 "Truncated",
                 input.len(),
                 path,
@@ -2837,7 +2837,7 @@ fn cbor_indefinite_string(
             ));
         }
         if major == 3 && std::str::from_utf8(&input[*i..*i + n]).is_err() {
-            return Err(CborError::new(
+            return Err(CBORError::new(
                 "Syntax",
                 chunk_start,
                 path,
@@ -2863,7 +2863,7 @@ fn cbor_indefinite_string(
     } else {
         String::from_utf8(bytes)
             .map(|s| json_variant("Text", Some(CtValue::Str(s))))
-            .map_err(|_| CborError::new("Syntax", start, path, "CBOR text is not UTF-8"))
+            .map_err(|_| CBORError::new("Syntax", start, path, "CBOR text is not UTF-8"))
     }
 }
 
@@ -2871,15 +2871,15 @@ fn cbor_indefinite_string(
 fn cbor_decode_val(
     input: &[u8],
     i: &mut usize,
-    options: &CborOptions,
-    budget: &mut CborBudget,
+    options: &CBOROptions,
+    budget: &mut CBORBudget,
     depth: i64,
     items: &mut i64,
     path: &str,
     allow_bytes: bool,
-) -> Result<CtValue, CborError> {
+) -> Result<CtValue, CBORError> {
     if *i >= input.len() {
-        return Err(CborError::new(
+        return Err(CBORError::new(
             "Truncated",
             input.len(),
             path,
@@ -2903,7 +2903,7 @@ fn cbor_decode_val(
         )?)
         .map(|n| json_variant("Int", Some(CtValue::Int(n))))
         .map_err(|_| {
-            CborError::new(
+            CBORError::new(
                 "Unsupported",
                 start,
                 path,
@@ -2922,7 +2922,7 @@ fn cbor_decode_val(
         .and_then(|n| n.checked_neg()?.checked_sub(1))
         .map(|n| json_variant("Int", Some(CtValue::Int(n))))
         .ok_or_else(|| {
-            CborError::new(
+            CBORError::new(
                 "Unsupported",
                 start,
                 path,
@@ -2953,7 +2953,7 @@ fn cbor_decode_val(
                 path,
             )?)
             .map_err(|_| {
-                CborError::new(
+                CBORError::new(
                     "Limit",
                     start,
                     path,
@@ -2961,7 +2961,7 @@ fn cbor_decode_val(
                 )
             })?;
             if n > input.len() - *i {
-                return Err(CborError::new(
+                return Err(CBORError::new(
                     "Truncated",
                     input.len(),
                     path,
@@ -2969,7 +2969,7 @@ fn cbor_decode_val(
                 ));
             }
             if major == 2 && !allow_bytes {
-                return Err(CborError::new(
+                return Err(CBORError::new(
                     "Unsupported",
                     start,
                     path,
@@ -2994,14 +2994,14 @@ fn cbor_decode_val(
             } else {
                 String::from_utf8(bytes)
                     .map(|s| json_variant("Text", Some(CtValue::Str(s))))
-                    .map_err(|_| CborError::new("Syntax", start, path, "CBOR text is not UTF-8"))
+                    .map_err(|_| CBORError::new("Syntax", start, path, "CBOR text is not UTF-8"))
             }
         }
         4 => {
             if add == 31 {
                 cbor_indefinite(options, start, path)?;
                 if depth + 1 > options.max_depth {
-                    return Err(CborError::new(
+                    return Err(CBORError::new(
                         "Limit",
                         start,
                         path,
@@ -3012,7 +3012,7 @@ fn cbor_decode_val(
                 let mut index = 0;
                 loop {
                     if *i >= input.len() {
-                        return Err(CborError::new(
+                        return Err(CBORError::new(
                             "Truncated",
                             input.len(),
                             path,
@@ -3025,7 +3025,7 @@ fn cbor_decode_val(
                     }
                     let (child_path, charged) = cbor_index_path(path, index, budget, *i)?;
                     if *items >= options.max_items {
-                        let e = CborError::new(
+                        let e = CBORError::new(
                             "Limit",
                             *i,
                             &child_path,
@@ -3058,7 +3058,7 @@ fn cbor_decode_val(
                 return Ok(json_array(xs));
             }
             if depth + 1 > options.max_depth {
-                return Err(CborError::new(
+                return Err(CBORError::new(
                     "Limit",
                     start,
                     path,
@@ -3074,7 +3074,7 @@ fn cbor_decode_val(
                 path,
             )?)
             .map_err(|_| {
-                CborError::new(
+                CBORError::new(
                     "Limit",
                     start,
                     path,
@@ -3104,7 +3104,7 @@ fn cbor_decode_val(
             if add == 31 {
                 cbor_indefinite(options, start, path)?;
                 if depth + 1 > options.max_depth {
-                    return Err(CborError::new(
+                    return Err(CBORError::new(
                         "Limit",
                         start,
                         path,
@@ -3114,7 +3114,7 @@ fn cbor_decode_val(
                 let mut es = Vec::new();
                 loop {
                     if *i >= input.len() {
-                        return Err(CborError::new(
+                        return Err(CBORError::new(
                             "Truncated",
                             input.len(),
                             path,
@@ -3132,7 +3132,7 @@ fn cbor_decode_val(
                     let k = match json_payload(&key_value, "Text") {
                         Some(CtValue::Str(s)) => s.clone(),
                         _ => {
-                            return Err(CborError::new(
+                            return Err(CBORError::new(
                                 "Unsupported",
                                 key_start,
                                 path,
@@ -3141,7 +3141,7 @@ fn cbor_decode_val(
                         }
                     };
                     if es.iter().any(|(old, _)| old == &k) {
-                        return Err(CborError::new(
+                        return Err(CBORError::new(
                             "Unsupported",
                             key_start,
                             path,
@@ -3149,7 +3149,7 @@ fn cbor_decode_val(
                         ));
                     }
                     if *i >= input.len() {
-                        return Err(CborError::new(
+                        return Err(CBORError::new(
                             "Truncated",
                             input.len(),
                             path,
@@ -3157,7 +3157,7 @@ fn cbor_decode_val(
                         ));
                     }
                     if input[*i] == 0xff {
-                        return Err(CborError::new(
+                        return Err(CBORError::new(
                             "Syntax",
                             *i,
                             path,
@@ -3181,7 +3181,7 @@ fn cbor_decode_val(
                 return Ok(json_object(es));
             }
             if depth + 1 > options.max_depth {
-                return Err(CborError::new(
+                return Err(CBORError::new(
                     "Limit",
                     start,
                     path,
@@ -3197,7 +3197,7 @@ fn cbor_decode_val(
                 path,
             )?)
             .map_err(|_| {
-                CborError::new(
+                CBORError::new(
                     "Limit",
                     start,
                     path,
@@ -3214,7 +3214,7 @@ fn cbor_decode_val(
                 let k = match json_payload(&key_value, "Text") {
                     Some(CtValue::Str(s)) => s.clone(),
                     _ => {
-                        return Err(CborError::new(
+                        return Err(CBORError::new(
                             "Unsupported",
                             key_start,
                             path,
@@ -3228,7 +3228,7 @@ fn cbor_decode_val(
                         input[a..b] >= input[key_start..key_end]
                     })
                 {
-                    return Err(CborError::new(
+                    return Err(CBORError::new(
                         "NonCanonical",
                         key_start,
                         path,
@@ -3236,7 +3236,7 @@ fn cbor_decode_val(
                     ));
                 }
                 if es.iter().any(|(old, _)| old == &k) {
-                    return Err(CborError::new(
+                    return Err(CBORError::new(
                         "Unsupported",
                         key_start,
                         path,
@@ -3266,7 +3266,7 @@ fn cbor_decode_val(
             22 => Ok(json_variant("Null", None)),
             25 => {
                 if *i + 2 > input.len() {
-                    return Err(CborError::new(
+                    return Err(CBORError::new(
                         "Truncated",
                         input.len(),
                         path,
@@ -3276,7 +3276,7 @@ fn cbor_decode_val(
                 let bits = u16::from_be_bytes([input[*i], input[*i + 1]]);
                 *i += 2;
                 if options.require_canonical && cbor_half_to_f64(bits).is_nan() && bits != 0x7e00 {
-                    return Err(CborError::new(
+                    return Err(CBORError::new(
                         "NonCanonical",
                         start,
                         path,
@@ -3290,7 +3290,7 @@ fn cbor_decode_val(
             }
             26 => {
                 if *i + 4 > input.len() {
-                    return Err(CborError::new(
+                    return Err(CBORError::new(
                         "Truncated",
                         input.len(),
                         path,
@@ -3303,7 +3303,7 @@ fn cbor_decode_val(
                 let value = f32::from_be_bytes(buf) as f64;
                 if options.require_canonical && (value.is_nan() || cbor_half_exact(value).is_some())
                 {
-                    return Err(CborError::new(
+                    return Err(CBORError::new(
                         "NonCanonical",
                         start,
                         path,
@@ -3317,7 +3317,7 @@ fn cbor_decode_val(
             }
             27 => {
                 if *i + 8 > input.len() {
-                    return Err(CborError::new(
+                    return Err(CBORError::new(
                         "Truncated",
                         input.len(),
                         path,
@@ -3333,7 +3333,7 @@ fn cbor_decode_val(
                         || cbor_half_exact(value).is_some()
                         || ((value as f32) as f64).to_bits() == value.to_bits())
                 {
-                    return Err(CborError::new(
+                    return Err(CBORError::new(
                         "NonCanonical",
                         start,
                         path,
@@ -3345,26 +3345,26 @@ fn cbor_decode_val(
                     Some(CtValue::Float(CtFloat::f64(value))),
                 ))
             }
-            31 => Err(CborError::new(
+            31 => Err(CBORError::new(
                 "Syntax",
                 start,
                 path,
                 "CBOR break outside an indefinite container",
             )),
-            _ => Err(CborError::new(
+            _ => Err(CBORError::new(
                 "Unsupported",
                 start,
                 path,
                 format!("unsupported CBOR simple value {add}"),
             )),
         },
-        6 => Err(CborError::new(
+        6 => Err(CBORError::new(
             "Unsupported",
             start,
             path,
             "CBOR tags are unsupported",
         )),
-        _ => Err(CborError::new(
+        _ => Err(CBORError::new(
             "Unsupported",
             start,
             path,
@@ -3374,11 +3374,11 @@ fn cbor_decode_val(
 }
 pub(super) fn cbor_decode(
     bytes: &[u8],
-    options: &CborOptions,
+    options: &CBOROptions,
     allow_bytes: bool,
-) -> Result<CtValue, CborError> {
+) -> Result<CtValue, CBORError> {
     if bytes.len() as i64 > options.max_bytes {
-        return Err(CborError::new(
+        return Err(CBORError::new(
             "Limit",
             0,
             "$",
@@ -3387,7 +3387,7 @@ pub(super) fn cbor_decode(
     }
     let mut i = 0usize;
     let mut items = 0i64;
-    let mut budget = CborBudget::new(options.max_bytes);
+    let mut budget = CBORBudget::new(options.max_bytes);
     let v = cbor_decode_val(
         bytes,
         &mut i,
@@ -3399,7 +3399,7 @@ pub(super) fn cbor_decode(
         allow_bytes,
     )?;
     if i != bytes.len() {
-        return Err(CborError::new(
+        return Err(CBORError::new(
             "TrailingData",
             i,
             "$",
@@ -3413,7 +3413,7 @@ pub(super) fn cbor_decode(
 mod cbor_tests {
     use super::*;
 
-    fn safe() -> CborOptions {
+    fn safe() -> CBOROptions {
         cbor_options(None).unwrap()
     }
 
@@ -3465,7 +3465,7 @@ mod cbor_tests {
                 (kind, offset, path, reason)
             );
         }
-        let strict = CborOptions {
+        let strict = CBOROptions {
             require_canonical: true,
             ..safe()
         };
@@ -3497,9 +3497,9 @@ pub(super) fn jsonl_parse(text: &str) -> Result<Vec<CtValue>, CtValue> {
         if trimmed.is_empty() {
             continue;
         }
-        match super::JsonInterp::parse_json(trimmed) {
+        match super::JSONInterp::parse_json(trimmed) {
             Ok(v) => out.push(v),
-            Err(e) => return Err(super::JsonInterp::json_error_value_at_line(e, idx as i64)),
+            Err(e) => return Err(super::JSONInterp::json_error_value_at_line(e, idx as i64)),
         }
     }
     Ok(out)
@@ -3507,7 +3507,7 @@ pub(super) fn jsonl_parse(text: &str) -> Result<Vec<CtValue>, CtValue> {
 pub(super) fn jsonl_render(rows: &[CtValue]) -> String {
     let mut out = rows
         .iter()
-        .map(|v| super::JsonInterp::render_json_pretty(v, false, 0))
+        .map(|v| super::JSONInterp::render_json_pretty(v, false, 0))
         .collect::<Vec<_>>()
         .join("\n");
     if !out.is_empty() {
@@ -3528,7 +3528,7 @@ pub(super) fn jsonl_render(rows: &[CtValue]) -> String {
 // canonical text AOT produces for `canonical()`, so reusing it here is exact
 // for that call specifically.
 pub(super) fn json_canonical(v: &CtValue) -> String {
-    super::JsonInterp::render_json_pretty(v, false, 0)
+    super::JSONInterp::render_json_pretty(v, false, 0)
 }
 pub(super) fn json_events(v: &CtValue) -> String {
     fn walk(path: String, t: &CtValue, out: &mut Vec<String>) {

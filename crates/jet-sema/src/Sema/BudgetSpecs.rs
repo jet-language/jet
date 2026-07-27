@@ -612,10 +612,10 @@ fn target_selector(name: &str, expr: &Expr) -> Result<String, Diagnostic> {
         ("Class", [arg]) => {
             let value = match arg { EnumLitArg::Positional(value) => value, EnumLitArg::Named { expr, .. } => expr };
             let Some(class) = enum_variant(value) else {
-                return Err(invalid(name, "target class must be one typed class", "use `.Native`, `.Web`, `.Freestanding`, `.Plugin`, or `.OsImage`", value.span()));
+                return Err(invalid(name, "target class must be one typed class", "use `.Native`, `.Web`, `.Freestanding`, `.Plugin`, or `.OSImage`", value.span()));
             };
             if !crate::Syntax::PERF_BUDGET_TARGET_CLASSES.contains(&class.as_str()) || !enum_args(value).is_empty() {
-                return Err(invalid(name, format!("`.{class}` is not a target class"), "use `.Native`, `.Web`, `.Freestanding`, `.Plugin`, or `.OsImage`", value.span()));
+                return Err(invalid(name, format!("`.{class}` is not a target class"), "use `.Native`, `.Web`, `.Freestanding`, `.Plugin`, or `.OSImage`", value.span()));
             }
             Ok(format!("Class({class})"))
         }

@@ -13,7 +13,7 @@ pub const KW_PURE: &str = "Pure";
 
 /// D-SHAPE8=A + D-EFFECT-OMIT1=A, amended by D-ARROW-CONTROL1=A on
 /// 2026-07-26: an explicit function effect row lives inside the callable arrow:
-/// `=[Fs.Read, ..E]=>`. The empty row `=[]=>` is an explicit purity bound; an
+/// `=[FS.Read, ..E]=>`. The empty row `=[]=>` is an explicit purity bound; an
 /// omitted row leaves ordinary `=>` unchanged while sema still infers its
 /// complete row. Public metadata and tooling project the normalized inferred
 /// row whether source spells it or not.
@@ -25,7 +25,7 @@ pub const EFFECT_ARROW_CLOSE: &str = "]=>";
 /// D-TAINT1 (ratified 2026-06-21, option A; gated on D-EFF1): the value-fact tag
 /// that marks an untrusted value at its source — `#Tainted input`. The taint
 /// **spreads** along dataflow (assignment, interpolation, field store, return,
-/// arithmetic); a tainted value reaching a sink effect (`Db`/`Exec`/`Net`)
+/// arithmetic); a tainted value reaching a sink effect (`DB`/`Exec`/`Net`)
 /// without passing through a `#Sanitizer fn` is E0721. A value fact, not a
 /// declaration: it rides the value (D-QUAL1). PascalCase per D-CASING1 (the
 /// ratified card's lowercase `#tainted` is normalized to the tag convention).
@@ -99,13 +99,13 @@ pub const PROTO_SERVER: &str = "server"; // D-PROTO2
 pub const STATE_ENTRY: &str = "_";
 
 /// D-EFF1 / D-QUAL1 (ratified 2026-06-22): the effect-restriction region marker,
-/// written `#Caps(Net, Db) { … }`. Inside the block, the body (and everything it
+/// written `#Caps(Net, DB) { … }`. Inside the block, the body (and everything it
 /// transitively calls) may use only the listed effects; an out-of-set effect is
 /// E0741. PascalCase per D-CASING1. Erased in codegen (I3).
 pub const KW_CAPS: &str = "Caps";
 
 /// D-SCAP1, amended by D-ARROW-CONTROL1=A: the scoped-capability grant marker,
-/// written `#Grant(caps: Fs) { … }`. Grants the listed effects inside the
+/// written `#Grant(caps: FS) { … }`. Grants the listed effects inside the
 /// block through the first-class handle bound in the marker head, and
 /// **revokes** the capability at scope end (RAII, S63) — the handle is bound only
 /// for the block. The dual of `#Caps` (which restricts): an effect used inside
@@ -114,10 +114,10 @@ pub const KW_CAPS: &str = "Caps";
 pub const KW_GRANT: &str = "Grant";
 
 /// D-SCAP1 + D-ARROW-CONTROL1=A: the existing field separator binds a grant
-/// handle in the marker head — `#Grant(caps: Fs) { … }`.
+/// handle in the marker head — `#Grant(caps: FS) { … }`.
 pub const GRANT_BIND_SEPARATOR: &str = ":";
 /// D-SCAP1: the type of a capability handle bound by
-/// `#Grant(caps: Fs, Net) { … }`.
+/// `#Grant(caps: FS, Net) { … }`.
 /// An opaque sema-only handle (authority to perform the granted effects); erased
 /// in codegen (I3). Mirrors `TXN_HANDLE_TYPE`.
 pub const CAP_HANDLE_TYPE: &str = "Capability";
@@ -171,7 +171,7 @@ pub const METHOD_TASK_TRACE: &str = "trace";
 /// D-TXN4 (ratified 2026-06-24): the transaction-block marker, written
 /// `#Transact(order) { … }`. `order` binds a user-chosen transaction handle
 /// (any lowercase ident, mirroring `region r { … }`). Inside the block an
-/// irreversible effect (Net/Fs/Exec) is rejected (E0746, D-TXN2); the fix is to
+/// irreversible effect (Net/FS/Exec) is rejected (E0746, D-TXN2); the fix is to
 /// move it after the block or register it on the handle via
 /// `order.on_commit(() => { … })` (D-TXN3), which runs Drop-backed on a clean
 /// commit. PascalCase per D-CASING1. Erased in codegen (I3).
@@ -270,7 +270,7 @@ pub const KW_IT: &str = "it";
 /// S42 (ratified M5): `as` recognized only for teaching error E0030.
 pub const FOREIGN_AS: &str = "as";
 
-/// S46 (M8): foreign anonymous-fn spellings for teaching error E0032.
+/// S46 (ratified M8): foreign anonymous-fn spellings for teaching error E0032.
 pub const FOREIGN_LAMBDA: &str = "lambda";
 
 /// S14 (M5): foreign collection spellings for teaching errors.

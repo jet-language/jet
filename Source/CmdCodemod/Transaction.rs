@@ -1039,32 +1039,32 @@ struct Journal {
     log: Vec<u8>,
 }
 fn parse_journal(raw: &str) -> Journal {
-    let root = super::Json::parse(raw)
+    let root = super::JSON::parse(raw)
         .and_then(|v| v.object())
         .unwrap_or_else(|e| fail(&format!("invalid recovery journal: {e}")));
     let files = match root.get("files") {
-        Some(super::Json::Value::Array(v)) => v,
+        Some(super::JSON::Value::Array(v)) => v,
         _ => fail("invalid recovery journal files"),
     };
     let string = |key| match root.get(key) {
-        Some(super::Json::Value::String(value)) => value.clone(),
+        Some(super::JSON::Value::String(value)) => value.clone(),
         _ => fail(&format!("recovery journal missing `{key}`")),
     };
     let records = files
         .iter()
         .map(|v| {
             let o = match v {
-                super::Json::Value::Object(o) => o,
+                super::JSON::Value::Object(o) => o,
                 _ => fail("invalid recovery journal record"),
             };
             let s = |k| match o.get(k) {
-                Some(super::Json::Value::String(s)) => s.clone(),
+                Some(super::JSON::Value::String(s)) => s.clone(),
                 _ => fail(&format!("recovery journal missing `{k}`")),
             };
             let identity = |key| match o.get(key) {
-                Some(super::Json::Value::Array(values)) if values.len() == 2 => {
-                    let number = |value: &super::Json::Value| match value {
-                        super::Json::Value::Number(value) => *value,
+                Some(super::JSON::Value::Array(values)) if values.len() == 2 => {
+                    let number = |value: &super::JSON::Value| match value {
+                        super::JSON::Value::Number(value) => *value,
                         _ => fail(&format!("recovery journal `{key}` identity is invalid")),
                     };
                     (number(&values[0]), number(&values[1]))

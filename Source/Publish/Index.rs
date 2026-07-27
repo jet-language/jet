@@ -17,7 +17,7 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use jet_foundation::JSON::{json_escape, parse_json, JsonValue};
+use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
 
 /// One published-version line in the sparse index.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,7 +63,7 @@ impl IndexEntry {
     /// `public_key`/`signature` default to empty (backward-compatible with
     /// index lines written before c146).
     pub fn parse_line(line: &str) -> Option<IndexEntry> {
-        let JsonValue::Object(fields) = parse_json(line).ok()? else {
+        let JSONValue::Object(fields) = parse_json(line).ok()? else {
             return None;
         };
         const KEYS: &[&str] = &[
@@ -205,33 +205,33 @@ fn json_str(s: &str) -> String {
 }
 
 fn required_string(
-    fields: &std::collections::HashMap<String, JsonValue>,
+    fields: &std::collections::HashMap<String, JSONValue>,
     key: &str,
 ) -> Option<String> {
     match fields.get(key)? {
-        JsonValue::String(value) if !value.is_empty() => Some(value.clone()),
+        JSONValue::String(value) if !value.is_empty() => Some(value.clone()),
         _ => None,
     }
 }
 
 fn optional_string(
-    fields: &std::collections::HashMap<String, JsonValue>,
+    fields: &std::collections::HashMap<String, JSONValue>,
     key: &str,
 ) -> Option<String> {
     match fields.get(key) {
         None => Some(String::new()),
-        Some(JsonValue::String(value)) => Some(value.clone()),
+        Some(JSONValue::String(value)) => Some(value.clone()),
         _ => None,
     }
 }
 
 fn optional_bool(
-    fields: &std::collections::HashMap<String, JsonValue>,
+    fields: &std::collections::HashMap<String, JSONValue>,
     key: &str,
 ) -> Option<bool> {
     match fields.get(key) {
         None => Some(false),
-        Some(JsonValue::Bool(value)) => Some(*value),
+        Some(JSONValue::Bool(value)) => Some(*value),
         _ => None,
     }
 }

@@ -7,7 +7,7 @@
 use super::Concurrency;
 use std::cell::{Cell, RefCell};
 
-// ── core.os (mirrors jet_std_os_* in FsIoEnvOsTesting.rs) ────────────────────
+// ── core.os (mirrors jet_std_os_* in FSIoEnvOsTesting.rs) ────────────────────
 
 extern "C" fn jet_jit_os_name() -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(std::env::consts::OS.to_string()))

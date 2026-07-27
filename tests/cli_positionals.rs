@@ -19,13 +19,13 @@ fn scratch(name: &str) -> PathBuf {
 fn write_todo(dir: &std::path::Path) {
     fs::write(
         dir.join("todo.jet"),
-        r#"#Cli
+        r#"#CLI
 struct AddArgs {
     text: String
     #Default("") due: String
 }
 
-#Cli
+#CLI
 struct LoginArgs {
     #Flag token: String
 }

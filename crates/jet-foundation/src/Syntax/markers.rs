@@ -32,25 +32,25 @@ pub const CONTRACT_BUNDLE_PRINTABLE: &str = "Printable"; // D-CAPBUNDLE1
 pub const CONTRACT_BUNDLE_CODABLE_AS_BASE: &str = "CodableAsBase"; // D-CAPBUNDLE1
 
 /// D-CLIFLAG1 / D-SHAPE-CLI1 (rides D-CONTRACTCASE1/D-MARKERMOVE1):
-/// struct-level CLI derive marker — `#Cli`. A resolved `fn run(args: T)`
+/// struct-level CLI derive marker — `#CLI`. A resolved `fn run(args: T)`
 /// parameter type owns parsing, defaults, help, completion, validation, and
 /// audit facts. The marker is optional because plain `fn run()` remains a
 /// complete entry.
-pub const CONTRACT_CLI: &str = "Cli"; // D-CLIFLAG1, D-SHAPE-CLI1
+pub const CONTRACT_CLI: &str = "CLI"; // D-CLIFLAG1, D-SHAPE-CLI1
 /// D-PATCH1 (card #181): struct-level derive — generates nested `T.Patch` with
 /// `apply`/`diff`/`merge`, Codable by construction (Encode+Decode on Patch).
 pub const CONTRACT_PATCHABLE: &str = "Patchable"; // D-PATCH1
 /// D-CLIFLAG1: field-level doc marker for CLI-derived help text — `#Doc`.
 /// Same status as `CONTRACT_CLI`: registered here, feature built elsewhere.
 pub const CONTRACT_DOC: &str = "Doc"; // D-CLIFLAG1
-/// D-CLI-POS1=A: field-level opt-out from positional filling on a `#[Cli]`
+/// D-CLI-POS1=A: field-level opt-out from positional filling on a `#[CLI]`
 /// required value field — `#[Flag]`. Without it, required scalars fill from
 /// bare argv in declaration order; with it, only `--field` is accepted.
 pub const CONTRACT_FLAG: &str = "Flag"; // D-CLI-POS1
 
 /// D-CABI-PLATFORM1=A: per-function native calling-convention marker for C
 /// declarations. C remains the implicit default; alternate ABIs never inherit.
-pub const ATTR_ABI: &str = "Abi"; // D-CABI-PLATFORM1
+pub const ATTR_ABI: &str = "ABI"; // D-CABI-PLATFORM1
 
 /// D-LINTPOLICY1=A / D-DECIMAL1: per-site lint-suppression marker —
 /// `#[allow(lint_name)]` on a struct or field (e.g. `#[allow(float_money)]`

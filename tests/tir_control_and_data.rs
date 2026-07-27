@@ -862,11 +862,11 @@ fn enum_payload_range_pattern_guard() {
         return;
     }
     let src = "\
-enum Http {
+enum HTTP {
     Good(Int)
     Fail(Int)
 }
-fn classify(r: Http) => String {
+fn classify(r: HTTP) => String {
     if r == {
         Good(200..299) -> { return \"success\" }
         Good(400..499) -> { return \"client error\" }
@@ -876,10 +876,10 @@ fn classify(r: Http) => String {
     return \"unknown\"
 }
 fn run() {
-    print(classify(Http.Good(201)))
-    print(classify(Http.Good(404)))
-    print(classify(Http.Good(302)))
-    print(classify(Http.Fail(0)))
+    print(classify(HTTP.Good(201)))
+    print(classify(HTTP.Good(404)))
+    print(classify(HTTP.Good(302)))
+    print(classify(HTTP.Fail(0)))
 }
 ";
     let (code, stdout) = build_and_run("tir_enum_range", src);

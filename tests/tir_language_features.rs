@@ -394,7 +394,7 @@ fn run() {
 /// c109 Phase 24: JSON value type + construction + if-let matching + render/parse
 /// round-trip (the coupled prelude-`JSON` slice). `main` routes through the TIR:
 /// `json.parse(raw) ?? panic`, `if data == Object(entries)` (JSON if-let), `JSON.Text`/
-/// `JSON.Boolean`/`JSON.Object` construction (non-mangled `jet_std::Json::…`), a Map
+/// `JSON.Boolean`/`JSON.Object` construction (non-mangled `jet_std::JSON::…`), a Map
 /// index over `[String: JSON]`, and `json.to_string`. rustc accepting proves byte-parity.
 #[test]
 fn json_value_construct_match_render() {
@@ -409,11 +409,11 @@ fn run() {
     if data == Object(entries) {
         print(entries.len())
     }
-    obj := [String: Json].{}
-    obj[\"name\"] = Json.Text(\"jet\")
-    obj[\"ok\"] = Json.Bool(true)
-    obj[\"none\"] = Json.Null
-    print(json.to_string(Json.Object(obj)))
+    obj := [String: JSON].{}
+    obj[\"name\"] = JSON.Text(\"jet\")
+    obj[\"ok\"] = JSON.Bool(true)
+    obj[\"none\"] = JSON.Null
+    print(json.to_string(JSON.Object(obj)))
 }
 ";
     let (code, stdout) = build_and_run("tir_json", src);
@@ -676,7 +676,7 @@ fn run() {
     assert_eq!(stdout, "hello, \n");
 }
 
-/// c109 Phase 25: the HttpRouter handle surface (D-ROUTE1=A, 76_http_routes). `http.router()`
+/// c109 Phase 25: the HTTPRouter handle surface (D-ROUTE1=A, 76_http_routes). `http.router()`
 /// (producer), `router.get(path, handler)` with a named-fn handler (the boxed-closure
 /// `emit_router_handler` reproduction), and `http.dispatch(router, req)` — all without
 /// networking (dispatch a directly-parsed request). The handler routes too.
@@ -688,11 +688,11 @@ fn http_router_dispatch() {
     let src = "\
 use core.http as http
 use core.http.server as server
-fn handle_root(req: HttpRequest) => HttpResponse ? HttpError {
+fn handle_root(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(server.response(200, \"welcome\"))
 }
 
-fn handle_user(req: HttpRequest) => HttpResponse ? HttpError {
+fn handle_user(req: HTTPRequest) => HTTPResponse ? HTTPError {
     id :: req.param(\"id\") ?? \"unknown\"
     return Ok(server.response(200, \"user={id}\"))
 }
@@ -738,7 +738,7 @@ fn http_router_duplicate_route_is_jet_runtime_error() {
     let src = "\
 use core.http as http
 use core.http.server as server
-fn handle(req: HttpRequest) => HttpResponse ? HttpError {
+fn handle(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(server.response(200, \"ok\"))
 }
 fn run() {
@@ -772,22 +772,22 @@ fn http_router_named_catchall_and_encoded_marker_literals() {
     let src = "\
 use core.http as http
 use core.http.server as server
-fn asset(req: HttpRequest) => HttpResponse ? HttpError {
+fn asset(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(server.response(200, req.param(\"path\") ?? \"missing\"))
 }
-fn literal(req: HttpRequest) => HttpResponse ? HttpError {
+fn literal(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(server.response(200, \"literal\"))
 }
-fn catch(req: HttpRequest) => HttpResponse ? HttpError {
+fn catch(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(server.response(200, \"catch\"))
 }
-fn param_catch(req: HttpRequest) => HttpResponse ? HttpError {
+fn param_catch(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(server.response(200, \"param-catch\"))
 }
-fn param_first(req: HttpRequest) => HttpResponse ? HttpError {
+fn param_first(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(server.response(200, \"param-first\"))
 }
-fn static_first(req: HttpRequest) => HttpResponse ? HttpError {
+fn static_first(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(server.response(200, \"static-first\"))
 }
 fn run() {
@@ -822,7 +822,7 @@ fn http_router_retired_bare_catchall_is_jet_runtime_error() {
 use core.http as http
 use core.http.server as server
 use core.env as env
-fn handle(req: HttpRequest) => HttpResponse ? HttpError {
+fn handle(req: HTTPRequest) => HTTPResponse ? HTTPError {
     return Ok(server.response(200, \"ok\"))
 }
 fn run() {
@@ -871,7 +871,7 @@ fn run() {
     assert_eq!(stdout, "ok\n");
 }
 
-/// c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region (D-EFF1, effect_caps)
+/// c109 Phase 26: a `#Caps(IO) { … }` effect-restriction region (D-EFF1, effect_caps)
 /// erases to a plain block in codegen; the body runs unchanged.
 #[test]
 fn caps_block() {
@@ -879,11 +879,11 @@ fn caps_block() {
         return;
     }
     let src = "\
-fn announce(label: String, n: Int) =[Io]=> {
+fn announce(label: String, n: Int) =[IO]=> {
     print(\"{label}: {n}\")
 }
 fn run() {
-    #Caps(Io) {
+    #Caps(IO) {
         announce(\"answer\", 42)
     }
 }

@@ -88,7 +88,7 @@ fn unified_foreign_binder_registry_routes_active_and_planned_languages() {
             BinderStatus::Planned,
         ),
         (
-            ForeignLanguage::Js,
+            ForeignLanguage::JS,
             "js",
             "bindings/js",
             BinderSurface::Namespace,
@@ -220,7 +220,7 @@ fn unified_foreign_namespace_model_recognizes_every_registered_root() {
         ("cpp", ForeignLanguage::Cpp),
         ("rust", ForeignLanguage::Rust),
         ("py", ForeignLanguage::Py),
-        ("js", ForeignLanguage::Js),
+        ("js", ForeignLanguage::JS),
         ("swift", ForeignLanguage::Swift),
         ("go", ForeignLanguage::Go),
         ("java", ForeignLanguage::Java),
@@ -333,7 +333,7 @@ fn foreign_interop_routes_js_with_target_dispatched_host_and_dts_stub() {
     let native = route_plan(&root, ns.clone(), ForeignTarget::Native).expect("native js route");
     let web = route_plan(&root, ns, ForeignTarget::Web).expect("web js route");
 
-    assert_eq!(native.descriptor.language, ForeignLanguage::Js);
+    assert_eq!(native.descriptor.language, ForeignLanguage::JS);
     assert_eq!(native.descriptor.status, BinderStatus::Active);
     assert_eq!(native.descriptor.runtime, BinderRuntime::TargetDispatchedJs);
     assert_eq!(
@@ -955,7 +955,7 @@ fn cffi_sysv64_abi_executes_native_symbol() {
     let root=std::env::temp_dir().join(format!("jet_cffi_sysv_{}",std::process::id())); let _=fs::remove_dir_all(&root); fs::create_dir_all(&root).unwrap();
     fs::write(root.join("abi.c"),"#include <stdint.h>\nint32_t abi_add(int32_t a,int32_t b){return a+b;}\n").unwrap();
     let cc=["cc","gcc","clang"].iter().find(|x|Command::new(x).arg("--version").output().is_ok()).unwrap(); assert!(Command::new(cc).args(["-c"]).arg(root.join("abi.c")).arg("-o").arg(root.join("abi.o")).status().unwrap().success()); assert!(Command::new("ar").arg("rcs").arg(root.join("libabi.a")).arg(root.join("abi.o")).status().unwrap().success());
-    let src="use c.abi as c\n#Extern module c.abi { #Abi(sysv64) fn add(a: I32, b: I32) => I32 = \"abi_add\"; }\nfn run() { print(c.add(20, 22)) }\n"; let main=root.join("main.jet"); fs::write(&main,src).unwrap(); let out=jet::compile_with_path(src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),src,&d))); assert!(out.rust.contains("extern \"sysv64\""));
+    let src="use c.abi as c\n#Extern module c.abi { #ABI(sysv64) fn add(a: I32, b: I32) => I32 = \"abi_add\"; }\nfn run() { print(c.add(20, 22)) }\n"; let main=root.join("main.jet"); fs::write(&main,src).unwrap(); let out=jet::compile_with_path(src,main.to_str().unwrap()).unwrap_or_else(|d|panic!("{}",jet::render_diagnostics(main.to_str().unwrap(),src,&d))); assert!(out.rust.contains("extern \"sysv64\""));
     fs::write(root.join("main.rs"),out.rust).unwrap(); let built=Command::new("rustc").args(["--edition","2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg(format!("native={}",root.display())).arg("-labi").output().unwrap(); assert!(built.status.success(),"I2: {}",String::from_utf8_lossy(&built.stderr)); let run=Command::new(root.join("main_bin")).output().unwrap(); assert_eq!(String::from_utf8_lossy(&run.stdout),"42\n"); let _=fs::remove_dir_all(root);
 }
 

@@ -983,7 +983,7 @@ fn compile_bundle_path_build_inner(
     overlay: Option<(&std::path::Path, &str)>,
 ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
     let mut bundle = crate::Loader::load_entry_with_overlay(file, overlay, false)?;
-    let active_os = crate::Syntax::OsTarget::active(options.cross_target.as_deref());
+    let active_os = crate::Syntax::OSTarget::active(options.cross_target.as_deref());
     let compile_mode = if options.plugin_target {
         crate::Sema::CompileMode::Check
     } else {
@@ -1832,7 +1832,7 @@ fn build_execution_diagnostic(error: crate::Comptime::Build::BuildExecutionError
             "install bubblewrap or run on a supported build worker; there is no ambient fallback".to_string(),
             None,
         ),
-        BuildExecutionError::Io { action, detail } => Diagnostic::error(
+        BuildExecutionError::IO { action, detail } => Diagnostic::error(
             "E3505",
             format!("build action `{action}` could not access a declared build path"),
             detail,
@@ -1861,7 +1861,7 @@ fn compile_bundle_path_opts_full(
     // D-OSTARGET1=A: resolve the active native OS bucket once, from the same
     // `--target=<triple>` flag E2-M15 already threads through (host OS when
     // absent or unrecognized, e.g. a wasm/web pseudo-target).
-    let active_os = crate::Syntax::OsTarget::active(cross_target);
+    let active_os = crate::Syntax::OSTarget::active(cross_target);
     let timing = crate::PhaseTiming::enabled();
     let mut timer = crate::PhaseTiming::PhaseTimer::new();
     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
@@ -2100,7 +2100,7 @@ fn compile_src_with_options_and_policy(
         web_partition_enforced: options.web_target,
         web_partition_report: None,
         dep_roots: std::collections::HashMap::new(),
-        active_os: crate::Syntax::OsTarget::host(),
+        active_os: crate::Syntax::OSTarget::host(),
         edition: crate::Manifest::latest_edition().to_string(),
     };
     // Active foreign caches may contribute generated C-ABI bridge modules.
@@ -2389,7 +2389,7 @@ pub fn check_eval(src: &str, file: &str) -> Vec<Diagnostic> {
         web_partition_enforced: false,
         web_partition_report: None,
         dep_roots: std::collections::HashMap::new(),
-        active_os: crate::Syntax::OsTarget::host(),
+        active_os: crate::Syntax::OSTarget::host(),
         edition: crate::Manifest::latest_edition().to_string(),
     };
     if let Err(diags) = crate::Foreign::assemble_active_namespaces(&mut bundle) {
@@ -2519,7 +2519,7 @@ pub fn compile_bundle_path_with_entry(
         &bundle,
         ffi.as_ref(),
         false,
-        crate::Syntax::OsTarget::host(),
+        crate::Syntax::OSTarget::host(),
     );
     let capabilities = crate::Capabilities::from_sema(
         &bundle.used_core,

@@ -590,12 +590,12 @@ fn jet_cli_run_never_infers_web_target_from_marker() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// D-HTMLPAIR1 (ratified 2026-07-01, c134): an explicit `#Html("path.html")` marker wins
+/// D-HTMLPAIR1 (ratified 2026-07-01, c134): an explicit `#HTML("path.html")` marker wins
 /// over the `<stem>.html` sibling-filename convention.
 #[test]
 fn jet_cli_uses_explicit_html_marker() {
     if !have_tool("rustc") {
-        eprintln!("note: skipping #Html marker test");
+        eprintln!("note: skipping #HTML marker test");
         return;
     }
     let dir = std::env::temp_dir().join(format!("jet_html_marker_{}", std::process::id()));
@@ -603,7 +603,7 @@ fn jet_cli_uses_explicit_html_marker() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("app.jet"),
-        "#Target(Web)\n#Html(\"custom.html\")\nfn run() {}\n",
+        "#Target(Web)\n#HTML(\"custom.html\")\nfn run() {}\n",
     )
     .unwrap();
     // A sibling `app.html` exists too — the explicit marker must win over it.
@@ -622,24 +622,24 @@ fn jet_cli_uses_explicit_html_marker() {
         .unwrap();
     assert!(
         out.status.success(),
-        "jet build with #Html marker failed:\nstdout: {}\nstderr: {}",
+        "jet build with #HTML marker failed:\nstdout: {}\nstderr: {}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
     let served = fs::read_to_string(dir.join("build/index.html")).unwrap();
     assert!(
         served.contains("custom marker page"),
-        "expected the #Html(\"custom.html\") content, got:\n{served}"
+        "expected the #HTML(\"custom.html\") content, got:\n{served}"
     );
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// D-HTMLPAIR1 (ratified 2026-07-01, c134): a `#Html(...)` path that doesn't exist is a
+/// D-HTMLPAIR1 (ratified 2026-07-01, c134): a `#HTML(...)` path that doesn't exist is a
 /// loud build error, never a silent fallback to the generic page.
 #[test]
 fn jet_cli_html_marker_missing_file_is_an_error() {
     if !have_tool("rustc") {
-        eprintln!("note: skipping #Html missing-file test");
+        eprintln!("note: skipping #HTML missing-file test");
         return;
     }
     let dir = std::env::temp_dir().join(format!("jet_html_marker_missing_{}", std::process::id()));
@@ -647,7 +647,7 @@ fn jet_cli_html_marker_missing_file_is_an_error() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("app.jet"),
-        "#Target(Web)\n#Html(\"does_not_exist.html\")\nfn run() {}\n",
+        "#Target(Web)\n#HTML(\"does_not_exist.html\")\nfn run() {}\n",
     )
     .unwrap();
 
@@ -659,7 +659,7 @@ fn jet_cli_html_marker_missing_file_is_an_error() {
         .unwrap();
     assert!(
         !out.status.success(),
-        "jet build should fail loudly when #Html names a missing file"
+        "jet build should fail loudly when #HTML names a missing file"
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -747,7 +747,7 @@ fn decode_source_map_mappings(map: &str) -> Vec<(usize, usize, usize, usize, usi
 
 #[test]
 fn js_source_map_uses_line_markers_and_hides_host_paths() {
-    let src = "#Target(Web)\n#Target(Js)\nfn run() {\n\n    first :: 1\n    print(\"left {first}\\n//# __jet_source_map line 999\\nright\")\n}\n";
+    let src = "#Target(Web)\n#Target(JS)\nfn run() {\n\n    first :: 1\n    print(\"left {first}\\n//# __jet_source_map line 999\\nright\")\n}\n";
     let shown = format!(
         "{}/private/build-host/project/main.jet",
         std::env::temp_dir().display()
@@ -770,7 +770,7 @@ fn js_source_map_uses_line_markers_and_hides_host_paths() {
     assert!(
         first
             .js_source_map
-            .contains("\"#Target(Web)\\n#Target(Js)\\nfn run() {\\n\\n    first :: 1\\n    print(\\\"left {first}\\\\n//# __jet_source_map line 999\\\\nright\\\")\\n}\\n\""),
+            .contains("\"#Target(Web)\\n#Target(JS)\\nfn run() {\\n\\n    first :: 1\\n    print(\\\"left {first}\\\\n//# __jet_source_map line 999\\\\nright\\\")\\n}\\n\""),
         "sourcesContent must contain the exact Jet bytes:\n{}",
         first.js_source_map
     );
@@ -809,7 +809,7 @@ fn web_build_publishes_maps_and_release_omits_them() {
         eprintln!("note: skipping web map publication test (need rustc)");
         return;
     }
-    let src = "#Target(Web)\n#Target(Js)\nfn run() {\n    print(\"hi\")\n}\n";
+    let src = "#Target(Web)\n#Target(JS)\nfn run() {\n    print(\"hi\")\n}\n";
     let dir = std::env::temp_dir().join(format!("jet_web_maps_pub_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
@@ -920,7 +920,7 @@ fn web_unsupported_tui_backend_method_is_preflight_diagnostic() {
     let src = r#"#Target(Web)
 use core.ui as ui
 
-#Target(Js)
+#Target(JS)
 fn run() {
     b :: ui.tui_backend()
     print(b.frame_lines())
@@ -981,7 +981,7 @@ fn run() {}
 #[test]
 fn web_backends_traverse_impure_regions() {
     let src = r#"#Target(Web)
-#Target(Js)
+#Target(JS)
 fn js_value() => Int {
     value := 0
     #Impure("preserve JS body") {
@@ -1022,14 +1022,14 @@ fn web_inline_modules_keep_qualified_function_identity() {
     }
     let src = r#"#Target(Web)
 module left {
-    #Target(Js)
+    #Target(JS)
     pub fn value() => Int { return 1 }
 }
 module right {
-    #Target(Js)
+    #Target(JS)
     pub fn value() => Int { return 2 }
 }
-#Target(Js)
+#Target(JS)
 fn run() { print(left.value() + right.value()) }
 "#;
     let dir = build_web_fixture("module_identity", src, "tests/fixtures/web_module_identity.jet");
@@ -1051,7 +1051,7 @@ module left { pub fn value() => Int { return 1 } }
 module right { pub fn value() => Int { return 2 } }
 #WasmExport
 fn total() => Int { return left.value() + right.value() }
-#Target(Js)
+#Target(JS)
 fn run() { print(total()) }
 "#;
     let dir = build_web_fixture("wasm_module_identity", src, "tests/fixtures/web_wasm_module_identity.jet");
@@ -1075,15 +1075,15 @@ fn web_file_modules_keep_qualified_js_function_identity() {
         &[
             (
                 "main.jet",
-                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#Target(Js)\nfn run() { print(left.value() + right.value()) }\n",
+                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#Target(JS)\nfn run() { print(left.value() + right.value()) }\n",
             ),
             (
                 "left.jet",
-                "#Target(Js)\npub fn value() => Int { return 1 }\n",
+                "#Target(JS)\npub fn value() => Int { return 1 }\n",
             ),
             (
                 "right.jet",
-                "#Target(Js)\npub fn value() => Int { return 2 }\n",
+                "#Target(JS)\npub fn value() => Int { return 2 }\n",
             ),
         ],
     );
@@ -1105,7 +1105,7 @@ fn web_file_modules_emit_distinct_qualified_wasm_calls() {
         &[
             (
                 "main.jet",
-                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#WasmExport\nfn total() => Int { return left.value() + right.value() }\n#Target(Js)\nfn run() { print(total()) }\n",
+                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#WasmExport\nfn total() => Int { return left.value() + right.value() }\n#Target(JS)\nfn run() { print(total()) }\n",
             ),
             ("left.jet", "pub fn value() => Int { return 1 }\n"),
             ("right.jet", "pub fn value() => Int { return 2 }\n"),
@@ -1131,7 +1131,7 @@ fn web_file_module_wasm_export_uses_qualified_bridge() {
         &[
             (
                 "main.jet",
-                "#Target(Web)\nuse \"./math\" as math\n#Target(Js)\nfn run() { print(math.value()) }\n",
+                "#Target(Web)\nuse \"./math\" as math\n#Target(JS)\nfn run() { print(math.value()) }\n",
             ),
             (
                 "math.jet",
@@ -1170,7 +1170,7 @@ fn web_file_module_same_leaf_partitions_ignore_load_order() {
         ),
     ] {
         let main = format!(
-            "#Target(Web)\n{imports}\n#Target(Js)\nfn run() {{ print(left.value() + right.value()) }}\n"
+            "#Target(Web)\n{imports}\n#Target(JS)\nfn run() {{ print(left.value() + right.value()) }}\n"
         );
         let dir = build_web_project(
             stem,
@@ -1178,7 +1178,7 @@ fn web_file_module_same_leaf_partitions_ignore_load_order() {
                 ("main.jet", &main),
                 (
                     "left.jet",
-                    "#Target(Js)\nfn helper() => Int { return 1 }\n#Target(Js)\npub fn value() => Int { return helper() }\n",
+                    "#Target(JS)\nfn helper() => Int { return 1 }\n#Target(JS)\npub fn value() => Int { return helper() }\n",
                 ),
                 (
                     "right.jet",
@@ -1217,12 +1217,12 @@ fn module_local_run_cannot_hijack_web_entrypoint() {
     }
     let src = r#"#Target(Web)
 module helper { pub fn run() => Int { return 7 } }
-#Target(Js)
+#Target(JS)
 fn run() { print("top-level") }
 "#;
     let dir = build_web_fixture("entry_identity", src, "tests/fixtures/web_entry_identity.jet");
     let manifest = fs::read_to_string(dir.join("build/web.manifest.json")).unwrap();
-    assert!(manifest.contains("\"entry\": \"Js\""), "module-local run hijacked manifest entry:\n{manifest}");
+    assert!(manifest.contains("\"entry\": \"JS\""), "module-local run hijacked manifest entry:\n{manifest}");
     let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
     assert!(!js.contains("wasm.jet_export_run()"), "module-local run hijacked JS startup:\n{js}");
     assert_eq!(run_web_app(&dir), "top-level\n");
@@ -1231,7 +1231,7 @@ fn run() { print("top-level") }
 
 #[test]
 fn web_missing_return_is_a_preflight_diagnostic() {
-    let src = "#Target(Web)\n#Target(Js)\nfn missing() => Int { n :: 1 }\nfn run() {}\n";
+    let src = "#Target(Web)\n#Target(JS)\nfn missing() => Int { n :: 1 }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_missing_return.jet")
         .expect_err("non-void JS function without return must be rejected");
     assert!(diags.iter().any(|d| d.code == "E0114"), "{diags:?}");
@@ -1262,7 +1262,7 @@ fn wasm_unsupported_internal_abi_is_a_preflight_diagnostic() {
 
 #[test]
 fn wasm_cross_bucket_call_is_a_normal_preflight_diagnostic() {
-    let src = "#Target(Web)\n#Target(Js)\nfn browser_value() => Int { return 1 }\n#WasmExport\nfn compute() => Int { return browser_value() }\nfn run() {}\n";
+    let src = "#Target(Web)\n#Target(JS)\nfn browser_value() => Int { return 1 }\n#WasmExport\nfn compute() => Int { return browser_value() }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_cross_bucket_call.jet")
         .expect_err("Wasm must not call a JS-bucket function directly");
     assert!(diags.iter().any(|d| d.code == "E-WEB-CROSS-PARTITION"), "{diags:?}");
@@ -1294,7 +1294,7 @@ fn run() { print(summarize(4)) }
 fn host_dev_entry_is_not_web_runtime_and_run_prints_literal_from_tir() {
     let src = r#"#Target(Web)
 use core.web.devserver as devserver
-#Target(Js)
+#Target(JS)
 fn dev() {
     server :: devserver.app()
     server.port(8080)
@@ -1392,7 +1392,7 @@ fn web_reactive_dom_snapshot_roundtrip() {
 
 #[test]
 fn web_click_counter_dom_roundtrip() {
-    // 196_ui_web_click.jet: every top-level `#Target(Js) fn` is exported (not just
+    // 196_ui_web_click.jet: every top-level `#Target(JS) fn` is exported (not just
     // `main`), and `paint()` mounts a real, reused DOM element when a
     // `document` exists. This proves both, end to end: a fake `document` (no
     // browser, no new dependency) stands in for the click-driven host page
@@ -1419,7 +1419,7 @@ fn web_typed_tree_a11y_focus_and_cleanup_roundtrip() {
     let src = r#"#Target(Web)
 use core.ui as ui
 
-#Target(Js)
+#Target(JS)
 fn render_tree(with_role: Bool) {
     tree := ui.node("plain", 80.0, 24.0)
     if with_role {
@@ -1431,7 +1431,7 @@ fn render_tree(with_role: Bool) {
     backend.paint(tree)
 }
 
-#Target(Js)
+#Target(JS)
 fn render_focus_tree() {
     tree := ui.box([ui.button("Save"), ui.button("Cancel")])
     backend := ui.null_backend()
@@ -1440,7 +1440,7 @@ fn render_focus_tree() {
     backend.paint(tree)
 }
 
-#Target(Js)
+#Target(JS)
 fn render_two_backends() {
     first := ui.null_backend()
     first_tree := ui.button("Backend A")
@@ -1499,7 +1499,7 @@ fn web_reactive_effect_lifecycle_roundtrip() {
     }
     let src = r#"#Target(Web)
 use core.reactive as reactive
-#Target(Js)
+#Target(JS)
 fn run() {
     value := reactive.signal(1)
     effect := reactive.effect(() => {
@@ -1531,7 +1531,7 @@ fn web_events_and_storage_roundtrip() {
     let src = r##"#Target(Web)
 use core.web as web
 
-#Target(Js)
+#Target(JS)
 fn init() {
     saved :: web.storage.local.get("tasks") ?? "[]"
     web.storage.local.set("tasks", saved)
@@ -1570,10 +1570,10 @@ fn web_trace_map_keeps_qualified_handler_identity() {
     let src = r##"#Target(Web)
 use core.web as web
 module handlers {
-    #Target(Js)
+    #Target(JS)
     pub fn init() { web.on("#new-task", "input", (ev) => {}) }
 }
-#Target(Js)
+#Target(JS)
 fn init() { handlers.init() }
 fn run() {}
 "##;
