@@ -112,6 +112,9 @@ pub(crate) struct JitRuntime {
     /// `E0953` diagnostic, exactly as the tier-0 interpreter reports the same
     /// panic. Keeps the FIRST message; later traps on the unwind path are noise.
     pub(crate) trapped: Option<String>,
+    /// Soft process exit for rich `require`/`panic` reports — stderr already
+    /// holds the AOT-matching text; resident returns `Ran` with this code.
+    pub(crate) exit_code: Option<i32>,
     /// Compiler-owned E3003 rendered after native code returns; never unwinds
     /// through a Cranelift frame.
     pub(crate) deadline_exceeded: Option<String>,
@@ -724,9 +727,93 @@ extern "C" fn jet_jit_clock_tick(handle: i64, delta: i64) {
     });
 }
 
+extern "C" fn jet_jit_clock_advance(handle: i64, to_ms: i64) -> i64 {
+    // D-DET-CAPAPI: absolute set — matches AOT `jet_clock_advance`.
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(now) = rt.clocks.get_mut((handle as usize).wrapping_sub(1)) {
+            *now = to_ms;
+            to_ms
+        } else {
+            0
+        }
+    })
+}
+
+extern "C" fn jet_jit_clock_wait(handle: i64, duration_ms: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(now) = rt.clocks.get_mut((handle as usize).wrapping_sub(1)) {
+            *now = now.saturating_add(duration_ms);
+            *now
+        } else {
+            0
+        }
+    })
+}
+
 extern "C" fn jet_jit_trap_panic(_unused: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.set_trap("panic");
+        0
+    })
+}
+
+extern "C" fn jet_jit_trace_err(file: i64, line: i64, fn_name: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let file = rt.heap.clone_string(file).unwrap_or_default();
+        let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
+        let line = format!(
+            "error propagated from: {fn_name} ({file}:{line}) via ?\n"
+        );
+        rt.stderr.push_str(&line);
+    });
+}
+
+extern "C" fn jet_jit_result_context(handle: i64, msg: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(result) = jit_result(rt, handle) else {
+            return 0;
+        };
+        if result.ok {
+            return handle;
+        }
+        let err = rt
+            .heap
+            .clone_string(result.bits as i64)
+            .unwrap_or_default();
+        let msg = rt.heap.clone_string(msg).unwrap_or_default();
+        let combined = rt.heap.alloc_string(format!("{msg}: {err}"));
+        alloc_jit_result(rt, false, combined as u64)
+    })
+}
+
+extern "C" fn jet_jit_rich_panic(
+    file: i64,
+    line: i64,
+    fn_name: i64,
+    src_line: i64,
+    col: i64,
+    caret: i64,
+    msg: i64,
+) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let file = rt.heap.clone_string(file).unwrap_or_default();
+        let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
+        let src_line = rt.heap.clone_string(src_line).unwrap_or_default();
+        let msg = rt.heap.clone_string(msg).unwrap_or_default();
+        let line_s = line.to_string();
+        let margin = line_s.len();
+        let pad = " ".repeat(margin);
+        let col_offset = (col as u64).saturating_sub(1) as usize;
+        let caret = "^".repeat((caret as usize).max(1));
+        let mut out = String::new();
+        out.push_str(&format!("panic: {msg}\n"));
+        out.push_str(&format!("  --> {file}:{line} in {fn_name}\n"));
+        out.push_str(&format!("   {pad}|\n"));
+        out.push_str(&format!("{line_s} | {src_line}\n"));
+        out.push_str(&format!("   {pad}| {}{caret}\n", " ".repeat(col_offset)));
+        rt.stderr.push_str(&out);
+        rt.exit_code = Some(70);
+        rt.set_trap("__jet_rich_panic__");
         0
     })
 }
@@ -1324,6 +1411,8 @@ pub(crate) struct HostFns {
     pub(crate) clock_new: FuncId,
     pub(crate) clock_now: FuncId,
     pub(crate) clock_tick: FuncId,
+    pub(crate) clock_advance: FuncId,
+    pub(crate) clock_wait: FuncId,
     pub(crate) parse_i64: FuncId,
     pub(crate) parse_f64: FuncId,
     pub(crate) numeric_try_i64: FuncId,
@@ -1362,6 +1451,9 @@ pub(crate) struct HostFns {
     pub(crate) result_get_i8: FuncId,
     pub(crate) result_get_i32: FuncId,
     pub(crate) trap_panic: FuncId,
+    pub(crate) rich_panic: FuncId,
+    pub(crate) trace_err: FuncId,
+    pub(crate) result_context: FuncId,
     pub(crate) duration_from_int: FuncId,
     pub(crate) duration_from_float: FuncId,
     pub(crate) duration_in: FuncId,
@@ -1449,7 +1541,12 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_clock_new", jet_jit_clock_new as *const u8);
     builder.symbol("jet_jit_clock_now", jet_jit_clock_now as *const u8);
     builder.symbol("jet_jit_clock_tick", jet_jit_clock_tick as *const u8);
+    builder.symbol("jet_jit_clock_advance", jet_jit_clock_advance as *const u8);
+    builder.symbol("jet_jit_clock_wait", jet_jit_clock_wait as *const u8);
     builder.symbol("jet_jit_trap_panic", jet_jit_trap_panic as *const u8);
+    builder.symbol("jet_jit_rich_panic", jet_jit_rich_panic as *const u8);
+    builder.symbol("jet_jit_trace_err", jet_jit_trace_err as *const u8);
+    builder.symbol("jet_jit_result_context", jet_jit_result_context as *const u8);
     builder.symbol("jet_jit_parse_i64", jet_jit_parse_i64 as *const u8);
     builder.symbol("jet_jit_parse_f64", jet_jit_parse_f64 as *const u8);
     builder.symbol("jet_jit_numeric_try_i64", jet_jit_numeric_try_i64 as *const u8);
@@ -1690,6 +1787,15 @@ fn declare_host_fns(
     sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
     sig_i64_i64_i64_i64.params.push(AbiParam::new(types::I64));
     sig_i64_i64_i64_i64.returns.push(AbiParam::new(types::I64));
+    let mut sig_trace_err = Signature::new(cc);
+    sig_trace_err.params.push(AbiParam::new(types::I64));
+    sig_trace_err.params.push(AbiParam::new(types::I64));
+    sig_trace_err.params.push(AbiParam::new(types::I64));
+    let mut sig_rich_panic = Signature::new(cc);
+    for _ in 0..7 {
+        sig_rich_panic.params.push(AbiParam::new(types::I64));
+    }
+    sig_rich_panic.returns.push(AbiParam::new(types::I64));
     let mut sig_f64_i64_i64 = Signature::new(cc);
     sig_f64_i64_i64.params.push(AbiParam::new(types::F64));
     sig_f64_i64_i64.params.push(AbiParam::new(types::I64));
@@ -1860,6 +1966,8 @@ fn declare_host_fns(
         clock_new: import("jet_jit_clock_new", &sig_str_unary_i64)?,
         clock_now: import("jet_jit_clock_now", &sig_str_unary_i64)?,
         clock_tick: import("jet_jit_clock_tick", &sig_struct_assign)?,
+        clock_advance: import("jet_jit_clock_advance", &sig_str_binary_i64)?,
+        clock_wait: import("jet_jit_clock_wait", &sig_str_binary_i64)?,
         parse_i64: import("jet_jit_parse_i64", &sig_str_unary_i64)?,
         parse_f64: import("jet_jit_parse_f64", &sig_str_unary_i64)?,
         numeric_try_i64: import("jet_jit_numeric_try_i64", &sig_i64_i64_i64_i64)?,
@@ -1901,6 +2009,9 @@ fn declare_host_fns(
         result_get_i8: import("jet_jit_result_get_i8", &sig_result_query_i8)?,
         result_get_i32: import("jet_jit_result_get_i32", &sig_result_query_i32)?,
         trap_panic: import("jet_jit_trap_panic", &sig_i64)?,
+        rich_panic: import("jet_jit_rich_panic", &sig_rich_panic)?,
+        trace_err: import("jet_jit_trace_err", &sig_trace_err)?,
+        result_context: import("jet_jit_result_context", &sig_str_binary_i64)?,
         duration_from_int: import("jet_jit_duration_from_int", &sig_duration_int)?,
         duration_from_float: import("jet_jit_duration_from_float", &sig_duration_float)?,
         duration_in: import("jet_jit_duration_in", &sig_duration_int)?,

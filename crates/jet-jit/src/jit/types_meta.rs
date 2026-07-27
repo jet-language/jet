@@ -218,10 +218,7 @@ pub(crate) fn clif_ty_with_distinct(
         || matches!(
             &ty,
             Type::Union(_)
-                | Type::Fn {
-                    effect_bound: None,
-                    ..
-                }
+                | Type::Fn { .. }
                 | Type::TraitObject(_)
         )
     {
@@ -341,6 +338,7 @@ pub(crate) struct JitMeta<'a> {
     enum_variants: &'a HashMap<String, Vec<String>>,
     enum_variant_payload_types: &'a HashMap<String, Vec<Type>>,
     int_constants: &'a HashMap<String, i64>,
+    constants: &'a HashMap<String, jet_foundation::AST::CtValue>,
     has_generic_instances: bool,
     distinct_bases: &'a HashMap<String, Type>,
 }
@@ -355,6 +353,7 @@ impl<'a> JitMeta<'a> {
             enum_variants: &program.enum_variants,
             enum_variant_payload_types: &program.enum_variant_payload_types,
             int_constants: &program.int_constants,
+            constants: &program.constants,
             has_generic_instances: !program.instance_provenance.is_empty(),
             distinct_bases: &program.distinct_bases,
         }
@@ -432,6 +431,13 @@ impl<'a> JitMeta<'a> {
 
     pub(crate) fn int_constant(&self, rust_name: &str) -> Option<i64> {
         self.int_constants.get(rust_name.strip_prefix("user_").unwrap_or(rust_name)).copied()
+    }
+    pub(crate) fn constant(
+        &self,
+        rust_name: &str,
+    ) -> Option<&jet_foundation::AST::CtValue> {
+        self.constants
+            .get(rust_name.strip_prefix("user_").unwrap_or(rust_name))
     }
     pub(crate) fn has_generic_instances(&self) -> bool { self.has_generic_instances }
     pub(crate) fn distinct_base(&self, name: &str) -> Option<&Type> {

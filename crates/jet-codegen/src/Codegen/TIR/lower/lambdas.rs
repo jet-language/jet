@@ -119,12 +119,51 @@ fn lower_lambda_expecting_with_host_borrow(
     // lambda body dumps the lambda's lexical env (outer locals + captures + params) and
     // does not leak its own bindings into the enclosing function.
     let mut lam_env = fork_panic(env);
+    // `move ` keyword: the AST emits it UNLESS the lambda is FnMut and does not escape.
+    // Computed before the clone-capture prelude so a moving escape can also clone
+    // borrowed/Fn captures rustc would otherwise reject (E0521).
+    let is_move = !(lam.meta.needs_fn_mut && !lam.meta.escapes);
     // The clone-capture prelude: `let _jet_cap_<n> = (<outer place>).clone();`. The
     // outer place comes from the *outer* env (the capture is an outer local). The cap
     // rebinds the name with place `_jet_cap_<n>`, no deref, type `None` (matching the
     // AST slot `{ rust_name: cap, deref: false, jet_ty: None }`).
     let mut prep = String::new();
-    for name in &lam.meta.cloned_captures {
+    let mut extra_cloned: Vec<String> = Vec::new();
+    // Moving escape into `jet_iter_map` / similar hosts needs owned captures. A
+    // borrowed Fn parameter (`&Box<dyn Fn…>`) is not always in `cloned_captures`
+    // yet, and a bare `move || f(…)` trips rustc E0521. Clone it into an owned
+    // temp so the move closure owns the Box.
+    if is_move {
+        let param_names: HashSet<&str> = lam.params.iter().map(|p| p.name.as_str()).collect();
+        let reads = match &lam.body {
+            LambdaBody::Block(stmts) => crate::Sema::block_free_var_reads(stmts),
+            LambdaBody::Expr(e) => {
+                crate::Sema::block_free_var_reads(&[Stmt::Expr((**e).clone())])
+            }
+        };
+        for name in reads {
+            if param_names.contains(name.as_str())
+                || lam.meta.cloned_captures.iter().any(|c| c == &name)
+                || extra_cloned.iter().any(|c| c == &name)
+            {
+                continue;
+            }
+            if !env.locals.contains_key(&name) {
+                continue;
+            }
+            let needs_clone = env.is_borrowed(&name)
+                || matches!(env.ty_of(&name), Some(Type::Fn { .. }));
+            if needs_clone {
+                extra_cloned.push(name);
+            }
+        }
+    }
+    for name in lam
+        .meta
+        .cloned_captures
+        .iter()
+        .chain(extra_cloned.iter())
+    {
         let cap = format!("_jet_cap_{}", mangle(name));
         prep.push_str(&format!(
             "let {} = ({}).clone();\n    ",
@@ -206,8 +245,6 @@ fn lower_lambda_expecting_with_host_borrow(
         }
     };
     cx.in_stm_transact.set(prev_in_stm);
-    // `move ` keyword: the AST emits it UNLESS the lambda is FnMut and does not escape.
-    let is_move = !(lam.meta.needs_fn_mut && !lam.meta.escapes);
     TLambda {
         prep,
         params,

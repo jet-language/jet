@@ -155,6 +155,16 @@ pub(super) struct EvalCtx<'a> {
     /// collection is materialized between producer and consumer.
     yield_consumer: Option<YieldConsumer<'a>>,
     yield_scope: Option<HashMap<String, CtValue>>,
+    /// `scope.guard` cleanups — run LIFO when the enclosing function returns.
+    scope_guards: Vec<&'a TIR::TLambda>,
+    /// Nested `#Transact` frames for auto-snapshot + commit/rollback hooks.
+    txn_stack: Vec<EvalTxnFrame<'a>>,
+}
+
+pub(super) struct EvalTxnFrame<'a> {
+    pub(super) snapshots: Vec<(String, CtValue)>,
+    pub(super) on_commit: Vec<&'a TIR::TLambda>,
+    pub(super) on_rollback: Vec<&'a TIR::TLambda>,
 }
 
 enum EvalCallable<'a> {
@@ -277,6 +287,11 @@ impl<'a> EvalCtx<'a> {
                 self.span(),
             )),
         };
+        // Run scope.guard cleanups LIFO, matching Drop order in AOT/JIT.
+        let guards: Vec<_> = self.scope_guards.drain(..).rev().collect();
+        for lam in guards {
+            let _ = self.eval_tlambda(lam, Vec::new(), scope)?;
+        }
         self.call_depth -= 1;
         result
     }
@@ -561,6 +576,8 @@ pub fn run_program_with_structs(
         spawn_site: 0,
         yield_consumer: None,
         yield_scope: None,
+        scope_guards: Vec::new(),
+        txn_stack: Vec::new(),
     };
     let mut scope = HashMap::new();
     ctx.run_func(entry, Vec::new(), &mut scope)
@@ -616,6 +633,8 @@ pub fn run_named_func(
         spawn_site: 0,
         yield_consumer: None,
         yield_scope: None,
+        scope_guards: Vec::new(),
+        txn_stack: Vec::new(),
     };
     let mut scope = HashMap::new();
     ctx.run_func(func, args, &mut scope)
@@ -652,8 +671,17 @@ fn run_bundle(
     for module in &bundle.modules {
         for item in &module.items {
             if let crate::AST::Item::Const(c) = item {
-                if let Some(v) = &c.ct {
+                let value = c.ct.clone().or_else(|| match &c.value {
+                    crate::AST::Expr::Int(v, _, _, _) => Some(CtValue::Int(*v)),
+                    crate::AST::Expr::Bool(v, _) => Some(CtValue::Bool(*v)),
+                    _ => None,
+                });
+                if let Some(v) = value {
                     globals.entry(c.name.clone()).or_insert_with(|| v.clone());
+                    // ConstRef sometimes carries the Rust-mangled spelling.
+                    globals
+                        .entry(format!("user_{}", c.name))
+                        .or_insert(v);
                 }
             }
         }
@@ -740,6 +768,8 @@ fn eval_expr_hook(
         spawn_site: 0,
         yield_consumer: None,
         yield_scope: None,
+        scope_guards: Vec::new(),
+        txn_stack: Vec::new(),
     };
     let mut scope = globals;
     ctx.eval_expr(&tir, &mut scope)
@@ -808,6 +838,8 @@ fn eval_block_hook(
         spawn_site: 0,
         yield_consumer: None,
         yield_scope: None,
+        scope_guards: Vec::new(),
+        txn_stack: Vec::new(),
     };
     let mut scope = globals;
     match ctx.exec_stmts(&tir, &mut scope)? {
