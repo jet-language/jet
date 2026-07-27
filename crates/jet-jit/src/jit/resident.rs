@@ -64,6 +64,9 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         game_backends: Vec::new(),
         raylib_windows: Vec::new(),
         raylib_colors: Vec::new(),
+        time_values: Vec::new(),
+        regex_values: Vec::new(),
+        decimal_values: Vec::new(),
         trapped: None,
         exit_code: None,
         deadline_exceeded: None,
@@ -150,6 +153,10 @@ fn reset_run_heap(rt: &mut JitRuntime) {
 pub(crate) fn resident_teardown() {
     clear_deopt_state();
     crate::Collections::clear_packed_enum_show();
+    crate::Watcher::clear_watcher_state();
+    crate::Net::clear_net_state();
+    // CLI plan stays installed across teardown→recompile in the same try_resident;
+    // prepare_cli_from_bundle / clear_cli_plan own its lifetime.
     // Keep STRUCT_REDACT: resident_run_fresh teardowns then recompiles in the
     // same try_resident that installed redact; clearing here dropped JetDebug.
     RESIDENT_MODULE.with(|slot| *slot.borrow_mut() = None);

@@ -54,6 +54,7 @@ pub(crate) fn try_resident(bundle: &ProgramBundle) -> Result<RunOutcome, super::
         Some(program) => program,
         None => return Err(plan_tiers(bundle, None)),
     };
+    crate::Cli::prepare_cli_from_bundle(bundle);
     let plan = plan_tiers(bundle, Some(&program));
     if plan.whole_interp {
         return Err(plan);
@@ -100,6 +101,7 @@ pub(crate) fn try_resident_hot_swap(
         Some(program) => program,
         None => return Err(plan_tiers(bundle, None)),
     };
+    crate::Cli::prepare_cli_from_bundle(bundle);
     let plan = plan_tiers(bundle, Some(&program));
     if plan.whole_interp || !plan.deopt.is_empty() {
         // Hot-swap keeps the simple path: whole-program deopt when any gap.
@@ -130,6 +132,7 @@ pub(crate) fn try_resident_restart(
         Some(program) => program,
         None => return Err(plan_tiers(bundle, None)),
     };
+    crate::Cli::prepare_cli_from_bundle(bundle);
     let plan = plan_tiers(bundle, Some(&program));
     if plan.whole_interp {
         return Err(plan);
@@ -186,10 +189,13 @@ pub fn try_compile_bundle(bundle: &ProgramBundle) -> Result<(), String> {
             TIR::lower_jit_program_fail_reason(bundle)
         )
     })?;
+    crate::Cli::prepare_cli_from_bundle(bundle);
     catch_jit_panic("compile", || {
         resident_teardown();
         crate::Encoding::register_migrations(bundle);
         super::types_meta::install_struct_redact(bundle);
+        // Teardown must not wipe CLI plan — reinstall after.
+        crate::Cli::prepare_cli_from_bundle(bundle);
         RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime()));
         ensure_resident_module(&program)
     })
@@ -660,16 +666,33 @@ pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
         );
     };
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let main_ok = program.funcs.iter().any(|f| {
-        f.name == program.entry
-            && f.params.is_empty()
-            && (f.ret.is_none()
-                || matches!(&f.ret, Some(Type::Result { ok, err })
-                    if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit")
-                        && matches!(err.as_ref(), Type::String | Type::Named(_))))
-            && resident_safe_func(f, &names)
-    });
+    let main_ok = if program.entry == "__jet_cli_main" {
+        // Typed CLI entry is a host trampoline; user `run` is the resident body.
+        program.funcs.iter().any(|f| {
+            f.name == "run" && resident_safe_func(f, &names)
+        })
+    } else {
+        program.funcs.iter().any(|f| {
+            f.name == program.entry
+                && f.params.is_empty()
+                && (f.ret.is_none()
+                    || matches!(&f.ret, Some(Type::Result { ok, err })
+                        if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit")
+                            && matches!(err.as_ref(), Type::String | Type::Named(_))))
+                && resident_safe_func(f, &names)
+        })
+    };
     if !main_ok {
+        if program.entry == "__jet_cli_main" {
+            for f in &program.funcs {
+                if f.name == "run" {
+                    if let Some(d) = resident_safe_func_detail(f, &names) {
+                        return format!("cli run not resident-safe: {d}");
+                    }
+                }
+            }
+            return "cli entry not resident-safe".to_string();
+        }
         for f in &program.funcs {
             if f.name == program.entry {
                 if let Some(d) = resident_safe_func_detail(f, &names) {

@@ -52,6 +52,7 @@ use crate::Codegen::TIR::lower_method_args;
 use crate::Codegen::TIR::lower_module_args;
 use crate::Codegen::TIR::lower_one_call_arg;
 use crate::Codegen::TIR::lower_spawn_lambda_for_jit;
+use crate::Codegen::TIR::lower_spawn_lambda_for_jit_expecting;
 use crate::Codegen::TIR::lower::static_call_type_name_lower;
 use crate::Codegen::TIR::pool_field_ty_hint;
 use crate::Codegen::TIR::render_router_handler;
@@ -1595,6 +1596,7 @@ pub(crate) fn lower_method_call(
             (_, "is_active") => Type::Bool,
             _ => unit_type(),
         };
+        let mut callback_index = None;
         let targs: Vec<TExpr> = args
             .iter()
             .enumerate()
@@ -1606,6 +1608,16 @@ pub(crate) fn lower_method_call(
                     if let Expr::Lambda(lam) = &a.expr {
                         let params = vec![Type::Named("WatchEvent".to_string())];
                         let tl = lower_lambda_expecting_value(lam, cx, env, params.as_slice());
+                        let idx = cx.jit_spawn_lambdas.borrow().len();
+                        cx.jit_spawn_lambdas.borrow_mut().push(
+                            lower_spawn_lambda_for_jit_expecting(
+                                lam,
+                                cx,
+                                env,
+                                &[Type::Named("WatchEvent".to_string())],
+                            ),
+                        );
+                        callback_index = Some(idx);
                         return TExpr {
                             ty: Type::Fn {
                                 params,
@@ -1625,6 +1637,7 @@ pub(crate) fn lower_method_call(
                 recv: Box::new(recv_t),
                 op: THandleOp::WatchMethod {
                     method: method.to_string(),
+                    callback_index,
                 },
                 args: targs,
             },

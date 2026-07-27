@@ -739,7 +739,85 @@ extern "C" fn jet_jit_email_smtp(config: i64) -> i64 {
     }
 }
 
+
+// Minimal TCP listen/local-addr/port for watcher demos (#1219) and http loopbacks.
+use std::cell::RefCell;
+use std::net::{SocketAddr, TcpListener};
+
+thread_local! {
+    static LISTENERS: RefCell<Vec<Option<TcpListener>>> = const { RefCell::new(Vec::new()) };
+    static ADDRS: RefCell<Vec<Option<SocketAddr>>> = const { RefCell::new(Vec::new()) };
+}
+
+fn push_listener(listener: TcpListener) -> i64 {
+    LISTENERS.with(|slot| {
+        let mut v = slot.borrow_mut();
+        v.push(Some(listener));
+        v.len() as i64
+    })
+}
+
+fn push_addr(addr: SocketAddr) -> i64 {
+    ADDRS.with(|slot| {
+        let mut v = slot.borrow_mut();
+        v.push(Some(addr));
+        v.len() as i64
+    })
+}
+
+pub(crate) fn clear_net_state() {
+    LISTENERS.with(|s| s.borrow_mut().clear());
+    ADDRS.with(|s| s.borrow_mut().clear());
+}
+
+extern "C" fn jet_jit_net_tcp_listen(addr: i64) -> i64 {
+    let addr = clone_string(addr);
+    match TcpListener::bind(addr.as_str()) {
+        Ok(listener) => {
+            if let Err(e) = listener.set_nonblocking(true) {
+                return result_err(e.to_string());
+            }
+            result_ok(push_listener(listener) as u64)
+        }
+        Err(e) => result_err(e.to_string()),
+    }
+}
+
+extern "C" fn jet_jit_net_listener_local_socket_addr(listener: i64) -> i64 {
+    if listener <= 0 {
+        return result_err("invalid TcpListener".into());
+    }
+    let idx = (listener as usize).saturating_sub(1);
+    let addr = LISTENERS.with(|slot| {
+        slot.borrow()
+            .get(idx)
+            .and_then(|l| l.as_ref())
+            .and_then(|l| l.local_addr().ok())
+    });
+    match addr {
+        Some(addr) => result_ok(push_addr(addr) as u64),
+        None => result_err("tcp listener local address failed".into()),
+    }
+}
+
+extern "C" fn jet_jit_net_socket_port(addr: i64) -> i64 {
+    if addr <= 0 {
+        return 0;
+    }
+    let idx = (addr as usize).saturating_sub(1);
+    ADDRS.with(|slot| {
+        slot.borrow()
+            .get(idx)
+            .and_then(|a| a.as_ref())
+            .map(|a| i64::from(a.port()))
+            .unwrap_or(0)
+    })
+}
+
 pub(crate) struct NetHostFns {
+    pub tcp_listen: FuncId,
+    pub listener_local_socket_addr: FuncId,
+    pub socket_port: FuncId,
     pub url_parse: FuncId,
     pub url_file: FuncId,
     pub url_data: FuncId,
@@ -768,6 +846,12 @@ pub(crate) struct NetHostFns {
 }
 
 pub(crate) fn register_net_symbols(builder: &mut JITBuilder) {
+    builder.symbol("jet_jit_net_tcp_listen", jet_jit_net_tcp_listen as *const u8);
+    builder.symbol(
+        "jet_jit_net_listener_local_socket_addr",
+        jet_jit_net_listener_local_socket_addr as *const u8,
+    );
+    builder.symbol("jet_jit_net_socket_port", jet_jit_net_socket_port as *const u8);
     builder.symbol("jet_jit_url_parse", jet_jit_url_parse as *const u8);
     builder.symbol("jet_jit_url_file", jet_jit_url_file as *const u8);
     builder.symbol("jet_jit_url_data", jet_jit_url_data as *const u8);
@@ -844,6 +928,9 @@ pub(crate) fn declare_net_host_fns(module: &mut JITModule) -> Result<NetHostFns,
             .map_err(|e| e.to_string())
     };
     Ok(NetHostFns {
+        tcp_listen: import(module, "jet_jit_net_tcp_listen", &sig1)?,
+        listener_local_socket_addr: import(module, "jet_jit_net_listener_local_socket_addr", &sig1)?,
+        socket_port: import(module, "jet_jit_net_socket_port", &sig1)?,
         url_parse: import(module, "jet_jit_url_parse", &sig1)?,
         url_file: import(module, "jet_jit_url_file", &sig1)?,
         url_data: import(module, "jet_jit_url_data", &sig2)?,

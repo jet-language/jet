@@ -13,7 +13,7 @@ use jet_codegen::Codegen::TIR::{
     ListSpreadPart,
     TFnValueKind, TMethodRef, TModuleCallForm, TNumericOp, TOrFallback, TPattern,
     TPatternPosition, TPlace,
-    TStaticOwner, TStmt, TStrPart,
+    TStaticOwner, TStmt, TStrPart, TTypedTextForm, TTypedTextInterpKind,
 };
 use jet_foundation::AST::{BinOp, IncDecOp, PatSlot, Pattern, StrFormat, Type, UnOp};
 use std::collections::HashMap;
@@ -501,6 +501,27 @@ impl LowerCtx<'_, '_> {
             ty,
             Type::Named(n) if matches!(n.as_str(), "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
         )
+    }
+
+    /// Constant string from `(…) => "lit"` / block with sole string return.
+    fn constant_string_lambda(expr: &TExpr) -> Option<String> {
+        let TExprKind::Lambda(lam) = &expr.kind else {
+            return None;
+        };
+        let body_expr = match &lam.executable {
+            TLambdaBody::Expr(body) => body.as_ref(),
+            TLambdaBody::Block(stmts) => match stmts.as_slice() {
+                [TStmt::Return(Some(e))] | [TStmt::ExprStmt(e)] => e,
+                _ => return None,
+            },
+        };
+        match &body_expr.kind {
+            TExprKind::StrLit(parts) if parts.len() == 1 => match &parts[0] {
+                TStrPart::Lit(s) => Some(s.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     /// TIR `handle_method_return_ty` omits DataTree accessors (Unit fallback).
@@ -1742,7 +1763,9 @@ impl LowerCtx<'_, '_> {
     }
 
     pub(crate) fn emit_scope_guards(&mut self) -> Result<(), String> {
-        let guards: Vec<_> = self.scope_guards.drain(..).rev().collect();
+        // Keep the stack: early returns and sibling exit paths each need the
+        // same LIFO cleanup (D-DEFER1). Cleared when the function finishes.
+        let guards: Vec<FuncId> = self.scope_guards.iter().rev().copied().collect();
         for id in guards {
             let func_ref = self.module.declare_func_in_func(id, self.b.func);
             self.b.ins().call(func_ref, &[]);
@@ -1926,7 +1949,129 @@ impl LowerCtx<'_, '_> {
     /// suppress this branch's own statements.
     fn lower_stmts_scoped(&mut self, stmts: &[TStmt]) -> Result<(), String> {
         self.dead = false;
-        self.lower_stmts(stmts)
+        let push = self
+            .module
+            .declare_func_in_func(self.host.watcher.event_scope_frame_push, self.b.func);
+        self.b.ins().call(push, &[]);
+        self.lower_stmts(stmts)?;
+        if !self.dead {
+            let pop = self
+                .module
+                .declare_func_in_func(self.host.watcher.event_scope_frame_pop, self.b.func);
+            self.b.ins().call(pop, &[]);
+        }
+        Ok(())
+    }
+
+    fn lower_watch_method(
+        &mut self,
+        recv: &TExpr,
+        recv_val: Value,
+        method: &str,
+        callback_index: Option<usize>,
+        args: &[TExpr],
+    ) -> Result<Value, String> {
+        let is_set = matches!(&recv.ty, Type::Named(n) if n == "WatchSet");
+        match method {
+            "poll" | "events" if args.is_empty() => {
+                let host_id = if is_set {
+                    self.host.watcher.watchset_poll
+                } else {
+                    self.host.watcher.watch_poll
+                };
+                let host = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "cancel" if args.is_empty() && !is_set => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.watcher.watch_cancel, self.b.func);
+                self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            "is_active" if args.is_empty() && !is_set => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.watcher.watch_is_active, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "summary" if args.is_empty() => {
+                let host_id = if is_set {
+                    self.host.watcher.watchset_summary
+                } else {
+                    self.host.watcher.watch_summary
+                };
+                let host = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "add" if args.len() == 1 && is_set => {
+                let other = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.watcher.watchset_add, self.b.func);
+                self.b.ins().call(host, &[recv_val, other]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            "on" | "once" if args.len() == 2 && !is_set => {
+                let Some(idx) = callback_index else {
+                    return Err("jit watch callback missing spawn index".to_string());
+                };
+                let scope = self.lower_expr(&args[0])?;
+                let lam = self
+                    .spawn_lambdas
+                    .get(idx)
+                    .ok_or_else(|| format!("jit watch callback site {idx} missing lambda"))?;
+                let spawn_fn = self
+                    .spawn_func_ids
+                    .get(idx)
+                    .copied()
+                    .ok_or_else(|| format!("jit watch callback site {idx} missing"))?;
+                let mut cap_vals = Vec::new();
+                for cap in &lam.captures {
+                    let captured = TExpr {
+                        ty: cap.ty.clone(),
+                        kind: TExprKind::Local(TLocal::user(&cap.name)),
+                    };
+                    let val = if cap.clone_at_spawn {
+                        self.lower_clone(&captured)?
+                    } else {
+                        self.lower_expr(&captured)?
+                    };
+                    cap_vals.push(val);
+                }
+                if cap_vals.len() > 4 {
+                    return Err(format!(
+                        "jit watch callback capture count {} > 4",
+                        cap_vals.len()
+                    ));
+                }
+                let spawn_ref = self.module.declare_func_in_func(spawn_fn, self.b.func);
+                let fn_ptr = self.b.ins().func_addr(types::I64, spawn_ref);
+                let n_caps = self.b.ins().iconst(types::I64, cap_vals.len() as i64);
+                let zero = self.b.ins().iconst(types::I64, 0);
+                let mut caps = [zero, zero, zero, zero];
+                for (i, v) in cap_vals.into_iter().enumerate() {
+                    caps[i] = v;
+                }
+                let host_id = if method == "once" {
+                    self.host.watcher.watch_once
+                } else {
+                    self.host.watcher.watch_on
+                };
+                let host = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(
+                    host,
+                    &[
+                        recv_val, scope, fn_ptr, n_caps, caps[0], caps[1], caps[2], caps[3],
+                    ],
+                );
+                Ok(self.b.inst_results(call)[0])
+            }
+            _ => Err(format!("jit watch method unsupported: {method}")),
+        }
     }
 
     fn lower_inline_block(&mut self, stmts: &[TStmt], ty: &Type) -> Result<Value, String> {
@@ -2622,9 +2767,9 @@ impl LowerCtx<'_, '_> {
             TStmt::ExprStmt(expr) => {
                 self.lower_expr(expr)?;
             }
-            TStmt::DeferClose { .. } => {
-                // ponytail: TempDir/FileLock Drop is best-effort no-op in JIT;
-                // examples that need durable cleanup still call remove_all.
+            TStmt::DeferClose { close, .. } => {
+                // Run the same close expr AOT's Drop guard would.
+                self.lower_expr(close)?;
             }
             TStmt::If {
                 cond,
@@ -2635,12 +2780,17 @@ impl LowerCtx<'_, '_> {
                 let cond_val = match cond {
                     TIfCond::Plain(e) => self.lower_expr(e)?,
                     TIfCond::IfLet { pattern, subj } => {
-                        if matches!(
-                            &pattern.pattern,
-                            Pattern::Variant { .. }
-                        ) && Self::is_datatree_value_ty(&subj.ty)
+                        if matches!(&pattern.pattern, Pattern::Variant { .. })
+                            && Self::is_datatree_value_ty(&subj.ty)
                         {
                             self.lower_datatree_if_let(
+                                pattern,
+                                subj,
+                                then_body,
+                                else_body.as_deref(),
+                            )?;
+                        } else if matches!(&pattern.pattern, Pattern::Variant { .. }) {
+                            self.lower_enum_if_let(
                                 pattern,
                                 subj,
                                 then_body,
@@ -3105,16 +3255,10 @@ impl LowerCtx<'_, '_> {
                 }
                 if matches!(
                     method_kind,
-                    Some(
-                        TForInMethod::LinesFile
-                            | TForInMethod::LinesStdin
-                    )
+                    Some(TForInMethod::LinesFile | TForInMethod::LinesStdin)
                 ) {
-                    return Err("jit for-in method-call collection unsupported".to_string());
-                }
-                // LinesProcessStream drains via host then walks the string list
-                // (handled with Chars in the single-binding arm below).
-                if *columnar {
+                    // Fall through — materialize via host then walk as string list.
+                } else if *columnar {
                     return Err("jit for-in columnar unsupported".to_string());
                 }
                 // `by_value` is set for Stream / Iter / HttpBodyChunks. JIT can
@@ -3122,7 +3266,14 @@ impl LowerCtx<'_, '_> {
                 // (true JetIter cannot cross the host-shim ABI yet).
                 if *by_value
                     && !jet_foundation::Collections::is_iter_type(&collection.ty)
-                    && !matches!(method_kind, Some(TForInMethod::LinesProcessStream))
+                    && !matches!(
+                        method_kind,
+                        Some(
+                            TForInMethod::LinesProcessStream
+                                | TForInMethod::LinesFile
+                                | TForInMethod::LinesStdin
+                        )
+                    )
                 {
                     return Err("jit for-in by-value stream unsupported".to_string());
                 }
@@ -3282,7 +3433,12 @@ impl LowerCtx<'_, '_> {
                 } else {
                     let elem_ty = if matches!(
                         method_kind,
-                        Some(TForInMethod::Chars | TForInMethod::LinesProcessStream)
+                        Some(
+                            TForInMethod::Chars
+                                | TForInMethod::LinesProcessStream
+                                | TForInMethod::LinesFile
+                                | TForInMethod::LinesStdin
+                        )
                     ) {
                         if matches!(method_kind, Some(TForInMethod::Chars)) {
                             Type::Char
@@ -3334,6 +3490,20 @@ impl LowerCtx<'_, '_> {
                             .module
                             .declare_func_in_func(self.host.process.stream_lines, self.b.func);
                         let call = self.b.ins().call(host_ref, &[child_val, tag]);
+                        self.b.inst_results(call)[0]
+                    } else if matches!(method_kind, Some(TForInMethod::LinesFile)) {
+                        let file = self.lower_expr(source)?;
+                        let host_ref = self
+                            .module
+                            .declare_func_in_func(self.host.io.file_lines, self.b.func);
+                        let call = self.b.ins().call(host_ref, &[file]);
+                        self.b.inst_results(call)[0]
+                    } else if matches!(method_kind, Some(TForInMethod::LinesStdin)) {
+                        let stdin = self.lower_expr(source)?;
+                        let host_ref = self
+                            .module
+                            .declare_func_in_func(self.host.io.stdin_lines, self.b.func);
+                        let call = self.b.ins().call(host_ref, &[stdin]);
                         self.b.inst_results(call)[0]
                     } else {
                         self.lower_expr(source)?
@@ -3771,7 +3941,23 @@ impl LowerCtx<'_, '_> {
                     self.deadline_depth -= pushed;
                 }
             }
-            TStmt::Live { .. } => return Err("jit live block unsupported".to_string()),
+            TStmt::Live { body } => {
+                let enter = self
+                    .module
+                    .declare_func_in_func(self.host.io.term_enter, self.b.func);
+                self.b.ins().call(enter, &[]);
+                let guard_depth = self.scope_guards.len();
+                self.scope_guards.push(self.host.io.term_leave);
+                self.lower_stmts_scoped(body)?;
+                if !self.dead {
+                    while self.scope_guards.len() > guard_depth {
+                        let id = self.scope_guards.pop().expect("live guard");
+                        let leave = self.module.declare_func_in_func(id, self.b.func);
+                        self.b.ins().call(leave, &[]);
+                        self.emit_trap_check()?;
+                    }
+                }
+            }
             TStmt::Shield { body } => {
                 let enter_ref = self
                     .module
@@ -5446,6 +5632,94 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[recv, msg]);
                 Ok(self.b.inst_results(call)[0])
             }
+            THostCall::TypedText { kind, arg } => {
+                let val = self.lower_expr(arg)?;
+                match kind {
+                    TTypedTextForm::SqlRaw => {
+                        let n = self.b.ins().iconst(types::I64, 2);
+                        let new_ref = self
+                            .module
+                            .declare_func_in_func(self.host.struct_new, self.b.func);
+                        let call = self.b.ins().call(new_ref, &[n]);
+                        let rec = self.b.inst_results(call)[0];
+                        let zero = self.b.ins().iconst(types::I64, 0);
+                        let one = self.b.ins().iconst(types::I64, 1);
+                        let set = self
+                            .module
+                            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+                        self.b.ins().call(set, &[rec, zero, val]);
+                        let list_new = self
+                            .module
+                            .declare_func_in_func(self.host.coll.list_new, self.b.func);
+                        let call = self.b.ins().call(list_new, &[]);
+                        let empty = self.b.inst_results(call)[0];
+                        self.b.ins().call(set, &[rec, one, empty]);
+                        Ok(rec)
+                    }
+                    TTypedTextForm::SqlTemplate => {
+                        let zero = self.b.ins().iconst(types::I64, 0);
+                        let get = self
+                            .module
+                            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+                        let call = self.b.ins().call(get, &[val, zero]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    TTypedTextForm::SqlParams => {
+                        let one = self.b.ins().iconst(types::I64, 1);
+                        let get = self
+                            .module
+                            .declare_func_in_func(self.host.struct_get_i64, self.b.func);
+                        let call = self.b.ins().call(get, &[val, one]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    TTypedTextForm::HtmlRaw | TTypedTextForm::HtmlText | TTypedTextForm::ShRaw => {
+                        Ok(val)
+                    }
+                }
+            }
+            THostCall::TypedTextInterp {
+                kind: TTypedTextInterpKind::Sql,
+                literals,
+                holes,
+            } => {
+                let template = literals.join("?");
+                let template_id = self.runtime.heap.alloc_string(template);
+                let template_v = self.b.ins().iconst(types::I64, template_id);
+                let list_new = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_new, self.b.func);
+                let call = self.b.ins().call(list_new, &[]);
+                let params = self.b.inst_results(call)[0];
+                let push = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_push, self.b.func);
+                for hole in holes {
+                    let shown = self.lower_jet_show(hole)?;
+                    self.b.ins().call(push, &[params, shown]);
+                }
+                let n = self.b.ins().iconst(types::I64, 2);
+                let new_ref = self
+                    .module
+                    .declare_func_in_func(self.host.struct_new, self.b.func);
+                let call = self.b.ins().call(new_ref, &[n]);
+                let rec = self.b.inst_results(call)[0];
+                let zero = self.b.ins().iconst(types::I64, 0);
+                let one = self.b.ins().iconst(types::I64, 1);
+                let set = self
+                    .module
+                    .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+                self.b.ins().call(set, &[rec, zero, template_v]);
+                self.b.ins().call(set, &[rec, one, params]);
+                Ok(rec)
+            }
+            THostCall::TypedTextInterp { kind, .. } => {
+                let label = match kind {
+                    TTypedTextInterpKind::Sql => "Sql",
+                    TTypedTextInterpKind::Html => "Html",
+                    TTypedTextInterpKind::Sh => "Sh",
+                };
+                Err(format!("jit TypedTextInterp unsupported: {label}"))
+            }
             THostCall::Helper { helper, .. } => {
                 Err(format!("jit helper unsupported: {helper}"))
             }
@@ -5501,6 +5775,38 @@ impl LowerCtx<'_, '_> {
                 Err(format!("jit host method unsupported: {method}"))
             }
             _ => Err("jit host call unsupported".to_string()),
+        }
+    }
+
+    /// `jet_show` for Sql hole params — Int/String/Bool/Float cover checked Sql.
+    fn lower_jet_show(&mut self, expr: &TExpr) -> Result<Value, String> {
+        match &expr.ty {
+            Type::String => self.lower_expr(expr),
+            Type::Int | Type::IntN { .. } => {
+                let v = self.lower_expr(expr)?;
+                let signed = self.b.ins().iconst(types::I64, 1);
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.intn_to_string, self.b.func);
+                let call = self.b.ins().call(host, &[v, signed]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            Type::Bool => {
+                let v = self.lower_expr(expr)?;
+                let is_true = if self.b.func.dfg.value_type(v) == types::I8 {
+                    let zero = self.b.ins().iconst(types::I8, 0);
+                    self.b.ins().icmp(IntCC::NotEqual, v, zero)
+                } else {
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    self.b.ins().icmp(IntCC::NotEqual, v, zero)
+                };
+                let t_id = self.runtime.heap.alloc_string("true".to_string());
+                let f_id = self.runtime.heap.alloc_string("false".to_string());
+                let t_v = self.b.ins().iconst(types::I64, t_id);
+                let f_v = self.b.ins().iconst(types::I64, f_id);
+                Ok(self.b.ins().select(is_true, t_v, f_v))
+            }
+            other => Err(format!("jit Sql hole show unsupported: {other:?}")),
         }
     }
 
@@ -7385,6 +7691,36 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &[has_prompt, prompt]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
+                if module == "core.io" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "stdout" if args.is_empty() => (self.host.io.stdout, Vec::new()),
+                        "stderr" if args.is_empty() => (self.host.io.stderr, Vec::new()),
+                        "stdin" if args.is_empty() => (self.host.io.stdin, Vec::new()),
+                        "terminal_width" if args.is_empty() => {
+                            (self.host.io.terminal_width, Vec::new())
+                        }
+                        "terminal_height" if args.is_empty() => {
+                            (self.host.io.terminal_height, Vec::new())
+                        }
+                        "style" if args.len() == 2 => (
+                            self.host.io.style,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "style_force" if args.len() == 2 => (
+                            self.host.io.style_force,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "progress" if args.len() == 1 => {
+                            (self.host.io.progress, vec![self.lower_expr(&args[0])?])
+                        }
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 if module == "core.os" && args.is_empty() {
                     let host_id = match method.as_str() {
                         "name" => self.host.core.os_name,
@@ -7399,6 +7735,58 @@ impl LowerCtx<'_, '_> {
                     };
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                     let call = self.b.ins().call(host_ref, &[]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.event" && method == "scope" && args.is_empty() {
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.watcher.event_scope, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.net" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "tcp_listen" if args.len() == 1 => (
+                            self.host.net.tcp_listen,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "listener_local_socket_addr" if args.len() == 1 => (
+                            self.host.net.listener_local_socket_addr,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "socket_port" if args.len() == 1 => (
+                            self.host.net.socket_port,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.watcher" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "files" if args.len() == 1 => (
+                            self.host.watcher.watcher_files,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "process_pid" if args.len() == 1 => (
+                            self.host.watcher.watcher_process_pid,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "port" if args.len() == 2 => (
+                            self.host.watcher.watcher_port,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "set" if args.is_empty() => (self.host.watcher.watcher_set, vec![]),
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
                 if module == "jet.log" {
@@ -8268,13 +8656,30 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                if module == "core.path" && method == "join" && args.len() == 2 {
-                    let host_ref = self
-                        .module
-                        .declare_func_in_func(self.host.core.path_join, self.b.func);
-                    let a0 = self.lower_expr(&args[0])?;
-                    let a1 = self.lower_expr(&args[1])?;
-                    let call = self.b.ins().call(host_ref, &[a0, a1]);
+                if module == "core.path" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "join" if args.len() == 2 => (
+                            self.host.core.path_join,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "parent" if args.len() == 1 => (
+                            self.host.core.path_parent_str,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "extension" if args.len() == 1 => (
+                            self.host.core.path_extension_str,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "normalize" if args.len() == 1 => (
+                            self.host.core.path_normalize_str,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
                 if module == "core.random" {
@@ -8609,11 +9014,19 @@ impl LowerCtx<'_, '_> {
                             self.host.core.math_lcm,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
+                        "decimal" if args.len() == 1 => (
+                            self.host.num.decimal_from_str,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
                         _ => return Err("jit core call unsupported".to_string()),
                     };
                     let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
                     let call = self.b.ins().call(host_ref, &arg_vals);
-                    return Ok(self.b.inst_results(call)[0]);
+                    let result = self.b.inst_results(call)[0];
+                    if method == "decimal" {
+                        self.emit_trap_check()?;
+                    }
+                    return Ok(result);
                 }
                 if module == "core.tasks" && method == "channel" && args.is_empty() {
                     let host_ref = self
@@ -8879,6 +9292,100 @@ impl LowerCtx<'_, '_> {
                         .map(|_| self.b.inst_results(call)[0])
                         .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
                 }
+
+                if module == "core.time.date" || module == "core.time.datetime" || module == "core.time" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
+                        ("core.time.date", "new") if args.len() == 3 => (
+                            self.host.time.date_new,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?, self.lower_expr(&args[2])?],
+                        ),
+                        ("core.time.date", "today") if args.is_empty() => (self.host.time.date_today, Vec::new()),
+                        ("core.time.date", "parse") if args.len() == 1 => (self.host.time.date_parse, vec![self.lower_expr(&args[0])?]),
+                        ("core.time.datetime", "from_timestamp") if args.len() == 1 => (
+                            self.host.time.datetime_from_timestamp,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        ("core.time.datetime", "now") if args.is_empty() => (self.host.time.datetime_now, Vec::new()),
+                        ("core.time", "parse_rfc3339") if args.len() == 1 => (
+                            self.host.time.parse_rfc3339,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        ("core.time", "from_unix_ms") if args.len() == 1 => (
+                            self.host.time.from_unix_ms,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        ("core.time", "utc") if args.is_empty() => (self.host.time.utc, Vec::new()),
+                        ("core.time", "period_months") if args.len() == 1 => (
+                            self.host.time.period_months,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        ("core.time", "instant") if args.is_empty() => (self.host.time.instant, Vec::new()),
+                        ("core.time", "zoned") if args.len() == 2 => (
+                            self.host.time.zoned,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        _ => return Err(format!("jit core call unsupported: {module}.{method}")),
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "jet.regex" || module == "core.regex" {
+                    let widen_bool = |this: &mut Self, e: &TExpr| -> Result<Value, String> {
+                        let v = this.lower_expr(e)?;
+                        if this.b.func.dfg.value_type(v) == types::I8 {
+                            Ok(this.b.ins().uextend(types::I64, v))
+                        } else {
+                            Ok(v)
+                        }
+                    };
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "flags" if args.len() == 3 => (
+                            self.host.text.regex_flags,
+                            vec![
+                                widen_bool(self, &args[0])?,
+                                widen_bool(self, &args[1])?,
+                                widen_bool(self, &args[2])?,
+                            ],
+                        ),
+                        "is_match" if args.len() == 2 => (
+                            self.host.text.regex_is_match,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "find" if args.len() == 2 => (
+                            self.host.text.regex_find,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "find_all" if args.len() == 2 => (
+                            self.host.text.regex_find_all,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "match" if args.len() == 2 => (
+                            self.host.text.regex_match,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "replace_all" if args.len() == 3 => (
+                            self.host.text.regex_replace_all,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?, self.lower_expr(&args[2])?],
+                        ),
+                        "split" if args.len() == 2 => (
+                            self.host.text.regex_split,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "compile" if args.len() == 1 => (
+                            self.host.text.regex_compile,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "compile_with" if args.len() == 2 => (
+                            self.host.text.regex_compile_with,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        _ => return Err(format!("jit core call unsupported: {module}.{method}")),
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 if module == "jet.db" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "open_memory" if args.is_empty() => {
@@ -8887,6 +9394,33 @@ impl LowerCtx<'_, '_> {
                         "open" if args.len() == 1 => {
                             (self.host.db.open, vec![self.lower_expr(&args[0])?])
                         }
+                        "migrate" if args.len() == 3 => (
+                            self.host.db.migrate,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        "transaction" if args.len() == 3 => (
+                            self.host.db.transaction,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        "params" if args.len() == 1 => {
+                            (self.host.db.params, vec![self.lower_expr(&args[0])?])
+                        }
+                        "row_int" if args.len() == 2 => (
+                            self.host.db.row_int,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "row_text" if args.len() == 2 => (
+                            self.host.db.row_text,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
                         _ => {
                             return Err(format!("jit core call unsupported: {module}.{method}"))
                         }
@@ -9989,25 +10523,25 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::DistinctCtor { arg, .. } => self.lower_expr(arg),
             TExprKind::MathBuiltin { .. } => Err("jit math builtin unsupported".to_string()),
-            // D-BIGINT1: `BigInt(...)` ctor + `+`/`-`/`*` binop, lowered from
-            // `TIR/lower/expressions.rs`. `BigInt` values are opaque i64 handles
-            // into `rt.heap` (`Numeric.rs`'s host shims), the same pattern as
-            // `String`/list handles. `Decimal` (`type_name != "BigInt"`) stays
-            // unsupported — out of this card's slice (jit_gaps.txt keeps
-            // `text/decimal`).
+            // D-BIGINT1 / D-DECIMAL1: precise numeric ctor/binop.
             TExprKind::PreciseBuiltin {
                 type_name,
                 func,
                 args,
-            } if type_name == "BigInt" => {
-                let host_fn = match func.as_str() {
-                    "from_int" => self.host.num.bigint_from_int,
-                    "from_str" => self.host.num.bigint_from_str,
-                    "add" => self.host.num.bigint_add,
-                    "sub" => self.host.num.bigint_sub,
-                    "mul" => self.host.num.bigint_mul,
-                    "to_string" => self.host.num.bigint_to_string,
-                    _ => return Err(format!("jit precise numeric builtin unsupported: {func}")),
+            } if type_name == "BigInt" || type_name == "Decimal" => {
+                let host_fn = match (type_name.as_str(), func.as_str()) {
+                    ("BigInt", "from_int") => self.host.num.bigint_from_int,
+                    ("BigInt", "from_str") => self.host.num.bigint_from_str,
+                    ("BigInt", "add") => self.host.num.bigint_add,
+                    ("BigInt", "sub") => self.host.num.bigint_sub,
+                    ("BigInt", "mul") => self.host.num.bigint_mul,
+                    ("BigInt", "to_string") => self.host.num.bigint_to_string,
+                    ("Decimal", "from_str") => self.host.num.decimal_from_str,
+                    ("Decimal", "add") => self.host.num.decimal_add,
+                    ("Decimal", "sub") => self.host.num.decimal_sub,
+                    ("Decimal", "mul") => self.host.num.decimal_mul,
+                    ("Decimal", "to_string") => self.host.num.decimal_to_string,
+                    _ => return Err(format!("jit precise numeric builtin unsupported: {type_name}.{func}")),
                 };
                 let arg_vals: Result<Vec<_>, _> = args.iter().map(|a| self.lower_expr(a)).collect();
                 let arg_vals = arg_vals?;
@@ -10593,7 +11127,30 @@ impl LowerCtx<'_, '_> {
                 TModuleCallForm::Qualified { .. } => Err("jit file-module call unsupported".to_string()),
             },
             TExprKind::ExternCall { .. } => Err("jit extern call unsupported".to_string()),
-            TExprKind::Close(_) => Ok(self.b.ins().iconst(types::I8, 0)),
+            TExprKind::Close(inner) => {
+                let handle = self.lower_expr(inner)?;
+                let host = match &inner.ty {
+                    Type::Named(n) if n == "FileWriter" => Some(self.host.io.file_writer_close),
+                    Type::Named(n) if n == "FileReader" => Some(self.host.io.file_reader_close),
+                    Type::Apply { name, args } if name == "Resource" && args.len() == 1 => {
+                        match &args[0] {
+                            Type::Named(n) if n == "FileWriter" => {
+                                Some(self.host.io.file_writer_close)
+                            }
+                            Type::Named(n) if n == "FileReader" => {
+                                Some(self.host.io.file_reader_close)
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(fid) = host {
+                    let host_ref = self.module.declare_func_in_func(fid, self.b.func);
+                    self.b.ins().call(host_ref, &[handle]);
+                }
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
             TExprKind::ResourceNew(inner) => self.lower_expr(inner),
             TExprKind::ResourceTake(name) => {
                 let place = TIR::local_place(name);
@@ -11348,7 +11905,18 @@ impl LowerCtx<'_, '_> {
                 }
             }
             TBuiltinOp::ToString => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::MatchGroup => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::MatchGroup => {
+                // Match.group(n) — same host as THandleOp::RegexMethod { method: "group" }.
+                let method_id = self.runtime.heap.alloc_string("group".to_string());
+                let method_val = self.b.ins().iconst(types::I64, method_id);
+                let arg0 = self.lower_expr(&args[0])?;
+                let zero = self.b.ins().iconst(types::I64, 0);
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.text.regex_method, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, method_val, arg0, zero]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TBuiltinOp::Take => {
                 self.lower_iter_adapter(self.host.coll.iter_take, recv_val, Some(&args[0]), None)
             }
@@ -12386,8 +12954,21 @@ impl LowerCtx<'_, '_> {
             // (no catch-all) so a future TIR/mod.rs variant fails this match at
             // compile time (R12). AOT emit + tier-0 interpreter fallback cover these.
             THandleOp::FileReaderReadLine => Err("jit handle method unsupported".to_string()),
-            THandleOp::FileWriterWriteLine => Err("jit handle method unsupported".to_string()),
-            THandleOp::FileWriterFlush => Err("jit handle method unsupported".to_string()),
+            THandleOp::FileWriterWriteLine => {
+                let line = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.io.file_writer_write_line, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, line]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::FileWriterFlush => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.io.file_writer_flush, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::JSONReaderNext => {
                 let host_ref = self
                     .module
@@ -12541,16 +13122,82 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.inst_results(call)[0])
             }
             THandleOp::StdinReadLine => Err("jit handle method unsupported".to_string()),
-            THandleOp::StdoutWrite => Err("jit handle method unsupported".to_string()),
-            THandleOp::StdoutWriteLine => Err("jit handle method unsupported".to_string()),
-            THandleOp::StdoutWriteBytes => Err("jit handle method unsupported".to_string()),
-            THandleOp::StdoutFlush => Err("jit handle method unsupported".to_string()),
-            THandleOp::StdoutIsTty => Err("jit handle method unsupported".to_string()),
-            THandleOp::StderrWrite => Err("jit handle method unsupported".to_string()),
-            THandleOp::StderrWriteLine => Err("jit handle method unsupported".to_string()),
-            THandleOp::StderrWriteBytes => Err("jit handle method unsupported".to_string()),
-            THandleOp::StderrFlush => Err("jit handle method unsupported".to_string()),
-            THandleOp::StderrIsTty => Err("jit handle method unsupported".to_string()),
+            THandleOp::StdoutWrite => {
+                let text = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.io.stdout_write, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, text]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::StdoutWriteLine => {
+                let text = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.io.stdout_write_line, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, text]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::StdoutWriteBytes => {
+                let bytes = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.io.stdout_write_bytes, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, bytes]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::StdoutFlush => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.io.stdout_flush, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::StdoutIsTty => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.io.stdout_is_tty, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::StderrWrite => {
+                let text = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.io.stderr_write, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, text]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::StderrWriteLine => {
+                let text = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.io.stderr_write_line, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, text]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::StderrWriteBytes => {
+                let bytes = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.io.stderr_write_bytes, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, bytes]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::StderrFlush => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.io.stderr_flush, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::StderrIsTty => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.io.stderr_is_tty, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::StopwatchElapsedMillis => Err("jit handle method unsupported".to_string()),
             THandleOp::ClockNow => {
                 let host = self
@@ -12805,18 +13452,25 @@ impl LowerCtx<'_, '_> {
             THandleOp::DurationIn { unit: None } => {
                 Err("jit dynamic DurationUnit falls back to AOT".to_string())
             }
-            // D-BIGINT1: `BigInt` instance methods (`.add`/`.sub`/`.mul`/`.neg`/
-            // `.to_string`) — reuses the same `rt.heap` handle host shims as the
-            // `PreciseBuiltin` ctor/binop path above. `Decimal` stays unsupported
-            // (out of this card's slice).
-            THandleOp::PreciseMethod { type_name, method } if type_name == "BigInt" => {
-                let (host_fn, extra_args) = match method.as_str() {
-                    "add" => (self.host.num.bigint_add, 1),
-                    "sub" => (self.host.num.bigint_sub, 1),
-                    "mul" => (self.host.num.bigint_mul, 1),
-                    "neg" => (self.host.num.bigint_neg, 0),
-                    "to_string" => (self.host.num.bigint_to_string, 0),
-                    _ => return Err(format!("jit handle method unsupported: BigInt::{method}")),
+            // D-BIGINT1 / D-DECIMAL1: instance methods on precise numerics.
+            THandleOp::PreciseMethod { type_name, method }
+                if type_name == "BigInt" || type_name == "Decimal" =>
+            {
+                let (host_fn, extra_args) = match (type_name.as_str(), method.as_str()) {
+                    ("BigInt", "add") => (self.host.num.bigint_add, 1),
+                    ("BigInt", "sub") => (self.host.num.bigint_sub, 1),
+                    ("BigInt", "mul") => (self.host.num.bigint_mul, 1),
+                    ("BigInt", "neg") => (self.host.num.bigint_neg, 0),
+                    ("BigInt", "to_string") => (self.host.num.bigint_to_string, 0),
+                    ("Decimal", "add") => (self.host.num.decimal_add, 1),
+                    ("Decimal", "sub") => (self.host.num.decimal_sub, 1),
+                    ("Decimal", "mul") => (self.host.num.decimal_mul, 1),
+                    ("Decimal", "to_string") => (self.host.num.decimal_to_string, 0),
+                    _ => {
+                        return Err(format!(
+                            "jit handle method unsupported: {type_name}::{method}"
+                        ))
+                    }
                 };
                 let mut arg_vals = vec![recv_val];
                 for a in args.iter().take(extra_args) {
@@ -13107,7 +13761,21 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.inst_results(call)[0])
             }
             THandleOp::ProcessChildMethod { method } => match method.as_str() {
-                "wait" => {
+                "id" if args.is_empty() => {
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.process.child_id, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "kill" | "terminate" | "interrupt" if args.is_empty() => {
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.process.child_kill, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "wait" if args.is_empty() => {
                     let host = self
                         .module
                         .declare_func_in_func(self.host.process.child_wait, self.b.func);
@@ -13177,8 +13845,28 @@ impl LowerCtx<'_, '_> {
             THandleOp::ReactiveEffectMethod { .. } => {
                 Err("jit handle method unsupported".to_string())
             }
-            THandleOp::EventMethod { .. } => Err("jit handle method unsupported".to_string()),
-            THandleOp::WatchMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::EventMethod { method } => match method.as_str() {
+                "cancel" if args.is_empty() => {
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.watcher.event_scope_cancel, self.b.func);
+                    self.b.ins().call(host, &[recv_val]);
+                    Ok(self.b.ins().iconst(types::I8, 0))
+                }
+                "is_active" if args.is_empty() => {
+                    let host = self.module.declare_func_in_func(
+                        self.host.watcher.subscription_is_active,
+                        self.b.func,
+                    );
+                    let call = self.b.ins().call(host, &[recv_val]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                _ => Err(format!("jit event method unsupported: {method}")),
+            },
+            THandleOp::WatchMethod {
+                method,
+                callback_index,
+            } => self.lower_watch_method(recv, recv_val, method, *callback_index, args),
             THandleOp::MeasurementMethod { method } => match method.as_str() {
                 "value" | "uncertainty" if args.is_empty() => {
                     let field = self
@@ -13295,7 +13983,26 @@ impl LowerCtx<'_, '_> {
                     _ => Err(format!("jit sketch method unsupported: {sketch}.{method}")),
                 }
             }
-            THandleOp::CivilTimeMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::CivilTimeMethod { method, .. } => {
+                let recv_v = self.lower_expr(recv)?;
+                let method_id = self.runtime.heap.alloc_string(method.clone());
+                let method_val = self.b.ins().iconst(types::I64, method_id);
+                let a0 = if let Some(a) = args.first() {
+                    self.lower_expr(a)?
+                } else {
+                    self.b.ins().iconst(types::I64, 0)
+                };
+                let a1 = if let Some(a) = args.get(1) {
+                    self.lower_expr(a)?
+                } else {
+                    self.b.ins().iconst(types::I64, 0)
+                };
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.time.civil_method, self.b.func);
+                let call = self.b.ins().call(host, &[recv_v, method_val, a0, a1]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::UrlMimeMethod { method, .. } => {
                 let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                     "to_string" if args.is_empty() => {
@@ -13332,7 +14039,45 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.inst_results(call)[0])
             }
             THandleOp::EmailMethod { .. } => Err("jit handle method unsupported".to_string()),
-            THandleOp::RegexMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::RegexMethod { method, .. } => {
+                let recv_v = self.lower_expr(recv)?;
+                let method_name = if method == "replace_all_with" {
+                    // Constant-string lambdas fold to replace_all (canonical
+                    // algorithm); non-constant callbacks stay unsupported.
+                    "replace_all"
+                } else {
+                    method.as_str()
+                };
+                let method_id = self.runtime.heap.alloc_string(method_name.to_string());
+                let method_val = self.b.ins().iconst(types::I64, method_id);
+                let a0 = if let Some(a) = args.first() {
+                    self.lower_expr(a)?
+                } else {
+                    self.b.ins().iconst(types::I64, 0)
+                };
+                let a1 = if let Some(a) = args.get(1) {
+                    if method == "replace_all_with" {
+                        if let Some(text) = Self::constant_string_lambda(a) {
+                            let sid = self.runtime.heap.alloc_string(text);
+                            self.b.ins().iconst(types::I64, sid)
+                        } else {
+                            return Err(
+                                "jit regex replace_all_with non-constant callback unsupported"
+                                    .to_string(),
+                            );
+                        }
+                    } else {
+                        self.lower_expr(a)?
+                    }
+                } else {
+                    self.b.ins().iconst(types::I64, 0)
+                };
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.text.regex_method, self.b.func);
+                let call = self.b.ins().call(host, &[recv_v, method_val, a0, a1]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::HttpClientMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpServerMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpReqTrailers => Err("jit handle method unsupported".to_string()),
@@ -14751,6 +15496,113 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(header);
         self.b.seal_block(exit);
         Ok(self.b.ins().iconst(types::I8, 0))
+    }
+
+    /// `if k == .Char(c)` / `.F(n)` / `.Ctrl(c)` on user enums.
+    fn lower_enum_if_let(
+        &mut self,
+        pattern: &TPattern,
+        subj: &TExpr,
+        then_body: &[TStmt],
+        else_body: Option<&[TStmt]>,
+    ) -> Result<(), String> {
+        let Pattern::Variant {
+            variant, bindings, ..
+        } = &pattern.pattern
+        else {
+            return Err("jit if-let pattern unsupported".to_string());
+        };
+        let enum_name = pattern
+            .enum_type
+            .as_deref()
+            .or_else(|| user_type_name(&subj.ty))
+            .ok_or("jit enum if-let missing type")?;
+        let f64_heap = self
+            .meta
+            .enum_variant_payload_types(enum_name, variant)
+            .and_then(|tys| tys.first().cloned())
+            .is_some_and(|ty| matches!(ty, Type::Float | Type::Float32));
+        let subject = self.lower_expr(subj)?;
+        let then_block = self.b.create_block();
+        let else_block = self.b.create_block();
+        let merge_block = self.b.create_block();
+        let eq = self.lower_pattern_condition(
+            subject,
+            &pattern.pattern,
+            Some(enum_name),
+            f64_heap,
+        )?;
+        self.b
+            .ins()
+            .brif(eq, then_block, &[], else_block, &[]);
+
+        self.b.switch_to_block(then_block);
+        self.b.seal_block(then_block);
+        let bound = if let Some(name) = bindings.first().and_then(PatSlot::as_bind) {
+            let payload_ty = self
+                .meta
+                .enum_variant_payload_types(enum_name, variant)
+                .and_then(|tys| tys.first())
+                .cloned()
+                .unwrap_or(Type::Int);
+            let payload = if f64_heap {
+                self.unpack_enum_heap_payload(subject, &payload_ty)?
+            } else {
+                self.unpack_enum_scalar(subject, &payload_ty)?
+            };
+            let payload_clif = self.meta.clif_ty(&payload_ty).unwrap_or(types::I64);
+            let var = self.fresh_var(payload_clif);
+            self.b.def_var(var, payload);
+            let key = TIR::local_place(name);
+            let old_var = self.vars.insert(key.clone(), var);
+            let old_ty = self.var_tys.insert(key.clone(), payload_ty);
+            Some((key, old_var, old_ty))
+        } else {
+            None
+        };
+        self.lower_stmts_scoped(then_body)?;
+        if let Some((key, old_var, old_ty)) = bound {
+            match old_var {
+                Some(var) => {
+                    self.vars.insert(key.clone(), var);
+                }
+                None => {
+                    self.vars.remove(&key);
+                }
+            }
+            match old_ty {
+                Some(ty) => {
+                    self.var_tys.insert(key, ty);
+                }
+                None => {
+                    self.var_tys.remove(&key);
+                }
+            }
+        }
+        let then_dead = self.dead;
+        if !then_dead {
+            self.b.ins().jump(merge_block, &[]);
+        }
+
+        self.b.switch_to_block(else_block);
+        self.b.seal_block(else_block);
+        self.dead = false;
+        if let Some(body) = else_body {
+            self.lower_stmts_scoped(body)?;
+        }
+        let else_dead = self.dead;
+        if !else_dead {
+            self.b.ins().jump(merge_block, &[]);
+        }
+
+        if then_dead && else_dead {
+            self.dead = true;
+        } else {
+            self.b.switch_to_block(merge_block);
+            self.b.seal_block(merge_block);
+            self.dead = false;
+        }
+        Ok(())
     }
 
     /// `if x == .Ok(v)` / `.Err(e)` on Result, or `if opt == Val(v)` on Option.
