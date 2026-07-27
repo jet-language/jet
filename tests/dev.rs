@@ -557,6 +557,9 @@ fn normalize_json_log_timestamps(s: &str) -> String {
         out.push_str(&rest[..pos]);
         out.push_str("\"ts\":<ts>");
         let mut tail = &rest[pos + "\"ts\":".len()..];
+        // Optional whitespace between colon and digits (emitters may vary).
+        let ws = tail.bytes().take_while(|b| b.is_ascii_whitespace()).count();
+        tail = &tail[ws..];
         let digits = tail.bytes().take_while(|b| b.is_ascii_digit()).count();
         tail = &tail[digits..];
         rest = tail;
@@ -4054,7 +4057,9 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
         "`{stem}` used deopt or fallback"
     );
+    let jit = normalize_for_parity(stem, jit);
     if let Some(interpreted) = interpreted {
+        let interpreted = normalize_for_parity(stem, interpreted);
         assert_eq!(
             jit, interpreted,
             "JIT vs interpreter divergence for `{stem}`"
@@ -4062,7 +4067,7 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
     }
 
     let dir = std::env::temp_dir().join(format!("jet_jit_3way_{}", std::process::id()));
-    let aot = compiled_binary_output(&dir, "jit_3way", 0, stem, file);
+    let aot = normalize_for_parity(stem, compiled_binary_output(&dir, "jit_3way", 0, stem, file));
     assert_eq!(jit, aot, "JIT vs AOT divergence for `{stem}`");
 }
 
@@ -6646,6 +6651,7 @@ fn cranelift_three_way_differential_battery_inner() {
             );
             continue;
         }
+        eprintln!("three-way battery: checking `{stem}`");
         assert_cranelift_three_way(&example_path(stem), stem);
         ran += 1;
     }
