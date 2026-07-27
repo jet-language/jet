@@ -118,43 +118,16 @@ pub(crate) fn run_dev(
 }
 
 /// D-PERSIST1: refresh `#Persist` bindings from the loaded bundle into the
-/// shared persist store (typed migration on shape change).
+/// shared runtime-heap persist store (typed migration on shape change).
 fn sync_persist_bindings(
     bundle: &jet::AST::ProgramBundle,
     store: &mut jet_devserver::PersistStore,
 ) {
-    for module in &bundle.modules {
-        for item in &module.items {
-            let jet::AST::Item::Const(c) = item else {
-                continue;
-            };
-            if !c.is_persist {
-                continue;
-            }
-            let shape = c
-                .ty
-                .as_ref()
-                .map(|t| format!("{t:?}"))
-                .unwrap_or_else(|| "Unknown".to_string());
-            let fresh = c
-                .ct
-                .as_ref()
-                .map(|v| format!("{v:?}"))
-                .unwrap_or_else(|| "null".to_string());
-            match store.migrate(&module.display, &c.name, &shape, &fresh) {
-                jet_devserver::PersistOutcome::Reset { reason, .. } => {
-                    eprintln!("[persist] {reason}");
-                }
-                jet_devserver::PersistOutcome::Migrated(_) => {
-                    eprintln!(
-                        "[persist] migrated `{}::{}` to new shape",
-                        module.display, c.name
-                    );
-                }
-                jet_devserver::PersistOutcome::Kept(_) => {}
-            }
-        }
+    let prep = jet_foundation::Persist::prepare_bundle(bundle);
+    for msg in &prep.messages {
+        eprintln!("{msg}");
     }
+    *store = jet_foundation::Persist::shared_clone();
 }
 
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): the `jet dev` consumer of

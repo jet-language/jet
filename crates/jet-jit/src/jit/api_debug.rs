@@ -140,6 +140,9 @@ pub(crate) fn try_resident_restart(
     if !cranelift_host_supported() {
         return Err(plan_tiers(bundle, None));
     }
+    // D-HOTSWAP1 / D-PERSIST1: clean restart drops the shared persist generation
+    // before re-seeding from the new bundle's initializers.
+    jet_foundation::Persist::shared_clear();
     crate::Encoding::register_migrations(bundle);
     super::types_meta::install_struct_redact(bundle);
     if let Err(reason) = crate::Ffi::bind_bundle_ffi(bundle) {

@@ -57,6 +57,8 @@ impl JitBackend for InterpreterBackend {
     fn restart(&mut self, bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
         #[cfg(test)]
         jet_jit::note_fallback_invoked_for_test();
+        // D-HOTSWAP1 / D-PERSIST1: interpreter restart drops shared persist.
+        jet_foundation::Persist::shared_clear();
         run_checked(bundle, try_anyway)
     }
 }

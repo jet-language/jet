@@ -993,6 +993,12 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     );
     let mut int_constants = std::collections::HashMap::new();
     let mut constants = std::collections::HashMap::new();
+    // D-PERSIST1: shared-heap overrides for `#Persist` bindings (tier-0 + tier-1).
+    let persist_prep = jet_foundation::Persist::prepare_bundle(bundle);
+    for msg in &persist_prep.messages {
+        eprintln!("{msg}");
+    }
+    let persist_overrides = persist_prep.by_name;
     for item in &module.items {
         match item {
             Item::Struct(s) => {
@@ -1040,12 +1046,20 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                 }
             }
             Item::Const(c) => {
-                if let Some(value) = &c.ct {
-                    constants.insert(c.name.clone(), value.clone());
+                let persisted = c
+                    .is_persist
+                    .then(|| persist_overrides.get(&c.name).cloned())
+                    .flatten();
+                if let Some(value) = persisted.clone().or_else(|| c.ct.clone()) {
+                    constants.insert(c.name.clone(), value);
                 }
-                let value = match &c.ct {
-                    Some(crate::AST::CtValue::Int(value)) => Some(*value),
-                    _ => match &c.value { crate::AST::Expr::Int(value, _, _, _) => Some(*value), _ => None },
+                let value = match persisted.or_else(|| c.ct.clone()) {
+                    Some(crate::AST::CtValue::Int(value)) => Some(value),
+                    Some(_) => None,
+                    None => match &c.value {
+                        crate::AST::Expr::Int(value, _, _, _) => Some(*value),
+                        _ => None,
+                    },
                 };
                 if let Some(value) = value {
                     int_constants.insert(c.name.clone(), value);
