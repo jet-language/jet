@@ -105,10 +105,11 @@ pub fn integer_binop(
     right: i64,
     signed: bool,
     bits: u8,
+    right_signed: bool,
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
     let a = integer_widen(left, signed);
-    let b = integer_widen(right, signed);
+    let b = integer_widen(right, right_signed);
     let (lo, hi) = crate::AST::int_range(signed, bits);
     let checked = |value: Option<i128>, name: &str| {
         value

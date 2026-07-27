@@ -1101,7 +1101,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             BinOp::Sub => "jet_sub",
                             BinOp::Mul => "jet_mul",
                             BinOp::Div => "jet_div",
-                            _ => unreachable!("overflow flag only set for +,-,*,/,<<,>>"),
+                            BinOp::Rem => "jet_rem",
+                            _ => unreachable!("overflow flag only set for +,-,*,/,%,<<,>>"),
                         };
                         format!("({}).{}(({}), {:?}, {})", ls, method, rs, file, line)
                     }

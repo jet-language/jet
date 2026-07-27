@@ -1353,6 +1353,7 @@ trait JetArith: Copy {
     fn jet_sub(self, rhs: Self, file: &str, line: u32) -> Self;
     fn jet_mul(self, rhs: Self, file: &str, line: u32) -> Self;
     fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self;
+    fn jet_rem(self, rhs: Self, file: &str, line: u32) -> Self;
     // D-NUMOPS1: a shift by a bit-count `>=` the value's width is undefined in C
     // and a panic in Rust — Jet traps it cleanly instead. The count comes in as
     // an `i128` so any integer width (signed or unsigned) reaches here losslessly.
@@ -1377,6 +1378,10 @@ macro_rules! jet_arith_impl {
             fn jet_div(self, rhs: Self, file: &str, line: u32) -> Self {
                 self.checked_div(rhs).unwrap_or_else(|| jet_panic(file, line,
                     &format!("this division can't be done (dividing by zero, or overflow)")))
+            }
+            fn jet_rem(self, rhs: Self, file: &str, line: u32) -> Self {
+                self.checked_rem(rhs).unwrap_or_else(|| jet_panic(file, line,
+                    "attempt to calculate the remainder with overflow"))
             }
             fn jet_shl(self, bits: i128, file: &str, line: u32) -> Self {
                 let w = (Self::BITS) as i128;

@@ -606,13 +606,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // field. We instead replay `operand_is_integer` on the AST operands.
             // `operand_is_integer` inspects only the LEFT spine of nested
             // arithmetic, so check the left operand first, then the right.
-            // D-NUMOPS1: `+`/`-`/`*`/`/` trap on value overflow; `<<`/`>>` trap on a
-            // bit-count out of the type's width (both via the `JetArith` helpers, so
-            // no raw Rust overflow panic leaks — I2). A shift's overflow is governed
-            // by its LEFT operand's integer-ness (the value), never the count.
-            let arith_overflow = matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
-                && (ast_operand_is_integer(l, env) == Some(true)
-                    || ast_operand_is_integer(r, env) == Some(true));
+            // D-NUMOPS1: `+`/`-`/`*`/`/`/`%` trap on value overflow; `<<`/`>>`
+            // trap on a bit-count out of the type's width (both via the `JetArith`
+            // helpers, so no raw Rust overflow panic leaks — I2). A shift's
+            // overflow is governed by its LEFT operand's integer-ness (the value),
+            // never the count.
+            let arith_overflow = matches!(
+                op,
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem
+            ) && (ast_operand_is_integer(l, env) == Some(true)
+                || ast_operand_is_integer(r, env) == Some(true));
             let shift_overflow = matches!(op, BinOp::Shl | BinOp::Shr)
                 && ast_operand_is_integer(l, env) == Some(true);
             let overflow = arith_overflow || shift_overflow;

@@ -253,11 +253,8 @@ extern "C" fn jet_jit_intn_binop(
     };
     let signed = signed != 0;
     let bits = bits as u8;
-    let shift_count = if right_signed != 0 {
-        right as i128
-    } else {
-        right as u64 as i128
-    };
+    let right_signed = right_signed != 0;
+    let shift_count = MathLayout::integer_widen(right, right_signed);
     if let Some(message) = MathLayout::integer_shift_trap(op, shift_count, bits) {
         with_runtime_mut(|rt| rt.set_trap(&message));
         return 0;
@@ -271,7 +268,9 @@ extern "C" fn jet_jit_intn_binop(
     }
     let span = jet_codegen::Diagnostics::Span::new(0, 0);
     let result = match mode {
-        INTN_MODE_TRAP => MathLayout::integer_binop(op, left, right, signed, bits, span),
+        INTN_MODE_TRAP => {
+            MathLayout::integer_binop(op, left, right, signed, bits, right_signed, span)
+        }
         INTN_MODE_WRAPPING => MathLayout::overflow_opt(
             jet_codegen::Syntax::BUILTIN_WRAPPING,
             op,

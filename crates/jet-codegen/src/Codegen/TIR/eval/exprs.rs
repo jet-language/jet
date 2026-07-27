@@ -114,12 +114,17 @@ impl EvalCtx<'_> {
                 if let Type::IntN { signed, bits } = &lhs.ty {
                     let a = as_int(&l, self.span())?;
                     let b = as_int(&r, self.span())?;
+                    let right_signed =
+                        crate::Comptime::MathLayout::integer_type_layout(&rhs.ty)
+                            .map(|(signed, _)| signed)
+                            .unwrap_or(true);
                     return crate::Comptime::MathLayout::integer_binop(
                         *op,
                         a,
                         b,
                         *signed,
                         *bits,
+                        right_signed,
                         self.span(),
                     );
                 }
@@ -153,12 +158,17 @@ impl EvalCtx<'_> {
                 }
                 for (i, op) in ops.iter().enumerate() {
                     let part = if let Type::IntN { signed, bits } = &operands[i].ty {
+                        let right_signed =
+                            crate::Comptime::MathLayout::integer_type_layout(&operands[i + 1].ty)
+                                .map(|(signed, _)| signed)
+                                .unwrap_or(true);
                         crate::Comptime::MathLayout::integer_binop(
                             *op,
                             as_int(&vals[i], self.span())?,
                             as_int(&vals[i + 1], self.span())?,
                             *signed,
                             *bits,
+                            right_signed,
                             self.span(),
                         )?
                     } else {

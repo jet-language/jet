@@ -4214,13 +4214,141 @@ fn run() {
         "fixed_width_remainder_trap",
         &shown,
     );
-    assert_eq!(aot.exit_code, 101, "AOT remainder trap exit: {aot:?}");
+    assert_ne!(aot.exit_code, 101, "AOT leaked a raw Rust panic: {aot:?}");
+    assert_eq!(aot.exit_code, 70, "AOT remainder trap exit: {aot:?}");
     assert!(aot.stdout.is_empty(), "AOT printed a wrapped result: {aot:?}");
     assert!(
         aot.stderr.contains(trap),
         "AOT remainder trap lost overflow detail: {}",
         aot.stderr
     );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn fixed_width_mixed_sign_shift_counts_trap_across_tiers() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let cases = [
+        (
+            "shl_negative",
+            "U8",
+            "I8",
+            "U8.{1}",
+            "I8.{-1}",
+            "<<",
+            "shifting left by -1 bits is out of range (this type is 8 bits wide)",
+        ),
+        (
+            "shr_negative",
+            "U8",
+            "I8",
+            "U8.{1}",
+            "I8.{-1}",
+            ">>",
+            "shifting right by -1 bits is out of range (this type is 8 bits wide)",
+        ),
+        (
+            "shl_huge",
+            "I8",
+            "U64",
+            "I8.{1}",
+            "U64.MAX",
+            "<<",
+            "shifting left by 18446744073709551615 bits is out of range (this type is 8 bits wide)",
+        ),
+        (
+            "shr_width",
+            "U8",
+            "U8",
+            "U8.{1}",
+            "U8.{8}",
+            ">>",
+            "shifting right by 8 bits is out of range (this type is 8 bits wide)",
+        ),
+    ];
+    let dir =
+        std::env::temp_dir().join(format!("jet_fixed_width_shift_traps_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    for (i, (tag, value_ty, count_ty, value, count, operator, trap)) in
+        cases.into_iter().enumerate()
+    {
+        let source = format!(
+            "fn shift(value: {value_ty}, count: {count_ty}) -> {value_ty} {{\n    return value {operator} count\n}}\n\nfn run() {{\n    print(shift({value}, {count}))\n}}\n"
+        );
+        let file = dir.join(format!("{tag}.jet"));
+        fs::write(&file, &source).unwrap();
+        let shown = file.to_string_lossy().to_string();
+        let bundle = checked_bundle_from_path(&shown);
+        assert!(
+            jet_jit::resident_jit_safe_bundle(&bundle),
+            "{tag} must stay resident-safe: {}",
+            jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        );
+        jet_jit::try_compile_bundle(&bundle)
+            .unwrap_or_else(|reason| panic!("{tag} must JIT-compile: {reason}"));
+
+        let interpreted = match dev_iteration(&shown, false, true) {
+            RunOutcome::Problems(diags) => diags,
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => panic!(
+                "{tag} interpreter did not trap: stdout={stdout:?} stderr={stderr:?} exit={exit_code}"
+            ),
+        };
+        jet_jit::reset_jit_trace_for_test();
+        let resident = match run_cranelift_outcome_without_fallback(&source, tag) {
+            RunOutcome::Problems(diags) => diags,
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => panic!(
+                "{tag} resident JIT did not trap: stdout={stdout:?} stderr={stderr:?} exit={exit_code}"
+            ),
+        };
+        assert!(jet_jit::jit_executed_for_test(), "{tag} did not run natively");
+        assert!(
+            !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+            "{tag} used deopt or fallback"
+        );
+
+        assert_eq!(interpreted.len(), 1, "{tag} interpreter trap count");
+        assert_eq!(resident.len(), 1, "{tag} resident JIT trap count");
+        let interpreted = &interpreted[0];
+        let resident = &resident[0];
+        assert_eq!(resident.code, interpreted.code, "{tag} trap code drift");
+        assert_eq!(resident.what, interpreted.what, "{tag} trap summary drift");
+        assert_eq!(resident.why, interpreted.why, "{tag} trap detail drift");
+        assert_eq!(resident.fix, interpreted.fix, "{tag} trap fix drift");
+        assert_eq!(interpreted.code, "E0953", "{tag} interpreter trap code");
+        assert!(
+            interpreted.why.contains(trap),
+            "{tag} interpreter trap detail: {}",
+            interpreted.why
+        );
+
+        let aot = compiled_binary_output(&dir, tag, i, tag, &shown);
+        assert_ne!(aot.exit_code, 101, "{tag} leaked a raw Rust panic: {aot:?}");
+        assert_eq!(aot.exit_code, 70, "{tag} AOT shift trap exit: {aot:?}");
+        assert!(aot.stdout.is_empty(), "{tag} printed a shifted result: {aot:?}");
+        assert!(
+            aot.stderr.contains(trap),
+            "{tag} AOT trap detail: {}",
+            aot.stderr
+        );
+        assert!(
+            !aot.stderr.contains("panicked at"),
+            "{tag} leaked Rust panic presentation: {}",
+            aot.stderr
+        );
+    }
     let _ = fs::remove_dir_all(&dir);
 }
 
