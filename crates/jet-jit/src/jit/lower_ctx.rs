@@ -12603,8 +12603,75 @@ impl LowerCtx<'_, '_> {
                     Err("jit builtin method unsupported".to_string())
                 }
             }
-            TBuiltinOp::InsertMap => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::AddNewMap => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::InsertMap => {
+                // Map.add(k, v) → Option<V>: previous value if any, then overwrite.
+                let key = self.lower_expr(&args[0])?;
+                let val = self.lower_expr(&args[1])?;
+                let val = match self.meta.clif_ty(&args[1].ty) {
+                    Some(types::I32) => self.b.ins().uextend(types::I64, val),
+                    Some(types::I8) => self.b.ins().uextend(types::I64, val),
+                    Some(types::F64) => self.b.ins().bitcast(
+                        types::I64,
+                        Self::scalar_bitcast_memflags(),
+                        val,
+                    ),
+                    _ => val,
+                };
+                let get_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_get_opt, self.b.func);
+                let prev_call = self.b.ins().call(get_ref, &[recv_val, key]);
+                let prev = self.b.inst_results(prev_call)[0];
+                let insert_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_insert, self.b.func);
+                self.b.ins().call(insert_ref, &[recv_val, key, val]);
+                Ok(prev)
+            }
+            TBuiltinOp::AddNewMap => {
+                // Map.add_new(k, v) → Bool: insert only when vacant.
+                let key = self.lower_expr(&args[0])?;
+                let val = self.lower_expr(&args[1])?;
+                let val = match self.meta.clif_ty(&args[1].ty) {
+                    Some(types::I32) => self.b.ins().uextend(types::I64, val),
+                    Some(types::I8) => self.b.ins().uextend(types::I64, val),
+                    Some(types::F64) => self.b.ins().bitcast(
+                        types::I64,
+                        Self::scalar_bitcast_memflags(),
+                        val,
+                    ),
+                    _ => val,
+                };
+                let get_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_get_opt, self.b.func);
+                let prev_call = self.b.ins().call(get_ref, &[recv_val, key]);
+                let prev = self.b.inst_results(prev_call)[0];
+                let zero = self.b.ins().iconst(types::I64, 0);
+                let occupied = self.b.ins().icmp(IntCC::NotEqual, prev, zero);
+                let vac_block = self.b.create_block();
+                let occ_block = self.b.create_block();
+                let merge = self.b.create_block();
+                self.b.append_block_param(merge, types::I8);
+                self.b
+                    .ins()
+                    .brif(occupied, occ_block, &[], vac_block, &[]);
+                self.b.switch_to_block(vac_block);
+                self.b.seal_block(vac_block);
+                let insert_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_insert, self.b.func);
+                self.b.ins().call(insert_ref, &[recv_val, key, val]);
+                let tru = self.b.ins().iconst(types::I8, 1);
+                self.b.ins().jump(merge, &[tru]);
+                self.b.switch_to_block(occ_block);
+                self.b.seal_block(occ_block);
+                let fal = self.b.ins().iconst(types::I8, 0);
+                self.b.ins().jump(merge, &[fal]);
+                self.b.switch_to_block(merge);
+                self.b.seal_block(merge);
+                Ok(self.b.block_params(merge)[0])
+            }
             TBuiltinOp::InsertList => {
                 let idx = self.lower_expr(&args[0])?;
                 let val = self.lower_expr(&args[1])?;

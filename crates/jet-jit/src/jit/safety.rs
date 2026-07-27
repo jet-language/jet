@@ -214,6 +214,20 @@ pub(crate) fn jit_map_string_type(ty: &Type) -> bool {
     matches!(ty, Type::Map { key, .. } if matches!(key.as_ref(), Type::String))
 }
 
+/// `Map<Int, V>` with scalar/handle values — Int keys share the i64 map heap ABI.
+pub(crate) fn jit_map_int_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Map { key, value, .. }
+            if matches!(key.as_ref(), Type::Int)
+                && (jit_value_type(value) || matches!(value.as_ref(), Type::String))
+    )
+}
+
+fn jit_map_resident_type(ty: &Type) -> bool {
+    (jit_map_string_type(ty) || jit_map_int_type(ty)) && !jit_map_intn_value_type(ty)
+}
+
 fn jit_map_intn_value_type(ty: &Type) -> bool {
     matches!(ty, Type::Map { value, .. } if matches!(value.as_ref(), Type::IntN { .. }))
 }
@@ -713,9 +727,14 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             }
         }
         TExprKind::MapLit(entries) => {
-            jit_map_string_type(&expr.ty)
+            jit_map_resident_type(&expr.ty)
                 && entries.iter().all(|(k, v)| {
-                    matches!(&k.ty, Type::String)
+                    let key_ok = if jit_map_int_type(&expr.ty) {
+                        matches!(&k.ty, Type::Int)
+                    } else {
+                        matches!(&k.ty, Type::String)
+                    };
+                    key_ok
                         && jit_value_type(&v.ty)
                         && resident_safe_expr(k, callees)
                         && resident_safe_expr(v, callees)
@@ -768,8 +787,13 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             ..
         } => {
             if *is_map {
-                jit_map_string_type(&base.ty)
-                    && matches!(&index.ty, Type::String)
+                let key_ok = if jit_map_int_type(&base.ty) {
+                    matches!(&index.ty, Type::Int)
+                } else {
+                    jit_map_string_type(&base.ty) && matches!(&index.ty, Type::String)
+                };
+                key_ok
+                    && !jit_map_intn_value_type(&base.ty)
                     && resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
             } else {
@@ -1523,11 +1547,26 @@ fn resident_safe_builtin_op(
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::GetMap => {
-            jit_map_string_type(&recv.ty)
-                && !jit_map_intn_value_type(&recv.ty)
+            jit_map_resident_type(&recv.ty)
                 && args.len() == 1
-                && matches!(&args[0].ty, Type::String)
+                && (if jit_map_int_type(&recv.ty) {
+                    matches!(&args[0].ty, Type::Int)
+                } else {
+                    matches!(&args[0].ty, Type::String)
+                })
                 && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::InsertMap | TBuiltinOp::AddNewMap => {
+            jit_map_resident_type(&recv.ty)
+                && args.len() == 2
+                && (if jit_map_int_type(&recv.ty) {
+                    matches!(&args[0].ty, Type::Int)
+                } else {
+                    matches!(&args[0].ty, Type::String)
+                })
+                && jit_value_type(&args[1].ty)
+                && resident_safe_expr(&args[0], callees)
+                && resident_safe_expr(&args[1], callees)
         }
         TBuiltinOp::JoinSep => {
             (jit_list_native_type(&recv.ty) || jit_list_iter_elem_type(&recv.ty).is_some())
@@ -1984,8 +2023,13 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             value,
         } => {
             if *is_map {
-                jit_map_string_type(&base.ty)
-                    && matches!(&index.ty, Type::String)
+                let key_ok = if jit_map_int_type(&base.ty) {
+                    matches!(&index.ty, Type::Int)
+                } else {
+                    jit_map_string_type(&base.ty) && matches!(&index.ty, Type::String)
+                };
+                key_ok
+                    && !jit_map_intn_value_type(&base.ty)
                     && jit_value_type(&value.ty)
                     && resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
