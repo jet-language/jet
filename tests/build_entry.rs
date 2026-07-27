@@ -623,6 +623,20 @@ fn run() {}
 
 #[test]
 fn program_info_uses_qualified_collision_free_type_function_and_method_identities() {
+    // Programmable-build / effect-facts frames exceed the default test thread
+    // stack under full-suite parallelism. Same pattern as distinct-conversion
+    // and LSP incremental diag parity (ddd6dca7f).
+    let worker = std::thread::Builder::new()
+        .name("build-entry-program-identities".into())
+        .stack_size(32 * 1024 * 1024)
+        .spawn(run_program_info_uses_qualified_collision_free_type_function_and_method_identities)
+        .expect("start build_entry program-identities worker");
+    if let Err(payload) = worker.join() {
+        std::panic::resume_unwind(payload);
+    }
+}
+
+fn run_program_info_uses_qualified_collision_free_type_function_and_method_identities() {
     let root = project("program-identities");
     write(&root.join("left.jet"), "use core.net as net\npub enum Choice { A }\nfn helper() { net.tcp_connect(\"127.0.0.1:1\") ?? panic(\"net\") }\npub fn same() { helper(); panic(\"left\") }\npub fn answer() => Int { return 7 }\n");
     write(&root.join("right.jet"), "pub struct Choice { value: Int }\nimpl Choice { pub fn inspect(self) {} }\nfn helper() {}\npub fn same() { helper() }\n");
@@ -661,6 +675,20 @@ fn run() { left.same(); right.same() }
 
 #[test]
 fn programmable_build_executes_destination_owned_distinct_conversion() {
+    // Programmable-build / distinct-conversion frames exceed the default test
+    // thread stack under full-suite parallelism. Match LSP incremental diag
+    // parity (ddd6dca7f): isolate one worker with a larger stack.
+    let worker = std::thread::Builder::new()
+        .name("build-entry-distinct-conversion".into())
+        .stack_size(32 * 1024 * 1024)
+        .spawn(run_programmable_build_executes_destination_owned_distinct_conversion)
+        .expect("start build_entry distinct-conversion worker");
+    if let Err(payload) = worker.join() {
+        std::panic::resume_unwind(payload);
+    }
+}
+
+fn run_programmable_build_executes_destination_owned_distinct_conversion() {
     let root = project("distinct-conversion");
     let entry = root.join("main.jet");
     write(
@@ -1042,6 +1070,20 @@ fn run() {{}}
 
 #[test]
 fn pure_core_call_inside_impure_does_not_require_allow_impure() {
+    // Programmable-build frames exceed the default test thread stack under
+    // full-suite parallelism. Same pattern as distinct-conversion /
+    // program-identities (ddd6dca7f).
+    let worker = std::thread::Builder::new()
+        .name("build-entry-pure-inside-impure".into())
+        .stack_size(32 * 1024 * 1024)
+        .spawn(run_pure_core_call_inside_impure_does_not_require_allow_impure)
+        .expect("start build_entry pure-inside-impure worker");
+    if let Err(payload) = worker.join() {
+        std::panic::resume_unwind(payload);
+    }
+}
+
+fn run_pure_core_call_inside_impure_does_not_require_allow_impure() {
     let root = project("pure-inside-impure");
     let entry = root.join("main.jet");
     write(
