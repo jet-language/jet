@@ -67,7 +67,7 @@ struct JetBrowserCapabilities {
     profile: String,
 }
 
-/// D-BROWSER-AUTO1=A (#1190): BiDi event with redacted network inspection facts.
+/// D-BROWSER-AUTO1=A (#1190/#1191): BiDi event with redacted network/download facts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct JetBrowserEvent {
     method: String,
@@ -76,6 +76,8 @@ struct JetBrowserEvent {
     url_hash: String,
     is_blocked: bool,
     status_code: i64,
+    download_id: String,
+    suggested_filename_hash: String,
 }
 
 /// D-BROWSER-AUTO1=A (#1190): network intercept handle (explicit remove).
@@ -297,6 +299,7 @@ fn jet_browser_event_network_facts(
         .unwrap_or_default();
     let url_hash = request
         .and_then(|request| jet_browser_string(request, "url").ok())
+        .or_else(|| jet_browser_string(params, "url").ok())
         .map(|url| jet_browser_fact_hash(&url))
         .unwrap_or_default();
     let status_code = jet_browser_get(params, "response")
@@ -308,6 +311,17 @@ fn jet_browser_event_network_facts(
         })
         .unwrap_or(0);
     (request_id, request_method, url_hash, is_blocked, status_code)
+}
+
+fn jet_browser_event_download_facts(value: &jet_std::JSON) -> (String, String) {
+    let Some(params) = jet_browser_get(value, "params") else {
+        return (String::new(), String::new());
+    };
+    let download_id = jet_browser_string(params, "download").unwrap_or_default();
+    let suggested_filename_hash = jet_browser_string(params, "suggestedFilename")
+        .map(|name| jet_browser_fact_hash(&name))
+        .unwrap_or_default();
+    (download_id, suggested_filename_hash)
 }
 
 fn jet_browser_capture_event(
@@ -323,6 +337,7 @@ fn jet_browser_capture_event(
     let method = jet_browser_string(value, "method")?;
     let (request_id, request_method, url_hash, is_blocked, status_code) =
         jet_browser_event_network_facts(value);
+    let (download_id, suggested_filename_hash) = jet_browser_event_download_facts(value);
     jet_browser_trace_push(state, format!("event:{}", jet_browser_fact_hash(&method)));
     if state.events.len() == JET_BROWSER_EVENT_LIMIT {
         state.events.pop_front();
@@ -334,6 +349,8 @@ fn jet_browser_capture_event(
         url_hash,
         is_blocked,
         status_code,
+        download_id,
+        suggested_filename_hash,
     });
     Ok(true)
 }
@@ -346,6 +363,7 @@ fn jet_browser_profile_allows(profile: &str, method: &str) -> bool {
         "session.subscribe",
         "browser.createUserContext",
         "browser.removeUserContext",
+        "browser.setDownloadBehavior",
         "browsingContext.create",
         "browsingContext.close",
         "browsingContext.getTree",
@@ -353,6 +371,7 @@ fn jet_browser_profile_allows(profile: &str, method: &str) -> bool {
         "browsingContext.reload",
         "browsingContext.locateNodes",
         "browsingContext.captureScreenshot",
+        "browsingContext.print",
         "input.performActions",
         "input.releaseActions",
         "input.setFiles",
@@ -361,6 +380,9 @@ fn jet_browser_profile_allows(profile: &str, method: &str) -> bool {
         "network.failRequest",
         "network.provideResponse",
         "network.removeIntercept",
+        "storage.getCookies",
+        "storage.setCookie",
+        "storage.deleteCookies",
         "script.callFunction",
         "script.disown",
         "script.evaluate",
@@ -848,6 +870,28 @@ fn jet_browser_fulfill_request(
     .map(|_| ())
 }
 
+/// D-BROWSER-AUTO1=A (#1191): allow downloads into an absolute destination folder.
+fn jet_browser_allow_downloads(
+    browser: &JetBrowser,
+    folder: &String,
+) -> Result<(), JetBrowserError> {
+    if folder.is_empty() {
+        return Err(JetBrowserError::new("protocol"));
+    }
+    jet_browser_command(
+        browser,
+        "browser.setDownloadBehavior",
+        jet_browser_object(vec![(
+            "downloadBehavior",
+            jet_browser_object(vec![
+                ("type", jet_browser_text("allowed")),
+                ("destinationFolder", jet_browser_text(folder)),
+            ]),
+        )]),
+    )
+    .map(|_| ())
+}
+
 fn jet_browser_protocol(
     browser: &JetBrowser,
     kind: &String,
@@ -980,6 +1024,257 @@ fn jet_browser_page_goto(
         ]),
     )
     .map(|_| ())
+}
+
+fn jet_browser_page_partition(page: &JetBrowserPage) -> jet_std::JSON {
+    jet_browser_object(vec![
+        ("type", jet_browser_text("context")),
+        ("context", jet_browser_text(&page.state.id)),
+    ])
+}
+
+fn jet_browser_bytes_value(text: &str) -> jet_std::JSON {
+    jet_browser_object(vec![
+        ("type", jet_browser_text("string")),
+        ("value", jet_browser_text(text)),
+    ])
+}
+
+/// D-BROWSER-AUTO1=A (#1191): viewport PNG screenshot as base64 (never traced).
+fn jet_browser_page_screenshot(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
+    if page.state.closed.get() || page.state.context.closed.get() {
+        return Err(JetBrowserError::new("closed"));
+    }
+    let result = jet_browser_command(
+        &page.state.browser,
+        "browsingContext.captureScreenshot",
+        jet_browser_object(vec![
+            ("context", jet_browser_text(&page.state.id)),
+            (
+                "format",
+                jet_browser_object(vec![("type", jet_browser_text("image/png"))]),
+            ),
+        ]),
+    )?;
+    jet_browser_string(&result, "data")
+}
+
+/// D-BROWSER-AUTO1=A (#1191): print-to-PDF as base64 (never traced).
+fn jet_browser_page_pdf(page: &JetBrowserPage) -> Result<String, JetBrowserError> {
+    if page.state.closed.get() || page.state.context.closed.get() {
+        return Err(JetBrowserError::new("closed"));
+    }
+    let result = jet_browser_command(
+        &page.state.browser,
+        "browsingContext.print",
+        jet_browser_object(vec![("context", jet_browser_text(&page.state.id))]),
+    )?;
+    jet_browser_string(&result, "data")
+}
+
+/// D-BROWSER-AUTO1=A (#1191): set a cookie in the page's storage partition.
+fn jet_browser_page_set_cookie(
+    page: &JetBrowserPage,
+    name: &String,
+    value: &String,
+    domain: &String,
+) -> Result<(), JetBrowserError> {
+    if page.state.closed.get() || page.state.context.closed.get() {
+        return Err(JetBrowserError::new("closed"));
+    }
+    if name.is_empty() || domain.is_empty() {
+        return Err(JetBrowserError::new("protocol"));
+    }
+    jet_browser_command(
+        &page.state.browser,
+        "storage.setCookie",
+        jet_browser_object(vec![
+            (
+                "cookie",
+                jet_browser_object(vec![
+                    ("name", jet_browser_text(name)),
+                    ("value", jet_browser_bytes_value(value)),
+                    ("domain", jet_browser_text(domain)),
+                ]),
+            ),
+            ("partition", jet_browser_page_partition(page)),
+        ]),
+    )
+    .map(|_| ())
+}
+
+fn jet_browser_cookie_string_value(cookie: &jet_std::JSON) -> Result<String, JetBrowserError> {
+    let Some(value) = jet_browser_get(cookie, "value") else {
+        return Err(JetBrowserError::new("protocol"));
+    };
+    match jet_browser_get(value, "type") {
+        Some(jet_std::JSON::Text(kind)) if kind == "string" || kind == "base64" => {
+            jet_browser_string(value, "value")
+        }
+        _ => Err(JetBrowserError::new("protocol")),
+    }
+}
+
+/// D-BROWSER-AUTO1=A (#1191): read one cookie value by name (caller-owned; not traced).
+fn jet_browser_page_cookie(
+    page: &JetBrowserPage,
+    name: &String,
+) -> Result<Option<String>, JetBrowserError> {
+    if page.state.closed.get() || page.state.context.closed.get() {
+        return Err(JetBrowserError::new("closed"));
+    }
+    if name.is_empty() {
+        return Err(JetBrowserError::new("protocol"));
+    }
+    let result = jet_browser_command(
+        &page.state.browser,
+        "storage.getCookies",
+        jet_browser_object(vec![
+            (
+                "filter",
+                jet_browser_object(vec![("name", jet_browser_text(name))]),
+            ),
+            ("partition", jet_browser_page_partition(page)),
+        ]),
+    )?;
+    let Some(jet_std::JSON::Array(cookies)) = jet_browser_get(&result, "cookies") else {
+        return Err(JetBrowserError::new("protocol"));
+    };
+    match cookies.first() {
+        None => Ok(None),
+        Some(cookie) => Ok(Some(jet_browser_cookie_string_value(cookie)?)),
+    }
+}
+
+/// D-BROWSER-AUTO1=A (#1191): delete cookies in the page partition.
+fn jet_browser_page_clear_cookies(page: &JetBrowserPage) -> Result<(), JetBrowserError> {
+    if page.state.closed.get() || page.state.context.closed.get() {
+        return Err(JetBrowserError::new("closed"));
+    }
+    jet_browser_command(
+        &page.state.browser,
+        "storage.deleteCookies",
+        jet_browser_object(vec![("partition", jet_browser_page_partition(page))]),
+    )
+    .map(|_| ())
+}
+
+fn jet_browser_storage_kind_ok(kind: &str) -> bool {
+    matches!(kind, "local" | "session")
+}
+
+fn jet_browser_page_storage_call(
+    page: &JetBrowserPage,
+    function: &str,
+    args: Vec<jet_std::JSON>,
+) -> Result<jet_std::JSON, JetBrowserError> {
+    if page.state.closed.get() || page.state.context.closed.get() {
+        return Err(JetBrowserError::new("closed"));
+    }
+    jet_browser_command(
+        &page.state.browser,
+        "script.callFunction",
+        jet_browser_object(vec![
+            ("functionDeclaration", jet_browser_text(function)),
+            ("awaitPromise", jet_std::JSON::Boolean(false)),
+            (
+                "target",
+                jet_browser_object(vec![("context", jet_browser_text(&page.state.id))]),
+            ),
+            ("arguments", jet_std::JSON::Array(args)),
+        ]),
+    )
+}
+
+fn jet_browser_remote_string(
+    result: &jet_std::JSON,
+) -> Result<Option<String>, JetBrowserError> {
+    let Some(value) = jet_browser_get(result, "result") else {
+        return Err(JetBrowserError::new("protocol"));
+    };
+    match jet_browser_get(value, "type") {
+        Some(jet_std::JSON::Text(kind)) if kind == "null" || kind == "undefined" => Ok(None),
+        Some(jet_std::JSON::Text(kind)) if kind == "string" => {
+            Ok(Some(jet_browser_string(value, "value")?))
+        }
+        _ => Err(JetBrowserError::new("protocol")),
+    }
+}
+
+/// D-BROWSER-AUTO1=A (#1191): read local/session storage (kind: "local"|"session").
+fn jet_browser_page_storage_get(
+    page: &JetBrowserPage,
+    kind: &String,
+    key: &String,
+) -> Result<Option<String>, JetBrowserError> {
+    if !jet_browser_storage_kind_ok(kind) || key.is_empty() {
+        return Err(JetBrowserError::new("protocol"));
+    }
+    let store = if kind == "local" {
+        "localStorage"
+    } else {
+        "sessionStorage"
+    };
+    let function = format!("function(key) {{ return {store}.getItem(key); }}");
+    let result = jet_browser_page_storage_call(
+        page,
+        &function,
+        vec![jet_browser_object(vec![
+            ("type", jet_browser_text("string")),
+            ("value", jet_browser_text(key)),
+        ])],
+    )?;
+    jet_browser_remote_string(&result)
+}
+
+/// D-BROWSER-AUTO1=A (#1191): write local/session storage.
+fn jet_browser_page_storage_set(
+    page: &JetBrowserPage,
+    kind: &String,
+    key: &String,
+    value: &String,
+) -> Result<(), JetBrowserError> {
+    if !jet_browser_storage_kind_ok(kind) || key.is_empty() {
+        return Err(JetBrowserError::new("protocol"));
+    }
+    let store = if kind == "local" {
+        "localStorage"
+    } else {
+        "sessionStorage"
+    };
+    let function = format!("function(key, value) {{ {store}.setItem(key, value); }}");
+    jet_browser_page_storage_call(
+        page,
+        &function,
+        vec![
+            jet_browser_object(vec![
+                ("type", jet_browser_text("string")),
+                ("value", jet_browser_text(key)),
+            ]),
+            jet_browser_object(vec![
+                ("type", jet_browser_text("string")),
+                ("value", jet_browser_text(value)),
+            ]),
+        ],
+    )
+    .map(|_| ())
+}
+
+/// D-BROWSER-AUTO1=A (#1191): clear local/session storage.
+fn jet_browser_page_storage_clear(
+    page: &JetBrowserPage,
+    kind: &String,
+) -> Result<(), JetBrowserError> {
+    if !jet_browser_storage_kind_ok(kind) {
+        return Err(JetBrowserError::new("protocol"));
+    }
+    let store = if kind == "local" {
+        "localStorage"
+    } else {
+        "sessionStorage"
+    };
+    let function = format!("function() {{ {store}.clear(); }}");
+    jet_browser_page_storage_call(page, &function, Vec::new()).map(|_| ())
 }
 
 fn jet_browser_css_attr_equals(attr: &str, value: &str) -> String {
@@ -1404,6 +1699,33 @@ fn jet_browser_locator_press(
     .map(|_| ())
 }
 
+/// D-BROWSER-AUTO1=A (#1191): set file input paths via BiDi input.setFiles.
+fn jet_browser_locator_set_files(
+    locator: &JetBrowserLocator,
+    path: &String,
+) -> Result<(), JetBrowserError> {
+    if path.is_empty() {
+        return Err(JetBrowserError::new("protocol"));
+    }
+    let shared_id = jet_browser_locator_resolve(locator)?;
+    jet_browser_command(
+        &locator.page.browser,
+        "input.setFiles",
+        jet_browser_object(vec![
+            ("context", jet_browser_text(&locator.page.id)),
+            (
+                "element",
+                jet_browser_object(vec![("sharedId", jet_browser_text(&shared_id))]),
+            ),
+            (
+                "files",
+                jet_std::JSON::Array(vec![jet_browser_text(path)]),
+            ),
+        ]),
+    )
+    .map(|_| ())
+}
+
 fn jet_browser_event_kind(event: &JetBrowserEvent) -> String {
     event.method.clone()
 }
@@ -1426,6 +1748,14 @@ fn jet_browser_event_is_blocked(event: &JetBrowserEvent) -> bool {
 
 fn jet_browser_event_status_code(event: &JetBrowserEvent) -> i64 {
     event.status_code
+}
+
+fn jet_browser_event_download_id(event: &JetBrowserEvent) -> String {
+    event.download_id.clone()
+}
+
+fn jet_browser_event_suggested_filename_hash(event: &JetBrowserEvent) -> String {
+    event.suggested_filename_hash.clone()
 }
 
 fn jet_browser_protocol_send(

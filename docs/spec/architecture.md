@@ -233,10 +233,17 @@ locator actions (`click`, `hover`, `fill`, `press`), and bounded deterministic
 waits (`wait`, `wait_gone`). `Browser.subscribe` / `next_event` deliver BiDi
 events; network events expose redacted inspection facts (`request_id`,
 `request_method`, `url_hash`, `is_blocked`, `status_code`) without putting URLs
-or payloads in the trace. `add_intercept` / `add_intercept_url` register BiDi
+or payloads in the trace. Download events expose `download_id` and
+`suggested_filename_hash` the same way. `add_intercept` / `add_intercept_url` register BiDi
 network intercepts; paused requests use `continue_request`, `fail_request`, or
 `fulfill_request`, and `BrowserIntercept.remove` is explicit and idempotent.
-The expert path
+`allow_downloads` sets BiDi download behavior to a destination folder.
+Page cookie APIs (`set_cookie`, `cookie`, `clear_cookies`) speak the BiDi
+`storage` module against the page partition. `storage_get` / `storage_set` /
+`storage_clear` read and write `local` or `session` web storage through
+`script.callFunction`. `page.screenshot` and `page.pdf` return base64 PNG/PDF
+bytes to the caller (never into the trace). Locators upload files with
+`set_files` (`input.setFiles`). The expert path
 exposes raw BiDi and capability-checked CDP commands through
 `Browser.protocol`.
 

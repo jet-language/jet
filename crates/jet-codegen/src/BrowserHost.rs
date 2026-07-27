@@ -4,6 +4,7 @@
 //! the CtValue handle table needed by the structured TIR evaluator.
 #![allow(dead_code)]
 
+use crate::AST::Type;
 use crate::Comptime::CtValue;
 use crate::Diagnostics::{Diagnostic, Span};
 use std::cell::{Cell, RefCell};
@@ -147,6 +148,11 @@ fn event_ct(event: JetBrowserEvent) -> CtValue {
             ("url_hash".to_string(), CtValue::Str(event.url_hash)),
             ("is_blocked".to_string(), CtValue::Bool(event.is_blocked)),
             ("status_code".to_string(), CtValue::Int(event.status_code)),
+            ("download_id".to_string(), CtValue::Str(event.download_id)),
+            (
+                "suggested_filename_hash".to_string(),
+                CtValue::Str(event.suggested_filename_hash),
+            ),
         ],
     }
 }
@@ -341,6 +347,10 @@ pub(crate) fn eval_method(
                 ),
                 |_| CtValue::Unit,
             ),
+            (BrowserHostValue::Browser(browser), "allow_downloads") => result(
+                jet_browser_allow_downloads(browser, &string_arg(args, 0, span)?),
+                |_| CtValue::Unit,
+            ),
             (BrowserHostValue::Browser(browser), "protocol") => result(
                 jet_browser_protocol(browser, &string_arg(args, 0, span)?),
                 |protocol| store("BrowserProtocol", BrowserHostValue::Protocol(protocol)),
@@ -434,6 +444,55 @@ pub(crate) fn eval_method(
             (BrowserHostValue::Page(page), "close") => {
                 result(jet_browser_page_close(page), |_| CtValue::Unit)
             }
+            (BrowserHostValue::Page(page), "screenshot") => {
+                result(jet_browser_page_screenshot(page), CtValue::Str)
+            }
+            (BrowserHostValue::Page(page), "pdf") => {
+                result(jet_browser_page_pdf(page), CtValue::Str)
+            }
+            (BrowserHostValue::Page(page), "set_cookie") => result(
+                jet_browser_page_set_cookie(
+                    page,
+                    &string_arg(args, 0, span)?,
+                    &string_arg(args, 1, span)?,
+                    &string_arg(args, 2, span)?,
+                ),
+                |_| CtValue::Unit,
+            ),
+            (BrowserHostValue::Page(page), "cookie") => result(
+                jet_browser_page_cookie(page, &string_arg(args, 0, span)?),
+                |value| match value {
+                    Some(text) => CtValue::Some(Box::new(CtValue::Str(text))),
+                    None => CtValue::None(Type::String),
+                },
+            ),
+            (BrowserHostValue::Page(page), "clear_cookies") => {
+                result(jet_browser_page_clear_cookies(page), |_| CtValue::Unit)
+            }
+            (BrowserHostValue::Page(page), "storage_get") => result(
+                jet_browser_page_storage_get(
+                    page,
+                    &string_arg(args, 0, span)?,
+                    &string_arg(args, 1, span)?,
+                ),
+                |value| match value {
+                    Some(text) => CtValue::Some(Box::new(CtValue::Str(text))),
+                    None => CtValue::None(Type::String),
+                },
+            ),
+            (BrowserHostValue::Page(page), "storage_set") => result(
+                jet_browser_page_storage_set(
+                    page,
+                    &string_arg(args, 0, span)?,
+                    &string_arg(args, 1, span)?,
+                    &string_arg(args, 2, span)?,
+                ),
+                |_| CtValue::Unit,
+            ),
+            (BrowserHostValue::Page(page), "storage_clear") => result(
+                jet_browser_page_storage_clear(page, &string_arg(args, 0, span)?),
+                |_| CtValue::Unit,
+            ),
             (BrowserHostValue::Frame(frame), "close") => {
                 result(jet_browser_frame_close(frame), |_| CtValue::Unit)
             }
@@ -465,6 +524,10 @@ pub(crate) fn eval_method(
                 jet_browser_locator_press(locator, &string_arg(args, 0, span)?),
                 |_| CtValue::Unit,
             ),
+            (BrowserHostValue::Locator(locator), "set_files") => result(
+                jet_browser_locator_set_files(locator, &string_arg(args, 0, span)?),
+                |_| CtValue::Unit,
+            ),
             (BrowserHostValue::Intercept(intercept), "remove") => {
                 result(jet_browser_intercept_remove(intercept), |_| CtValue::Unit)
             }
@@ -488,9 +551,8 @@ pub(crate) fn eval_value_method(
 ) -> Result<Option<CtValue>, Diagnostic> {
     let value = match (kind, method) {
         ("BrowserEvent", "kind") => field(recv, kind, "method").cloned(),
-        ("BrowserEvent", "request_id" | "request_method" | "url_hash") => {
-            field(recv, kind, method).cloned()
-        }
+        ("BrowserEvent", "request_id" | "request_method" | "url_hash" | "download_id"
+            | "suggested_filename_hash") => field(recv, kind, method).cloned(),
         ("BrowserEvent", "is_blocked") => field(recv, kind, "is_blocked").cloned(),
         ("BrowserEvent", "status_code") => field(recv, kind, "status_code").cloned(),
         ("BrowserCapabilities", "bidi" | "cdp" | "profile") => {

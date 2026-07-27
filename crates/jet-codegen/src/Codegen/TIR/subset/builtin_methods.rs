@@ -293,6 +293,7 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
                 | "continue_request"
                 | "fail_request"
                 | "fulfill_request"
+                | "allow_downloads"
                 | "protocol"
                 | "trace"
                 | "close"
@@ -310,10 +311,21 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
                 | "close"
                 | "main_frame"
                 | "frames"
+                | "screenshot"
+                | "pdf"
+                | "set_cookie"
+                | "cookie"
+                | "clear_cookies"
+                | "storage_get"
+                | "storage_set"
+                | "storage_clear"
         ),
         Some("BrowserFrame") => method == "close",
         Some("BrowserLocator") => {
-            matches!(method, "wait" | "wait_gone" | "click" | "hover" | "fill" | "press")
+            matches!(
+                method,
+                "wait" | "wait_gone" | "click" | "hover" | "fill" | "press" | "set_files"
+            )
         },
         Some("BrowserIntercept") => method == "remove",
         Some("BrowserEvent") => matches!(
@@ -324,6 +336,8 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
                 | "url_hash"
                 | "is_blocked"
                 | "status_code"
+                | "download_id"
+                | "suggested_filename_hash"
         ),
         Some("BrowserProtocol") => method == "send",
         Some("BrowserCapabilities") => matches!(method, "bidi" | "cdp" | "profile"),

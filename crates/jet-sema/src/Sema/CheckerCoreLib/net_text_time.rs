@@ -20,33 +20,37 @@ impl<'a> Checker<'a> {
         let expected = match (type_name, method) {
             ("Browser", "capabilities" | "context" | "close" | "trace")
             | ("BrowserContext", "page" | "tab" | "close")
-            | ("BrowserPage", "close" | "main_frame" | "frames")
+            | ("BrowserPage", "close" | "main_frame" | "frames" | "screenshot" | "pdf"
+                | "clear_cookies")
             | ("BrowserFrame", "close")
             | ("BrowserLocator", "click" | "hover")
             | ("BrowserIntercept", "remove")
             | ("BrowserEvent", "kind" | "request_id" | "request_method" | "url_hash"
-                | "is_blocked" | "status_code")
+                | "is_blocked" | "status_code" | "download_id" | "suggested_filename_hash")
             | ("BrowserCapabilities", "bidi" | "cdp" | "profile")
             | ("BrowserTrace", "entry_count" | "redacted" | "summary")
             | ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => Vec::new(),
             ("BrowserLocked", "verify") => Vec::new(),
             ("Browser", "subscribe" | "protocol" | "add_intercept" | "continue_request"
-                | "fail_request")
+                | "fail_request" | "allow_downloads")
             | ("BrowserPage", "goto" | "get_by_text" | "get_by_label" | "get_by_placeholder"
-                | "get_by_test_id" | "get_by_css")
-            | ("BrowserLocator", "fill" | "press") => {
+                | "get_by_test_id" | "get_by_css" | "cookie" | "storage_clear")
+            | ("BrowserLocator", "fill" | "press" | "set_files") => {
                 vec![Type::String]
             }
             ("Browser", "next_event") | ("BrowserLocator", "wait" | "wait_gone") => {
                 vec![Type::Named("BrowserTimeout".to_string())]
             }
             ("Browser", "add_intercept_url")
-            | ("BrowserPage", "get_by_role")
+            | ("BrowserPage", "get_by_role" | "storage_get")
             | ("BrowserProtocol", "send") => {
                 vec![Type::String, Type::String]
             }
             ("Browser", "fulfill_request") => {
                 vec![Type::String, Type::Int, Type::String]
+            }
+            ("BrowserPage", "set_cookie" | "storage_set") => {
+                vec![Type::String, Type::String, Type::String]
             }
             _ => return false,
         };
@@ -54,12 +58,15 @@ impl<'a> Checker<'a> {
             (type_name, method),
             ("Browser", "context" | "subscribe" | "close" | "next_event" | "protocol"
                 | "add_intercept" | "add_intercept_url" | "continue_request" | "fail_request"
-                | "fulfill_request")
+                | "fulfill_request" | "allow_downloads")
                 | ("BrowserContext", "page" | "tab" | "close")
-                | ("BrowserPage", "goto" | "close" | "frames")
+                | ("BrowserPage", "goto" | "close" | "frames" | "screenshot" | "pdf"
+                    | "set_cookie" | "cookie" | "clear_cookies" | "storage_get" | "storage_set"
+                    | "storage_clear")
                 | ("BrowserFrame", "close")
                 | ("BrowserIntercept", "remove")
-                | ("BrowserLocator", "wait" | "wait_gone" | "click" | "hover" | "fill" | "press")
+                | ("BrowserLocator", "wait" | "wait_gone" | "click" | "hover" | "fill" | "press"
+                    | "set_files")
                 | ("BrowserProtocol", "send")
         ) {
             self.record_effect(Effect::Net.name(), span);
@@ -189,7 +196,8 @@ pub fn net_method_return(
             ok: Box::new(Type::Named("BrowserIntercept".to_string())),
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
-        ("Browser", "continue_request" | "fail_request" | "fulfill_request") => {
+        ("Browser", "continue_request" | "fail_request" | "fulfill_request"
+            | "allow_downloads") => {
             Some(Some(Type::Result {
                 ok: Box::new(unit.clone()),
                 err: Box::new(Type::Named("BrowserError".to_string())),
@@ -218,6 +226,20 @@ pub fn net_method_return(
             ok: Box::new(unit.clone()),
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
+        ("BrowserPage", "screenshot" | "pdf") => Some(Some(Type::Result {
+            ok: Box::new(Type::String),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
+        ("BrowserPage", "set_cookie" | "clear_cookies" | "storage_set" | "storage_clear") => {
+            Some(Some(Type::Result {
+                ok: Box::new(unit.clone()),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            }))
+        }
+        ("BrowserPage", "cookie" | "storage_get") => Some(Some(Type::Result {
+            ok: Box::new(Type::Option(Box::new(Type::String))),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
         ("BrowserPage", "main_frame") => Some(Some(Type::Result {
             ok: Box::new(Type::Named("BrowserFrame".to_string())),
             err: Box::new(Type::Named("BrowserError".to_string())),
@@ -234,7 +256,8 @@ pub fn net_method_return(
             ok: Box::new(unit.clone()),
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
-        ("BrowserLocator", "wait" | "wait_gone" | "click" | "hover" | "fill" | "press") => {
+        ("BrowserLocator", "wait" | "wait_gone" | "click" | "hover" | "fill" | "press"
+            | "set_files") => {
             Some(Some(Type::Result {
                 ok: Box::new(unit.clone()),
                 err: Box::new(Type::Named("BrowserError".to_string())),
@@ -244,7 +267,8 @@ pub fn net_method_return(
             ok: Box::new(unit.clone()),
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
-        ("BrowserEvent", "kind" | "request_id" | "request_method" | "url_hash") => {
+        ("BrowserEvent", "kind" | "request_id" | "request_method" | "url_hash"
+            | "download_id" | "suggested_filename_hash") => {
             Some(Some(Type::String))
         }
         ("BrowserEvent", "is_blocked") => Some(Some(Type::Bool)),
@@ -634,7 +658,7 @@ pub fn http_type_method_return(
                 err: Box::new(Type::Named("BrowserError".to_string())),
             })),
             ("subscribe", 1) | ("close", 0)
-            | ("continue_request" | "fail_request", 1)
+            | ("continue_request" | "fail_request" | "allow_downloads", 1)
             | ("fulfill_request", 3) => Some(Some(Type::Result {
                 ok: Box::new(unit_ty()),
                 err: Box::new(Type::Named("BrowserError".to_string())),
@@ -666,8 +690,18 @@ pub fn http_type_method_return(
             _ => None,
         },
         Type::Named(n) if n == "BrowserPage" => match (method, _args.len()) {
-            ("goto", 1) | ("close", 0) => Some(Some(Type::Result {
+            ("goto", 1) | ("close", 0) | ("clear_cookies", 0)
+            | ("set_cookie" | "storage_set", 3)
+            | ("storage_clear", 1) => Some(Some(Type::Result {
                 ok: Box::new(unit_ty()),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
+            ("screenshot" | "pdf", 0) => Some(Some(Type::Result {
+                ok: Box::new(Type::String),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
+            ("cookie", 1) | ("storage_get", 2) => Some(Some(Type::Result {
+                ok: Box::new(Type::Option(Box::new(Type::String))),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             })),
             ("main_frame", 0) => Some(Some(Type::Result {
@@ -693,7 +727,7 @@ pub fn http_type_method_return(
         Type::Named(n) if n == "BrowserLocator" => match (method, _args.len()) {
             ("wait" | "wait_gone", 1)
             | ("click" | "hover", 0)
-            | ("fill" | "press", 1) => Some(Some(Type::Result {
+            | ("fill" | "press" | "set_files", 1) => Some(Some(Type::Result {
                 ok: Box::new(unit_ty()),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             })),
@@ -707,7 +741,8 @@ pub fn http_type_method_return(
             _ => None,
         },
         Type::Named(n) if n == "BrowserEvent" => match (method, _args.len()) {
-            ("kind" | "request_id" | "request_method" | "url_hash", 0) => mk_str(),
+            ("kind" | "request_id" | "request_method" | "url_hash" | "download_id"
+                | "suggested_filename_hash", 0) => mk_str(),
             ("is_blocked", 0) => Some(Some(Type::Bool)),
             ("status_code", 0) => mk_int(),
             _ => None,
