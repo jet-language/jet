@@ -1774,6 +1774,8 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         }
         TStmt::Return(ret) => ret.as_ref().is_none_or(|e| resident_safe_expr(e, callees)),
         TStmt::ExprStmt(e) => resident_safe_expr(e, callees),
+        // Lowered by JIT (`Close` / file hosts); same expr gate as ExprStmt.
+        TStmt::DeferClose { close, .. } => resident_safe_expr(close, callees),
         TStmt::If {
             cond,
             then_body,

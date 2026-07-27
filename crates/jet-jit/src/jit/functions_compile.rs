@@ -109,6 +109,7 @@ fn lower_spawn_function(
             shared_transaction_depth: 0,
             unsafe_depth: 0,
             scope_guards: Vec::new(),
+            deferred_closes: Vec::new(),
             txn_stack: Vec::new(),
         };
         for cap in &lam.captures {
@@ -236,6 +237,7 @@ pub(crate) fn lower_callable_lambda(
             shared_transaction_depth: 0,
             unsafe_depth: 0,
             scope_guards: Vec::new(),
+            deferred_closes: Vec::new(),
             txn_stack: Vec::new(),
         };
         for (i, (name, ty)) in lam
@@ -346,6 +348,7 @@ fn lower_function(
             shared_transaction_depth: 0,
             unsafe_depth: 0,
             scope_guards: Vec::new(),
+            deferred_closes: Vec::new(),
             txn_stack: Vec::new(),
         };
         if func_has_receiver(tir) {
@@ -508,6 +511,7 @@ fn lower_generator_body(
             shared_transaction_depth: 0,
             unsafe_depth: 0,
             scope_guards: Vec::new(),
+            deferred_closes: Vec::new(),
             txn_stack: Vec::new(),
         };
         for (index, (name, ty, _)) in tir.params.iter().enumerate() {

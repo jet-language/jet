@@ -119,6 +119,8 @@ pub(super) struct EvalCtx<'a> {
     pub(super) runtime_execution: bool,
     pub(super) repl_mode: bool,
     pub(super) pending_return: Option<CtValue>,
+    /// `defer close(^…)` exprs scheduled in the current eval frame (LIFO).
+    pub(super) deferred_closes: Vec<&'a TExpr>,
     /// Control emitted by an inline loop expression that targets an enclosing
     /// loop. The containing statement list consumes and propagates it.
     pub(super) pending_flow: Option<Flow>,
@@ -559,6 +561,7 @@ pub fn run_program_with_structs(
         runtime_execution: true,
         repl_mode: false,
         pending_return: None,
+        deferred_closes: Vec::new(),
         pending_flow: None,
         collecting_items: Vec::new(),
         call_depth: 0,
@@ -616,6 +619,7 @@ pub fn run_named_func(
         runtime_execution: true,
         repl_mode: false,
         pending_return: None,
+        deferred_closes: Vec::new(),
         pending_flow: None,
         collecting_items: Vec::new(),
         call_depth: 0,
@@ -751,6 +755,7 @@ fn eval_expr_hook(
         runtime_execution: false,
         repl_mode,
         pending_return: None,
+        deferred_closes: Vec::new(),
         pending_flow: None,
         collecting_items: Vec::new(),
         call_depth: 0,
@@ -821,6 +826,7 @@ fn eval_block_hook(
         runtime_execution: false,
         repl_mode,
         pending_return: None,
+        deferred_closes: Vec::new(),
         pending_flow: None,
         collecting_items: Vec::new(),
         call_depth: 0,
