@@ -457,29 +457,39 @@ mod tests {
 
     #[test]
     fn resident_jit_safe_task_examples() {
-        for file in [
-            "examples/features/concurrency/tasks.jet",
-            "examples/features/concurrency/scheduler_spawn.jet",
-        ] {
-            let mut bundle =
-                crate::Loader::load_entry(file).unwrap_or_else(|_| panic!("load {file}"));
-            let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
-            assert!(
-                diags
-                    .iter()
-                    .all(|d| !matches!(d.severity, crate::Diagnostics::Severity::Error)),
-                "{file} must type-check"
-            );
-            let detail = jet_jit::resident_jit_safe_bundle_detail(&bundle);
-            if !detail.is_empty() {
-                eprintln!("{file}: {detail}");
-                if file.contains("160") {
-                    for line in jet_jit::jit_dump_main_stmts(&bundle) {
-                        eprintln!("  {line}");
+        // resident_jit_safe_bundle_detail walks large concurrency TIR graphs;
+        // default test threads overflow after Epoch 3 JIT ratchet growth.
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(|| {
+                for file in [
+                    "examples/features/concurrency/tasks.jet",
+                    "examples/features/concurrency/scheduler_spawn.jet",
+                ] {
+                    let mut bundle =
+                        crate::Loader::load_entry(file).unwrap_or_else(|_| panic!("load {file}"));
+                    let diags =
+                        crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
+                    assert!(
+                        diags
+                            .iter()
+                            .all(|d| !matches!(d.severity, crate::Diagnostics::Severity::Error)),
+                        "{file} must type-check"
+                    );
+                    let detail = jet_jit::resident_jit_safe_bundle_detail(&bundle);
+                    if !detail.is_empty() {
+                        eprintln!("{file}: {detail}");
+                        if file.contains("160") {
+                            for line in jet_jit::jit_dump_main_stmts(&bundle) {
+                                eprintln!("  {line}");
+                            }
+                        }
                     }
+                    assert!(detail.is_empty(), "{file} must be resident-safe: {detail}");
                 }
-            }
-            assert!(detail.is_empty(), "{file} must be resident-safe: {detail}");
-        }
+            })
+            .expect("spawn resident_jit_safe_task_examples thread")
+            .join()
+            .expect("resident_jit_safe_task_examples thread panicked");
     }
 }
