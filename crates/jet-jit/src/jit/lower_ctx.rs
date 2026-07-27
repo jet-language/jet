@@ -11632,12 +11632,11 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().load(clif, MemFlags::trusted(), pointer, 0))
             }
             TExprKind::AllocNew { .. } => {
-                // Honest gap: do not admit fake Arena/Bump/Pool/Fixed host
-                // constructors. Dev deopts to the interpreter / AOT path.
-                Err(
-                    "jit allocator constructors need automatic resource cleanup"
-                        .to_string(),
-                )
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.memory.allocator_new, self.b.func);
+                let call = self.b.ins().call(host_ref, &[]);
+                Ok(self.b.inst_results(call)[0])
             }
             TExprKind::JsonLit { variant, arg } => {
                 let disc = self
@@ -14848,9 +14847,52 @@ impl LowerCtx<'_, '_> {
             | THandleOp::TlsClientConfigWithVersionBounds => {
                 Err("jit handle method unsupported".to_string())
             }
-            THandleOp::AllocAlloc | THandleOp::AllocReset => Err(
-                "jit allocator methods need automatic resource cleanup".to_string(),
-            ),
+            THandleOp::AllocAlloc if args.len() == 1 => {
+                let value = self.lower_expr(&args[0])?;
+                let bits = match self.meta.clif_ty(&args[0].ty) {
+                    Some(ty) if ty == types::F64 => self.b.ins().bitcast(
+                        types::I64,
+                        Self::scalar_bitcast_memflags(),
+                        value,
+                    ),
+                    Some(ty) if ty == types::I8 => self.b.ins().uextend(types::I64, value),
+                    Some(ty) if ty == types::I32 => self.b.ins().uextend(types::I64, value),
+                    Some(ty) if ty == types::I64 => value,
+                    other => {
+                        return Err(format!(
+                            "jit allocator payload unsupported: {:?} ({other:?})",
+                            args[0].ty
+                        ))
+                    }
+                };
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.memory.allocator_alloc, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, bits]);
+                let bits = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                match self.meta.clif_ty(&args[0].ty) {
+                    Some(ty) if ty == types::F64 => Ok(self.b.ins().bitcast(
+                        types::F64,
+                        Self::scalar_bitcast_memflags(),
+                        bits,
+                    )),
+                    Some(ty) if ty == types::I8 => Ok(self.b.ins().ireduce(types::I8, bits)),
+                    Some(ty) if ty == types::I32 => Ok(self.b.ins().ireduce(types::I32, bits)),
+                    _ => Ok(bits),
+                }
+            }
+            THandleOp::AllocReset if args.is_empty() => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.memory.allocator_reset, self.b.func);
+                self.b.ins().call(host, &[recv_val]);
+                self.emit_trap_check()?;
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            THandleOp::AllocAlloc | THandleOp::AllocReset => {
+                Err("jit allocator method arity unsupported".to_string())
+            }
             THandleOp::HttpReqField(..) => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpReqHeader => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpReqParam => Err("jit handle method unsupported".to_string()),

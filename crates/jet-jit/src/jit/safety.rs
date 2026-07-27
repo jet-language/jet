@@ -918,10 +918,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::StaticCall { args, .. } => {
             args.iter().all(|a| resident_safe_call_arg(a, callees))
         }
-        // Host stubs for Arena/Bump/Pool/Fixed are not real allocator
-        // semantics (capacity, drop, reset, Fixed backing). Keep the
-        // intentional compile/deopt boundary until Cranelift lowers them.
-        TExprKind::AllocNew { .. } => false,
+        TExprKind::AllocNew { .. } => true,
         TExprKind::PoolSlot { pool, id, .. } => {
             resident_safe_expr(pool, callees) && resident_safe_expr(id, callees)
         }
@@ -3105,9 +3102,8 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         }
         THandleOp::DurationNew { .. } => args.is_empty(),
         THandleOp::DurationIn { .. } => args.len() <= 1,
-        // Same gap as AllocNew: host stubs are not real allocator semantics.
-        THandleOp::AllocAlloc | THandleOp::AllocReset => false,
-        THandleOp::ClockNow | THandleOp::RngBool => args.is_empty(),
+        THandleOp::AllocAlloc => args.len() == 1,
+        THandleOp::AllocReset | THandleOp::ClockNow | THandleOp::RngBool => args.is_empty(),
         THandleOp::RngInt => args.len() == 2,
         THandleOp::ClockTick
         | THandleOp::ClockAdvance

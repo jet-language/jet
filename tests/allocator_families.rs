@@ -414,7 +414,7 @@ fn run() {
 }
 
 #[test]
-fn default_dev_deopts_or_interpreter_gaps_on_allocator_constructors() {
+fn default_dev_runs_allocator_constructors_natively() {
     use jet::Interpreter::RunOutcome;
     use jet::JitBackend::JitBackend;
 
@@ -454,12 +454,8 @@ fn run() {
     assert!(errors.is_empty(), "{errors:?}");
 
     if jet_jit::cranelift_host_supported() {
-        let gap = jet_jit::try_compile_bundle(&bundle)
-            .expect_err("allocator constructors must name their JIT boundary");
-        assert!(
-            gap.contains("automatic resource cleanup") || gap.contains("jit "),
-            "{gap}"
-        );
+        jet_jit::try_compile_bundle(&bundle)
+            .expect("allocator constructors must compile natively in resident JIT");
     }
 
     let mut dev = jet_jit::CraneliftBackend::new();
@@ -467,16 +463,13 @@ fn run() {
     match dev.run(&bundle, false) {
         RunOutcome::Ran { stdout, .. } => {
             assert!(
-                jet_jit::deopt_invoked_for_test(),
-                "tiered JIT must deopt on allocator constructor gap"
+                !jet_jit::deopt_invoked_for_test(),
+                "allocator constructors must stay resident-native (no deopt)"
             );
             assert_eq!(stdout, "1\n2\n3\n4\n5\n");
         }
         RunOutcome::Problems(diags) => {
-            assert!(
-                !jet_jit::is_e2211(&diags),
-                "E2211 retired: {diags:?}"
-            );
+            panic!("resident JIT must run allocator constructors: {diags:?}");
         }
     }
 
