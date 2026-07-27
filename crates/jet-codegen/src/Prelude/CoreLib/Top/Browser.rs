@@ -3,6 +3,7 @@
 // Profiles pin the wire contract. Contexts are isolated BiDi user contexts.
 // Traces keep method/sequence facts only: endpoints, parameters, results, event
 // payloads, and page data never enter the trace.
+// #1192: CDP is a capability-checked expert supplement via protocol("cdp") only.
 
 const JET_BROWSER_TRACE_LIMIT_BYTES: usize = 8 * 1024;
 const JET_BROWSER_EVENT_LIMIT: usize = 256;
@@ -1758,6 +1759,36 @@ fn jet_browser_event_suggested_filename_hash(event: &JetBrowserEvent) -> String 
     event.suggested_filename_hash.clone()
 }
 
+/// CDP methods are `Domain.command` (PascalCase domain). BiDi module paths
+/// stay lowercase (`session.status`); this check keeps CDP from becoming a
+/// silent second spelling for portable BiDi commands.
+fn jet_browser_cdp_method_ok(method: &str) -> bool {
+    let Some((domain, command)) = method.split_once('.') else {
+        return false;
+    };
+    if method.bytes().filter(|b| *b == b'.').count() != 1
+        || domain.is_empty()
+        || command.is_empty()
+        || method.contains(':')
+    {
+        return false;
+    }
+    let mut domain_chars = domain.chars();
+    let Some(first) = domain_chars.next() else {
+        return false;
+    };
+    first.is_ascii_uppercase()
+        && domain_chars.all(|c| c.is_ascii_alphanumeric())
+        && command
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic())
+        && command.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// D-BROWSER-AUTO1=A (#1192): checked expert CDP / raw BiDi protocol send.
+/// CDP is capability-gated via `protocol("cdp")` only — BiDi cannot smuggle
+/// `goog:cdp.*`, and CDP methods must match audited `Domain.command` shape.
 fn jet_browser_protocol_send(
     protocol: &JetBrowserProtocol,
     method: &String,
@@ -1769,8 +1800,17 @@ fn jet_browser_protocol_send(
         return Err(JetBrowserError::new("protocol"));
     }
     let result = if protocol.kind == "bidi" {
+        if method.starts_with("goog:cdp.") {
+            return Err(JetBrowserError::new("unsupported protocol"));
+        }
         jet_browser_command(&protocol.browser, method, params)?
-    } else {
+    } else if protocol.kind == "cdp" {
+        if !protocol.browser.state.borrow().cdp {
+            return Err(JetBrowserError::new("unsupported protocol"));
+        }
+        if !jet_browser_cdp_method_ok(method) {
+            return Err(JetBrowserError::new("protocol"));
+        }
         jet_browser_command(
             &protocol.browser,
             "goog:cdp.sendCommand",
@@ -1779,6 +1819,8 @@ fn jet_browser_protocol_send(
                 ("params", params),
             ]),
         )?
+    } else {
+        return Err(JetBrowserError::new("unsupported protocol"));
     };
     Ok(jet_std::render_json(&result, false, 0))
 }

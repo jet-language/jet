@@ -2224,3 +2224,297 @@ fn run() {
     );
 }
 
+/// D-BROWSER-AUTO1=A (#1192): checked expert CDP — success, BiDi smuggle block,
+/// shape rejection, capability miss, and redacted hostile CDP wire errors.
+#[test]
+fn native_bidi_checked_expert_cdp_supplement_success_and_gates() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!(
+        "ws://{}/session?token=CDP_SUCCESS_SECRET",
+        listener.local_addr().unwrap()
+    );
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        accept_websocket(&mut stream);
+        let mut methods = Vec::new();
+        for _ in 0..8 {
+            let request = read_text_frame(&mut stream);
+            let id = field(&request, "id");
+            let method = field(&request, "method");
+            methods.push(method.clone());
+            let result = match method.as_str() {
+                "session.status" => r#"{"ready":true,"message":"ready"}"#,
+                "session.new" => {
+                    assert!(
+                        request.contains(r#""capabilities":{"alwaysMatch":{}}"#),
+                        "session.new must not request CDP up front: {request}"
+                    );
+                    r#"{"sessionId":"cdp-ok","capabilities":{"browserName":"mock","goog:cdp":true}}"#
+                }
+                "goog:cdp.sendCommand" => {
+                    assert!(
+                        request.contains(r#""method":"Network.setCacheDisabled""#),
+                        "CDP wrap must carry Domain.command: {request}"
+                    );
+                    assert!(
+                        request.contains(r#""params":{"cacheDisabled":true}"#),
+                        "CDP wrap must carry params object: {request}"
+                    );
+                    assert!(
+                        !request.contains("CDP_SUCCESS_SECRET"),
+                        "endpoint secret must not enter CDP params: {request}"
+                    );
+                    r#"{"result":{"cacheDisabled":true}}"#
+                }
+                "session.end" => "{}",
+                other => panic!("unexpected CDP success method {other}: {request}"),
+            };
+            write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+            );
+            if method == "session.end" {
+                break;
+            }
+        }
+        methods
+    });
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    caps :: session.capabilities()
+    print("caps:{caps.bidi()}:{caps.cdp()}")
+
+    bidi :: session.protocol("bidi") ?? panic("bidi")
+    smuggle :: bidi.send("goog:cdp.sendCommand", "{{\"method\":\"Network.enable\",\"params\":{{}}}}") ?? "blocked-smuggle"
+    print(smuggle)
+
+    cdp :: session.protocol("cdp") ?? panic("cdp")
+    bad_shape :: cdp.send("session.status", "{{}}") ?? "blocked-shape"
+    print(bad_shape)
+    empty :: cdp.send("", "{{}}") ?? "blocked-empty"
+    print(empty)
+    colon :: cdp.send("goog:cdp.sendCommand", "{{}}") ?? "blocked-colon"
+    print(colon)
+
+    ok :: cdp.send("Network.setCacheDisabled", "{{\"cacheDisabled\":true}}") ?? panic("cdp send")
+    print("cdp:{ok}")
+
+    trace :: session.trace()
+    redacted :: trace.redacted()
+    no_method :: trace.summary().contains("Network") == false
+    no_secret :: trace.summary().contains("CDP_SUCCESS_SECRET") == false
+    print("trace:{redacted}:{no_method}:{no_secret}")
+    session.close() ?? panic("close")
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_cdp_checked",
+        "browser_bidi_cdp_checked",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "caps:true:true\nblocked-smuggle\nblocked-shape\nblocked-empty\nblocked-colon\ncdp:{\"result\":{\"cacheDisabled\":true}}\ntrace:true:true:true\n"
+    );
+    assert!(!stdout.contains("CDP_SUCCESS_SECRET"), "{stdout}");
+    assert!(!stderr.contains("CDP_SUCCESS_SECRET"), "{stderr}");
+    assert_eq!(
+        server.join().unwrap(),
+        [
+            "session.status",
+            "session.new",
+            "goog:cdp.sendCommand",
+            "session.end",
+        ]
+    );
+}
+
+#[test]
+fn native_bidi_checked_expert_cdp_rejects_missing_capability_and_hostile_wire() {
+    let (no_cdp, no_cdp_server) = hostile_listener(HostileReply::NoCdp);
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let hostile_endpoint = format!(
+        "ws://{}/session?token=CDP_HOSTILE_SECRET",
+        listener.local_addr().unwrap()
+    );
+    let hostile_server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        accept_websocket(&mut stream);
+        let mut methods = Vec::new();
+        for _ in 0..4 {
+            let request = read_text_frame(&mut stream);
+            let id = field(&request, "id");
+            let method = field(&request, "method");
+            methods.push(method.clone());
+            match method.as_str() {
+                "session.status" => write_text_frame(
+                    &mut stream,
+                    &format!(
+                        r#"{{"type":"success","id":{id},"result":{{"ready":true,"message":"ready"}}}}"#
+                    ),
+                ),
+                "session.new" => write_text_frame(
+                    &mut stream,
+                    &format!(
+                        r#"{{"type":"success","id":{id},"result":{{"sessionId":"cdp-hostile","capabilities":{{"goog:cdp":true}}}}}}"#
+                    ),
+                ),
+                "goog:cdp.sendCommand" => write_text_frame(
+                    &mut stream,
+                    &format!(
+                        r#"{{"type":"error","id":{id},"error":"unknown error","message":"CDP_HOSTILE_SECRET wire leak","stacktrace":"SECRET STACK"}}"#
+                    ),
+                ),
+                "session.end" => {
+                    write_text_frame(
+                        &mut stream,
+                        &format!(r#"{{"type":"success","id":{id},"result":{{}}}}"#),
+                    );
+                    break;
+                }
+                other => panic!("unexpected hostile CDP method {other}: {request}"),
+            }
+        }
+        methods
+    });
+
+    let source = r#"
+use core.browser as browser
+
+fn missing_cdp(endpoint: String) => String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    print("caps:{session.capabilities().cdp()}")
+    cdp :: session.protocol("cdp") ?? return "caught-capability"
+    return "unexpected-open"
+}
+
+fn hostile_cdp(endpoint: String) => String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    cdp :: session.protocol("cdp") ?? return "unexpected-protocol"
+    cdp.send("Runtime.evaluate", "{{\"expression\":\"1\"}}") ?? return "caught-wire"
+    return "unexpected-success"
+}
+
+fn run() {
+    print(missing_cdp("__NO_CDP__"))
+    print(hostile_cdp("__HOSTILE__"))
+}
+"#
+    .replace("__NO_CDP__", &no_cdp)
+    .replace("__HOSTILE__", &hostile_endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_cdp_hostile",
+        "browser_bidi_cdp_hostile",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "caps:false\ncaught-capability\ncaught-wire\n");
+    assert!(!stdout.contains("CDP_HOSTILE_SECRET"), "{stdout}");
+    assert!(!stderr.contains("CDP_HOSTILE_SECRET"), "{stderr}");
+    assert!(!stdout.contains("SECRET STACK"), "{stdout}");
+    assert!(!stderr.contains("SECRET STACK"), "{stderr}");
+    no_cdp_server.join().unwrap();
+    assert_eq!(
+        hostile_server.join().unwrap(),
+        [
+            "session.status",
+            "session.new",
+            "goog:cdp.sendCommand",
+            "session.end",
+        ]
+    );
+}
+
+#[test]
+fn native_bidi_checked_expert_cdp_integrates_with_page_lifecycle() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!("ws://{}/session", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        accept_websocket(&mut stream);
+        let mut methods = Vec::new();
+        for _ in 0..10 {
+            let request = read_text_frame(&mut stream);
+            let id = field(&request, "id");
+            let method = field(&request, "method");
+            methods.push(method.clone());
+            let result = match method.as_str() {
+                "session.status" => r#"{"ready":true,"message":"ready"}"#,
+                "session.new" => {
+                    r#"{"sessionId":"cdp-life","capabilities":{"goog:cdp":true}}"#
+                }
+                "browser.createUserContext" => r#"{"userContext":"user-1"}"#,
+                "browsingContext.create" => r#"{"context":"page-1"}"#,
+                "goog:cdp.sendCommand" => {
+                    assert!(
+                        request.contains(r#""method":"Page.enable""#),
+                        "page-scoped expert CDP must wrap Page.enable: {request}"
+                    );
+                    "{}"
+                }
+                "browsingContext.close" | "browser.removeUserContext" | "session.end" => "{}",
+                other => panic!("unexpected CDP lifecycle method {other}: {request}"),
+            };
+            write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+            );
+            if method == "session.end" {
+                break;
+            }
+        }
+        methods
+    });
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    cdp :: session.protocol("cdp") ?? panic("cdp")
+    print(cdp.send("Page.enable", "{{}}") ?? panic("send"))
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_cdp_lifecycle",
+        "browser_bidi_cdp_lifecycle",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "{}\n");
+    assert_eq!(
+        server.join().unwrap(),
+        [
+            "session.status",
+            "session.new",
+            "browser.createUserContext",
+            "browsingContext.create",
+            "goog:cdp.sendCommand",
+            "browsingContext.close",
+            "browser.removeUserContext",
+            "session.end",
+        ]
+    );
+}
+
