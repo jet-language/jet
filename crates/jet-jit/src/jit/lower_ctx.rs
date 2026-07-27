@@ -6243,6 +6243,19 @@ impl LowerCtx<'_, '_> {
                 TStrPart::Interp(e, fmt) => {
                     let push_ty = Self::recover_core_return_ty(e)
                         .unwrap_or_else(|| {
+                            // CORE struct fields (Stat.kind / is_file, …): TIR may
+                            // leave Int; recover String/Bool so str_push_* matches AOT.
+                            if let TExprKind::Field { recv, field, .. } = &e.kind {
+                                if let Some(name) = record_type_key(&recv.ty) {
+                                    if let Some(ty) = self
+                                        .meta
+                                        .struct_field_ty(&name, field)
+                                        .or_else(|| core_struct_field_type(&name, field))
+                                    {
+                                        return self.erase_distinct_ty(&ty);
+                                    }
+                                }
+                            }
                             let erased = self.erase_distinct_ty(&e.ty);
                             if matches!(&erased, Type::Named(n) if n == "Unit" || n == "Void") {
                                 self.print_result_ty(e)
