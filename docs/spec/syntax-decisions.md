@@ -1711,7 +1711,9 @@ D-CONTRACTCASE1.
 
 **D-PERSIST1**: `#Persist` module binding survives `jet dev` hot reload;
 identity = module path + name; layout change re-decodes Codable-style, falls
-back to reinit + warning. Dev-tier only. *(rides JIT hot-reload runtime)*
+back to reinit + warning. Dev-tier only. Values live in the shared
+`jet_foundation::Persist` store at the runtime-heap boundary (tier-0 and
+tier-1); not inside one JIT module. *(rides JIT hot-reload runtime)*
 
 **D-EFFBUDGET1 — Package effect budget**: every build prints a one-line
 effect summary and records per-dependency provenance in the lock.

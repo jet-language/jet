@@ -16,6 +16,7 @@ pub mod Numeric;
 pub mod OsTarget;
 pub mod JetTrace;
 pub mod PerformanceBudget;
+pub mod Persist;
 pub mod Policy;
 pub mod RingLayer;
 pub mod SHA256;

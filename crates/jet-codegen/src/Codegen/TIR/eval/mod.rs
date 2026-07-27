@@ -672,13 +672,25 @@ fn run_bundle(
     })?;
     let mut globals = HashMap::new();
     let mut core_imports = HashMap::new();
+    let persist = jet_foundation::Persist::prepare_bundle(bundle);
+    for msg in &persist.messages {
+        // Dev-tier only: surface reset / migration notes on stderr.
+        eprintln!("{msg}");
+    }
     for module in &bundle.modules {
         for item in &module.items {
             if let crate::AST::Item::Const(c) = item {
-                let value = c.ct.clone().or_else(|| match &c.value {
-                    crate::AST::Expr::Int(v, _, _, _) => Some(CtValue::Int(*v)),
-                    crate::AST::Expr::Bool(v, _) => Some(CtValue::Bool(*v)),
-                    _ => None,
+                let value = if c.is_persist {
+                    persist.by_name.get(&c.name).cloned()
+                } else {
+                    None
+                }
+                .or_else(|| {
+                    c.ct.clone().or_else(|| match &c.value {
+                        crate::AST::Expr::Int(v, _, _, _) => Some(CtValue::Int(*v)),
+                        crate::AST::Expr::Bool(v, _) => Some(CtValue::Bool(*v)),
+                        _ => None,
+                    })
                 });
                 if let Some(v) = value {
                     globals.entry(c.name.clone()).or_insert_with(|| v.clone());

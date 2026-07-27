@@ -7712,10 +7712,9 @@ fn enum_variant_change_emits_e2210() {
 }
 
 /// D-PERSIST1: `#Persist` is inert in a release build — the marker carries no
-/// runtime-carry-across machinery yet (named gate: a module+name-keyed value
-/// store in the JIT resident runtime, `crates/jet-jit`, doesn't exist). This
-/// asserts that by construction: the generated Rust for a module-level
-/// `const` is byte-for-byte identical with and without `#Persist`.
+/// AOT hooks. Dev-tier persistence lives in the shared `jet_foundation::Persist`
+/// store (not in generated Rust). Asserts release codegen is byte-identical
+/// with and without `#Persist`.
 #[test]
 fn persist_marker_is_codegen_inert() {
     let dir = std::env::temp_dir().join(format!("jet_persist_parity_{}", std::process::id()));
@@ -7754,6 +7753,126 @@ fn persist_marker_is_codegen_inert() {
         plain, persisted,
         "#Persist must not change generated Rust (inert in release)"
     );
+}
+
+/// D-PERSIST1: `#Persist` module bindings survive a real hot reload when the
+/// shape is compatible; an incompatible shape reset reports the exact reason
+/// and reseeds from the new initializer. Shared store is consulted by both
+/// Cranelift and interpreter tiers.
+#[test]
+fn persist_binding_survives_hot_swap_and_resets_on_shape_change() {
+    fn load_checked(path: &std::path::Path) -> jet::AST::ProgramBundle {
+        let mut b = jet::Loader::load_entry(path.to_str().unwrap()).expect("bundle should load");
+        let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
+        let errors: Vec<_> = diags
+            .into_iter()
+            .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+            .collect();
+        assert!(errors.is_empty(), "fixture must type-check: {errors:?}");
+        b
+    }
+
+    // Same on-disk path across reloads — matches `jet dev` editing one file
+    // (module alias identity is the file stem).
+    let path = std::env::temp_dir().join(format!(
+        "jet_persist_reload_{}.jet",
+        std::process::id()
+    ));
+    let write = |src: &str| {
+        fs::write(&path, src).unwrap();
+    };
+
+    jet_foundation::Persist::shared_clear();
+
+    write("#Persist const counter = 0\nfn run() {\n    print(counter)\n}\n");
+    let v1 = load_checked(&path);
+    write("#Persist const counter = 99\nfn run() {\n    print(counter)\n}\n");
+    let v2 = load_checked(&path);
+    write("#Persist const counter = true\nfn run() {\n    print(counter)\n}\n");
+    let v3 = load_checked(&path);
+
+    // Interpreter tier (always available): value must survive compatible reload.
+    {
+        use jet::JitBackend::{InterpreterBackend, JitBackend};
+        jet_foundation::Persist::shared_clear();
+        let mut backend = InterpreterBackend::new();
+        let out1 = match backend.run(&v1, false) {
+            RunOutcome::Ran { stdout, .. } => stdout,
+            RunOutcome::Problems(ds) => panic!("interp run failed: {ds:?}"),
+        };
+        assert_eq!(out1, "0\n");
+
+        let out2 = match backend.hot_swap("run", &v2, false) {
+            Ok(RunOutcome::Ran { stdout, .. }) => stdout,
+            Ok(RunOutcome::Problems(ds)) => panic!("interp hot_swap problems: {ds:?}"),
+            Err(ds) => panic!("interp hot_swap failed: {ds:?}"),
+        };
+        assert_eq!(
+            out2, "0\n",
+            "compatible `#Persist` reload must keep prior Int value, not reinit to 99"
+        );
+
+        let out3 = match backend.hot_swap("run", &v3, false) {
+            Ok(RunOutcome::Ran { stdout, .. }) => stdout,
+            Ok(RunOutcome::Problems(ds)) => panic!("interp shape-change problems: {ds:?}"),
+            Err(ds) => panic!("interp shape-change failed: {ds:?}"),
+        };
+        assert_eq!(
+            out3, "true\n",
+            "incompatible shape must reinitialize from the new Bool initializer"
+        );
+
+        let out4 = match backend.restart(&v2, false) {
+            RunOutcome::Ran { stdout, .. } => stdout,
+            RunOutcome::Problems(ds) => panic!("interp restart failed: {ds:?}"),
+        };
+        assert_eq!(
+            out4, "99\n",
+            "restart must clear persist and use the new initializer"
+        );
+    }
+
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+
+    // Cranelift tier: same contract at the shared-heap boundary.
+    {
+        use jet::JitBackend::JitBackend;
+        jet_foundation::Persist::shared_clear();
+        let mut backend = CraneliftBackend::new();
+        let out1 = match backend.run(&v1, false) {
+            RunOutcome::Ran { stdout, .. } => stdout,
+            RunOutcome::Problems(ds) => panic!("jit run failed: {ds:?}"),
+        };
+        assert_eq!(out1, "0\n");
+
+        let out2 = match backend.hot_swap("run", &v2, false) {
+            Ok(RunOutcome::Ran { stdout, .. }) => stdout,
+            Ok(RunOutcome::Problems(ds)) => panic!("jit hot_swap problems: {ds:?}"),
+            Err(ds) => panic!("jit hot_swap failed: {ds:?}"),
+        };
+        assert_eq!(
+            out2, "0\n",
+            "JIT hot_swap must keep `#Persist` Int across compatible reload"
+        );
+
+        let out3 = match backend.hot_swap("run", &v3, false) {
+            Ok(RunOutcome::Ran { stdout, .. }) => stdout,
+            Ok(RunOutcome::Problems(ds)) => panic!("jit shape-change problems: {ds:?}"),
+            Err(ds) => panic!("jit shape-change failed: {ds:?}"),
+        };
+        assert_eq!(out3, "true\n");
+
+        let out4 = match backend.restart(&v2, false) {
+            RunOutcome::Ran { stdout, .. } => stdout,
+            RunOutcome::Problems(ds) => panic!("jit restart failed: {ds:?}"),
+        };
+        assert_eq!(out4, "99\n");
+    }
+
+    jet_foundation::Persist::shared_clear();
+    let _ = fs::remove_file(&path);
 }
 
 // ── card #131 S1-bridge (D-SERDE2): hand codec dev-tier parity (R12) ──────────

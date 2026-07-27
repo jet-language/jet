@@ -6,7 +6,7 @@
 //! deterministic. `#Persist` migration and client/server replacement commit
 //! as one transaction or leave the prior session valid.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
@@ -584,118 +584,10 @@ fn detect_renames(
 }
 
 // ── `#Persist` typed migration (D-PERSIST1) ─────────────────────────────
+// Store + migration live in `jet_foundation::Persist` (shared runtime-heap
+// boundary for tier-0 and tier-1). Re-exported here for WatchService callers.
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PersistEntry {
-    pub module: String,
-    pub name: String,
-    pub shape: String,
-    pub payload: String,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum PersistOutcome {
-    Kept(PersistEntry),
-    Migrated(PersistEntry),
-    Reset { reason: String, entry: PersistEntry },
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct PersistStore {
-    entries: HashMap<String, PersistEntry>,
-}
-
-impl PersistStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    fn key(module: &str, name: &str) -> String {
-        format!("{module}::{name}")
-    }
-
-    pub fn put(&mut self, entry: PersistEntry) {
-        self.entries
-            .insert(Self::key(&entry.module, &entry.name), entry);
-    }
-
-    pub fn get(&self, module: &str, name: &str) -> Option<&PersistEntry> {
-        self.entries.get(&Self::key(module, name))
-    }
-
-    /// Compatible shape keeps payload; same name + new shape tries migration
-    /// via payload re-decode (string equality of shape fingerprint). Failure
-    /// reinitializes with `fresh_payload` and records the reason.
-    pub fn migrate(
-        &mut self,
-        module: &str,
-        name: &str,
-        new_shape: &str,
-        fresh_payload: &str,
-    ) -> PersistOutcome {
-        let key = Self::key(module, name);
-        match self.entries.get(&key).cloned() {
-            None => {
-                let entry = PersistEntry {
-                    module: module.to_string(),
-                    name: name.to_string(),
-                    shape: new_shape.to_string(),
-                    payload: fresh_payload.to_string(),
-                };
-                self.entries.insert(key, entry.clone());
-                PersistOutcome::Kept(entry)
-            }
-            Some(old) if old.shape == new_shape => PersistOutcome::Kept(old),
-            Some(old) => {
-                // Codable-style: accept when payload still parses under the new
-                // shape marker (caller encodes shape as `TypeName` / layout id).
-                if payload_compatible(&old.payload, new_shape) {
-                    let entry = PersistEntry {
-                        module: module.to_string(),
-                        name: name.to_string(),
-                        shape: new_shape.to_string(),
-                        payload: old.payload,
-                    };
-                    self.entries.insert(key, entry.clone());
-                    PersistOutcome::Migrated(entry)
-                } else {
-                    let entry = PersistEntry {
-                        module: module.to_string(),
-                        name: name.to_string(),
-                        shape: new_shape.to_string(),
-                        payload: fresh_payload.to_string(),
-                    };
-                    self.entries.insert(key, entry.clone());
-                    PersistOutcome::Reset {
-                        reason: format!(
-                            "`{module}::{name}` shape `{}` → `{new_shape}`; reinitialized",
-                            old.shape
-                        ),
-                        entry,
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn payload_compatible(payload: &str, new_shape: &str) -> bool {
-    // Minimal typed migration: shapes that share a prefix family and whose
-    // payload is non-empty JSON/Jet show form stay compatible when the new
-    // shape widens (suffix `+` or `|optional`). Narrowing fails.
-    if payload.is_empty() {
-        return false;
-    }
-    if let Some(base) = new_shape.strip_suffix('+') {
-        return payload.contains(base) || !new_shape.contains('|');
-    }
-    if new_shape.contains('|') {
-        return true;
-    }
-    // Exact re-decode: payload declares its own shape tag `"shape":"…"`.
-    let tag = format!("\"shape\":\"{new_shape}\"");
-    payload.contains(&tag) || !payload.contains("\"shape\":")
-}
+pub use jet_foundation::Persist::{PersistEntry, PersistOutcome, PersistStore};
 
 // ── Client/server hot-replacement transaction ───────────────────────────
 
@@ -761,7 +653,9 @@ impl HotReplaceTxn {
         Ok(SessionSnapshot {
             generation: self.prior.generation + 1,
             artifact_token: format!("gen-{}", self.prior.generation + 1),
-            persist: self.prior.persist,
+            // Carry the live shared-heap persist store (updated by prepare_bundle
+            // during the successful reload), not a stale prior clone.
+            persist: jet_foundation::Persist::shared_clone(),
         })
     }
 
