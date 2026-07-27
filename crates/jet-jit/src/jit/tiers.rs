@@ -165,7 +165,12 @@ pub fn plan_tiers(bundle: &ProgramBundle, program: Option<&JitProgram>) -> TierP
         }
     }
 
-    let entry_native = native.contains(&program.entry);
+    let entry_native = if program.entry == "__jet_cli_main" {
+        // Host trampoline; user `run` is the resident body.
+        native.contains("run")
+    } else {
+        native.contains(&program.entry)
+    };
     let deopt_ok = deopt.iter().all(|(name, _)| {
         program
             .funcs
@@ -181,14 +186,25 @@ pub fn plan_tiers(bundle: &ProgramBundle, program: Option<&JitProgram>) -> TierP
                 .iter()
                 .all(|lam| resident_safe_spawn_lambda(lam, &names))
     };
-    let entry_shape_ok = program.funcs.iter().any(|f| {
-        f.name == program.entry
-            && f.params.is_empty()
-            && (f.ret.is_none()
-                || matches!(&f.ret, Some(Type::Result { ok, err })
-                    if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit")
-                        && matches!(err.as_ref(), Type::String | Type::Named(_))))
-    });
+    let entry_shape_ok = if program.entry == "__jet_cli_main" {
+        program.funcs.iter().any(|f| {
+            f.name == "run"
+                && f.params.len() == 1
+                && (f.ret.is_none()
+                    || matches!(&f.ret, Some(Type::Result { ok, err })
+                        if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit")
+                            && matches!(err.as_ref(), Type::String | Type::Named(_))))
+        })
+    } else {
+        program.funcs.iter().any(|f| {
+            f.name == program.entry
+                && f.params.is_empty()
+                && (f.ret.is_none()
+                    || matches!(&f.ret, Some(Type::Result { ok, err })
+                        if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit")
+                            && matches!(err.as_ref(), Type::String | Type::Named(_))))
+        })
+    };
 
     // Mixed: entry native + every deopted helper marshallable + spawn lambdas covered.
     let mixed = entry_native && entry_shape_ok && deopt_ok && spawn_ok && !deopt.is_empty();

@@ -1,9 +1,11 @@
-//! D-BIGINT1: `BigInt` host shims for the Cranelift JIT. `BigInt` values are
-//! opaque i64 handles into the shared `JetArena` heap (`rt.heap`), exactly
-//! like `String`/list handles (`Collections.rs`) — the JIT never inlines the
-//! limb representation into generated CLIF, it always calls back into Rust.
+//! D-BIGINT1 / D-DECIMAL1: precise numeric host shims for the Cranelift JIT.
+//! `BigInt` values are opaque i64 handles into the shared `JetArena` heap.
+//! `Decimal` values are opaque i64 handles into `JitRuntime.decimal_values`
+//! (side table — digit vectors do not fit the limb arena). Both reuse the
+//! canonical foundation algorithms (`CtBigInt` / `CtDecimal`), not a third copy.
 
 use super::Concurrency;
+use jet_foundation::Numeric::CtDecimal;
 
 /// Record an invalid `BigInt(...)` literal as a trap (mirrors AOT's
 /// `JetBigInt::from_str(...).expect(...)` panic, but as a JIT-safe trap
@@ -12,6 +14,29 @@ fn trap_bigint(msg: &str) {
     Concurrency::with_runtime_mut(|rt| {
         rt.set_trap(msg);
     });
+}
+
+fn trap_decimal(msg: &str) {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.set_trap(msg);
+    });
+}
+
+fn push_decimal(d: CtDecimal) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.decimal_values.push(Some(d));
+        rt.decimal_values.len() as i64
+    })
+}
+
+fn with_decimal<R>(handle: i64, f: impl FnOnce(&CtDecimal) -> R) -> Option<R> {
+    Concurrency::with_runtime_mut(|rt| {
+        let idx = handle.saturating_sub(1) as usize;
+        rt.decimal_values
+            .get(idx)
+            .and_then(|s| s.as_ref())
+            .map(f)
+    })
 }
 
 extern "C" fn jet_jit_bigint_from_int(n: i64) -> i64 {
@@ -77,6 +102,40 @@ extern "C" fn jet_jit_bigint_to_string(a: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_decimal_from_str(str_id: i64) -> i64 {
+    let s = Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(str_id).unwrap_or_default());
+    match CtDecimal::from_str(&s) {
+        Ok(d) => push_decimal(d),
+        Err(_) => {
+            trap_decimal("invalid Decimal string");
+            0
+        }
+    }
+}
+
+extern "C" fn jet_jit_decimal_add(a: i64, b: i64) -> i64 {
+    let left = with_decimal(a, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
+    let right = with_decimal(b, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
+    push_decimal(left.add(&right))
+}
+
+extern "C" fn jet_jit_decimal_sub(a: i64, b: i64) -> i64 {
+    let left = with_decimal(a, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
+    let right = with_decimal(b, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
+    push_decimal(left.sub(&right))
+}
+
+extern "C" fn jet_jit_decimal_mul(a: i64, b: i64) -> i64 {
+    let left = with_decimal(a, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
+    let right = with_decimal(b, |d| d.clone()).unwrap_or_else(|| CtDecimal::from_str("0").unwrap());
+    push_decimal(left.mul(&right))
+}
+
+extern "C" fn jet_jit_decimal_to_string(a: i64) -> i64 {
+    let text = with_decimal(a, |d| d.to_string_rep()).unwrap_or_else(|| "0".to_string());
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+}
+
 pub(crate) struct NumericHostFns {
     pub bigint_from_int: cranelift_module::FuncId,
     pub bigint_from_str: cranelift_module::FuncId,
@@ -86,6 +145,11 @@ pub(crate) struct NumericHostFns {
     pub bigint_eq: cranelift_module::FuncId,
     pub bigint_neg: cranelift_module::FuncId,
     pub bigint_to_string: cranelift_module::FuncId,
+    pub decimal_from_str: cranelift_module::FuncId,
+    pub decimal_add: cranelift_module::FuncId,
+    pub decimal_sub: cranelift_module::FuncId,
+    pub decimal_mul: cranelift_module::FuncId,
+    pub decimal_to_string: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_numeric_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -99,6 +163,14 @@ pub(crate) fn register_numeric_symbols(builder: &mut cranelift_jit::JITBuilder) 
     builder.symbol(
         "jet_jit_bigint_to_string",
         jet_jit_bigint_to_string as *const u8,
+    );
+    builder.symbol("jet_jit_decimal_from_str", jet_jit_decimal_from_str as *const u8);
+    builder.symbol("jet_jit_decimal_add", jet_jit_decimal_add as *const u8);
+    builder.symbol("jet_jit_decimal_sub", jet_jit_decimal_sub as *const u8);
+    builder.symbol("jet_jit_decimal_mul", jet_jit_decimal_mul as *const u8);
+    builder.symbol(
+        "jet_jit_decimal_to_string",
+        jet_jit_decimal_to_string as *const u8,
     );
 }
 
@@ -136,5 +208,10 @@ pub(crate) fn declare_numeric_host_fns(
         bigint_eq: import("jet_jit_bigint_eq", &sig_compare)?,
         bigint_neg: import("jet_jit_bigint_neg", &sig_unary)?,
         bigint_to_string: import("jet_jit_bigint_to_string", &sig_unary)?,
+        decimal_from_str: import("jet_jit_decimal_from_str", &sig_unary)?,
+        decimal_add: import("jet_jit_decimal_add", &sig_binary)?,
+        decimal_sub: import("jet_jit_decimal_sub", &sig_binary)?,
+        decimal_mul: import("jet_jit_decimal_mul", &sig_binary)?,
+        decimal_to_string: import("jet_jit_decimal_to_string", &sig_unary)?,
     })
 }

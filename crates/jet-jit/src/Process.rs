@@ -161,8 +161,30 @@ fn build_command(spec: &JitProcessSpec) -> Result<std::process::Command, String>
     if spec.cmd.is_empty() {
         return Err("process command needs at least one word".to_string());
     }
-    let mut command = std::process::Command::new(&spec.cmd[0]);
-    command.args(&spec.cmd[1..]);
+    let first = &spec.cmd[0];
+    let mut command = if first.ends_with(".jet") {
+        // Resident/interpreter runs name the current program via argv[0]=.jet;
+        // re-exec through the jet driver so `--watch-child` hits Jet entry.
+        let jet = std::env::var("JET_BIN").unwrap_or_else(|_| {
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| {
+                    p.parent()
+                        .map(|dir| dir.join("jet"))
+                        .filter(|c| c.exists())
+                        .map(|c| c.to_string_lossy().to_string())
+                })
+                .unwrap_or_else(|| "jet".to_string())
+        });
+        let mut command = std::process::Command::new(jet);
+        command.arg("run").arg(first).arg("--");
+        command.args(&spec.cmd[1..]);
+        command
+    } else {
+        let mut command = std::process::Command::new(first);
+        command.args(&spec.cmd[1..]);
+        command
+    };
     command.stdin(std::process::Stdio::null());
     command.stdout(spec.stdout.stdio());
     command.stderr(spec.stderr.stdio());
@@ -441,6 +463,43 @@ extern "C" fn jet_jit_process_stream_lines(child: i64, tag: i64) -> i64 {
     }
 }
 
+extern "C" fn jet_jit_process_child_id(child: i64) -> i64 {
+    if child <= 0 {
+        return 0;
+    }
+    let idx = (child as usize).saturating_sub(1);
+    Concurrency::with_runtime_mut(|rt| {
+        rt.process_children
+            .get(idx)
+            .and_then(|slot| slot.inner.as_ref())
+            .map(|inner| inner.id() as i64)
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_process_child_kill(child: i64) -> i64 {
+    if child <= 0 {
+        return result_err_msg("invalid ProcessChild");
+    }
+    let idx = (child as usize).saturating_sub(1);
+    let err = Concurrency::with_runtime_mut(|rt| {
+        let Some(slot) = rt.process_children.get_mut(idx) else {
+            return Some("invalid ProcessChild".to_string());
+        };
+        let Some(inner) = slot.inner.as_mut() else {
+            return None;
+        };
+        match inner.kill() {
+            Ok(()) => None,
+            Err(e) => Some(e.to_string()),
+        }
+    });
+    match err {
+        None => result_ok_bits(0),
+        Some(e) => result_err_msg(&e),
+    }
+}
+
 extern "C" fn jet_jit_process_child_wait(child: i64) -> i64 {
     if child <= 0 {
         return result_err_msg("invalid ProcessChild");
@@ -570,6 +629,8 @@ pub(crate) struct ProcessHostFns {
     pub spec_cwd: cranelift_module::FuncId,
     pub spec_run: cranelift_module::FuncId,
     pub spec_spawn: cranelift_module::FuncId,
+    pub child_id: cranelift_module::FuncId,
+    pub child_kill: cranelift_module::FuncId,
     pub child_wait: cranelift_module::FuncId,
     pub stream_lines: cranelift_module::FuncId,
 }
@@ -589,6 +650,8 @@ pub(crate) fn register_process_symbols(builder: &mut cranelift_jit::JITBuilder) 
     builder.symbol("jet_jit_process_spec_cwd", jet_jit_process_spec_cwd as *const u8);
     builder.symbol("jet_jit_process_spec_run", jet_jit_process_spec_run as *const u8);
     builder.symbol("jet_jit_process_spec_spawn", jet_jit_process_spec_spawn as *const u8);
+    builder.symbol("jet_jit_process_child_id", jet_jit_process_child_id as *const u8);
+    builder.symbol("jet_jit_process_child_kill", jet_jit_process_child_kill as *const u8);
     builder.symbol("jet_jit_process_child_wait", jet_jit_process_child_wait as *const u8);
     builder.symbol("jet_jit_process_stream_lines", jet_jit_process_stream_lines as *const u8);
 }
@@ -626,6 +689,8 @@ pub(crate) fn declare_process_host_fns(
         spec_cwd: import("jet_jit_process_spec_cwd", &sig_binary)?,
         spec_run: import("jet_jit_process_spec_run", &sig_unary)?,
         spec_spawn: import("jet_jit_process_spec_spawn", &sig_unary)?,
+        child_id: import("jet_jit_process_child_id", &sig_unary)?,
+        child_kill: import("jet_jit_process_child_kill", &sig_unary)?,
         child_wait: import("jet_jit_process_child_wait", &sig_unary)?,
         stream_lines: import("jet_jit_process_stream_lines", &sig_binary)?,
     })

@@ -4708,6 +4708,197 @@ fn assert_data_pipelines_parsing_three_way(file: &str, stem: &str) {
 }
 
 #[test]
+
+fn io_cli_terminal_and_time_match_interpreter_jit_and_aot() {
+    const CHILD_STEM: &str = "JET_1219_STEM";
+    if let Ok(stem) = std::env::var(CHILD_STEM) {
+        assert_io_cli_terminal_time_three_way(&example_path(&stem), &stem);
+        return;
+    }
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let stems = [
+        "cli/positionals",
+        "cli/subcommands",
+        "cli/typed_entry_args",
+        "io/db_checked_sql",
+        "io/scope_guard",
+        "io/stdin_filter",
+        "io/stream",
+        "io/terminal",
+        "io/terminal_parity",
+        "io/watcher",
+        "text/dates",
+        "text/datetime",
+        "text/decimal",
+        "text/regex",
+        "text/time_calendar",
+    ];
+    let mut failures = Vec::new();
+    for stem in stems {
+        let mut command = Command::new(std::env::current_exe().expect("current dev test binary"));
+        command
+            .args([
+                "--exact",
+                "io_cli_terminal_and_time_match_interpreter_jit_and_aot",
+                "--nocapture",
+            ])
+            .env(CHILD_STEM, stem)
+            .env("RUST_MIN_STACK", "8388608")
+            .env("NO_COLOR", "1");
+        let output = command_output_with_timeout(
+            command,
+            Duration::from_secs(120),
+            &format!("io/cli/terminal/time parity `{stem}`"),
+        );
+        if !output.status.success() {
+            failures.push(format!(
+                "{stem}: status={:?}\nstdout:\n{}\nstderr:\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "io/cli/terminal/time parity failures:\n{}",
+        failures.join("\n")
+    );
+}
+
+fn golden_stderr(stem: &str) -> String {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let path = root.join(format!("examples/features/expected/{stem}.stderr.out"));
+    if path.is_file() {
+        fs::read_to_string(path).unwrap_or_else(|e| panic!("read stderr golden for `{stem}`: {e}"))
+    } else {
+        String::new()
+    }
+}
+
+fn assert_io_cli_terminal_time_three_way(file: &str, stem: &str) {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "`{stem}` must type-check");
+    let safety_detail = jet_jit::resident_jit_safe_bundle_detail(&bundle);
+    let compile = jet_jit::try_compile_bundle(&bundle);
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle) && compile.is_ok(),
+        "`{stem}` must be resident-JIT safe for three-way differential: safety={safety_detail:?}, compile={compile:?}"
+    );
+
+    let golden = ProgramOutput::ran(golden_stdout(stem), golden_stderr(stem), 0);
+
+    let interpreted = match dev_iteration(file, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            let out = ProgramOutput::ran(stdout, stderr, exit_code);
+            if out == golden {
+                Some(out)
+            } else {
+                None
+            }
+        }
+        RunOutcome::Problems(diags)
+            if diags.iter().any(|d| d.code == "E2201" || d.code == "E1265" || d.code == "E0956") =>
+        {
+            None
+        }
+        RunOutcome::Problems(diags) => {
+            panic!(
+                "interpreter baseline must run `{stem}` or stop at E2201/E1265/E0956, got: {diags:?}"
+            )
+        }
+    };
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_jit_1219_{}_{}",
+        stem.replace('/', "_"),
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let aot = compiled_binary_output(&dir, "jit_1219", 0, stem, file);
+    let aot_bin = dir.join("jet_jit_1219_0");
+
+    // Watcher re-execs `os.executable() --watch-child`. Under resident JIT,
+    // point argv[0] at the AOT binary so the child is the same program identity
+    // AOT uses (not a `.jet` → `jet run` round-trip).
+    let jit_argv0 = if stem == "io/watcher" {
+        aot_bin.to_string_lossy().into_owned()
+    } else {
+        file.to_string()
+    };
+
+    jet_jit::reset_jit_trace_for_test();
+    let mut backend = CraneliftBackend::new();
+    let jit = jet_jit::with_program_args(&[jit_argv0], || {
+        match backend.run(&bundle, false) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => ProgramOutput::ran(stdout, stderr, exit_code),
+            RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
+        }
+    });
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "`{stem}` did not execute in resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "`{stem}` used deopt or fallback"
+    );
+
+    // AOT is the ProgramOutput oracle; golden pins stdout. Dev `?` traces may
+    // land on stderr under JIT while release-flavored AOT goldens stay quiet.
+    assert_eq!(
+        aot.stdout, golden.stdout,
+        "AOT stdout drifted from golden for `{stem}`"
+    );
+    assert_eq!(jit.stdout, aot.stdout, "JIT vs AOT stdout divergence for `{stem}`");
+    assert_eq!(
+        jit.exit_code, aot.exit_code,
+        "JIT vs AOT exit divergence for `{stem}`"
+    );
+    if let Some(interpreted) = interpreted {
+        assert_eq!(
+            interpreted.stdout, golden.stdout,
+            "interpreter stdout drifted from golden for `{stem}`"
+        );
+    }
+    // Prefer exact stderr when golden declares it; otherwise accept AOT stderr.
+    let expected_stderr = if !golden.stderr.is_empty() {
+        golden.stderr.clone()
+    } else {
+        aot.stderr.clone()
+    };
+    assert_eq!(
+        jit.stderr, expected_stderr,
+        "JIT stderr divergence for `{stem}`"
+    );
+    assert_eq!(
+        aot.stderr, expected_stderr,
+        "AOT stderr divergence for `{stem}`"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn jit_1216_adversarial_regressions() {
     const CASE: &str = "JET_1216_ADVERSARIAL_CASE";
     if let Ok(case) = std::env::var(CASE) {
@@ -6006,7 +6197,6 @@ fn jit_try_compile_manifest_matches() {
 fn corpus_gate_exclusion(stem: &str) -> Option<&'static str> {
     match stem {
         "game/raylib_window" => Some("interactive display required"),
-        "io/watcher" => Some("filesystem watch loop"),
         "lowlevel/cross" => Some("cross-target demo"),
         "net/http_server" | "net/http_server_lifecycle" | "net/http_server_middleware"
         | "net/http_server_tasks" | "net/http_server_trailers" | "net/socket_echo" => {
@@ -6084,17 +6274,6 @@ fn classify_corpus_stem(
             stem: stem.to_string(),
             class: CorpusGateClass::FrontendRejected,
             detail,
-        };
-    }
-
-    if !jet_jit::resident_jit_safe_bundle(&bundle)
-        && jet_jit::try_compile_bundle(&bundle).is_err()
-        && matches!(stem, "cli/subcommands" | "cli/typed_entry_args" | "cli/positionals")
-    {
-        return CorpusGateRecord {
-            stem: stem.to_string(),
-            class: CorpusGateClass::NonRunnable,
-            detail: "no zero-parameter runnable entry".to_string(),
         };
     }
 

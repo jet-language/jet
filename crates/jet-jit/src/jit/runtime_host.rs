@@ -9,7 +9,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use super::resident::resident_teardown;
 use super::{
     Archive, Collections, Compress, Concurrency, CoreHost, Crypto, Encoding, Fmt, JitResultValue,
-    Memory, Numeric, Parse, Process, Random, Sketch, Solver, Text, TRY_COMPILE_PANIC_HOOK_LOCK,
+    Memory, Numeric, Parse, Process, Random, Sketch, Solver, Text, Time, TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
 pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
@@ -121,6 +121,11 @@ pub(crate) struct JitRuntime {
     /// `core.raylib` window / color handles (#1218).
     pub(crate) raylib_windows: Vec<crate::Raylib::RaylibWindowState>,
     pub(crate) raylib_colors: Vec<crate::Raylib::RaylibColorState>,
+    pub(crate) time_values: Vec<Option<Time::TimeValue>>,
+    /// Regex / Match handles for jet.regex (#1219).
+    pub(crate) regex_values: Vec<Option<Text::RegexValue>>,
+    /// Decimal handles for D-DECIMAL1 (#1219) — side table of CtDecimal.
+    pub(crate) decimal_values: Vec<Option<jet_foundation::Numeric::CtDecimal>>,
     /// Set by a host shim when the user program hits a runtime panic (overflow,
     /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
     /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,
@@ -1539,6 +1544,10 @@ pub(crate) struct HostFns {
     pub(crate) testing_temp_dir: FuncId,
     pub(crate) testing_snap: FuncId,
     pub(crate) data: crate::Data::DataHostFns,
+    pub(crate) time: crate::Time::TimeHostFns,
+    pub(crate) io: crate::Io::IoHostFns,
+    pub(crate) watcher: crate::Watcher::WatcherHostFns,
+    pub(crate) net: crate::Net::NetHostFns,
 }
 
 pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
@@ -1712,6 +1721,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Text::register_text_symbols(&mut builder);
     crate::Sketch::register_sketch_symbols(&mut builder);
     crate::Args::register_args_symbols(&mut builder);
+    crate::Cli::register_cli_symbols(&mut builder);
     crate::Db::register_db_symbols(&mut builder);
     Crypto::register_crypto_symbols(&mut builder);
     crate::Game::register_game_symbols(&mut builder);
@@ -1727,6 +1737,10 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_reflect_field_value", jet_jit_reflect_field_value as *const u8);
     builder.symbol("jet_jit_testing_temp_dir", jet_jit_testing_temp_dir as *const u8);
     builder.symbol("jet_jit_testing_snap", jet_jit_testing_snap as *const u8);
+    crate::Time::register_time_symbols(&mut builder);
+    crate::Io::register_io_symbols(&mut builder);
+    crate::Watcher::register_watcher_symbols(&mut builder);
+    crate::Net::register_net_symbols(&mut builder);
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
     let memory = Memory::declare_memory_host_fns(&mut module)?;
@@ -1750,6 +1764,10 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let raylib = crate::Raylib::declare_raylib_host_fns(&mut module)?;
     let parse = crate::Parse::declare(&mut module)?;
     let data = crate::Data::declare(&mut module)?;
+    let time = crate::Time::declare_time_host_fns(&mut module)?;
+    let io = crate::Io::declare_io_host_fns(&mut module)?;
+    let watcher = crate::Watcher::declare_watcher_host_fns(&mut module)?;
+    let net = crate::Net::declare_net_host_fns(&mut module)?;
     let host = declare_host_fns(
         &mut module,
         coll,
@@ -1774,6 +1792,10 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         raylib,
         parse,
         data,
+        time,
+        io,
+        watcher,
+        net,
     )?;
     Ok((module, host))
 }
@@ -1945,6 +1967,10 @@ fn declare_host_fns(
     raylib: crate::Raylib::RaylibHostFns,
     parse: crate::Parse::HostFns,
     data: crate::Data::DataHostFns,
+    time: crate::Time::TimeHostFns,
+    io: crate::Io::IoHostFns,
+    watcher: crate::Watcher::WatcherHostFns,
+    net: crate::Net::NetHostFns,
 ) -> Result<HostFns, String> {
     let cc = module.target_config().default_call_conv;
     let mut sig_bin_i64 = Signature::new(cc);
@@ -2294,5 +2320,9 @@ fn declare_host_fns(
         testing_temp_dir: import("jet_jit_testing_temp_dir", &sig_str_unary_i64)?,
         testing_snap: import("jet_jit_testing_snap", &sig_str_eq)?,
         data,
+        time,
+        io,
+        watcher,
+        net,
     })
 }

@@ -633,10 +633,29 @@ pub(crate) fn compile_program_tiered(
         spawn_func_ids.push(id);
     }
 
+    let cli_entry = program.entry == "__jet_cli_main";
     let mut func_ids: HashMap<String, FuncId> = HashMap::new();
+    let mut cli_import_id: Option<FuncId> = None;
+    if cli_entry {
+        cli_import_id = Some(crate::Cli::declare_cli_main_import(module)?);
+        let main_id = match existing_main {
+            Some(id) => id,
+            None => {
+                let cc = module.target_config().default_call_conv;
+                let sig = Signature::new(cc);
+                module
+                    .declare_function("jet_jit_main", Linkage::Export, &sig)
+                    .map_err(|e| e.to_string())?
+            }
+        };
+        func_ids.insert(program.entry.clone(), main_id);
+    }
     for f in &program.funcs {
+        if cli_entry && f.name == program.entry {
+            continue;
+        }
         let sig = func_signature(module, f, &meta)?;
-        let id = if f.name == program.entry {
+        let id = if !cli_entry && f.name == program.entry {
             match existing_main {
                 Some(id) => id,
                 None => module
@@ -679,6 +698,9 @@ pub(crate) fn compile_program_tiered(
 
     let mut spawn_site = 0usize;
     for f in &program.funcs {
+        if cli_entry && f.name == program.entry {
+            continue;
+        }
         let id = func_ids[&f.name];
         if let Some(&idx) = deopt_index.get(&f.name) {
             super::deopt::lower_deopt_stub(module, host, &meta, f, id, idx)
@@ -716,8 +738,43 @@ pub(crate) fn compile_program_tiered(
         }
     }
 
+    if cli_entry {
+        // Export `jet_jit_main` as a thin wrapper around the host trampoline.
+        // Cranelift cannot `get_finalized_function` an Import for direct invoke.
+        let main_id = func_ids[&program.entry];
+        let import_id = cli_import_id.expect("cli import");
+        let mut ctx = module.make_context();
+        let cc = module.target_config().default_call_conv;
+        ctx.func.signature = Signature::new(cc);
+        let mut fbcx = FunctionBuilderContext::new();
+        {
+            let mut b = FunctionBuilder::new(&mut ctx.func, &mut fbcx);
+            let entry = b.create_block();
+            b.append_block_params_for_function_params(entry);
+            b.switch_to_block(entry);
+            b.seal_block(entry);
+            let callee = module.declare_func_in_func(import_id, b.func);
+            b.ins().call(callee, &[]);
+            b.ins().return_(&[]);
+            b.finalize();
+        }
+        module
+            .define_function(main_id, &mut ctx)
+            .map_err(|e| e.to_string())?;
+        module.clear_context(&mut ctx);
+    }
+
     module.finalize_definitions().map_err(|e| e.to_string())?;
     crate::Data::bind_lazy_callables(module);
+    if cli_entry {
+        let run_name = "run";
+        let run_id = func_ids
+            .get(run_name)
+            .copied()
+            .ok_or_else(|| "jit CLI entry missing `run`".to_string())?;
+        let code = module.get_finalized_function(run_id);
+        crate::Cli::install_cli_run_ptr(code);
+    }
     Ok(func_ids
         .get(&program.entry)
         .copied()

@@ -36,8 +36,17 @@ extern "C" fn jet_jit_os_temp_dir() -> i64 {
 
 extern "C" fn jet_jit_os_executable() -> i64 {
     Concurrency::with_runtime_mut(|rt| {
-        let path = std::env::current_exe()
-            .map(|p| p.to_string_lossy().to_string())
+        // Under with_program_args, argv[0] is the entry .jet (or binary); that is
+        // the program identity watchers/process should re-exec (#1219).
+        let path = crate::program_args()
+            .into_iter()
+            .next()
+            .filter(|p| !p.is_empty())
+            .or_else(|| {
+                std::env::current_exe()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+            })
             .unwrap_or_default();
         rt.heap.alloc_string(path)
     })
@@ -452,6 +461,54 @@ extern "C" fn jet_jit_path_join(base: i64, part: i64) -> i64 {
         .to_string_lossy()
         .to_string();
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(joined))
+}
+
+/// String-form `core.path.parent` / `.extension` / `.normalize` (D-IO1 helpers).
+extern "C" fn jet_jit_path_parent_str(path: i64) -> i64 {
+    let s = clone_heap_string(path);
+    let out = std::path::Path::new(&s)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
+}
+
+extern "C" fn jet_jit_path_extension_str(path: i64) -> i64 {
+    let s = clone_heap_string(path);
+    let out = std::path::Path::new(&s)
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default();
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(out))
+}
+
+extern "C" fn jet_jit_path_normalize_str(path: i64) -> i64 {
+    let s = clone_heap_string(path);
+    let source = std::path::Path::new(&s);
+    let rooted = source.has_root();
+    let mut normalized = std::path::PathBuf::new();
+    let mut normal_depth = 0usize;
+    for component in source.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            std::path::Component::RootDir => normalized.push(component.as_os_str()),
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir if normal_depth > 0 => {
+                normalized.pop();
+                normal_depth -= 1;
+            }
+            std::path::Component::ParentDir if !rooted => normalized.push(".."),
+            std::path::Component::ParentDir => {}
+            std::path::Component::Normal(part) => {
+                normalized.push(part);
+                normal_depth += 1;
+            }
+        }
+    }
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .alloc_string(normalized.to_string_lossy().into_owned())
+    })
 }
 
 extern "C" fn jet_jit_path_write_atomic(rec: i64, bytes: i64) -> i64 {
@@ -1254,6 +1311,9 @@ pub(crate) struct CoreHostFns {
     pub fs_temp_file: cranelift_module::FuncId,
     pub fs_lock: cranelift_module::FuncId,
     pub path_join: cranelift_module::FuncId,
+    pub path_parent_str: cranelift_module::FuncId,
+    pub path_extension_str: cranelift_module::FuncId,
+    pub path_normalize_str: cranelift_module::FuncId,
     pub path_from: cranelift_module::FuncId,
     pub path_write_atomic: cranelift_module::FuncId,
     pub path_join_handle: cranelift_module::FuncId,
@@ -1340,6 +1400,9 @@ pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder
     builder.symbol("jet_jit_fs_temp_file", jet_jit_fs_temp_file as *const u8);
     builder.symbol("jet_jit_fs_lock", jet_jit_fs_lock as *const u8);
     builder.symbol("jet_jit_path_join", jet_jit_path_join as *const u8);
+    builder.symbol("jet_jit_path_parent_str", jet_jit_path_parent_str as *const u8);
+    builder.symbol("jet_jit_path_extension_str", jet_jit_path_extension_str as *const u8);
+    builder.symbol("jet_jit_path_normalize_str", jet_jit_path_normalize_str as *const u8);
     builder.symbol("jet_jit_path_from", jet_jit_path_from as *const u8);
     builder.symbol("jet_jit_path_write_atomic", jet_jit_path_write_atomic as *const u8);
     builder.symbol("jet_jit_path_join_handle", jet_jit_path_join_handle as *const u8);
@@ -1501,6 +1564,9 @@ pub(crate) fn declare_core_host_fns(
         fs_temp_file: import("jet_jit_fs_temp_file", &sig_unary_i64)?,
         fs_lock: import("jet_jit_fs_lock", &sig_unary_i64)?,
         path_join: import("jet_jit_path_join", &sig_i64_i64_i64)?,
+        path_parent_str: import("jet_jit_path_parent_str", &sig_unary_i64)?,
+        path_extension_str: import("jet_jit_path_extension_str", &sig_unary_i64)?,
+        path_normalize_str: import("jet_jit_path_normalize_str", &sig_unary_i64)?,
         path_from: import("jet_jit_path_from", &sig_unary_i64)?,
         path_write_atomic: import("jet_jit_path_write_atomic", &sig_i64_i64_i64)?,
         path_join_handle: import("jet_jit_path_join_handle", &sig_i64_i64_i64)?,

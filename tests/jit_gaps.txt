@@ -35,6 +35,9 @@ covered:
   basics/tuples
   basics/values
   basics/variadics_spread
+  cli/positionals
+  cli/subcommands
+  cli/typed_entry_args
   collections/deque
   collections/dynamic-array-view
   collections/filter_map
@@ -114,7 +117,6 @@ covered:
   effects/share_boundary
   effects/single_use
   effects/single_use_discard
-  effects/smart_context
   effects/taint
   errors/discard_fallible
   errors/error_context
@@ -137,6 +139,7 @@ covered:
   io/compress_gzip
   io/compress_zstd
   io/db
+  io/db_checked_sql
   io/db_read_footprint
   io/dir_entry
   io/env_overlay
@@ -151,6 +154,11 @@ covered:
   io/path
   io/process_builder
   io/scope_guard
+  io/stdin_filter
+  io/stream
+  io/terminal
+  io/terminal_parity
+  io/watcher
   lowlevel/cross
   lowlevel/layout_c
   lowlevel/layout_columnar
@@ -160,8 +168,6 @@ covered:
   lowlevel/unsafe_obligations
   math/math_audit
   math/random_audit
-  memory/arena
-  memory/arena_parse
   memory/arena_regions
   memory/copy_verb
   memory/entity_tree
@@ -175,7 +181,6 @@ covered:
   memory/pool_stale_id
   memory/rawptr
   memory/ref_field
-  memory/resource_close
   memory/returned_views
   memory/shared_config
   memory/shared_transact
@@ -224,11 +229,16 @@ covered:
   syntax/maturity_tags
   syntax/trailing_block
   text/bigint
+  text/dates
+  text/datetime
+  text/decimal
   text/hex_base64
   text/human_format
+  text/regex
   text/runtime_duration
   text/string_parse
   text/strings
+  text/time_calendar
   text/unicode_text
   text/unicode_text_audit
   text/uuid
@@ -305,15 +315,7 @@ covered:
 
 gaps:
   basics/loop_values: run: jit builtin method unsupported
-  cli/positionals: lower_jit_program returned None (no zero-parameter runnable entry)
-  cli/subcommands: lower_jit_program returned None (no zero-parameter runnable entry)
-  cli/typed_entry_args: lower_jit_program returned None (no zero-parameter runnable entry)
-  io/db_checked_sql: run: jit core call unsupported: jet.db.migrate
-  io/stdin_filter: run: jit for-in method-call collection unsupported
-  io/stream: count_lines: jit for-in method-call collection unsupported
-  io/terminal: describe_key: jit if-let pattern unsupported
-  io/terminal_parity: run: jit core call unsupported: core.io.stdout
-  io/watcher: run: jit core call unsupported: core.event.scope
+  effects/smart_context: run: jit resource take unknown local `user___jet_resource_arena_435`
   lowlevel/ffi: run: jit extern call unsupported
   lowlevel/freestanding: run: jit core call unsupported
   lowlevel/inline_asm: add_registers: jit function missing return
@@ -323,11 +325,14 @@ gaps:
   lowlevel/sized_floats: run: jit core call unsupported
   lowlevel/swizzle: run: jit math builtin unsupported
   lowlevel/target_profile_board: run: jit core call unsupported
+  memory/arena: run: jit resource take unknown local `user___jet_resource_arena_392`
+  memory/arena_parse: run: jit resource take unknown local `user___jet_resource_arena_112`
+  memory/resource_close: run: jit resource take unknown local `user___jet_resource_first_287`
   net/browser_bidi_profiles: profile_outcome: jit core call unsupported: core.browser.profile
   net/email_dkim: run: jit enum lit `SmtpSecurity::StartTls`
   net/email_message: run: jit core call unsupported: core.email.address
-  net/http_client: jit core call unsupported: core.net.tcp_listen
-  net/http_get: jit core call unsupported: core.net.tcp_listen
+  net/http_client: jit handle method unsupported
+  net/http_get: jit handle method unsupported
   net/http_rest_service: jit core call unsupported: core.http.server.serve_once_listener
   net/http_routes: jit core call unsupported: core.http.server.serve_once_listener
   net/http_server: run: jit core call unsupported: core.http.server.mux
@@ -339,13 +344,8 @@ gaps:
   net/socket_echo: jit core call unsupported: core.net.socket_to_string
   net/url_mime: run: jit core call unsupported: core.url.parse
   net/ws_echo: jit handle method unsupported
-  safety/sh_typed_text: run: jit host call unsupported
-  safety/typed_sql: run_query: jit host call unsupported
-  text/dates: run: jit core call unsupported: core.time.date.new
-  text/datetime: run: jit core call unsupported: core.time.datetime.from_timestamp
-  text/decimal: run: jit precise numeric builtin unsupported
-  text/regex: run: jit core call unsupported: jet.regex.is_match
-  text/time_calendar: run: jit core call unsupported: core.time.parse_rfc3339
+  safety/sh_typed_text: run: jit TypedTextInterp unsupported: Sh
+  safety/typed_sql: render: jit clone unsupported type: Named("Html")
   ui/events: show_publish: jit enum `HookOutcome::Continue`
   ui/layout_basic: run: jit layout block unsupported
   ui/loadable: run: jit core call unsupported: core.reactive.loadable.idle

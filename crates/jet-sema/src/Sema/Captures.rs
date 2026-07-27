@@ -645,7 +645,11 @@ pub(crate) fn expr_collect_captures(
         | Expr::Present(inner, _)
         | Expr::Try(inner, _, _)
         | Expr::Ok(inner, _)
-        | Expr::Err(inner, _) => expr_collect_captures(inner, bound, read, mut_cap),
+        | Expr::Err(inner, _)
+        | Expr::Deref(inner, _)
+        | Expr::RawOf(inner, _)
+        | Expr::Copy(inner, _)
+        | Expr::Place(inner, _, _) => expr_collect_captures(inner, bound, read, mut_cap),
         Expr::MethodCall { receiver, args, .. } => {
             // A leading-capital identifier in receiver position is a static type
             // (`Int.parse`, `UserId.from_int`), not a value captured by the lambda.

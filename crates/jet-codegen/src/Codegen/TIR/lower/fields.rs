@@ -307,6 +307,14 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             _ => None,
         };
     }
+    // D-WATCH-SCOPE1: WatchEvent is a reserved core struct (not a user Item::Struct).
+    if name == "WatchEvent" && !cx.struct_fields.contains_key(name) {
+        return match field {
+            "domain" | "kind" | "path" | "detail" => Some(Type::String),
+            "pid" | "port" => Some(Type::Int),
+            _ => None,
+        };
+    }
     if name == "DecodeError" && !cx.struct_fields.contains_key(name) {
         return matches!(field, "path" | "reason").then_some(Type::String);
     }
