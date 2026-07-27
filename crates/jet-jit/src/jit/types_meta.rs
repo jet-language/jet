@@ -654,6 +654,47 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "max_expansion_depth",
             "max_expansion_bytes",
         ],
+        "DataLimits" => &[
+            "encoding",
+            "max_groups",
+            "max_sort_rows",
+            "max_join_rows",
+            "max_output_rows",
+        ],
+        "DataStatus" => &[
+            "step",
+            "path",
+            "copy",
+            "ownership",
+            "trust",
+            "fallback",
+            "replacement",
+        ],
+        "DataGroup" => &["key", "count", "sum", "mean"],
+        "DataError" => &[
+            "kind",
+            "operation",
+            "row",
+            "column",
+            "index",
+            "reason",
+            "cause",
+        ],
+        "DataSummary" => &[
+            "count",
+            "sum",
+            "mean",
+            "min",
+            "max",
+            "median",
+            "variance",
+            "stddev",
+        ],
+        "DataTable" | "Table" | "LazyFrame" => &["rows", "missing", "plan"],
+        "Series" | "DataSeries" => &["values", "missing"],
+        "DataColumn" => &["name", "type_name"],
+        "DataJoin" | "Join" => &["left", "right"],
+        "DataPivotCell" => &["row_key", "column_key", "count", "sum", "mean"],
         "EncodingCause" => &["kind", "os_code", "message"],
         "EncodingError" => &[
             "format",
@@ -706,6 +747,60 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
             "buffer_bytes" | "max_depth" | "max_item_bytes" | "max_expansion_depth"
             | "max_expansion_bytes" => Some(Type::Int),
             "max_total_bytes" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        },
+        "DataLimits" => match field {
+            "encoding" => Some(Type::Named("EncodingLimits".into())),
+            "max_groups" | "max_sort_rows" | "max_join_rows" | "max_output_rows" => Some(Type::Int),
+            _ => None,
+        },
+        "DataStatus" => match field {
+            "step" | "path" | "copy" | "ownership" | "trust" | "fallback" | "replacement" => {
+                Some(Type::String)
+            }
+            _ => None,
+        },
+        "DataGroup" => match field {
+            "key" => Some(Type::String),
+            "count" => Some(Type::Int),
+            "sum" | "mean" => Some(Type::Float),
+            _ => None,
+        },
+        "DataError" => match field {
+            "kind" | "operation" | "reason" => Some(Type::String),
+            "row" | "column" | "index" | "cause" => Some(Type::Int),
+            _ => None,
+        },
+        "DataSummary" => match field {
+            "count" => Some(Type::Int),
+            "sum" | "mean" | "min" | "max" | "median" | "variance" | "stddev" => {
+                Some(Type::Float)
+            }
+            _ => None,
+        },
+        "DataTable" | "Table" | "LazyFrame" => match field {
+            "rows" => Some(Type::List(Box::new(Type::Int))),
+            "missing" => Some(Type::Int),
+            "plan" => Some(Type::List(Box::new(Type::String))),
+            _ => None,
+        },
+        "Series" | "DataSeries" => match field {
+            "values" => Some(Type::List(Box::new(Type::Float))),
+            "missing" => Some(Type::Int),
+            _ => None,
+        },
+        "DataColumn" => match field {
+            "name" | "type_name" => Some(Type::String),
+            _ => None,
+        },
+        "DataJoin" | "Join" => match field {
+            "left" | "right" => Some(Type::Int),
+            _ => None,
+        },
+        "DataPivotCell" => match field {
+            "row_key" | "column_key" => Some(Type::String),
+            "count" => Some(Type::Int),
+            "sum" | "mean" => Some(Type::Float),
             _ => None,
         },
         "EncodingCause" => match field {

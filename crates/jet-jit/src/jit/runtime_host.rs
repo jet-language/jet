@@ -9,7 +9,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use super::resident::resident_teardown;
 use super::{
     Archive, Collections, Compress, Concurrency, CoreHost, Crypto, Encoding, Fmt, JitResultValue,
-    Memory, Numeric, Process, Random, Sketch, Solver, Text, TRY_COMPILE_PANIC_HOOK_LOCK,
+    Memory, Numeric, Parse, Process, Random, Sketch, Solver, Text, TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
 pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
@@ -48,6 +48,13 @@ pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, St
 /// Live heap carried across type-stable hot_swap (M2). `invocations` counts
 /// how many times `main` ran without a clean restart — preserved on swap,
 /// reset on restart.
+#[derive(Clone)]
+pub(crate) struct ReflectSlot {
+    pub type_name: String,
+    pub display: String,
+    pub fields: Vec<(String, String)>,
+}
+
 pub(crate) struct JitRuntime {
     pub(crate) source_file: String,
     pub(crate) stdout: String,
@@ -87,6 +94,8 @@ pub(crate) struct JitRuntime {
     pub(crate) xml_writers: Vec<crate::enc_stream::XmlWriterSlot>,
     pub(crate) cbor_readers: Vec<crate::enc_stream::CborReaderSlot>,
     pub(crate) cbor_writers: Vec<crate::enc_stream::CborWriterSlot>,
+    /// Typed `core.data` pull streams (`csv_reader` → Event rows).
+    pub(crate) data_streams: Vec<crate::Data::DataStreamSlot>,
     /// `Set<T>` handles — 1-based indices (#729 collections/set). Int elems only.
     pub(crate) sets: Vec<std::collections::HashSet<i64>>,
     /// `Deque<T>` handles — 1-based indices (#729 collections/deque). Int elems only.
@@ -123,9 +132,13 @@ pub(crate) struct JitRuntime {
     /// Soft process exit for rich `require`/`panic` reports — stderr already
     /// holds the AOT-matching text; resident returns `Ran` with this code.
     pub(crate) exit_code: Option<i32>,
+
     /// Compiler-owned E3003 rendered after native code returns; never unwinds
     /// through a Cranelift frame.
     pub(crate) deadline_exceeded: Option<String>,
+    pub(crate) readers: Vec<crate::Parse::ReaderSlot>,
+    pub(crate) cursors: Vec<crate::Parse::CursorSlot>,
+    pub(crate) reflect_values: Vec<ReflectSlot>,
 }
 
 impl JitRuntime {
@@ -488,6 +501,20 @@ extern "C" fn jet_jit_str_contains(hay: i64, needle: i64) -> i8 {
     })
 }
 
+extern "C" fn jet_jit_str_starts_with(hay: i64, needle: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| match (rt.heap.get_string(hay), rt.heap.get_string(needle)) {
+        (Some(h), Some(n)) => i8::from(h.starts_with(n)),
+        _ => 0,
+    })
+}
+
+extern "C" fn jet_jit_str_ends_with(hay: i64, needle: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| match (rt.heap.get_string(hay), rt.heap.get_string(needle)) {
+        (Some(h), Some(n)) => i8::from(h.ends_with(n)),
+        _ => 0,
+    })
+}
+
 extern "C" fn jet_jit_str_len(id: i64) -> i64 {
     with_runtime_result(0, |rt| {
         rt.heap
@@ -758,6 +785,45 @@ extern "C" fn jet_jit_clock_wait(handle: i64, duration_ms: i64) -> i64 {
     })
 }
 
+
+extern "C" fn jet_jit_rich_panic(
+    file: i64,
+    line: i64,
+    fn_name: i64,
+    src_line: i64,
+    col: i64,
+    caret: i64,
+    msg: i64,
+    locals: i64,
+) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let file = rt.heap.clone_string(file).unwrap_or_default();
+        let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
+        let src_line = rt.heap.clone_string(src_line).unwrap_or_default();
+        let msg = rt.heap.clone_string(msg).unwrap_or_default();
+        let locals = rt.heap.clone_string(locals).unwrap_or_default();
+        let line_s = line.to_string();
+        let margin = line_s.len();
+        let pad = " ".repeat(margin);
+        let col_offset = (col as u64).saturating_sub(1) as usize;
+        let caret = "^".repeat((caret as usize).max(1));
+        let mut out = String::new();
+        out.push_str(&format!("panic: {msg}\n"));
+        out.push_str(&format!("  --> {file}:{line} in {fn_name}\n"));
+        out.push_str(&format!("   {pad}|\n"));
+        out.push_str(&format!("{line_s} | {src_line}\n"));
+        out.push_str(&format!("   {pad}| {}{caret}\n", " ".repeat(col_offset)));
+        if !locals.is_empty() {
+            out.push_str(&format!("locals: {locals}\n"));
+        }
+        rt.stderr.push_str(&out);
+        rt.exit_code = Some(70);
+        rt.set_trap("__jet_rich_panic__");
+        0
+    })
+}
+
+
 extern "C" fn jet_jit_trap_panic(_unused: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.set_trap("panic");
@@ -791,38 +857,6 @@ extern "C" fn jet_jit_result_context(handle: i64, msg: i64) -> i64 {
         let msg = rt.heap.clone_string(msg).unwrap_or_default();
         let combined = rt.heap.alloc_string(format!("{msg}: {err}"));
         alloc_jit_result(rt, false, combined as u64)
-    })
-}
-
-extern "C" fn jet_jit_rich_panic(
-    file: i64,
-    line: i64,
-    fn_name: i64,
-    src_line: i64,
-    col: i64,
-    caret: i64,
-    msg: i64,
-) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let file = rt.heap.clone_string(file).unwrap_or_default();
-        let fn_name = rt.heap.clone_string(fn_name).unwrap_or_default();
-        let src_line = rt.heap.clone_string(src_line).unwrap_or_default();
-        let msg = rt.heap.clone_string(msg).unwrap_or_default();
-        let line_s = line.to_string();
-        let margin = line_s.len();
-        let pad = " ".repeat(margin);
-        let col_offset = (col as u64).saturating_sub(1) as usize;
-        let caret = "^".repeat((caret as usize).max(1));
-        let mut out = String::new();
-        out.push_str(&format!("panic: {msg}\n"));
-        out.push_str(&format!("  --> {file}:{line} in {fn_name}\n"));
-        out.push_str(&format!("   {pad}|\n"));
-        out.push_str(&format!("{line_s} | {src_line}\n"));
-        out.push_str(&format!("   {pad}| {}{caret}\n", " ".repeat(col_offset)));
-        rt.stderr.push_str(&out);
-        rt.exit_code = Some(70);
-        rt.set_trap("__jet_rich_panic__");
-        0
     })
 }
 
@@ -1397,6 +1431,8 @@ pub(crate) struct HostFns {
     pub(crate) str_push_str: FuncId,
     pub(crate) str_eq: FuncId,
     pub(crate) str_contains: FuncId,
+    pub(crate) str_starts_with: FuncId,
+    pub(crate) str_ends_with: FuncId,
     pub(crate) str_clone: FuncId,
     pub(crate) str_len: FuncId,
     pub(crate) str_byte_len: FuncId,
@@ -1462,6 +1498,7 @@ pub(crate) struct HostFns {
     pub(crate) rich_panic: FuncId,
     pub(crate) trace_err: FuncId,
     pub(crate) result_context: FuncId,
+
     pub(crate) duration_from_int: FuncId,
     pub(crate) duration_from_float: FuncId,
     pub(crate) duration_in: FuncId,
@@ -1491,6 +1528,17 @@ pub(crate) struct HostFns {
     pub(crate) crypto: Crypto::CryptoHostFns,
     pub(crate) game: crate::Game::GameHostFns,
     pub(crate) raylib: crate::Raylib::RaylibHostFns,
+    pub(crate) parse: crate::Parse::HostFns,
+    pub(crate) reflect_of_finish: FuncId,
+    pub(crate) reflect_field_new: FuncId,
+    pub(crate) reflect_type_name: FuncId,
+    pub(crate) reflect_display: FuncId,
+    pub(crate) reflect_fields: FuncId,
+    pub(crate) reflect_field_name: FuncId,
+    pub(crate) reflect_field_value: FuncId,
+    pub(crate) testing_temp_dir: FuncId,
+    pub(crate) testing_snap: FuncId,
+    pub(crate) data: crate::Data::DataHostFns,
 }
 
 pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
@@ -1520,6 +1568,8 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_push_str", jet_jit_str_push_str as *const u8);
     builder.symbol("jet_jit_str_eq", jet_jit_str_eq as *const u8);
     builder.symbol("jet_jit_str_contains", jet_jit_str_contains as *const u8);
+    builder.symbol("jet_jit_str_starts_with", jet_jit_str_starts_with as *const u8);
+    builder.symbol("jet_jit_str_ends_with", jet_jit_str_ends_with as *const u8);
     builder.symbol("jet_jit_str_clone", jet_jit_str_clone as *const u8);
     builder.symbol("jet_jit_str_len", jet_jit_str_len as *const u8);
     builder.symbol("jet_jit_str_byte_len", jet_jit_str_byte_len as *const u8);
@@ -1557,6 +1607,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_rich_panic", jet_jit_rich_panic as *const u8);
     builder.symbol("jet_jit_trace_err", jet_jit_trace_err as *const u8);
     builder.symbol("jet_jit_result_context", jet_jit_result_context as *const u8);
+
     builder.symbol("jet_jit_parse_i64", jet_jit_parse_i64 as *const u8);
     builder.symbol("jet_jit_parse_f64", jet_jit_parse_f64 as *const u8);
     builder.symbol("jet_jit_numeric_try_i64", jet_jit_numeric_try_i64 as *const u8);
@@ -1665,6 +1716,17 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     Crypto::register_crypto_symbols(&mut builder);
     crate::Game::register_game_symbols(&mut builder);
     crate::Raylib::register_raylib_symbols(&mut builder);
+    crate::Parse::register_symbols(&mut builder);
+    crate::Data::register_symbols(&mut builder);
+    builder.symbol("jet_jit_reflect_of_finish", jet_jit_reflect_of_finish as *const u8);
+    builder.symbol("jet_jit_reflect_field_new", jet_jit_reflect_field_new as *const u8);
+    builder.symbol("jet_jit_reflect_type_name", jet_jit_reflect_type_name as *const u8);
+    builder.symbol("jet_jit_reflect_display", jet_jit_reflect_display as *const u8);
+    builder.symbol("jet_jit_reflect_fields", jet_jit_reflect_fields as *const u8);
+    builder.symbol("jet_jit_reflect_field_name", jet_jit_reflect_field_name as *const u8);
+    builder.symbol("jet_jit_reflect_field_value", jet_jit_reflect_field_value as *const u8);
+    builder.symbol("jet_jit_testing_temp_dir", jet_jit_testing_temp_dir as *const u8);
+    builder.symbol("jet_jit_testing_snap", jet_jit_testing_snap as *const u8);
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
     let memory = Memory::declare_memory_host_fns(&mut module)?;
@@ -1686,6 +1748,8 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let crypto = Crypto::declare_crypto_host_fns(&mut module)?;
     let game = crate::Game::declare_game_host_fns(&mut module)?;
     let raylib = crate::Raylib::declare_raylib_host_fns(&mut module)?;
+    let parse = crate::Parse::declare(&mut module)?;
+    let data = crate::Data::declare(&mut module)?;
     let host = declare_host_fns(
         &mut module,
         coll,
@@ -1708,9 +1772,154 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         crypto,
         game,
         raylib,
+        parse,
+        data,
     )?;
     Ok((module, host))
 }
+
+
+extern "C" fn jet_jit_reflect_of_finish(
+    type_name: i64,
+    display: i64,
+    fields: i64,
+) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let type_name = rt.heap.clone_string(type_name).unwrap_or_default();
+        let display = rt.heap.clone_string(display).unwrap_or_default();
+        let field_len = rt.heap.list_len(fields).unwrap_or(0);
+        let mut out = Vec::new();
+        for i in 0..field_len {
+            let fh = rt.heap.list_get_int(fields, i).unwrap_or(0);
+            let idx = (fh as usize).wrapping_sub(1);
+            if let Some(slot) = rt.reflect_values.get(idx) {
+                // field slots store single field in type_name/display misuse:
+                // we store Field as ReflectSlot { type_name=name, display=value, fields=[] }
+                out.push((slot.type_name.clone(), slot.display.clone()));
+            }
+        }
+        rt.reflect_values.push(ReflectSlot {
+            type_name,
+            display,
+            fields: out,
+        });
+        rt.reflect_values.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_reflect_field_new(name: i64, value: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let name = rt.heap.clone_string(name).unwrap_or_default();
+        let value = rt.heap.clone_string(value).unwrap_or_default();
+        rt.reflect_values.push(ReflectSlot {
+            type_name: name,
+            display: value,
+            fields: Vec::new(),
+        });
+        rt.reflect_values.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_reflect_type_name(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let idx = (handle as usize).wrapping_sub(1);
+        let text = rt
+            .reflect_values
+            .get(idx)
+            .map(|s| s.type_name.clone())
+            .unwrap_or_default();
+        rt.heap.alloc_string(text)
+    })
+}
+
+extern "C" fn jet_jit_reflect_display(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let idx = (handle as usize).wrapping_sub(1);
+        let text = rt
+            .reflect_values
+            .get(idx)
+            .map(|s| s.display.clone())
+            .unwrap_or_default();
+        rt.heap.alloc_string(text)
+    })
+}
+
+extern "C" fn jet_jit_reflect_fields(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let idx = (handle as usize).wrapping_sub(1);
+        let fields = rt
+            .reflect_values
+            .get(idx)
+            .map(|s| s.fields.clone())
+            .unwrap_or_default();
+        let mut ids = Vec::new();
+        for (name, value) in fields {
+            rt.reflect_values.push(ReflectSlot {
+                type_name: name,
+                display: value,
+                fields: Vec::new(),
+            });
+            ids.push(rt.reflect_values.len() as i64);
+        }
+        rt.heap.alloc_int_list(ids)
+    })
+}
+
+extern "C" fn jet_jit_reflect_field_name(handle: i64) -> i64 {
+    jet_jit_reflect_type_name(handle)
+}
+
+extern "C" fn jet_jit_reflect_field_value(handle: i64) -> i64 {
+    jet_jit_reflect_display(handle)
+}
+
+extern "C" fn jet_jit_testing_temp_dir(prefix: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let prefix = rt.heap.clone_string(prefix).unwrap_or_else(|| "jet".into());
+        let safe: String = prefix
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+            .collect();
+        let tid: String = format!("{:?}", std::thread::current().id())
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect();
+        let path = std::env::temp_dir().join(format!(
+            "jet_test_{}_{}_{}",
+            safe,
+            std::process::id(),
+            tid
+        ));
+        let _ = std::fs::remove_dir_all(&path);
+        let _ = std::fs::create_dir_all(&path);
+        rt.heap.alloc_string(path.to_string_lossy().into_owned())
+    })
+}
+
+extern "C" fn jet_jit_testing_snap(name: i64, actual: i64) -> i8 {
+    Concurrency::with_runtime_mut(|rt| {
+        let name = rt.heap.clone_string(name).unwrap_or_default();
+        let actual = rt.heap.clone_string(actual).unwrap_or_default();
+        let safe: String = name
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+            .collect();
+        let path = std::path::Path::new("__snapshots__").join(format!("{safe}.snap"));
+        let update = std::env::var("JET_UPDATE_SNAPSHOTS").ok().as_deref() == Some("1");
+        if update || !path.is_file() {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            return i8::from(std::fs::write(&path, actual).is_ok());
+        }
+        i8::from(
+            std::fs::read_to_string(path)
+                .map(|s| s == actual)
+                .unwrap_or(false),
+        )
+    })
+}
+
 
 fn declare_host_fns(
     module: &mut JITModule,
@@ -1734,6 +1943,8 @@ fn declare_host_fns(
     crypto: Crypto::CryptoHostFns,
     game: crate::Game::GameHostFns,
     raylib: crate::Raylib::RaylibHostFns,
+    parse: crate::Parse::HostFns,
+    data: crate::Data::DataHostFns,
 ) -> Result<HostFns, String> {
     let cc = module.target_config().default_call_conv;
     let mut sig_bin_i64 = Signature::new(cc);
@@ -1749,6 +1960,16 @@ fn declare_host_fns(
 
     let mut sig_i64 = Signature::new(cc);
     sig_i64.params.push(AbiParam::new(types::I64));
+    let mut sig_reflect_finish = Signature::new(cc);
+    for _ in 0..3 {
+        sig_reflect_finish.params.push(AbiParam::new(types::I64));
+    }
+    sig_reflect_finish.returns.push(AbiParam::new(types::I64));
+    let mut sig_rich_panic = Signature::new(cc);
+    for _ in 0..8 {
+        sig_rich_panic.params.push(AbiParam::new(types::I64));
+    }
+    sig_rich_panic.returns.push(AbiParam::new(types::I64));
     let mut sig_f64 = Signature::new(cc);
     sig_f64.params.push(AbiParam::new(types::F64));
     let mut sig_i8 = Signature::new(cc);
@@ -1810,7 +2031,7 @@ fn declare_host_fns(
     sig_trace_err.params.push(AbiParam::new(types::I64));
     sig_trace_err.params.push(AbiParam::new(types::I64));
     let mut sig_rich_panic = Signature::new(cc);
-    for _ in 0..7 {
+    for _ in 0..8 {
         sig_rich_panic.params.push(AbiParam::new(types::I64));
     }
     sig_rich_panic.returns.push(AbiParam::new(types::I64));
@@ -1962,6 +2183,8 @@ fn declare_host_fns(
         str_push_str: import("jet_jit_str_push_str", &sig_str_push_lit)?,
         str_eq: import("jet_jit_str_eq", &sig_str_eq)?,
         str_contains: import("jet_jit_str_contains", &sig_str_eq)?,
+        str_starts_with: import("jet_jit_str_starts_with", &sig_str_eq)?,
+        str_ends_with: import("jet_jit_str_ends_with", &sig_str_eq)?,
         str_clone: import("jet_jit_str_clone", &sig_str_unary_i64)?,
         str_len: import("jet_jit_str_len", &sig_str_unary_i64)?,
         str_byte_len: import("jet_jit_str_byte_len", &sig_str_unary_i64)?,
@@ -2030,6 +2253,7 @@ fn declare_host_fns(
         rich_panic: import("jet_jit_rich_panic", &sig_rich_panic)?,
         trace_err: import("jet_jit_trace_err", &sig_trace_err)?,
         result_context: import("jet_jit_result_context", &sig_str_binary_i64)?,
+
         duration_from_int: import("jet_jit_duration_from_int", &sig_duration_int)?,
         duration_from_float: import("jet_jit_duration_from_float", &sig_duration_float)?,
         duration_in: import("jet_jit_duration_in", &sig_duration_int)?,
@@ -2059,5 +2283,16 @@ fn declare_host_fns(
         crypto,
         game,
         raylib,
+        parse,
+        reflect_of_finish: import("jet_jit_reflect_of_finish", &sig_reflect_finish)?,
+        reflect_field_new: import("jet_jit_reflect_field_new", &sig_str_binary_i64)?,
+        reflect_type_name: import("jet_jit_reflect_type_name", &sig_str_unary_i64)?,
+        reflect_display: import("jet_jit_reflect_display", &sig_str_unary_i64)?,
+        reflect_fields: import("jet_jit_reflect_fields", &sig_str_unary_i64)?,
+        reflect_field_name: import("jet_jit_reflect_field_name", &sig_str_unary_i64)?,
+        reflect_field_value: import("jet_jit_reflect_field_value", &sig_str_unary_i64)?,
+        testing_temp_dir: import("jet_jit_testing_temp_dir", &sig_str_unary_i64)?,
+        testing_snap: import("jet_jit_testing_snap", &sig_str_eq)?,
+        data,
     })
 }

@@ -717,6 +717,7 @@ pub(crate) fn compile_program_tiered(
     }
 
     module.finalize_definitions().map_err(|e| e.to_string())?;
+    crate::Data::bind_lazy_callables(module);
     Ok(func_ids
         .get(&program.entry)
         .copied()

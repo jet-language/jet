@@ -649,6 +649,32 @@ extern "C" fn jet_jit_list_sort_by_i64_keys(list: i64, keys: i64) {
     });
 }
 
+/// Stable sort `list` by parallel string-handle keys (Jet `String` heap ids).
+extern "C" fn jet_jit_list_sort_by_str_keys(list: i64, keys: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let xs = rt
+            .heap
+            .clone_int_list(list)
+            .expect("jit sort_by_str: bad list handle");
+        let key_ids = rt
+            .heap
+            .clone_int_list(keys)
+            .expect("jit sort_by_str: bad keys handle");
+        debug_assert_eq!(xs.len(), key_ids.len());
+        let key_strs: Vec<String> = key_ids
+            .iter()
+            .map(|id| rt.heap.clone_string(*id).unwrap_or_default())
+            .collect();
+        let mut order: Vec<usize> = (0..xs.len()).collect();
+        order.sort_by(|&a, &b| key_strs[a].cmp(&key_strs[b]));
+        for (dst, src) in order.into_iter().enumerate() {
+            rt.heap
+                .list_set_int(list, dst as i64, xs[src])
+                .expect("jit sort_by_str: set");
+        }
+    });
+}
+
 /// Print `[T]` / materialized `Iter<T>` with the same `jet_show` shape AOT uses.
 /// `kind`: 0 = raw i64, 1 = string, 2 = signed IntN, 3 = unsigned IntN.
 extern "C" fn jet_jit_print_list(list: i64, kind: i64) {
@@ -743,6 +769,28 @@ extern "C" fn jet_jit_list_pop(list: i64) -> i64 {
             Some(_) | None => 0,
         }
     })
+}
+
+/// `list.insert(i, v)` — AOT `Vec::insert`; OOB traps like remove.
+///
+/// # ponytail: same JetArena layout poke as `list_remove`.
+extern "C" fn jet_jit_list_insert(list: i64, idx: i64, v: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        // SAFETY: JetArena is `{ values: Vec<JetVal> }` — one field, identical address.
+        let values: &mut Vec<jet_rt::JetVal> =
+            unsafe { &mut *(&mut rt.heap as *mut jet_rt::JetArena as *mut Vec<jet_rt::JetVal>) };
+        let Some(jet_rt::JetVal::List(xs)) = values.get_mut(list as usize) else {
+            jet_foundation::ice!(None, "jit list insert: bad handle");
+        };
+        let len = xs.len() as i64;
+        if idx < 0 || idx > len {
+            rt.set_trap(&format!(
+                "the list has {len} items, so position {idx} doesn't exist"
+            ));
+            return;
+        }
+        xs.insert(idx as usize, jet_rt::JetVal::Int(v));
+    });
 }
 
 /// `list.remove(i)` — AOT `jet_list_remove` panic text on OOB; in-bounds mutates
@@ -1430,12 +1478,14 @@ pub(crate) struct CollectionsHostFns {
     pub list_zip: cranelift_module::FuncId,
     pub list_unzip: cranelift_module::FuncId,
     pub list_sort_by_i64_keys: cranelift_module::FuncId,
+    pub list_sort_by_str_keys: cranelift_module::FuncId,
     pub print_list: cranelift_module::FuncId,
     pub print_opt: cranelift_module::FuncId,
     pub print_enum: cranelift_module::FuncId,
     pub list_show: cranelift_module::FuncId,
     pub list_remove: cranelift_module::FuncId,
     pub list_pop: cranelift_module::FuncId,
+    pub list_insert: cranelift_module::FuncId,
     pub set_from_list: cranelift_module::FuncId,
     pub set_insert: cranelift_module::FuncId,
     pub set_remove: cranelift_module::FuncId,
@@ -1536,12 +1586,17 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
         "jet_jit_list_sort_by_i64_keys",
         jet_jit_list_sort_by_i64_keys as *const u8,
     );
+    builder.symbol(
+        "jet_jit_list_sort_by_str_keys",
+        jet_jit_list_sort_by_str_keys as *const u8,
+    );
     builder.symbol("jet_jit_print_list", jet_jit_print_list as *const u8);
     builder.symbol("jet_jit_print_opt", jet_jit_print_opt as *const u8);
     builder.symbol("jet_jit_print_enum", jet_jit_print_enum as *const u8);
     builder.symbol("jet_jit_list_show", jet_jit_list_show as *const u8);
     builder.symbol("jet_jit_list_remove", jet_jit_list_remove as *const u8);
     builder.symbol("jet_jit_list_pop", jet_jit_list_pop as *const u8);
+    builder.symbol("jet_jit_list_insert", jet_jit_list_insert as *const u8);
     builder.symbol("jet_jit_set_from_list", jet_jit_set_from_list as *const u8);
     builder.symbol("jet_jit_set_insert", jet_jit_set_insert as *const u8);
     builder.symbol("jet_jit_set_remove", jet_jit_set_remove as *const u8);
@@ -1722,12 +1777,14 @@ pub(crate) fn declare_collections_host_fns(
         list_zip: import("jet_jit_list_zip", &sig_get_opt)?,
         list_unzip: import("jet_jit_list_unzip", &sig_len)?,
         list_sort_by_i64_keys: import("jet_jit_list_sort_by_i64_keys", &sig_sort_by_keys)?,
+        list_sort_by_str_keys: import("jet_jit_list_sort_by_str_keys", &sig_sort_by_keys)?,
         print_list: import("jet_jit_print_list", &sig_print_list)?,
         print_opt: import("jet_jit_print_opt", &sig_print_list)?,
         print_enum: import("jet_jit_print_enum", &sig_print_enum)?,
         list_show: import("jet_jit_list_show", &sig_get_opt)?,
         list_remove: import("jet_jit_list_remove", &sig_get_opt)?,
         list_pop: import("jet_jit_list_pop", &sig_len)?,
+        list_insert: import("jet_jit_list_insert", &sig_map_insert)?,
         set_from_list: import("jet_jit_set_from_list", &sig_len)?,
         set_insert: import("jet_jit_set_insert", &sig_list_eq)?,
         set_remove: import("jet_jit_set_remove", &sig_push)?,

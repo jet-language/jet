@@ -42,6 +42,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         xml_writers: Vec::new(),
         cbor_readers: Vec::new(),
         cbor_writers: Vec::new(),
+        data_streams: Vec::new(),
         sets: Vec::new(),
         deques: Vec::new(),
         bags: Vec::new(),
@@ -65,6 +66,9 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         trapped: None,
         exit_code: None,
         deadline_exceeded: None,
+        readers: Vec::new(),
+        cursors: Vec::new(),
+        reflect_values: Vec::new(),
     }
 }
 
@@ -100,6 +104,7 @@ fn jit_panic_diag(msg: &str) -> Diagnostic {
 /// bookkeeping, not per-run heap, and are left alone.
 fn reset_run_heap(rt: &mut JitRuntime) {
     rt.heap.clear();
+    crate::Data::clear_lazy_state();
     rt.channels.clear();
     rt.senders.clear();
     rt.tasks.clear();
@@ -125,6 +130,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.xml_writers.clear();
     rt.cbor_readers.clear();
     rt.cbor_writers.clear();
+    rt.data_streams.clear();
     rt.sets.clear();
     rt.deques.clear();
     rt.bags.clear();
@@ -255,6 +261,7 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
                     exit_code: code,
                 });
             }
+
             // A runtime panic unwound to `main`'s epilogue via the trapped-flag
             // branches (no Rust panic crossed a JIT frame — I1). Report it exactly
             // as the tier-0 interpreter reports the same panic (E0953), and scrub

@@ -1397,6 +1397,13 @@ extern "C" fn jet_jit_datatree_at(tree: i64, index: i64) -> i64 {
 extern "C" fn jet_jit_datatree_int(tree: i64) -> i64 {
     match read_datatree(tree) {
         Some(json_rt::DataTree::Int(n)) => result_ok_bits(n as u64),
+        Some(json_rt::DataTree::Float(f)) if f.fract() == 0.0 && f.is_finite() => {
+            result_ok_bits(f as i64 as u64)
+        }
+        Some(json_rt::DataTree::Text(s)) => match s.trim().parse::<i64>() {
+            Ok(n) => result_ok_bits(n as u64),
+            Err(_) => result_err_msg(&format!("expected int, got text `{s}`")),
+        },
         Some(other) => result_err_msg(&format!(
             "expected int, got {}",
             json_rt::render_datatree_json(&other, false, 0)
@@ -1434,6 +1441,11 @@ extern "C" fn jet_jit_datatree_float(tree: i64) -> i64 {
     match read_datatree(tree) {
         Some(json_rt::DataTree::Float(f)) => result_ok_bits(f.to_bits()),
         Some(json_rt::DataTree::Int(n)) => result_ok_bits((n as f64).to_bits()),
+        Some(json_rt::DataTree::Text(s)) => match s.trim().parse::<f64>() {
+            Ok(f) if f.is_finite() => result_ok_bits(f.to_bits()),
+            Ok(_) => result_err_msg(&format!("expected finite float, got text `{s}`")),
+            Err(_) => result_err_msg(&format!("expected float, got text `{s}`")),
+        },
         Some(other) => result_err_msg(&format!(
             "expected float, got {}",
             json_rt::render_datatree_json(&other, false, 0)
