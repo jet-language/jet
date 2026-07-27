@@ -90,7 +90,9 @@ fn jet_scheduler_shielded() -> bool {
     false
 }
 fn jet_panic(_file: &str, _line: u32, msg: &str) -> ! {
-    panic!("{msg}")
+    // RUNTIME_PANIC (exit 70): user-program panic path for include!d net host, not I2 ICE.
+    eprintln!("panic: {msg}");
+    std::process::exit(70);
 }
 fn jet_task_deliver_cancel() {
     // Host-side cancel delivery is a no-op outside a live scheduler task frame.

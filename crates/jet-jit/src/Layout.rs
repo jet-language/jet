@@ -63,35 +63,35 @@ extern "C" fn jet_jit_layout_from_const(v: f64) -> i64 {
 extern "C" fn jet_jit_layout_ge(lhs: i64, rhs: i64) -> i64 {
     match (slot(lhs), slot(rhs)) {
         (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => push_slot(LayoutSlot::Constraint(jet_layout::ge(a, b))),
-        _ => panic!("jit layout ge: bad operands"),
+        _ => jet_foundation::ice!(None, "jit layout ge: bad operands"),
     }
 }
 
 extern "C" fn jet_jit_layout_le(lhs: i64, rhs: i64) -> i64 {
     match (slot(lhs), slot(rhs)) {
         (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => push_slot(LayoutSlot::Constraint(jet_layout::le(a, b))),
-        _ => panic!("jit layout le: bad operands"),
+        _ => jet_foundation::ice!(None, "jit layout le: bad operands"),
     }
 }
 
 extern "C" fn jet_jit_layout_eq(lhs: i64, rhs: i64) -> i64 {
     match (slot(lhs), slot(rhs)) {
         (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => push_slot(LayoutSlot::Constraint(jet_layout::eq_(a, b))),
-        _ => panic!("jit layout eq: bad operands"),
+        _ => jet_foundation::ice!(None, "jit layout eq: bad operands"),
     }
 }
 
 extern "C" fn jet_jit_layout_add(lhs: i64, rhs: i64) -> i64 {
     match (slot(lhs), slot(rhs)) {
         (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => push_slot(LayoutSlot::Expr(a + b)),
-        _ => panic!("jit layout add: bad operands"),
+        _ => jet_foundation::ice!(None, "jit layout add: bad operands"),
     }
 }
 
 extern "C" fn jet_jit_layout_sub(lhs: i64, rhs: i64) -> i64 {
     match (slot(lhs), slot(rhs)) {
         (LayoutSlot::Expr(a), LayoutSlot::Expr(b)) => push_slot(LayoutSlot::Expr(a - b)),
-        _ => panic!("jit layout sub: bad operands"),
+        _ => jet_foundation::ice!(None, "jit layout sub: bad operands"),
     }
 }
 
@@ -105,7 +105,7 @@ extern "C" fn jet_jit_layout_h(handle: i64, box_name: i64, anchor: i64) -> i64 {
             .expect("jit layout h: bad handle")
             .clone()
         else {
-            panic!("jit layout h: not a handle");
+            jet_foundation::ice!(None, "jit layout h: not a handle");
         };
         let expr = h.h(&box_name, &anchor);
         rt.layout_slots.push(LayoutSlot::Expr(expr));
@@ -123,7 +123,7 @@ extern "C" fn jet_jit_layout_v(handle: i64, box_name: i64, anchor: i64) -> i64 {
             .expect("jit layout v: bad handle")
             .clone()
         else {
-            panic!("jit layout v: not a handle");
+            jet_foundation::ice!(None, "jit layout v: not a handle");
         };
         let expr = h.v(&box_name, &anchor);
         rt.layout_slots.push(LayoutSlot::Expr(expr));
@@ -139,7 +139,7 @@ extern "C" fn jet_jit_layout_value(handle: i64, expr: i64) -> f64 {
             .expect("jit layout value: bad handle")
             .clone()
         else {
-            panic!("jit layout value: not a handle");
+            jet_foundation::ice!(None, "jit layout value: not a handle");
         };
         let LayoutSlot::Expr(e) = rt
             .layout_slots
@@ -147,7 +147,7 @@ extern "C" fn jet_jit_layout_value(handle: i64, expr: i64) -> f64 {
             .expect("jit layout value: bad expr")
             .clone()
         else {
-            panic!("jit layout value: not an expr");
+            jet_foundation::ice!(None, "jit layout value: not an expr");
         };
         h.value(e)
     })
@@ -161,7 +161,7 @@ extern "C" fn jet_jit_layout_suggest(handle: i64, expr: i64, value: f64) {
             .expect("jit layout suggest: bad handle")
             .clone()
         else {
-            panic!("jit layout suggest: not a handle");
+            jet_foundation::ice!(None, "jit layout suggest: not a handle");
         };
         let LayoutSlot::Expr(e) = rt
             .layout_slots
@@ -169,7 +169,7 @@ extern "C" fn jet_jit_layout_suggest(handle: i64, expr: i64, value: f64) {
             .expect("jit layout suggest: bad expr")
             .clone()
         else {
-            panic!("jit layout suggest: not an expr");
+            jet_foundation::ice!(None, "jit layout suggest: not an expr");
         };
         h.suggest(e, value);
     });
@@ -183,7 +183,7 @@ extern "C" fn jet_jit_layout_is_feasible(handle: i64) -> i8 {
             .expect("jit layout is_feasible: bad handle")
             .clone()
         else {
-            panic!("jit layout is_feasible: not a handle");
+            jet_foundation::ice!(None, "jit layout is_feasible: not a handle");
         };
         if h.is_feasible() {
             1
@@ -206,7 +206,7 @@ extern "C" fn jet_jit_layout_strength(constraint: i64, kind: i64) -> i64 {
             .expect("jit layout strength: bad constraint")
             .clone()
         else {
-            panic!("jit layout strength: not a constraint");
+            jet_foundation::ice!(None, "jit layout strength: not a constraint");
         };
         let c = match kind {
             0 => c.required(),
