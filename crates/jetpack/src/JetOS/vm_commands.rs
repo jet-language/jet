@@ -4,19 +4,14 @@ use super::generation_files::systems_dir;
 use super::generations_activation::latest_generation_for;
 use super::installer_media::write_installer_media;
 use super::load_validate::{load_plan, load_target, parse_target_or_report};
-use super::nixos_backend::{
-    cmd_vm_prove_real, cmd_vm_run_or_build, nixos_backend_dir, real_tier_proof_marker_path,
-};
 use super::types::{OsFlags, Target};
 use super::vm_proof::{
     prove_vm_guest, qemu_has_local_display, qemu_interactive_run_command, qemu_vnc_endpoint,
-    require_real_vm_tools, require_vm_run_proof, run_interactive_vm_command, run_vmtest,
-    write_vm_install_plan,
+    require_vm_run_proof, run_interactive_vm_command, run_vmtest, write_vm_install_plan,
 };
-use jet_env_model::ModuleEval::{EnvPlan, SystemPlan};
+use jet_env_model::ModuleEval::SystemPlan;
 use crate::Output::Theme;
 use crate::Syntax;
-use std::path::Path;
 
 pub(super) fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     let Some((action, rest)) = args.split_first().map(|(a, r)| (a.as_str(), r)) else {
@@ -38,13 +33,14 @@ pub(super) fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
         );
         return 2;
     }
-    let real_guest = rest.iter().any(|arg| arg == Syntax::OS_VM_FLAG_REAL);
-    let action_args = rest
-        .iter()
-        .filter(|arg| arg.as_str() != Syntax::OS_VM_FLAG_REAL)
-        .cloned()
-        .collect::<Vec<_>>();
-    let rest = action_args.as_slice();
+    if rest.iter().any(|arg| arg == Syntax::OS_VM_FLAG_REAL) {
+        theme.error(
+            "`--real` is not a jetos VM option",
+            "D-JOS-NATIVE1=A forbids the NixOS backend on product VM commands.",
+            "run `jet os migrate compare-nixos <host> --out <dir>` for a labeled NixOS comparison.",
+        );
+        return 2;
+    }
     if action == Syntax::OS_VM_ACTION_TEST {
         let Some(target) = parse_target_or_report(theme, rest.first().map(String::as_str)) else {
             return 2;
@@ -84,45 +80,24 @@ pub(super) fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
         return 2;
     };
     if action == Syntax::OS_VM_ACTION_RUN {
-        return cmd_vm_run(theme, &plan, &system, disk, flags);
+        return cmd_vm_run(theme, &system, disk, flags);
     }
-    if real_guest {
-        // The real tier realizes the disk through the hidden system backend,
-        // so it needs a real QEMU and `nix` — not the installer-media
-        // toolchain the plumbing tier stages ISOs with.
-        if let Err(e) = require_real_vm_tools() {
-            theme.error_coded(
-                "E1290",
-                "jetos real VM proof needs real tools",
-                &e,
-                "rerun without `--real` for plumbing tests, or put real QEMU/image/media tools on PATH before claiming replacement proof.",
-            );
-            return 2;
-        }
-    } else {
-        let missing = missing_vm_tools();
-        if !missing.is_empty() {
-            theme.error_coded(
-                "E1279",
-                "jetos VM proof tools are missing",
-                &format!(
+    let missing = missing_vm_tools();
+    if !missing.is_empty() {
+        theme.error_coded(
+            "E1279",
+            "jetos VM proof tools are missing",
+            &format!(
                 "D-JOS-VMDEPS1=A requires pinned VM/media tools before installer proof can run; missing: {}.",
-                    missing.join(", ")
-                ),
-                "realize or expose qemu-system-x86_64, qemu-img, xorriso, limine, sfdisk, blockdev, mkfs.ext4, mkfs.vfat, mmd, mcopy, and zstd, then rerun `jet os vm prove`.",
-            );
-            return 2;
-        }
+                missing.join(", ")
+            ),
+            "realize or expose qemu-system-x86_64, qemu-img, xorriso, limine, sfdisk, blockdev, mkfs.ext4, mkfs.vfat, mmd, mcopy, and zstd, then rerun `jet os vm prove`.",
+        );
+        return 2;
     }
-    let mut flags = flags.clone();
-    flags.real_tier = real_guest;
-    let flags = &flags;
     let Some(gen) = build_generation(theme, &plan, &system, flags, &target.config) else {
         return 2;
     };
-    if real_guest {
-        return cmd_vm_prove_real(theme, &gen, &plan.table, &system, disk, flags);
-    }
     let media = match write_installer_media(&gen, &system, "guided-ext4") {
         Ok(path) => path,
         Err(e) => {
@@ -148,8 +123,8 @@ pub(super) fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
         );
         return 2;
     }
-    match write_vm_install_plan(&gen, &system, disk, &media, real_guest) {
-        Ok(path) => match prove_vm_guest(&gen, &system, disk, &media, &path, real_guest) {
+    match write_vm_install_plan(&gen, &system, disk, &media, false) {
+        Ok(path) => match prove_vm_guest(&gen, &system, disk, &media, &path, false) {
             Ok(Some(final_path)) => {
                 theme.ok(&format!(
                     "proved jetos VM install/reboot {}",
@@ -243,16 +218,7 @@ fn cmd_vm_test(theme: &Theme, target: &Target, disk: &str, flags: &OsFlags) -> i
     }
 }
 
-fn cmd_vm_run(theme: &Theme, plan: &EnvPlan, system: &SystemPlan, disk: &str, flags: &OsFlags) -> i32 {
-    // Running a VM is never gated on a proof (owner decree, card #363,
-    // 2026-07-09): a missing disk is built by the hidden backend, an existing
-    // real-tier disk just boots. Only legacy plumbing disks (no backend
-    // artifacts, no real marker) keep the old harness contract below.
-    let real_marker = real_tier_proof_marker_path(disk);
-    let backend_flake = nixos_backend_dir(&system.name).join("flake.nix");
-    if !Path::new(disk).is_file() || real_marker.is_file() || backend_flake.is_file() {
-        return cmd_vm_run_or_build(theme, &plan.table, system, disk, flags);
-    }
+fn cmd_vm_run(theme: &Theme, system: &SystemPlan, disk: &str, _flags: &OsFlags) -> i32 {
     let missing = missing_vm_tools();
     let missing = missing
         .into_iter()

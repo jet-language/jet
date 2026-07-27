@@ -1,5 +1,5 @@
 use super::desktop_store_vm::find_path_tool;
-use super::generation_files::{copy_runtime_file_filtered, sanitize_runtime_branding_bytes, systems_dir};
+use super::generation_files::{copy_runtime_file_filtered, systems_dir};
 use super::identity::jetos_release_label;
 use super::initrd_overlay::{
     append_installer_initrd_overlay, first_zstd_frame_offset, unique_initrd_temp_path,
@@ -183,11 +183,8 @@ fn copy_initrd_runtime_filtered(src: &Path, dst: &Path) -> std::io::Result<()> {
         }
         let compressed_path = unique_initrd_temp_path(dst, "copy-main.zst");
         fs::write(&compressed_path, &bytes[offset..])?;
-        let mut plain = zstd_decode_file(&zstd, &compressed_path)?;
+        let plain = zstd_decode_file(&zstd, &compressed_path)?;
         let _ = fs::remove_file(&compressed_path);
-        if let Some(sanitized) = sanitize_runtime_branding_bytes(&plain) {
-            plain = sanitized;
-        }
         let plain_path = unique_initrd_temp_path(dst, "copy-main.cpio");
         fs::write(&plain_path, &plain)?;
         let compressed = zstd_encode_file(&zstd, &plain_path)?;

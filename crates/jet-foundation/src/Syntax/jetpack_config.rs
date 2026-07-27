@@ -53,6 +53,10 @@ pub const TRUST_FILE: &str = "trust";
 /// gate's own implementation surface.
 pub const ENGINE_PROTOCOL_FLAG: &str = "--engine-protocol";
 
+/// Internal routing provenance: root `jet` overwrites this with its PID before
+/// dispatching an engine process. Migration code also verifies the live parent.
+pub const ROOT_ENGINE_DISPATCH_PID_ENV: &str = "JET_INTERNAL_ROOT_DISPATCH_PID";
+
 /// D-JPK14: the default visible prompt label inside a Jetpack shell.
 pub const JETPACK_PROMPT_LABEL: &str = "jetpack";
 
@@ -321,6 +325,12 @@ pub const OS_VERB_GENERATIONS: &str = "generations";
 pub const OS_VERB_LIFT: &str = "lift";
 /// D-JOS-NIXIMPORT1=C: import semantic NixOS/flake-parts/Home Manager facts.
 pub const OS_VERB_IMPORT: &str = "import";
+/// D-JOS-MIGRATIONVERB1=A: explicit access to migration-only backends.
+pub const OS_VERB_MIGRATE: &str = "migrate";
+/// D-JOS-MIGRATIONVERB1=A: build and prove an honestly labeled NixOS comparison.
+pub const OS_MIGRATION_COMPARE_NIXOS: &str = "compare-nixos";
+/// D-JOS-MIGRATIONVERB1=A: publish proved comparison artifacts to this directory.
+pub const OS_MIGRATION_FLAG_OUT: &str = "--out";
 pub const OS_VERB_IMAGE: &str = "image";
 /// D-JOS-VMCOMMAND1=A: `jet os vm prove` runs installer/reboot proof.
 pub const OS_VERB_VM: &str = "vm";
@@ -365,6 +375,7 @@ pub const OS_VERBS: &[&str] = &[
     OS_VERB_GENERATIONS,
     OS_VERB_LIFT,
     OS_VERB_IMPORT,
+    OS_VERB_MIGRATE,
     OS_VERB_IMAGE,
     OS_VERB_VM,
     STUDIO_SUBCOMMAND,

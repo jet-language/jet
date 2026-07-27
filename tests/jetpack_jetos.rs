@@ -3009,13 +3009,7 @@ fn os_generations_are_newest_first_and_rollback_activates_prior() {
 
 
 #[test]
-fn os_vm_run_real_tier_requires_nixpkgs_pin() {
-    // E1291 (D-JOS-NIXBACKEND1=C): the hidden real-tier NixOS backend
-    // refuses to generate when it can't map every declaration — here
-    // there is no `sources:` entry that resolves to a nixpkgs pin, so
-    // `map_system_to_nixos` reports it as unmapped instead of silently
-    // dropping it. `jet os vm run` hits this before any tool/media check
-    // because a fresh disk always routes through `cmd_vm_run_or_build`.
+fn os_vm_run_never_reaches_nixos_migration_backend() {
     let proj = Scratch::new("os-vm-real-no-nixpkgs-pin");
     let root = Scratch::new("os-vm-real-no-nixpkgs-pin-root");
     fs::write(
@@ -3034,7 +3028,8 @@ fn os_vm_run_real_tier_requires_nixpkgs_pin() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_jetos_stderr_snapshot("real_tier_no_nixpkgs_pin", &stderr);
+    assert!(!stderr.contains("E1291"), "product VM path reached NixOS backend: {stderr}");
+    assert!(!root.join("systems/backend").exists());
 }
 
 
@@ -3096,7 +3091,7 @@ fn os_vm_run_requires_proved_installed_disk() {
 
 
 #[test]
-fn os_vm_prove_real_tier_rejects_fake_toolchain() {
+fn os_vm_prove_real_tier_is_retired_to_explicit_migration() {
     let root = Scratch::new("os-vm-real-root");
     let tools = Scratch::new("os-vm-real-tools");
     write_fake_vm_tools(&tools.path, true);
@@ -3121,15 +3116,585 @@ fn os_vm_prove_real_tier_rejects_fake_toolchain() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert_jetos_stderr_snapshot_normalized(
-        "vm_real_fake_tools",
-        &stderr,
-        &[(tools.path.to_str().unwrap(), "<tools>")],
+    assert!(stderr.contains("`--real` is not a jetos VM option"), "{stderr}");
+    assert!(
+        stderr.contains("jet os migrate compare-nixos <host> --out <dir>"),
+        "{stderr}"
     );
     assert!(
         !root.join("systems/vm-proofs").exists(),
-        "real tier must fail before writing replacement proof with fake tools"
+        "retired product path must not write comparison proof"
     );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn os_migrate_compare_nixos_is_explicit_and_proof_gated() {
+    let root = Scratch::new("os-migrate-nixos-root");
+    let (path, outputs) = build_nixos_migration_test_tools(&root.path);
+    let out_dir = root.join("published");
+    let out = jet()
+        .args([
+            "os",
+            "migrate",
+            "compare-nixos",
+            "halcyon-gnome",
+            "--out",
+            out_dir.to_str().unwrap(),
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config-real"),
+        )
+        .env("JETPACK_ROOT", &root.path)
+        .env("JET_TEST_TOOL_ROOT", outputs)
+        .env(
+            "JET_TEST_MISSING_LOCKED_INPUT",
+            "github:NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51",
+        )
+        .env("JET_TEST_REQUIRE_COMPOSED_METADATA", "1")
+        .env("PATH", path)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "stdout: {}\nstderr: {stderr}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(stderr.contains(
+        "migration comparison unavailable offline: github:NixOS/nixpkgs/fef9403a3e4d31b0a23f0bacebbec52c248fbb51"
+    ), "{stderr}");
+    assert!(
+        !out_dir.exists(),
+        "comparison artifacts must not publish before guest proof"
+    );
+}
+
+#[test]
+fn nixos_migration_prompt_probe_executes_interactive_shell_init() {
+    let root = Scratch::new("nixos-interactive-prompt");
+    let bashrc = root.join("bashrc");
+    let backend = include_str!("../crates/jetpack/src/JetOS/nixos_backend.rs");
+    let prompt_init = backend
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("PS1="))
+        .expect("generated NixOS configuration must initialize PS1");
+    fs::write(&bashrc, format!("{prompt_init}\nexport PS1\n")).unwrap();
+
+    let out = Command::new("bash")
+        .args(["--noprofile", "--rcfile"])
+        .arg(&bashrc)
+        .args(["-i", "-c", "printf '%s' \"$PS1\""])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        "NixOS comparison $ "
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn nixos_migration_protects_stage_before_writing_inputs() {
+    let root = Scratch::new("nixos-private-stage");
+    let out_dir = root.join("published");
+    let trace = root.join("stage.trace");
+    let jet_program = jet().get_program().to_owned();
+
+    let out = Command::new("strace")
+        .args(["-f", "-s", "4096", "-o"])
+        .arg(&trace)
+        .args(["-e", "trace=%file", "--"])
+        .arg(jet_program)
+        .args([
+            "os",
+            "migrate",
+            "compare-nixos",
+            "halcyon-gnome",
+            "--out",
+            out_dir.to_str().unwrap(),
+            "--no-color",
+        ])
+        .current_dir(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config-real"),
+        )
+        .env("JETPACK_ROOT", &root.path)
+        .env("NIX_REMOTE", "invalid")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!out_dir.exists());
+
+    let trace = fs::read_to_string(trace).unwrap();
+    let marker = "/.nixos-comparison-halcyon-gnome-";
+    let lines = trace.lines().collect::<Vec<_>>();
+    let mkdir = lines
+        .iter()
+        .position(|line| line.contains("mkdir(") && line.contains(marker) && line.contains("0700"))
+        .unwrap_or_else(|| panic!("private 0700 mkdir missing:\n{trace}"));
+    let first_input = lines
+        .iter()
+        .position(|line| {
+            line.contains(marker)
+                && (line.contains("/flake.nix")
+                    || line.contains("/configuration.nix")
+                    || line.contains("/input-facts.json"))
+        })
+        .unwrap_or_else(|| panic!("private input creation missing:\n{trace}"));
+    let protected = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            (index < first_input
+                && line.contains(marker)
+                && line.contains("AT_SYMLINK_NOFOLLOW")
+                && (line.contains("S_IFDIR|0700") || line.contains("stx_mode=S_IFDIR|0700")))
+            .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        protected.len(),
+        2,
+        "expected post-mkdir and pre-write verification:\n{trace}"
+    );
+    let insecure = lines.iter().find(|line| {
+        line.contains(marker)
+            && (line.contains("st_mode=S_IFDIR|") || line.contains("stx_mode=S_IFDIR|"))
+            && !line.contains("S_IFDIR|0700")
+    });
+    assert!(insecure.is_none(), "stage mode widened: {insecure:?}");
+    assert!(mkdir < protected[0], "mode checked before mkdir:\n{trace}");
+    assert!(
+        protected[1] < first_input,
+        "private input opened before mode/no-follow verification:\n{trace}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+fn build_nixos_migration_test_tools(root: &Path) -> (std::ffi::OsString, std::path::PathBuf) {
+    let tools = root.join("tools");
+    let outputs = root.join("tool-outputs");
+    fs::create_dir_all(&tools).unwrap();
+    fs::create_dir_all(&outputs).unwrap();
+    let source = root.join("migration-tool.c");
+    let binary = tools.join("migration-tool");
+    fs::write(
+        &source,
+        r##"#define _GNU_SOURCE
+#include <errno.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <unistd.h>
+
+static void write_file(const char *path, const char *text) {
+    FILE *file = fopen(path, "w");
+    if (!file) exit(20);
+    fputs(text, file);
+    fclose(file);
+}
+
+static int run_nix(int argc, char **argv) {
+    const char *root = getenv("JET_TEST_TOOL_ROOT");
+    const char *missing = getenv("JET_TEST_MISSING_LOCKED_INPUT");
+    char dir[PATH_MAX], path[PATH_MAX];
+    int disk = 0;
+    int offline = 0;
+    for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--offline")) offline = 1;
+    if (getenv("JET_TEST_REQUIRE_OFFLINE") && !offline) return 24;
+    for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "metadata")) {
+            if (getenv("JET_TEST_REQUIRE_COMPOSED_METADATA") && strcmp(argv[argc - 1], "path:.")) return 25;
+            if (missing) {
+                fprintf(stderr, "cannot fetch input '%s' because offline mode is enabled\n", missing);
+                return 1;
+            }
+            puts("{}");
+            return 0;
+        }
+    }
+    for (int i = 1; i < argc; i++) if (strstr(argv[i], "#disk")) disk = 1;
+    if (disk) {
+        snprintf(dir, sizeof(dir), "%s/disk", root);
+        mkdir(dir, 0700);
+        snprintf(path, sizeof(path), "%s/system.qcow2", dir);
+        write_file(path, "qcow2");
+    } else {
+        snprintf(dir, sizeof(dir), "%s/firmware", root);
+        mkdir(dir, 0700);
+        snprintf(path, sizeof(path), "%s/FV", dir);
+        mkdir(path, 0700);
+        snprintf(path, sizeof(path), "%s/FV/OVMF_CODE.fd", dir);
+        write_file(path, "code");
+        snprintf(path, sizeof(path), "%s/FV/OVMF_VARS.fd", dir);
+        write_file(path, "vars");
+    }
+    printf("%s/%s\n", root, disk ? "disk" : "firmware");
+    return 0;
+}
+
+static int run_qemu(int argc, char **argv) {
+    const char *serial = NULL, *qmp = NULL;
+    for (int i = 1; i + 1 < argc; i++) {
+        if (!strcmp(argv[i], "-serial") && !strncmp(argv[i + 1], "file:", 5)) serial = argv[i + 1] + 5;
+        if (!strcmp(argv[i], "-qmp") && !strncmp(argv[i + 1], "unix:", 5)) qmp = argv[i + 1] + 5;
+    }
+    if (!serial || !qmp) return 21;
+    char socket_path[PATH_MAX];
+    snprintf(socket_path, sizeof(socket_path), "%s", qmp);
+    char *comma = strchr(socket_path, ',');
+    if (comma) *comma = '\0';
+
+    int server = socket(AF_UNIX, SOCK_STREAM, 0);
+    struct sockaddr_un address = { .sun_family = AF_UNIX };
+    snprintf(address.sun_path, sizeof(address.sun_path), "%s", socket_path);
+    unlink(socket_path);
+    if (bind(server, (struct sockaddr *)&address, sizeof(address)) || listen(server, 1)) return 22;
+
+    const char *collision = getenv("JET_TEST_COLLIDE_PUBLISH");
+    if (collision) {
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/.nixos-comparison-publish-halcyon-gnome-%d", collision, getppid());
+        mkdir(path, 0700);
+    }
+    write_file(serial, "NIXOS_COMPARISON_PROOF:{\"host\":\"halcyon-gnome\",\"os_release\":\"NixOS\",\"prompt\":\"NixOS comparison $ \",\"banner\":\"NixOS comparison guest\",\"proof\":\"live-desktop\"}\n");
+
+    int client = accept(server, NULL, NULL);
+    FILE *stream = fdopen(client, "r+");
+    fputs("{\"QMP\":{}}\n", stream);
+    fflush(stream);
+    char line[PATH_MAX * 2];
+    while (fgets(line, sizeof(line), stream)) {
+        char *filename = strstr(line, "\"filename\":\"");
+        if (filename) {
+            filename += strlen("\"filename\":\"");
+            char *end = strchr(filename, '"');
+            if (end) {
+                *end = '\0';
+                write_file(filename, "png");
+            }
+        }
+        fputs("{\"return\":{}}\n", stream);
+        fflush(stream);
+        if (strstr(line, "system_powerdown")) break;
+    }
+    fclose(stream);
+    close(server);
+    unlink(socket_path);
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    const char *name = strrchr(argv[0], '/');
+    name = name ? name + 1 : argv[0];
+    if (!strcmp(name, "nix")) return run_nix(argc, argv);
+    if (!strcmp(name, "qemu-system-x86_64")) return run_qemu(argc, argv);
+    return 0;
+}
+"##,
+    )
+    .unwrap();
+    let built = Command::new("cc")
+        .args(["-std=c11", "-O0"])
+        .arg(&source)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "cc failed: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    for name in ["nix", "qemu-system-x86_64", "qemu-img"] {
+        fs::hard_link(&binary, tools.join(name)).unwrap();
+    }
+    let path = std::env::join_paths(
+        std::iter::once(tools).chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )),
+    )
+    .unwrap();
+    (path, outputs)
+}
+
+#[cfg(target_os = "linux")]
+fn traced_nixos_migration(
+    root: &Scratch,
+    out_dir: &Path,
+    trace: &Path,
+    path: &std::ffi::OsStr,
+    outputs: &Path,
+    collide_publish: bool,
+    json: bool,
+) -> std::process::Output {
+    let jet_program = jet().get_program().to_owned();
+    let mut command = Command::new("strace");
+    command
+        .args(["-f", "-s", "4096", "-o"])
+        .arg(trace)
+        .args(["-e", "trace=%file", "--"])
+        .arg(jet_program)
+        .args([
+            "os",
+            "migrate",
+            "compare-nixos",
+            "halcyon-gnome",
+            "--out",
+            out_dir.to_str().unwrap(),
+            "--no-color",
+            "--offline",
+        ])
+        .current_dir(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-config-real"),
+        )
+        .env("JETPACK_ROOT", &root.path)
+        .env("JET_TEST_TOOL_ROOT", outputs)
+        .env("JET_TEST_REQUIRE_OFFLINE", "1")
+        .env("JET_TEST_REQUIRE_COMPOSED_METADATA", "1")
+        .env("TMPDIR", "/tmp")
+        .env("PATH", path);
+    if collide_publish {
+        command.env("JET_TEST_COLLIDE_PUBLISH", &root.path);
+    }
+    if json {
+        command.arg("--json");
+    }
+    command.output().unwrap()
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn nixos_migration_publish_stage_is_private_and_collision_safe() {
+    let root = Scratch::new("nixos-private-publish");
+    let (path, outputs) = build_nixos_migration_test_tools(&root.path);
+
+    let published = root.join("published");
+    let success_trace = root.join("publish-success.trace");
+    let out = traced_nixos_migration(
+        &root,
+        &published,
+        &success_trace,
+        &path,
+        &outputs,
+        false,
+        false,
+    );
+    assert!(
+        out.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let trace = fs::read_to_string(success_trace).unwrap();
+    let marker = "/.nixos-comparison-publish-halcyon-gnome-";
+    let lines = trace.lines().collect::<Vec<_>>();
+    let mkdir = lines
+        .iter()
+        .position(|line| line.contains("mkdir(") && line.contains(marker) && line.contains("0700"))
+        .unwrap_or_else(|| panic!("private publish mkdir missing:\n{trace}"));
+    let protected = lines
+        .iter()
+        .position(|line| {
+            line.contains(marker)
+                && line.contains("AT_SYMLINK_NOFOLLOW")
+                && (line.contains("S_IFDIR|0700") || line.contains("stx_mode=S_IFDIR|0700"))
+        })
+        .unwrap_or_else(|| panic!("private publish verification missing:\n{trace}"));
+    let first_output = lines
+        .iter()
+        .position(|line| {
+            line.contains(marker)
+                && line.contains("/nixos/halcyon-gnome/system.qcow2")
+        })
+        .unwrap_or_else(|| panic!("private publish output missing:\n{trace}"));
+    assert!(mkdir < protected && protected < first_output, "{trace}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&published).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+    }
+    let host = published.join("nixos/halcyon-gnome");
+    let image = host.join("system.qcow2");
+    let proof = host.join("proof.json");
+    let receipt = host.join("receipt.json");
+    assert!(image.is_file());
+    assert!(proof.is_file());
+    assert!(receipt.is_file());
+    assert!(
+        fs::read_to_string(&proof)
+            .unwrap()
+            .contains("\"image\":\"system.qcow2\"")
+    );
+    assert!(
+        fs::read_to_string(&receipt)
+            .unwrap()
+            .contains("\"boot_proof\":\"proof.json\"")
+    );
+    let plan = fs::read_to_string(host.join("build-boot-plan.json")).unwrap();
+    assert_eq!(plan.matches("\"--offline\"").count(), 2, "{plan}");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    for path in [&image, &proof, &receipt] {
+        assert!(stdout.contains(&path.display().to_string()), "{stdout}");
+    }
+
+    let json_out_dir = root.join("json-output");
+    let json_trace = root.join("publish-json.trace");
+    let out = traced_nixos_migration(
+        &root,
+        &json_out_dir,
+        &json_trace,
+        &path,
+        &outputs,
+        false,
+        true,
+    );
+    assert!(
+        out.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        format!(
+            "{{\"kind\":\"nixos.migration.comparison\",\"state\":\"proved\",\"host\":\"halcyon-gnome\",\"image\":\"{}\",\"proof\":\"{}\",\"receipt\":\"{}\"}}\n",
+            json_out_dir.join("nixos/halcyon-gnome/system.qcow2").display(),
+            json_out_dir.join("nixos/halcyon-gnome/proof.json").display(),
+            json_out_dir.join("nixos/halcyon-gnome/receipt.json").display(),
+        )
+    );
+
+    let collision_out = root.join("collision-output");
+    let collision_trace = root.join("publish-collision.trace");
+    let out = traced_nixos_migration(
+        &root,
+        &collision_out,
+        &collision_trace,
+        &path,
+        &outputs,
+        true,
+        false,
+    );
+    assert_eq!(out.status.code(), Some(2));
+    assert!(!collision_out.exists());
+    let trace = fs::read_to_string(collision_trace).unwrap();
+    assert!(
+        trace.lines().any(|line| {
+            line.contains("mkdir(")
+                && line.contains(marker)
+                && line.contains("0700")
+                && line.contains("EEXIST")
+        }),
+        "preexisting publish leaf did not fail atomically:\n{trace}"
+    );
+}
+
+#[test]
+fn nixos_migration_rejects_direct_engine_front_doors() {
+    let marker = std::process::id().to_string();
+    for (name, mut command, prefix) in [
+        ("jetpack", jetpack(), &["os", "migrate"][..]),
+        ("jetos", jetos(), &["migrate"][..]),
+    ] {
+        let root = Scratch::new("os-direct-migration-rejected");
+        let out_dir = root.join("should-not-publish");
+        let out = command
+            .args(prefix)
+            .args([
+                "compare-nixos",
+                "halcyon",
+                "--out",
+                out_dir.to_str().unwrap(),
+                "--no-color",
+                "--offline",
+            ])
+            .current_dir(config_example_dir())
+            .env("JETPACK_ROOT", &root.path)
+            .env("JET_INTERNAL_ROOT_DISPATCH_PID", &marker)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(2), "{name}: {stderr}");
+        assert!(
+            stderr.contains("available only through root `jet`"),
+            "{name}: {stderr}"
+        );
+        assert!(
+            !out_dir.exists(),
+            "{name} reached migration publication"
+        );
+    }
+}
+
+#[test]
+fn direct_os_engines_install_the_config_eval_bridge() {
+    for (mut command, args) in [
+        (jetpack(), &["os", "check", "halcyon", "--no-color"][..]),
+        (jetos(), &["check", "halcyon", "--no-color"][..]),
+    ] {
+        let root = Scratch::new("os-direct-engine-bridge");
+        let out = command
+            .args(args)
+            .current_dir(config_example_dir())
+            .env("JETPACK_ROOT", &root.path)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+#[test]
+fn nixos_migration_backend_has_no_product_path_or_rebranding_rewrite() {
+    let vm = fs::read_to_string("crates/jetpack/src/JetOS/vm_commands.rs").unwrap();
+    let generation = fs::read_to_string("crates/jetpack/src/JetOS/generation.rs").unwrap();
+    let backend = fs::read_to_string("crates/jetpack/src/JetOS/nixos_backend.rs").unwrap();
+    let files = fs::read_to_string("crates/jetpack/src/JetOS/generation_files.rs").unwrap();
+    let syntax =
+        fs::read_to_string("crates/jet-foundation/src/Syntax/jetpack_config.rs").unwrap();
+    assert!(!vm.contains("nixos_backend"), "{vm}");
+    assert!(!generation.contains("nixos_backend"), "{generation}");
+    assert!(!backend.contains("distroName = \"jetos\""), "{backend}");
+    assert!(!backend.contains("bounded_redacted_tail"));
+    assert!(backend.contains("private build output was suppressed"));
+    assert!(backend.contains("guest payload was suppressed"));
+    let service = backend
+        .split_once("const CONFIGURATION_PROOF_SERVICE")
+        .and_then(|(_, rest)| rest.split_once("fn render_configuration_nix"))
+        .map(|(service, _)| service)
+        .unwrap();
+    assert!(service.contains("--rcfile /etc/bashrc -i"));
+    assert!(syntax.contains("pub const OS_VERB_MIGRATE: &str = \"migrate\";"));
+    assert!(syntax.contains(
+        "pub const OS_MIGRATION_COMPARE_NIXOS: &str = \"compare-nixos\";"
+    ));
+    assert!(syntax.contains("pub const OS_MIGRATION_FLAG_OUT: &str = \"--out\";"));
+    assert!(syntax.contains("OS_VERB_MIGRATE,"));
+    for pattern in [
+        "sanitize_runtime_branding",
+        "replace_bytes_in_place",
+        "b\"NixOS\".as_slice(), b\"JetOS\"",
+    ] {
+        assert!(!files.contains(pattern), "rebranding rewrite remains: {pattern}");
+    }
 }
 
 

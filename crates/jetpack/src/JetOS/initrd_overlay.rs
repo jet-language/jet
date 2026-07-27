@@ -1,5 +1,4 @@
 use super::desktop_store_vm::find_path_tool;
-use super::generation_files::sanitize_runtime_branding_bytes;
 use super::installer_media::{render_guest_verify_script, render_installer_script};
 use super::types::Generation;
 use jet_env_model::ModuleEval::SystemPlan;
@@ -346,11 +345,8 @@ exec /jetos/tools/bin/sh /jetos/install.sh
         })?;
         let compressed_path = unique_initrd_temp_path(initrd, "main.zst");
         fs::write(&compressed_path, &initrd_bytes[offset..])?;
-        let mut plain = zstd_decode_file(&zstd, &compressed_path)?;
+        let plain = zstd_decode_file(&zstd, &compressed_path)?;
         let _ = fs::remove_file(&compressed_path);
-        if let Some(sanitized) = sanitize_runtime_branding_bytes(&plain) {
-            plain = sanitized;
-        }
         let merged = append_overlay_to_cpio_plain(plain, &overlay);
         let plain_path = unique_initrd_temp_path(initrd, "main.cpio");
         fs::write(&plain_path, &merged)?;
@@ -501,7 +497,6 @@ fn add_cpio_file(
 ) {
     add_cpio_parent_dirs(dirs, name);
     if seen_files.insert(name.to_string()) {
-        let data = sanitize_runtime_branding_bytes(&data).unwrap_or(data);
         files.push(OwnedCpioEntry::file(name, mode, data));
     }
 }

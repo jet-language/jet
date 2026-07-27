@@ -94,11 +94,13 @@ authoring app over the same typed option registry.
 
 ### P4 — Migration and acceptance
 The semantic importer stays central. The jet→NixOS realizer is repackaged
-behind an explicit migration surface (labeled as building a NixOS system
-for A/B comparison during transition — including removing the dishonest
-distro rebranding). Owner-config acceptance (#337) reopens with the
-native bar. The epoch closes on the same proof harness this session
-validated: real QEMU guests, live-session assertions, screenshots.
+behind `jet os migrate compare-nixos <host> --out <dir>`. This command
+builds an honestly labeled NixOS system for A/B comparison. It checks the
+guest `os-release`, prompt, banner, and live desktop before it publishes
+the image, boot proof, guest fact, and receipt. Product commands cannot
+reach this backend. Owner-config acceptance (#337) reopens with the native
+bar. The epoch closes on the same proof harness this session validated:
+real QEMU guests, live-session assertions, screenshots.
 
 ## Sequencing spine
 
