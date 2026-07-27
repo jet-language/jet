@@ -12918,11 +12918,6 @@ impl LowerCtx<'_, '_> {
                 _ => Err("jit handle method unsupported".to_string()),
             },
             THandleOp::ProcessStdinWrite => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReflectValueTypeName => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReflectValueDisplay => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReflectValueFields => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReflectFieldName => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReflectFieldValue => Err("jit handle method unsupported".to_string()),
             THandleOp::TaskDetach => {
                 let host_ref = self
                     .module
@@ -12976,10 +12971,6 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::TaskDetach => Err("jit handle method unsupported".to_string()),
-            THandleOp::TaskPause => Err("jit handle method unsupported".to_string()),
-            THandleOp::TaskResume => Err("jit handle method unsupported".to_string()),
-            THandleOp::TaskTrace => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpRouterRegister { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::MathMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::ReactiveGet => Err("jit handle method unsupported".to_string()),
