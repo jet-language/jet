@@ -626,6 +626,9 @@ fn lower_guard_switch(
         let mut branch = clone_env(env);
         lower_stmts(body, cx, &mut branch)
     });
+    // First wrap of the residual is a real `else { … }` (multi-stmt safe).
+    // Later wraps nest a single `If` and must emit as `else if`.
+    let mut else_is_elseif = false;
     for arm in arms.iter().rev() {
         let (cond, bindings, mut body) = lower_if_cond(&arm.cond, cx, env);
         let mut branch = if bindings.is_empty() { clone_env(env) } else { fork_panic(env) };
@@ -637,8 +640,9 @@ fn lower_guard_switch(
             cond,
             then_body: body,
             else_body: (!chain.is_empty()).then_some(chain),
-            else_is_elseif: true,
+            else_is_elseif,
         }];
+        else_is_elseif = true;
     }
     chain.into_iter().next().expect("guard table has at least one arm")
 }

@@ -169,7 +169,14 @@ fn emit_if_else(
     let pad = "    ".repeat(indent);
     match else_body {
         None => out.push_str(&format!("{}}}\n", pad)),
-        Some(body) if else_is_elseif => {
+        // `else if` only when the else-body is exactly one nested `If`.
+        // A multi-stmt residual (guard-table final `else`) must stay braced —
+        // emitting only body[0] silently drops later statements.
+        Some(body)
+            if else_is_elseif
+                && body.len() == 1
+                && matches!(body.first(), Some(TStmt::If { .. })) =>
+        {
             out.push_str(&format!("{}}} else ", pad));
             let mut nested = String::new();
             let mut branch_cleanups = active_cleanups.to_vec();
