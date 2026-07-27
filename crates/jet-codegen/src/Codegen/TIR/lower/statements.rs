@@ -906,6 +906,15 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                                 Some((**elem).clone())
                             }
                             Type::Map { value, .. } => Some((**value).clone()),
+                            // D-MEM-VIEWRET1 / #1163: `ViewMut<T>[i].field`
+                            // must write through the slice element, not clone
+                            // via `jet_index_vec` and mutate a temporary.
+                            Type::Apply { name, args }
+                                if matches!(name.as_str(), "View" | "ViewMut")
+                                    && args.len() == 1 =>
+                            {
+                                Some(args[0].clone())
+                            }
                             _ => None,
                         };
                         if let Some(elem_ty) = elem_ty {

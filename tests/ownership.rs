@@ -2317,6 +2317,157 @@ fn indexed_simulation_example_runs_production_pipeline() {
     );
 }
 
+/// #1163: return read and write windows into an owner-backed list field.
+/// Inclusive `i..i` selects one element; field writes must update the owner.
+#[test]
+fn owner_backed_collection_returns_element_views() {
+    let src = r#"
+struct Book {
+    title: String,
+    pages: Int
+}
+
+struct Library {
+    books: [Book]
+}
+
+fn book_at(lib: Library, i: Int) => View<Book> = lib.books[i..i]
+
+fn edit_at(lib: &Library, i: Int) => ViewMut<Book> {
+    return &lib.books[i..i]
+}
+
+fn run() {
+    lib := Library.{
+        books: [
+            Book.{ title: "Dune", pages: 412 },
+            Book.{ title: "Neuromancer", pages: 271 }
+        ]
+    }
+    first :: book_at(lib, 0)
+    print(first[0].title)
+    dune :: edit_at(&lib, 0)
+    dune[0].pages += 10
+    print(lib.books[0].pages)
+}
+"#;
+    let out = jet::compile(src).expect("owner-backed collection views must compile");
+    assert!(
+        out.rust.contains(
+            "fn user_book_at<'__jet_view>(user_lib: &'__jet_view user_Library, user_i: i64) -> &'__jet_view [user_Book]"
+        ),
+        "read view must tie to parameter 0: {}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains(
+            "fn user_edit_at<'__jet_view>(user_lib: &'__jet_view mut user_Library, user_i: i64) -> &'__jet_view mut [user_Book]"
+        ),
+        "write view must tie to parameter 0: {}",
+        out.rust
+    );
+    assert!(
+        out.rust.contains("].user_pages +="),
+        "field write must assign through the ViewMut element, not a cloned temporary: {}",
+        out.rust
+    );
+}
+
+/// #1163: resizing the owning list while an element view is live is E0212.
+#[test]
+fn owner_backed_collection_rejects_resize_while_view_live() {
+    let src = r#"
+struct Book {
+    title: String,
+    pages: Int
+}
+
+struct Library {
+    books: [Book]
+}
+
+fn book_at(lib: Library, i: Int) => View<Book> = lib.books[i..i]
+
+fn run() {
+    lib := Library.{
+        books: [
+            Book.{ title: "Dune", pages: 412 },
+            Book.{ title: "Neuromancer", pages: 271 }
+        ]
+    }
+    first :: book_at(lib, 0)
+    lib.books.push(Book.{ title: "Snow Crash", pages: 480 })
+    print(first[0].title)
+}
+"#;
+    let diags = jet::compile(src).expect_err("resize while view live must fail");
+    assert!(
+        diags.iter().any(|d| d.code == "E0212"),
+        "expected E0212, got {diags:?}"
+    );
+}
+
+/// #1163: a plain owned String place cannot fill View<str>; only tracked
+/// string-view bindings / trim|after|before may.
+#[test]
+fn owner_backed_collection_rejects_plain_string_as_view_str_field() {
+    let src = r#"
+struct Book {
+    title: String,
+    pages: Int
+}
+
+struct Library {
+    books: [Book]
+}
+
+struct TitleView {
+    value: View<str>
+}
+
+fn first_title(lib: Library) => TitleView {
+    value :: lib.books[0].title
+    return TitleView.{ value: value }
+}
+
+fn run() {
+    lib :: Library.{
+        books: [Book.{ title: "Dune", pages: 412 }]
+    }
+    print(first_title(lib).value)
+}
+"#;
+    let diags = jet::compile(src).expect_err("plain String into View<str> must fail");
+    assert!(
+        diags.iter().any(|d| d.code == "E2307"),
+        "expected E2307, got {diags:?}"
+    );
+}
+
+/// #1163: the memory example runs the owner-backed library through the
+/// production CLI and native backend with exact output.
+#[test]
+fn owner_backed_collection_example_runs_production_pipeline() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args([
+            "run",
+            "--release",
+            "examples/features/memory/owner_backed_views.jet",
+        ])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("run the owner-backed collection through the production native CLI path");
+    assert!(
+        output.status.success(),
+        "native owner-backed collection failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("example stdout must be UTF-8"),
+        "Dune\n412\n422\n280\n"
+    );
+}
+
 #[test]
 fn disjoint_place_split_plans_follow_source_order() {
     let src = r#"

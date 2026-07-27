@@ -1,0 +1,36 @@
+// #1163 / D-MEM-VIEWRET1=B: an owner-backed collection keeps the list in a
+// named field. Callers borrow element windows through `View` / `ViewMut` with
+// public provenance — no lifetime syntax, no second view mechanism.
+// Jet range windows are inclusive, so one element is `i..i`.
+struct Book {
+    title: String
+    pages: Int
+}
+
+struct Library {
+    books: [Book]
+}
+
+fn book_at(lib: Library, i: Int) => View<Book> = lib.books[i..i]
+
+fn edit_at(lib: &Library, i: Int) => ViewMut<Book> {
+    return &lib.books[i..i]
+}
+
+fn run() {
+    lib := Library.{
+        books: [
+            Book.{title: "Dune", pages: 412},
+            Book.{title: "Neuromancer", pages: 271}
+        ]
+    }
+    first :: book_at(lib, 0)
+    print(first[0].title)
+    print(first[0].pages)
+    dune :: edit_at(&lib, 0)
+    dune[0].pages += 10
+    neuro :: edit_at(&lib, 1)
+    neuro[0].pages += 9
+    print(lib.books[0].pages)
+    print(lib.books[1].pages)
+}
