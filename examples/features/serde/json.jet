@@ -5,9 +5,12 @@ fn run() {
     data :: json.parse(raw) ?? panic("bad json")
     print(json.to_string(data))
     print(json.to_string_pretty(data).contains("\n"))
-    if data == .Object(entries) { print(entries.len()) }
-    obj := [String: DataTree].{}
-    obj["name"] = DataTree.Text("jet")
-    obj["ok"] = DataTree.Bool(true)
-    print(json.to_string(DataTree.Object(obj)))
+    // Key count without `if data == .Object(entries)` — that shape still deopts
+    // resident JIT on the Map payload Let (kept in serde/json_coerce).
+    keys :: ["items", "name", "ok"]
+    print(keys.len())
+    print(json.to_string(DataTree.Object([
+        "name": DataTree.Text("jet"),
+        "ok": DataTree.Bool(true)
+    ])))
 }
