@@ -562,6 +562,10 @@ extern "C" fn jet_jit_path_to_string(rec: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(path_string_from_record(rec)))
 }
 
+/// D-PATHFS1 / AOT `jet_path_walk` → `Vec<JetPath>` (bare list handle).
+/// Must not wrap in `result_ok_bits` — callers treat the return as `List[Path]`
+/// (`paths.len()` → `jet_jit_list_len`); a Result slot index panics across FFI
+/// (`jit list len: bad handle` → non-unwinding abort).
 extern "C" fn jet_jit_path_walk(rec: i64) -> i64 {
     let root_s = path_string_from_record(rec);
     let root = std::path::PathBuf::from(root_s);
@@ -589,7 +593,7 @@ extern "C" fn jet_jit_path_walk(rec: i64) -> i64 {
             }
         }
     }
-    let list = Concurrency::with_runtime_mut(|rt| {
+    Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
         for path in result_paths {
             let rec = rt.heap.alloc_record(1);
@@ -598,8 +602,7 @@ extern "C" fn jet_jit_path_walk(rec: i64) -> i64 {
             let _ = rt.heap.list_push_int(list, rec);
         }
         list
-    });
-    result_ok_bits(list as u64)
+    })
 }
 
 extern "C" fn jet_jit_fs_list_dir(path: i64) -> i64 {
