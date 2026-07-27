@@ -27,10 +27,9 @@ mod jet_gtk {
         JetAriaRole, JetBackend, JetEventResult, JetInputEvent, JetPaintCmd, JetRect, JetShow,
         JetSize, JetSizeConstraint, JetUiNode, JetUiNodeKind,
     };
-    use std::cell::RefCell;
     use std::ffi::CString;
     use std::os::raw::{c_char, c_int, c_void};
-    use std::rc::Rc;
+    use std::sync::{Arc, Mutex};
 
     #[allow(non_camel_case_types)]
     type gboolean = c_int;
@@ -91,15 +90,15 @@ mod jet_gtk {
     }
 
     /// Trampoline for a GTK "clicked" signal. Each connection owns one boxed
-    /// `Rc<dyn Fn()>`; the registry retains another `Rc` for path recreation.
+    /// `Arc<dyn Fn() + Send + Sync>`; the registry retains another `Arc` for path recreation.
     extern "C" fn jet_gtk_click_trampoline(_widget: *mut GtkWidget, data: gpointer) {
         if data.is_null() {
             return;
         }
-        // SAFETY: `data` is a boxed `Rc<dyn Fn()>` owned by this signal
+        // SAFETY: `data` is a boxed `Arc<dyn Fn() + Send + Sync>` owned by this signal
         // connection. GTK runs its destroy notifier before releasing it.
         unsafe {
-            let cb = &*(data as *const Rc<dyn Fn()>);
+            let cb = &*(data as *const Arc<dyn Fn() + Send + Sync>);
             cb();
         }
     }
@@ -111,7 +110,7 @@ mod jet_gtk {
         // SAFETY: `on_click` allocated exactly one Box at this pointer; GTK
         // invokes this notifier once when the signal/widget is destroyed.
         unsafe {
-            drop(Box::from_raw(data as *mut Rc<dyn Fn()>));
+            drop(Box::from_raw(data as *mut Arc<dyn Fn() + Send + Sync>));
         }
     }
 
@@ -155,7 +154,7 @@ mod jet_gtk {
 
     struct GtkClickBinding {
         path: String,
-        callback: Rc<dyn Fn()>,
+        callback: Arc<dyn Fn() + Send + Sync>,
         connected_widget: *mut GtkWidget,
     }
 
@@ -179,6 +178,11 @@ mod jet_gtk {
         tree_widgets: Vec<GtkWidgetRecord>,
         availability: GtkAvailability,
     }
+
+    // SAFETY: GTK widgets stay on the creating thread; Send/Sync only satisfy
+    // `jet_ui_reactive_render`'s closure bound (headless runs never cross threads).
+    unsafe impl Send for GtkState {}
+    unsafe impl Sync for GtkState {}
 
     impl GtkState {
         /// Initialize GTK once and create the window + vertical container.
@@ -387,7 +391,7 @@ mod jet_gtk {
             (!widget.is_null()).then_some((widget, handle.kind))
         }
 
-        fn connect_click_callback(widget: *mut GtkWidget, callback: Rc<dyn Fn()>) {
+        fn connect_click_callback(widget: *mut GtkWidget, callback: Arc<dyn Fn() + Send + Sync>) {
             let boxed = Box::into_raw(Box::new(callback));
             let signal = CString::new("clicked").unwrap();
             // SAFETY: `widget` is a live GTK button. The connection owns
@@ -411,7 +415,7 @@ mod jet_gtk {
             let mut connected = 0;
             for binding in &mut self.click_bindings {
                 if binding.path == path && binding.connected_widget != widget {
-                    Self::connect_click_callback(widget, Rc::clone(&binding.callback));
+                    Self::connect_click_callback(widget, Arc::clone(&binding.callback));
                     binding.connected_widget = widget;
                     connected += 1;
                 }
@@ -440,13 +444,13 @@ mod jet_gtk {
     /// `button` call opens GTK and the window (when a display exists).
     #[derive(Clone)]
     pub struct JetGtkBackend {
-        state: Rc<RefCell<GtkState>>,
+        state: Arc<Mutex<GtkState>>,
     }
 
     impl JetGtkBackend {
         pub fn new() -> Self {
             JetGtkBackend {
-                state: Rc::new(RefCell::new(GtkState {
+                state: Arc::new(Mutex::new(GtkState {
                     measured: None,
                     layout_frame: None,
                     commands: Vec::new(),
@@ -468,23 +472,23 @@ mod jet_gtk {
 
         // ── Seam parity: display-free measure/layout/paint/on_event ──
         pub fn measure_node(&self, node: JetUiNode, constraint: JetSizeConstraint) -> JetSize {
-            let mut state = self.state.borrow_mut();
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             JetBackend::measure(&mut *state, &node, constraint)
         }
         pub fn layout_node(&self, node: JetUiNode, frame: JetRect) {
-            let mut state = self.state.borrow_mut();
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             JetBackend::layout(&mut *state, &node, frame);
         }
         pub fn paint_node(&self, node: JetUiNode) {
-            let mut state = self.state.borrow_mut();
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             JetBackend::paint(&mut *state, &node);
         }
         pub fn dispatch_event(&self, event: JetInputEvent) -> JetEventResult {
-            let mut state = self.state.borrow_mut();
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             JetBackend::on_event(&mut *state, event)
         }
         pub fn set_focus_group(&self, nodes: Vec<JetUiNode>) {
-            let mut state = self.state.borrow_mut();
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state.focused_index = if nodes.is_empty() { None } else { Some(0) };
             state.focus_paths = nodes
                 .iter()
@@ -494,7 +498,7 @@ mod jet_gtk {
             state.focus_current_widget();
         }
         pub fn focused_label(&self) -> String {
-            let state = self.state.borrow();
+            let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state
                 .focused_index
                 .and_then(|i| state.focus_nodes.get(i))
@@ -515,7 +519,7 @@ mod jet_gtk {
         }
 
         fn add_widget(&self, text: &str, is_button: bool) -> i64 {
-            let mut state = self.state.borrow_mut();
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state.ensure_init();
             let id = state.widget_handles.len() as i64;
             let tree_kind = if is_button { GtkWidgetKind::Button } else { GtkWidgetKind::Label };
@@ -556,7 +560,7 @@ mod jet_gtk {
 
         /// Update a widget's text in place (the reactive counter's live update).
         pub fn set_text(&self, id: i64, text: &str) {
-            let state = self.state.borrow();
+            let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             let Some((widget, kind)) = state.resolve_widget_handle(id) else {
                 state.trace(&format!("handle-miss {id}"));
                 return;
@@ -575,7 +579,7 @@ mod jet_gtk {
 
         /// Apply a Px minimum size (D-STYLEUNIT1's `Px` reaching native layout).
         pub fn set_size(&self, id: i64, width: i64, height: i64) {
-            let state = self.state.borrow();
+            let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             let Some((widget, _)) = state.resolve_widget_handle(id) else {
                 state.trace(&format!("handle-miss {id}"));
                 return;
@@ -589,7 +593,7 @@ mod jet_gtk {
         /// Apply a `#RRGGBB` fill via a scoped CSS provider (D-STYLESHAPE1 Color
         /// reaching the native paint pipeline).
         pub fn set_color(&self, id: i64, color: &str) {
-            let state = self.state.borrow();
+            let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             let Some((widget, _)) = state.resolve_widget_handle(id) else {
                 state.trace(&format!("handle-miss {id}"));
                 return;
@@ -617,13 +621,13 @@ mod jet_gtk {
         }
 
         /// Wire a button's "clicked" signal to a Jet handler.
-        pub fn on_click<F: Fn() + 'static>(&self, id: i64, handler: F) {
-            let mut state = self.state.borrow_mut();
+        pub fn on_click<F: Fn() + Send + Sync + 'static>(&self, id: i64, handler: F) {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             let Some((widget, GtkWidgetKind::Button)) = state.resolve_widget_handle(id) else {
                 state.trace(&format!("handle-miss {id}"));
                 return;
             };
-            let callback = Rc::new(handler) as Rc<dyn Fn()>;
+            let callback = Arc::new(handler) as Arc<dyn Fn() + Send + Sync>;
             let path = state.widget_handles.get(id as usize).and_then(|handle| {
                 if let GtkWidgetHandleTarget::TreePath(path) = &handle.target {
                     Some(path.clone())
@@ -650,7 +654,7 @@ mod jet_gtk {
             // Read what we need, then drop the borrow BEFORE the blocking loop so
             // click handlers (`set_text`, etc.) can re-borrow the state.
             let (display_ok, window, availability) = {
-                let state = self.state.borrow();
+                let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 (state.display_ok, state.window, state.availability)
             };
             if !display_ok || window.is_null() {

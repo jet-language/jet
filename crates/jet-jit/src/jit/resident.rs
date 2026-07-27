@@ -72,6 +72,10 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         readers: Vec::new(),
         cursors: Vec::new(),
         reflect_values: Vec::new(),
+        layout_slots: Vec::new(),
+        reactive: crate::Reactive::ReactiveState::default(),
+        ui: crate::Ui::UiState::default(),
+        web: crate::Web::WebState::default(),
     }
 }
 

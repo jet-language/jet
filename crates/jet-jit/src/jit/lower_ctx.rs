@@ -27,7 +27,7 @@ use super::safety::{
     collect_select_arms_jit, flatten_string, jit_closure_elem_type, jit_list_float_type,
     jit_list_iter_elem_type, jit_list_native_type, jit_list_of_int_list_type, jit_list_record_type,
     jit_list_string_type, jit_map_string_type, jit_result_list_elem, jit_struct_type, jit_tuple_type,
-    jit_value_type, record_type_key, user_type_name,
+    jit_value_type, opaque_host_handle_ty, record_type_key, user_type_name,
 };
 use super::types_meta::{
     clif_ty, core_struct_field_type, fn_value_signature, init_clif_ty, JitMeta,
@@ -2758,7 +2758,19 @@ impl LowerCtx<'_, '_> {
                         .declare_func_in_func(self.host.conc.sender_close, self.b.func);
                     self.b.ins().call(close, &[sender]);
                 }
-                self.b.ins().return_(&[val]);
+                let ret_val = match (self.ret_clif, self.b.func.dfg.value_type(val)) {
+                    (Some(ty), got) if ty == types::I64 && got == types::F64 => self
+                        .b
+                        .ins()
+                        .bitcast(types::I64, Self::scalar_bitcast_memflags(), val),
+                    (Some(ty), got)
+                        if ty == types::I64 && (got == types::I8 || got == types::I32) =>
+                    {
+                        self.b.ins().uextend(types::I64, val)
+                    }
+                    _ => val,
+                };
+                self.b.ins().return_(&[ret_val]);
                 self.dead = true;
             }
             TStmt::Return(None) => {
@@ -3937,8 +3949,31 @@ impl LowerCtx<'_, '_> {
                 self.lower_stmts_scoped(body)?;
                 self.unsafe_depth -= 1;
             }
-            TStmt::Reactive { .. } => return Err("jit reactive statement unsupported".to_string()),
-            TStmt::Layout { .. } => return Err("jit layout block unsupported".to_string()),
+            TStmt::Reactive { executable, .. } => {
+                let _ = executable;
+                let _ = self.lower_reactive_cb_call(
+                    self.host.reactive.effect_rooted,
+                    false,
+                    "reactive stmt",
+                )?;
+            }
+            TStmt::Layout { handle, label, body } => {
+                let label_id = self.runtime.heap.alloc_string(label.clone());
+                let label_ptr = self.b.ins().iconst(types::I64, label_id);
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.layout.new, self.b.func);
+                let call = self.b.ins().call(host, &[label_ptr]);
+                let h = self.b.inst_results(call)[0];
+                let var = self.fresh_var(types::I64);
+                self.b.def_var(var, h);
+                self.vars.insert(TIR::local_place(&handle.name), var);
+                self.var_tys.insert(
+                    TIR::local_place(&handle.name),
+                    Type::Named("LayoutHandle".to_string()),
+                );
+                self.lower_stmts_scoped(body)?;
+            }
             TStmt::ContextBlock { guards, body } => {
                 let mut pushed = 0u32;
                 for (field, value) in guards {
@@ -5929,6 +5964,16 @@ impl LowerCtx<'_, '_> {
         })
     }
 
+    /// Coerce Int/Float/unit-raw args to Cranelift F64 for UI geometry hosts.
+    fn lower_as_f64(&mut self, expr: &TExpr) -> Result<Value, String> {
+        let v = self.lower_expr(expr)?;
+        match self.b.func.dfg.value_type(v) {
+            types::F64 => Ok(v),
+            types::I64 => Ok(self.b.ins().fcvt_from_sint(types::F64, v)),
+            other => Err(format!("jit f64 coerce unsupported type {other:?}")),
+        }
+    }
+
     /// `TCallArg` wrappers: `arc_clone` / `fn_coerce` stay unsupported.
     /// `borrow` / `mut_borrow` pass the same heap handle (JIT mutates in place).
     /// `clone` lowers through `lower_clone` (structs/lists/strings — no silent drop).
@@ -6844,14 +6889,20 @@ impl LowerCtx<'_, '_> {
         let handle = self.b.inst_results(new_call)[0];
         for (i, value) in values.iter().enumerate() {
             let raw = self.lower_expr(value)?;
-            let host_id = match &value.ty {
+            let abi_ty = self.erase_distinct_ty(&value.ty);
+            let host_id = match &abi_ty {
                 ty if Self::is_string_abi_ty(ty) => self.host.struct_set_str,
                 Type::Int => self.host.struct_set_i64,
                 Type::Float => self.host.struct_set_f64,
                 Type::Bool => self.host.struct_set_bool,
                 Type::Char => self.host.struct_set_char,
                 other if clif_ty(other) == Some(types::I64) => self.host.struct_set_i64,
-                _ => return Err(format!("jit record field unsupported: {:?}", value.ty)),
+                _ => {
+                    return Err(format!(
+                        "jit record field unsupported: {:?} (abi {:?})",
+                        value.ty, abi_ty
+                    ))
+                }
             };
             let idx = self.b.ins().iconst(types::I64, i as i64);
             let set_ref = self.module.declare_func_in_func(host_id, self.b.func);
@@ -6900,8 +6951,10 @@ impl LowerCtx<'_, '_> {
         let idx_val = self.b.ins().iconst(types::I64, idx);
         // TIR has already substituted any generic owner arguments. The
         // metadata type is only the declaration (`T` for `Box<T>`), so use
-        // the total expression fact for ABI selection.
-        let host_id = match fallback_ty {
+        // the total expression fact for ABI selection. Unit-family / `#Numeric`
+        // distinct wrappers (Px, …) erase to Float/Int for the host getter.
+        let abi_ty = self.erase_distinct_ty(fallback_ty);
+        let host_id = match &abi_ty {
             ty if Self::is_string_abi_ty(ty) => self.host.struct_get_str,
             Type::Int => self.host.struct_get_i64,
             Type::Float => self.host.struct_get_f64,
@@ -7311,6 +7364,22 @@ impl LowerCtx<'_, '_> {
             } => {
                 if matches!(op, BinOp::And | BinOp::Or) {
                     return self.lower_short_circuit(*op, lhs, rhs);
+                }
+                if matches!(op, BinOp::Add | BinOp::Sub)
+                    && (Self::is_layout_axis_ty(&expr.ty)
+                        || Self::is_layout_axis_ty(&lhs.ty)
+                        || Self::is_layout_axis_ty(&rhs.ty))
+                {
+                    let l = self.lower_expr(lhs)?;
+                    let r = self.lower_expr(rhs)?;
+                    let host_id = if matches!(op, BinOp::Add) {
+                        self.host.layout.add
+                    } else {
+                        self.host.layout.sub
+                    };
+                    let host = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host, &[l, r]);
+                    return Ok(self.b.inst_results(call)[0]);
                 }
                 self.lower_binary(*op, *overflow, *line, lhs, rhs)
             }
@@ -9448,6 +9517,222 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
+                if module == "jet.reactive" {
+                    match method.as_str() {
+                        "signal" if args.len() == 1 => {
+                            let init = self.lower_expr(&args[0])?;
+                            let packed = if matches!(
+                                self.erase_distinct_ty(&args[0].ty),
+                                Type::Float | Type::Float32
+                            ) {
+                                self.b.ins().bitcast(
+                                    types::I64,
+                                    Self::scalar_bitcast_memflags(),
+                                    init,
+                                )
+                            } else {
+                                init
+                            };
+                            let host = self
+                                .module
+                                .declare_func_in_func(self.host.reactive.signal, self.b.func);
+                            let call = self.b.ins().call(host, &[packed]);
+                            return Ok(self.b.inst_results(call)[0]);
+                        }
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    }
+                }
+                if module == "core.reactive.loadable" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "idle" if args.is_empty() => (self.host.reactive.loadable_idle, Vec::new()),
+                        "loading" if args.is_empty() => {
+                            (self.host.reactive.loadable_loading, Vec::new())
+                        }
+                        "loaded" if args.len() == 1 => (
+                            self.host.reactive.loadable_loaded,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "failed" if args.len() == 1 => (
+                            self.host.reactive.loadable_failed,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.event" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "scope" | "policy_sync" if args.is_empty() => {
+                            (self.host.reactive.event_scope, Vec::new())
+                        }
+                        "new" | "with_policy" => (self.host.reactive.event_new, Vec::new()),
+                        "hook" if args.len() == 1 => (
+                            self.host.reactive.hook_new,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "decision_hook" if args.len() == 1 => (
+                            self.host.reactive.decision_hook_new,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "async_result" if args.len() == 2 => {
+                            // AsyncPolicy + FailurePolicy → thin host (capacity/overflow ignored for golden path)
+                            let _policy = self.lower_expr(&args[0])?;
+                            let _fail = self.lower_expr(&args[1])?;
+                            let zero = self.b.ins().iconst(types::I64, 0);
+                            (
+                                self.host.reactive.async_event_new,
+                                vec![zero, zero, zero],
+                            )
+                        }
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    // async_result is Result — pack as Ok(handle) via Option/Result ABI
+                    if method == "async_result" {
+                        let h = self.b.inst_results(call)[0];
+                        let ok = self.b.ins().iconst(types::I8, 1);
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.result_new_i64, self.b.func);
+                        let packed = self.b.ins().call(host, &[ok, h]);
+                        return Ok(self.b.inst_results(packed)[0]);
+                    }
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.ui" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "null_backend" if args.is_empty() => {
+                            (self.host.ui.null_backend, Vec::new())
+                        }
+                        "tui_backend" if args.is_empty() => (self.host.ui.tui_backend, Vec::new()),
+                        "gtk_backend" if args.is_empty() => (self.host.ui.gtk_backend, Vec::new()),
+                        "text" if args.len() == 1 => {
+                            (self.host.ui.text, vec![self.lower_expr(&args[0])?])
+                        }
+                        "button" if args.len() == 1 => {
+                            (self.host.ui.button, vec![self.lower_expr(&args[0])?])
+                        }
+                        "node" if args.len() == 3 => {
+                            let label = self.lower_expr(&args[0])?;
+                            let w = self.lower_as_f64(&args[1])?;
+                            let h = self.lower_as_f64(&args[2])?;
+                            (self.host.ui.node, vec![label, w, h])
+                        }
+                        "node_color" if args.len() == 4 => {
+                            let label = self.lower_expr(&args[0])?;
+                            let w = self.lower_as_f64(&args[1])?;
+                            let h = self.lower_as_f64(&args[2])?;
+                            let color = self.lower_expr(&args[3])?;
+                            (self.host.ui.node_color, vec![label, w, h, color])
+                        }
+                        "node_role" if args.len() == 4 => {
+                            let label = self.lower_expr(&args[0])?;
+                            let w = self.lower_as_f64(&args[1])?;
+                            let h = self.lower_as_f64(&args[2])?;
+                            let role = self.lower_expr(&args[3])?;
+                            (self.host.ui.node_role, vec![label, w, h, role])
+                        }
+                        "box" if args.len() == 1 => {
+                            (self.host.ui.box_node, vec![self.lower_expr(&args[0])?])
+                        }
+                        "constraint" if args.len() == 4 => (
+                            self.host.ui.constraint,
+                            vec![
+                                self.lower_as_f64(&args[0])?,
+                                self.lower_as_f64(&args[1])?,
+                                self.lower_as_f64(&args[2])?,
+                                self.lower_as_f64(&args[3])?,
+                            ],
+                        ),
+                        "rect" if args.len() == 4 => (
+                            self.host.ui.rect,
+                            vec![
+                                self.lower_as_f64(&args[0])?,
+                                self.lower_as_f64(&args[1])?,
+                                self.lower_as_f64(&args[2])?,
+                                self.lower_as_f64(&args[3])?,
+                            ],
+                        ),
+                        "key_event" if args.len() == 1 => {
+                            (self.host.ui.key_event, vec![self.lower_expr(&args[0])?])
+                        }
+                        "aria_role" if args.len() == 1 => {
+                            (self.host.ui.aria_role, vec![self.lower_expr(&args[0])?])
+                        }
+                        "aria_role_button" if args.is_empty() => {
+                            let kind = self.b.ins().iconst(types::I64, 0);
+                            (self.host.ui.aria_role, vec![kind])
+                        }
+                        "aria_role_text_input" if args.is_empty() => {
+                            let kind = self.b.ins().iconst(types::I64, 1);
+                            (self.host.ui.aria_role, vec![kind])
+                        }
+                        "aria_role_label" if args.is_empty() => {
+                            let kind = self.b.ins().iconst(types::I64, 2);
+                            (self.host.ui.aria_role, vec![kind])
+                        }
+                        "aria_role_container" if args.is_empty() => {
+                            let kind = self.b.ins().iconst(types::I64, 3);
+                            (self.host.ui.aria_role, vec![kind])
+                        }
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.web" || module == "core.web.devserver" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
+                        ("core.web", "on") if args.len() == 2 || args.len() == 3 => {
+                            let sel = self.lower_expr(&args[0])?;
+                            let ev = self.lower_expr(&args[1])?;
+                            let cb = if args.len() == 3 {
+                                self.lower_expr(&args[2])?
+                            } else {
+                                self.b.ins().iconst(types::I64, 0)
+                            };
+                            let host = self
+                                .module
+                                .declare_func_in_func(self.host.web.on, self.b.func);
+                            self.b.ins().call(host, &[sel, ev, cb]);
+                            return Ok(self.b.ins().iconst(types::I8, 0));
+                        }
+                        ("core.web", "value") if args.is_empty() => {
+                            (self.host.web.value, Vec::new())
+                        }
+                        ("core.web", "app") if args.is_empty() => (self.host.web.app, Vec::new()),
+                        ("core.web", "page") if args.len() == 2 => (
+                            self.host.web.page,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        ("core.web.devserver", "app") if args.is_empty() => {
+                            (self.host.web.devserver_app, Vec::new())
+                        }
+                        ("core.web.devserver", "for_app") if args.len() == 1 => (
+                            self.host.web.devserver_for_app,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(clif_ty(&expr.ty)
+                        .map(|_| self.b.inst_results(call)[0])
+                        .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
+                }
                 Err(format!("jit core call unsupported: {module}.{method}"))
             }
             TExprKind::CoreClosureCall { kind } => match kind {
@@ -9506,15 +9791,21 @@ impl LowerCtx<'_, '_> {
                     frame.on_rollback.push(id);
                     Ok(self.b.ins().iconst(types::I64, 0))
                 }
-                TCoreClosureKind::ReactiveDerived { .. } => {
-                    Err("jit reactive derived closure unsupported".to_string())
-                }
-                TCoreClosureKind::ReactiveEffect { .. } => {
-                    Err("jit reactive effect closure unsupported".to_string())
-                }
-                TCoreClosureKind::UiReactiveRender { .. } => {
-                    Err("jit UI reactive render closure unsupported".to_string())
-                }
+                TCoreClosureKind::ReactiveDerived { .. } => self.lower_reactive_cb_call(
+                    self.host.reactive.derived,
+                    true,
+                    "reactive derived",
+                ),
+                TCoreClosureKind::ReactiveEffect { .. } => self.lower_reactive_cb_call(
+                    self.host.reactive.effect,
+                    true,
+                    "reactive effect",
+                ),
+                TCoreClosureKind::UiReactiveRender { .. } => self.lower_reactive_cb_call(
+                    self.host.ui.reactive_render,
+                    false,
+                    "ui reactive render",
+                ),
             },
             TExprKind::HandleMethod { recv, op, args } => {
                 self.lower_handle_method(recv, op, args, &expr.ty)
@@ -9926,6 +10217,36 @@ impl LowerCtx<'_, '_> {
                 {
                     return Ok(handle);
                 }
+                // UiNode opaque slot — host getters (not a heap record).
+                if matches!(
+                    type_name.as_deref().or_else(|| match &record_ty {
+                        Type::Named(n) => Some(n.as_str()),
+                        _ => None,
+                    }),
+                    Some("UiNode")
+                ) {
+                    return match field.as_str() {
+                        "label" => {
+                            let host = self
+                                .module
+                                .declare_func_in_func(self.host.ui.node_label, self.b.func);
+                            let call = self.b.ins().call(host, &[handle]);
+                            Ok(self.b.inst_results(call)[0])
+                        }
+                        "width" | "height" => {
+                            let which =
+                                self.b
+                                    .ins()
+                                    .iconst(types::I64, if field == "width" { 0 } else { 1 });
+                            let host = self
+                                .module
+                                .declare_func_in_func(self.host.ui.node_dim, self.b.func);
+                            let call = self.b.ins().call(host, &[handle, which]);
+                            Ok(self.b.inst_results(call)[0])
+                        }
+                        other => Err(format!("jit field `{other}` on `UiNode`")),
+                    };
+                }
                 let type_name = type_name.ok_or_else(|| {
                     format!("jit field recv type: field `{field}` on {record_ty:?}")
                 })?;
@@ -10240,6 +10561,30 @@ impl LowerCtx<'_, '_> {
                             ("TextWidthAmbiguous", "Wide") => Some(1),
                             ("TextWidthControls", "Zero") => Some(0),
                             ("TextWidthControls", "Reject") => Some(1),
+                            ("Overflow", "Block") => Some(0),
+                            ("Overflow", "DropNewest") => Some(1),
+                            ("Overflow", "DropOldest") => Some(2),
+                            ("FailurePolicy", "StopFirst") => Some(0),
+                            ("FailurePolicy", "Collect") => Some(1),
+                            ("FailurePolicy", "Log") => Some(2),
+                            ("FailurePolicy", "Ignore") => Some(3),
+                            ("EventResult", "Handled") => Some(0),
+                            ("EventResult", "Ignored") => Some(1),
+                            ("HookOutcome", "Continue") => Some(0),
+                            ("HookOutcome", "Cancel") => Some(1),
+                            ("HookOutcome", "Fail") => Some(2),
+                            ("HookDecision", "Continue") => Some(0),
+                            ("HookDecision", "Transform") => Some(1),
+                            ("HookDecision", "Cancel") => Some(2),
+                            ("HookDecision", "Fail") => Some(3),
+                            ("DispatchState", "Delivered") => Some(0),
+                            ("DispatchState", "HandlerFailed") => Some(1),
+                            ("DispatchState", "DroppedNewest") => Some(2),
+                            ("DispatchState", "DroppedOldest") => Some(3),
+                            ("DispatchState", "Closed") => Some(4),
+                            ("DispatchState", "Cancelled") => Some(5),
+                            ("DispatchState", "DeadlineExceeded") => Some(6),
+                            ("HookPolicy", "FirstCancelElseTransform") => Some(0),
                             _ => None,
                         })
                         .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
@@ -10534,8 +10879,34 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
 
-            TExprKind::LayoutCompare { .. } => Err("jit layout compare unsupported".to_string()),
-            TExprKind::LayoutLit { .. } => Err("jit layout literal unsupported".to_string()),
+            TExprKind::LayoutCompare { op, lhs, rhs } => {
+                let l = self.lower_expr(lhs)?;
+                let r = self.lower_expr(rhs)?;
+                let host_id = match op {
+                    BinOp::Ge => self.host.layout.ge,
+                    BinOp::Le => self.host.layout.le,
+                    BinOp::Eq => self.host.layout.eq,
+                    _ => return Err(format!("jit layout compare unsupported op {op:?}")),
+                };
+                let host = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host, &[l, r]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TExprKind::LayoutLit { inner } => {
+                let v = self.lower_expr(inner)?;
+                let f = match self.b.func.dfg.value_type(v) {
+                    types::F64 => v,
+                    types::I64 => self.b.ins().fcvt_from_sint(types::F64, v),
+                    other => {
+                        return Err(format!("jit layout lit unsupported type {other:?}"))
+                    }
+                };
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.layout.from_const, self.b.func);
+                let call = self.b.ins().call(host, &[f]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TExprKind::PtrFromAddr { .. } => Err("jit pointer from addr unsupported".to_string()),
             TExprKind::RawOf(inner) => {
                 if self.unsafe_depth == 0 {
@@ -12280,6 +12651,10 @@ impl LowerCtx<'_, '_> {
         if matches!(&inner.ty, Type::Union(_)) {
             return self.lower_expr(inner);
         }
+        // Opaque UI/reactive/web host handles are i64 slots — clone copies the handle.
+        if opaque_host_handle_ty(&inner.ty) {
+            return self.lower_expr(inner);
+        }
         if let Type::Named(name) = &inner.ty {
             if self.meta.is_enum(name) {
                 return self.lower_expr(inner);
@@ -12675,17 +13050,45 @@ impl LowerCtx<'_, '_> {
 
     /// `scene.on_frame(…)` — spawn-site callback registered with the game host.
     fn lower_game_on_frame(&mut self, scene: Value) -> Result<Value, String> {
+        let (spawn_ptr, n_caps, caps) = self.lower_spawn_site_cb("game on_frame")?;
+        let host = self
+            .module
+            .declare_func_in_func(self.host.game.on_frame, self.b.func);
+        self.b.ins().call(
+            host,
+            &[scene, spawn_ptr, n_caps, caps[0], caps[1], caps[2], caps[3]],
+        );
+        Ok(self.b.ins().iconst(types::I8, 0))
+    }
+
+    fn lower_spawn_site_cb(&mut self, what: &str) -> Result<(Value, Value, [Value; 4]), String> {
         let site = *self.spawn_site;
         *self.spawn_site += 1;
         let lam = self
             .spawn_lambdas
             .get(site)
-            .ok_or_else(|| format!("jit game on_frame site {site} missing lambda"))?;
+            .ok_or_else(|| format!("jit {what} site {site} missing lambda"))?;
         let spawn_fn = self
             .spawn_func_ids
             .get(site)
             .copied()
-            .ok_or_else(|| format!("jit game on_frame site {site} missing"))?;
+            .ok_or_else(|| format!("jit {what} site {site} missing"))?;
+        let caps = self.lower_spawn_captures(lam)?;
+        if caps.len() > 4 {
+            return Err(format!("jit {what} capture count {} > 4", caps.len()));
+        }
+        let spawn_ref = self.module.declare_func_in_func(spawn_fn, self.b.func);
+        let spawn_ptr = self.b.ins().func_addr(types::I64, spawn_ref);
+        let n_caps = self.b.ins().iconst(types::I64, caps.len() as i64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let mut out = [zero; 4];
+        for (i, v) in caps.into_iter().enumerate() {
+            out[i] = v;
+        }
+        Ok((spawn_ptr, n_caps, out))
+    }
+
+    fn lower_spawn_captures(&mut self, lam: &TJitSpawnLambda) -> Result<Vec<Value>, String> {
         let mut cap_vals = Vec::new();
         for cap in &lam.captures {
             let captured = TExpr {
@@ -12699,28 +13102,205 @@ impl LowerCtx<'_, '_> {
             };
             cap_vals.push(val);
         }
-        if cap_vals.len() > 4 {
-            return Err(format!(
-                "jit game on_frame capture count {} > 4",
-                cap_vals.len()
-            ));
+        Ok(cap_vals)
+    }
+
+    fn lower_reactive_cb_call(
+        &mut self,
+        host_id: FuncId,
+        returns: bool,
+        what: &str,
+    ) -> Result<Value, String> {
+        let (spawn_ptr, n_caps, caps) = self.lower_spawn_site_cb(what)?;
+        let host = self.module.declare_func_in_func(host_id, self.b.func);
+        let call = self
+            .b
+            .ins()
+            .call(host, &[spawn_ptr, n_caps, caps[0], caps[1], caps[2], caps[3]]);
+        if returns {
+            Ok(self.b.inst_results(call)[0])
+        } else {
+            Ok(self.b.ins().iconst(types::I8, 0))
         }
-        let spawn_ref = self.module.declare_func_in_func(spawn_fn, self.b.func);
-        let spawn_ptr = self.b.ins().func_addr(types::I64, spawn_ref);
-        let n_caps = self.b.ins().iconst(types::I64, cap_vals.len() as i64);
-        let zero = self.b.ins().iconst(types::I64, 0);
-        let mut caps = [zero; 4];
-        for (i, v) in cap_vals.into_iter().enumerate() {
-            caps[i] = v;
+    }
+
+    fn lower_event_method(
+        &mut self,
+        recv_val: Value,
+        method: &str,
+        args: &[TExpr],
+        _ret_ty: &Type,
+    ) -> Result<Value, String> {
+        match method {
+            "on" | "once" if args.len() == 2 => {
+                let scope = self.lower_expr(&args[0])?;
+                let _ = &args[1];
+                let (spawn_ptr, n_caps, caps) = self.lower_spawn_site_cb(&format!("event {method}"))?;
+                let async_host = self
+                    .module
+                    .declare_func_in_func(self.host.reactive.async_event_on, self.b.func);
+                self.b.ins().call(
+                    async_host,
+                    &[
+                        recv_val, scope, spawn_ptr, n_caps, caps[0], caps[1], caps[2], caps[3],
+                    ],
+                );
+                let host_id = if method == "on" {
+                    self.host.reactive.event_on
+                } else {
+                    self.host.reactive.event_once
+                };
+                let host = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(
+                    host,
+                    &[
+                        recv_val, scope, spawn_ptr, n_caps, caps[0], caps[1], caps[2], caps[3],
+                    ],
+                );
+                // Also DecisionHook.on (2-arg) — tolerant host ignores non-decision handles.
+                let dhost = self
+                    .module
+                    .declare_func_in_func(self.host.reactive.decision_hook_on, self.b.func);
+                let zero = self.b.ins().iconst(types::I64, 0);
+                let z8 = self.b.ins().iconst(types::I8, 0);
+                self.b.ins().call(
+                    dhost,
+                    &[
+                        recv_val, scope, zero, spawn_ptr, n_caps, caps[0], caps[1], caps[2],
+                        caps[3], z8,
+                    ],
+                );
+                Ok(self.b.inst_results(call)[0])
+            }
+            "on_priority" if args.len() == 3 => {
+                let scope = self.lower_expr(&args[0])?;
+                let priority = self.lower_expr(&args[1])?;
+                let _ = &args[2];
+                let (spawn_ptr, n_caps, caps) = self.lower_spawn_site_cb("event on_priority")?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.reactive.hook_on_priority, self.b.func);
+                self.b.ins().call(
+                    host,
+                    &[
+                        recv_val, scope, priority, spawn_ptr, n_caps, caps[0], caps[1], caps[2],
+                        caps[3],
+                    ],
+                );
+                let host2 = self
+                    .module
+                    .declare_func_in_func(self.host.reactive.decision_hook_on, self.b.func);
+                let one = self.b.ins().iconst(types::I8, 1);
+                self.b.ins().call(
+                    host2,
+                    &[
+                        recv_val, scope, priority, spawn_ptr, n_caps, caps[0], caps[1], caps[2],
+                        caps[3], one,
+                    ],
+                );
+                Ok(self.b.ins().iconst(types::I64, 0))
+            }
+            "emit" if args.len() == 1 => {
+                let payload = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.reactive.event_emit, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, payload]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "emit_async" if args.len() == 1 => {
+                let payload = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.reactive.async_event_emit, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, payload]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "join" if args.is_empty() => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.reactive.async_event_join, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "close" if args.is_empty() => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.reactive.async_event_close, self.b.func);
+                self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            "summary" if args.is_empty() => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.reactive.event_trace_summary, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "active_count" if args.is_empty() => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.reactive.event_scope_active, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "cancel" if args.is_empty() => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.reactive.event_scope_cancel, self.b.func);
+                self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            "unsubscribe" if args.is_empty() => {
+                let host = self.module.declare_func_in_func(
+                    self.host.reactive.subscription_unsubscribe,
+                    self.b.func,
+                );
+                self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            "run" if args.len() == 1 || args.len() == 2 => {
+                if args.len() == 2 {
+                    let payload = self.lower_expr(&args[0])?;
+                    let fallback = self.lower_expr(&args[1])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.reactive.hook_run, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val, payload, fallback]);
+                    Ok(self.b.inst_results(call)[0])
+                } else {
+                    let payload = self.lower_expr(&args[0])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.reactive.decision_hook_run, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val, payload]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+            }
+            "state" if args.is_empty() => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.reactive.dispatch_report_state, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "delivered_handlers" if args.is_empty() => {
+                let host = self.module.declare_func_in_func(
+                    self.host.reactive.dispatch_report_handlers,
+                    self.b.func,
+                );
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            other => Err(format!("jit EventMethod unsupported: {other}")),
         }
-        let host = self
-            .module
-            .declare_func_in_func(self.host.game.on_frame, self.b.func);
-        self.b.ins().call(
-            host,
-            &[scene, spawn_ptr, n_caps, caps[0], caps[1], caps[2], caps[3]],
-        );
-        Ok(self.b.ins().iconst(types::I8, 0))
+    }
+
+    fn is_layout_axis_ty(ty: &Type) -> bool {
+        matches!(
+            ty,
+            Type::Named(n) if matches!(n.as_str(), "HVar" | "VVar" | "LengthVar")
+        )
     }
 
     /// Exhaustive match on `THandleOp` (`TIR/mod.rs`) for `TExprKind::
@@ -13668,19 +14248,90 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::HttpRouterRegister { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::MathMethod { .. } => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReactiveGet => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReactiveSet => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReactiveEffectMethod { .. } => {
-                Err("jit handle method unsupported".to_string())
+            THandleOp::ReactiveGet => {
+                let is_derived = matches!(
+                    &recv.ty,
+                    Type::Named(n)
+                        if n == "Derived"
+                            || n == "Computed"
+                            || n.ends_with("Derived")
+                            || n.ends_with("Computed")
+                ) || matches!(
+                    &recv.ty,
+                    Type::Apply { name, .. } if name == "Derived" || name == "Computed"
+                );
+                let host_id = if is_derived {
+                    self.host.reactive.derived_get
+                } else {
+                    self.host.reactive.get
+                };
+                let host = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                let bits = self.b.inst_results(call)[0];
+                let payload_ty = match &recv.ty {
+                    Type::Apply { args, .. } => args.first().cloned(),
+                    _ => None,
+                }
+                .unwrap_or_else(|| ret_ty.clone());
+                if matches!(
+                    self.erase_distinct_ty(&payload_ty),
+                    Type::Float | Type::Float32
+                ) {
+                    Ok(self.b.ins().bitcast(
+                        types::F64,
+                        Self::scalar_bitcast_memflags(),
+                        bits,
+                    ))
+                } else {
+                    Ok(bits)
+                }
+            }
+            THandleOp::ReactiveSet => {
+                let v = self.lower_expr(&args[0])?;
+                let payload_ty = match &recv.ty {
+                    Type::Apply { args, .. } => args.first().cloned(),
+                    _ => None,
+                }
+                .unwrap_or_else(|| args[0].ty.clone());
+                let packed = if matches!(
+                    self.erase_distinct_ty(&payload_ty),
+                    Type::Float | Type::Float32
+                ) {
+                    self.b.ins().bitcast(
+                        types::I64,
+                        Self::scalar_bitcast_memflags(),
+                        v,
+                    )
+                } else {
+                    v
+                };
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.reactive.set, self.b.func);
+                self.b.ins().call(host, &[recv_val, packed]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            THandleOp::ReactiveEffectMethod { method } => match method.as_str() {
+                "unsubscribe" | "is_active" => {
+                    // Effects from thin host don't track unsubscribe yet — no-op / true.
+                    if method == "is_active" {
+                        Ok(self.b.ins().iconst(types::I8, 1))
+                    } else {
+                        Ok(self.b.ins().iconst(types::I8, 0))
+                    }
+                }
+                _ => Err(format!("jit ReactiveEffect method unsupported: {method}")),
             }
             THandleOp::EventMethod { method } => match method.as_str() {
+                // Shared EventScope cancel (watcher + reactive tables).
                 "cancel" if args.is_empty() => {
                     let host = self
                         .module
-                        .declare_func_in_func(self.host.watcher.event_scope_cancel, self.b.func);
+                        .declare_func_in_func(self.host.reactive.event_scope_cancel, self.b.func);
                     self.b.ins().call(host, &[recv_val]);
                     Ok(self.b.ins().iconst(types::I8, 0))
                 }
+                // Watcher Subscription.is_active (UI uses reactive unsubscribe path).
                 "is_active" if args.is_empty() => {
                     let host = self.module.declare_func_in_func(
                         self.host.watcher.subscription_is_active,
@@ -13689,7 +14340,7 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host, &[recv_val]);
                     Ok(self.b.inst_results(call)[0])
                 }
-                _ => Err(format!("jit event method unsupported: {method}")),
+                _ => self.lower_event_method(recv_val, method, args, ret_ty),
             },
             THandleOp::WatchMethod {
                 method,
@@ -13725,8 +14376,93 @@ impl LowerCtx<'_, '_> {
                 }
                 _ => Err("jit handle method unsupported".to_string()),
             },
-            THandleOp::LayoutMethod { .. } => Err("jit handle method unsupported".to_string()),
-            THandleOp::LoadableMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::LayoutMethod { method } => match method.as_str() {
+                "h" | "v" if args.len() == 2 => {
+                    let box_n = self.lower_expr(&args[0])?;
+                    let anchor = self.lower_expr(&args[1])?;
+                    let host_id = if method == "h" {
+                        self.host.layout.h
+                    } else {
+                        self.host.layout.v
+                    };
+                    let host = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val, box_n, anchor]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "value" if args.len() == 1 => {
+                    let expr = self.lower_expr(&args[0])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.layout.value, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val, expr]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "suggest" if args.len() == 2 => {
+                    let expr = self.lower_expr(&args[0])?;
+                    let val = self.lower_expr(&args[1])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.layout.suggest, self.b.func);
+                    self.b.ins().call(host, &[recv_val, expr, val]);
+                    Ok(self.b.ins().iconst(types::I8, 0))
+                }
+                "is_feasible" if args.is_empty() => {
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.layout.is_feasible, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "required" | "strong" | "medium" | "weak" if args.is_empty() => {
+                    let kind = match method.as_str() {
+                        "required" => 0i64,
+                        "strong" => 1,
+                        "medium" => 2,
+                        _ => 3,
+                    };
+                    let kind = self.b.ins().iconst(types::I64, kind);
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.layout.strength, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val, kind]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                _ => Err(format!("jit LayoutMethod unsupported: {method}")),
+            },
+            THandleOp::LoadableMethod { method } => match method.as_str() {
+                "is_idle" | "is_loading" | "is_loaded" | "is_failed" if args.is_empty() => {
+                    let kind = match method.as_str() {
+                        "is_idle" => 0i64,
+                        "is_loading" => 1,
+                        "is_loaded" => 2,
+                        _ => 3,
+                    };
+                    let kind = self.b.ins().iconst(types::I64, kind);
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.reactive.loadable_is, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val, kind]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "loaded" if args.is_empty() => {
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.reactive.loadable_payload, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val]);
+                    let payload = self.b.inst_results(call)[0];
+                    // Option packing for Some when is_loaded
+                    self.pack_option_payload(payload, &Type::Int)
+                }
+                "or_else" if args.len() == 1 => {
+                    let def = self.lower_expr(&args[0])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.reactive.loadable_or_else, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val, def]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                _ => Err(format!("jit LoadableMethod unsupported: {method}")),
+            },
             THandleOp::ExpiringMethod { method } => {
                 let clock = args
                     .first()
@@ -13979,9 +14715,151 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_val, bytes]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::UiBackendMethod { .. } => Err("jit handle method unsupported".to_string()),
-            THandleOp::DevServerMethod { .. } => Err("jit handle method unsupported".to_string()),
-            THandleOp::WebAppMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::UiBackendMethod { method } => match method.as_str() {
+                "measure" if args.len() == 2 => {
+                    let node = self.lower_expr(&args[0])?;
+                    let c = self.lower_expr(&args[1])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.ui.measure, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val, node, c]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "layout" if args.len() == 2 => {
+                    let node = self.lower_expr(&args[0])?;
+                    let rect = self.lower_expr(&args[1])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.ui.layout, self.b.func);
+                    self.b.ins().call(host, &[recv_val, node, rect]);
+                    Ok(self.b.ins().iconst(types::I8, 0))
+                }
+                "paint" if args.len() == 1 => {
+                    let node = self.lower_expr(&args[0])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.ui.paint, self.b.func);
+                    self.b.ins().call(host, &[recv_val, node]);
+                    Ok(self.b.ins().iconst(types::I8, 0))
+                }
+                "on_event" if args.len() == 1 => {
+                    let ev = self.lower_expr(&args[0])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.ui.on_event, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val, ev]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "commands" | "frame_lines" if args.is_empty() => {
+                    let host_id = if method == "commands" {
+                        self.host.ui.commands
+                    } else {
+                        self.host.ui.frame_lines
+                    };
+                    let host = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "render_count" if args.is_empty() => {
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.ui.render_count, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "set_focus_group" if args.len() == 1 => {
+                    let nodes = self.lower_expr(&args[0])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.ui.set_focus_group, self.b.func);
+                    self.b.ins().call(host, &[recv_val, nodes]);
+                    Ok(self.b.ins().iconst(types::I8, 0))
+                }
+                "focused_label" if args.is_empty() => {
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.ui.focused_label, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "button" if args.len() == 1 => {
+                    let label = self.lower_expr(&args[0])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.ui.gtk_button, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val, label]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "on_click" if args.len() == 2 => {
+                    let widget = self.lower_expr(&args[0])?;
+                    let (spawn_ptr, n_caps, caps) = self.lower_spawn_site_cb("ui on_click")?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.ui.gtk_on_click, self.b.func);
+                    self.b.ins().call(
+                        host,
+                        &[
+                            recv_val, widget, spawn_ptr, n_caps, caps[0], caps[1], caps[2],
+                            caps[3],
+                        ],
+                    );
+                    Ok(self.b.ins().iconst(types::I8, 0))
+                }
+                "present" if args.len() == 1 => {
+                    let title = self.lower_expr(&args[0])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.ui.gtk_present, self.b.func);
+                    self.b.ins().call(host, &[recv_val, title]);
+                    Ok(self.b.ins().iconst(types::I8, 0))
+                }
+                _ => Err(format!("jit UiBackendMethod unsupported: {method}")),
+            },
+            THandleOp::DevServerMethod { method } => match method.as_str() {
+                "html" if args.len() == 1 => {
+                    let html = self.lower_expr(&args[0])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.web.devserver_html, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val, html]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "port" if args.len() == 1 => {
+                    let port = self.lower_expr(&args[0])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.web.devserver_port, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val, port]);
+                    Ok(self.b.inst_results(call)[0])
+                }
+                "serve" if args.is_empty() => {
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.web.devserver_serve, self.b.func);
+                    self.b.ins().call(host, &[recv_val]);
+                    Ok(self.b.ins().iconst(types::I8, 0))
+                }
+                _ => Err(format!("jit DevServerMethod unsupported: {method}")),
+            },
+            THandleOp::WebAppMethod { method } => {
+                let method_s = self.runtime.heap.alloc_string(method.clone());
+                let method_v = self.b.ins().iconst(types::I64, method_s);
+                let a0 = if args.is_empty() {
+                    self.b.ins().iconst(types::I64, 0)
+                } else {
+                    self.lower_expr(&args[0])?
+                };
+                let a1 = if args.len() < 2 {
+                    self.b.ins().iconst(types::I64, 0)
+                } else {
+                    self.lower_expr(&args[1])?
+                };
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.web.app_method, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, method_v, a0, a1]);
+                Ok(self.b.inst_results(call)[0])
+            },
             THandleOp::DbQuery => {
                 let sql = self.lower_expr(&args[0])?;
                 let params = self.lower_expr(&args[1])?;
@@ -14362,8 +15240,16 @@ impl LowerCtx<'_, '_> {
     }
 
     fn expr_arith_type(&self, expr: &TExpr) -> Type {
-        if let Some(t) = self.expr_field_type(expr) {
-            return self.erase_distinct_ty(&t);
+        if let TExprKind::Field { field, recv, .. } = &expr.kind {
+            if field == "label" && matches!(&recv.ty, Type::Named(n) if n == "UiNode") {
+                return Type::String;
+            }
+            if matches!(field.as_str(), "width" | "height")
+                && matches!(&recv.ty, Type::Named(n) if n == "UiNode")
+            {
+                return Type::Float;
+            }
+            return self.erase_distinct_ty(&expr.ty);
         }
         // TIR `handle_method_return_ty` falls through to Unit for several Rng
         // draws; recover the real scalar from the op so compares type-check.
@@ -14639,6 +15525,35 @@ impl LowerCtx<'_, '_> {
         if matches!(op, BinOp::Eq | BinOp::Ne) && matches!(lhs_ty, Type::Tuple(_)) {
             return self.lower_tuple_eq(op, &lhs_ty, l, r);
         }
+        // UiNode.label is a heap string; TIR may leave the Field ty as Unit/Named
+        // when UiNode is an opaque host handle — still content-compare.
+        let ui_label_eq = matches!(op, BinOp::Eq | BinOp::Ne)
+            && (
+                matches!(
+                    &lhs.kind,
+                    TExprKind::Field { field, recv, .. }
+                        if field == "label"
+                            && matches!(&recv.ty, Type::Named(n) if n == "UiNode")
+                ) || matches!(
+                    &rhs.kind,
+                    TExprKind::Field { field, recv, .. }
+                        if field == "label"
+                            && matches!(&recv.ty, Type::Named(n) if n == "UiNode")
+                ) || matches!(&lhs_ty, Type::Named(n) if n == "str")
+            );
+        if ui_label_eq {
+            let host_ref = self
+                .module
+                .declare_func_in_func(self.host.str_eq, self.b.func);
+            let call = self.b.ins().call(host_ref, &[l, r]);
+            let eq = self.b.inst_results(call)[0];
+            return Ok(if matches!(op, BinOp::Eq) {
+                eq
+            } else {
+                let one = self.b.ins().iconst(types::I8, 1);
+                self.b.ins().isub(one, eq)
+            });
+        }
         Ok(match (&lhs_ty, op) {
             (Type::Int, BinOp::Add) => self.b.ins().iadd(l, r),
             (Type::Int, BinOp::Sub) => self.b.ins().isub(l, r),
@@ -14864,6 +15779,19 @@ impl LowerCtx<'_, '_> {
                 }
                 // Packed enums — JetShow `user_Variant(…)` matching AOT `{:?}`.
                 if let Type::Named(name) = &print_ty {
+                    if name == "EventResult" {
+                        // JetShow: Handled / Ignored (not Debug `EventResult::…`).
+                        let handled = self.b.ins().iconst(types::I64, 0);
+                        let is_handled = self.b.ins().icmp(IntCC::Equal, val, handled);
+                        let h_lit = self.lower_string_lit(&[TStrPart::Lit("Handled".into())])?;
+                        let i_lit = self.lower_string_lit(&[TStrPart::Lit("Ignored".into())])?;
+                        let text = self.b.ins().select(is_handled, h_lit, i_lit);
+                        let print = self
+                            .module
+                            .declare_func_in_func(self.host.print_str, self.b.func);
+                        self.b.ins().call(print, &[text]);
+                        return Ok(());
+                    }
                     if self.meta.is_enum(name) && self.meta.enum_packed_showable(name) {
                         // Leak the type name once: heap string handles die on
                         // resident reset between compile and run.

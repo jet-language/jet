@@ -144,6 +144,14 @@ pub(crate) struct JitRuntime {
     pub(crate) readers: Vec<crate::Parse::ReaderSlot>,
     pub(crate) cursors: Vec<crate::Parse::CursorSlot>,
     pub(crate) reflect_values: Vec<ReflectSlot>,
+    /// D-LAYOUT1: layout handles / LinExpr / Constraint slots (#1225).
+    pub(crate) layout_slots: Vec<crate::Layout::LayoutSlot>,
+    /// D-REACT1 / D-EVENT1: reactive + event opaque handles (#1225).
+    pub(crate) reactive: crate::Reactive::ReactiveState,
+    /// D-RENDERTGT*: UI backends / nodes / events (#1225).
+    pub(crate) ui: crate::Ui::UiState,
+    /// D-WEBAPP1 / c-devserver: web app + DevServer handles (#1226).
+    pub(crate) web: crate::Web::WebState,
 }
 
 impl JitRuntime {
@@ -1533,6 +1541,10 @@ pub(crate) struct HostFns {
     pub(crate) crypto: Crypto::CryptoHostFns,
     pub(crate) game: crate::Game::GameHostFns,
     pub(crate) raylib: crate::Raylib::RaylibHostFns,
+    pub(crate) layout: crate::Layout::LayoutHostFns,
+    pub(crate) reactive: crate::Reactive::ReactiveHostFns,
+    pub(crate) ui: crate::Ui::UiHostFns,
+    pub(crate) web: crate::Web::WebHostFns,
     pub(crate) parse: crate::Parse::HostFns,
     pub(crate) reflect_of_finish: FuncId,
     pub(crate) reflect_field_new: FuncId,
@@ -1726,6 +1738,10 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     Crypto::register_crypto_symbols(&mut builder);
     crate::Game::register_game_symbols(&mut builder);
     crate::Raylib::register_raylib_symbols(&mut builder);
+    crate::Layout::register_layout_symbols(&mut builder);
+    crate::Reactive::register_reactive_symbols(&mut builder);
+    crate::Ui::register_ui_symbols(&mut builder);
+    crate::Web::register_web_symbols(&mut builder);
     crate::Parse::register_symbols(&mut builder);
     crate::Data::register_symbols(&mut builder);
     builder.symbol("jet_jit_reflect_of_finish", jet_jit_reflect_of_finish as *const u8);
@@ -1762,6 +1778,10 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let crypto = Crypto::declare_crypto_host_fns(&mut module)?;
     let game = crate::Game::declare_game_host_fns(&mut module)?;
     let raylib = crate::Raylib::declare_raylib_host_fns(&mut module)?;
+    let layout = crate::Layout::declare_layout_host_fns(&mut module)?;
+    let reactive = crate::Reactive::declare_reactive_host_fns(&mut module)?;
+    let ui = crate::Ui::declare_ui_host_fns(&mut module)?;
+    let web = crate::Web::declare_web_host_fns(&mut module)?;
     let parse = crate::Parse::declare(&mut module)?;
     let data = crate::Data::declare(&mut module)?;
     let time = crate::Time::declare_time_host_fns(&mut module)?;
@@ -1790,6 +1810,10 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         crypto,
         game,
         raylib,
+        layout,
+        reactive,
+        ui,
+        web,
         parse,
         data,
         time,
@@ -1965,6 +1989,10 @@ fn declare_host_fns(
     crypto: Crypto::CryptoHostFns,
     game: crate::Game::GameHostFns,
     raylib: crate::Raylib::RaylibHostFns,
+    layout: crate::Layout::LayoutHostFns,
+    reactive: crate::Reactive::ReactiveHostFns,
+    ui: crate::Ui::UiHostFns,
+    web: crate::Web::WebHostFns,
     parse: crate::Parse::HostFns,
     data: crate::Data::DataHostFns,
     time: crate::Time::TimeHostFns,
@@ -2309,6 +2337,10 @@ fn declare_host_fns(
         crypto,
         game,
         raylib,
+        layout,
+        reactive,
+        ui,
+        web,
         parse,
         reflect_of_finish: import("jet_jit_reflect_of_finish", &sig_reflect_finish)?,
         reflect_field_new: import("jet_jit_reflect_field_new", &sig_str_binary_i64)?,

@@ -456,15 +456,24 @@ extern "C" fn jet_jit_task_trace(task: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_task_join(task: i64) -> i64 {
+    // `emit_async(…).join()` is typed as TaskJoin in TIR, but the thin async
+    // event host returns a completed DispatchReport handle (1-based index into
+    // `dispatch_reports`), not a scheduler task. Treat missing/already-joined
+    // slots as identity so the report handle passes through.
     let join = with_runtime_mut(|rt| {
-        Some(
-            rt.tasks[task as usize]
-                .take()
-                .expect("jit task join: already joined"),
-        )
-    })
-    .expect("jit task join without active runtime");
-    wait_status(|| join.join())
+        let idx = task as usize;
+        if idx >= rt.tasks.len() {
+            return None;
+        }
+        rt.tasks[idx].take()
+    });
+    match join {
+        Some(j) => wait_status(|| j.join()),
+        None => {
+            WAIT_VALUE.with(|slot| slot.set(task));
+            JitWaitStatus::Ready as i64
+        }
+    }
 }
 
 /// D-NURSERY1=A: `g.all([h1, h2, …])` — returns a new `[Int]` list handle.

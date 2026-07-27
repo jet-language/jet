@@ -26,6 +26,7 @@ mod enc_stream;
 mod Fmt;
 mod Game;
 mod Io;
+mod Layout;
 mod Memory;
 mod Net;
 mod Numeric;
@@ -33,11 +34,14 @@ mod Parse;
 mod Process;
 mod Random;
 mod Raylib;
+mod Reactive;
 mod Sketch;
 mod Solver;
 mod Text;
 mod Time;
+mod Ui;
 mod Watcher;
+mod Web;
 
 /// Canonical XML pull engine — EncodingStream refers to `crate::jet_xml_pull`.
 pub mod jet_xml_pull {

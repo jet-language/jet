@@ -1,7 +1,7 @@
 // D-RENDERTGT1=A + D-RENDERTGT2=A (c133 M1): render-target backend trait seam.
-
-use std::cell::RefCell;
-use std::rc::Rc;
+// Arc/Mutex (not Rc/RefCell): `jet_ui_reactive_render` requires Send+Sync
+// closures that capture backends — fully-qualified paths avoid clashing with
+// the AOT prelude's existing `use std::sync::{Arc, Mutex, …}`.
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct JetPoint {
@@ -208,13 +208,13 @@ fn jet_ui_paint_tree(node: &JetUiNode, frame: JetRect, commands: &mut Vec<JetPai
 
 #[derive(Clone)]
 pub struct JetNullBackend {
-    state: Rc<RefCell<JetNullBackendState>>,
+    state: std::sync::Arc<std::sync::Mutex<JetNullBackendState>>,
 }
 
 impl JetNullBackend {
     pub fn new() -> Self {
         JetNullBackend {
-            state: Rc::new(RefCell::new(JetNullBackendState {
+            state: std::sync::Arc::new(std::sync::Mutex::new(JetNullBackendState {
                 measured: None,
                 layout_frame: None,
                 commands: Vec::new(),
@@ -228,7 +228,7 @@ impl JetNullBackend {
     /// D-A11YGATE1=B: register the interactive focus order. Always focuses
     /// the first node when the list is non-empty.
     pub fn set_focus_group(&self, nodes: Vec<JetUiNode>) {
-        let mut state = self.state.borrow_mut();
+        let mut state = self.state.lock().unwrap();
         state.focused_index = if nodes.is_empty() { None } else { Some(0) };
         state.focus_nodes = nodes;
     }
@@ -236,7 +236,7 @@ impl JetNullBackend {
     /// D-A11YGATE1=B: the accessible label of the currently focused node, or
     /// `""` when nothing is focused.
     pub fn focused_label(&self) -> String {
-        let state = self.state.borrow();
+        let state = self.state.lock().unwrap();
         state
             .focused_index
             .and_then(|i| state.focus_nodes.get(i))
@@ -249,28 +249,29 @@ impl JetNullBackend {
         node: JetUiNode,
         constraint: JetSizeConstraint,
     ) -> JetSize {
-        let mut state = self.state.borrow_mut();
+        let mut state = self.state.lock().unwrap();
         JetBackend::measure(&mut *state, &node, constraint)
     }
 
     pub fn layout_node(&self, node: JetUiNode, frame: JetRect) {
-        let mut state = self.state.borrow_mut();
+        let mut state = self.state.lock().unwrap();
         JetBackend::layout(&mut *state, &node, frame);
     }
 
     pub fn paint_node(&self, node: JetUiNode) {
-        let mut state = self.state.borrow_mut();
+        let mut state = self.state.lock().unwrap();
         JetBackend::paint(&mut *state, &node);
     }
 
     pub fn dispatch_event(&self, event: JetInputEvent) -> JetEventResult {
-        let mut state = self.state.borrow_mut();
+        let mut state = self.state.lock().unwrap();
         JetBackend::on_event(&mut *state, event)
     }
 
     pub fn paint_commands(&self) -> Vec<String> {
         self.state
-            .borrow()
+            .lock()
+            .unwrap()
             .commands
             .iter()
             .map(|cmd| match cmd {
@@ -379,13 +380,13 @@ fn tui_write_label(grid: &mut [Vec<char>], frame: &JetRect, label: &str) {
 
 #[derive(Clone)]
 pub struct JetTuiBackend {
-    state: Rc<RefCell<JetTuiBackendState>>,
+    state: std::sync::Arc<std::sync::Mutex<JetTuiBackendState>>,
 }
 
 impl JetTuiBackend {
     pub fn new() -> Self {
         JetTuiBackend {
-            state: Rc::new(RefCell::new(JetTuiBackendState {
+            state: std::sync::Arc::new(std::sync::Mutex::new(JetTuiBackendState {
                 measured: None,
                 layout_frame: None,
                 grid: Vec::new(),
@@ -402,7 +403,7 @@ impl JetTuiBackend {
     /// D-A11YGATE1=B: register the interactive focus order. Always focuses
     /// the first node when the list is non-empty.
     pub fn set_focus_group(&self, nodes: Vec<JetUiNode>) {
-        let mut state = self.state.borrow_mut();
+        let mut state = self.state.lock().unwrap();
         state.focused_index = if nodes.is_empty() { None } else { Some(0) };
         state.focus_nodes = nodes;
     }
@@ -410,7 +411,7 @@ impl JetTuiBackend {
     /// D-A11YGATE1=B: the accessible label of the currently focused node, or
     /// `""` when nothing is focused.
     pub fn focused_label(&self) -> String {
-        let state = self.state.borrow();
+        let state = self.state.lock().unwrap();
         state
             .focused_index
             .and_then(|i| state.focus_nodes.get(i))
@@ -423,28 +424,29 @@ impl JetTuiBackend {
         node: JetUiNode,
         constraint: JetSizeConstraint,
     ) -> JetSize {
-        let mut state = self.state.borrow_mut();
+        let mut state = self.state.lock().unwrap();
         JetBackend::measure(&mut *state, &node, constraint)
     }
 
     pub fn layout_node(&self, node: JetUiNode, frame: JetRect) {
-        let mut state = self.state.borrow_mut();
+        let mut state = self.state.lock().unwrap();
         JetBackend::layout(&mut *state, &node, frame);
     }
 
     pub fn paint_node(&self, node: JetUiNode) {
-        let mut state = self.state.borrow_mut();
+        let mut state = self.state.lock().unwrap();
         JetBackend::paint(&mut *state, &node);
     }
 
     pub fn dispatch_event(&self, event: JetInputEvent) -> JetEventResult {
-        let mut state = self.state.borrow_mut();
+        let mut state = self.state.lock().unwrap();
         JetBackend::on_event(&mut *state, event)
     }
 
     pub fn frame_lines(&self) -> Vec<String> {
         self.state
-            .borrow()
+            .lock()
+            .unwrap()
             .grid
             .iter()
             .map(|row| row.iter().collect::<String>().trim_end().to_string())
@@ -452,7 +454,7 @@ impl JetTuiBackend {
     }
 
     pub fn render_count(&self) -> i64 {
-        self.state.borrow().render_count as i64
+        self.state.lock().unwrap().render_count as i64
     }
 }
 

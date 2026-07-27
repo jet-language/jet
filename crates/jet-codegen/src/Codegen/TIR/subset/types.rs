@@ -48,7 +48,11 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     }
     if matches!(&ty, Type::Named(n) if matches!(n.as_str(),
         "Effect" | "UiNode" | "Subscription" | "EventScope" | "EventPolicy" | "EventTrace" | "AsyncPolicy" | "HookPolicy"
-        | "Overflow" | "FailurePolicy" | "DispatchState" | "EventConfigError")) {
+        | "Overflow" | "FailurePolicy" | "DispatchState" | "EventConfigError"
+        // D-WEBAPP1 / D-RENDERTGT*: opaque UI + web graph value types (prelude hosts).
+        | "WebApp" | "WebPage" | "DevServer"
+        | "EventResult" | "NullBackend" | "TuiBackend" | "GtkBackend"
+        | "Point" | "Size" | "Rect" | "SizeConstraint" | "AriaRole" | "InputEvent")) {
         return true;
     }
     // D-UNIONTYPE1=A: anonymous unions are one generated enum of covered members.

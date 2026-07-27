@@ -655,7 +655,13 @@ pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
         .modules
         .iter()
         .flat_map(|module| &module.items)
-        .any(|item| matches!(item, Item::CModule(_) | Item::ExternRust(_)))
+        .any(|item| match item {
+            // gtk4 is hosted by jet-jit Ui (headless under JET_UI_HEADLESS); the
+            // CModule only names the native link key for AOT.
+            Item::CModule(cm) if cm.lib == "gtk4" => false,
+            Item::CModule(_) | Item::ExternRust(_) => true,
+            _ => false,
+        })
     {
         return "foreign ABI boundary requires the native build/link path; resident JIT has no foreign symbol resolver".to_string();
     }

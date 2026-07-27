@@ -3515,7 +3515,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 format!("{}.on_rollback(Box::new({}))", handle, closure)
             }
             // D-REACT1=B: a derived value recomputed from its signals.
-            TCoreClosureKind::ReactiveDerived { closure } => {
+            TCoreClosureKind::ReactiveDerived { closure, .. } => {
                 format!("{}jet_std::JetDerived::new({})", cx.root_prefix, closure)
             }
             // D-REACT1=B: an effect re-run when a signal it read changes.

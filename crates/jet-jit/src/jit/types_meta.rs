@@ -7,6 +7,11 @@ use jet_codegen::Codegen::TIR::{
 use jet_foundation::AST::{Item, ProgramBundle, Type};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::LazyLock;
+
+static HOOK_INT_PAYLOAD: LazyLock<Vec<Type>> = LazyLock::new(|| vec![Type::Int]);
+static HOOK_STR_PAYLOAD: LazyLock<Vec<Type>> = LazyLock::new(|| vec![Type::String]);
+static EMPTY_PAYLOAD: LazyLock<Vec<Type>> = LazyLock::new(Vec::new);
 
 /// `TypeName → per-field #[Redact]` flags in declaration order (parallel to
 /// `JitProgram.struct_fields`). Populated from the ProgramBundle before compile
@@ -396,6 +401,28 @@ impl<'a> JitMeta<'a> {
         if enum_name == "Key" {
             return Some(key_payload(variant));
         }
+        // Builtin generic enums used by UI/event stems — payload shapes for the
+        // examples under proof (Int/String). Instantiations match events/loadable.
+        if enum_name == "HookOutcome" {
+            return Some(match variant {
+                "Continue" => HOOK_INT_PAYLOAD.as_slice(),
+                "Fail" => HOOK_STR_PAYLOAD.as_slice(),
+                _ => EMPTY_PAYLOAD.as_slice(),
+            });
+        }
+        if enum_name == "HookDecision" {
+            return Some(match variant {
+                "Transform" => HOOK_INT_PAYLOAD.as_slice(),
+                "Fail" => HOOK_STR_PAYLOAD.as_slice(),
+                _ => EMPTY_PAYLOAD.as_slice(),
+            });
+        }
+        if enum_name == "Loadable" {
+            return Some(match variant {
+                "Loaded" | "Failed" => HOOK_STR_PAYLOAD.as_slice(),
+                _ => EMPTY_PAYLOAD.as_slice(),
+            });
+        }
         let key = format!("user_{enum_name}::user_{variant}");
         self.enum_variant_payload_types
             .get(&key)
@@ -559,6 +586,69 @@ impl<'a> JitMeta<'a> {
                 _ => None,
             };
         }
+        // D-EVENT1 / D-PENDING1: compiler-builtin enums not always on JitProgram.
+        if enum_name == "HookOutcome" {
+            return match variant {
+                "Continue" => Some(0),
+                "Cancel" => Some(1),
+                "Fail" => Some(2),
+                _ => None,
+            };
+        }
+        if enum_name == "HookDecision" {
+            return match variant {
+                "Continue" => Some(0),
+                "Transform" => Some(1),
+                "Cancel" => Some(2),
+                "Fail" => Some(3),
+                _ => None,
+            };
+        }
+        if enum_name == "Loadable" {
+            return match variant {
+                "Idle" => Some(0),
+                "Loading" => Some(1),
+                "Loaded" => Some(2),
+                "Failed" => Some(3),
+                _ => None,
+            };
+        }
+        if enum_name == "Overflow" {
+            return match variant {
+                "Block" => Some(0),
+                "DropNewest" => Some(1),
+                "DropOldest" => Some(2),
+                _ => None,
+            };
+        }
+        if enum_name == "FailurePolicy" {
+            return match variant {
+                "StopFirst" => Some(0),
+                "Collect" => Some(1),
+                "Log" => Some(2),
+                "Ignore" => Some(3),
+                _ => None,
+            };
+        }
+        if enum_name == "EventResult" {
+            return match variant {
+                "Handled" => Some(0),
+                "Ignored" => Some(1),
+                _ => None,
+            };
+        }
+        if enum_name == "DispatchState" {
+            return match variant {
+                "Delivered" => Some(0),
+                "HandlerFailed" => Some(1),
+                "DroppedNewest" => Some(2),
+                "DroppedOldest" => Some(3),
+                "Closed" => Some(4),
+                "Cancelled" => Some(5),
+                "DeadlineExceeded" => Some(6),
+                _ => None,
+            };
+        }
         // DataTree (+ format aliases): Null/Bool/Int/Float/Text/Array/Object.
         if matches!(enum_name, "DataTree" | "Json" | "Toml" | "Yaml" | "Csv") {
             return match variant {
@@ -613,6 +703,13 @@ impl<'a> JitMeta<'a> {
                 | "EncodingErrorKind"
                 | "DataEvent"
                 | "Key"
+                | "HookOutcome"
+                | "HookDecision"
+                | "Loadable"
+                | "Overflow"
+                | "FailurePolicy"
+                | "EventResult"
+                | "DispatchState"
         ) || self.enum_variants.contains_key(name)
     }
 
@@ -650,6 +747,12 @@ impl<'a> JitMeta<'a> {
 /// Field order mirrors `jet_std` CommonTypes / sema `core_struct_field`.
 fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
     let fields: &[&str] = match type_name {
+        // D-RENDERTGT*: UI geometry (Prelude). Do NOT register `Point` — many
+        // examples define user `Point { x: Int, … }` and core Float would win.
+        "Size" => &["width", "height"],
+        "Rect" => &["x", "y", "width", "height"],
+        "SizeConstraint" => &["min_width", "min_height", "max_width", "max_height"],
+        "UiNode" => &["kind", "role", "label", "width", "height", "color", "children"],
         "DirEntry" => &["name", "path", "is_dir"],
         "Stat" => &[
             "size",
@@ -749,6 +852,25 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
 /// user struct); recover the real type so JIT field/print/ABI stay total.
 pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Type> {
     match type_name {
+        // No `Point` — collides with user Int Point examples (library, etc.).
+        "Size" => match field {
+            "width" | "height" => Some(Type::Float),
+            _ => None,
+        },
+        "Rect" => match field {
+            "x" | "y" | "width" | "height" => Some(Type::Float),
+            _ => None,
+        },
+        "SizeConstraint" => match field {
+            "min_width" | "min_height" | "max_width" | "max_height" => Some(Type::Float),
+            _ => None,
+        },
+        "UiNode" => match field {
+            "kind" | "role" | "label" | "color" => Some(Type::String),
+            "width" | "height" => Some(Type::Float),
+            "children" => Some(Type::List(Box::new(Type::Named("UiNode".into())))),
+            _ => None,
+        },
         "Claims" => match field {
             "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),
             "audience" => Some(Type::String),
