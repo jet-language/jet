@@ -2880,6 +2880,20 @@ mod project_part_tests {
 
     #[test]
     fn incremental_lsp_query_diagnostics_match_fresh_check_bytes() {
+        // Sema/check frames for even a tiny document exceed the default test
+        // thread stack under full-suite parallelism. Match fmt_lossless: isolate
+        // one worker with a larger stack without changing global settings.
+        let worker = std::thread::Builder::new()
+            .name("lsp-incremental-diag-parity".into())
+            .stack_size(32 * 1024 * 1024)
+            .spawn(run_incremental_lsp_query_diagnostics_match_fresh_check_bytes)
+            .expect("start LSP incremental diagnostic parity worker");
+        if let Err(payload) = worker.join() {
+            std::panic::resume_unwind(payload);
+        }
+    }
+
+    fn run_incremental_lsp_query_diagnostics_match_fresh_check_bytes() {
         let path = "/tmp/lsp_incremental_diagnostic_parity.jet";
         let before = "fn alpha() => Int { return 1 }\nfn beta() => Int { return 2 }\n";
         let mut doc = Document::new(path.to_string(), before.to_string(), 1);
