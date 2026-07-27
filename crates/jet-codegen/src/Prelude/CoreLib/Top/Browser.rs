@@ -118,6 +118,20 @@ struct JetBrowserPageState {
     closed: std::cell::Cell<bool>,
 }
 
+/// D-BROWSER-AUTO1=A (#1188): browsing-context frame handle (main or child).
+/// Explicit close only — listing frames must not close children on drop.
+#[derive(Clone)]
+struct JetBrowserFrame {
+    state: std::rc::Rc<JetBrowserFrameState>,
+}
+
+struct JetBrowserFrameState {
+    browser: JetBrowser,
+    page: std::rc::Rc<JetBrowserPageState>,
+    id: String,
+    closed: std::cell::Cell<bool>,
+}
+
 #[derive(Clone)]
 struct JetBrowserLocator {
     page: std::rc::Rc<JetBrowserPageState>,
@@ -689,7 +703,7 @@ impl Drop for JetBrowser {
     }
 }
 
-fn jet_browser_context_page(
+fn jet_browser_context_create_tab(
     context: &JetBrowserContext,
 ) -> Result<JetBrowserPage, JetBrowserError> {
     if context.state.closed.get() {
@@ -711,6 +725,20 @@ fn jet_browser_context_page(
             closed: std::cell::Cell::new(false),
         }),
     })
+}
+
+/// Beginner page handle — one BiDi tab under the isolated user context.
+fn jet_browser_context_page(
+    context: &JetBrowserContext,
+) -> Result<JetBrowserPage, JetBrowserError> {
+    jet_browser_context_create_tab(context)
+}
+
+/// Explicit tab create — same BiDi browsing context as `page()`.
+fn jet_browser_context_tab(
+    context: &JetBrowserContext,
+) -> Result<JetBrowserPage, JetBrowserError> {
+    jet_browser_context_create_tab(context)
 }
 
 fn jet_browser_context_close(context: &JetBrowserContext) -> Result<(), JetBrowserError> {
@@ -767,6 +795,90 @@ fn jet_browser_page_get_by_role(
         role: role.clone(),
         name: name.clone(),
     }
+}
+
+fn jet_browser_frame_from_page(
+    page: &JetBrowserPage,
+    id: String,
+) -> JetBrowserFrame {
+    JetBrowserFrame {
+        state: std::rc::Rc::new(JetBrowserFrameState {
+            browser: page.state.browser.clone(),
+            page: page.state.clone(),
+            id,
+            closed: std::cell::Cell::new(false),
+        }),
+    }
+}
+
+fn jet_browser_page_main_frame(
+    page: &JetBrowserPage,
+) -> Result<JetBrowserFrame, JetBrowserError> {
+    if page.state.closed.get() || page.state.context.closed.get() {
+        return Err(JetBrowserError::new("closed"));
+    }
+    Ok(jet_browser_frame_from_page(page, page.state.id.clone()))
+}
+
+fn jet_browser_collect_frame_ids(
+    node: &jet_std::JSON,
+    out: &mut Vec<String>,
+) -> Result<(), JetBrowserError> {
+    out.push(jet_browser_string(node, "context")?);
+    match jet_browser_get(node, "children") {
+        None => Ok(()),
+        Some(jet_std::JSON::Array(children)) => {
+            for child in children {
+                jet_browser_collect_frame_ids(child, out)?;
+            }
+            Ok(())
+        }
+        Some(_) => Err(JetBrowserError::new("protocol")),
+    }
+}
+
+fn jet_browser_page_frames(
+    page: &JetBrowserPage,
+) -> Result<Vec<JetBrowserFrame>, JetBrowserError> {
+    if page.state.closed.get() || page.state.context.closed.get() {
+        return Err(JetBrowserError::new("closed"));
+    }
+    let result = jet_browser_command(
+        &page.state.browser,
+        "browsingContext.getTree",
+        jet_browser_object(vec![("root", jet_browser_text(&page.state.id))]),
+    )?;
+    let Some(jet_std::JSON::Array(contexts)) = jet_browser_get(&result, "contexts") else {
+        return Err(JetBrowserError::new("protocol"));
+    };
+    let mut ids = Vec::new();
+    for node in contexts {
+        jet_browser_collect_frame_ids(node, &mut ids)?;
+    }
+    Ok(ids
+        .into_iter()
+        .map(|id| jet_browser_frame_from_page(page, id))
+        .collect())
+}
+
+fn jet_browser_frame_close(frame: &JetBrowserFrame) -> Result<(), JetBrowserError> {
+    if frame.state.closed.get() {
+        return Ok(());
+    }
+    if frame.state.page.closed.get() || frame.state.page.context.closed.get() {
+        frame.state.closed.set(true);
+        return Ok(());
+    }
+    jet_browser_command(
+        &frame.state.browser,
+        "browsingContext.close",
+        jet_browser_object(vec![("context", jet_browser_text(&frame.state.id))]),
+    )?;
+    frame.state.closed.set(true);
+    if frame.state.id == frame.state.page.id {
+        frame.state.page.closed.set(true);
+    }
+    Ok(())
 }
 
 fn jet_browser_page_close(page: &JetBrowserPage) -> Result<(), JetBrowserError> {

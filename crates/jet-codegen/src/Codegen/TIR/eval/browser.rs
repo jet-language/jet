@@ -26,6 +26,7 @@ pub(super) fn handle(
         "Browser"
             | "BrowserContext"
             | "BrowserPage"
+            | "BrowserFrame"
             | "BrowserLocator"
             | "BrowserEvent"
             | "BrowserTrace"

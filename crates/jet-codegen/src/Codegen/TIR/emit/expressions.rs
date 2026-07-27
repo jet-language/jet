@@ -3090,6 +3090,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         ("BrowserContext", "page") => {
                             format!("{}jet_browser_context_page(&({}))", root, recv)
                         }
+                        ("BrowserContext", "tab") => {
+                            format!("{}jet_browser_context_tab(&({}))", root, recv)
+                        }
                         ("BrowserContext", "close") => {
                             format!("{}jet_browser_context_close(&({}))", root, recv)
                         }
@@ -3106,8 +3109,17 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             a(0),
                             a(1)
                         ),
+                        ("BrowserPage", "main_frame") => {
+                            format!("{}jet_browser_page_main_frame(&({}))", root, recv)
+                        }
+                        ("BrowserPage", "frames") => {
+                            format!("{}jet_browser_page_frames(&({}))", root, recv)
+                        }
                         ("BrowserPage", "close") => {
                             format!("{}jet_browser_page_close(&({}))", root, recv)
+                        }
+                        ("BrowserFrame", "close") => {
+                            format!("{}jet_browser_frame_close(&({}))", root, recv)
                         }
                         ("BrowserLocator", "wait") => format!(
                             "{}jet_browser_locator_wait(&({}), {})",

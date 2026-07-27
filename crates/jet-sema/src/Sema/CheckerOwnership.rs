@@ -3018,6 +3018,7 @@ impl<'a> Checker<'a> {
                     "Browser"
                         | "BrowserContext"
                         | "BrowserPage"
+                        | "BrowserFrame"
                         | "BrowserLocator"
                         | "BrowserProtocol"
                 ) =>

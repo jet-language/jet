@@ -295,6 +295,70 @@ fn run_lifecycle(listener: TcpListener) -> Vec<String> {
     methods
 }
 
+fn run_tab_frame_lifecycle(listener: TcpListener) -> Vec<String> {
+    let (mut stream, _) = listener.accept().unwrap();
+    accept_websocket(&mut stream);
+    let mut methods = Vec::new();
+    let mut creates = 0;
+    for _ in 0..11 {
+        let request = read_text_frame(&mut stream);
+        let id = field(&request, "id");
+        let method = field(&request, "method");
+        methods.push(method.clone());
+        let result = match method.as_str() {
+            "session.status" => r#"{"ready":true,"message":"ready"}"#.to_string(),
+            "session.new" => r#"{"sessionId":"tabs","capabilities":{}}"#.to_string(),
+            "browser.createUserContext" => r#"{"userContext":"ctx"}"#.to_string(),
+            "browsingContext.create" => {
+                creates += 1;
+                assert!(
+                    request.contains(r#""type":"tab""#),
+                    "tab create must request type=tab: {request}"
+                );
+                format!(r#"{{"context":"tab-{creates}"}}"#)
+            }
+            "browsingContext.getTree" => {
+                r#"{"contexts":[{"context":"tab-1","children":[{"context":"frame-a","children":[]},{"context":"frame-b","children":[]}]}]}"#
+                    .to_string()
+            }
+            "browsingContext.close" | "browser.removeUserContext" | "session.end" => {
+                "{}".to_string()
+            }
+            other => panic!("unexpected tab/frame method {other}: {request}"),
+        };
+        write_text_frame(
+            &mut stream,
+            &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+        );
+    }
+    methods
+}
+
+fn run_closed_frames_hostile(listener: TcpListener) -> Vec<String> {
+    let (mut stream, _) = listener.accept().unwrap();
+    accept_websocket(&mut stream);
+    let mut methods = Vec::new();
+    for _ in 0..7 {
+        let request = read_text_frame(&mut stream);
+        let id = field(&request, "id");
+        let method = field(&request, "method");
+        methods.push(method.clone());
+        let result = match method.as_str() {
+            "session.status" => r#"{"ready":true,"message":"ready"}"#,
+            "session.new" => r#"{"sessionId":"closed","capabilities":{}}"#,
+            "browser.createUserContext" => r#"{"userContext":"ctx"}"#,
+            "browsingContext.create" => r#"{"context":"tab"}"#,
+            "browsingContext.close" | "browser.removeUserContext" | "session.end" => "{}",
+            other => panic!("unexpected closed-frame method {other}: {request}"),
+        };
+        write_text_frame(
+            &mut stream,
+            &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+        );
+    }
+    methods
+}
+
 fn run_smoke(listener: TcpListener) -> Vec<String> {
     let (mut stream, _) = listener.accept().unwrap();
     accept_websocket(&mut stream);
@@ -610,7 +674,10 @@ fn next(session: Browser, timeout: BrowserTimeout) =[FS]=> Unit { session.next_e
 fn protocol(session: Browser) =[FS]=> Unit { session.protocol("bidi") ?? return }
 fn close(session: Browser) =[FS]=> Unit { session.close() ?? return }
 fn page(context: BrowserContext) =[FS]=> Unit { context.page() ?? return }
+fn tab(context: BrowserContext) =[FS]=> Unit { context.tab() ?? return }
 fn goto(page: BrowserPage) =[FS]=> Unit { page.goto("https://example.test") ?? return }
+fn frames(page: BrowserPage) =[FS]=> Unit { page.frames() ?? return }
+fn frame_close(frame: BrowserFrame) =[FS]=> Unit { frame.close() ?? return }
 fn wait(locator: BrowserLocator, timeout: BrowserTimeout) =[FS]=> Unit { locator.wait(timeout) ?? return }
 fn click(locator: BrowserLocator) =[FS]=> Unit { locator.click() ?? return }
 fn send(protocol: BrowserProtocol) =[FS]=> Unit { protocol.send("session.status", "{{}}") ?? return }
@@ -618,7 +685,7 @@ fn run() {}
 "#;
     let diags = jet::compile(source).expect_err("Browser I/O methods must infer Net");
     assert!(
-        diags.iter().filter(|diag| diag.code == "E0740").count() >= 11,
+        diags.iter().filter(|diag| diag.code == "E0740").count() >= 14,
         "Browser connect and every I/O method must violate an FS-only bound: {diags:?}"
     );
 }
@@ -685,6 +752,118 @@ fn run() {
             "browser.createUserContext",
             "browsingContext.create",
             "session.end",
+            "browsingContext.close",
+            "browser.removeUserContext",
+            "session.end",
+        ]
+    );
+}
+
+#[test]
+fn native_bidi_tab_and_frame_lifecycle_is_explicit_and_idempotent() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!(
+        "ws://{}/session?token=TAB_FRAME_SECRET",
+        listener.local_addr().unwrap()
+    );
+    let server = thread::spawn(move || run_tab_frame_lifecycle(listener));
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+
+    tab_one :: context.tab() ?? panic("tab one")
+    tab_two :: context.page() ?? panic("tab two")
+    main :: tab_one.main_frame() ?? panic("main")
+    frames :: tab_one.frames() ?? panic("frames")
+    print("frames:{frames.len()}")
+
+    child :: frames[1]
+    child.close() ?? panic("child close")
+    child.close() ?? panic("child close idempotent")
+
+    tab_two.close() ?? panic("tab two close")
+    main.close() ?? panic("main close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_tab_frame",
+        "browser_bidi_tab_frame",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "frames:3\n");
+    assert!(!stdout.contains("SECRET"), "{stdout}");
+    assert!(!stderr.contains("SECRET"), "{stderr}");
+    assert_eq!(
+        server.join().unwrap(),
+        [
+            "session.status",
+            "session.new",
+            "browser.createUserContext",
+            "browsingContext.create",
+            "browsingContext.create",
+            "browsingContext.getTree",
+            "browsingContext.close",
+            "browsingContext.close",
+            "browsingContext.close",
+            "browser.removeUserContext",
+            "session.end",
+        ]
+    );
+}
+
+#[test]
+fn native_bidi_frames_on_closed_page_fail_without_get_tree() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!(
+        "ws://{}/session?token=CLOSED_FRAME_SECRET",
+        listener.local_addr().unwrap()
+    );
+    let server = thread::spawn(move || run_closed_frames_hostile(listener));
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.tab() ?? panic("tab")
+    page.close() ?? panic("close")
+    loop attempt; [1] {
+        page.frames() ?? next
+        print("unexpected")
+    }
+    print("caught")
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_closed_frames",
+        "browser_bidi_closed_frames",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "caught\n");
+    assert!(!stdout.contains("SECRET"), "{stdout}");
+    assert!(!stderr.contains("SECRET"), "{stderr}");
+    assert_eq!(
+        server.join().unwrap(),
+        [
+            "session.status",
+            "session.new",
+            "browser.createUserContext",
+            "browsingContext.create",
             "browsingContext.close",
             "browser.removeUserContext",
             "session.end",

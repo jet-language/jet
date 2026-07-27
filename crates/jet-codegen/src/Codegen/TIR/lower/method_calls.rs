@@ -1992,14 +1992,23 @@ pub(crate) fn lower_method_call(
                 err: Box::new(Type::Named("BrowserError".to_string())),
             },
             ("Browser", "trace") => Type::Named("BrowserTrace".to_string()),
-            ("BrowserContext", "page") => Type::Result {
+            ("BrowserContext", "page" | "tab") => Type::Result {
                 ok: Box::new(Type::Named("BrowserPage".to_string())),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             },
             ("BrowserContext", "close")
             | ("BrowserPage", "goto" | "close")
+            | ("BrowserFrame", "close")
             | ("BrowserLocator", "wait" | "click") => Type::Result {
                 ok: Box::new(unit_type()),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            },
+            ("BrowserPage", "main_frame") => Type::Result {
+                ok: Box::new(Type::Named("BrowserFrame".to_string())),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            },
+            ("BrowserPage", "frames") => Type::Result {
+                ok: Box::new(Type::List(Box::new(Type::Named("BrowserFrame".to_string())))),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             },
             ("BrowserPage", "get_by_role") => Type::Named("BrowserLocator".to_string()),
@@ -2071,6 +2080,7 @@ pub(crate) fn lower_method_call(
                 "Browser"
                     | "BrowserContext"
                     | "BrowserPage"
+                    | "BrowserFrame"
                     | "BrowserLocator"
                     | "BrowserEvent"
                     | "BrowserTrace"
