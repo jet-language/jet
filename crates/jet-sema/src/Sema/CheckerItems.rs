@@ -1349,8 +1349,22 @@ impl<'a> Checker<'a> {
             if let Some((_, _, fty, _)) = field_def {
                 let inst = self.trait_reg.instantiate_type(fty, &subst);
                 if let Some(et) = et {
-                    let string_view_compatible = string_view_field && et == Type::String;
-                    if is_patch_lit {
+                    // `View<str>` fields accept only live string-view bindings
+                    // (or trim/after/before calls). A plain owned `String` is
+                    // not a view — allowing it here false-greened into an ICE
+                    // when codegen emitted `String` into an `&str` slot (#1163).
+                    let string_view_compatible = string_view_field
+                        && et == Type::String
+                        && (matches!(
+                            expr,
+                            Expr::Ident(name, _) if self.is_string_view(name)
+                        ) || self.string_view_call_source(expr).is_some());
+                    if string_view_field
+                        && et == Type::String
+                        && !string_view_compatible
+                    {
+                        self.report_string_view_boundary(expr.span());
+                    } else if is_patch_lit {
                         if let Some(inner) = inst.unwrap_option() {
                             self.check_type_assignable(&inner, &et, expr.span());
                         }

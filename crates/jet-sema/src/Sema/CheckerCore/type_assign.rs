@@ -361,6 +361,14 @@ impl<'a> Checker<'a> {
                         }
                     }
                     for arg in args {
+                        // D-MEM-VIEWRET1: `View<str>` is the named string-view
+                        // spelling. `str` is not a free-standing type — only
+                        // this View argument slot may name it.
+                        if name == "View"
+                            && matches!(arg, Type::Named(inner) if inner == "str")
+                        {
+                            continue;
+                        }
                         self.check_declared_type_rules(arg, span);
                     }
                 }
