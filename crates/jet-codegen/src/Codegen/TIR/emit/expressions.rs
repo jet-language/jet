@@ -718,6 +718,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         TExprKind::BuiltinMethod { recv, op, args } => {
             // Eager fuse: `list.map(f).to_list()` → `jet_list_map` so borrowed
             // Fn captures need not be `'static` (E0521 under `jet_iter_map`).
+            // Only fuse a real List/FixedList receiver — `filter(…).map(…).to_list()`
+            // (and any other Iter→map chain) must stay on `jet_iter_map` + `.to_list()`;
+            // cloning a move-only `JetIter` is E0599.
             if matches!(op, TBuiltinOp::IterToList | TBuiltinOp::IterCollect) {
                 if let TExprKind::ClosureMethod {
                     recv: map_recv,
@@ -725,7 +728,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     args: map_args,
                 } = &recv.kind
                 {
-                    if matches!(map_op, TClosureOp::Map | TClosureOp::MapMut) {
+                    if matches!(map_op, TClosureOp::Map | TClosureOp::MapMut)
+                        && matches!(
+                            map_recv.ty,
+                            Type::List(_) | Type::FixedList { .. }
+                        )
+                    {
                         let list = emit_tir_expr(map_recv, cx);
                         let mut f = map_args
                             .first()
