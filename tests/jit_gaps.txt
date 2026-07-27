@@ -5,7 +5,9 @@
 # Covered/gap movement is intentional only; update this file in the same diff.
 
 covered:
+  basics/bare_lambda_param
   basics/branches
+  basics/callbacks
   basics/closures
   basics/compound
   basics/counted_loop
@@ -26,11 +28,13 @@ covered:
   basics/multiline_string
   basics/named_args
   basics/numbers
+  basics/pattern_matching
   basics/printable
   basics/range_step
   basics/switch
   basics/tuples
   basics/values
+  basics/variadics_spread
   collections/deque
   collections/dynamic-array-view
   collections/filter_map
@@ -71,6 +75,7 @@ covered:
   effects/capability_sigils
   effects/effect_caps
   effects/effect_grant
+  effects/effect_higher_order
   effects/effect_prohibition
   effects/effect_trait_bound
   effects/effect_tree
@@ -120,6 +125,7 @@ covered:
   memory/copy_verb
   memory/gc_cyclic
   memory/no_alloc_policy
+  memory/parameter_modes
   memory/place_windows
   memory/ref_field
   memory/resource_close
@@ -132,6 +138,7 @@ covered:
   modules/selective_imports
   operators/chained_comparison
   operators/user_defined
+  patterns/struct_destructure
   serde/codable_default
   serde/csv
   serde/csv_typed
@@ -158,6 +165,7 @@ covered:
   serde/validate
   serde/yaml
   syntax/maturity_tags
+  syntax/trailing_block
   text/bigint
   text/hex_base64
   text/human_format
@@ -179,6 +187,7 @@ covered:
   tooling/test_members
   tooling/tests
   types/affine_unit_types
+  types/anonymous_unions
   types/associated_types
   types/capability_bundles
   types/computed_field
@@ -190,17 +199,29 @@ covered:
   types/enum_dot_patterns
   types/enums
   types/external_methods
+  types/generic_types
   types/inferred_new
+  types/measurement
+  types/nested_enum_groups
+  types/no_any_alternatives
   types/option
   types/option_combinators
+  types/optional_result_variants
+  types/patchable
   types/range_types
   types/recursive_enum
+  types/refinements
+  types/renderable-varargs
+  types/renderable-varargs-multi
   types/structs
   types/tags_and_traits
+  types/traits
+  types/type_alias
   types/typed_literal_head
   types/typestate
   types/unit_family
   types/unit_literals
+  types/value_tag_type
   web/app_hello
   web/web_compute
   web/web_wasm_for_in
@@ -212,10 +233,6 @@ covered:
   web/web_wasm_string_param
 
 gaps:
-  basics/bare_lambda_param: jit param type unsupported: Fn { params: [Int], ret: None, effect_bound: None }
-  basics/callbacks: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
-  basics/pattern_matching: describe_conn: jit unknown local `id`
-  basics/variadics_spread: join: jit list spread unsupported
   cli/positionals: lower_jit_program returned None (no zero-parameter runnable entry)
   cli/subcommands: lower_jit_program returned None (no zero-parameter runnable entry)
   cli/typed_entry_args: lower_jit_program returned None (no zero-parameter runnable entry)
@@ -242,7 +259,6 @@ gaps:
   crypto/vault_secret: handler: jit core call unsupported: core.vault.get
   devloop/persist: run: jit const ref unsupported
   effects/determinism: roll_at: jit handle method unsupported
-  effects/effect_higher_order: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
   effects/effect_levers: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: Some([]) }
   effects/single_use_discard: run: jit unsafe region unsupported
   effects/smart_context: run: jit allocator constructor unsupported
@@ -250,7 +266,7 @@ gaps:
   errors/must_use: run: jit scope guard closure unsupported
   errors/panic: run: jit require/panic stop unsupported
   errors/rollback_trait: transfer: jit transact block unsupported
-  errors/transact: place_order: jit transact block unsupported
+  errors/transact: jit writable scalar param ABI unsupported: Int
   errors/typed_error_families: load: jit typed Result conversion unsupported
   game/core_game_headless: run: jit handle method unsupported
   game/raylib_window: run: jit core call unsupported: core.raylib.window_open
@@ -265,7 +281,7 @@ gaps:
   lowlevel/freestanding: run: jit core call unsupported
   lowlevel/inline_asm: add_registers: jit function missing return
   lowlevel/inline_c: add: jit function missing return
-  lowlevel/layout_columnar: total_mass: jit for-in columnar unsupported
+  lowlevel/layout_columnar: run: jit require/panic stop unsupported
   lowlevel/linalg_simd: run: jit math builtin unsupported
   lowlevel/lowlevel: run: jit unsafe region unsupported
   lowlevel/os_target_gating: run: jit inline comptime branch unsupported
@@ -280,14 +296,14 @@ gaps:
   memory/entity_tree: run: jit static `jet_std::JetPool::new`
   memory/entity_world: tick: jit host/default/uninit/ct-lit unsupported
   memory/expiring_secret: run: jit host/default/uninit/ct-lit unsupported
-  memory/ownership: jit param type unsupported: Fn { params: [String], ret: Some(Int), effect_bound: None }
-  memory/parameter_modes: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
+  memory/ownership: jit writable scalar param ABI unsupported: Int
   memory/pool_stale_id: run: jit static `jet_std::JetPool::new`
   memory/rawptr: run: jit unsafe region unsupported
   memory/returned_views: domain: jit builtin method unsupported
   memory/shared_config: jit param type unsupported: Shared(Named("AppConfig"))
   memory/shared_transact: jit param type unsupported: Shared(Named("Account"))
   memory/string_view: run: jit builtin method unsupported
+  net/browser_bidi_profiles: profile_outcome: jit core call unsupported: core.browser.profile
   net/email_dkim: run: jit core call unsupported: jet.crypto.__secret_from_text
   net/email_message: run: jit core call unsupported: core.email.address
   net/http_client: jit core call unsupported: core.net.tcp_listen
@@ -307,12 +323,10 @@ gaps:
   parsing/binary_pattern: run: jit host/default/uninit/ct-lit unsupported
   parsing/parse_interpolation: run: jit host/default/uninit/ct-lit unsupported
   parsing/text-cursor: run: jit handle method unsupported
-  patterns/struct_destructure: run: jit host/default/uninit/ct-lit unsupported
   reflection/reflect-value: run: jit core call unsupported: core.reflect.of
   safety/sh_typed_text: run: jit host/default/uninit/ct-lit unsupported
   safety/typed_sql: run_query: jit host/default/uninit/ct-lit unsupported
   streams/generators: count: jit host/default/uninit/ct-lit unsupported
-  syntax/trailing_block: jit param type unsupported: Fn { params: [], ret: None, effect_bound: None }
   text/dates: run: jit core call unsupported: core.time.date.new
   text/datetime: run: jit core call unsupported: core.time.datetime.from_timestamp
   text/decimal: run: jit precise numeric builtin unsupported
@@ -333,18 +347,6 @@ gaps:
   tooling/provenance_track: run: jit numeric origin unsupported
   tooling/testing_helpers: run: jit core call unsupported: core.testing.temp_dir
   tooling/todo_hole: not_yet: jit todo expression unsupported
-  types/anonymous_unions: jit param type unsupported: Union([Int, String])
-  types/generic_types: run: jit call to unknown function `make_pair`
-  types/measurement: run: jit core call unsupported: core.science.measurement.from
-  types/no_any_alternatives: run: jit call to unknown function `echo`
-  types/optional_result_variants: run: jit enum arm is not a variant pattern
-  types/patchable: run: jit missing method `Employee::apply`
-  types/refinements: pick: jit host/default/uninit/ct-lit unsupported
-  types/renderable-varargs-multi: run: jit call to unknown function `announce__va1`
-  types/renderable-varargs: run: jit call to unknown function `log_all__va4`
-  types/traits: print_area: jit missing method `Shape::name`
-  types/type_alias: run: jit result ?? operand is not Result
-  types/value_tag_type: jit param type unsupported: Tagged { marker: "Raw", inner: Int }
   ui/events: show_publish: jit enum `HookOutcome::Continue`
   ui/layout_basic: run: jit layout block unsupported
   ui/loadable: run: jit core call unsupported: core.reactive.loadable.idle

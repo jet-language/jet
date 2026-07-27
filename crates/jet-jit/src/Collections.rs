@@ -278,6 +278,17 @@ extern "C" fn jet_jit_map_get(map: i64, key: i64, _line: u32) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_map_validate(map: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        if rt.heap.map_len(map).is_some() {
+            map
+        } else {
+            rt.set_trap("data object payload is not a map");
+            0
+        }
+    })
+}
+
 /// `0` = absent; otherwise `value + 1` (Option Int encoding).
 extern "C" fn jet_jit_map_get_opt(map: i64, key: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
@@ -878,6 +889,7 @@ pub(crate) struct CollectionsHostFns {
     pub map_clone: cranelift_module::FuncId,
     pub map_insert: cranelift_module::FuncId,
     pub map_get: cranelift_module::FuncId,
+    pub map_validate: cranelift_module::FuncId,
     pub map_get_opt: cranelift_module::FuncId,
     pub map_len: cranelift_module::FuncId,
     pub map_key_at: cranelift_module::FuncId,
@@ -941,6 +953,7 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_map_clone", jet_jit_map_clone as *const u8);
     builder.symbol("jet_jit_map_insert", jet_jit_map_insert as *const u8);
     builder.symbol("jet_jit_map_get", jet_jit_map_get as *const u8);
+    builder.symbol("jet_jit_map_validate", jet_jit_map_validate as *const u8);
     builder.symbol("jet_jit_map_get_opt", jet_jit_map_get_opt as *const u8);
     builder.symbol("jet_jit_map_len", jet_jit_map_len as *const u8);
     builder.symbol("jet_jit_map_key_at", jet_jit_map_key_at as *const u8);
@@ -1082,6 +1095,7 @@ pub(crate) fn declare_collections_host_fns(
         map_clone: import("jet_jit_map_clone", &sig_len)?,
         map_insert: import("jet_jit_map_insert", &sig_map_insert)?,
         map_get: import("jet_jit_map_get", &sig_map_get)?,
+        map_validate: import("jet_jit_map_validate", &sig_len)?,
         map_get_opt: import("jet_jit_map_get_opt", &sig_map_get_opt)?,
         map_len: import("jet_jit_map_len", &sig_len)?,
         map_key_at: import("jet_jit_map_key_at", &sig_map_at)?,

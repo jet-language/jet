@@ -36,6 +36,14 @@ fn erase_runtime_qualifiers(mut ty: &Type) -> &Type {
     ty
 }
 
+fn jit_bag_raw_key_candidate(ty: &Type) -> bool {
+    match ty {
+        Type::Tagged { inner, .. } => jit_bag_raw_key_candidate(inner),
+        Type::Int | Type::IntN { .. } | Type::Bool | Type::Char | Type::Named(_) => true,
+        _ => false,
+    }
+}
+
 pub(crate) fn jit_list_int_type(ty: &Type) -> bool {
     // IntN (U8/…) shares the i64 list ABI — bytes / write_at / random.bytes.
     matches!(
@@ -271,7 +279,7 @@ fn jit_compound_type(ty: &Type) -> bool {
             Type::Apply { name, args }
                 if matches!(name.as_str(), "Set" | "Deque" | "Bag")
                     && args.len() == 1
-                    && jit_value_type(&args[0])
+                    && (name != "Bag" || jit_bag_raw_key_candidate(&args[0]))
         )
 }
 
@@ -587,7 +595,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     .iter()
                     .all(|(_, v, _)| resident_safe_expr(v, callees))
         }
-        TExprKind::DataEntriesToMap(_) => true,
+        TExprKind::DataEntriesToMap(local) => {
+            local.generated && !local.deref && local.name.starts_with("__jet_obj")
+        }
         TExprKind::TupleLit { fields, .. } => {
             jit_tuple_type(&expr.ty) && resident_safe_tuple_fields(fields, callees)
         }
@@ -892,6 +902,23 @@ fn resident_safe_unary_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool
         )
 }
 
+fn resident_safe_each_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool {
+    args.len() == 1
+        && matches!(
+            &args[0].kind,
+            TExprKind::Lambda(lam)
+                if lam.prep.is_empty()
+                    && lam.source_params.len() == 1
+                    && match &lam.executable {
+                        TIR::TLambdaBody::Expr(e) => resident_safe_expr(e, callees),
+                        TIR::TLambdaBody::Block(stmts) => stmts.iter().all(|stmt| {
+                            matches!(stmt, TStmt::Let { .. } | TStmt::Assign { .. } | TStmt::ExprStmt(_))
+                                && resident_safe_stmt(stmt, callees)
+                        }),
+                    }
+        )
+}
+
 fn resident_safe_fold_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool {
     args.len() == 2
         && matches!(&args[0].ty, Type::Int)
@@ -937,13 +964,24 @@ fn resident_safe_closure_method(
                 matches!(elem, Type::Int | Type::String | Type::Named(_))
             }) && resident_safe_unary_lambda(args, callees)
         }
+        TIR::TClosureOp::Each | TIR::TClosureOp::EachMut | TIR::TClosureOp::EachRef => {
+            jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
+                matches!(elem, Type::Int | Type::String | Type::Named(_))
+            }) && resident_safe_each_lambda(args, callees)
+        }
         TIR::TClosureOp::FilterMap => {
             matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::String))
                 && resident_safe_unary_lambda(args, callees)
         }
         TIR::TClosureOp::SortBy => {
-            matches!(jit_list_iter_elem_type(&recv.ty), Some(Type::String))
+            jit_closure_elem_type(&recv.ty)
+                .is_some_and(|elem| matches!(elem, Type::String | Type::Named(_)))
                 && resident_safe_unary_lambda(args, callees)
+                && matches!(
+                    &args[0].kind,
+                    TExprKind::Lambda(lam)
+                        if matches!(&lam.executable, TIR::TLambdaBody::Expr(body) if matches!(body.ty, Type::Int))
+                )
         }
         TIR::TClosureOp::TakeWhile
         | TIR::TClosureOp::SkipWhile
@@ -1170,13 +1208,13 @@ fn resident_safe_builtin_op(
         }
         TBuiltinOp::BagAdd | TBuiltinOp::BagRemove | TBuiltinOp::BagHas | TBuiltinOp::BagCount => {
             matches!(&recv.ty, Type::Apply { name, args: targs }
-                if name == "Bag" && targs.len() == 1 && jit_value_type(&targs[0]))
+                if name == "Bag" && targs.len() == 1 && jit_bag_raw_key_candidate(&targs[0]))
                 && args.len() == 1
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::BagLen => {
             matches!(&recv.ty, Type::Apply { name, args: targs }
-                if name == "Bag" && targs.len() == 1 && jit_value_type(&targs[0]))
+                if name == "Bag" && targs.len() == 1 && jit_bag_raw_key_candidate(&targs[0]))
                 && args.is_empty()
         }
         TBuiltinOp::Contains

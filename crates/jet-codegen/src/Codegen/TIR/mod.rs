@@ -103,6 +103,9 @@ pub struct JitProgram {
     pub enum_variant_payload_types: std::collections::HashMap<String, Vec<Type>>,
     pub int_constants: std::collections::HashMap<String, i64>,
     pub distinct_bases: std::collections::HashMap<String, Type>,
+    /// Sema-resolved `(trait, method) -> concrete owner` dispatch facts.
+    pub trait_method_owners:
+        std::collections::HashMap<(String, String), Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -292,6 +295,9 @@ impl TLocal {
 pub struct TMethodRef {
     pub name: String,
     pub mangled: bool,
+    /// Sema-resolved trait that owns a dynamic call. `None` for inherent and
+    /// prelude calls; JIT dispatch never reconstructs this fact from names.
+    pub trait_owner: Option<String>,
 }
 
 impl TMethodRef {
@@ -300,6 +306,7 @@ impl TMethodRef {
         TMethodRef {
             name: name.into(),
             mangled: true,
+            trait_owner: None,
         }
     }
 
@@ -308,6 +315,18 @@ impl TMethodRef {
         TMethodRef {
             name: name.into(),
             mangled: false,
+            trait_owner: None,
+        }
+    }
+
+    pub fn trait_method(
+        trait_owner: impl Into<String>,
+        name: impl Into<String>,
+    ) -> TMethodRef {
+        TMethodRef {
+            name: name.into(),
+            mangled: false,
+            trait_owner: Some(trait_owner.into()),
         }
     }
 
@@ -646,11 +665,23 @@ fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TF
             continue;
         }
         let mut specialized = crate::Sema::specialize_function_types(template, &subst);
+        let residual_type_params: std::collections::HashSet<String> = specialized
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect();
         specialized.type_params.clear();
-        if !tir_covers(&specialized, cx) {
+        // Sema has replaced the value types, but bounded operator calls retain
+        // their resolved source type-parameter owner (`T::compare`). Preserve
+        // that exact identity while coverage and lowering consume the body.
+        let previous_type_params = cx.current_type_params.replace(residual_type_params);
+        let covered = tir_covers(&specialized, cx);
+        if !covered {
+            cx.current_type_params.replace(previous_type_params);
             continue;
         }
         let mut lowered = lower_func(&specialized, cx);
+        cx.current_type_params.replace(previous_type_params);
         lowered.name = emitted_name;
         funcs.push(lowered);
     }
@@ -1061,6 +1092,48 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             _ => {}
         }
     }
+    let mut trait_method_owners =
+        std::collections::HashMap::<(String, String), Vec<String>>::new();
+    for item in &module.items {
+        let mut record = |trait_name: &str, owner: &str, methods: &[crate::AST::Func]| {
+            for method in methods {
+                trait_method_owners
+                    .entry((trait_name.to_string(), method.name.clone()))
+                    .or_default()
+                    .push(owner.to_string());
+            }
+        };
+        match item {
+            Item::Struct(def) => {
+                for implementation in &def.trait_impls {
+                    record(
+                        &implementation.trait_name,
+                        &def.name,
+                        &implementation.methods,
+                    );
+                }
+            }
+            Item::Enum(def) => {
+                for implementation in &def.trait_impls {
+                    record(
+                        &implementation.trait_name,
+                        &def.name,
+                        &implementation.methods,
+                    );
+                }
+            }
+            Item::Impl(implementation) => {
+                if let Some(trait_name) = &implementation.trait_name {
+                    record(
+                        trait_name,
+                        &implementation.type_name,
+                        &implementation.methods,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
     Some(JitProgram {
         instance_provenance: instance_provenance(bundle),
         source_file: module.display.clone(),
@@ -1073,6 +1146,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         enum_variant_payload_types,
         int_constants,
         distinct_bases,
+        trait_method_owners,
     })
     })
 }

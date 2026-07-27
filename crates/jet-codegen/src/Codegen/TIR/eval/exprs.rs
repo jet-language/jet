@@ -700,6 +700,20 @@ impl<'a> EvalCtx<'a> {
                         return Ok(ret);
                     }
                 }
+                if method.name == "compare" {
+                    if let (CtValue::Int(lhs), [CtValue::Int(rhs)]) = (&r, argv.as_slice()) {
+                        let variant = match lhs.cmp(rhs) {
+                            std::cmp::Ordering::Less => "Less",
+                            std::cmp::Ordering::Equal => "Equal",
+                            std::cmp::Ordering::Greater => "Greater",
+                        };
+                        return Ok(CtValue::Enum {
+                            type_name: "Ordering".to_string(),
+                            variant: variant.to_string(),
+                            args: Vec::new(),
+                        });
+                    }
+                }
                 if let Ok(v) = crate::Comptime::Builtins::apply_method(
                     &r,
                     &method.name,

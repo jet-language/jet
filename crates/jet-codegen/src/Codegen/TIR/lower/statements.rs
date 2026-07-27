@@ -314,11 +314,11 @@ fn split_view_plan(stmts: &[Stmt], cx: &Cx) -> HashMap<usize, PlannedSplitView> 
 /// elaborates the head away. Preserve the asserted list shape:
 /// the value already has the exact expected list type, so the wrapper is not
 /// another list dimension.
-fn preserve_typed_list_shape(expr: TExpr, expected: &Type) -> TExpr {
+fn preserve_typed_list_shape(expr: TExpr, expected: &Type, cx: &Cx) -> TExpr {
     if !matches!(expected, Type::List(_)) {
         return expr;
     }
-    match expr {
+    let mut expr = match expr {
         TExpr {
             ty,
             kind: TExprKind::ListLit(mut elems),
@@ -333,7 +333,39 @@ fn preserve_typed_list_shape(expr: TExpr, expected: &Type) -> TExpr {
             }
         }
         other => other,
+    };
+    let Type::List(expected_elem) = expected else {
+        return expr;
+    };
+    let trait_name = match expected_elem.as_ref() {
+        Type::TraitObject(names) if names.len() == 1 => names.first(),
+        Type::Named(name) if cx.trait_names.contains(name) => Some(name),
+        _ => None,
+    };
+    let Some(trait_name) = trait_name else {
+        return expr;
+    };
+    let TExprKind::ListLit(elems) = &mut expr.kind else {
+        return expr;
+    };
+    for elem in elems {
+        let concrete = match &elem.ty {
+            Type::Named(name) => Some(name.clone()),
+            Type::Apply { name, .. } => Some(name.clone()),
+            _ => None,
+        };
+        let (Some(concrete), TExprKind::StructLit { as_trait, .. }) =
+            (concrete, &mut elem.kind)
+        else {
+            continue;
+        };
+        if as_trait.is_none() {
+            *as_trait = Some((trait_name.clone(), concrete));
+            elem.ty = Type::TraitObject(vec![trait_name.clone()]);
+        }
     }
+    expr.ty = Type::List(Box::new(Type::TraitObject(vec![trait_name.clone()])));
+    expr
 }
 
 pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
@@ -626,7 +658,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             }
             let mut init = lower_owned_expr(&b.init, cx, env);
             if let Some(want) = &b.ty {
-                init = preserve_typed_list_shape(init, want);
+                init = preserve_typed_list_shape(init, want, cx);
             }
             // D-FIXARR1: if the binding annotation is `[T#N]` and the init lowered as a
             // growable list (e.g. a plain list literal), re-tag the TExpr type so the emit

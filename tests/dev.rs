@@ -3784,11 +3784,22 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
 
 #[test]
 fn language_callables_and_types_match_interpreter_jit_and_aot() {
+    const CHILD_STEM: &str = "JET_1215_STEM";
+    if let Ok(stem) = std::env::var(CHILD_STEM) {
+        assert_cranelift_three_way(&example_path(&stem), &stem);
+        return;
+    }
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
     let stems = [
         "basics/bare_lambda_param",
         "basics/callbacks",
         "basics/pattern_matching",
         "basics/variadics_spread",
+        "effects/effect_higher_order",
+        "memory/parameter_modes",
         "patterns/struct_destructure",
         "syntax/trailing_block",
         "types/anonymous_unions",
@@ -3807,16 +3818,28 @@ fn language_callables_and_types_match_interpreter_jit_and_aot() {
     ];
     let mut failures = Vec::new();
     for stem in stems {
-        let file = example_path(stem);
-        if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            assert_cranelift_three_way(&file, stem);
-        })) {
-            let detail = payload
-                .downcast_ref::<String>()
-                .map(String::as_str)
-                .or_else(|| payload.downcast_ref::<&str>().copied())
-                .unwrap_or("unknown panic");
-            failures.push(format!("{stem}: {detail}"));
+        let mut command = Command::new(std::env::current_exe().expect("current dev test binary"));
+        command
+            .args([
+                "--exact",
+                "language_callables_and_types_match_interpreter_jit_and_aot",
+                "--nocapture",
+            ])
+            .env(CHILD_STEM, stem)
+            .env("RUST_MIN_STACK", "8388608")
+            .env("NO_COLOR", "1");
+        let output = command_output_with_timeout(
+            command,
+            DEV_DIFF_TIMEOUT,
+            &format!("language/callable/type parity `{stem}`"),
+        );
+        if !output.status.success() {
+            failures.push(format!(
+                "{stem}: status={:?}\nstdout:\n{}\nstderr:\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
     }
     assert!(

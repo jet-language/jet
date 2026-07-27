@@ -1134,7 +1134,18 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .borrow_mut()
                 .entry(call.name.clone())
                 .or_default()
-                .push(args.iter().map(|arg| arg.value.ty.clone()).collect());
+                .push(
+                    args.iter()
+                        .map(|arg| {
+                            if arg.widen_to_vec {
+                                if let Type::FixedList { elem, .. } = &arg.value.ty {
+                                    return Type::List(elem.clone());
+                                }
+                            }
+                            arg.value.ty.clone()
+                        })
+                        .collect(),
+                );
             let declared_ret = call_return_type(cx, &call.name);
             let ret = match (
                 cx.fn_type_params.get(&call.name),

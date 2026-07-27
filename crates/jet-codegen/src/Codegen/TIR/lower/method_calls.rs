@@ -3506,13 +3506,33 @@ pub(crate) fn lower_method_call(
                 .cloned()
                 .flatten()
                 .unwrap_or_else(unit_type);
-            let recv = lower_expr(receiver, cx, env);
+            let mut recv = lower_expr(receiver, cx, env);
+            // A specialized generic/variadic parameter can retain the trait as
+            // `recv_type` while its lowered TIR type is the exact concrete
+            // implementation. Keep that concrete ABI and dispatch directly;
+            // only genuine trait-object values use the boxed dynamic ABI.
+            if let Type::Named(concrete) = &recv.ty {
+                if cx.type_names.contains(concrete) {
+                    let targs = lower_method_args(args, &sig, env, cx);
+                    return TExpr {
+                        ty: ret_ty,
+                        kind: TExprKind::MethodCall {
+                            recv: Box::new(recv),
+                            method: TMethodRef::bare(method),
+                            args: targs,
+                            source_first_string_literal: first_string_literal_arg(args),
+                            operator_line: None,
+                        },
+                    };
+                }
+            }
+            recv.ty = Type::TraitObject(vec![ty.clone()]);
             let targs = lower_method_args(args, &sig, env, cx);
             return TExpr {
                 ty: ret_ty,
                 kind: TExprKind::MethodCall {
                     recv: Box::new(recv),
-                    method: TMethodRef::bare(method),
+                    method: TMethodRef::trait_method(ty, method),
                     args: targs,
                     source_first_string_literal: first_string_literal_arg(args),
                     operator_line: None,
@@ -3598,6 +3618,31 @@ pub(crate) fn lower_method_call(
     } else {
         lower_expr(receiver, cx, env)
     };
+    if matches!(&recv.ty, Type::Named(name) if cx.trait_names.contains(name)) {
+        let trait_name = recv.ty.name();
+        let mut recv = recv;
+        recv.ty = Type::TraitObject(vec![trait_name.clone()]);
+        let targs = lower_method_args(args, &sig, env, cx);
+        let ret_ty = resolved_ret
+            .cloned()
+            .or_else(|| {
+                cx.method_rets
+                    .get(&(trait_name.clone(), method.to_string()))
+                    .cloned()
+                    .flatten()
+            })
+            .unwrap_or_else(unit_type);
+        return TExpr {
+            ty: ret_ty,
+            kind: TExprKind::MethodCall {
+                recv: Box::new(recv),
+                method: TMethodRef::trait_method(&trait_name, method),
+                args: targs,
+                source_first_string_literal: first_string_literal_arg(args),
+                operator_line: None,
+            },
+        };
+    }
     if matches!(&recv.ty, Type::Apply { .. }) {
         cx.jit_method_calls.borrow_mut().insert(
             format!("{}::{method}", recv.ty.name()),

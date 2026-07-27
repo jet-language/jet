@@ -3898,6 +3898,19 @@ impl LowerCtx<'_, '_> {
         Some(format!("{}::{}", base, method.name))
     }
 
+    fn require_raw_bag_key(&self, recv_ty: &Type) -> Result<(), String> {
+        match recv_ty {
+            Type::Apply { name, args }
+                if name == "Bag"
+                    && args.len() == 1
+                    && self.meta.raw_bag_key_type(&args[0]) =>
+            {
+                Ok(())
+            }
+            _ => Err(format!("jit Bag key type unsupported: {recv_ty:?}")),
+        }
+    }
+
     fn lower_trait_object_method(
         &mut self,
         recv: &TExpr,
@@ -3911,12 +3924,16 @@ impl LowerCtx<'_, '_> {
         let arg_values: Result<Vec<_>, _> =
             args.iter().map(|arg| self.lower_call_arg(arg)).collect();
         let arg_values = arg_values?;
-        let suffix = format!("::{}", method.name);
+        let trait_name = method
+            .trait_owner
+            .as_deref()
+            .ok_or_else(|| format!("jit dynamic method `{}` has no trait owner", method.name))?;
         let mut candidates: Vec<(i64, FuncId)> = self
-            .func_ids
-            .iter()
-            .filter_map(|(name, func)| {
-                let owner = name.strip_suffix(&suffix)?;
+            .meta
+            .trait_method_owners(trait_name, &method.name)
+            .into_iter()
+            .filter_map(|owner| {
+                let func = self.func_ids.get(&format!("{owner}::{}", method.name))?;
                 Some((self.meta.struct_type_id(owner)?, *func))
             })
             .collect();
@@ -6309,16 +6326,23 @@ impl LowerCtx<'_, '_> {
                 args,
                 ..
             } => {
-                let direct_method = self
-                    .method_key(&recv.ty, method)
-                    .is_some_and(|key| self.func_ids.contains_key(&key));
-                let dynamic_named = matches!(&recv.ty, Type::Named(_))
-                    && !direct_method
-                    && self
-                        .func_ids
-                        .keys()
-                        .any(|name| name.ends_with(&format!("::{}", method.name)));
-                if matches!(&recv.ty, Type::TraitObject(_)) || dynamic_named {
+                if method.name == "compare"
+                    && args.len() == 1
+                    && matches!(&recv.ty, Type::Int)
+                {
+                    let left = self.lower_expr(recv)?;
+                    let right = self.lower_call_arg(&args[0])?;
+                    let equal = self.bool_from_icmp(IntCC::Equal, left, right);
+                    let greater =
+                        self.bool_from_icmp(IntCC::SignedGreaterThan, left, right);
+                    let less_disc = self.b.ins().iconst(types::I64, 0);
+                    let equal_disc = self.b.ins().iconst(types::I64, 1);
+                    let greater_disc = self.b.ins().iconst(types::I64, 2);
+                    let unequal =
+                        self.b.ins().select(greater, greater_disc, less_disc);
+                    return Ok(self.b.ins().select(equal, equal_disc, unequal));
+                }
+                if matches!(&recv.ty, Type::TraitObject(_)) {
                     return self.lower_trait_object_method(recv, method, args, &expr.ty);
                 }
                 if method.name == "apply"
@@ -6536,8 +6560,14 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::ConstRef(_) => Err("jit const ref unsupported".to_string()),
             TExprKind::DataEntriesToMap(local) => {
-                // Object payload is already a Map handle in the JIT DataTree ABI.
-                self.load_local(local)
+                let payload = self.load_local(local)?;
+                let validate = self
+                    .module
+                    .declare_func_in_func(self.host.coll.map_validate, self.b.func);
+                let call = self.b.ins().call(validate, &[payload]);
+                let map = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                Ok(map)
             }
             TExprKind::PoolSlot { .. } => Err("jit pool slot unsupported".to_string()),
             TExprKind::RangeCheckedCtor { .. } => {
@@ -7590,6 +7620,7 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::ByteBufferWrite { .. } => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::ByteBufferToBytes => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::BagAdd => {
+                self.require_raw_bag_key(&recv.ty)?;
                 let value = self.lower_expr(&args[0])?;
                 let host = self
                     .module
@@ -7598,6 +7629,7 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::BagRemove => {
+                self.require_raw_bag_key(&recv.ty)?;
                 let value = self.lower_expr(&args[0])?;
                 let host = self
                     .module
@@ -7606,6 +7638,7 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             TBuiltinOp::BagHas => {
+                self.require_raw_bag_key(&recv.ty)?;
                 let value = self.lower_expr(&args[0])?;
                 let host = self
                     .module
@@ -7614,6 +7647,7 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::BagCount => {
+                self.require_raw_bag_key(&recv.ty)?;
                 let value = self.lower_expr(&args[0])?;
                 let host = self
                     .module
@@ -7622,6 +7656,7 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.inst_results(call)[0])
             }
             TBuiltinOp::BagLen => {
+                self.require_raw_bag_key(&recv.ty)?;
                 let host = self
                     .module
                     .declare_func_in_func(self.host.coll.bag_len, self.b.func);
@@ -7876,6 +7911,14 @@ impl LowerCtx<'_, '_> {
             }
             return self.lower_clone_struct(inner);
         }
+        if matches!(&inner.ty, Type::Apply { name, .. } if name == "Sender") {
+            let val = self.lower_expr(inner)?;
+            let host_ref = self
+                .module
+                .declare_func_in_func(self.host.conc.sender_clone, self.b.func);
+            let call = self.b.ins().call(host_ref, &[val]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
         if let Type::Apply { name, .. } = &inner.ty {
             if self.meta.is_enum(name) {
                 return self.lower_expr(inner);
@@ -7884,14 +7927,6 @@ impl LowerCtx<'_, '_> {
         }
         if jit_tuple_type(&inner.ty) {
             return self.lower_clone_tuple(inner);
-        }
-        if matches!(&inner.ty, Type::Apply { name, .. } if name == "Sender") {
-            let val = self.lower_expr(inner)?;
-            let host_ref = self
-                .module
-                .declare_func_in_func(self.host.conc.sender_clone, self.b.func);
-            let call = self.b.ins().call(host_ref, &[val]);
-            return Ok(self.b.inst_results(call)[0]);
         }
         // Option packed ABI is a plain i64 — clone is a bitwise copy.
         if matches!(&inner.ty, Type::Option(_)) {
@@ -9970,6 +10005,9 @@ impl LowerCtx<'_, '_> {
                 self.lower_iter_map_filter(recv, args, false)
             }
             TClosureOp::Filter => self.lower_iter_map_filter(recv, args, true),
+            TClosureOp::Each | TClosureOp::EachMut | TClosureOp::EachRef => {
+                self.lower_iter_each(recv, args)
+            }
             TClosureOp::FilterMap => self.lower_iter_filter_map(recv, args),
             TClosureOp::SortBy => self.lower_iter_sort_by(recv, args),
             TClosureOp::TakeWhile => self.lower_iter_take_skip_while(recv, args, false),
@@ -10134,6 +10172,83 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(header);
         self.b.seal_block(exit);
         Ok(self.b.use_var(out_var))
+    }
+
+    fn lower_iter_each(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
+        let elem_ty = jit_closure_elem_type(&recv.ty)
+            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+        if !matches!(
+            &elem_ty,
+            Type::Int | Type::String | Type::Named(_)
+        ) {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let lam_expr = args
+            .first()
+            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+        let TExprKind::Lambda(lam) = &lam_expr.kind else {
+            return Err("jit closure method unsupported".to_string());
+        };
+        if !lam.prep.is_empty() || lam.source_params.len() != 1 {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let param_place = TIR::local_place(&lam.source_params[0]);
+        let recv_val = self.lower_expr(recv)?;
+        let coll_var = self.fresh_var(types::I64);
+        self.b.def_var(coll_var, recv_val);
+
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        let idx_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(idx_var, zero);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let idx = self.b.use_var(idx_var);
+        let coll = self.b.use_var(coll_var);
+        let len_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_len, self.b.func);
+        let len_call = self.b.ins().call(len_ref, &[coll]);
+        let len = self.b.inst_results(len_call)[0];
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let get_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
+        let elem = self.b.inst_results(get_call)[0];
+        self.emit_trap_check()?;
+        self.with_bound_local(&param_place, elem_ty, elem, |this| {
+            match &lam.executable {
+                TLambdaBody::Expr(body) => this.lower_expr(body).map(|_| ()),
+                TLambdaBody::Block(stmts) => this.lower_stmts(stmts),
+            }
+        })?;
+        self.b.ins().jump(step, &[]);
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(idx, one);
+        self.b.def_var(idx_var, next);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        Ok(self.b.ins().iconst(types::I8, 0))
     }
 
     /// `if x == .Ok(v)` / `.Err(e)` on Result, or `if opt == Val(v)` on Option.
@@ -10530,9 +10645,9 @@ impl LowerCtx<'_, '_> {
         recv: &TExpr,
         args: &[TExpr],
     ) -> Result<Value, String> {
-        let elem_ty = jit_list_iter_elem_type(&recv.ty)
+        let elem_ty = jit_closure_elem_type(&recv.ty)
             .ok_or_else(|| "jit closure method unsupported".to_string())?;
-        if !matches!(elem_ty, Type::String) {
+        if !matches!(elem_ty, Type::String | Type::Named(_)) {
             return Err("jit closure method unsupported".to_string());
         }
         let (param_place, body_expr) = self.closure_unary_lambda(args)?;

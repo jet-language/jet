@@ -190,7 +190,15 @@ pub(crate) fn clif_ty_with_distinct(
         || (jit_struct_type(&ty) && !distinct_bases.contains_key(ty.name().as_str()))
         || jit_tuple_type(&ty)
         || jit_enum_type(&ty)
-        || matches!(&ty, Type::Union(_) | Type::Fn { .. } | Type::TraitObject(_))
+        || matches!(
+            &ty,
+            Type::Union(_)
+                | Type::Fn {
+                    effect_bound: None,
+                    ..
+                }
+                | Type::TraitObject(_)
+        )
     {
         return Some(types::I64);
     }
@@ -235,7 +243,20 @@ pub(crate) fn func_signature(
     if func_has_receiver(tir) {
         sig.params.push(AbiParam::new(types::I64));
     }
-    for (_, ty, _) in &tir.params {
+    for (_, ty, convention) in &tir.params {
+        if matches!(convention, jet_foundation::AST::AccessConvention::Write)
+            && matches!(
+                ty,
+                Type::Int
+                    | Type::IntN { .. }
+                    | Type::Float
+                    | Type::Float32
+                    | Type::Bool
+                    | Type::Char
+            )
+        {
+            return Err(format!("jit writable scalar param ABI unsupported: {ty:?}"));
+        }
         sig.params.push(AbiParam::new(
             meta.clif_ty(ty)
                 .ok_or_else(|| format!("jit param type unsupported: {ty:?}"))?,
@@ -285,6 +306,8 @@ pub(crate) fn jit_fn_name(name: &str) -> String {
 }
 
 pub(crate) struct JitMeta<'a> {
+    trait_method_owners:
+        &'a HashMap<(String, String), Vec<String>>,
     struct_fields: &'a HashMap<String, Vec<String>>,
     struct_field_types: &'a HashMap<String, Vec<Type>>,
     enum_variants: &'a HashMap<String, Vec<String>>,
@@ -297,6 +320,7 @@ pub(crate) struct JitMeta<'a> {
 impl<'a> JitMeta<'a> {
     pub(crate) fn from_program(program: &'a JitProgram) -> Self {
         JitMeta {
+            trait_method_owners: &program.trait_method_owners,
             struct_fields: &program.struct_fields,
             struct_field_types: &program.struct_field_types,
             enum_variants: &program.enum_variants,
@@ -309,6 +333,19 @@ impl<'a> JitMeta<'a> {
 
     pub(crate) fn clif_ty(&self, ty: &Type) -> Option<types::Type> {
         clif_ty_with_distinct(ty, self.distinct_bases)
+    }
+
+    pub(crate) fn trait_method_owners(
+        &self,
+        trait_name: &str,
+        method_name: &str,
+    ) -> Vec<&str> {
+        self.trait_method_owners
+            .get(&(trait_name.to_string(), method_name.to_string()))
+            .into_iter()
+            .flatten()
+            .map(String::as_str)
+            .collect()
     }
 
     pub(crate) fn enum_variant_payload_types(
@@ -329,6 +366,30 @@ impl<'a> JitMeta<'a> {
                     .get(&alt)
                     .map(|types| types.as_slice())
             })
+    }
+
+    pub(crate) fn raw_bag_key_type(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Tagged { inner, .. } => self.raw_bag_key_type(inner),
+            Type::Int | Type::IntN { .. } | Type::Bool | Type::Char => true,
+            Type::Named(name) => {
+                if let Some(base) = self.distinct_base(name) {
+                    return self.raw_bag_key_type(base);
+                }
+                let Some(variants) = self.enum_variant_names(name) else {
+                    return false;
+                };
+                variants.iter().all(|variant| {
+                    let variant = variant.strip_prefix("user_").unwrap_or(variant);
+                    self.enum_variant_payload_types(name, variant)
+                        .is_some_and(|payloads| {
+                            payloads.is_empty()
+                                || payloads.iter().all(|payload| self.raw_bag_key_type(payload))
+                        })
+                })
+            }
+            _ => false,
+        }
     }
 
     pub(crate) fn int_constant(&self, rust_name: &str) -> Option<i64> {

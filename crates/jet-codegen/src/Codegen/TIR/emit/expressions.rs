@@ -1199,9 +1199,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             extra,
             as_trait,
         } => {
+            let literal_ty = as_trait
+                .as_ref()
+                .map(|(_, concrete)| Type::Named(concrete.clone()))
+                .unwrap_or_else(|| e.ty.clone());
             // Value-position generic heads need turbofish (`Foo::<T> {…}`);
             // `cx.rust_type` spells type-position `Foo<T>` and rustc rejects it.
-            let rust_type = match &e.ty {
+            let rust_type = match &literal_ty {
                 Type::Apply { name, args } if !args.is_empty() => {
                     let head = match cx.foreign_types.get(name) {
                         Some(rust_mod) => {
@@ -1234,10 +1238,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             .join(", ")
                     )
                 }
-                _ => cx.rust_type(&e.ty),
+                _ => cx.rust_type(&literal_ty),
             };
             let plain_fields = matches!(
-                &e.ty,
+                &literal_ty,
                 Type::Named(n) if crate::Codegen::net_handle_rust_type(n).is_some()
                     || matches!(
                         n.as_str(),
@@ -1260,7 +1264,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     let field_rust = if plain_fields {
                         field.clone()
                     } else {
-                        emit_field_rust(cx, &e.ty, field)
+                        emit_field_rust(cx, &literal_ty, field)
                     };
                     let value = emit_tir_expr(v, cx);
                     let value = if *boxed {
