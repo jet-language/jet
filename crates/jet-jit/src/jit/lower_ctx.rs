@@ -1795,6 +1795,7 @@ impl LowerCtx<'_, '_> {
             break_block: exit,
             break_value_ty: Some(ty.clone()),
             shield_depth: self.shield_depth,
+            shared_transaction_depth: self.shared_transaction_depth,
         });
         self.b.switch_to_block(body_block);
         self.b.seal_block(body_block);
@@ -3714,6 +3715,7 @@ impl LowerCtx<'_, '_> {
             label: label.clone(),
             continue_block: step_block,
             break_block: exit,
+            break_value_ty: None,
             shield_depth: self.shield_depth,
             shared_transaction_depth: self.shared_transaction_depth,
         });
@@ -3795,6 +3797,7 @@ impl LowerCtx<'_, '_> {
             label: label.clone(),
             continue_block: header,
             break_block: cancel,
+            break_value_ty: None,
             shield_depth: self.shield_depth,
             shared_transaction_depth: self.shared_transaction_depth,
         });

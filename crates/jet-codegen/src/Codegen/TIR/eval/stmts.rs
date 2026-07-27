@@ -68,7 +68,7 @@ impl<'a> EvalCtx<'a> {
 
     fn exec_stmt_inner(
         &mut self,
-        stmt: &TStmt,
+        stmt: &'a TStmt,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
         self.burn()?;

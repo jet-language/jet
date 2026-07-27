@@ -1292,12 +1292,33 @@ impl<'a> EvalCtx<'a> {
                     Ok(result)
                 }
                 crate::Codegen::TIR::THostCall::YieldSend { value } => {
-                    let value = self.eval_expr(value, scope)?;
-                    let Some(items) = self.collecting_items.last_mut() else {
-                        return Err(unsupported("expr `HostCall` YieldSend", self.span()));
-                    };
-                    items.push(value);
-                    Ok(CtValue::Unit)
+                    let yielded = self.eval_expr(value, scope)?;
+                    if let Some(items) = self.collecting_items.last_mut() {
+                        items.push(yielded);
+                        return Ok(CtValue::Unit);
+                    }
+                    let consumer = self
+                        .yield_consumer
+                        .clone()
+                        .ok_or_else(|| unsupported("yield outside a stream consumer", self.span()))?;
+                    let mut consumer_scope = self
+                        .yield_scope
+                        .take()
+                        .ok_or_else(|| unsupported("stream consumer scope", self.span()))?;
+                    consumer_scope.insert(consumer.var, yielded);
+                    let result = self.exec_stmts(consumer.body, &mut consumer_scope);
+                    self.yield_scope = Some(consumer_scope);
+                    match result? {
+                        Flow::Normal | Flow::Continue => Ok(CtValue::Unit),
+                        Flow::Break => {
+                            self.pending_return = Some(CtValue::Unit);
+                            Ok(CtValue::Unit)
+                        }
+                        other => Err(unsupported(
+                            &format!("stream consumer control flow {other:?}"),
+                            self.span(),
+                        )),
+                    }
                 }
                 crate::Codegen::TIR::THostCall::Helper { helper, args } => {
                     let leaf = helper
@@ -1346,31 +1367,6 @@ impl<'a> EvalCtx<'a> {
                         &format!("expr `HostCall` helper `{leaf}`"),
                         self.span(),
                     ))
-                }
-                crate::Codegen::TIR::THostCall::YieldSend { value } => {
-                    let yielded = self.eval_expr(value, scope)?;
-                    let consumer = self
-                        .yield_consumer
-                        .clone()
-                        .ok_or_else(|| unsupported("yield outside a stream consumer", self.span()))?;
-                    let mut consumer_scope = self
-                        .yield_scope
-                        .take()
-                        .ok_or_else(|| unsupported("stream consumer scope", self.span()))?;
-                    consumer_scope.insert(consumer.var, yielded);
-                    let result = self.exec_stmts(consumer.body, &mut consumer_scope);
-                    self.yield_scope = Some(consumer_scope);
-                    match result? {
-                        Flow::Normal | Flow::Continue => Ok(CtValue::Unit),
-                        Flow::Break => {
-                            self.pending_return = Some(CtValue::Unit);
-                            Ok(CtValue::Unit)
-                        }
-                        other => Err(unsupported(
-                            &format!("stream consumer control flow {other:?}"),
-                            self.span(),
-                        )),
-                    }
                 }
                 crate::Codegen::TIR::THostCall::ExpiringValueNew {
                     value,
