@@ -205,8 +205,22 @@ impl<'a> EvalCtx<'a> {
                 self.write_print(&shown, false)?;
                 Ok(CtValue::Unit)
             }
-            TExprKind::Drop(inner) | TExprKind::Close(inner) => {
+            TExprKind::Drop(inner) => {
                 let _ = self.eval_expr(inner, scope)?;
+                Ok(CtValue::Unit)
+            }
+            TExprKind::Close(inner) => {
+                let value = self.eval_expr(inner, scope)?;
+                let type_name = match &inner.ty {
+                    Type::Named(n) | Type::Apply { name: n, .. } => n.as_str(),
+                    _ => return Ok(CtValue::Unit),
+                };
+                let key = format!("{type_name}::close");
+                if let Some(func) = self.funcs.get(&key).copied() {
+                    let mut child = HashMap::new();
+                    child.insert("self".to_string(), value);
+                    let _ = self.run_func(func, Vec::new(), &mut child)?;
+                }
                 Ok(CtValue::Unit)
             }
             TExprKind::Binary { op, lhs, rhs, .. } => {

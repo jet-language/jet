@@ -91,6 +91,8 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) unsafe_depth: usize,
     /// `scope.guard` cleanups — compiled zero-arg funcs, run LIFO on exit.
     pub(crate) scope_guards: Vec<FuncId>,
+    /// `defer close(^…)` — `(rust_place, resource_ty)`, run LIFO on exit.
+    pub(crate) deferred_closes: Vec<(String, Type)>,
     /// Open `#Transact` frames: snapshot restores + commit/rollback hook funcs.
     pub(crate) txn_stack: Vec<TxnFrame>,
 }
@@ -1765,6 +1767,18 @@ impl LowerCtx<'_, '_> {
     pub(crate) fn emit_scope_guards(&mut self) -> Result<(), String> {
         // Keep the stack: early returns and sibling exit paths each need the
         // same LIFO cleanup (D-DEFER1). Cleared when the function finishes.
+        let closes: Vec<(String, Type)> = self.deferred_closes.iter().rev().cloned().collect();
+        for (place, ty) in closes {
+            let take = TExpr {
+                ty: ty.clone(),
+                kind: TExprKind::ResourceTake(place),
+            };
+            let close = TExpr {
+                ty: Type::Named("Unit".to_string()),
+                kind: TExprKind::Close(Box::new(take)),
+            };
+            self.lower_expr(&close)?;
+        }
         let guards: Vec<FuncId> = self.scope_guards.iter().rev().copied().collect();
         for id in guards {
             let func_ref = self.module.declare_func_in_func(id, self.b.func);
@@ -2767,9 +2781,14 @@ impl LowerCtx<'_, '_> {
             TStmt::ExprStmt(expr) => {
                 self.lower_expr(expr)?;
             }
-            TStmt::DeferClose { close, .. } => {
-                // Run the same close expr AOT's Drop guard would.
-                self.lower_expr(close)?;
+            TStmt::DeferClose {
+                close, resource, ..
+            } => {
+                let ty = match &close.kind {
+                    TExprKind::Close(inner) => inner.ty.clone(),
+                    _ => close.ty.clone(),
+                };
+                self.deferred_closes.push((resource.clone(), ty));
             }
             TStmt::If {
                 cond,
@@ -10949,15 +10968,23 @@ impl LowerCtx<'_, '_> {
                 if let Some(fid) = host {
                     let host_ref = self.module.declare_func_in_func(fid, self.b.func);
                     self.b.ins().call(host_ref, &[handle]);
+                } else if let Some(key) = self.method_key(&inner.ty, &TMethodRef::bare("close")) {
+                    // User/stdlib `Close.close(^self)` (e.g. resource_close.jet).
+                    if let Some(&fid) = self.func_ids.get(&key) {
+                        let func_ref = self.module.declare_func_in_func(fid, self.b.func);
+                        self.b.ins().call(func_ref, &[handle]);
+                        self.emit_trap_check()?;
+                    }
                 }
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             TExprKind::ResourceNew(inner) => self.lower_expr(inner),
             TExprKind::ResourceTake(name) => {
-                let place = TIR::local_place(name);
+                // `ResourceTake` already carries `rust_name_of` (mangled place).
+                // Re-applying `local_place` double-mangles and misses the Let binding.
                 let var = self
                     .vars
-                    .get(&place)
+                    .get(name)
                     .copied()
                     .ok_or_else(|| format!("jit resource take unknown local `{name}`"))?;
                 Ok(self.b.use_var(var))
