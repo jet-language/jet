@@ -1,4 +1,4 @@
-    impl JetUrl {
+    impl JetURL {
         pub fn parse(input: &String) -> Result<Self, String> {
             let raw = input.trim();
             let Some(colon) = raw.find(':') else {
@@ -42,7 +42,7 @@
             } else {
                 path = jet_url_percent_decode_str(rest)?;
             }
-            let mut url = JetUrl {
+            let mut url = JetURL {
                 scheme,
                 host,
                 port,
@@ -74,7 +74,7 @@
             } else {
                 Some(fragment.clone())
             };
-            Ok(JetUrl {
+            Ok(JetURL {
                 scheme: scheme.to_ascii_lowercase(),
                 host,
                 port: None,
@@ -86,7 +86,7 @@
         }
 
         pub fn file(path: &String) -> Self {
-            JetUrl {
+            JetURL {
                 scheme: "file".to_string(),
                 host: Some(String::new()),
                 port: None,
@@ -100,8 +100,8 @@
             }
         }
 
-        pub fn data(mime: &JetMime, text: &String) -> Self {
-            JetUrl {
+        pub fn data(mime: &JetMIME, text: &String) -> Self {
+            JetURL {
                 scheme: "data".to_string(),
                 host: None,
                 port: None,
@@ -163,11 +163,11 @@
             if let Some(colon) = rel.find(':') {
                 let before_slash = rel.find('/').map_or(true, |slash| colon < slash);
                 if before_slash && jet_url_valid_scheme(&rel[..colon]) {
-                    return JetUrl::parse(rel);
+                    return JetURL::parse(rel);
                 }
             }
             if rel.starts_with("//") {
-                return JetUrl::parse(&format!("{}:{}", self.scheme, rel));
+                return JetURL::parse(&format!("{}:{}", self.scheme, rel));
             }
             let mut out = self.clone();
             let mut rest = rel.as_str();
@@ -232,13 +232,13 @@
         }
     }
 
-    impl crate::JetShow for JetUrl {
+    impl crate::JetShow for JetURL {
         fn jet_show(&self) -> String {
             self.to_string_value()
         }
     }
 
-    impl JetMime {
+    impl JetMIME {
         pub fn parse(input: &String) -> Result<Self, String> {
             let mut parts = input.split(';');
             let essence = parts.next().unwrap_or("").trim();
@@ -266,7 +266,7 @@
                 }
                 params.push((key, val));
             }
-            Ok(JetMime { top, sub, params })
+            Ok(JetMIME { top, sub, params })
         }
         pub fn media_type(&self) -> String {
             self.top.clone()
@@ -302,7 +302,7 @@
         }
     }
 
-    impl crate::JetShow for JetMime {
+    impl crate::JetShow for JetMIME {
         fn jet_show(&self) -> String {
             self.to_string_value()
         }

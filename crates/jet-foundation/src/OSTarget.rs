@@ -1,8 +1,8 @@
 //! D-OSTARGET1=A (ratified 2026-07-01, c134): native OS platform gating for
 //! `#Extern` backends. A second, mutually-exclusive axis of the same
 //! `#Target(...)` marker family that `WebPartition::WebBucket` already uses
-//! for the web bucket ceiling (`Wasm`/`Js`) and the default-web-backend
-//! marker (`Web`) — `Os.Linux`/`Os.Macos`/`Os.Windows` picks which native
+//! for the web bucket ceiling (`Wasm`/`JS`) and the default-web-backend
+//! marker (`Web`) — `OS.Linux`/`OS.MacOS`/`OS.Windows` picks which native
 //! platform an `impl` block compiles for (I8: one marker family, mutually
 //! exclusive values, never a second marker meaning the same job).
 
@@ -10,27 +10,27 @@ use crate::Syntax;
 
 /// Native OS bucket an `impl` block is gated to (D-OSTARGET1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OsTarget {
+pub enum OSTarget {
     Linux,
-    Macos,
+    MacOS,
     Windows,
 }
 
-impl OsTarget {
+impl OSTarget {
     pub fn parse(name: &str) -> Option<Self> {
         match name {
-            Syntax::TARGET_OS_LINUX => Some(OsTarget::Linux),
-            Syntax::TARGET_OS_MACOS => Some(OsTarget::Macos),
-            Syntax::TARGET_OS_WINDOWS => Some(OsTarget::Windows),
+            Syntax::TARGET_OS_LINUX => Some(OSTarget::Linux),
+            Syntax::TARGET_OS_MACOS => Some(OSTarget::MacOS),
+            Syntax::TARGET_OS_WINDOWS => Some(OSTarget::Windows),
             _ => None,
         }
     }
 
     pub fn name(self) -> &'static str {
         match self {
-            OsTarget::Linux => Syntax::TARGET_OS_LINUX,
-            OsTarget::Macos => Syntax::TARGET_OS_MACOS,
-            OsTarget::Windows => Syntax::TARGET_OS_WINDOWS,
+            OSTarget::Linux => Syntax::TARGET_OS_LINUX,
+            OSTarget::MacOS => Syntax::TARGET_OS_MACOS,
+            OSTarget::Windows => Syntax::TARGET_OS_WINDOWS,
         }
     }
 
@@ -40,11 +40,11 @@ impl OsTarget {
     /// caller falls back to the host OS in that case.
     pub fn from_triple(triple: &str) -> Option<Self> {
         if triple.contains("windows") {
-            Some(OsTarget::Windows)
+            Some(OSTarget::Windows)
         } else if triple.contains("apple") || triple.contains("darwin") {
-            Some(OsTarget::Macos)
+            Some(OSTarget::MacOS)
         } else if triple.contains("linux") {
-            Some(OsTarget::Linux)
+            Some(OSTarget::Linux)
         } else {
             None
         }
@@ -54,9 +54,9 @@ impl OsTarget {
     /// bucket when `--target=<triple>` is omitted.
     pub fn host() -> Self {
         match std::env::consts::OS {
-            "windows" => OsTarget::Windows,
-            "macos" => OsTarget::Macos,
-            _ => OsTarget::Linux,
+            "windows" => OSTarget::Windows,
+            "macos" => OSTarget::MacOS,
+            _ => OSTarget::Linux,
         }
     }
 
@@ -70,51 +70,51 @@ impl OsTarget {
     }
 }
 
-/// E-OSTARGET-MIXED-AXIS: a `#Target(Os.*)`-gated item also carries a
-/// web-axis marker (a per-method `#Wasm`/`#Js`/`#WasmExport` override, or an
+/// E-OSTARGET-MIXED-AXIS: a `#Target(OS.*)`-gated item also carries a
+/// web-axis marker (a per-method `#Wasm`/`#JS`/`#WasmExport` override, or an
 /// enclosing web bucket ceiling) — two different compilation axes, one item.
 pub fn os_target_mixed_axis(
     item: &str,
-    os: OsTarget,
+    os: OSTarget,
     web: &str,
     span: Option<crate::Diagnostics::Span>,
 ) -> crate::Diagnostics::Diagnostic {
     crate::Diagnostics::Diagnostic::error(
         "E-OSTARGET-MIXED-AXIS",
         format!(
-            "`#{}(Os.{})` can't combine with `#{}({})` on `{item}`",
+            "`#{}(OS.{})` can't combine with `#{}({})` on `{item}`",
             Syntax::ATTR_TARGET,
             os.name(),
             Syntax::ATTR_TARGET,
             web,
         ),
-        "the OS axis (Os.Linux/Os.Macos/Os.Windows, native platform gating) and the web axis (Wasm/Js/Web, D-WASM1's browser partition) are mutually exclusive — one item can't compile for both a specific native OS and a web bucket"
+        "the OS axis (OS.Linux/OS.MacOS/OS.Windows, native platform gating) and the web axis (Wasm/JS/Web, D-WASM1's browser partition) are mutually exclusive — one item can't compile for both a specific native OS and a web bucket"
             .to_string(),
-        format!("pick one axis: remove the `#{}(Os.{})` marker or the web-axis marker", Syntax::ATTR_TARGET, os.name()),
+        format!("pick one axis: remove the `#{}(OS.{})` marker or the web-axis marker", Syntax::ATTR_TARGET, os.name()),
         span,
     )
 }
 
 /// E-OSTARGET-UNMATCHED-CALL: a function/method not itself gated to match
-/// takes or returns a value of a type whose `impl` is `#Target(Os.*)`-gated
+/// takes or returns a value of a type whose `impl` is `#Target(OS.*)`-gated
 /// — reachable from any build, it would call a method that `impl` supplies.
 pub fn os_target_unmatched_call(
     caller: &str,
     gated_type: &str,
-    os: OsTarget,
+    os: OSTarget,
     span: Option<crate::Diagnostics::Span>,
 ) -> crate::Diagnostics::Diagnostic {
     crate::Diagnostics::Diagnostic::error(
         "E-OSTARGET-UNMATCHED-CALL",
         format!(
-            "`{caller}` uses `{gated_type}`, whose `impl` is gated to `#{}(Os.{})`, without itself being gated to match",
+            "`{caller}` uses `{gated_type}`, whose `impl` is gated to `#{}(OS.{})`, without itself being gated to match",
             Syntax::ATTR_TARGET,
             os.name(),
         ),
         "an OS-gated impl only exists in the build for that OS; code reachable on other platforms would hit a missing method, so this is caught at compile time, not left to fail as a link (or a raw rustc) error"
             .to_string(),
         format!(
-            "only use `{gated_type}` from inside an `impl` already gated to `#{}(Os.{})`, or move `{caller}`'s body into one",
+            "only use `{gated_type}` from inside an `impl` already gated to `#{}(OS.{})`, or move `{caller}`'s body into one",
             Syntax::ATTR_TARGET,
             os.name(),
         ),
@@ -158,7 +158,7 @@ pub fn os_target_build_context(
 }
 
 /// E-OSTARGET-DISPATCH-ARM (D-OSTARGET2=B): an arm head of a `comptime if
-/// build.os == { }` dispatch is not a bare OS variant (`.Linux`/`.Macos`/
+/// build.os == { }` dispatch is not a bare OS variant (`.Linux`/`.MacOS`/
 /// `.Windows`), or repeats one.
 pub fn os_target_dispatch_arm(
     found: &str,
@@ -175,7 +175,7 @@ pub fn os_target_dispatch_arm(
             Syntax::TARGET_OS_WINDOWS,
         ),
         format!(
-            "each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#{}(Os.*)` uses — and each OS appears at most once",
+            "each arm gates code for exactly one native OS, so its head is a bare, payload-free OS variant — the same set `#{}(OS.*)` uses — and each OS appears at most once",
             Syntax::ATTR_TARGET,
         ),
         format!(
@@ -219,35 +219,35 @@ mod tests {
 
     #[test]
     fn parse_and_name_roundtrip() {
-        for os in [OsTarget::Linux, OsTarget::Macos, OsTarget::Windows] {
-            assert_eq!(OsTarget::parse(os.name()), Some(os));
+        for os in [OSTarget::Linux, OSTarget::MacOS, OSTarget::Windows] {
+            assert_eq!(OSTarget::parse(os.name()), Some(os));
         }
-        assert_eq!(OsTarget::parse("Bsd"), None);
+        assert_eq!(OSTarget::parse("Bsd"), None);
     }
 
     #[test]
     fn from_triple_maps_known_platforms() {
         assert_eq!(
-            OsTarget::from_triple("x86_64-unknown-linux-gnu"),
-            Some(OsTarget::Linux)
+            OSTarget::from_triple("x86_64-unknown-linux-gnu"),
+            Some(OSTarget::Linux)
         );
         assert_eq!(
-            OsTarget::from_triple("aarch64-apple-darwin"),
-            Some(OsTarget::Macos)
+            OSTarget::from_triple("aarch64-apple-darwin"),
+            Some(OSTarget::MacOS)
         );
         assert_eq!(
-            OsTarget::from_triple("x86_64-pc-windows-msvc"),
-            Some(OsTarget::Windows)
+            OSTarget::from_triple("x86_64-pc-windows-msvc"),
+            Some(OSTarget::Windows)
         );
-        assert_eq!(OsTarget::from_triple("wasm32-unknown-unknown"), None);
+        assert_eq!(OSTarget::from_triple("wasm32-unknown-unknown"), None);
     }
 
     #[test]
     fn active_falls_back_to_host_for_unrecognized_triple() {
         assert_eq!(
-            OsTarget::active(Some("wasm32-unknown-unknown")),
-            OsTarget::host()
+            OSTarget::active(Some("wasm32-unknown-unknown")),
+            OSTarget::host()
         );
-        assert_eq!(OsTarget::active(None), OsTarget::host());
+        assert_eq!(OSTarget::active(None), OSTarget::host());
     }
 }

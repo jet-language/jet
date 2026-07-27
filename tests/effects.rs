@@ -41,7 +41,7 @@ fn cross_module_same_name_effects_keep_qualified_rows() {
             .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error),
         "{diagnostics:#?}"
     );
-    assert!(facts.solved["left::same"].contains("Io"));
+    assert!(facts.solved["left::same"].contains("IO"));
     assert!(facts.solved["right::same"].is_empty());
     assert!(!facts.solved.contains_key("same"));
 }
@@ -49,7 +49,7 @@ fn cross_module_same_name_effects_keep_qualified_rows() {
 #[test]
 fn dynamic_trait_calls_use_the_declared_dispatch_row() {
     let source = r#"
-trait Shape { fn area(self) =[Io]=> Int; }
+trait Shape { fn area(self) =[IO]=> Int; }
 fn clean(shape: Shape) =[]=> Int { return shape.area(); }
 fn run() {}
 "#;
@@ -64,8 +64,8 @@ fn run() {}
         "{:#?}",
         facts.summaries["clean"].edges
     );
-    assert!(facts.solved["Shape::area"].contains("Io"), "{:#?}", facts.solved);
-    assert!(facts.solved["clean"].contains("Io"), "{:#?}", facts.solved);
+    assert!(facts.solved["Shape::area"].contains("IO"), "{:#?}", facts.solved);
+    assert!(facts.solved["clean"].contains("IO"), "{:#?}", facts.solved);
     assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E3401"));
 }
 
@@ -111,7 +111,7 @@ fn reserve() {{
         facts.memory_projections.get(&run_12),
         Some(&jet::Sema::MemoryProjection::Proven)
     );
-    assert!(facts.solved["run"].contains("Io"));
+    assert!(facts.solved["run"].contains("IO"));
 
     let (diagnostics, facts) = check("jet_stride_arena_tight", &source(11, "2"));
     assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0921"));
@@ -134,7 +134,7 @@ fn reserve() {{
         Some(jet::Sema::MemoryProjection::OpenWorld { reason, .. })
             if reason.contains("loop iteration count")
     ));
-    assert!(facts.solved["run"].contains("Io"));
+    assert!(facts.solved["run"].contains("IO"));
 }
 
 /// I3: a `#Caps(…)` region lowers to a plain lexical block — the generated Rust
@@ -144,7 +144,7 @@ fn reserve() {{
 fn caps_region_erases_to_plain_block() {
     let src = r#"
 fn run() {
-    #Caps(Io) {
+    #Caps(IO) {
         print("inside");
     }
     print("outside");
@@ -175,8 +175,8 @@ trait Shape { fn area(self) =[]=> Int; }
 struct Square { side: Int }
 impl Square.Shape { fn area(self) => Int { return self.side * self.side; } }
 fn sq(n: Int) =[]=> Int { return n * n; }
-fn load(p: String) =[Io]=> { print(p); }
-fn invoke(n: Int) =[Io]=> { load("{sq(n)}"); }
+fn load(p: String) =[IO]=> { print(p); }
+fn invoke(n: Int) =[IO]=> { load("{sq(n)}"); }
 fn run() { s :: Square.{ side: 3 }; print("{s.area()}"); invoke(2); }
 "#;
     let plain = r#"
@@ -196,12 +196,12 @@ fn run() { s :: Square.{ side: 3 }; print("{s.area()}"); invoke(2); }
     );
 }
 
-/// A `#(Fs)` bound that matches the body's only effect compiles clean.
+/// A `#(FS)` bound that matches the body's only effect compiles clean.
 #[test]
 fn declared_bound_matching_body_ok() {
     let src = r#"
 use core.files as fs
-fn load(path: String) =[Fs]=> String {
+fn load(path: String) =[FS]=> String {
     return fs.read(~path) ?? "";
 }
 fn run() { print(load("x")); }
@@ -230,7 +230,7 @@ fn run() { print(load("x")); }
     );
 }
 
-/// Effects propagate transitively along calls: `load` reaches `Fs` only through
+/// Effects propagate transitively along calls: `load` reaches `FS` only through
 /// `helper`, yet its `#(Net)` bound is still violated.
 #[test]
 fn effects_propagate_transitively() {
@@ -242,7 +242,7 @@ fn run() { print(load("x")); }
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E0740"),
-        "transitive Fs should trip E0740: {:?}",
+        "transitive FS should trip E0740: {:?}",
         codes(src)
     );
 }
@@ -252,7 +252,7 @@ fn run() { print(load("x")); }
 fn wider_bound_than_body_ok() {
     let src = r#"
 use core.files as fs
-fn load(path: String) =[Fs, Net]=> String {
+fn load(path: String) =[FS, Net]=> String {
     return fs.read(~path) ?? "";
 }
 fn run() { print(load("x")); }
@@ -264,16 +264,16 @@ fn run() { print(load("x")); }
     );
 }
 
-/// `print` contributes `Io`; an `#(Io)` bound covers it.
+/// `print` contributes `IO`; an `#(IO)` bound covers it.
 #[test]
 fn io_effect_from_print_ok() {
     let src = r#"
-fn announce(n: Int) =[Io]=> { print("{n}"); }
+fn announce(n: Int) =[IO]=> { print("{n}"); }
 fn run() { announce(1); }
 "#;
     assert!(
         codes(src).is_empty(),
-        "Io bound should cover print: {:?}",
+        "IO bound should cover print: {:?}",
         codes(src)
     );
 }
@@ -297,7 +297,7 @@ fn run() { print(load("x")); }
 #[test]
 fn retired_effect_marker_is_e0066() {
     let src = r#"
-fn calc() #(Fs) -> Int { return 1; }
+fn calc() #(FS) -> Int { return 1; }
 fn run() { print(calc()); }
 "#;
     assert_eq!(codes(src), vec!["E0066"]);
@@ -353,7 +353,7 @@ fn run() { print(caller()); }
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E0740"),
-        "callback Fs should flow to caller: {:?}",
+        "callback FS should flow to caller: {:?}",
         codes(src)
     );
 }
@@ -374,7 +374,7 @@ fn run() {
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E0741"),
-        "lambda Fs should surface in region: {:?}",
+        "lambda FS should surface in region: {:?}",
         codes(src)
     );
 }
@@ -385,7 +385,7 @@ fn pure_callback_flows_nothing() {
     let src = r#"
 fn inc(n: Int) => Int { return n + 1; }
 fn apply(f: fn(Int) => Int, x: Int) => Int { return f(x); }
-fn caller() =[Io]=> { print("{apply(inc, 1)}"); }
+fn caller() =[IO]=> { print("{apply(inc, 1)}"); }
 fn run() { caller(); }
 "#;
     assert!(
@@ -396,7 +396,7 @@ fn run() { caller(); }
 }
 
 /// D-EFF1 reconciliation: `#Pure` is the empty effect set, so an effectful Core
-/// call (here `Fs`) inside a `#Pure fn` is a purity violation (E3401) — even
+/// call (here `FS`) inside a `#Pure fn` is a purity violation (E3401) — even
 /// though the legacy purity list only knew about stdin/time/random.
 #[test]
 fn pure_fn_with_core_effect_is_e3401() {
@@ -407,7 +407,7 @@ fn run() { print(readit("x")); }
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E3401"),
-        "Fs in #Pure fn should be E3401: {:?}",
+        "FS in #Pure fn should be E3401: {:?}",
         codes(src)
     );
 }
@@ -416,9 +416,9 @@ fn run() { print(readit("x")); }
 #[test]
 fn caps_region_within_set_ok() {
     let src = r#"
-fn announce(n: Int) =[Io]=> { print("{n}"); }
+fn announce(n: Int) =[IO]=> { print("{n}"); }
 fn run() {
-    #Caps(Io) {
+    #Caps(IO) {
         announce(1);
     }
 }
@@ -457,7 +457,7 @@ fn caps_region_transitive_is_e0741() {
 use core.files as fs
 fn helper(p: String) => String { return fs.read(p) ?? ""; }
 fn run() {
-    #Caps(Io) {
+    #Caps(IO) {
         text :: helper("x");
         print(text);
     }
@@ -465,7 +465,7 @@ fn run() {
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E0741"),
-        "transitive Fs should trip E0741: {:?}",
+        "transitive FS should trip E0741: {:?}",
         codes(src)
     );
 }
@@ -488,14 +488,14 @@ fn run() { work(); }
 
 // ── Scoped capabilities (D-SCAP1) ─────────────────────────────────────────────
 
-/// D-SCAP1: a `#Grant(caps: Fs) { … }` whose body stays within the granted set
+/// D-SCAP1: a `#Grant(caps: FS) { … }` whose body stays within the granted set
 /// compiles clean — the grant authorizes the listed effects.
 #[test]
 fn grant_within_set_ok() {
     let src = r#"
 use core.files as fs
 fn run() {
-    #Grant(caps: Fs, Io) {
+    #Grant(caps: FS, IO) {
         text :: fs.read("x") ?? "";
         print(text);
     }
@@ -536,7 +536,7 @@ fn grant_transitive_is_e0712() {
 use core.files as fs
 fn helper(p: String) => String { return fs.read(p) ?? ""; }
 fn run() {
-    #Grant(caps: Io) {
+    #Grant(caps: IO) {
         text :: helper("x");
         print(text);
     }
@@ -544,7 +544,7 @@ fn run() {
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E0712"),
-        "transitive Fs should trip E0712: {:?}",
+        "transitive FS should trip E0712: {:?}",
         codes(src)
     );
 }
@@ -555,7 +555,7 @@ fn run() {
 fn grant_handle_alias_is_e0711() {
     let src = r#"
 fn run() {
-    #Grant(caps: Io) {
+    #Grant(caps: IO) {
         alias :: caps;
         print("hi");
     }
@@ -574,7 +574,7 @@ fn run() {
 fn grant_unused_handle_ok() {
     let src = r#"
 fn run() {
-    #Grant(caps: Io) {
+    #Grant(caps: IO) {
         print("granted");
     }
 }
@@ -613,7 +613,7 @@ fn run() {
 fn grant_region_erases_to_plain_block() {
     let src = r#"
 fn run() {
-    #Grant(caps: Io) {
+    #Grant(caps: IO) {
         print("inside");
     }
     print("outside");
@@ -650,7 +650,7 @@ fn run() {
 fn grant_lowers_like_caps_region() {
     let granted = r#"
 fn run() {
-    #Grant(caps: Io) {
+    #Grant(caps: IO) {
         print("a");
         print("b");
     }
@@ -658,7 +658,7 @@ fn run() {
 "#;
     let caps = r#"
 fn run() {
-    #Caps(Io) {
+    #Caps(IO) {
         print("a");
         print("b");
     }
@@ -674,7 +674,7 @@ fn run() {
 
 // ── Transactions (D-TXN1–D-TXN4) ──────────────────────────────────────────────
 
-/// D-TXN2: an irreversible Core effect (Fs) reached DIRECTLY inside a
+/// D-TXN2: an irreversible Core effect (FS) reached DIRECTLY inside a
 /// `#Transact` block is E0746 at the call site.
 #[test]
 fn transact_irreversible_fs_is_e0746() {
@@ -689,7 +689,7 @@ fn run() {
 "#;
     assert!(
         codes(src).iter().any(|c| c == "E0746"),
-        "Fs in #Transact should be E0746: {:?}",
+        "FS in #Transact should be E0746: {:?}",
         codes(src)
     );
 }
@@ -713,7 +713,7 @@ fn run() {
     );
 }
 
-/// D-TXN2: a reversible-or-benign effect (Io via `print`) is NOT rejected inside
+/// D-TXN2: a reversible-or-benign effect (IO via `print`) is NOT rejected inside
 /// a `#Transact` block.
 #[test]
 fn transact_reversible_io_ok() {
@@ -726,12 +726,12 @@ fn run() {
 "#;
     assert!(
         codes(src).is_empty(),
-        "Io in #Transact should compile: {:?}",
+        "IO in #Transact should compile: {:?}",
         codes(src)
     );
 }
 
-/// D-TXN2 fix-it: the same Fs effect is accepted when registered via
+/// D-TXN2 fix-it: the same FS effect is accepted when registered via
 /// `name.on_commit(…)` — a deferred (post-commit) context.
 #[test]
 fn transact_fs_in_on_commit_ok() {
@@ -748,7 +748,7 @@ fn run() {
 "#;
     assert!(
         codes(src).is_empty(),
-        "Fs inside on_commit should compile: {:?}",
+        "FS inside on_commit should compile: {:?}",
         codes(src)
     );
 }
@@ -976,7 +976,7 @@ fn run() { print("{transform([1, 2], noisy)}"); }
 #[test]
 fn callback_set_bound_within_ok() {
     let src = r#"
-fn invoke(n: Int, act: fn(Int) =[Io]=>) {
+fn invoke(n: Int, act: fn(Int) =[IO]=>) {
     act(n);
 }
 fn show(n: Int) { print("{n}"); }
@@ -984,7 +984,7 @@ fn run() { invoke(5, show); }
 "#;
     assert!(
         codes(src).is_empty(),
-        "Io callback within an #(Io) bound is clean: {:?}",
+        "IO callback within an #(IO) bound is clean: {:?}",
         codes(src)
     );
 }
@@ -995,7 +995,7 @@ fn run() { invoke(5, show); }
 fn callback_set_bound_exceeded_is_e0747() {
     let src = r#"
 use core.files as fs
-fn invoke(p: String, act: fn(String) =[Io]=>) {
+fn invoke(p: String, act: fn(String) =[IO]=>) {
     act(p);
 }
 fn read_it(p: String) { x :: fs.read(~p) ?? ""; print("{x}"); }
@@ -1004,7 +1004,7 @@ fn run() { invoke("f.txt", read_it); }
     assert_eq!(
         codes(src),
         vec!["E0747"],
-        "Fs callback to an #(Io) bound is E0747"
+        "FS callback to an #(IO) bound is E0747"
     );
 }
 
@@ -1040,12 +1040,12 @@ fn run() { print("{invoke(0, value)}"); }
 }
 
 /// Lever 2: `#(via f)` publishes the callback's effects — a `#Pure fn` calling a
-/// via-fn whose callback carries `Io` is rejected (E3401), proving the
+/// via-fn whose callback carries `IO` is rejected (E3401), proving the
 /// pass-through surfaced the effect even though the body only calls a fn-value.
 #[test]
 fn effect_via_publishes_callback_effect() {
     let src = r#"
-fn invoke(n: Int, act: fn(Int) =[Io]=>) =[via act]=> {
+fn invoke(n: Int, act: fn(Int) =[IO]=>) =[via act]=> {
     act(n);
 }
 fn show(n: Int) { print("{n}"); }
@@ -1055,7 +1055,7 @@ fn run() { print("{caller()}"); }
     assert_eq!(
         codes(src),
         vec!["E3401"],
-        "#(via act) must publish the Io effect to callers"
+        "#(via act) must publish the IO effect to callers"
     );
 }
 
@@ -1063,7 +1063,7 @@ fn run() { print("{caller()}"); }
 #[test]
 fn effect_via_unknown_param_is_e0748() {
     let src = r#"
-fn invoke(n: Int, act: fn(Int) =[Io]=>) =[via missing]=> { act(n); }
+fn invoke(n: Int, act: fn(Int) =[IO]=>) =[via missing]=> { act(n); }
 fn show(n: Int) { print("{n}"); }
 fn run() { invoke(5, show); }
 "#;
@@ -1092,7 +1092,7 @@ fn eff2_levers_are_erased() {
 fn transform(items: [Int], f: fn(Int) =[]=> Int) => [Int] {
     return items.map((x) => f(x)).to_list();
 }
-fn invoke(n: Int, act: fn(Int) =[Io]=>) =[via act]=> { act(n); }
+fn invoke(n: Int, act: fn(Int) =[IO]=>) =[via act]=> { act(n); }
 fn inc(n: Int) =[]=> Int { return n + 1; }
 fn show(n: Int) { print("{n}"); }
 fn run() { print("{transform([1], inc)}"); invoke(5, show); }

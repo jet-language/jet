@@ -1,3 +1,3 @@
     // Compile-time include shim used by the JIT encoding host.
-    include!("JsonCodec.rs");
-    include!("JsonDataTree.rs");
+    include!("JSONCodec.rs");
+    include!("JSONDataTree.rs");

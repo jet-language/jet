@@ -1336,7 +1336,7 @@ mod tests {
         };
 
         let error = ingest_tree(&roots, &request(src.clone())).unwrap_err();
-        assert!(matches!(&error, IngestError::Io(_)), "{error:?}");
+        assert!(matches!(&error, IngestError::IO(_)), "{error:?}");
         assert_eq!(error.code(), "E1315");
         assert!(list_checked(&roots).unwrap().is_empty());
         assert!(closure_graph(&roots).unwrap().records.is_empty());

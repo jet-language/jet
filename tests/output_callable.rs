@@ -411,13 +411,13 @@ fn typed_executable_output_reuses_the_checked_cli_schema() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        "#Cli\nstruct Args { value: Int }\n\napp: Output :: .Executable.{ name: \"demo\", entry: launch };\n\nfn launch(args: Args) { print(args.value) }\n",
+        "#CLI\nstruct Args { value: Int }\n\napp: Output :: .Executable.{ name: \"demo\", entry: launch };\n\nfn launch(args: Args) { print(args.value) }\n",
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
-    let schema = jet_foundation::CliSchema::entry_schema_for_bundle(&bundle)
+    let schema = jet_foundation::CLISchema::entry_schema_for_bundle(&bundle)
         .expect("typed Output owns one checked CLI schema");
     assert_eq!(schema.entry_type, "Args");
     let rust = jet::Codegen::emit_bundle(&bundle, jet::Sema::CompileMode::Run, None);
@@ -434,7 +434,7 @@ fn compiled_imported_typed_fallible_entry_uses_its_defining_module() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("helper.jet"),
-        "#Cli\npub struct Args { value: Int }\n\npub fn launch(args: Args) => Void ? {\n    print(args.value)\n    return Err(\"imported boom\")\n}\n",
+        "#CLI\npub struct Args { value: Int }\n\npub fn launch(args: Args) => Void ? {\n    print(args.value)\n    return Err(\"imported boom\")\n}\n",
     )
     .unwrap();
     let file = dir.join("main.jet");

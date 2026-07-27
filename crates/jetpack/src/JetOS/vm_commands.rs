@@ -4,7 +4,7 @@ use super::generation_files::systems_dir;
 use super::generations_activation::latest_generation_for;
 use super::installer_media::write_installer_media;
 use super::load_validate::{load_plan, load_target, parse_target_or_report};
-use super::types::{OsFlags, Target};
+use super::types::{OSFlags, Target};
 use super::vm_proof::{
     prove_vm_guest, qemu_has_local_display, qemu_interactive_run_command, qemu_vnc_endpoint,
     require_vm_run_proof, run_interactive_vm_command, run_vmtest, write_vm_install_plan,
@@ -13,7 +13,7 @@ use jet_env_model::ModuleEval::SystemPlan;
 use crate::Output::Theme;
 use crate::Syntax;
 
-pub(super) fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
+pub(super) fn cmd_vm(theme: &Theme, args: &[String], flags: &OSFlags) -> i32 {
     let Some((action, rest)) = args.split_first().map(|(a, r)| (a.as_str(), r)) else {
         theme.error(
             "vm needs an action",
@@ -168,7 +168,7 @@ pub(super) fn cmd_vm(theme: &Theme, args: &[String], flags: &OsFlags) -> i32 {
     }
 }
 
-fn cmd_vm_test(theme: &Theme, target: &Target, disk: &str, flags: &OsFlags) -> i32 {
+fn cmd_vm_test(theme: &Theme, target: &Target, disk: &str, flags: &OSFlags) -> i32 {
     let Some(plan) = load_plan(theme, target) else {
         return 2;
     };
@@ -218,7 +218,7 @@ fn cmd_vm_test(theme: &Theme, target: &Target, disk: &str, flags: &OsFlags) -> i
     }
 }
 
-fn cmd_vm_run(theme: &Theme, system: &SystemPlan, disk: &str, _flags: &OsFlags) -> i32 {
+fn cmd_vm_run(theme: &Theme, system: &SystemPlan, disk: &str, _flags: &OSFlags) -> i32 {
     let missing = missing_vm_tools();
     let missing = missing
         .into_iter()

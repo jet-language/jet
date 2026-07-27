@@ -10,8 +10,8 @@ use std::time::Duration;
 
 #[derive(Debug)]
 pub enum FetchError {
-    Io(String),
-    Http {
+    IO(String),
+    HTTP {
         kind: FetchErrorKind,
         detail: String,
     },
@@ -21,43 +21,43 @@ pub enum FetchError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FetchErrorKind {
     General,
-    TlsHandshake,
-    TlsCertificate,
-    TlsTrustRoots,
+    TLSHandshake,
+    TLSCertificate,
+    TLSTrustRoots,
 }
 
 impl FetchError {
     pub fn diagnostic_code(&self) -> &'static str {
         match self {
-            FetchError::Http {
-                kind: FetchErrorKind::TlsHandshake,
+            FetchError::HTTP {
+                kind: FetchErrorKind::TLSHandshake,
                 ..
             } => "E4201",
-            FetchError::Http {
-                kind: FetchErrorKind::TlsCertificate,
+            FetchError::HTTP {
+                kind: FetchErrorKind::TLSCertificate,
                 ..
             } => "E4202",
-            FetchError::Http {
-                kind: FetchErrorKind::TlsTrustRoots,
+            FetchError::HTTP {
+                kind: FetchErrorKind::TLSTrustRoots,
                 ..
             } => "E4203",
-            FetchError::Io(_) | FetchError::Http { .. } | FetchError::Scheme(_) => "E3414",
+            FetchError::IO(_) | FetchError::HTTP { .. } | FetchError::Scheme(_) => "E3414",
         }
     }
 
     pub fn diagnostic_what(&self, url: &str) -> String {
         let host = host_from_url(url);
         match self {
-            FetchError::Http {
-                kind: FetchErrorKind::TlsHandshake,
+            FetchError::HTTP {
+                kind: FetchErrorKind::TLSHandshake,
                 ..
             } => format!("TLS handshake with `{host}` failed"),
-            FetchError::Http {
-                kind: FetchErrorKind::TlsCertificate,
+            FetchError::HTTP {
+                kind: FetchErrorKind::TLSCertificate,
                 ..
             } => format!("TLS certificate for `{host}` could not be trusted"),
-            FetchError::Http {
-                kind: FetchErrorKind::TlsTrustRoots,
+            FetchError::HTTP {
+                kind: FetchErrorKind::TLSTrustRoots,
                 ..
             } => "HTTPS could not find system certificate roots".to_string(),
             _ => format!("fetch failed: {self}"),
@@ -66,20 +66,20 @@ impl FetchError {
 
     pub fn diagnostic_why(&self, url: &str) -> String {
         match self {
-            FetchError::Http {
-                kind: FetchErrorKind::TlsHandshake,
+            FetchError::HTTP {
+                kind: FetchErrorKind::TLSHandshake,
                 ..
             } => format!(
                 "`{url}` reached the server, but the connection did not complete a secure HTTPS handshake"
             ),
-            FetchError::Http {
-                kind: FetchErrorKind::TlsCertificate,
+            FetchError::HTTP {
+                kind: FetchErrorKind::TLSCertificate,
                 ..
             } => format!(
                 "`{url}` presented a certificate Jet could not verify for that host"
             ),
-            FetchError::Http {
-                kind: FetchErrorKind::TlsTrustRoots,
+            FetchError::HTTP {
+                kind: FetchErrorKind::TLSTrustRoots,
                 ..
             } => "Jet uses rustls with the system trust store for default HTTPS, but no usable roots were available".to_string(),
             _ => format!("could not retrieve `{url}`"),
@@ -88,16 +88,16 @@ impl FetchError {
 
     pub fn diagnostic_fix(&self) -> String {
         match self {
-            FetchError::Http {
-                kind: FetchErrorKind::TlsHandshake,
+            FetchError::HTTP {
+                kind: FetchErrorKind::TLSHandshake,
                 ..
             } => "verify the URL points at an HTTPS server, not plain HTTP; for local tests, start the TLS fixture server".to_string(),
-            FetchError::Http {
-                kind: FetchErrorKind::TlsCertificate,
+            FetchError::HTTP {
+                kind: FetchErrorKind::TLSCertificate,
                 ..
             } => "use a certificate whose subject matches the host and chains to a trusted root; for tests, trust the local fixture CA explicitly".to_string(),
-            FetchError::Http {
-                kind: FetchErrorKind::TlsTrustRoots,
+            FetchError::HTTP {
+                kind: FetchErrorKind::TLSTrustRoots,
                 ..
             } => "install the system certificate bundle (for example `ca-certificates`) or run in an image that includes it".to_string(),
             _ => "check the URL is reachable and the network is available; use `file://` for local paths".to_string(),
@@ -105,7 +105,7 @@ impl FetchError {
     }
 
     fn http(url: &str, detail: String) -> Self {
-        FetchError::Http {
+        FetchError::HTTP {
             kind: classify_http_error(url, &detail),
             detail,
         }
@@ -115,21 +115,21 @@ impl FetchError {
 impl std::fmt::Display for FetchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FetchError::Io(s) | FetchError::Scheme(s) => f.write_str(s),
-            FetchError::Http {
+            FetchError::IO(s) | FetchError::Scheme(s) => f.write_str(s),
+            FetchError::HTTP {
                 kind: FetchErrorKind::General,
                 detail,
             } => f.write_str(detail),
-            FetchError::Http {
-                kind: FetchErrorKind::TlsHandshake,
+            FetchError::HTTP {
+                kind: FetchErrorKind::TLSHandshake,
                 ..
             } => f.write_str("TLS handshake failed"),
-            FetchError::Http {
-                kind: FetchErrorKind::TlsCertificate,
+            FetchError::HTTP {
+                kind: FetchErrorKind::TLSCertificate,
                 ..
             } => f.write_str("TLS certificate could not be trusted"),
-            FetchError::Http {
-                kind: FetchErrorKind::TlsTrustRoots,
+            FetchError::HTTP {
+                kind: FetchErrorKind::TLSTrustRoots,
                 ..
             } => f.write_str("HTTPS could not find system certificate roots"),
         }
@@ -147,7 +147,7 @@ pub fn fetch(url: &str) -> Result<Vec<u8>, FetchError> {
 
 fn fetch_with_timeout(url: &str, timeout: Duration) -> Result<Vec<u8>, FetchError> {
     if let Some(path) = url.strip_prefix("file://") {
-        std::fs::read(path).map_err(|e| FetchError::Io(e.to_string()))
+        std::fs::read(path).map_err(|e| FetchError::IO(e.to_string()))
     } else if url.starts_with("http://") || url.starts_with("https://") {
         let mut bytes = Vec::new();
         ureq::AgentBuilder::new()
@@ -180,7 +180,7 @@ fn classify_http_error(url: &str, detail: &str) -> FetchErrorKind {
         || lower.contains("empty root")
         || lower.contains("trust store")
     {
-        FetchErrorKind::TlsTrustRoots
+        FetchErrorKind::TLSTrustRoots
     } else if lower.contains("certificate")
         || lower.contains("unknownissuer")
         || lower.contains("notvalid")
@@ -188,13 +188,13 @@ fn classify_http_error(url: &str, detail: &str) -> FetchErrorKind {
         || lower.contains("hostname")
         || lower.contains("cert")
     {
-        FetchErrorKind::TlsCertificate
+        FetchErrorKind::TLSCertificate
     } else if lower.contains("tls")
         || lower.contains("rustls")
         || lower.contains("handshake")
         || lower.contains("alert")
     {
-        FetchErrorKind::TlsHandshake
+        FetchErrorKind::TLSHandshake
     } else {
         FetchErrorKind::General
     }

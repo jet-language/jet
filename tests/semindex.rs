@@ -253,7 +253,7 @@ fn semindex_reconstructs_checked_output_callable() {
         "\"outputs\":[{",
         "\"entry\":{\"identity\"",
         "\"authority\":\"safe-jet\"",
-        "\"effects\":[\"Io\"]",
+        "\"effects\":[\"IO\"]",
     ] {
         assert!(json.contains(field), "semindex JSON missing {field}: {json}");
     }
@@ -756,10 +756,10 @@ fn semindex_projects_omitted_inferred_effects() {
     );
     let index = open(&path).expect("inferred effects index");
     let announce = index.effect_of("announce").expect("announce effects");
-    assert_eq!(announce.inferred, vec!["Io"]);
+    assert_eq!(announce.inferred, vec!["IO"]);
     assert!(announce.callees.is_empty(), "direct effect has no call edge");
     assert_eq!(announce.provenance.len(), 1);
-    assert_eq!(announce.provenance[0].effect, "Io");
+    assert_eq!(announce.provenance[0].effect, "IO");
     assert_eq!(announce.provenance[0].call_path, vec!["announce"]);
     assert_eq!(announce.provenance[0].spans.len(), 1);
     let run = index.effect_of("run").expect("run effects");
@@ -779,14 +779,14 @@ fn semindex_projects_inline_module_inferred_effects() {
     let symbols = open_symbols(&path).expect("inline inferred effects index");
     let announce = symbols.lookup("announce");
     assert_eq!(announce.len(), 1);
-    assert!(announce[0].signature.contains("=[Io]=>"), "{}", announce[0].signature);
+    assert!(announce[0].signature.contains("=[IO]=>"), "{}", announce[0].signature);
 }
 
 #[test]
 fn semindex_effect_provenance_covers_open_and_trait_dispatch() {
     let path = temp_fixture(
         "effect_provenance_origins.jet",
-        "trait Shape { fn area(self) =[Io]=> Int; }\nfn dynamic(shape: Shape) => Int { return shape.area(); }\nfn apply(f: fn() => Int) => Int { return f(); }\nfn stored(f: ^fn() => Int) => Int { g :: f; return g(); }\nfn run() {}\n",
+        "trait Shape { fn area(self) =[IO]=> Int; }\nfn dynamic(shape: Shape) => Int { return shape.area(); }\nfn apply(f: fn() => Int) => Int { return f(); }\nfn stored(f: ^fn() => Int) => Int { g :: f; return g(); }\nfn run() {}\n",
     );
     let index = open(&path).expect("effect provenance index");
 
@@ -804,8 +804,8 @@ fn semindex_effect_provenance_covers_open_and_trait_dispatch() {
     let io = dynamic
         .provenance
         .iter()
-        .find(|origin| origin.effect == "Io")
-        .expect("Io provenance");
+        .find(|origin| origin.effect == "IO")
+        .expect("IO provenance");
     assert_eq!(io.call_path.len(), 2);
     assert_eq!(io.spans.len(), 2);
 }
@@ -814,12 +814,12 @@ fn semindex_effect_provenance_covers_open_and_trait_dispatch() {
 fn semindex_via_contracts_have_provenance_without_invocation() {
     let path = temp_fixture(
         "effect_via_provenance.jet",
-        "fn bounded(act: fn() =[Io]=>) =[via act]=> {}\nfn open(act: fn()) =[via act]=> {}\nfn run() {}\n",
+        "fn bounded(act: fn() =[IO]=>) =[via act]=> {}\nfn open(act: fn()) =[via act]=> {}\nfn run() {}\n",
     );
     let index = open(&path).expect("via provenance index");
 
     let bounded = index.effect_of("bounded").expect("bounded via effects");
-    assert_eq!(bounded.inferred, vec!["Io"]);
+    assert_eq!(bounded.inferred, vec!["IO"]);
     assert_eq!(bounded.provenance.len(), 1);
     assert_eq!(bounded.provenance[0].spans.len(), 1);
 
@@ -833,7 +833,7 @@ fn semindex_via_contracts_have_provenance_without_invocation() {
 fn semindex_preserves_via_effect_row_in_signatures() {
     let path = temp_fixture(
         "effect_via.jet",
-        "fn invoke(act: fn() =[Io]=>) =[via act]=> { act() }\nfn run() {}\n",
+        "fn invoke(act: fn() =[IO]=>) =[via act]=> { act() }\nfn run() {}\n",
     );
     let symbols = open_symbols(&path).expect("via function indexes");
     let invoke = symbols
@@ -843,7 +843,7 @@ fn semindex_preserves_via_effect_row_in_signatures() {
         .expect("invoke symbol");
     assert_eq!(
         invoke.signature,
-        "fn invoke(act: fn() =[Io]=>) =[via act]=>"
+        "fn invoke(act: fn() =[IO]=>) =[via act]=>"
     );
 }
 

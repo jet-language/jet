@@ -304,12 +304,12 @@ fn panic_context_uses_only_lexically_live_locals() {
         ),
         (
             "caps",
-            "#Caps(Io) { caps_only :: 7; print(caps_only) }",
+            "#Caps(IO) { caps_only :: 7; print(caps_only) }",
             &["caps_only"],
         ),
         (
             "grant",
-            "#Grant(caps: Io) { grant_only :: 7; print(grant_only) }",
+            "#Grant(caps: IO) { grant_only :: 7; print(grant_only) }",
             &["grant_only"],
         ),
         // `assume_deterministic { … }` was renamed to `#Nondeterministic("reason") { … }`

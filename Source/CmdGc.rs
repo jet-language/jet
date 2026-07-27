@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use jet_foundation::JSON::{json_escape, parse_json, JsonValue};
+use jet_foundation::JSON::{json_escape, parse_json, JSONValue};
 
 use crate::OutputMode;
 
@@ -325,27 +325,27 @@ fn parse_trace(raw: &str, expected_project: &str, now: u64) -> Result<Trace, Tra
     Ok(Trace { project, pid, started_unix_ms, updated_unix_ms, collections, sites })
 }
 
-fn object<'a>(value: &'a JsonValue, name: &str) -> Result<&'a HashMap<String, JsonValue>, TraceError> {
+fn object<'a>(value: &'a JSONValue, name: &str) -> Result<&'a HashMap<String, JSONValue>, TraceError> {
     match value {
-        JsonValue::Object(object) => Ok(object),
+        JSONValue::Object(object) => Ok(object),
         _ => Err(TraceError::new(ErrorKind::Malformed, format!("{name} is not an object"))),
     }
 }
 
-fn field<'a>(object: &'a HashMap<String, JsonValue>, name: &str) -> Result<&'a JsonValue, TraceError> {
+fn field<'a>(object: &'a HashMap<String, JSONValue>, name: &str) -> Result<&'a JSONValue, TraceError> {
     object.get(name).ok_or_else(|| {
         TraceError::new(ErrorKind::Malformed, format!("GC trace is missing `{name}`"))
     })
 }
 
-fn string_field<'a>(object: &'a HashMap<String, JsonValue>, name: &str) -> Result<&'a str, TraceError> {
+fn string_field<'a>(object: &'a HashMap<String, JSONValue>, name: &str) -> Result<&'a str, TraceError> {
     match field(object, name)? {
-        JsonValue::String(value) => Ok(value),
+        JSONValue::String(value) => Ok(value),
         _ => Err(TraceError::new(ErrorKind::Malformed, format!("GC trace `{name}` is not text"))),
     }
 }
 
-fn safe_string(object: &HashMap<String, JsonValue>, name: &str) -> Result<String, TraceError> {
+fn safe_string(object: &HashMap<String, JSONValue>, name: &str) -> Result<String, TraceError> {
     let value = string_field(object, name)?;
     if value.is_empty()
         || value.len() > MAX_TRACE_FIELD_BYTES
@@ -359,9 +359,9 @@ fn safe_string(object: &HashMap<String, JsonValue>, name: &str) -> Result<String
     Ok(value.to_string())
 }
 
-fn uint_field(object: &HashMap<String, JsonValue>, name: &str) -> Result<u64, TraceError> {
+fn uint_field(object: &HashMap<String, JSONValue>, name: &str) -> Result<u64, TraceError> {
     match field(object, name)? {
-        JsonValue::Number(value) if *value >= 0 => Ok(*value as u64),
+        JSONValue::Number(value) if *value >= 0 => Ok(*value as u64),
         _ => Err(TraceError::new(
             ErrorKind::Malformed,
             format!("GC trace `{name}` is not a non-negative integer"),
@@ -369,16 +369,16 @@ fn uint_field(object: &HashMap<String, JsonValue>, name: &str) -> Result<u64, Tr
     }
 }
 
-fn bool_field(object: &HashMap<String, JsonValue>, name: &str) -> Result<bool, TraceError> {
+fn bool_field(object: &HashMap<String, JSONValue>, name: &str) -> Result<bool, TraceError> {
     match field(object, name)? {
-        JsonValue::Bool(value) => Ok(*value),
+        JSONValue::Bool(value) => Ok(*value),
         _ => Err(TraceError::new(ErrorKind::Malformed, format!("GC trace `{name}` is not Bool"))),
     }
 }
 
-fn array_field<'a>(object: &'a HashMap<String, JsonValue>, name: &str) -> Result<&'a [JsonValue], TraceError> {
+fn array_field<'a>(object: &'a HashMap<String, JSONValue>, name: &str) -> Result<&'a [JSONValue], TraceError> {
     match field(object, name)? {
-        JsonValue::Array(values) => Ok(values),
+        JSONValue::Array(values) => Ok(values),
         _ => Err(TraceError::new(ErrorKind::Malformed, format!("GC trace `{name}` is not a list"))),
     }
 }

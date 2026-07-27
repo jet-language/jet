@@ -33,7 +33,7 @@ const MAX_STEP_OVER_UNMAPPED: usize = 200;
 /// How the session reads its `(jet)` commands and where its output goes — the
 /// same split this crate's interpreter backend uses, so a test can
 /// script a native session exactly like `run_session` scripts the interpreter.
-enum Io {
+enum IO {
     Interactive,
     Scripted {
         inputs: std::collections::VecDeque<String>,
@@ -41,9 +41,9 @@ enum Io {
     },
 }
 
-impl Io {
+impl IO {
     fn is_scripted(&self) -> bool {
-        matches!(self, Io::Scripted { .. })
+        matches!(self, IO::Scripted { .. })
     }
 }
 
@@ -62,7 +62,7 @@ pub fn run(
         jet_file,
         jet_src,
         raw_frames,
-        Io::Interactive,
+        IO::Interactive,
     );
     code
 }
@@ -83,7 +83,7 @@ pub fn run_scripted(
     inputs: &[&str],
 ) -> String {
     let queue: std::collections::VecDeque<String> = inputs.iter().map(|s| s.to_string()).collect();
-    let io = Io::Scripted {
+    let io = IO::Scripted {
         inputs: queue,
         out: String::new(),
     };
@@ -100,7 +100,7 @@ fn run_with_io(
     jet_file: &str,
     jet_src: &str,
     raw_frames: bool,
-    mut io: Io,
+    mut io: IO,
 ) -> (i32, String) {
     if !Inferior::available() {
         let msg = format!(
@@ -108,7 +108,7 @@ fn run_with_io(
             jet_file
         );
         if io.is_scripted() {
-            if let Io::Scripted { out, .. } = &mut io {
+            if let IO::Scripted { out, .. } = &mut io {
                 out.push_str(&msg);
                 out.push('\n');
             }
@@ -164,10 +164,10 @@ fn run_with_io(
     (code, io_into_output(io))
 }
 
-fn io_into_output(io: Io) -> String {
+fn io_into_output(io: IO) -> String {
     match io {
-        Io::Scripted { out, .. } => out,
-        Io::Interactive => String::new(),
+        IO::Scripted { out, .. } => out,
+        IO::Interactive => String::new(),
     }
 }
 
@@ -182,14 +182,14 @@ struct Session {
     raw_frames: bool,
     started: bool,
     exited: bool,
-    io: Io,
+    io: IO,
 }
 
 impl Session {
     fn emit(&mut self, s: &str) {
         match &mut self.io {
-            Io::Interactive => println!("{}", s),
-            Io::Scripted { out, .. } => {
+            IO::Interactive => println!("{}", s),
+            IO::Scripted { out, .. } => {
                 out.push_str(s);
                 out.push('\n');
             }
@@ -200,7 +200,7 @@ impl Session {
     /// a scripted transcript that ran out (both treated as "run to completion").
     fn read_command(&mut self) -> Option<String> {
         match &mut self.io {
-            Io::Interactive => {
+            IO::Interactive => {
                 use std::io::Write;
                 print!("{} ", Syntax::DBG_PROMPT);
                 let _ = std::io::stdout().flush();
@@ -211,7 +211,7 @@ impl Session {
                     Err(_) => None,
                 }
             }
-            Io::Scripted { inputs, out } => {
+            IO::Scripted { inputs, out } => {
                 let next = inputs.pop_front()?;
                 out.push_str(&format!("{} {}\n", Syntax::DBG_PROMPT, next.trim()));
                 Some(next.trim().to_string())

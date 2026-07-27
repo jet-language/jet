@@ -4,17 +4,17 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(super) enum Json {
+pub(super) enum JSON {
     Null,
     Bool,
     Num(f64),
     Str(String),
     Array,
-    Object(BTreeMap<String, Json>),
+    Object(BTreeMap<String, JSON>),
 }
 
-impl Json {
-    pub(super) fn as_object(&self) -> Result<&BTreeMap<String, Json>, String> {
+impl JSON {
+    pub(super) fn as_object(&self) -> Result<&BTreeMap<String, JSON>, String> {
         match self {
             Self::Object(value) => Ok(value),
             _ => Err("expected a JSON object".into()),
@@ -29,7 +29,7 @@ impl Json {
     }
 }
 
-pub(super) fn parse(input: &str) -> Result<Json, String> {
+pub(super) fn parse(input: &str) -> Result<JSON, String> {
     let mut parser = Parser {
         chars: input.chars().collect(),
         pos: 0,
@@ -67,12 +67,12 @@ impl Parser {
         }
     }
 
-    fn value(&mut self) -> Result<Json, String> {
+    fn value(&mut self) -> Result<JSON, String> {
         self.skip_ws();
         match self.peek() {
             Some('{') => self.object(),
             Some('[') => self.array(),
-            Some('"') => Ok(Json::Str(self.string()?)),
+            Some('"') => Ok(JSON::Str(self.string()?)),
             Some('t') | Some('f') => self.boolean(),
             Some('n') => self.null(),
             Some(value) if value == '-' || value.is_ascii_digit() => self.number(),
@@ -81,13 +81,13 @@ impl Parser {
         }
     }
 
-    fn object(&mut self) -> Result<Json, String> {
+    fn object(&mut self) -> Result<JSON, String> {
         self.bump();
         let mut values = BTreeMap::new();
         self.skip_ws();
         if self.peek() == Some('}') {
             self.bump();
-            return Ok(Json::Object(values));
+            return Ok(JSON::Object(values));
         }
         loop {
             self.skip_ws();
@@ -110,15 +110,15 @@ impl Parser {
                 _ => return Err("expected `,` or `}` in object".into()),
             }
         }
-        Ok(Json::Object(values))
+        Ok(JSON::Object(values))
     }
 
-    fn array(&mut self) -> Result<Json, String> {
+    fn array(&mut self) -> Result<JSON, String> {
         self.bump();
         self.skip_ws();
         if self.peek() == Some(']') {
             self.bump();
-            return Ok(Json::Array);
+            return Ok(JSON::Array);
         }
         loop {
             self.value()?;
@@ -129,7 +129,7 @@ impl Parser {
                 _ => return Err("expected `,` or `]` in array".into()),
             }
         }
-        Ok(Json::Array)
+        Ok(JSON::Array)
     }
 
     fn string(&mut self) -> Result<String, String> {
@@ -187,7 +187,7 @@ impl Parser {
         Ok(codepoint)
     }
 
-    fn number(&mut self) -> Result<Json, String> {
+    fn number(&mut self) -> Result<JSON, String> {
         let start = self.pos;
         while matches!(self.peek(), Some(value) if value.is_ascii_digit() || "-+.eE".contains(value))
         {
@@ -196,21 +196,21 @@ impl Parser {
         let value: String = self.chars[start..self.pos].iter().collect();
         value
             .parse::<f64>()
-            .map(Json::Num)
+            .map(JSON::Num)
             .map_err(|_| format!("invalid number `{value}`"))
     }
 
-    fn boolean(&mut self) -> Result<Json, String> {
+    fn boolean(&mut self) -> Result<JSON, String> {
         if self.literal("true") || self.literal("false") {
-            Ok(Json::Bool)
+            Ok(JSON::Bool)
         } else {
             Err("invalid literal".into())
         }
     }
 
-    fn null(&mut self) -> Result<Json, String> {
+    fn null(&mut self) -> Result<JSON, String> {
         if self.literal("null") {
-            Ok(Json::Null)
+            Ok(JSON::Null)
         } else {
             Err("invalid literal".into())
         }

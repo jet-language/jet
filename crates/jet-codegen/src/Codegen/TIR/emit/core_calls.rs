@@ -69,22 +69,22 @@ fn data_schema_expand_struct(arg_ty: &Type) -> bool {
 pub(crate) fn emit_http_bridge_error(ffi: &str, error: &str) -> String {
     format!(
         "match {error} {{ \
-         {ffi}::JetHttpBridgeError::InvalidUrl => JetHttpError::InvalidUrl, \
-         {ffi}::JetHttpBridgeError::InvalidHeader => JetHttpError::InvalidHeader, \
-         {ffi}::JetHttpBridgeError::InvalidFraming => JetHttpError::InvalidFraming, \
-         {ffi}::JetHttpBridgeError::UnsupportedEncoding => JetHttpError::UnsupportedEncoding, \
-         {ffi}::JetHttpBridgeError::Resolve => JetHttpError::Resolve {{ host: \"<redacted>\".to_string() }}, \
-         {ffi}::JetHttpBridgeError::Connect => JetHttpError::Connect {{ address: \"<redacted>\".to_string() }}, \
-         {ffi}::JetHttpBridgeError::Tls => JetHttpError::Tls {{ stage: \"handshake\".to_string() }}, \
-         {ffi}::JetHttpBridgeError::Timeout => JetHttpError::Timeout {{ phase: \"transport\".to_string() }}, \
-         {ffi}::JetHttpBridgeError::Proxy => JetHttpError::Proxy {{ stage: \"transport\".to_string() }}, \
-         {ffi}::JetHttpBridgeError::Redirect => JetHttpError::Redirect {{ reason: \"limit\".to_string() }}, \
-         {ffi}::JetHttpBridgeError::Protocol => JetHttpError::Protocol {{ version: \"unsupported\".to_string() }}, \
-         {ffi}::JetHttpBridgeError::Io => JetHttpError::Io {{ operation: \"transport\".to_string() }}, \
-         {ffi}::JetHttpBridgeError::ResourceUnavailable => JetHttpError::ResourceUnavailable {{ resource: \"transport\".to_string() }}, \
-         {ffi}::JetHttpBridgeError::Cancelled => JetHttpError::Cancelled, \
-         {ffi}::JetHttpBridgeError::UnsupportedTarget => JetHttpError::UnsupportedTarget {{ operation: JetHttpOperation::ClientConnect }}, \
-         {ffi}::JetHttpBridgeError::Internal => JetHttpError::Internal {{ incident_id: \"http-transport\".to_string() }} }}"
+         {ffi}::JetHTTPBridgeError::InvalidUrl => JetHTTPError::InvalidUrl, \
+         {ffi}::JetHTTPBridgeError::InvalidHeader => JetHTTPError::InvalidHeader, \
+         {ffi}::JetHTTPBridgeError::InvalidFraming => JetHTTPError::InvalidFraming, \
+         {ffi}::JetHTTPBridgeError::UnsupportedEncoding => JetHTTPError::UnsupportedEncoding, \
+         {ffi}::JetHTTPBridgeError::Resolve => JetHTTPError::Resolve {{ host: \"<redacted>\".to_string() }}, \
+         {ffi}::JetHTTPBridgeError::Connect => JetHTTPError::Connect {{ address: \"<redacted>\".to_string() }}, \
+         {ffi}::JetHTTPBridgeError::TLS => JetHTTPError::TLS {{ stage: \"handshake\".to_string() }}, \
+         {ffi}::JetHTTPBridgeError::Timeout => JetHTTPError::Timeout {{ phase: \"transport\".to_string() }}, \
+         {ffi}::JetHTTPBridgeError::Proxy => JetHTTPError::Proxy {{ stage: \"transport\".to_string() }}, \
+         {ffi}::JetHTTPBridgeError::Redirect => JetHTTPError::Redirect {{ reason: \"limit\".to_string() }}, \
+         {ffi}::JetHTTPBridgeError::Protocol => JetHTTPError::Protocol {{ version: \"unsupported\".to_string() }}, \
+         {ffi}::JetHTTPBridgeError::IO => JetHTTPError::IO {{ operation: \"transport\".to_string() }}, \
+         {ffi}::JetHTTPBridgeError::ResourceUnavailable => JetHTTPError::ResourceUnavailable {{ resource: \"transport\".to_string() }}, \
+         {ffi}::JetHTTPBridgeError::Cancelled => JetHTTPError::Cancelled, \
+         {ffi}::JetHTTPBridgeError::UnsupportedTarget => JetHTTPError::UnsupportedTarget {{ operation: JetHTTPOperation::ClientConnect }}, \
+         {ffi}::JetHTTPBridgeError::Internal => JetHTTPError::Internal {{ incident_id: \"http-transport\".to_string() }} }}"
     )
 }
 
@@ -733,7 +733,7 @@ pub(crate) fn emit_tir_core_call(
             )
         }
         // D-ENC1 + D-JSONVERB1 + D-SERDE6: unified `core.encoding.*`. The dynamic forms
-        // (`Json` tree / `[[String]]` / `Map`) keep their existing helpers; the typed
+        // (`JSON` tree / `[[String]]` / `Map`) keep their existing helpers; the typed
         // forms route through the Encode/Decode model, distinguished by the lowered arg
         // type (encode) or the resolved return type (decode). `is_json_value` etc. read
         // those total facts — codegen never re-infers (I3).
@@ -2228,18 +2228,18 @@ pub(crate) fn emit_tir_core_call(
         ("jet.http", "get") => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             emit_http_response_from_bridge(
-                format!("{ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()).and_then(|_ambient| {ffi}::jet_http_client_get_impl(&({})))", arg(0)),
+                format!("{ffi}::JetHTTPAmbientDeadline::push(jet_deadline_remaining_ms()).and_then(|_ambient| {ffi}::jet_http_client_get_impl(&({})))", arg(0)),
                 ffi,
             )
         }
         ("jet.http", "post") => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             emit_http_response_from_bridge(
-                format!("{ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()).and_then(|_ambient| {ffi}::jet_http_client_post_impl(&({}), &({})))", arg(0), arg(1)),
+                format!("{ffi}::JetHTTPAmbientDeadline::push(jet_deadline_remaining_ms()).and_then(|_ambient| {ffi}::jet_http_client_post_impl(&({}), &({})))", arg(0), arg(1)),
                 ffi,
             )
         }
-        // c109 Phase 25: HttpRouter producer + parse/dispatch (D-ROUTE1=A), byte-for-byte
+        // c109 Phase 25: HTTPRouter producer + parse/dispatch (D-ROUTE1=A), byte-for-byte
         // `emit_core_call` (Source/Codegen/Expression.rs ~L1411). `router()` is arg-free;
         // `parse(raw)` borrows the raw string; `dispatch(router, req)` borrows the router
         // and passes the request by value.
@@ -2485,9 +2485,9 @@ pub(crate) fn emit_tir_core_call(
         }
         // D-DBDRIVER1: jet.db — SQLite via the FFI bridge crate. `open`/`open_memory`
         // are the only module-level entry points; they wrap the bridge's raw u64
-        // handle in the Jet-visible `DbConnection` handle (`JetDbConnection`), so
+        // handle in the Jet-visible `DBConnection` handle (`JetDbConnection`), so
         // every other operation dispatches by receiver TYPE as an instance method
-        // (`THandleOp::DbQuery`/… in the `HandleMethod` arm below), not a second
+        // (`THandleOp::DBQuery`/… in the `HandleMethod` arm below), not a second
         // module-call surface.
         ("jet.db", "open") => {
             format!(
@@ -2525,7 +2525,7 @@ pub(crate) fn emit_tir_core_call(
         ("jet.db", "transaction") => {
             let root = &cx.root_prefix;
             format!(
-                "{{ let __jet_conn = &({}); let __jet_steps = ({}); let __jet_empty: Vec<{}jet_std::DbValue> = Vec::new(); if !{}(__jet_conn.handle) {{ Err({}jet_std::DbError {{ message: format!(\"could not begin transaction: {{}}\", {}) }}) }} else {{ let mut __jet_done: i64 = 0; let mut __jet_err: Option<{}jet_std::DbError> = None; for __jet_sql in __jet_steps.iter() {{ match {}jet_std::jet_db_decode_execute_result(&{}(__jet_conn.handle, __jet_sql, &{}jet_std::jet_db_encode_params(&__jet_empty))) {{ Ok(_) => __jet_done += 1, Err(e) => {{ __jet_err = Some(e); break; }} }} }} if let Some(e) = __jet_err {{ let _ = {}(__jet_conn.handle); Err(e) }} else if {}(__jet_conn.handle) {{ Ok(__jet_done) }} else {{ Err({}jet_std::DbError {{ message: \"could not commit transaction\".to_string() }}) }} }} }}",
+                "{{ let __jet_conn = &({}); let __jet_steps = ({}); let __jet_empty: Vec<{}jet_std::DBValue> = Vec::new(); if !{}(__jet_conn.handle) {{ Err({}jet_std::DBError {{ message: format!(\"could not begin transaction: {{}}\", {}) }}) }} else {{ let mut __jet_done: i64 = 0; let mut __jet_err: Option<{}jet_std::DBError> = None; for __jet_sql in __jet_steps.iter() {{ match {}jet_std::jet_db_decode_execute_result(&{}(__jet_conn.handle, __jet_sql, &{}jet_std::jet_db_encode_params(&__jet_empty))) {{ Ok(_) => __jet_done += 1, Err(e) => {{ __jet_err = Some(e); break; }} }} }} if let Some(e) = __jet_err {{ let _ = {}(__jet_conn.handle); Err(e) }} else if {}(__jet_conn.handle) {{ Ok(__jet_done) }} else {{ Err({}jet_std::DBError {{ message: \"could not commit transaction\".to_string() }}) }} }} }}",
                 arg(0),
                 arg(2),
                 root,
@@ -2544,7 +2544,7 @@ pub(crate) fn emit_tir_core_call(
         ("jet.db", "migrate") => {
             let root = &cx.root_prefix;
             format!(
-                "{{ let __jet_conn = &({}); let __jet_name = ({}); let __jet_steps = ({}); let __jet_empty: Vec<{}jet_std::DbValue> = Vec::new(); if !{}(__jet_conn.handle) {{ Err({}jet_std::DbError {{ message: format!(\"could not begin migration `{{}}`\", __jet_name) }}) }} else {{ let __jet_create_sql = \"CREATE TABLE IF NOT EXISTS __jet_migrations (name TEXT PRIMARY KEY, checksum TEXT NOT NULL)\".to_string(); let __jet_create = {}jet_std::jet_db_decode_execute_result(&{}(__jet_conn.handle, &__jet_create_sql, &{}jet_std::jet_db_encode_params(&__jet_empty))); match __jet_create {{ Err(e) => {{ let _ = {}(__jet_conn.handle); Err(e) }}, Ok(_) => {{ let __jet_checksum = {}jet_std::jet_db_migration_checksum(&__jet_steps); let __jet_check_sql = \"SELECT checksum FROM __jet_migrations WHERE name = ?\".to_string(); let __jet_check_params = vec![{}jet_std::DbValue::Text(__jet_name.clone())]; let __jet_existing = {}jet_std::jet_db_decode_query_result(&{}(__jet_conn.handle, &__jet_check_sql, &{}jet_std::jet_db_encode_params(&__jet_check_params))); match __jet_existing {{ Err(e) => {{ let _ = {}(__jet_conn.handle); Err(e) }}, Ok(rows) => {{ if let Some(row) = rows.into_iter().next() {{ let old = row.get(\"checksum\").and_then(|v| v.text().ok()).unwrap_or_default(); if old == __jet_checksum {{ if {}(__jet_conn.handle) {{ Ok(0) }} else {{ Err({}jet_std::DbError {{ message: format!(\"could not commit migration `{{}}`\", __jet_name) }}) }} }} else {{ let _ = {}(__jet_conn.handle); Err({}jet_std::DbError {{ message: format!(\"migration `{{}}` checksum changed\", __jet_name) }}) }} }} else {{ let mut __jet_done: i64 = 0; let mut __jet_err: Option<{}jet_std::DbError> = None; for __jet_sql in __jet_steps.iter() {{ match {}jet_std::jet_db_decode_execute_result(&{}(__jet_conn.handle, __jet_sql, &{}jet_std::jet_db_encode_params(&__jet_empty))) {{ Ok(_) => __jet_done += 1, Err(e) => {{ __jet_err = Some(e); break; }} }} }} if let Some(e) = __jet_err {{ let _ = {}(__jet_conn.handle); Err(e) }} else {{ let __jet_insert_sql = \"INSERT INTO __jet_migrations (name, checksum) VALUES (?, ?)\".to_string(); let __jet_insert_params = vec![{}jet_std::DbValue::Text(__jet_name.clone()), {}jet_std::DbValue::Text(__jet_checksum)]; match {}jet_std::jet_db_decode_execute_result(&{}(__jet_conn.handle, &__jet_insert_sql, &{}jet_std::jet_db_encode_params(&__jet_insert_params))) {{ Err(e) => {{ let _ = {}(__jet_conn.handle); Err(e) }}, Ok(_) => {{ if {}(__jet_conn.handle) {{ Ok(__jet_done) }} else {{ Err({}jet_std::DbError {{ message: format!(\"could not commit migration `{{}}`\", __jet_name) }}) }} }} }} }} }} }} }} }} }} }} }}",
+                "{{ let __jet_conn = &({}); let __jet_name = ({}); let __jet_steps = ({}); let __jet_empty: Vec<{}jet_std::DBValue> = Vec::new(); if !{}(__jet_conn.handle) {{ Err({}jet_std::DBError {{ message: format!(\"could not begin migration `{{}}`\", __jet_name) }}) }} else {{ let __jet_create_sql = \"CREATE TABLE IF NOT EXISTS __jet_migrations (name TEXT PRIMARY KEY, checksum TEXT NOT NULL)\".to_string(); let __jet_create = {}jet_std::jet_db_decode_execute_result(&{}(__jet_conn.handle, &__jet_create_sql, &{}jet_std::jet_db_encode_params(&__jet_empty))); match __jet_create {{ Err(e) => {{ let _ = {}(__jet_conn.handle); Err(e) }}, Ok(_) => {{ let __jet_checksum = {}jet_std::jet_db_migration_checksum(&__jet_steps); let __jet_check_sql = \"SELECT checksum FROM __jet_migrations WHERE name = ?\".to_string(); let __jet_check_params = vec![{}jet_std::DBValue::Text(__jet_name.clone())]; let __jet_existing = {}jet_std::jet_db_decode_query_result(&{}(__jet_conn.handle, &__jet_check_sql, &{}jet_std::jet_db_encode_params(&__jet_check_params))); match __jet_existing {{ Err(e) => {{ let _ = {}(__jet_conn.handle); Err(e) }}, Ok(rows) => {{ if let Some(row) = rows.into_iter().next() {{ let old = row.get(\"checksum\").and_then(|v| v.text().ok()).unwrap_or_default(); if old == __jet_checksum {{ if {}(__jet_conn.handle) {{ Ok(0) }} else {{ Err({}jet_std::DBError {{ message: format!(\"could not commit migration `{{}}`\", __jet_name) }}) }} }} else {{ let _ = {}(__jet_conn.handle); Err({}jet_std::DBError {{ message: format!(\"migration `{{}}` checksum changed\", __jet_name) }}) }} }} else {{ let mut __jet_done: i64 = 0; let mut __jet_err: Option<{}jet_std::DBError> = None; for __jet_sql in __jet_steps.iter() {{ match {}jet_std::jet_db_decode_execute_result(&{}(__jet_conn.handle, __jet_sql, &{}jet_std::jet_db_encode_params(&__jet_empty))) {{ Ok(_) => __jet_done += 1, Err(e) => {{ __jet_err = Some(e); break; }} }} }} if let Some(e) = __jet_err {{ let _ = {}(__jet_conn.handle); Err(e) }} else {{ let __jet_insert_sql = \"INSERT INTO __jet_migrations (name, checksum) VALUES (?, ?)\".to_string(); let __jet_insert_params = vec![{}jet_std::DBValue::Text(__jet_name.clone()), {}jet_std::DBValue::Text(__jet_checksum)]; match {}jet_std::jet_db_decode_execute_result(&{}(__jet_conn.handle, &__jet_insert_sql, &{}jet_std::jet_db_encode_params(&__jet_insert_params))) {{ Err(e) => {{ let _ = {}(__jet_conn.handle); Err(e) }}, Ok(_) => {{ if {}(__jet_conn.handle) {{ Ok(__jet_done) }} else {{ Err({}jet_std::DBError {{ message: format!(\"could not commit migration `{{}}`\", __jet_name) }}) }} }} }} }} }} }} }} }} }} }} }}",
                 arg(0),
                 arg(1),
                 arg(2),
@@ -2746,7 +2746,7 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             };
             emit_http_response_from_bridge(
-                format!("{ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()).and_then(|_ambient| {ffi}::jet_http_client_get_impl(&({u})))"),
+                format!("{ffi}::JetHTTPAmbientDeadline::push(jet_deadline_remaining_ms()).and_then(|_ambient| {ffi}::jet_http_client_get_impl(&({u})))"),
                 ffi,
             )
         }
@@ -2758,7 +2758,7 @@ pub(crate) fn emit_tir_core_call(
                 arg(0)
             };
             emit_http_response_from_bridge(
-                format!("{ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()).and_then(|_ambient| {ffi}::jet_http_client_post_impl(&({u}), &({})))", arg(1)),
+                format!("{ffi}::JetHTTPAmbientDeadline::push(jet_deadline_remaining_ms()).and_then(|_ambient| {ffi}::jet_http_client_post_impl(&({u}), &({})))", arg(1)),
                 ffi,
             )
         }
@@ -2788,30 +2788,30 @@ pub(crate) fn emit_tir_core_call(
         ("core.http.server", "bind") if args.len() == 3 => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             format!(
-                "jet_http_server_bind_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, on_h2, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)).map_err(|e| JetHttpError::Io {{ operation: e }})",
+                "jet_http_server_bind_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, on_h2, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)).map_err(|e| JetHTTPError::IO {{ operation: e }})",
                 arg(0),
                 arg(1),
                 arg(2)
             )
         }
-        ("core.http.server", "bind") => format!("jet_http_server_bind(&({}), {}).map_err(|_| JetHttpError::Io {{ operation: \"bind\".to_string() }})", arg(0), arg(1)),
+        ("core.http.server", "bind") => format!("jet_http_server_bind(&({}), {}).map_err(|_| JetHTTPError::IO {{ operation: \"bind\".to_string() }})", arg(0), arg(1)),
         ("core.http.server", "mux") => format!("jet_http_mux_new()"),
         ("core.http.server", "serve") if args.len() == 3 => {
             let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
             format!(
-                "jet_http_mux_serve_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, on_h2, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)).map_err(|e| JetHttpError::Io {{ operation: e }})",
+                "jet_http_mux_serve_tls(&({}), {}, {}, |cert, key| {ffi}::jet_http_server_tls_validate_impl(cert, key), |cert, key, stream, on_request, on_h2, should_stop| {ffi}::jet_http_server_tls_session_impl(cert, key, stream, on_request, on_h2, should_stop)).map_err(|e| JetHTTPError::IO {{ operation: e }})",
                 arg(0),
                 arg(1),
                 arg(2)
             )
         }
-        ("core.http.server", "serve") => format!("jet_http_mux_serve(&({}), {}).map_err(|_| JetHttpError::Io {{ operation: \"serve\".to_string() }})", arg(0), arg(1)),
+        ("core.http.server", "serve") => format!("jet_http_mux_serve(&({}), {}).map_err(|_| JetHTTPError::IO {{ operation: \"serve\".to_string() }})", arg(0), arg(1)),
         ("core.http.server", "serve_once") => {
-            format!("jet_http_mux_serve_once(&({}), {}).map_err(|_| JetHttpError::Io {{ operation: \"serve once\".to_string() }})", arg(0), arg(1))
+            format!("jet_http_mux_serve_once(&({}), {}).map_err(|_| JetHTTPError::IO {{ operation: \"serve once\".to_string() }})", arg(0), arg(1))
         }
         ("core.http.server", "serve_once_listener") => {
             format!(
-                "jet_http_mux_serve_once_listener(&({}), &({})).map_err(|_| JetHttpError::Io {{ operation: \"serve listener\".to_string() }})",
+                "jet_http_mux_serve_once_listener(&({}), &({})).map_err(|_| JetHTTPError::IO {{ operation: \"serve listener\".to_string() }})",
                 arg(0),
                 arg(1)
             )
@@ -2822,10 +2822,10 @@ pub(crate) fn emit_tir_core_call(
         ("core.http.server", "tls") => format!("jet_http_srv_tls(&({}), &({}))", arg(0), arg(1)),
         ("core.http.server", "sse") => format!("jet_http_srv_sse(&({}))", arg(0)),
         ("core.http.server", "static_file") => {
-            format!("jet_http_srv_static_file(&({}), &({})).map_err(|_| JetHttpError::Io {{ operation: \"read static file\".to_string() }})", arg(0), arg(1))
+            format!("jet_http_srv_static_file(&({}), &({})).map_err(|_| JetHTTPError::IO {{ operation: \"read static file\".to_string() }})", arg(0), arg(1))
         }
         ("core.http.server", "static_file_range") => format!(
-            "jet_http_srv_static_file_range(&({}), &({}), &({})).map_err(|_| JetHttpError::Io {{ operation: \"read static file\".to_string() }})",
+            "jet_http_srv_static_file_range(&({}), &({}), &({})).map_err(|_| JetHTTPError::IO {{ operation: \"read static file\".to_string() }})",
             arg(0),
             arg(1),
             arg(2)

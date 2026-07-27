@@ -11,7 +11,7 @@ pub(super) fn default_resource_pools() -> Vec<BuildResourcePoolSpec> {
         BuildResourcePoolSpec::new(BuildResourcePool::Memory, 0),
         BuildResourcePoolSpec::new(BuildResourcePool::Linker, 1),
         BuildResourcePoolSpec::new(BuildResourcePool::Console, 1),
-        BuildResourcePoolSpec::new(BuildResourcePool::Gpu, 1),
+        BuildResourcePoolSpec::new(BuildResourcePool::GPU, 1),
     ]
 }
 

@@ -29,7 +29,7 @@ mod DataPipeline;
 mod Diagnostics;
 mod EncodingLite;
 mod Interpreter;
-mod JsonInterp;
+mod JSONInterp;
 pub mod MathLayout;
 mod Methods;
 mod Purity;

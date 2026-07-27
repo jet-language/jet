@@ -298,7 +298,7 @@ fn encode_resource_pool(w: &mut KeyWriter, pool: &BuildResourcePool) {
         BuildResourcePool::Memory => w.str("memory"),
         BuildResourcePool::Linker => w.str("linker"),
         BuildResourcePool::Console => w.str("console"),
-        BuildResourcePool::Gpu => w.str("gpu"),
+        BuildResourcePool::GPU => w.str("gpu"),
         BuildResourcePool::Custom(name) => {
             w.str("custom");
             w.str(name);

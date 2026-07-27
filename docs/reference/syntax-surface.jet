@@ -446,14 +446,14 @@ module web-app { }
 
 
 // ============================================================================
-// EFFECTS  (=> / =[Io]=>)
+// EFFECTS  (=> / =[IO]=>)
 // ============================================================================
 // Every fn carries an inferred, erased effect set; an `=[…]=>` row bounds it (D-EFF1).
 // Effect tags are PascalCase (D-CASING1). Effects flow through calls (D-EFF2).
 // D-SHAPE8 puts every explicit effect row inside the arrow.
 
 fn square(n: Int) =[]=> Int = n * n
-fn announce(label: String, n: Int) =[Io]=> {    // upper bound: may use Io
+fn announce(label: String, n: Int) =[IO]=> {    // upper bound: may use IO
     print("{label} {n}")
 }
 
@@ -464,8 +464,8 @@ fn map_each(f: fn(Int) => Int) =[via f]=> { }   // lever 2: callback pass-throug
 
 // Scoped capability: granted into a lexical scope, revoked at scope end (D-SCAP1).
 fn with_fs() {
-    #Grant(caps: Fs) {
-        // Fs effect authorized only inside this block
+    #Grant(caps: FS) {
+        // FS effect authorized only inside this block
     }
 }
 

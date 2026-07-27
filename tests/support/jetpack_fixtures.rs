@@ -93,7 +93,7 @@ pub fn studio_json_string(response: &str, key: &str) -> String {
 }
 
 
-pub fn studio_json(response: &str) -> jetpack::JSON::Json {
+pub fn studio_json(response: &str) -> jetpack::JSON::JSON {
     let body = response
         .split_once("\r\n\r\n")
         .map(|(_, body)| body)
@@ -103,9 +103,9 @@ pub fn studio_json(response: &str) -> jetpack::JSON::Json {
 }
 
 
-pub fn json_string(json: &jetpack::JSON::Json, key: &str) -> String {
+pub fn json_string(json: &jetpack::JSON::JSON, key: &str) -> String {
     json.get(key)
-        .and_then(jetpack::JSON::Json::as_str)
+        .and_then(jetpack::JSON::JSON::as_str)
         .unwrap_or_else(|error| panic!("invalid JSON string `{key}`: {error}: {json:?}"))
         .to_string()
 }

@@ -19,22 +19,22 @@ fn jet_deadline_remaining_ms() -> Option<i64> {
 
 mod jet_std {
     #[derive(Clone, Debug, PartialEq)]
-    pub struct JsonError {
+    pub struct JSONError {
         pub line: i64,
         pub message: String,
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub enum Json {
+    pub enum JSON {
         Null,
         Boolean(bool),
         Number(f64),
         Text(String),
-        Array(Vec<Json>),
-        Object(std::collections::BTreeMap<String, Json>),
+        Array(Vec<JSON>),
+        Object(std::collections::BTreeMap<String, JSON>),
     }
 
-    include!("Prelude/CoreLib/JetStd/JsonCodec.rs");
+    include!("Prelude/CoreLib/JetStd/JSONCodec.rs");
 }
 
 include!("Prelude/CoreLib/Top/WsClient.rs");

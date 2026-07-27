@@ -6,7 +6,7 @@ use core.ws as ws
 
 fn run() {
     mux :: http_server.mux()
-    mux.get("/live", (req: HttpRequest) => {
+    mux.get("/live", (req: HTTPRequest) => {
         sock :: ws.upgrade(req) ?? return Ok(http_server.response(400, "upgrade failed"))
         message :: sock.recv() ?? return Ok(http_server.response(400, "recv failed"))
         if message.is_text() {

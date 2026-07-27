@@ -147,7 +147,7 @@ buttons may accept or bounce, from a loopback device or a remote device that
 presents the configured `auth.token` (the same trust boundary every other
 remote write already uses — see Auth note above; no token configured means no
 remote device can prove it's the owner, so acceptance stays loopback-only).
-The server binds each click to an HttpOnly in-memory UI session and a
+The server binds each click to an HTTPOnly in-memory UI session and a
 short-lived, single-use challenge for that exact ballot and outcome. CLI
 ratify, `clearance`, batch clearance, `--quote`, and caller-supplied
 `by: owner` are rejected and audited.

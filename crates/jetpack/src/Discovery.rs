@@ -10,7 +10,7 @@ use jet_env_model::ModuleEval::AdapterPlan;
 use super::Provider;
 use super::RefSpec::RefSpec;
 use super::Store::StoreEntry;
-use super::JSON::{self, Json};
+use super::JSON::{self, JSONValue};
 use crate::Syntax;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -448,7 +448,7 @@ fn json_string_array(items: &[String]) -> String {
     format!("[{body}]")
 }
 
-fn record_from_json(json: &Json) -> Result<PackageRecord, String> {
+fn record_from_json(json: &JSONValue) -> Result<PackageRecord, String> {
     let obj = json.as_object()?;
     Ok(PackageRecord {
         source: required_str(obj, "source")?.to_string(),
@@ -462,14 +462,14 @@ fn record_from_json(json: &Json) -> Result<PackageRecord, String> {
     })
 }
 
-fn required_str<'a>(obj: &'a BTreeMap<String, Json>, key: &str) -> Result<&'a str, String> {
+fn required_str<'a>(obj: &'a BTreeMap<String, JSONValue>, key: &str) -> Result<&'a str, String> {
     obj.get(key)
         .ok_or_else(|| format!("missing key `{key}`"))?
         .as_str()
 }
 
-fn string_array(json: Option<&Json>) -> Vec<String> {
-    let Some(Json::Array(items)) = json else {
+fn string_array(json: Option<&JSONValue>) -> Vec<String> {
+    let Some(JSONValue::Array(items)) = json else {
         return Vec::new();
     };
     items
@@ -478,8 +478,8 @@ fn string_array(json: Option<&Json>) -> Vec<String> {
         .collect()
 }
 
-fn option_array(json: Option<&Json>) -> Vec<OptionField> {
-    let Some(Json::Array(items)) = json else {
+fn option_array(json: Option<&JSONValue>) -> Vec<OptionField> {
+    let Some(JSONValue::Array(items)) = json else {
         return Vec::new();
     };
     items
@@ -518,7 +518,7 @@ mod tests {
             "fixture".to_string(),
         ));
         let json = record_to_json(&index.packages[0]);
-        let parsed = record_from_json(&JSON::parse(&json).unwrap()).unwrap();
+        let parsed = record_from_json(&JSONValue::parse(&json).unwrap()).unwrap();
         assert_eq!(parsed.name, "ripgrep");
         assert_eq!(index.search("rip")[0].display_ref(), "default.ripgrep");
         assert_eq!(index.info("default.ripgrep").unwrap().version, "14.1.0");

@@ -391,7 +391,7 @@ fn jetos_studio_transaction_previews_and_writes_source() {
     let proof_response = studio_json(&proof);
     assert_eq!(
         proof_response.get("success").unwrap(),
-        &jetpack::JSON::Json::Bool(true),
+        &jetpack::JSON::JSON::Bool(true),
         "proof: {proof}"
     );
     let proof_revision = json_string(&proof_response, "source_revision");

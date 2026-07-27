@@ -34,5 +34,5 @@ mod options_rendering;
 mod generations_activation;
 
 pub use entry::{main, resolve_config_path, user_main};
-pub use types::OsFlags;
+pub use types::OSFlags;
 pub(crate) use studio_projection::studio_pages_json;

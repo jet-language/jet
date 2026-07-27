@@ -20,10 +20,10 @@ Status keys:
 | `D-REFINE1` | refinements | shipped | Parser accepts `#Invariant("value >= lo && value < hi")` on `distinct Int`; sema proves fixed-list indexes in-bounds; TIR lowers proven indexes without `jet_index_vec`; `examples/features/types/refinements.jet` and `tests/corelib.rs` cover it | #347 |
 | `D-COLLBREADTH1` | collections breadth | partial | `Deque<T>` / `Set<T>` shipped; HashMap and iterator breadth still audit-sized | #305 |
 | `D-ITER1` | iterator adapters | partial | Core iteration exists, full Rust/itertools parity not proven | #305 |
-| `D-TYPEDTEXT2` | typed text prefixes | shipped | Expected-type `Sql`/`Html` path shipped; parser recognizes adjacent `sql"..."` / `html"..."` prefixes and sema rewrites through the same typed-text constructor path; `examples/features/safety/typed_sql.jet` covers no-expected-type bindings | #348 |
+| `D-TYPEDTEXT2` | typed text prefixes | shipped | Expected-type `SQL`/`HTML` path shipped; parser recognizes adjacent `sql"..."` / `html"..."` prefixes and sema rewrites through the same typed-text constructor path; `examples/features/safety/typed_sql.jet` covers no-expected-type bindings | #348 |
 | `D-IGNORERET1` | visible discard sigil | shipped by successor, stale doc | `D-IGNORERET2` `.drop("reason")`; sema checks in `crates/jet-sema/src/Sema/CheckerCore.rs`; examples under `examples/features/errors/` | #340 |
 | `D-SMELLLINT1` | semantic-smell lints | partial | Some lint infrastructure exists; float-eq/duplicate-branch/always-true breadth not proven | #343 |
-| `D-REPLAY1` | `#Replayable` soundness | shipped | `Func.is_replayable`; parser `#Replayable fn`; effect fixpoint E0725 rejects reachable `Time`/`Rand`/`Net`/`Io`; `tests/ui/replayable_reaches_io.jet` proves transitive `Io` rejection | #349 |
+| `D-REPLAY1` | `#Replayable` soundness | shipped | `Func.is_replayable`; parser `#Replayable fn`; effect fixpoint E0725 rejects reachable `Time`/`Rand`/`Net`/`IO`; `tests/ui/replayable_reaches_io.jet` proves transitive `IO` rejection | #349 |
 | `D-CTFIND1` | comptime `find(glob)` | shipped | `crates/jet-comptime/src/Comptime/Methods.rs` implements sorted std-only glob `*`/`**`/`?`/`{a,b}`/`[a-z]`; `examples/features/comptime/find.jet` covers it | #350 |
 | `D-CTFIND2` | comptime `find(glob)` lock semantics | shipped | `find` records each matched file as `ComptimeInput { path, hash }`; `comptime_find_glob_records_sorted_lock_inputs` covers sorted lock evidence | #350 |
 | `D-PLUGIN1` | `target: plugin` WASM component target | shipped | `target: plugin`, deny-by-default effects, `core.plugin`, export shape checks, and version diagnostics are implemented and tested | #351 |
@@ -38,7 +38,7 @@ Status keys:
 | `D-ROUTE1` | router and params | shipped/partial | CoreLib router and `req.params["id"]`; tests/examples under net/http routes | #301 |
 | `D-HONESTNUM1` | `core.science.measurement` | shipped/partial, stale doc | measurement type sema/TIR/CoreLib and `examples/features/types/measurement.jet` | #340, #310 |
 | `D-OPTGC1` | scoped automatic GC | implemented | `#Policy(gc)` / package `gc: true`; no public wrapper | #658 |
-| `D-WEBAPP1` | remaining `app.live` application graph | gap/partial | `Db.Read`/`Db.Write` leaf inference shipped; `app` graph, `core.ws`, client signal binding, and transactional invalidation remain unbuilt | #438, #134 |
+| `D-WEBAPP1` | remaining `app.live` application graph | gap/partial | `DB.Read`/`DB.Write` leaf inference shipped; `app` graph, `core.ws`, client signal binding, and transactional invalidation remain unbuilt | #438, #134 |
 
 Open global proof issue discovered while verifying #338/#339: `cargo test --test
 diagnostic_snapshots ui_snapshots` currently fails because

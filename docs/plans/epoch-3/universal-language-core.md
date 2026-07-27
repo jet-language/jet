@@ -79,7 +79,7 @@ These are source-backed defects, not roadmap speculation:
   substring gate at `Source/REPL/mod.rs:930` rejects harmless comments/strings.
 - `crates/jet-codegen/src/Codegen/mod.rs:241-272,1241-1253` emits the whole Core
   prelude after the first Core call, contradicting R10 at source/compile level.
-- `crates/jet-codegen/src/Prelude/CoreLib/Top/HttpServer.rs:89-164,231-249,
+- `crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:89-164,231-249,
   378-429` uses an OS thread per connection, allocates unbounded requests,
   defaults malformed input to `GET /`, collapses repeated headers, and can
   slice UTF-8 static-file ranges on invalid boundaries.
@@ -224,7 +224,7 @@ They must be capture-free or have an explicit `=[]=>` bound. They remain
 restricted to the foreign-thread-safe subset. Generic Result stays outside C
 declarations; raw status/out-pointer
 functions get ordinary Jet wrappers. Alternate native conventions use a local
-per-function `#Abi` marker, with C as the default, the exact target matrix in
+per-function `#ABI` marker, with C as the default, the exact target matrix in
 the syntax ledger, no module inheritance, and no invented symbol decoration.
 
 - Reopen #180 for C FFI types that sema accepts but codegen cannot emit.

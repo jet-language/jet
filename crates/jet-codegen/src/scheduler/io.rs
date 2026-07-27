@@ -17,7 +17,7 @@ use std::time::Instant;
 
 // ── M2: IO poll substrate (native epoll on Linux; portable fallback elsewhere) ─
 
-struct IoInterest {
+struct IOInterest {
     stream_id: usize,
     slot: Arc<ParkSlot>,
     readable: bool,
@@ -26,18 +26,18 @@ struct IoInterest {
 
 #[allow(dead_code)]
 #[derive(Clone)]
-enum IoBackendState {
+enum IOBackendState {
     Starting,
     Running,
     Failed(&'static str),
     Closed,
 }
 
-struct IoPoller {
-    interests: Mutex<Vec<IoInterest>>,
+struct IOPoller {
+    interests: Mutex<Vec<IOInterest>>,
     streams: Mutex<HashMap<usize, Arc<Mutex<TcpStream>>>>,
     retire_requested: Mutex<HashSet<usize>>,
-    backend_state: Mutex<IoBackendState>,
+    backend_state: Mutex<IOBackendState>,
     notify: Condvar,
     next_key: AtomicUsize,
     #[cfg(target_os = "windows")]
@@ -48,7 +48,7 @@ struct IoPoller {
 
 // jet:scheduler-native-begin — vetted std-only OS FFI and poller dispatch.
 #[allow(dead_code)]
-impl IoPoller {
+impl IOPoller {
     fn register(
         self: &Arc<Self>,
         stream: Arc<Mutex<TcpStream>>,
@@ -56,10 +56,10 @@ impl IoPoller {
         writable: bool,
     ) -> Result<(usize, Arc<ParkSlot>), &'static str> {
         let state = self.backend_state.lock().unwrap();
-        if let IoBackendState::Failed(error) = &*state {
+        if let IOBackendState::Failed(error) = &*state {
             return Err(*error);
         }
-        if matches!(&*state, IoBackendState::Closed) {
+        if matches!(&*state, IOBackendState::Closed) {
             return Err("scheduler IO backend is closed");
         }
         let slot = ParkSlot::new();
@@ -67,7 +67,7 @@ impl IoPoller {
         let id = self.next_key.fetch_add(1, Ordering::Relaxed);
         streams.insert(id, stream);
         drop(streams);
-        self.interests.lock().unwrap().push(IoInterest {
+        self.interests.lock().unwrap().push(IOInterest {
             stream_id: id,
             slot: slot.clone(),
             readable,
@@ -432,7 +432,7 @@ impl IoPoller {
         if port == 0 {
             METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
             *self.backend_state.lock().unwrap() =
-                IoBackendState::Failed("internal scheduler IOCP creation failed");
+                IOBackendState::Failed("internal scheduler IOCP creation failed");
             for interest in self.interests.lock().unwrap().drain(..) { interest.slot.wake(); }
             self.streams.lock().unwrap().clear();
             self.retire_requested.lock().unwrap().clear();
@@ -441,7 +441,7 @@ impl IoPoller {
         }
         self.iocp_port.store(port, Ordering::Release);
         self.iocp_shutdown_done.store(false, Ordering::Release);
-        *self.backend_state.lock().unwrap() = IoBackendState::Running;
+        *self.backend_state.lock().unwrap() = IOBackendState::Running;
         let mut active: HashMap<usize, Active> = HashMap::new();
         loop {
             let pending: Vec<(usize, Arc<Mutex<TcpStream>>, usize, bool, bool)> = {
@@ -537,7 +537,7 @@ impl IoPoller {
                 if ok == 0 {
                     METRIC_IO_FAILURES.fetch_add(1, Ordering::Relaxed);
                     *self.backend_state.lock().unwrap() =
-                        IoBackendState::Failed("internal scheduler IOCP completion port failed");
+                        IOBackendState::Failed("internal scheduler IOCP completion port failed");
                     for interest in self.interests.lock().unwrap().drain(..) { interest.slot.wake(); }
                     for entry in active.values_mut() {
                         if !entry.cancel_requested {
@@ -588,7 +588,7 @@ impl IoPoller {
                         }
                     }
                     self.iocp_port.store(0, Ordering::Release);
-                    *self.backend_state.lock().unwrap() = IoBackendState::Closed;
+                    *self.backend_state.lock().unwrap() = IOBackendState::Closed;
                     if unsafe { CloseHandle(port) } != 0 {
                         METRIC_IO_PORT_CLOSED.fetch_add(1, Ordering::Relaxed);
                     } else {
@@ -604,7 +604,7 @@ impl IoPoller {
                         std::mem::forget(active);
                     }
                     *self.backend_state.lock().unwrap() =
-                        IoBackendState::Failed("internal scheduler IOCP completion port failed");
+                        IOBackendState::Failed("internal scheduler IOCP completion port failed");
                     self.iocp_shutdown_done.store(true, Ordering::Release);
                     return;
                 }
@@ -693,19 +693,19 @@ impl IoPoller {
     }
 }
 
-static IO_POLLER: OnceLock<Arc<IoPoller>> = OnceLock::new();
+static IO_POLLER: OnceLock<Arc<IOPoller>> = OnceLock::new();
 
-fn io_poller() -> Arc<IoPoller> {
+fn io_poller() -> Arc<IOPoller> {
     IO_POLLER
         .get_or_init(|| {
-            let poller = Arc::new(IoPoller {
+            let poller = Arc::new(IOPoller {
                 interests: Mutex::new(Vec::new()),
                 streams: Mutex::new(HashMap::new()),
                 retire_requested: Mutex::new(HashSet::new()),
                 backend_state: Mutex::new(if cfg!(target_os = "windows") {
-                    IoBackendState::Starting
+                    IOBackendState::Starting
                 } else {
-                    IoBackendState::Running
+                    IOBackendState::Running
                 }),
                 notify: Condvar::new(),
                 next_key: AtomicUsize::new(0),
@@ -728,13 +728,13 @@ pub fn jet_scheduler_io_wait(stream: &TcpStream, read: bool, write: bool, wait_k
     let (id, slot) = poller
         .register(shared, read, write)
         .unwrap_or_else(|error| jet_scheduler_fatal(error));
-    struct Registration(Arc<IoPoller>, usize);
+    struct Registration(Arc<IOPoller>, usize);
     impl Drop for Registration {
         fn drop(&mut self) { self.0.unregister(self.1); }
     }
     let _registration = Registration(poller, id);
     jet_scheduler_yield(wait_kind, &slot, None);
-    if let IoBackendState::Failed(error) = &*io_poller().backend_state.lock().unwrap() {
+    if let IOBackendState::Failed(error) = &*io_poller().backend_state.lock().unwrap() {
         jet_scheduler_fatal(error);
     }
 }
@@ -879,7 +879,7 @@ mod iocp_runtime_tests {
         let (active, allocated, retired) = jet_scheduler_metric_io_operations();
         assert_eq!((active, allocated), (0, retired));
         assert_eq!(METRIC_IO_PORT_CLOSED.load(Ordering::Relaxed), closed_before + 1);
-        assert!(matches!(*io_poller().backend_state.lock().unwrap(), IoBackendState::Failed(_)));
+        assert!(matches!(*io_poller().backend_state.lock().unwrap(), IOBackendState::Failed(_)));
 
         // Published terminal failure rejects later waits synchronously.
         let (client, _server) = connected();

@@ -18,7 +18,7 @@ use crate::file_mtime;
 pub enum RootKind {
     Import,
     Asset,
-    Html,
+    HTML,
     Style,
     Manifest,
     Lock,
@@ -32,7 +32,7 @@ impl RootKind {
         match self {
             Self::Import => "import",
             Self::Asset => "asset",
-            Self::Html => "html",
+            Self::HTML => "html",
             Self::Style => "style",
             Self::Manifest => "manifest",
             Self::Lock => "lock",
@@ -247,7 +247,7 @@ impl WatchGraph {
         }
         match path.extension().and_then(|e| e.to_str()) {
             Some("jet") => RootKind::Import,
-            Some("html" | "htm") => RootKind::Html,
+            Some("html" | "htm") => RootKind::HTML,
             Some("css") => RootKind::Style,
             Some("png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" | "woff" | "woff2" | "ttf" | "otf") => {
                 RootKind::Asset
@@ -278,7 +278,7 @@ impl WatchGraph {
                     "{}.html",
                     entry.file_stem().and_then(|s| s.to_str()).unwrap_or("app")
                 )),
-                RootKind::Html,
+                RootKind::HTML,
             ),
             (
                 project.join(format!(
@@ -731,7 +731,7 @@ mod tests {
         let mut graph = WatchGraph::from_entry(&entry, &[lib.clone()]);
         graph.upsert(css.clone(), RootKind::Style);
         graph.link(entry.clone(), css.clone());
-        graph.upsert(html.clone(), RootKind::Html);
+        graph.upsert(html.clone(), RootKind::HTML);
         graph.link(entry.clone(), html.clone());
         graph.upsert(dir.join("logo.png"), RootKind::Asset);
         graph.upsert(dir.join("generated/out.jet"), RootKind::Generated);
@@ -744,7 +744,7 @@ mod tests {
         assert!(kinds.contains(&RootKind::Manifest));
         assert!(kinds.contains(&RootKind::Lock));
         assert!(kinds.contains(&RootKind::Style));
-        assert!(kinds.contains(&RootKind::Html));
+        assert!(kinds.contains(&RootKind::HTML));
         assert!(kinds.contains(&RootKind::Asset));
         assert!(kinds.contains(&RootKind::Generated));
         assert!(kinds.contains(&RootKind::BuildInput));

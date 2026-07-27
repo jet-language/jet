@@ -1,9 +1,9 @@
 // Reactive UI flagship: canonical UiNode composition, typed color, motion,
 // signals, DOM rendering, and native/null rendering share one tree mechanism.
-// `#Target(Web)` and `#Html` make the companion page the default web output.
+// `#Target(Web)` and `#HTML` make the companion page the default web output.
 use core.ui as ui
 use core.reactive as reactive
-#[Target(Web), Html("ui_showcase.html")]
+#[Target(Web), HTML("ui_showcase.html")]
 
 // Native and browser entry points compose the same canonical UiNode tree.
 // Browser-side wiring converts typed Color values to real CSS hex colors.
@@ -14,8 +14,8 @@ use core.reactive as reactive
 // (there, `Style`/`Color` were built but never reached the backend).
 //
 // Organization note: tried grouping every browser-side function into ONE
-// `#Target(Js) module browser { ... }` instead of a `#Target(Js)` tag on each one —
-// this WOULD be the cleaner shape (a module-level `#Target(Js)` ceiling does
+// `#Target(JS) module browser { ... }` instead of a `#Target(JS)` tag on each one —
+// this WOULD be the cleaner shape (a module-level `#Target(JS)` ceiling does
 // cascade to member functions, confirmed working for simple cases), but it
 // exposed two real, general compiler bugs unrelated to this file's own logic:
 // (1) a struct declared *inside* an inline `module { }` isn't visible even to
@@ -26,7 +26,7 @@ use core.reactive as reactive
 // `return StatCard.{ ..., color: color, ... }` inside a module wants a
 // copy that the identical code at file scope never needed). Both are
 // reported, not fixed here (out of scope for this pass) — so this file keeps
-// the original, verified-working per-function `#Target(Js)` tags below instead.
+// the original, verified-working per-function `#Target(JS)` tags below instead.
 // Truncating divide-by-16, computed via range comparison + subtraction
 // (never `/`) — deliberately sidesteps int-vs-float division semantics the
 // narrow JS backend doesn't distinguish (JS `/` is always float division;
@@ -69,7 +69,7 @@ struct StatCard {
     y: Float
 }
 
-#Target(Js)
+#Target(JS)
 fn hex_digit(n: Int) => String {
     if n == 0 { return "0" }
     if n == 1 { return "1" }
@@ -89,7 +89,7 @@ fn hex_digit(n: Int) => String {
     return "f"
 }
 
-#Target(Js)
+#Target(JS)
 fn hi_nibble(n: Int) => Int {
     if n < 16 { return 0 }
     if n < 32 { return 1 }
@@ -109,29 +109,29 @@ fn hi_nibble(n: Int) => Int {
     return 15
 }
 
-#Target(Js)
+#Target(JS)
 fn hex_byte(n: Int) => String {
     hi :: hi_nibble(n)
     lo :: n - (hi * 16)
     return "{hex_digit(hi)}{hex_digit(lo)}"
 }
 
-#Target(Js)
+#Target(JS)
 fn to_hex(c: Color) => String = "#{hex_byte(c.r)}{hex_byte(c.g)}{hex_byte(c.b)}"
 
-#Target(Js)
+#Target(JS)
 fn altitude_color() => Color { return Color.{r: 51, g: 102, b: 255} }
 
-#Target(Js)
+#Target(JS)
 fn airspeed_color() => Color { return Color.{r: 18, g: 184, b: 134} }
 
-#Target(Js)
+#Target(JS)
 fn fuel_color() => Color { return Color.{r: 232, g: 121, b: 12} }
 
-#Target(Js)
+#Target(JS)
 fn boost_color() => Color { return Color.{r: 136, g: 85, b: 238} }
 
-#Target(Js)
+#Target(JS)
 fn stat_card(label: String, value: String, color: Color, x: Float, y: Float) => StatCard {
     return StatCard.{label: ~label, value: ~value, color: ~color, x: x, y: y}
 }
@@ -147,7 +147,7 @@ fn paint_stat_card(card: StatCard) {
     backend.paint(node)
 }
 
-#Target(Js)
+#Target(JS)
 fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) => Float {
     if elapsed_ms <= 0 { return from }
     if elapsed_ms >= duration_ms { return to }

@@ -3,7 +3,7 @@
 //! Command spelling and TODO diagnostic codes are gated. These helpers produce
 //! canonical editable files and data-only TODO facts for callers/tests.
 
-use super::JSON::{self, Json};
+use super::JSON::{self, JSONValue};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportPlan {
@@ -129,7 +129,7 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
             .to_string(),
         version: "0.1.0".to_string(),
     });
-    if let Some(Json::Array(pkgs)) = obj.and_then(|m| m.get("packages")) {
+    if let Some(JSONValue::Array(pkgs)) = obj.and_then(|m| m.get("packages")) {
         for pkg in pkgs {
             if let Ok(name) = pkg.as_str() {
                 plan.deps.push(ImportedDep {
@@ -201,7 +201,7 @@ pub fn import_npm(package_json: &str) -> ImportPlan {
         .unwrap_or("0.1.0")
         .to_string();
     plan.packages.push(ImportedPackage { name, version });
-    if let Some(Json::Object(deps)) = obj.and_then(|m| m.get("dependencies")) {
+    if let Some(JSONValue::Object(deps)) = obj.and_then(|m| m.get("dependencies")) {
         for (name, val) in deps {
             plan.deps.push(ImportedDep {
                 name: name.clone(),
@@ -211,7 +211,7 @@ pub fn import_npm(package_json: &str) -> ImportPlan {
             });
         }
     }
-    if let Some(Json::Object(scripts)) = obj.and_then(|m| m.get("scripts")) {
+    if let Some(JSONValue::Object(scripts)) = obj.and_then(|m| m.get("scripts")) {
         for name in scripts.keys() {
             plan.todos.push(ImportTodo {
                 source_path: "package.json".to_string(),

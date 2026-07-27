@@ -1,12 +1,12 @@
 /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): what a `#Target(…)` marker parsed to — a
-/// partition-ceiling `Bucket` (`Wasm`/`Js`, existing D-WASM1 meaning),
+/// partition-ceiling `Bucket` (`Wasm`/`JS`, existing D-WASM1 meaning),
 /// `DefaultWeb` (`Web` — this file's default CLI backend, a different axis),
-/// or `Os` (D-OSTARGET1=A: `Os.Linux`/`Os.Macos`/`Os.Windows` — the native
+/// or `OS` (D-OSTARGET1=A: `OS.Linux`/`OS.MacOS`/`OS.Windows` — the native
 /// platform-gating axis, item-scoped rather than file/module-scoped).
 pub(super) enum TargetMarker {
     Bucket(crate::Syntax::WebBucket),
     DefaultWeb,
-    Os(crate::Syntax::OsTarget),
+    OS(crate::Syntax::OSTarget),
 }
 
 #[path = "Items/imports_policy.rs"]

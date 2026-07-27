@@ -591,7 +591,7 @@ pub(crate) fn run_completions(args: &[String]) {
         if bytes.len() as u64 > MAX_PROGRAM_BYTES {
             completion_metadata_error(program, "the program grew beyond the 512 MiB metadata-reader limit while being read");
         }
-        let schema = jet_foundation::CliSchema::read_executable(&bytes)
+        let schema = jet_foundation::CLISchema::read_executable(&bytes)
             .unwrap_or_else(|error| completion_metadata_error(program, &error.to_string()));
         jet::CLI::completions_for_program(shell, &command_name, &schema).unwrap()
     };

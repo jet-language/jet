@@ -23,7 +23,7 @@ pub use GenericModules::specialize_function_types;
 use GenericModules::{clone_enum, clone_struct};
 use Outputs::{
     cli_entry_param_shape, is_fallible_void_entry_return, no_run_error, resolve_outputs,
-    CliEntryShape,
+    CLIEntryShape,
 };
 #[allow(unused_imports)]
 pub(crate) use Validation::{
@@ -1352,9 +1352,9 @@ fn check_bundle_opts_for_output_inner(
         // `@`/`#` plane vocabulary is E0927, instead of silently doing
         // nothing (the parser accepts any PascalCase name structurally).
         diags.extend(check_marker_vocabulary(&module.items, &known_derive_names));
-        // D-CLIFLAG1: validate `#[Cli]`-derived structs (E1305/E1306), same
+        // D-CLIFLAG1: validate `#[CLI]`-derived structs (E1305/E1306), same
         // timing as the serde pass above (trait registry must be built so
-        // `Cli` is visible on `s.derives`).
+        // `CLI` is visible on `s.derives`).
         diags.extend(validate_cli_items(&module.items, &st.trait_reg));
         // D-MIGRATE1: schema diff pass (E0910) — runs after struct registration (I3).
         diags.extend(check_schema_migrations(
@@ -1817,7 +1817,7 @@ fn check_bundle_opts_for_output_inner(
         }) {
             // S12/D-S80-RUN1/D-CLIFLAG1: `run` is the only program entry name.
             // It is zero-arg (optionally `-> Void ?`), or one typed CLI-spec
-            // parameter (`#[Cli]` struct / enum).
+            // parameter (`#[CLI]` struct / enum).
             if run_fn.params.is_empty() {
                 if mode == CompileMode::Run
                     && run_fn
@@ -1837,16 +1837,16 @@ fn check_bundle_opts_for_output_inner(
                 }
             } else if run_fn.params.len() == 1 {
                 let param = &run_fn.params[0];
-                let cli_module = jet_foundation::CliSchema::entry_type_module(bundle)
+                let cli_module = jet_foundation::CLISchema::entry_type_module(bundle)
                     .unwrap_or(bundle.entry);
                 match cli_entry_param_shape(
                     &bundle.modules[cli_module].items,
                     &param.ty,
                     &states[cli_module].trait_reg,
                 ) {
-                    CliEntryShape::Struct | CliEntryShape::Enum => {}
-                    CliEntryShape::EnumBadVariants(bad) => diags.extend(bad),
-                    CliEntryShape::Invalid => diags.push(e1308(Some(param.ty_span))),
+                    CLIEntryShape::Struct | CLIEntryShape::Enum => {}
+                    CLIEntryShape::EnumBadVariants(bad) => diags.extend(bad),
+                    CLIEntryShape::Invalid => diags.push(e1308(Some(param.ty_span))),
                 }
             } else {
                 diags.push(e1308(Some(run_fn.name_span)));
@@ -2118,7 +2118,7 @@ fn check_bundle_opts_for_output_inner(
     // D-TAINT1: taint tracking across every module. `#Sanitizer fn`s are
     // collected program-wide (a sanitizer in one module clears taint at a call in
     // another); each module's bodies are checked against its own Core aliases so
-    // a sink call (Db/Exec/Net effect) resolves correctly. Erased in codegen (I3).
+    // a sink call (DB/Exec/Net effect) resolves correctly. Erased in codegen (I3).
     let mut sanitizers: std::collections::HashSet<String> = std::collections::HashSet::new();
     for module in &bundle.modules {
         collect_sanitizers(&module.items, &mut sanitizers);
@@ -2145,7 +2145,7 @@ fn check_bundle_opts_for_output_inner(
     }
 
     let (mut used_core, usage_spans, ffi_callback_fns) = collect_used_core(bundle, &states);
-    // D-CLIFLAG1: a `#[Cli]`-derived struct's generated `__jet_cli_spec_*`/
+    // D-CLIFLAG1: a `#[CLI]`-derived struct's generated `__jet_cli_spec_*`/
     // `__jet_cli_decode_*` functions (and the synthesized `fn main` for a
     // typed `fn run`) call straight into `core.args`'s `JetArgsSpec`/
     // `JetParsedArgs` prelude — but they're pure codegen text, not a Jet
@@ -2156,7 +2156,7 @@ fn check_bundle_opts_for_output_inner(
     if bundle.modules.iter().any(|m| {
         m.items
             .iter()
-            .any(|i| matches!(i, Item::Struct(s) if s.derives.iter().any(|(t, _)| t == "Cli")))
+            .any(|i| matches!(i, Item::Struct(s) if s.derives.iter().any(|(t, _)| t == "CLI")))
     }) {
         used_core.insert("core.args::spec".to_string());
     }
@@ -2287,7 +2287,7 @@ mod structure_tests {
             web_partition_enforced: false,
             web_partition_report: None,
             dep_roots: HashMap::new(),
-            active_os: crate::Syntax::OsTarget::host(),
+            active_os: crate::Syntax::OSTarget::host(),
             edition: "2027".to_string(),
         }
     }

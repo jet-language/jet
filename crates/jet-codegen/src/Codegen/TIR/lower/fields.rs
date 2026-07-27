@@ -106,10 +106,10 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         // `ProcessChild` Rust struct field directly (a writer/reader handle),
         // not a `user_<field>` name.
         "ProcessChild" => matches!(member, "stdin" | "stdout" | "stderr"),
-        n if n == Syntax::TYPE_JSON_ERROR || n == "JsonError" => {
+        n if n == Syntax::TYPE_JSON_ERROR || n == "JSONError" => {
             matches!(member, "line" | "message")
         }
-        n if n == Syntax::TYPE_UTF8_ERROR || n == "Utf8Error" => member == "message",
+        n if n == Syntax::TYPE_UTF8_ERROR || n == "UTF8Error" => member == "message",
         n if n == Syntax::TYPE_IO_CONTEXT => Syntax::IO_CONTEXT_FIELDS.contains(&member),
         // D-LSDIR1=A: DirEntry fields — name (bare filename), path (full path), is_dir.
         "DirEntry" => matches!(member, "name" | "path" | "is_dir"),
@@ -162,14 +162,14 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
             )
         }
         "UiNode" => matches!(member, "label" | "width" | "height"),
-        // E2-M10: HttpRequest / HttpResponse field access.
-        "HttpRequest" | "HttpResponse" => {
+        // E2-M10: HTTPRequest / HTTPResponse field access.
+        "HTTPRequest" | "HTTPResponse" => {
             matches!(member, "method" | "path" | "body" | "headers" | "status")
         }
-        "TlsPeerIdentity" => {
+        "TLSPeerIdentity" => {
             matches!(member, "verified_server_name" | "leaf" | "certificate_chain")
         }
-        "TlsCertificate" => matches!(
+        "TLSCertificate" => matches!(
             member,
             "der"
                 | "sha256"
@@ -275,17 +275,17 @@ pub(crate) fn struct_field_type(cx: &Cx, recv_ty: &Type, field: &str) -> Option<
             _ => None,
         };
     }
-    if name == "TlsPeerIdentity" && !cx.struct_fields.contains_key(name) {
+    if name == "TLSPeerIdentity" && !cx.struct_fields.contains_key(name) {
         return match field {
             "verified_server_name" => Some(Type::String),
-            "leaf" => Some(Type::Named("TlsCertificate".to_string())),
+            "leaf" => Some(Type::Named("TLSCertificate".to_string())),
             "certificate_chain" => Some(Type::List(Box::new(Type::Named(
-                "TlsCertificate".to_string(),
+                "TLSCertificate".to_string(),
             )))),
             _ => None,
         };
     }
-    if name == "TlsCertificate" && !cx.struct_fields.contains_key(name) {
+    if name == "TLSCertificate" && !cx.struct_fields.contains_key(name) {
         return match field {
             "der" | "sha256" | "spki_sha256" => Some(Type::List(Box::new(Type::IntN {
                 signed: false,

@@ -53,7 +53,7 @@ fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
         web_partition_enforced: false,
         web_partition_report: None,
         dep_roots: HashMap::new(),
-        active_os: Syntax::OsTarget::host(),
+        active_os: Syntax::OSTarget::host(),
         edition: "2027".to_string(),
     };
     let diagnostics = check_bundle(&mut bundle, CompileMode::Eval);
@@ -97,7 +97,7 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
         import_targets, layer_ceiling: None, inferred_layer: Syntax::RuntimeLayer::Core,
         web_partitions: HashMap::new(), web_partition_enforced: false, web_partition_report: None,
         dep_roots: HashMap::new(),
-        active_os: Syntax::OsTarget::host(),
+        active_os: Syntax::OSTarget::host(),
         edition: "2027".to_string(),
     };
     let diagnostics = check_bundle(&mut bundle, CompileMode::Eval);

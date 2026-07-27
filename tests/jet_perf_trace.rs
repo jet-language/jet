@@ -89,10 +89,10 @@ fn perf_attach_uses_compiler_browser_map_after_source_changes() {
     let original = r##"#Target(Web)
 use core.web as web
 module handlers {
-    #Target(Js)
+    #Target(JS)
     pub fn init() { web.on("#field", "input", (ev) => {}) }
 }
-#Target(Js)
+#Target(JS)
 fn run() { handlers.init() }
 "##;
     fs::write(&source, original).unwrap();
@@ -188,10 +188,10 @@ fn perf_attach_drives_real_devserver_browser_lifecycle() {
     let original = r##"#Target(Web)
 use core.web as web
 module handlers {
-    #Target(Js)
+    #Target(JS)
     pub fn init() { web.on("#field", "input", (ev) => {}) }
 }
-#Target(Js)
+#Target(JS)
 fn run() { handlers.init() }
 "##;
     fs::write(&source, original).unwrap();

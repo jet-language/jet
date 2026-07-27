@@ -158,7 +158,7 @@ pub const BINDERS: &[BinderDescriptor] = &[
         stub_kind: BindingStubKind::PythonIntrospection,
     },
     BinderDescriptor {
-        language: ForeignLanguage::Js,
+        language: ForeignLanguage::JS,
         surface: BinderSurface::Namespace,
         status: BinderStatus::Active,
         runtime: BinderRuntime::TargetDispatchedJs,
@@ -308,7 +308,7 @@ pub fn type_stub_file(
         return Some(binding_cache_dir(project_root,language).join(format!("{lib}_host.dart")));
     }
     let ext = match language {
-        ForeignLanguage::Js => "d.ts",
+        ForeignLanguage::JS => "d.ts",
         _ => return None,
     };
     Some(binding_cache_dir(project_root, language).join(format!("{lib}.{ext}")))
@@ -324,7 +324,7 @@ pub fn host_for(language: ForeignLanguage, target: ForeignTarget) -> ForeignHost
         ForeignLanguage::Cpp => ForeignHost::ClangCppShim,
         ForeignLanguage::Rust => ForeignHost::LegacyRustExtern,
         ForeignLanguage::Py => ForeignHost::SupervisedPythonSidecar,
-        ForeignLanguage::Js => match target {
+        ForeignLanguage::JS => match target {
             ForeignTarget::Native => ForeignHost::NativeJsWasmComponent,
             ForeignTarget::Web => ForeignHost::BrowserJsEngine,
         },

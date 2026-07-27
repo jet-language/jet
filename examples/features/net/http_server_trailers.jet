@@ -7,7 +7,7 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     addr :: listener.local_addr() ?? panic("address")
     mux :: http_server.mux()
-    mux.post("/", (req: HttpRequest) => {
+    mux.post("/", (req: HTTPRequest) => {
         body :: req.body().text(1024) ?? panic("body")
         // Request trailers are available only after Body reaches EOF.
         trailers :: req.trailers() ?? panic("trailers")

@@ -1,6 +1,6 @@
 //! U27 (D-JPK-BUILDDBG1=A): failed-build logs, preserved scratch, explain.
 
-use super::JSON::{self, Json};
+use super::JSON::{self, JSONValue};
 use std::path::{Path, PathBuf};
 
 const LOG_ROOT: &str = "build-logs";
@@ -235,7 +235,7 @@ fn parse_attempt(text: &str) -> Result<Attempt, String> {
         log_dir: str_field(obj, "log_dir")?,
         steps: Vec::new(),
     };
-    if let Some(Json::Array(steps)) = obj.get("steps") {
+    if let Some(JSONValue::Array(steps)) = obj.get("steps") {
         for item in steps {
             let o = item.as_object()?;
             attempt.steps.push(StepLog {
@@ -253,16 +253,16 @@ fn parse_attempt(text: &str) -> Result<Attempt, String> {
     Ok(attempt)
 }
 
-fn str_field(obj: &std::collections::BTreeMap<String, Json>, key: &str) -> Result<String, String> {
+fn str_field(obj: &std::collections::BTreeMap<String, JSONValue>, key: &str) -> Result<String, String> {
     obj.get(key)
         .ok_or_else(|| format!("missing key `{key}`"))?
         .as_str()
         .map(ToString::to_string)
 }
 
-fn num_field(obj: &std::collections::BTreeMap<String, Json>, key: &str) -> usize {
+fn num_field(obj: &std::collections::BTreeMap<String, JSONValue>, key: &str) -> usize {
     match obj.get(key) {
-        Some(Json::Num(n)) => *n as usize,
+        Some(JSONValue::Num(n)) => *n as usize,
         _ => 0,
     }
 }

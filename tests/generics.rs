@@ -40,7 +40,7 @@ module complete<T, count: Int, label: String> {
     enum SourceErr { Bad(T) }
     enum TargetErr { Wrapped(SourceErr) }
     impl SourceErr => TargetErr { return TargetErr.Wrapped(self) }
-    #Target(Os.Linux)
+    #Target(OS.Linux)
     impl Wrapped { fn linux_value(self) => T { return self.value } }
     module plain { pub fn value() => Int { return count } }
     module nested<U> { pub fn keep(value: U) => U { return ~value } }

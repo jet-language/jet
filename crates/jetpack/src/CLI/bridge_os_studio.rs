@@ -48,7 +48,7 @@ pub(super) fn cmd_bridge(theme: &Theme, parsed: &Parsed) -> i32 {
 pub(super) fn cmd_os(theme: &Theme, parsed: &Parsed) -> i32 {
     let verb = parsed.positional.first().map(String::as_str);
     let args = parsed.positional.get(1..).unwrap_or(&[]);
-    let flags = crate::JetOS::OsFlags {
+    let flags = crate::JetOS::OSFlags {
         fixtures: parsed.flags.fixtures.clone(),
         offline: parsed.flags.offline,
         name: parsed.flags.os_name.clone(),
@@ -80,7 +80,7 @@ pub(super) fn cmd_os(theme: &Theme, parsed: &Parsed) -> i32 {
 pub(super) fn cmd_user(theme: &Theme, parsed: &Parsed) -> i32 {
     let verb = parsed.positional.first().map(String::as_str);
     let args = parsed.positional.get(1..).unwrap_or(&[]);
-    let flags = crate::JetOS::OsFlags {
+    let flags = crate::JetOS::OSFlags {
         fixtures: parsed.flags.fixtures.clone(),
         offline: parsed.flags.offline,
         name: parsed.flags.os_name.clone(),

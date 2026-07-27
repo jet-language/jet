@@ -1,6 +1,6 @@
 #![allow(dead_code, non_camel_case_types, unexpected_cfgs)]
 
-struct JetTcpListener {
+struct JetTCPListener {
     inner: std::net::TcpListener,
 }
 
@@ -35,9 +35,9 @@ mod jet_std {
         pub ms: i64,
     }
 
-    pub struct JetMime(pub String);
+    pub struct JetMIME(pub String);
 
-    impl JetMime {
+    impl JetMIME {
         pub fn to_string_value(&self) -> String {
             self.0.clone()
         }
@@ -114,26 +114,26 @@ fn jet_log_emit(_level: &str, msg: &str, _fields: &[LogField]) {
         .push(msg.to_string());
 }
 
-include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpMessage.rs");
-include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpRoute.rs");
-include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpClient.rs");
-include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HttpServer.rs");
+include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs");
+include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs");
+include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs");
+include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs");
 include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/Ws.rs");
 include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
 
 mod http_server_tls_runtime {
-    include!("../crates/jet-pkg-model/src/Prelude/HttpServerTls.rs");
+    include!("../crates/jet-pkg-model/src/Prelude/HTTPServerTLS.rs");
 
     pub fn framing_probe(raw: &[u8]) -> (u8, usize, usize) {
-        let mut state = JetHttpTlsMessageState::new();
+        let mut state = JetHTTPTlsMessageState::new();
         for end in 0..=raw.len() {
             match state.advance(&raw[..end], 32 * 1024, 1024 * 1024) {
-                JetHttpTlsMessageStatus::Pending => {}
-                JetHttpTlsMessageStatus::Complete(message_end) => {
+                JetHTTPTlsMessageStatus::Pending => {}
+                JetHTTPTlsMessageStatus::Complete(message_end) => {
                     return (1, message_end, state.inspected());
                 }
-                JetHttpTlsMessageStatus::Reject => {
+                JetHTTPTlsMessageStatus::Reject => {
                     return (2, end, state.inspected());
                 }
             }
@@ -177,7 +177,7 @@ const GZIP_DYNAMIC: &[u8] = &[
 fn unread_bridge_body(
     _handle: i64,
     _max_chunk: usize,
-) -> Result<Option<Vec<u8>>, JetHttpError> {
+) -> Result<Option<Vec<u8>>, JetHTTPError> {
     HTTP_BODY_READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     Ok(Some(vec![1]))
 }
@@ -194,7 +194,7 @@ fn close_h2_bridge_body(_handle: i64) {
 fn lazy_bridge_body_closes_once_after_concurrent_final_drops() {
     HTTP_BODY_CLOSES.store(0, std::sync::atomic::Ordering::SeqCst);
     for round in 0..64 {
-        let body = JetHttpBody::bridge(
+        let body = JetHTTPBody::bridge(
             round,
             Some(1),
             unread_bridge_body,
@@ -315,7 +315,7 @@ fn h2_read_frame(stream: &mut std::net::TcpStream) -> (u8, u8, u32, Vec<u8>) {
 
 #[test]
 fn shared_headers_preserve_repeats_validate_and_redact() {
-    let mut headers = JetHttpHeaders::new();
+    let mut headers = JetHTTPHeaders::new();
     headers.append("X-Trace", "one").unwrap();
     headers.append("x-trace", "two").unwrap();
     headers.append("Authorization", "Bearer secret").unwrap();
@@ -344,7 +344,7 @@ fn shared_headers_preserve_repeats_validate_and_redact() {
 
 #[test]
 fn shared_http_body_streams_bytes_once_and_uses_closed_errors() {
-    let body = JetHttpBody::reader(std::io::Cursor::new(vec![0, 255, 1, 2]), Some(4));
+    let body = JetHTTPBody::reader(std::io::Cursor::new(vec![0, 255, 1, 2]), Some(4));
     let alias = body.clone();
     let chunks = body
         .chunks(2)
@@ -354,21 +354,21 @@ fn shared_http_body_streams_bytes_once_and_uses_closed_errors() {
     assert_eq!(chunks, vec![vec![0, 255], vec![1, 2]]);
     assert_eq!(
         alias.bytes(8),
-        Err(JetHttpError::BodyConsumed),
+        Err(JetHTTPError::BodyConsumed),
         "a cloned message must not make a move-only body reusable",
     );
 
-    let oversized = JetHttpBody::from_bytes(vec![1, 2, 3]);
+    let oversized = JetHTTPBody::from_bytes(vec![1, 2, 3]);
     assert_eq!(
         oversized.bytes(2),
-        Err(JetHttpError::BodyTooLarge { limit: 2 }),
+        Err(JetHTTPError::BodyTooLarge { limit: 2 }),
     );
     assert_eq!(
-        JetHttpBody::from_bytes(vec![0xff]).text(8),
-        Err(JetHttpError::UnsupportedEncoding),
+        JetHTTPBody::from_bytes(vec![0xff]).text(8),
+        Err(JetHTTPError::UnsupportedEncoding),
     );
 
-    let mut streamed = JetHttpBody::reader(std::io::Cursor::new(b"abcdef".to_vec()), None)
+    let mut streamed = JetHTTPBody::reader(std::io::Cursor::new(b"abcdef".to_vec()), None)
         .chunks(2)
         .unwrap();
     let mut observed = Vec::new();
@@ -386,7 +386,7 @@ fn shared_http_body_multipart_boundary_is_bounded_and_collision_free() {
             "jet-http-boundary-0000000000000000".to_string(),
         ),
     ]);
-    let body = JetHttpBody::from_multipart(values);
+    let body = JetHTTPBody::from_multipart(values);
     assert_eq!(
         body.content_type().as_deref(),
         Some("multipart/form-data; boundary=jet-http-boundary-0000000000000002"),
@@ -416,7 +416,7 @@ fn client_request_and_response_use_the_shared_headers() {
     );
     assert!(invalid.header_error.is_some());
 
-    let headers = JetHttpHeaders::from_flat(vec![
+    let headers = JetHTTPHeaders::from_flat(vec![
         "Set-Cookie".to_string(), "a=1".to_string(),
         "set-cookie".to_string(), "b=2".to_string(),
     ]).unwrap();
@@ -441,7 +441,7 @@ fn live_server_round_trips_repeated_headers_in_order() {
     let mux = jet_http_mux_new();
     jet_http_mux_add(&mux, "GET", "/headers", |req| {
         assert_eq!(req.headers.all("x-tag"), vec!["one", "two"]);
-        let mut headers = JetHttpHeaders::new();
+        let mut headers = JetHTTPHeaders::new();
         headers.append("Set-Cookie", "a=1").unwrap();
         headers.append("set-cookie", "b=2").unwrap();
         jet_http_srv_response_with_headers(200, "ok", headers)
@@ -449,7 +449,7 @@ fn live_server_round_trips_repeated_headers_in_order() {
     let client = std::thread::spawn(move || {
         request(addr, b"GET /headers HTTP/1.1\r\nHost: local\r\nX-Tag: one\r\nx-tag: two\r\n\r\n")
     });
-    jet_http_mux_serve_once_listener(&JetTcpListener { inner: listener }, &mux).expect("serve once");
+    jet_http_mux_serve_once_listener(&JetTCPListener { inner: listener }, &mux).expect("serve once");
     let response = client.join().expect("client");
     let first = response.find("Set-Cookie: a=1\r\n").expect("first repeated header");
     let second = response.find("set-cookie: b=2\r\n").expect("second repeated header");
@@ -460,8 +460,8 @@ fn live_server_round_trips_repeated_headers_in_order() {
 fn live_shared_messages_round_trip_binary_and_stream_unknown_length() {
     use std::io::{Read, Write};
 
-    fn takes_canonical_request(_: JetHttpRequest) {}
-    fn takes_canonical_response(_: JetHttpResponse) {}
+    fn takes_canonical_request(_: JetHTTPRequest) {}
+    fn takes_canonical_response(_: JetHTTPResponse) {}
 
     takes_canonical_request(jet_http_client_request_new(
         &"POST".to_string(),
@@ -486,7 +486,7 @@ fn live_shared_messages_round_trip_binary_and_stream_unknown_length() {
             .into_iter()
             .collect(),
         );
-        response.body = JetHttpBody::reader(
+        response.body = JetHTTPBody::reader(
             std::io::Cursor::new(vec![255, 0, 1]),
             None,
         );
@@ -503,7 +503,7 @@ fn live_shared_messages_round_trip_binary_and_stream_unknown_length() {
         stream.read_to_end(&mut response).unwrap();
         response
     });
-    jet_http_mux_serve_once_listener(&JetTcpListener { inner: listener }, &mux).unwrap();
+    jet_http_mux_serve_once_listener(&JetTCPListener { inner: listener }, &mux).unwrap();
     let response = client.join().unwrap();
     let header_end = response.windows(4).position(|bytes| bytes == b"\r\n\r\n").unwrap();
     let headers = std::str::from_utf8(&response[..header_end]).unwrap();
@@ -529,22 +529,22 @@ fn http1_streams_request_response_bodies_and_bounded_declared_trailers() {
     }
 
     let forbidden_response = jet_http_srv_response(200, &"body".to_string());
-    let mut forbidden_trailers = JetHttpHeaders::new();
+    let mut forbidden_trailers = JetHTTPHeaders::new();
     forbidden_trailers.append("Content-Length", "4").unwrap();
     assert!(matches!(
         jet_http_srv_response_trailers(forbidden_response, forbidden_trailers),
-        Err(JetHttpError::InvalidHeader),
+        Err(JetHTTPError::InvalidHeader),
     ));
     let mut forbidden_response = jet_http_srv_response(200, &"body".to_string());
     forbidden_response.trailers.append("Content-Length", "4").unwrap();
     let mut unpublished = Vec::new();
     assert_eq!(
         jet_http_srv_write_response(&mut unpublished, &forbidden_response, "HTTP/1.1", true),
-        Err(JetHttpError::InvalidHeader),
+        Err(JetHTTPError::InvalidHeader),
     );
     assert!(unpublished.is_empty(), "forbidden trailers published response headers");
 
-    let mut http10_trailers = JetHttpHeaders::new();
+    let mut http10_trailers = JetHTTPHeaders::new();
     http10_trailers.append("X-Checksum", "done").unwrap();
     let http10_response = jet_http_srv_response_trailers(
         jet_http_srv_response(200, &"body".to_string()),
@@ -552,12 +552,12 @@ fn http1_streams_request_response_bodies_and_bounded_declared_trailers() {
     ).unwrap();
     assert_eq!(
         jet_http_srv_write_response(&mut unpublished, &http10_response, "HTTP/1.0", true),
-        Err(JetHttpError::InvalidFraming),
+        Err(JetHTTPError::InvalidFraming),
     );
     assert!(unpublished.is_empty(), "HTTP/1.0 trailers published response headers");
 
     let mut http10_stream = jet_http_srv_response(200, &String::new());
-    http10_stream.body = JetHttpBody::reader(std::io::Cursor::new(b"close-body".to_vec()), None);
+    http10_stream.body = JetHTTPBody::reader(std::io::Cursor::new(b"close-body".to_vec()), None);
     let mut http10_wire = Vec::new();
     jet_http_srv_write_response(&mut http10_wire, &http10_stream, "HTTP/1.0", false).unwrap();
     let http10_wire = String::from_utf8(http10_wire).unwrap();
@@ -567,7 +567,7 @@ fn http1_streams_request_response_bodies_and_bounded_declared_trailers() {
     assert!(http10_wire.ends_with("\r\n\r\nclose-body"), "{http10_wire}");
 
     let mut streamed_head = jet_http_srv_response(200, &String::new());
-    streamed_head.body = JetHttpBody::reader(std::io::Cursor::new(b"hidden".to_vec()), None);
+    streamed_head.body = JetHTTPBody::reader(std::io::Cursor::new(b"hidden".to_vec()), None);
     streamed_head.trailers.append("X-Checksum", "hidden").unwrap();
     let streamed_head = jet_http_srv_head_response(streamed_head, true);
     let mut head_wire = Vec::new();
@@ -583,7 +583,7 @@ fn http1_streams_request_response_bodies_and_bounded_declared_trailers() {
     let calls = std::sync::Arc::new(AtomicUsize::new(0));
     let handler_calls = calls.clone();
     jet_http_mux_add_handler(&mux, "POST", "/trailers", std::sync::Arc::new(move |req| {
-        assert!(matches!(jet_http_srv_req_trailers(&req), Err(JetHttpError::InvalidFraming)));
+        assert!(matches!(jet_http_srv_req_trailers(&req), Err(JetHTTPError::InvalidFraming)));
         let body = req.body.text(1024)?;
         let trailers = jet_http_srv_req_trailers(&req)?;
         assert_eq!(trailers.first("x-checksum"), Some("abc123"));
@@ -591,8 +591,8 @@ fn http1_streams_request_response_bodies_and_bounded_declared_trailers() {
         handler_calls.fetch_add(1, Ordering::AcqRel);
 
         let mut response = jet_http_srv_response(200, &String::new());
-        response.body = JetHttpBody::reader(std::io::Cursor::new(format!("stream:{body}")), None);
-        let mut trailers = JetHttpHeaders::new();
+        response.body = JetHTTPBody::reader(std::io::Cursor::new(format!("stream:{body}")), None);
+        let mut trailers = JetHTTPHeaders::new();
         trailers.append("X-Checksum", "done").unwrap();
         trailers.append("X-Trace", "first").unwrap();
         trailers.append("x-trace", "second").unwrap();
@@ -603,12 +603,12 @@ fn http1_streams_request_response_bodies_and_bounded_declared_trailers() {
     });
     jet_http_mux_add(&mux, "GET", "/stream10", |_| {
         let mut response = jet_http_srv_response(200, &String::new());
-        response.body = JetHttpBody::reader(std::io::Cursor::new(b"close-body".to_vec()), None);
+        response.body = JetHTTPBody::reader(std::io::Cursor::new(b"close-body".to_vec()), None);
         response
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 1;
     options.admission_queue = 8;
     options.read_body_timeout = std::time::Duration::from_secs(2);
@@ -686,7 +686,7 @@ fn http1_streaming_response_backpressure_cancels_its_source() {
     let source_closes = closes.clone();
     jet_http_mux_add(&mux, "GET", "/stream", move |_| {
         let mut response = jet_http_srv_response(200, &String::new());
-        response.body = JetHttpBody::reader_cancellable(
+        response.body = JetHTTPBody::reader_cancellable(
             Endless {
                 reads: source_reads.clone(),
             },
@@ -702,7 +702,7 @@ fn http1_streaming_response_backpressure_cancels_its_source() {
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 1;
     options.admission_queue = 1;
     options.write_idle_timeout = std::time::Duration::from_millis(50);
@@ -753,7 +753,7 @@ fn live_server_body_starts_before_the_large_slow_upload_finishes() {
         jet_http_srv_response(200, &total.to_string())
     });
     let server = std::thread::spawn(move || {
-        jet_http_mux_serve_once_listener(&JetTcpListener { inner: listener }, &mux).unwrap();
+        jet_http_mux_serve_once_listener(&JetTCPListener { inner: listener }, &mux).unwrap();
     });
 
     let length = 512 * 1024;
@@ -848,7 +848,7 @@ fn serve_once_waits_for_nonblocking_listener_readiness() {
         std::thread::sleep(std::time::Duration::from_millis(20));
         request(addr, b"GET /ready HTTP/1.1\r\nHost: local\r\n\r\n")
     });
-    jet_http_mux_serve_once_listener(&JetTcpListener { inner: listener }, &mux).expect("serve once");
+    jet_http_mux_serve_once_listener(&JetTCPListener { inner: listener }, &mux).expect("serve once");
     assert!(client.join().expect("client").contains("ready"));
 }
 
@@ -858,7 +858,7 @@ fn serve_once_accept_has_a_deadline() {
     listener.set_nonblocking(true).expect("nonblocking");
     let started = std::time::Instant::now();
     let error = jet_http_accept_once(
-        &JetTcpListener { inner: listener },
+        &JetTCPListener { inner: listener },
         std::time::Duration::from_millis(20),
     )
     .expect_err("accept should time out");
@@ -891,7 +891,7 @@ fn plain_http11_keepalive_pipelines_in_order_and_closes_at_boundaries() {
     jet_http_mux_add(&mux, "GET", "/empty", |_| jet_http_srv_response(204, &"forbidden".to_string()));
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 1;
     options.admission_queue = 5;
     options.read_header_timeout = std::time::Duration::from_millis(40);
@@ -1018,7 +1018,7 @@ fn head_preserves_representation_length_without_a_wire_body() {
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 1;
     options.admission_queue = 8;
     let server = std::thread::spawn(move || {
@@ -1124,7 +1124,7 @@ fn reset_content_has_zero_length_and_preserves_pipeline_boundaries() {
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 1;
     options.admission_queue = 8;
     let server = std::thread::spawn(move || {
@@ -1192,7 +1192,7 @@ fn invalid_response_statuses_fail_closed_without_breaking_pipelines() {
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 1;
     options.admission_queue = 8;
     let server = std::thread::spawn(move || {
@@ -1272,7 +1272,7 @@ fn chunked_requests_are_bounded_strict_and_preserve_pipeline_boundaries() {
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 1;
     options.admission_queue = 16;
     options.read_header_timeout = std::time::Duration::from_secs(1);
@@ -1473,7 +1473,7 @@ fn gzip_content_encoding_is_transparent_bounded_and_strict() {
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.max_body_bytes = 100;
     options.workers = 1;
     options.admission_queue = 8;
@@ -1624,7 +1624,7 @@ fn expect_continue_is_ordered_bounded_and_rejects_before_dispatch() {
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 1;
     options.admission_queue = 8;
     options.read_header_timeout = std::time::Duration::from_millis(200);
@@ -1718,7 +1718,7 @@ fn host_authority_is_single_valid_and_required_for_http11() {
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 1;
     options.admission_queue = 24;
     let server = std::thread::spawn(move || {
@@ -1820,7 +1820,7 @@ fn absolute_form_target_matches_host_before_routing() {
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
@@ -1922,7 +1922,7 @@ fn connect_authority_form_matches_host_before_routing() {
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
@@ -2025,8 +2025,8 @@ fn http2_connect_omits_path_and_routes_authority() {
     use std::io::Write;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    fn empty_body() -> JetHttpBody {
-        JetHttpBody::from_bytes(Vec::new())
+    fn empty_body() -> JetHTTPBody {
+        JetHTTPBody::from_bytes(Vec::new())
     }
 
     for (authority, expected) in [
@@ -2137,7 +2137,7 @@ fn http2_connect_omits_path_and_routes_authority() {
     let addr = listener.local_addr().unwrap();
     let mut client = std::net::TcpStream::connect(addr).unwrap();
     let (mut server, _) = listener.accept().unwrap();
-    let options = JetHttpServerOptions::safe();
+    let options = JetHTTPServerOptions::safe();
     let worker = std::thread::spawn(move || {
         jet_http2_serve(
             &mut server,
@@ -2166,7 +2166,7 @@ fn http2_connect_omits_path_and_routes_authority() {
         }
         if kind == 1 && stream == 1 {
             saw_headers = true;
-            let decoded = jet_http2_decode_headers(&mut JetHttp2Hpack::new(), &payload).unwrap();
+            let decoded = jet_http2_decode_headers(&mut JetHTTP2Hpack::new(), &payload).unwrap();
             assert!(
                 decoded.iter().any(|(name, value)| name == ":status" && value == "200"),
                 "CONNECT missing 200: {decoded:?}"
@@ -2198,7 +2198,7 @@ fn http2_connect_omits_path_and_routes_authority() {
     let addr = listener.local_addr().unwrap();
     let mut client = std::net::TcpStream::connect(addr).unwrap();
     let (mut server, _) = listener.accept().unwrap();
-    let options = JetHttpServerOptions::safe();
+    let options = JetHTTPServerOptions::safe();
     let worker = std::thread::spawn(move || {
         jet_http2_serve(
             &mut server,
@@ -2260,7 +2260,7 @@ fn request_method_is_one_http_token_before_body_or_dispatch() {
     }
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
@@ -2338,7 +2338,7 @@ fn request_methods_are_case_sensitive_during_routing() {
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
@@ -2438,7 +2438,7 @@ fn options_asterisk_reports_server_methods_without_dispatch() {
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
@@ -2533,7 +2533,7 @@ fn connection_options_are_tokens_before_reuse_or_body_permission() {
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
@@ -2628,7 +2628,7 @@ fn content_length_is_one_identical_decimal_value_before_body_permission() {
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 1;
     options.admission_queue = 16;
     let server = std::thread::spawn(move || {
@@ -2699,7 +2699,7 @@ fn shutdown_closes_idle_keepalive_and_starts_no_new_request() {
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let mut options = JetHttpServerOptions::safe();
+    let mut options = JetHTTPServerOptions::safe();
     options.workers = 2;
     options.admission_queue = 2;
     options.shutdown_grace = std::time::Duration::from_millis(500);
@@ -2743,14 +2743,14 @@ fn bounded_admission_returns_503_and_shutdown_drains_accepted_work() {
 
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let options = JetHttpServerOptions {
+    let options = JetHTTPServerOptions {
         workers: 1,
         admission_queue: 1,
         read_header_timeout: std::time::Duration::from_secs(1),
         read_idle_timeout: std::time::Duration::from_secs(1),
         read_body_timeout: std::time::Duration::from_secs(1),
         shutdown_grace: std::time::Duration::from_secs(1),
-        ..JetHttpServerOptions::safe()
+        ..JetHTTPServerOptions::safe()
     };
     let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server"));
     let slow = std::thread::spawn(move || request(addr, b"GET /slow HTTP/1.1\r\nHost: local\r\n\r\n"));
@@ -2771,7 +2771,7 @@ fn bounded_admission_returns_503_and_shutdown_drains_accepted_work() {
     assert_eq!(report.user_cancelled, 0);
 }
 
-fn timeout_for(partial: &'static [u8]) -> JetHttpReadError {
+fn timeout_for(partial: &'static [u8]) -> JetHTTPReadError {
     use std::io::Write;
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let addr = listener.local_addr().expect("addr");
@@ -2781,14 +2781,14 @@ fn timeout_for(partial: &'static [u8]) -> JetHttpReadError {
         std::thread::sleep(std::time::Duration::from_millis(150));
     });
     let (mut stream, _) = listener.accept().expect("accept");
-    let options = JetHttpServerOptions {
+    let options = JetHTTPServerOptions {
         workers: 1,
         admission_queue: 1,
         read_header_timeout: std::time::Duration::from_millis(40),
         read_idle_timeout: std::time::Duration::from_millis(40),
         read_body_timeout: std::time::Duration::from_millis(40),
         shutdown_grace: std::time::Duration::from_millis(40),
-        ..JetHttpServerOptions::safe()
+        ..JetHTTPServerOptions::safe()
     };
     let error = jet_http_srv_read_with_limits(&mut stream, &options).expect_err("timeout");
     client.join().expect("client");
@@ -2815,14 +2815,14 @@ fn shutdown_grace_cancels_straggler_socket_and_returns_bounded_report() {
     });
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let options = JetHttpServerOptions {
+    let options = JetHTTPServerOptions {
         workers: 1,
         admission_queue: 1,
         read_header_timeout: std::time::Duration::from_secs(1),
         read_idle_timeout: std::time::Duration::from_secs(1),
         read_body_timeout: std::time::Duration::from_secs(1),
         shutdown_grace: std::time::Duration::from_millis(30),
-        ..JetHttpServerOptions::safe()
+        ..JetHTTPServerOptions::safe()
     };
     let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, server_shutdown, None, None, None).expect("server"));
     let mut client = std::net::TcpStream::connect(addr).expect("connect");
@@ -2875,7 +2875,7 @@ fn canonical_router_precedence_methods_and_conflicts() {
     jet_http_mux_add(&mux, "POST", "/files/:id", |_| jet_http_srv_response(201, &"posted".to_string()));
 
     let request = |method: &str, path: &str| {
-        JetHttpRequest::server(method, path.to_string(), Vec::new(), Default::default())
+        JetHTTPRequest::server(method, path.to_string(), Vec::new(), Default::default())
     };
     assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/static")).unwrap().body, "static");
     assert_eq!(jet_http_mux_dispatch(&mux, request("GET", "/files/42")).unwrap().body, "param:42");
@@ -2904,7 +2904,7 @@ fn canonical_router_precedence_methods_and_conflicts() {
     let bare_once = jet_http_mux_new();
     jet_http_mux_add(&bare_once, "GET", "/files/*", |_| jet_http_srv_response(200, &String::new()));
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind invalid route probe");
-    assert!(jet_http_mux_serve_once_listener(&JetTcpListener { inner: listener }, &bare_once)
+    assert!(jet_http_mux_serve_once_listener(&JetTCPListener { inner: listener }, &bare_once)
         .err().expect("serve-once validation").contains("`*wildcard`"));
 
     let invalid_before_bind = jet_http_mux_new();
@@ -2971,7 +2971,7 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
     });
     jet_http_mux_add(&mux, "GET", "/panic", |_| panic!("private failure detail"));
     let request = |path: &str| {
-        JetHttpRequest::server("GET", path.to_string(), Vec::new(), Default::default())
+        JetHTTPRequest::server("GET", path.to_string(), Vec::new(), Default::default())
     };
     assert_eq!(jet_http_mux_dispatch(&mux, request("/ok/one")).unwrap().body, "one");
     assert_eq!(&*events.lock().unwrap(), &[
@@ -3024,7 +3024,7 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
     jet_http_srv_install_request_id(&runtime_error);
     jet_http_mux_middleware(&runtime_error, |_| {
         std::sync::Arc::new(|_| {
-            Err(JetHttpError::Internal {
+            Err(JetHTTPError::Internal {
                 incident_id: "private-middleware-error".to_string(),
             })
         })
@@ -3060,7 +3060,7 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
     for id in 0..16 {
         let mux = mux.clone();
         threads.push(std::thread::spawn(move || {
-            let req = JetHttpRequest::server(
+            let req = JetHTTPRequest::server(
                 "GET",
                 format!("/ok/{id}"),
                 Vec::new(),
@@ -3075,7 +3075,7 @@ fn middleware_orders_short_circuits_contains_panics_and_isolates_requests() {
 #[test]
 fn dispatch_drops_route_lock_before_concurrent_and_reentrant_handlers() {
     let request = |path: &str| {
-        JetHttpRequest::server("GET", path.to_string(), Vec::new(), Default::default())
+        JetHTTPRequest::server("GET", path.to_string(), Vec::new(), Default::default())
     };
 
     // Two requests must enter the same handler concurrently. Holding the route
@@ -3145,7 +3145,7 @@ fn builtin_request_id_middleware_assigns_preserves_and_echoes_on_wire() {
         "GET",
         "/error",
         std::sync::Arc::new(|_| {
-            Err(JetHttpError::Internal {
+            Err(JetHTTPError::Internal {
                 incident_id: "private-handler-error".to_string(),
             })
         }),
@@ -3154,7 +3154,7 @@ fn builtin_request_id_middleware_assigns_preserves_and_echoes_on_wire() {
         panic!("private handler panic")
     });
 
-    let mut forged = JetHttpRequest::server("GET", "/id".to_string(), Vec::new(), JetHttpHeaders::new());
+    let mut forged = JetHTTPRequest::server("GET", "/id".to_string(), Vec::new(), JetHTTPHeaders::new());
     let _ = forged.headers.set("x-request-id", &"x".repeat(129));
     let replaced = jet_http_mux_dispatch(&mux, forged).expect("dispatch");
     let replaced_id = replaced.headers.get("x-request-id").cloned().expect("response id");
@@ -3162,7 +3162,7 @@ fn builtin_request_id_middleware_assigns_preserves_and_echoes_on_wire() {
     assert_eq!(replaced.body.text(64).unwrap(), replaced_id);
     assert_ne!(replaced_id.len(), 129);
 
-    let mut empty_id = JetHttpRequest::server("GET", "/id".to_string(), Vec::new(), JetHttpHeaders::new());
+    let mut empty_id = JetHTTPRequest::server("GET", "/id".to_string(), Vec::new(), JetHTTPHeaders::new());
     let _ = empty_id.headers.set("x-request-id", "");
     let empty_replaced = jet_http_mux_dispatch(&mux, empty_id).expect("dispatch empty id");
     assert!(
@@ -3173,11 +3173,11 @@ fn builtin_request_id_middleware_assigns_preserves_and_echoes_on_wire() {
         "empty inbound id must be replaced"
     );
     for unsafe_id in ["space separated", "tab\tseparated"] {
-        let mut request = JetHttpRequest::server(
+        let mut request = JetHTTPRequest::server(
             "GET",
             "/id".to_string(),
             Vec::new(),
-            JetHttpHeaders::new(),
+            JetHTTPHeaders::new(),
         );
         request.headers.set("x-request-id", unsafe_id).unwrap();
         let response = jet_http_mux_dispatch(&mux, request).expect("dispatch unsafe id");
@@ -3195,11 +3195,11 @@ fn builtin_request_id_middleware_assigns_preserves_and_echoes_on_wire() {
         ("GET", "/error", 500),
         ("GET", "/panic", 500),
     ] {
-        let request = JetHttpRequest::server(
+        let request = JetHTTPRequest::server(
             method,
             path.to_string(),
             Vec::new(),
-            JetHttpHeaders::new(),
+            JetHTTPHeaders::new(),
         );
         let response = jet_http_mux_dispatch(&mux, request).expect("redacted response");
         assert_eq!(response.status, status, "{method} {path}");
@@ -3226,7 +3226,7 @@ fn builtin_request_id_middleware_assigns_preserves_and_echoes_on_wire() {
     });
     let response = jet_http_mux_dispatch(
         &factory_panic,
-        JetHttpRequest::server("GET", "/".to_string(), Vec::new(), JetHttpHeaders::new()),
+        JetHTTPRequest::server("GET", "/".to_string(), Vec::new(), JetHTTPHeaders::new()),
     )
     .expect("factory panic response");
     assert_eq!(response.status, 500);
@@ -3349,7 +3349,7 @@ fn builtin_request_id_crosses_cleartext_http2() {
         jet_http_server_run_listener(
             listener,
             mux,
-            JetHttpServerOptions::safe(),
+            JetHTTPServerOptions::safe(),
             server_shutdown,
             None,
             None,
@@ -3375,7 +3375,7 @@ fn builtin_request_id_crosses_cleartext_http2() {
     for _ in 0..8 {
         let (kind, flags, stream, payload) = h2_read_frame(&mut client);
         if kind == 1 && stream == 1 {
-            let headers = jet_http2_decode_headers(&mut JetHttp2Hpack::new(), &payload).unwrap();
+            let headers = jet_http2_decode_headers(&mut JetHTTP2Hpack::new(), &payload).unwrap();
             for (name, value) in headers {
                 if name == ":status" {
                     response_status = Some(value);
@@ -3410,14 +3410,14 @@ fn http2_request_and_response_trailers_use_message_level_api() {
     jet_http_mux_add_handler(&mux, "POST", "/trailers", std::sync::Arc::new(|request| {
         assert!(matches!(
             jet_http_srv_req_trailers(&request),
-            Err(JetHttpError::InvalidFraming),
+            Err(JetHTTPError::InvalidFraming),
         ));
         let body = request.body.text(64)?;
         let trailers = jet_http_srv_req_trailers(&request)?;
         assert_eq!(trailers.all("x-trace"), vec!["one", "two"]);
 
         let mut response = jet_http_srv_response(200, &format!("h2:{body}"));
-        let mut trailers = JetHttpHeaders::new();
+        let mut trailers = JetHTTPHeaders::new();
         trailers.append("X-Trace", "first").unwrap();
         trailers.append("x-trace", "second").unwrap();
         response = jet_http_srv_response_trailers(response, trailers)?;
@@ -3445,7 +3445,7 @@ fn http2_request_and_response_trailers_use_message_level_api() {
         jet_http2_serve(
             &mut server_stream,
             &mux,
-            &JetHttpServerOptions::safe(),
+            &JetHTTPServerOptions::safe(),
             &std::sync::atomic::AtomicBool::new(false),
             None,
             None,
@@ -3466,7 +3466,7 @@ fn http2_request_and_response_trailers_use_message_level_api() {
     let mut response_trailers = Vec::new();
     let mut stream_one_done = false;
     let mut stream_three_done = false;
-    let mut decoder = JetHttp2Hpack::new();
+    let mut decoder = JetHTTP2Hpack::new();
     while !stream_one_done || !stream_three_done {
         let (kind, flags, stream, payload) = h2_read_frame(&mut client);
         if stream == 1 && kind == 0 {
@@ -3499,7 +3499,7 @@ fn http2_request_and_response_trailers_use_message_level_api() {
 
 #[test]
 fn server_safe_defaults_static_files_ranges_and_access_events_are_bounded() {
-    let options = JetHttpServerOptions::safe();
+    let options = JetHTTPServerOptions::safe();
     assert_eq!(options.max_body_bytes, 1024 * 1024);
     assert_eq!(options.max_connections, 10_000);
     assert_eq!(options.max_connections_per_ip, 256);
@@ -3515,9 +3515,9 @@ fn server_safe_defaults_static_files_ranges_and_access_events_are_bounded() {
     std::fs::write(root.join("index.html"), b"index").unwrap();
 
     let request = |path: &str, range: Option<&str>| {
-        let mut headers = JetHttpHeaders::new();
+        let mut headers = JetHTTPHeaders::new();
         if let Some(range) = range { headers.append("range", range).unwrap(); }
-        JetHttpRequest::server("GET", path.to_string(), Vec::new(), headers)
+        JetHTTPRequest::server("GET", path.to_string(), Vec::new(), headers)
     };
     let full = jet_http_srv_static_files(&request("/nested/data.bin", None), &root).unwrap();
     assert_eq!(full.status, 200);
@@ -3536,24 +3536,24 @@ fn server_safe_defaults_static_files_ranges_and_access_events_are_bounded() {
     assert_eq!(jet_http_srv_static_files(&request("/nested", None), &root).unwrap().status, 404);
     assert_eq!(jet_http_srv_static_files(&request("/", None), &root).unwrap().body.bytes(64).unwrap(), b"index");
     for (name, value) in [("if-none-match", etag.as_str()), ("if-modified-since", last_modified.as_str())] {
-        let mut headers = JetHttpHeaders::new();
+        let mut headers = JetHTTPHeaders::new();
         headers.append(name, value).unwrap();
-        let conditional = JetHttpRequest::server("GET", "/nested/data.bin".to_string(), Vec::new(), headers);
+        let conditional = JetHTTPRequest::server("GET", "/nested/data.bin".to_string(), Vec::new(), headers);
         assert_eq!(jet_http_srv_static_files(&conditional, &root).unwrap().status, 304);
     }
-    let mut headers = JetHttpHeaders::new();
+    let mut headers = JetHTTPHeaders::new();
     headers.append("range", "bytes=1-2").unwrap();
     headers.append("if-range", "\"stale\"").unwrap();
-    let stale_range = JetHttpRequest::server("GET", "/nested/data.bin".to_string(), Vec::new(), headers);
+    let stale_range = JetHTTPRequest::server("GET", "/nested/data.bin".to_string(), Vec::new(), headers);
     let stale_range = jet_http_srv_static_files(&stale_range, &root).unwrap();
     assert_eq!(stale_range.status, 200);
     assert_eq!(stale_range.body.bytes(64).unwrap().len(), 6);
 
-    let mut headers = JetHttpHeaders::new();
+    let mut headers = JetHTTPHeaders::new();
     headers.append("authorization", "Bearer private").unwrap();
     headers.append("cookie", "session=private").unwrap();
     headers.append("x-request-id", "req-7").unwrap();
-    let mut req = JetHttpRequest::server("GET", "/users/7?token=private".to_string(), Vec::new(), headers);
+    let mut req = JetHTTPRequest::server("GET", "/users/7?token=private".to_string(), Vec::new(), headers);
     req.route_template = Some("/users/:id".to_string());
     let event = jet_http_srv_access_event(&req, 201, 12, 3, "127.0.0.1:9", "HTTP/2", true);
     assert_eq!(event.request_id, "req-7");
@@ -3580,9 +3580,9 @@ fn static_file_response_holds_the_open_identity_and_streams_the_selected_range()
     std::fs::create_dir_all(&root).unwrap();
     let path = root.join("asset.bin");
     std::fs::write(&path, b"trusted-body").unwrap();
-    let mut headers = JetHttpHeaders::new();
+    let mut headers = JetHTTPHeaders::new();
     headers.append("range", "bytes=2-6").unwrap();
-    let request = JetHttpRequest::server("GET", "/asset.bin".to_string(), Vec::new(), headers);
+    let request = JetHTTPRequest::server("GET", "/asset.bin".to_string(), Vec::new(), headers);
     let response = jet_http_srv_static_files(&request, &root).unwrap();
     let direct = jet_http_srv_static_file_range(
         &request,
@@ -3606,11 +3606,11 @@ fn windows_static_serving_fails_closed_without_held_no_reparse_identity() {
     let root = std::env::temp_dir().join(format!("jet-http-windows-static-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("asset.txt"), b"must not serve by pathname").unwrap();
-    let request = JetHttpRequest::server(
+    let request = JetHTTPRequest::server(
         "GET",
         "/asset.txt".to_string(),
         Vec::new(),
-        JetHttpHeaders::new(),
+        JetHTTPHeaders::new(),
     );
     assert_eq!(jet_http_srv_static_files(&request, &root).unwrap().status, 404);
     assert!(jet_http_srv_static_file(
@@ -3635,18 +3635,18 @@ fn http2_response_framing_filters_handler_claims_and_verifies_known_lengths() {
     forbidden.headers.append("connection", "x-hop").unwrap();
     forbidden.headers.append("x-hop", "private").unwrap();
     let encoded = jet_http2_encode_response_headers(&forbidden, None);
-    let decoded = jet_http2_decode_headers(&mut JetHttp2Hpack::new(), &encoded).unwrap();
+    let decoded = jet_http2_decode_headers(&mut JetHTTP2Hpack::new(), &encoded).unwrap();
     assert_eq!(decoded, vec![(":status".to_string(), "204".to_string())]);
 
     let mux = jet_http_mux_new();
     jet_http_mux_add(&mux, "GET", "/", |_| jet_http_srv_response(200, &"representation".to_string()));
     let head = jet_http_mux_dispatch(
         &mux,
-        JetHttpRequest::server("HEAD", "/".to_string(), Vec::new(), JetHttpHeaders::new()),
+        JetHTTPRequest::server("HEAD", "/".to_string(), Vec::new(), JetHTTPHeaders::new()),
     ).unwrap();
     let length = head.head_content_length.or_else(|| head.body.length());
     let decoded = jet_http2_decode_headers(
-        &mut JetHttp2Hpack::new(),
+        &mut JetHTTP2Hpack::new(),
         &jet_http2_encode_response_headers(&head, length),
     ).unwrap();
     assert!(decoded.iter().any(|(name, value)| name == "content-length" && value == "14"));
@@ -3657,7 +3657,7 @@ fn http2_response_framing_filters_handler_claims_and_verifies_known_lengths() {
     let (mut server, _) = listener.accept().unwrap();
     peer.set_read_timeout(Some(std::time::Duration::from_secs(1))).unwrap();
     let mut response = jet_http_srv_empty_response(200);
-    response.body = JetHttpBody::reader_cancellable(
+    response.body = JetHTTPBody::reader_cancellable(
         std::io::Cursor::new(b"ab".to_vec()),
         Some(1),
         || {},
@@ -3700,7 +3700,7 @@ fn http2_rejects_uncancellable_reader_before_response_headers() {
     peer.set_nonblocking(true).unwrap();
     let dropped = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut response = jet_http_srv_empty_response(200);
-    response.body = JetHttpBody::reader(Uncancellable(dropped.clone()), None);
+    response.body = JetHTTPBody::reader(Uncancellable(dropped.clone()), None);
     assert!(jet_http2_start_response(&mut server, 1, response, JET_HTTP2_MAX_FRAME)
         .err().expect("uncancellable reader rejection")
         .contains("bounded or cancellable"));
@@ -3719,7 +3719,7 @@ fn http2_rejects_transport_bridge_before_response_headers() {
     let (mut server, _) = listener.accept().unwrap();
     peer.set_nonblocking(true).unwrap();
     let mut response = jet_http_srv_empty_response(200);
-    response.body = JetHttpBody::bridge(
+    response.body = JetHTTPBody::bridge(
         1,
         None,
         unread_bridge_body,
@@ -3750,12 +3750,12 @@ fn server_enforces_and_releases_per_ip_connection_capacity() {
     jet_http_mux_add(&mux, "GET", "/ok", |_| jet_http_srv_response(200, &"ok".to_string()));
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stop = shutdown.clone();
-    let options = JetHttpServerOptions {
+    let options = JetHTTPServerOptions {
         workers: 2,
         admission_queue: 2,
         max_connections: 2,
         max_connections_per_ip: 1,
-        ..JetHttpServerOptions::safe()
+        ..JetHTTPServerOptions::safe()
     };
     let server = std::thread::spawn(move || jet_http_server_run_listener(listener, mux, options, stop, None, None, None).unwrap());
     let held = std::thread::spawn(move || request(addr, b"GET /hold HTTP/1.1\r\nHost: local\r\n\r\n"));
@@ -3827,7 +3827,7 @@ fn http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_
     jet_http_mux_add(&mux, "GET", "/fast", |_| jet_http_srv_response(200, &"fast".to_string()));
     jet_http_mux_add(&mux, "GET", "/large", |_| {
         let mut response = jet_http_srv_empty_response(200);
-        response.body = JetHttpBody::from_bytes(vec![7; 100_000]);
+        response.body = JetHTTPBody::from_bytes(vec![7; 100_000]);
         response
     });
     jet_http_mux_add(&mux, "POST", "/ignore", |_| jet_http_srv_response(200, &"ignored".to_string()));
@@ -3843,7 +3843,7 @@ fn http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_
         let source_wake = handler_wake.clone();
         let close_wake = handler_wake.clone();
         let close_count = handler_closed.clone();
-        response.body = JetHttpBody::reader_cancellable(BlockingBody {
+        response.body = JetHTTPBody::reader_cancellable(BlockingBody {
             started: Some(response_started_tx.clone()),
             wake: source_wake,
             dropped: handler_dropped.clone(),
@@ -3860,11 +3860,11 @@ fn http2_handlers_overlap_reset_drops_queued_data_and_completed_streams_release_
     let addr = listener.local_addr().unwrap();
     let mut client = std::net::TcpStream::connect(addr).unwrap();
     let (mut server_stream, _) = listener.accept().unwrap();
-    let options = JetHttpServerOptions {
+    let options = JetHTTPServerOptions {
         workers: 1,
         admission_queue: 1,
         read_idle_timeout: std::time::Duration::from_secs(2),
-        ..JetHttpServerOptions::safe()
+        ..JetHTTPServerOptions::safe()
     };
     let server = std::thread::spawn(move || {
         jet_http2_serve(
@@ -3995,7 +3995,7 @@ fn http2_uses_configured_header_body_and_size_limits() {
     use std::io::Write;
 
     fn serve_once(
-        options: JetHttpServerOptions,
+        options: JetHTTPServerOptions,
         write_client: impl FnOnce(&mut std::net::TcpStream),
     ) -> Result<(), String> {
         let mux = jet_http_mux_new();
@@ -4017,10 +4017,10 @@ fn http2_uses_configured_header_body_and_size_limits() {
         worker.join().unwrap()
     }
 
-    let short = JetHttpServerOptions {
+    let short = JetHTTPServerOptions {
         read_header_timeout: std::time::Duration::from_millis(25),
         read_idle_timeout: std::time::Duration::from_secs(1),
-        ..JetHttpServerOptions::safe()
+        ..JetHTTPServerOptions::safe()
     };
     let header_error = serve_once(short, |client| {
         client.write_all(&h2_frame(1, 0, 1, &h2_request_headers(0x83, "/echo"))).unwrap();
@@ -4028,7 +4028,7 @@ fn http2_uses_configured_header_body_and_size_limits() {
     }).unwrap_err();
     assert!(header_error.contains("timed out") || header_error.contains("ended early"), "{header_error}");
 
-    let bounded = JetHttpServerOptions { max_body_bytes: 4, ..JetHttpServerOptions::safe() };
+    let bounded = JetHTTPServerOptions { max_body_bytes: 4, ..JetHTTPServerOptions::safe() };
     let body_error = serve_once(bounded, |client| {
         client.write_all(&h2_frame(1, 0x4, 1, &h2_request_headers(0x83, "/echo"))).unwrap();
         client.write_all(&h2_frame(0, 0x1, 1, b"12345")).unwrap();
@@ -4045,10 +4045,10 @@ fn http2_uses_configured_header_body_and_size_limits() {
     let addr = listener.local_addr().unwrap();
     let mut client = std::net::TcpStream::connect(addr).unwrap();
     let (mut server_stream, _) = listener.accept().unwrap();
-    let options = JetHttpServerOptions {
+    let options = JetHTTPServerOptions {
         read_body_timeout: std::time::Duration::from_millis(25),
         read_idle_timeout: std::time::Duration::from_secs(1),
-        ..JetHttpServerOptions::safe()
+        ..JetHTTPServerOptions::safe()
     };
     let worker = std::thread::spawn(move || {
         jet_http2_serve(&mut server_stream, &mux, &options, &std::sync::atomic::AtomicBool::new(false), None, None)
@@ -4098,7 +4098,7 @@ fn native_http2_routes_huffman_headers_and_enforces_stream_framing() {
     jet_http_mux_add(&mux, "GET", "/", |_| jet_http_srv_response(200, &"h2-ok".to_string()));
     jet_http_mux_add(&mux, "GET", "/large", |_| {
         let mut response = jet_http_srv_response(200, &String::new());
-        response.body = JetHttpBody::from_bytes(vec![7; 70_000]);
+        response.body = JetHTTPBody::from_bytes(vec![7; 70_000]);
         response
     });
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -4106,7 +4106,7 @@ fn native_http2_routes_huffman_headers_and_enforces_stream_framing() {
     let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stop = shutdown.clone();
     let server = std::thread::spawn(move || {
-        jet_http_server_run_listener(listener, mux, JetHttpServerOptions::safe(), stop, None, None, None).unwrap()
+        jet_http_server_run_listener(listener, mux, JetHTTPServerOptions::safe(), stop, None, None, None).unwrap()
     });
 
     let mut stream = std::net::TcpStream::connect(addr).unwrap();
@@ -4199,7 +4199,7 @@ fn native_http2_routes_huffman_headers_and_enforces_stream_framing() {
     assert!(jet_http2_serve(
         &mut server,
         &mux,
-        &JetHttpServerOptions::safe(),
+        &JetHTTPServerOptions::safe(),
         &std::sync::atomic::AtomicBool::new(false),
         None,
         None,
@@ -4227,12 +4227,12 @@ fn http2_shutdown_sends_goaway_with_last_stream_and_drains_active() {
     let (mut server_stream, _) = listener.accept().unwrap();
     let shutdown = std::sync::Arc::new(AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let options = JetHttpServerOptions {
+    let options = JetHTTPServerOptions {
         workers: 1,
         admission_queue: 1,
         shutdown_grace: std::time::Duration::from_secs(2),
         read_idle_timeout: std::time::Duration::from_secs(2),
-        ..JetHttpServerOptions::safe()
+        ..JetHTTPServerOptions::safe()
     };
     let server = std::thread::spawn(move || {
         jet_http2_serve(&mut server_stream, &mux, &options, &server_shutdown, None, None)
@@ -4361,12 +4361,12 @@ fn http2_goaway_discards_orphan_continuation_without_aborting_drain() {
     let (mut server_stream, _) = listener.accept().unwrap();
     let shutdown = std::sync::Arc::new(AtomicBool::new(false));
     let server_shutdown = shutdown.clone();
-    let options = JetHttpServerOptions {
+    let options = JetHTTPServerOptions {
         workers: 1,
         admission_queue: 1,
         shutdown_grace: std::time::Duration::from_secs(2),
         read_idle_timeout: std::time::Duration::from_secs(2),
-        ..JetHttpServerOptions::safe()
+        ..JetHTTPServerOptions::safe()
     };
     let server = std::thread::spawn(move || {
         jet_http2_serve(&mut server_stream, &mux, &options, &server_shutdown, None, None)
@@ -4498,13 +4498,13 @@ fn http2_serve_honors_dynamic_grace_over_options_shutdown_grace() {
     let server_shutdown = shutdown.clone();
     let grace_ms = std::sync::Arc::new(AtomicU64::new(45));
     let server_grace = grace_ms.clone();
-    let options = JetHttpServerOptions {
+    let options = JetHTTPServerOptions {
         workers: 1,
         admission_queue: 1,
         // If H2 ignored dynamic_grace_ms, drain would wait the full five seconds.
         shutdown_grace: std::time::Duration::from_secs(5),
         read_idle_timeout: std::time::Duration::from_secs(2),
-        ..JetHttpServerOptions::safe()
+        ..JetHTTPServerOptions::safe()
     };
     let server = std::thread::spawn(move || {
         jet_http2_serve(
@@ -4554,7 +4554,7 @@ fn http2_server_api_shutdown_grace_reaches_h2_drain() {
     use std::io::Write;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    // Server.serve uses JetHttpServerOptions::safe() with shutdown_grace=30s.
+    // Server.serve uses JetHTTPServerOptions::safe() with shutdown_grace=30s.
     // Server.shutdown(grace) must publish that grace into jet_http2_serve via
     // dynamic_grace_ms. If H2 ignored it and waited options.shutdown_grace, the
     // listener would force-close the socket at the short grace and mark cancelled.
@@ -4701,7 +4701,7 @@ fn tls_oversized_content_length_chunk_and_framing_return_413() {
     let server = jet_http_server_bind_tls(
         &"127.0.0.1:0".to_string(),
         mux,
-        JetHttpServerTls { cert_pem: cert, key_pem: key },
+        JetHTTPServerTls { cert_pem: cert, key_pem: key },
         |cert, key| http_server_tls_runtime::jet_http_server_tls_validate_impl(cert, key),
         |cert, key, stream, on_request, on_h2, should_stop| {
             http_server_tls_runtime::jet_http_server_tls_session_impl(
@@ -4749,7 +4749,7 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     // Real rustls path: Server.bind(tls) → keep-alive reuse → Server.shutdown stops
-    // a third request. Plaintext JetHttpTlsConn stubs are not enough.
+    // a third request. Plaintext JetHTTPTlsConn stubs are not enough.
     let mux = jet_http_mux_new();
     jet_http_srv_install_request_id(&mux);
     let calls = std::sync::Arc::new(AtomicUsize::new(0));
@@ -4768,25 +4768,25 @@ fn tls_rustls_keep_alive_and_server_shutdown() {
     }));
     let trailer_calls = calls.clone();
     jet_http_mux_add_handler(&mux, "POST", "/trailers", std::sync::Arc::new(move |req| {
-        assert!(matches!(jet_http_srv_req_trailers(&req), Err(JetHttpError::InvalidFraming)));
+        assert!(matches!(jet_http_srv_req_trailers(&req), Err(JetHTTPError::InvalidFraming)));
         let body = req.body.text(1024)?;
         let trailers = jet_http_srv_req_trailers(&req)?;
         assert_eq!(trailers.first("x-checksum"), Some("tls-in"));
         trailer_calls.fetch_add(1, Ordering::AcqRel);
         let mut response = jet_http_srv_response(200, &String::new());
-        response.body = JetHttpBody::reader(std::io::Cursor::new(body), None);
-        let mut trailers = JetHttpHeaders::new();
+        response.body = JetHTTPBody::reader(std::io::Cursor::new(body), None);
+        let mut trailers = JetHTTPHeaders::new();
         trailers.append("X-Checksum", "tls-out").unwrap();
         jet_http_srv_response_trailers(response, trailers)
     }));
     jet_http_mux_add_handler(&mux, "GET", "/error", std::sync::Arc::new(|_| {
-        Err(JetHttpError::Internal {
+        Err(JetHTTPError::Internal {
             incident_id: "private-tls-handler-error".to_string(),
         })
     }));
     let cert = include_str!("../tests/fixtures/tls/localhost.cert.pem").to_string();
     let key = include_str!("../tests/fixtures/tls/localhost.key.pem").to_string();
-    let tls = JetHttpServerTls {
+    let tls = JetHTTPServerTls {
         cert_pem: cert,
         key_pem: key,
     };
@@ -4889,14 +4889,14 @@ fn tls_rustls_alpn_serves_native_http2_streams_trailers_and_shutdown() {
     jet_http_mux_add_handler(&mux, "POST", "/trailers", std::sync::Arc::new(move |request| {
         assert!(matches!(
             jet_http_srv_req_trailers(&request),
-            Err(JetHttpError::InvalidFraming),
+            Err(JetHTTPError::InvalidFraming),
         ));
         let body = request.body.text(64)?;
         let incoming = jet_http_srv_req_trailers(&request)?;
         assert_eq!(incoming.all("x-trace"), vec!["one", "two"]);
         trailer_calls.fetch_add(1, Ordering::AcqRel);
 
-        let mut trailers = JetHttpHeaders::new();
+        let mut trailers = JetHTTPHeaders::new();
         trailers.append("X-Trace", "first").unwrap();
         trailers.append("x-trace", "second").unwrap();
         jet_http_srv_response_trailers(
@@ -4915,7 +4915,7 @@ fn tls_rustls_alpn_serves_native_http2_streams_trailers_and_shutdown() {
     let server = jet_http_server_bind_tls(
         &"127.0.0.1:0".to_string(),
         mux,
-        JetHttpServerTls { cert_pem: cert, key_pem: key },
+        JetHTTPServerTls { cert_pem: cert, key_pem: key },
         |cert, key| http_server_tls_runtime::jet_http_server_tls_validate_impl(cert, key),
         |cert, key, stream, on_request, on_h2, should_stop| {
             http_server_tls_runtime::jet_http_server_tls_session_impl(
@@ -4956,7 +4956,7 @@ fn tls_rustls_alpn_serves_native_http2_streams_trailers_and_shutdown() {
     let mut stream_one_done = false;
     let mut stream_three_body = Vec::new();
     let mut stream_three_done = false;
-    let mut decoder = JetHttp2Hpack::new();
+    let mut decoder = JetHTTP2Hpack::new();
     while !stream_one_done || !stream_three_done {
         let frame = jet_http2_read_frame(&mut client).unwrap();
         if frame.stream == 1 && frame.kind == 0 {
@@ -5059,7 +5059,7 @@ fn rustls_fixture_client_with_alpn(
 ) -> rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream> {
     use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
     use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-    use rustls::{DigitallySignedStruct, Error as TlsError, SignatureScheme};
+    use rustls::{DigitallySignedStruct, Error as TLSError, SignatureScheme};
 
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -5073,7 +5073,7 @@ fn rustls_fixture_client_with_alpn(
             _server_name: &ServerName<'_>,
             _ocsp_response: &[u8],
             _now: UnixTime,
-        ) -> Result<ServerCertVerified, TlsError> {
+        ) -> Result<ServerCertVerified, TLSError> {
             Ok(ServerCertVerified::assertion())
         }
         fn verify_tls12_signature(
@@ -5081,7 +5081,7 @@ fn rustls_fixture_client_with_alpn(
             _message: &[u8],
             _cert: &CertificateDer<'_>,
             _dss: &DigitallySignedStruct,
-        ) -> Result<HandshakeSignatureValid, TlsError> {
+        ) -> Result<HandshakeSignatureValid, TLSError> {
             Ok(HandshakeSignatureValid::assertion())
         }
         fn verify_tls13_signature(
@@ -5089,7 +5089,7 @@ fn rustls_fixture_client_with_alpn(
             _message: &[u8],
             _cert: &CertificateDer<'_>,
             _dss: &DigitallySignedStruct,
-        ) -> Result<HandshakeSignatureValid, TlsError> {
+        ) -> Result<HandshakeSignatureValid, TLSError> {
             Ok(HandshakeSignatureValid::assertion())
         }
         fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
@@ -5158,7 +5158,7 @@ fn rustls_exchange(
                             .collect::<Vec<_>>();
                         let trailer_names = jet_http_parse_trailer_names(&trailer_values)
                             .expect("response trailer declaration");
-                        let mut state = JetHttpChunkState::new(8 * 1024 * 1024, trailer_names);
+                        let mut state = JetHTTPChunkState::new(8 * 1024 * 1024, trailer_names);
                         if let Ok(Some(end)) = state.advance(&raw[header_end + 4..]) {
                             raw.truncate(header_end + 4 + end);
                             break;
@@ -5199,7 +5199,7 @@ fn builtin_middleware_timeout_body_limit_cors_compress_and_access_log() {
             Ok(jet_http_srv_response(200, &"slow".to_string()))
         }),
     );
-    let timed = slow(JetHttpRequest::server(
+    let timed = slow(JetHTTPRequest::server(
         "GET",
         "/slow".to_string(),
         Vec::new(),
@@ -5211,11 +5211,11 @@ fn builtin_middleware_timeout_body_limit_cors_compress_and_access_log() {
         4,
         std::sync::Arc::new(|_| Ok(jet_http_srv_response(200, &"ok".to_string()))),
     );
-    let mut big = JetHttpRequest::server("POST", "/".to_string(), vec![0; 8], Default::default());
-    big.body = JetHttpBody::from_bytes(vec![0; 8]);
+    let mut big = JetHTTPRequest::server("POST", "/".to_string(), vec![0; 8], Default::default());
+    big.body = JetHTTPBody::from_bytes(vec![0; 8]);
     assert!(matches!(
         limited(big),
-        Err(JetHttpError::BodyTooLarge { limit: 4 })
+        Err(JetHTTPError::BodyTooLarge { limit: 4 })
     ));
 
     let policy = jet_http_cors_policy(&"https://app.example".to_string());
@@ -5223,9 +5223,9 @@ fn builtin_middleware_timeout_body_limit_cors_compress_and_access_log() {
         &policy,
         std::sync::Arc::new(|_| Ok(jet_http_srv_response(200, &"ok".to_string()))),
     );
-    let mut preflight_headers = JetHttpHeaders::new();
+    let mut preflight_headers = JetHTTPHeaders::new();
     preflight_headers.append("origin", "https://app.example").unwrap();
-    let preflight = JetHttpRequest::server("OPTIONS", "/api".to_string(), Vec::new(), preflight_headers);
+    let preflight = JetHTTPRequest::server("OPTIONS", "/api".to_string(), Vec::new(), preflight_headers);
     let preflight = cors(preflight).unwrap();
     assert_eq!(preflight.status, 204);
     assert_eq!(
@@ -5234,17 +5234,17 @@ fn builtin_middleware_timeout_body_limit_cors_compress_and_access_log() {
     );
 
     let compress = jet_http_mw_compress(
-        JetHttpCompressEncoding::Gzip,
+        JetHTTPCompressEncoding::Gzip,
         std::sync::Arc::new(|_| Ok(jet_http_srv_response(200, &"compressible".to_string()))),
     );
-    let mut gzip_headers = JetHttpHeaders::new();
+    let mut gzip_headers = JetHTTPHeaders::new();
     gzip_headers.append("accept-encoding", "gzip").unwrap();
-    let gzip = compress(JetHttpRequest::server("GET", "/".to_string(), Vec::new(), gzip_headers)).unwrap();
+    let gzip = compress(JetHTTPRequest::server("GET", "/".to_string(), Vec::new(), gzip_headers)).unwrap();
     assert_eq!(gzip.headers.get("content-encoding"), Some(&"gzip".to_string()));
     assert!(gzip.body.bytes(64).unwrap().starts_with(&[0x1f, 0x8b]));
 
     let logged = jet_http_mw_access_log(std::sync::Arc::new(|_| Ok(jet_http_srv_response(201, &"x".to_string()))));
-    let mut req = JetHttpRequest::server("GET", "/logs/1".to_string(), Vec::new(), Default::default());
+    let mut req = JetHTTPRequest::server("GET", "/logs/1".to_string(), Vec::new(), Default::default());
     req.route_template = Some("/logs/:id".to_string());
     assert_eq!(logged(req).unwrap().status, 201);
     let lines = HTTP_ACCESS_LOG_LINES.get().unwrap().lock().unwrap();
@@ -5265,12 +5265,12 @@ fn static_files_handler_serves_root_index_and_rejects_traversal() {
     std::fs::write(root.join("index.html"), b"index").unwrap();
     std::fs::write(root.join("nested/data.bin"), [1, 2, 3]).unwrap();
     let handler = jet_http_srv_static_files_handler(root.to_string_lossy().into_owned());
-    let ok = handler(JetHttpRequest::server("GET", "/nested/data.bin".to_string(), Vec::new(), Default::default())).unwrap();
+    let ok = handler(JetHTTPRequest::server("GET", "/nested/data.bin".to_string(), Vec::new(), Default::default())).unwrap();
     assert_eq!(ok.status, 200);
     assert_eq!(ok.body.bytes(16).unwrap(), vec![1, 2, 3]);
-    let index = handler(JetHttpRequest::server("GET", "/".to_string(), Vec::new(), Default::default())).unwrap();
+    let index = handler(JetHTTPRequest::server("GET", "/".to_string(), Vec::new(), Default::default())).unwrap();
     assert_eq!(index.body.bytes(16).unwrap(), b"index");
-    let blocked = handler(JetHttpRequest::server("GET", "/../secret".to_string(), Vec::new(), Default::default())).unwrap();
+    let blocked = handler(JetHTTPRequest::server("GET", "/../secret".to_string(), Vec::new(), Default::default())).unwrap();
     assert_eq!(blocked.status, 404);
     std::fs::remove_dir_all(root).unwrap();
 }

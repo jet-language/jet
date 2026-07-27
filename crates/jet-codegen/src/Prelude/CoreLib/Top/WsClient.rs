@@ -12,7 +12,7 @@ enum JetWsError {
     InvalidHandshake,
     Protocol,
     MessageTooLarge { limit: i64 },
-    Io { operation: String },
+    IO { operation: String },
     Timeout,
     Closed,
     Cancelled,
@@ -28,7 +28,7 @@ impl JetShow for JetWsError {
             Self::MessageTooLarge { limit } => {
                 format!("websocket message exceeds {limit} bytes")
             }
-            Self::Io { operation } => format!("websocket I/O failed during {operation}"),
+            Self::IO { operation } => format!("websocket I/O failed during {operation}"),
             Self::Timeout => "websocket timed out".to_string(),
             Self::Closed => "websocket is closed".to_string(),
             Self::Cancelled => "websocket cancelled".to_string(),
@@ -64,12 +64,12 @@ impl JetWsConn {
     fn from_stream(stream: std::net::TcpStream, role: JetWsRole) -> Result<Self, JetWsError> {
         stream
             .set_read_timeout(Some(JET_WS_DEFAULT_READ_TIMEOUT))
-            .map_err(|_| JetWsError::Io {
+            .map_err(|_| JetWsError::IO {
                 operation: "set read timeout".to_string(),
             })?;
         stream
             .set_write_timeout(Some(JET_WS_DEFAULT_READ_TIMEOUT))
-            .map_err(|_| JetWsError::Io {
+            .map_err(|_| JetWsError::IO {
                 operation: "set write timeout".to_string(),
             })?;
         Ok(Self {
@@ -280,13 +280,13 @@ fn jet_ws_write_frame(
         header.extend_from_slice(&mask);
         jet_ws_apply_mask(&mut body, mask);
     }
-    stream.write_all(&header).map_err(|_| JetWsError::Io {
+    stream.write_all(&header).map_err(|_| JetWsError::IO {
         operation: "write frame header".to_string(),
     })?;
-    stream.write_all(&body).map_err(|_| JetWsError::Io {
+    stream.write_all(&body).map_err(|_| JetWsError::IO {
         operation: "write frame payload".to_string(),
     })?;
-    stream.flush().map_err(|_| JetWsError::Io {
+    stream.flush().map_err(|_| JetWsError::IO {
         operation: "flush frame".to_string(),
     })?;
     Ok(())
@@ -298,7 +298,7 @@ fn jet_ws_io_kind(error: &std::io::Error) -> JetWsError {
         std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::ConnectionReset => {
             JetWsError::Closed
         }
-        _ => JetWsError::Io {
+        _ => JetWsError::IO {
             operation: "read".to_string(),
         },
     }
@@ -541,17 +541,17 @@ fn jet_ws_connect(url: &String) -> Result<JetWsConn, JetWsError> {
         use std::io::{Read, Write};
         let (host, port, path) = jet_ws_parse_url(url)?;
         let addr = format!("{host}:{port}");
-        let mut stream = std::net::TcpStream::connect(addr).map_err(|_| JetWsError::Io {
+        let mut stream = std::net::TcpStream::connect(addr).map_err(|_| JetWsError::IO {
             operation: "connect".to_string(),
         })?;
         stream
             .set_read_timeout(Some(JET_WS_DEFAULT_READ_TIMEOUT))
-            .map_err(|_| JetWsError::Io {
+            .map_err(|_| JetWsError::IO {
                 operation: "set read timeout".to_string(),
             })?;
         stream
             .set_write_timeout(Some(JET_WS_DEFAULT_READ_TIMEOUT))
-            .map_err(|_| JetWsError::Io {
+            .map_err(|_| JetWsError::IO {
                 operation: "set write timeout".to_string(),
             })?;
         let key = jet_ws_random_key();
@@ -565,10 +565,10 @@ fn jet_ws_connect(url: &String) -> Result<JetWsConn, JetWsError> {
         );
         stream
             .write_all(request.as_bytes())
-            .map_err(|_| JetWsError::Io {
+            .map_err(|_| JetWsError::IO {
                 operation: "write handshake".to_string(),
             })?;
-        stream.flush().map_err(|_| JetWsError::Io {
+        stream.flush().map_err(|_| JetWsError::IO {
             operation: "flush handshake".to_string(),
         })?;
         let mut response = Vec::new();

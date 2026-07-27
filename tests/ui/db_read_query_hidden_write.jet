@@ -1,11 +1,11 @@
-// D-EFFDBREAD1=A: `conn.query`/`query_one` carry the `Db.Read` effect leaf and
-// `conn.execute` carries `Db.Write`. A function declared `#(Db.Read)` — the
+// D-EFFDBREAD1=A: `conn.query`/`query_one` carry the `DB.Read` effect leaf and
+// `conn.execute` carries `DB.Write`. A function declared `#(DB.Read)` — the
 // bound a live query (D-LIVEQUERY1) requires — that hides a write is caught by
-// the existing E0740 check, naming the offending `Db.Write` leaf. No new
-// diagnostic code: `Db.Read` does not cover its sibling `Db.Write`.
+// the existing E0740 check, naming the offending `DB.Write` leaf. No new
+// diagnostic code: `DB.Read` does not cover its sibling `DB.Write`.
 use core.db as db
 
-fn touch(conn: DbConnection) =[Db.Read]=> {
+fn touch(conn: DBConnection) =[DB.Read]=> {
     _rows :: conn.execute("UPDATE person SET active = 1", []) ?? 0
 }
 

@@ -84,16 +84,16 @@ pub(crate) struct JitRuntime {
     /// Encoding stream file / codec handles (#729 encoding_*_stream).
     pub(crate) file_readers: Vec<crate::enc_stream::FileReaderSlot>,
     pub(crate) file_writers: Vec<crate::enc_stream::FileWriterSlot>,
-    pub(crate) json_readers: Vec<crate::enc_stream::JsonReaderSlot>,
-    pub(crate) json_writers: Vec<crate::enc_stream::JsonWriterSlot>,
+    pub(crate) json_readers: Vec<crate::enc_stream::JSONReaderSlot>,
+    pub(crate) json_writers: Vec<crate::enc_stream::JSONWriterSlot>,
     pub(crate) jsonl_readers: Vec<crate::enc_stream::JsonlReaderSlot>,
     pub(crate) jsonl_writers: Vec<crate::enc_stream::JsonlWriterSlot>,
-    pub(crate) csv_readers: Vec<crate::enc_stream::CsvReaderSlot>,
-    pub(crate) csv_writers: Vec<crate::enc_stream::CsvWriterSlot>,
+    pub(crate) csv_readers: Vec<crate::enc_stream::CSVReaderSlot>,
+    pub(crate) csv_writers: Vec<crate::enc_stream::CSVWriterSlot>,
     pub(crate) xml_readers: Vec<crate::enc_stream::XmlReaderSlot>,
     pub(crate) xml_writers: Vec<crate::enc_stream::XmlWriterSlot>,
-    pub(crate) cbor_readers: Vec<crate::enc_stream::CborReaderSlot>,
-    pub(crate) cbor_writers: Vec<crate::enc_stream::CborWriterSlot>,
+    pub(crate) cbor_readers: Vec<crate::enc_stream::CBORReaderSlot>,
+    pub(crate) cbor_writers: Vec<crate::enc_stream::CBORWriterSlot>,
     /// Typed `core.data` pull streams (`csv_reader` → Event rows).
     pub(crate) data_streams: Vec<crate::Data::DataStreamSlot>,
     /// `Set<T>` handles — 1-based indices (#729 collections/set). Int elems only.
@@ -1539,7 +1539,7 @@ pub(crate) struct HostFns {
     pub(crate) text: crate::Text::TextHostFns,
     pub(crate) sketch: crate::Sketch::SketchHostFns,
     pub(crate) args: crate::Args::ArgsHostFns,
-    pub(crate) db: crate::Db::DbHostFns,
+    pub(crate) db: crate::DB::DBHostFns,
     pub(crate) crypto: Crypto::CryptoHostFns,
     pub(crate) net: Net::NetHostFns,
     pub(crate) net_http: crate::net_http_rt::NetHttpHostFns,
@@ -1561,7 +1561,7 @@ pub(crate) struct HostFns {
     pub(crate) testing_snap: FuncId,
     pub(crate) data: crate::Data::DataHostFns,
     pub(crate) time: crate::Time::TimeHostFns,
-    pub(crate) io: crate::Io::IoHostFns,
+    pub(crate) io: crate::IO::IOHostFns,
     pub(crate) watcher: crate::Watcher::WatcherHostFns,
     pub(crate) math: crate::Math::MathHostFns,
     pub(crate) ffi: crate::Ffi::FfiHostFns,
@@ -1738,8 +1738,8 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Text::register_text_symbols(&mut builder);
     crate::Sketch::register_sketch_symbols(&mut builder);
     crate::Args::register_args_symbols(&mut builder);
-    crate::Cli::register_cli_symbols(&mut builder);
-    crate::Db::register_db_symbols(&mut builder);
+    crate::CLI::register_cli_symbols(&mut builder);
+    crate::DB::register_db_symbols(&mut builder);
     Crypto::register_crypto_symbols(&mut builder);
     Net::register_net_symbols(&mut builder);
     crate::net_http_rt::register_net_http_symbols(&mut builder);
@@ -1761,7 +1761,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_testing_temp_dir", jet_jit_testing_temp_dir as *const u8);
     builder.symbol("jet_jit_testing_snap", jet_jit_testing_snap as *const u8);
     crate::Time::register_time_symbols(&mut builder);
-    crate::Io::register_io_symbols(&mut builder);
+    crate::IO::register_io_symbols(&mut builder);
     crate::Watcher::register_watcher_symbols(&mut builder);
     crate::Net::register_net_symbols(&mut builder);
     crate::Math::register_math_host_symbols(&mut builder);
@@ -1783,7 +1783,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let text = crate::Text::declare_text_host_fns(&mut module)?;
     let sketch = crate::Sketch::declare_sketch_host_fns(&mut module)?;
     let args = crate::Args::declare_args_host_fns(&mut module)?;
-    let db = crate::Db::declare_db_host_fns(&mut module)?;
+    let db = crate::DB::declare_db_host_fns(&mut module)?;
     let crypto = Crypto::declare_crypto_host_fns(&mut module)?;
     let net = Net::declare_net_host_fns(&mut module)?;
     let net_http = crate::net_http_rt::declare_net_http_host_fns(&mut module)?;
@@ -1796,7 +1796,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let parse = crate::Parse::declare(&mut module)?;
     let data = crate::Data::declare(&mut module)?;
     let time = crate::Time::declare_time_host_fns(&mut module)?;
-    let io = crate::Io::declare_io_host_fns(&mut module)?;
+    let io = crate::IO::declare_io_host_fns(&mut module)?;
     let watcher = crate::Watcher::declare_watcher_host_fns(&mut module)?;
     let math = crate::Math::declare_math_host_fns(&mut module)?;
     let ffi = crate::Ffi::declare_ffi_host_fns(&mut module)?;
@@ -2000,7 +2000,7 @@ fn declare_host_fns(
     text: crate::Text::TextHostFns,
     sketch: crate::Sketch::SketchHostFns,
     args: crate::Args::ArgsHostFns,
-    db: crate::Db::DbHostFns,
+    db: crate::DB::DBHostFns,
     crypto: Crypto::CryptoHostFns,
     net: Net::NetHostFns,
     net_http: crate::net_http_rt::NetHttpHostFns,
@@ -2013,7 +2013,7 @@ fn declare_host_fns(
     parse: crate::Parse::HostFns,
     data: crate::Data::DataHostFns,
     time: crate::Time::TimeHostFns,
-    io: crate::Io::IoHostFns,
+    io: crate::IO::IOHostFns,
     watcher: crate::Watcher::WatcherHostFns,
     math: crate::Math::MathHostFns,
     ffi: crate::Ffi::FfiHostFns,

@@ -94,8 +94,8 @@ fn emitted_scheduler_ships_native_readiness_backend() {
         "emitted program must ship real IOCP registration, completion, wake, and cancellation"
     );
     assert!(
-        rust.contains("enum IoBackendState")
-            && rust.contains("IoBackendState::Failed")
+        rust.contains("enum IOBackendState")
+            && rust.contains("IOBackendState::Failed")
             && rust.contains("scheduler IOCP completion port failed")
             && rust.contains("drain_deadline")
             && rust.contains("METRIC_IO_PORT_CLOSED")

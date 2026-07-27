@@ -164,24 +164,24 @@
         pub(crate) line: i64,
         pub(crate) column: i64,
         pub(crate) lookahead: Option<u8>,
-        pub(crate) frames: Vec<super::JetJsonReadFrame>,
+        pub(crate) frames: Vec<super::JetJSONReadFrame>,
         pub(crate) root_started: bool,
         pub(crate) root_done: bool,
         pub(crate) terminal: Option<EncodingError>,
         pub(crate) eof: bool,
         pub(crate) record_mode: bool,
-        pub(crate) allocation_budget: Option<super::JetJsonAllocationBudget>,
+        pub(crate) allocation_budget: Option<super::JetJSONAllocationBudget>,
     }
     pub struct JSONWriter {
         pub(crate) output: super::JetFileWriter,
         pub(crate) limits: EncodingLimits,
-        pub(crate) frames: Vec<super::JetJsonWriteFrame>,
+        pub(crate) frames: Vec<super::JetJSONWriteFrame>,
         pub(crate) root_written: bool,
         pub(crate) finished: bool,
         pub(crate) terminal: Option<EncodingError>,
         pub(crate) total: i64,
         pub(crate) canonical: bool,
-        pub(crate) canonical_frames: Vec<super::JetJsonCanonicalFrame>,
+        pub(crate) canonical_frames: Vec<super::JetJSONCanonicalFrame>,
         pub(crate) canonical_retained: usize,
     }
     pub struct JSONLReader {
@@ -228,7 +228,7 @@
         pub(crate) total: i64,
         pub(crate) eof: bool,
         // D-ENCSTREAM-SURFACE1=A: codec-owned live heap ceiling for retained events.
-        pub(crate) allocation: super::JetJsonAllocationBudget,
+        pub(crate) allocation: super::JetJSONAllocationBudget,
     }
     pub struct XMLWriter {
         pub(crate) output: super::JetFileWriter,
@@ -247,18 +247,18 @@
         pub(crate) eof: bool,
         pub(crate) root_done: bool,
         pub(crate) lookahead: Option<u8>,
-        pub(crate) frames: Vec<super::JetCborReadFrame>,
+        pub(crate) frames: Vec<super::JetCBORReadFrame>,
         pub(crate) retained: usize,
         pub(crate) workspace: usize,
         // D-ENCSTREAM-SURFACE1=A: codec-owned live heap ceiling (counting allocator).
-        pub(crate) allocation: super::JetJsonAllocationBudget,
+        pub(crate) allocation: super::JetJSONAllocationBudget,
     }
     pub struct CBORWriter {
         pub(crate) output: super::JetFileWriter,
         pub(crate) limits: EncodingLimits,
         pub(crate) terminal: Option<EncodingError>,
         pub(crate) total: i64,
-        pub(crate) frames: Vec<super::JetCborWriteFrame>,
+        pub(crate) frames: Vec<super::JetCBORWriteFrame>,
         pub(crate) root_written: bool,
         // finish validates one complete root; Drop without finish never claims success
         // and leaves incomplete buffered containers unwritten (≠ finished wire).
@@ -266,7 +266,7 @@
         pub(crate) retained: usize,
         pub(crate) workspace: usize,
         // D-ENCSTREAM-SURFACE1=A: codec-owned live heap ceiling (counting allocator).
-        pub(crate) allocation: super::JetJsonAllocationBudget,
+        pub(crate) allocation: super::JetJSONAllocationBudget,
     }
 
     #[derive(Clone, Debug, PartialEq)]
@@ -465,11 +465,11 @@
         pub mean: f64,
     }
     pub enum DataStreamInner {
-        Csv {
+        CSV {
             reader: CSVReader,
             headers: Option<Vec<String>>,
         },
-        Json {
+        JSON {
             reader: JSONReader,
             array_started: bool,
             array_done: bool,
@@ -1124,38 +1124,38 @@
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct JsonError {
+    pub struct JSONError {
         pub line: i64,
         pub message: String,
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub enum Json {
+    pub enum JSON {
         Null,
         Boolean(bool),
         Number(f64),
         Text(String),
-        Array(Vec<Json>),
-        Object(std::collections::BTreeMap<String, Json>),
+        Array(Vec<JSON>),
+        Object(std::collections::BTreeMap<String, JSON>),
     }
 
-    impl super::JetShow for IoError {
+    impl super::JetShow for IOError {
         fn jet_show(&self) -> String {
             let (kind, context) = match self {
-                IoError::InvalidInput(context) => ("invalid input", context),
-                IoError::NotFound(context) => ("not found", context),
-                IoError::PermissionDenied(context) => ("permission denied", context),
-                IoError::TimedOut(context) => ("timed out", context),
-                IoError::Cancelled(context) => ("cancelled", context),
-                IoError::Closed(context) => ("closed", context),
-                IoError::Protocol(context) => ("protocol error", context),
-                IoError::Other(context) => ("I/O error", context),
+                IOError::InvalidInput(context) => ("invalid input", context),
+                IOError::NotFound(context) => ("not found", context),
+                IOError::PermissionDenied(context) => ("permission denied", context),
+                IOError::TimedOut(context) => ("timed out", context),
+                IOError::Cancelled(context) => ("cancelled", context),
+                IOError::Closed(context) => ("closed", context),
+                IOError::Protocol(context) => ("protocol error", context),
+                IOError::Other(context) => ("I/O error", context),
             };
             let operation = match context.operation {
-                IoOperation::Read => "read", IoOperation::Write => "write",
-                IoOperation::Flush => "flush", IoOperation::Connect => "connect",
-                IoOperation::Accept => "accept", IoOperation::Close => "close",
-                IoOperation::Resolve => "resolve", IoOperation::Codec => "codec",
+                IOOperation::Read => "read", IOOperation::Write => "write",
+                IOOperation::Flush => "flush", IOOperation::Connect => "connect",
+                IOOperation::Accept => "accept", IOOperation::Close => "close",
+                IOOperation::Resolve => "resolve", IOOperation::Codec => "codec",
             };
             let mut text = format!("{kind} during {operation}");
             if let Some(resource) = &context.resource { text.push_str(&format!(" `{resource}`")); }
@@ -1174,7 +1174,7 @@
             }
         }
     }
-    impl super::JetShow for Utf8Error {
+    impl super::JetShow for UTF8Error {
         fn jet_show(&self) -> String {
             self.message.clone()
         }
@@ -1302,22 +1302,22 @@
             format!("{}ms", self.ms)
         }
     }
-    impl super::JetShow for JsonError {
+    impl super::JetShow for JSONError {
         fn jet_show(&self) -> String {
             format!("line {}: {}", self.line, self.message)
         }
     }
-    impl super::JetShow for Json {
+    impl super::JetShow for JSON {
         fn jet_show(&self) -> String {
             render_json(self, false, 0)
         }
     }
 
-    // D-SERDE-ACCESS=B: accessor methods on Json (= Data).
-    impl Json {
-        pub fn field(&self, name: &str) -> Result<Json, String> {
+    // D-SERDE-ACCESS=B: accessor methods on JSON (= Data).
+    impl JSON {
+        pub fn field(&self, name: &str) -> Result<JSON, String> {
             match self {
-                Json::Object(map) => map
+                JSON::Object(map) => map
                     .get(name)
                     .cloned()
                     .ok_or_else(|| format!("field `{}` not found", name)),
@@ -1327,9 +1327,9 @@
                 )),
             }
         }
-        pub fn at(&self, i: i64) -> Result<Json, String> {
+        pub fn at(&self, i: i64) -> Result<JSON, String> {
             match self {
-                Json::Array(items) => {
+                JSON::Array(items) => {
                     let idx = if i < 0 {
                         items.len().wrapping_sub((-i) as usize)
                     } else {
@@ -1348,7 +1348,7 @@
         }
         pub fn int(&self) -> Result<i64, String> {
             match self {
-                Json::Number(f) => {
+                JSON::Number(f) => {
                     let n = *f as i64;
                     if (n as f64 - f).abs() < 0.5 {
                         Ok(n)
@@ -1364,7 +1364,7 @@
         }
         pub fn text(&self) -> Result<String, String> {
             match self {
-                Json::Text(s) => Ok(s.clone()),
+                JSON::Text(s) => Ok(s.clone()),
                 _ => Err(format!(
                     "expected text, got {}",
                     render_json(self, false, 0)
@@ -1373,7 +1373,7 @@
         }
         pub fn bool(&self) -> Result<bool, String> {
             match self {
-                Json::Boolean(b) => Ok(*b),
+                JSON::Boolean(b) => Ok(*b),
                 _ => Err(format!(
                     "expected bool, got {}",
                     render_json(self, false, 0)
@@ -1382,7 +1382,7 @@
         }
         pub fn float(&self) -> Result<f64, String> {
             match self {
-                Json::Number(f) => Ok(*f),
+                JSON::Number(f) => Ok(*f),
                 _ => Err(format!(
                     "expected number, got {}",
                     render_json(self, false, 0)

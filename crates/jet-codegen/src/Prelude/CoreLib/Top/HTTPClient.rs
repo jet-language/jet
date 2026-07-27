@@ -1,11 +1,11 @@
 // ── D-HTTPLIB2=B / D-HTTPLIB4=B: core.http.client — request builder ─────────
-// JetHttpRequest and JetHttpResponse live here (in the generated program's
+// JetHTTPRequest and JetHTTPResponse live here (in the generated program's
 // crate) so they're accessible without cross-crate type imports. The native
 // client FFI seam uses only primitive types (i64, String, Vec<String>) through
 // wrappers here. This is the I6-safe pattern.
 
 #[derive(Clone)]
-enum JetHttpProxy {
+enum JetHTTPProxy {
     FromEnvironment,
     None,
     Url(String),
@@ -13,7 +13,7 @@ enum JetHttpProxy {
 
 /// D-HTTP-CLIENT2=A: typed redirect policy for `Client.redirects`.
 #[derive(Clone)]
-enum JetHttpRedirectPolicy {
+enum JetHTTPRedirectPolicy {
     Follow {
         max: i64,
         same_origin_credentials: bool,
@@ -24,7 +24,7 @@ enum JetHttpRedirectPolicy {
 /// Default unset is Safe (GET/HEAD/OPTIONS/TRACE), max one attempt, never
 /// status-based. Idempotent opts in PUT/DELETE; None disables.
 #[derive(Clone)]
-enum JetHttpRetryPolicy {
+enum JetHTTPRetryPolicy {
     None,
     Safe,
     Idempotent,
@@ -32,36 +32,36 @@ enum JetHttpRetryPolicy {
 
 /// D-HTTP-CLIENT2=A: explicit in-memory RFC6265bis cookie jar.
 #[derive(Clone)]
-enum JetHttpCookieJar {
+enum JetHTTPCookieJar {
     Memory,
 }
 
-struct JetHttpClientOwner {
+struct JetHTTPClientOwner {
     handle: i64,
     drop_handle: fn(i64),
 }
 
-impl Drop for JetHttpClientOwner {
+impl Drop for JetHTTPClientOwner {
     fn drop(&mut self) {
         (self.drop_handle)(self.handle);
     }
 }
 
 #[derive(Clone)]
-struct JetHttpClient {
-    owner: std::sync::Arc<JetHttpClientOwner>,
-    policy_error: Option<JetHttpError>,
+struct JetHTTPClient {
+    owner: std::sync::Arc<JetHTTPClientOwner>,
+    policy_error: Option<JetHTTPError>,
 }
 
-impl JetHttpClient {
+impl JetHTTPClient {
     fn new(handle: i64, drop_handle: fn(i64)) -> Self {
         Self {
-            owner: std::sync::Arc::new(JetHttpClientOwner { handle, drop_handle }),
+            owner: std::sync::Arc::new(JetHTTPClientOwner { handle, drop_handle }),
             policy_error: None,
         }
     }
 
-    fn policy(self, next: Result<i64, JetHttpError>, drop_handle: fn(i64)) -> Self {
+    fn policy(self, next: Result<i64, JetHTTPError>, drop_handle: fn(i64)) -> Self {
         match next {
             Ok(handle) => Self::new(handle, drop_handle),
             Err(error) => Self {
@@ -72,16 +72,16 @@ impl JetHttpClient {
     }
 }
 
-fn jet_http_client_request_new(method: &String, url: &String) -> JetHttpRequest {
-    JetHttpRequest {
+fn jet_http_client_request_new(method: &String, url: &String) -> JetHTTPRequest {
+    JetHTTPRequest {
         method: method.clone(),
         url: url.clone(),
         path: String::new(),
         version: "HTTP/1.1".to_string(),
-        headers: JetHttpHeaders::new(),
-        trailers: std::sync::Arc::new(std::sync::Mutex::new(JetHttpHeaders::new())),
+        headers: JetHTTPHeaders::new(),
+        trailers: std::sync::Arc::new(std::sync::Mutex::new(JetHTTPHeaders::new())),
         header_error: None,
-        body: JetHttpBody::empty(),
+        body: JetHTTPBody::empty(),
         body_set: false,
         params: std::collections::BTreeMap::new(),
         route_template: None,
@@ -102,32 +102,32 @@ fn jet_http_client_request_new(method: &String, url: &String) -> JetHttpRequest 
 }
 
 fn jet_http_client_request_header(
-    mut req: JetHttpRequest,
+    mut req: JetHTTPRequest,
     name: &String,
     value: &String,
-) -> JetHttpRequest {
+) -> JetHTTPRequest {
     if let Err(error) = req.headers.append(name, value) {
         let _ = error;
-        req.header_error = Some(JetHttpError::InvalidHeader);
+        req.header_error = Some(JetHTTPError::InvalidHeader);
     }
     req
 }
 
-fn jet_http_client_request_body(mut req: JetHttpRequest, body: &String) -> JetHttpRequest {
-    req.body = JetHttpBody::from_text(body.clone());
+fn jet_http_client_request_body(mut req: JetHTTPRequest, body: &String) -> JetHTTPRequest {
+    req.body = JetHTTPBody::from_text(body.clone());
     req.body_set = true;
     req
 }
 
-fn jet_http_client_request_body_stream(mut req: JetHttpRequest, body: JetHttpBody) -> JetHttpRequest {
+fn jet_http_client_request_body_stream(mut req: JetHTTPRequest, body: JetHTTPBody) -> JetHTTPRequest {
     req.body = body;
     req.body_set = true;
     req
 }
 
 fn jet_http_client_body_upload(
-    req: &JetHttpRequest,
-) -> Result<(Option<i64>, bool, Option<JetHttpBodyChunks>), JetHttpError> {
+    req: &JetHTTPRequest,
+) -> Result<(Option<i64>, bool, Option<JetHTTPBodyChunks>), JetHTTPError> {
     if !req.body_set {
         return Ok((None, false, None));
     }
@@ -136,93 +136,93 @@ fn jet_http_client_body_upload(
     Ok((length, true, Some(chunks)))
 }
 
-fn jet_http_client_request_timeout(mut req: JetHttpRequest, ms: i64) -> JetHttpRequest {
+fn jet_http_client_request_timeout(mut req: JetHTTPRequest, ms: i64) -> JetHTTPRequest {
     req.timeout_ms = Some(ms);
     req
 }
 
 fn jet_http_client_request_connect_timeout(
-    mut req: JetHttpRequest,
+    mut req: JetHTTPRequest,
     ms: i64,
-) -> JetHttpRequest {
+) -> JetHTTPRequest {
     req.connect_timeout_ms = Some(ms);
     req
 }
 
-fn jet_http_client_request_read_timeout(mut req: JetHttpRequest, ms: i64) -> JetHttpRequest {
+fn jet_http_client_request_read_timeout(mut req: JetHTTPRequest, ms: i64) -> JetHTTPRequest {
     req.read_timeout_ms = Some(ms);
     req
 }
 
-fn jet_http_client_request_total_timeout(mut req: JetHttpRequest, ms: i64) -> JetHttpRequest {
+fn jet_http_client_request_total_timeout(mut req: JetHTTPRequest, ms: i64) -> JetHTTPRequest {
     req.total_timeout_ms = Some(ms);
     req
 }
 
-fn jet_http_client_request_dns_timeout(mut req: JetHttpRequest, ms: i64) -> JetHttpRequest {
+fn jet_http_client_request_dns_timeout(mut req: JetHTTPRequest, ms: i64) -> JetHTTPRequest {
     req.dns_timeout_ms = Some(ms);
     req
 }
 
-fn jet_http_client_request_tls_timeout(mut req: JetHttpRequest, ms: i64) -> JetHttpRequest {
+fn jet_http_client_request_tls_timeout(mut req: JetHTTPRequest, ms: i64) -> JetHTTPRequest {
     req.tls_timeout_ms = Some(ms);
     req
 }
 
-fn jet_http_client_request_write_timeout(mut req: JetHttpRequest, ms: i64) -> JetHttpRequest {
+fn jet_http_client_request_write_timeout(mut req: JetHTTPRequest, ms: i64) -> JetHTTPRequest {
     req.write_timeout_ms = Some(ms);
     req
 }
 
 fn jet_http_client_request_first_byte_timeout(
-    mut req: JetHttpRequest,
+    mut req: JetHTTPRequest,
     ms: i64,
-) -> JetHttpRequest {
+) -> JetHTTPRequest {
     req.first_byte_timeout_ms = Some(ms);
     req
 }
 
-fn jet_http_client_request_redirects(mut req: JetHttpRequest, limit: i64) -> JetHttpRequest {
+fn jet_http_client_request_redirects(mut req: JetHTTPRequest, limit: i64) -> JetHTTPRequest {
     req.redirects = Some(limit);
     req
 }
 
-fn jet_http_client_request_proxy(mut req: JetHttpRequest, proxy: &String) -> JetHttpRequest {
+fn jet_http_client_request_proxy(mut req: JetHTTPRequest, proxy: &String) -> JetHTTPRequest {
     req.proxy = Some(proxy.clone());
     req
 }
 
 fn jet_http_client_request_cookie(
-    mut req: JetHttpRequest,
+    mut req: JetHTTPRequest,
     name: &String,
     value: &String,
-) -> JetHttpRequest {
+) -> JetHTTPRequest {
     req.cookies.push(name.clone());
     req.cookies.push(value.clone());
     req
 }
 
 fn jet_http_client_request_form(
-    mut req: JetHttpRequest,
+    mut req: JetHTTPRequest,
     name: &String,
     value: &String,
-) -> JetHttpRequest {
+) -> JetHTTPRequest {
     req.form.push(name.clone());
     req.form.push(value.clone());
     req
 }
 
 fn jet_http_client_request_multipart_text(
-    mut req: JetHttpRequest,
+    mut req: JetHTTPRequest,
     name: &String,
     value: &String,
-) -> JetHttpRequest {
+) -> JetHTTPRequest {
     req.multipart.push(name.clone());
     req.multipart.push(value.clone());
     req
 }
 
-fn jet_http_client_response_status(resp: &JetHttpResponse) -> i64 {
+fn jet_http_client_response_status(resp: &JetHTTPResponse) -> i64 {
     resp.status
 }
 
@@ -231,7 +231,7 @@ fn jet_http_client_response_new(
     body_handle: i64,
     body_length: Option<i64>,
     headers: Vec<String>,
-    body_read: fn(i64, usize) -> Result<Option<Vec<u8>>, JetHttpError>,
+    body_read: fn(i64, usize) -> Result<Option<Vec<u8>>, JetHTTPError>,
     body_close: fn(i64),
     protocol: String,
     remote_address: String,
@@ -239,17 +239,17 @@ fn jet_http_client_response_new(
     timings_ms: Vec<i64>,
     reused_connection: bool,
     raw_content_encoding: Option<String>,
-) -> Result<JetHttpResponse, JetHttpError> {
+) -> Result<JetHTTPResponse, JetHTTPError> {
     let body_length = body_length
         .map(usize::try_from)
         .transpose()
-        .map_err(|_| JetHttpError::InvalidFraming)?;
-    Ok(JetHttpResponse {
+        .map_err(|_| JetHTTPError::InvalidFraming)?;
+    Ok(JetHTTPResponse {
         status,
         version: "HTTP/1.1".to_string(),
-        body: JetHttpBody::bridge(body_handle, body_length, body_read, body_close),
-        headers: JetHttpHeaders::from_flat(headers).map_err(|_| JetHttpError::InvalidHeader)?,
-        trailers: JetHttpHeaders::new(),
+        body: JetHTTPBody::bridge(body_handle, body_length, body_read, body_close),
+        headers: JetHTTPHeaders::from_flat(headers).map_err(|_| JetHTTPError::InvalidHeader)?,
+        trailers: JetHTTPHeaders::new(),
         head_content_length: None,
         suppress_body: false,
         protocol,
@@ -260,14 +260,14 @@ fn jet_http_client_response_new(
         raw_content_encoding,
     })
 }
-fn jet_http_client_response_body(resp: &JetHttpResponse) -> JetHttpBody {
+fn jet_http_client_response_body(resp: &JetHTTPResponse) -> JetHTTPBody {
     resp.body.clone()
 }
-fn jet_http_client_response_header(resp: &JetHttpResponse, name: &String) -> Option<String> {
+fn jet_http_client_response_header(resp: &JetHTTPResponse, name: &String) -> Option<String> {
     resp.headers.get(name).cloned()
 }
 
-fn jet_http_response_cookies(resp: &JetHttpResponse) -> Vec<String> {
+fn jet_http_response_cookies(resp: &JetHTTPResponse) -> Vec<String> {
     resp.headers
         .all("set-cookie")
         .into_iter()
@@ -275,21 +275,21 @@ fn jet_http_response_cookies(resp: &JetHttpResponse) -> Vec<String> {
         .collect()
 }
 
-fn jet_http_client_response_protocol(resp: &JetHttpResponse) -> String {
+fn jet_http_client_response_protocol(resp: &JetHTTPResponse) -> String {
     resp.protocol.clone()
 }
-fn jet_http_client_response_remote_address(resp: &JetHttpResponse) -> String {
+fn jet_http_client_response_remote_address(resp: &JetHTTPResponse) -> String {
     resp.remote_address.clone()
 }
-fn jet_http_client_response_redirect_history(resp: &JetHttpResponse) -> Vec<String> {
+fn jet_http_client_response_redirect_history(resp: &JetHTTPResponse) -> Vec<String> {
     resp.redirect_history.clone()
 }
-fn jet_http_client_response_timings(resp: &JetHttpResponse) -> Vec<i64> {
+fn jet_http_client_response_timings(resp: &JetHTTPResponse) -> Vec<i64> {
     resp.timings_ms.clone()
 }
-fn jet_http_client_response_reused(resp: &JetHttpResponse) -> bool {
+fn jet_http_client_response_reused(resp: &JetHTTPResponse) -> bool {
     resp.reused_connection
 }
-fn jet_http_client_response_raw_encoding(resp: &JetHttpResponse) -> Option<String> {
+fn jet_http_client_response_raw_encoding(resp: &JetHTTPResponse) -> Option<String> {
     resp.raw_content_encoding.clone()
 }

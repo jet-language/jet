@@ -1159,7 +1159,7 @@ pub(crate) struct Checker<'a> {
     memory_control_multiplier: Option<u64>,
     /// D-TXN2: nesting depth of `#Transact(name) { … }` blocks whose body is
     /// being checked **directly** (not inside a deferred lambda). While `> 0`, an
-    /// irreversible Core effect (Net/Fs/Exec) reached directly in the block is
+    /// irreversible Core effect (Net/FS/Exec) reached directly in the block is
     /// E0746 at the call site — the fix is to move it after the block or register
     /// it via `name.on_commit(…)`. Zeroed and restored around every lambda body
     /// (effects inside an `on_commit`/other lambda are deferred, not rejected).
@@ -1285,7 +1285,7 @@ pub(crate) struct Checker<'a> {
     /// E2-M15: reject OS-dependent std APIs in `--freestanding` builds (E3301).
     freestanding: bool,
     /// D-CTEFFECT1: `--allow-impure` was passed — `#Impure` blocks may execute
-    /// Tier-2 ambient comptime effects (Fs/Env/Exec/Io) at compile time.
+    /// Tier-2 ambient comptime effects (FS/Env/Exec/IO) at compile time.
     allow_impure: bool,
     /// D-CTEFFECT1: nesting depth of `#Impure` blocks currently being checked.
     /// Passed as `initial_impure_depth` to comptime evaluation of bindings
@@ -1588,7 +1588,7 @@ mod MemoryFacts;
 pub mod UnsafeObligations;
 mod FFI;
 pub mod HotSwap;
-mod OsTarget;
+mod OSTarget;
 mod Protocol;
 mod Purity;
 mod Registration;
@@ -1630,7 +1630,7 @@ pub(crate) use State::{check_items_state, StateTable};
 pub use WebApp::extract_web_app_graph;
 pub(crate) use WebPartition::check_web_partition;
 // D-OSTARGET1=A: native OS platform gating (mixed-axis + unmatched-call).
-pub(crate) use OsTarget::{check_os_target, desugar_os_switches};
+pub(crate) use OSTarget::{check_os_target, desugar_os_switches};
 
 // Public entry points (preserve `jet::Sema::<item>` paths).
 pub use Bundle::{

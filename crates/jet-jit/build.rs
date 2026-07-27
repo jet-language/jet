@@ -165,13 +165,13 @@ fn write_layout_rt(manifest: &PathBuf) {
 }
 
 fn write_yaml_std(manifest: &PathBuf) {
-    let src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/Yaml.rs");
+    let src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/YAML.rs");
     println!("cargo:rerun-if-changed={}", src.display());
-    let raw = std::fs::read_to_string(&src).expect("read JetStd/Yaml.rs");
-    // Yaml.rs ends with an extra `}` for corelib string-concat embedding.
+    let raw = std::fs::read_to_string(&src).expect("read JetStd/YAML.rs");
+    // YAML.rs ends with an extra `}` for corelib string-concat embedding.
     let trimmed = {
         let t = raw.trim_end();
-        let without = t.strip_suffix('}').expect("Yaml.rs trailing }");
+        let without = t.strip_suffix('}').expect("YAML.rs trailing }");
         let without = without.trim_end();
         // Keep a trailing newline for include!
         format!("{without}\n")

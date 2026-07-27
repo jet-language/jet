@@ -1,6 +1,6 @@
 //! Card #392 gap fix: `core.url` (D-URL1=A) ported verbatim from AOT's
 //! hand-rolled RFC-3986-shaped parser
-//! (`crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs::JetUrl` +
+//! (`crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs::JetURL` +
 //! `jet_url_*` free functions) so comptime/REPL tier-0 matches AOT
 //! byte-for-byte (R12 parity). Only the module-level free functions in
 //! `fixed_sigs.rs`'s `"core.url"` table are ported here (`parse`/
@@ -10,7 +10,7 @@
 //! path), which already works once a `CtValue::Struct { type_name: "Url",
 //! .. }` exists with matching field names.
 
-/// Plain-data mirror of AOT's `JetUrl` struct — same shape, same field
+/// Plain-data mirror of AOT's `JetURL` struct — same shape, same field
 /// names, so `to_ct_value`/`from_ct_value` in `Methods.rs` map 1:1 onto a
 /// `CtValue::Struct { type_name: "Url", .. }`.
 pub(super) struct UrlParts {

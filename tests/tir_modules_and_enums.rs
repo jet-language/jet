@@ -679,9 +679,9 @@ fn run() {
     assert_eq!(stdout, "5\n1\n10\n7\n");
 }
 
-/// c109 Phase 17: a PRELUDE struct (HttpResponse/HttpRequest) constructed via a struct
+/// c109 Phase 17: a PRELUDE struct (HTTPResponse/HTTPRequest) constructed via a struct
 /// literal. The `is_prelude_struct` emit branch renders a `Jet…` Rust head with PLAIN
-/// (unmangled) fields, and HttpRequest injects a `params: BTreeMap::new()` field. The
+/// (unmangled) fields, and HTTPRequest injects a `params: BTreeMap::new()` field. The
 /// prelude types live in `jet_std`, which a standalone `rustc` here can't link, so this
 /// asserts the EMITTED Rust contains the byte-exact construction (the example suite +
 /// the JET_NO_TIR full-suite diff prove it compiles & runs). The type is a covered value
@@ -689,11 +689,11 @@ fn run() {
 #[test]
 fn prelude_struct_construction() {
     let src = "\
-fn build_resp(body: String) => HttpResponse {
-    return HttpResponse.{status: \"200 OK\", body: body, headers: []}
+fn build_resp(body: String) => HTTPResponse {
+    return HTTPResponse.{status: \"200 OK\", body: body, headers: []}
 }
-fn build_req() => HttpRequest {
-    return HttpRequest.{method: \"GET\", path: \"/\", body: \"\", headers: []}
+fn build_req() => HTTPRequest {
+    return HTTPRequest.{method: \"GET\", path: \"/\", body: \"\", headers: []}
 }
 fn run() {
     r :: build_resp(\"hi\")
@@ -713,18 +713,18 @@ fn run() {
             jet::render_diagnostics(&shown, src, &diags)
         )
     });
-    // HttpResponse: prelude head (`…JetHttpResponse`), PLAIN field names, no injected
+    // HTTPResponse: prelude head (`…JetHTTPResponse`), PLAIN field names, no injected
     // `params`. The `…` root prefix varies by emit layout — assert the prefix-independent
     // construction body.
     assert!(
-        out.rust.contains("JetHttpResponse { status: \"200 OK\".to_string(), body: (*user_body), headers: std::collections::BTreeMap::new() }"),
-        "HttpResponse construction not byte-exact:\n{}",
+        out.rust.contains("JetHTTPResponse { status: \"200 OK\".to_string(), body: (*user_body), headers: std::collections::BTreeMap::new() }"),
+        "HTTPResponse construction not byte-exact:\n{}",
         out.rust
     );
-    // HttpRequest: prelude head, plain fields, injected route metadata appended verbatim.
+    // HTTPRequest: prelude head, plain fields, injected route metadata appended verbatim.
     assert!(
-        out.rust.contains("JetHttpRequest { method: \"GET\".to_string(), path: \"/\".to_string(), body: \"\".to_string(), headers: std::collections::BTreeMap::new(), params: std::collections::BTreeMap::new(), route_template: None }"),
-        "HttpRequest construction not byte-exact:\n{}",
+        out.rust.contains("JetHTTPRequest { method: \"GET\".to_string(), path: \"/\".to_string(), body: \"\".to_string(), headers: std::collections::BTreeMap::new(), params: std::collections::BTreeMap::new(), route_template: None }"),
+        "HTTPRequest construction not byte-exact:\n{}",
         out.rust
     );
 }

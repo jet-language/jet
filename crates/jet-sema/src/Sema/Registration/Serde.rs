@@ -412,10 +412,11 @@ fn serde_source_field_key(container: &[crate::AST::Marker], f: &crate::AST::Fiel
     let style = container.iter().find(|m| m.name == crate::Syntax::ATTR_RENAME_ALL)
         .and_then(|m| m.args.first()).and_then(|e| match e { crate::AST::Expr::Ident(n, _) => Some(n.as_str()), _ => None });
     match style {
-        Some("camel") => { let mut parts = f.name.split('_'); let mut out = parts.next().unwrap_or("").to_string(); for p in parts { let mut c=p.chars(); if let Some(x)=c.next(){out.extend(x.to_uppercase());out.push_str(c.as_str());} } out }
-        Some("kebab") => f.name.replace('_', "-"),
-        Some("screaming") => f.name.to_uppercase(),
-        Some("pascal") => f.name.split('_').map(|p| { let mut c=p.chars(); c.next().map(|x| x.to_uppercase().collect::<String>()+c.as_str()).unwrap_or_default() }).collect(),
+        Some("camel") => crate::Syntax::to_camel_acronym(&f.name),
+        Some("kebab") => crate::Syntax::to_snake_acronym(&f.name).replace('_', "-"),
+        Some("screaming") => crate::Syntax::to_shouty_acronym(&f.name),
+        Some("pascal") => crate::Syntax::to_pascal_acronym(&f.name),
+        Some("snake") => crate::Syntax::to_snake_acronym(&f.name),
         _ => f.name.clone(),
     }
 }

@@ -115,14 +115,14 @@ pub struct PatchApplication {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OverlayError {
     Malformed(String),
-    Io(String),
+    IO(String),
     Patch(String),
 }
 
 impl OverlayError {
     pub fn message(&self) -> &str {
         match self {
-            OverlayError::Malformed(s) | OverlayError::Io(s) | OverlayError::Patch(s) => s,
+            OverlayError::Malformed(s) | OverlayError::IO(s) | OverlayError::Patch(s) => s,
         }
     }
 }
@@ -588,10 +588,10 @@ mod tests {
         let policy = parse_workspace_policy(r#"
 module workspace {
     policy_note: .{ deny: #(Exec) }
-    policy: .{ trust: .{ note: "deny: #(Fs)" }, Deny: #(Net), deny: #(Exec, Fs) }
+    policy: .{ trust: .{ note: "deny: #(FS)" }, Deny: #(Net), deny: #(Exec, FS) }
 }
 "#).unwrap();
-        assert_eq!(policy.build_deny, vec!["Exec", "Fs"]);
+        assert_eq!(policy.build_deny, vec!["Exec", "FS"]);
     }
 
     #[test]

@@ -26,12 +26,12 @@ pub(crate) struct FuncWebMeta {
 }
 
 #[derive(Debug, Default)]
-struct AbiTypeIndex {
+struct ABITypeIndex {
     structs: HashMap<String, StructDef>,
     enums: HashMap<String, EnumDef>,
 }
 
-impl AbiTypeIndex {
+impl ABITypeIndex {
     fn from_bundle(bundle: &ProgramBundle) -> Self {
         let mut out = Self::default();
         for module in &bundle.modules {
@@ -41,7 +41,7 @@ impl AbiTypeIndex {
     }
 }
 
-fn collect_abi_types(items: &[Item], out: &mut AbiTypeIndex) {
+fn collect_abi_types(items: &[Item], out: &mut ABITypeIndex) {
     for item in items {
         match item {
             Item::Struct(s) => {
@@ -88,7 +88,7 @@ fn has_codable_derive(derives: &[(String, crate::Diagnostics::Span)]) -> bool {
     encode && decode
 }
 
-fn is_abi_safe_type_full(ty: &Type, idx: &AbiTypeIndex) -> bool {
+fn is_abi_safe_type_full(ty: &Type, idx: &ABITypeIndex) -> bool {
     if Syntax::is_abi_safe_type(ty) {
         return true;
     }
@@ -99,7 +99,7 @@ fn is_abi_safe_type_full(ty: &Type, idx: &AbiTypeIndex) -> bool {
     }
 }
 
-impl AbiTypeIndex {
+impl ABITypeIndex {
     fn is_codable_named(&self, name: &str, args: &[Type]) -> bool {
         if let Some(s) = self.structs.get(name) {
             if !has_codable_derive(&s.derives) {
@@ -145,7 +145,7 @@ fn assign_bucket(
         return m.bucket();
     }
     if effect_set_has_root(effects, Effect::Browser) {
-        return WebBucket::Js;
+        return WebBucket::JS;
     }
     if let Some(c) = ceiling {
         return c;
@@ -312,7 +312,7 @@ pub fn format_partition_report(
     lines.join("\n")
 }
 
-fn check_abi_export(f: &FuncWebMeta, idx: &AbiTypeIndex, diags: &mut Vec<Diagnostic>) {
+fn check_abi_export(f: &FuncWebMeta, idx: &ABITypeIndex, diags: &mut Vec<Diagnostic>) {
     let Some(WebPartitionMarker::WasmExport) = f.marker else {
         return;
     };
@@ -383,7 +383,7 @@ pub fn check_web_partition(
         return Vec::new();
     }
 
-    let abi_idx = AbiTypeIndex::from_bundle(bundle);
+    let abi_idx = ABITypeIndex::from_bundle(bundle);
     let mut diags = Vec::new();
     for f in &metas {
         let effects = solved.get(&f.effect_key).cloned().unwrap_or_default();
@@ -408,7 +408,7 @@ pub fn check_web_partition(
             };
             let callee_bucket = &partitions[&callee_meta.key];
             if caller_bucket != callee_bucket {
-                let wasm_export_bridge = *caller_bucket == WebBucket::Js
+                let wasm_export_bridge = *caller_bucket == WebBucket::JS
                     && *callee_bucket == WebBucket::Wasm
                     && callee_meta.marker == Some(WebPartitionMarker::WasmExport);
                 if wasm_export_bridge {

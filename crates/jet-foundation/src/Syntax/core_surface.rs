@@ -310,7 +310,7 @@ pub const KW_SHIELD: &str = "Shield";
 
 /// D-CTEFFECT1 (ratified 2026-06-25): `#Impure("reason") { … }` — the audited
 /// Tier-2 comptime effect gate. Both this block AND `--allow-impure` at build
-/// are required to execute ambient comptime I/O (Fs/Env/Exec/Io). PascalCase
+/// are required to execute ambient comptime I/O (FS/Env/Exec/IO). PascalCase
 /// per D-CASING1 (consistent with `Unsafe`).
 pub const KW_IMPURE: &str = "Impure";
 
@@ -321,19 +321,19 @@ pub const KW_IMPURE: &str = "Impure";
 pub const KW_REACTIVE: &str = "Reactive";
 
 /// D-WASM1=A (ratified 2026-06-28, c123), respelled by D-MARK-TARGET1=A
-/// (ratified 2026-07-11, card #498): `#Target(Wasm|Js)` is the one target-
+/// (ratified 2026-07-11, card #498): `#Target(Wasm|JS)` is the one target-
 /// marker family, covering both the module-/file-level partition ceiling
-/// AND the per-function bucket override (the retired bare `#Wasm`/`#Js`
+/// AND the per-function bucket override (the retired bare `#Wasm`/`#JS`
 /// spellings). Sema validates it against inferred `Browser` effects.
 pub const ATTR_TARGET: &str = "Target";
 
 /// D-WASM1=A: export this WASM function to the generated JS loader. A
-/// different job (export surface) from the `#Target(Wasm|Js)` partition
+/// different job (export surface) from the `#Target(Wasm|JS)` partition
 /// family above — D-MARK-TARGET1=A leaves it untouched.
 pub const ATTR_WASM_EXPORT: &str = "WasmExport";
 
-/// D-WASM1=A: `#Target(Js)` argument spelling.
-pub const WEB_BUCKET_JS: &str = "Js";
+/// D-WASM1=A: `#Target(JS)` argument spelling.
+pub const WEB_BUCKET_JS: &str = "JS";
 
 /// D-WASM1=A: `#Target(Wasm)` argument spelling.
 pub const WEB_BUCKET_WASM: &str = "Wasm";
@@ -342,28 +342,28 @@ pub const WEB_BUCKET_WASM: &str = "Wasm";
 pub const BUILD_TARGET_WEB: &str = "web";
 
 /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Web)` argument spelling — a file-level
-/// marker distinct from the `Wasm`/`Js` partition-ceiling values above (same
+/// marker distinct from the `Wasm`/`JS` partition-ceiling values above (same
 /// `#Target(...)` marker, different axis: "build me for the web backend by
 /// default" rather than "cap this file's partition ceiling").
 pub const WEB_TARGET_DEFAULT_WEB: &str = "Web";
 
-/// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — an explicit, file-level
+/// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#HTML("path.html")` — an explicit, file-level
 /// declaration of this program's companion host page for `--target=web`
 /// builds, replacing the silent `<stem>.html` filename convention.
-pub const ATTR_HTML: &str = "Html";
+pub const ATTR_HTML: &str = "HTML";
 
-/// D-DSLBLOCK1=A (ratified 2026-07-06): `#Sql<Row> { ... }` — a stdlib-owned,
+/// D-DSLBLOCK1=A (ratified 2026-07-06): `#SQL<Row> { ... }` — a stdlib-owned,
 /// checked DSL block. Third-party DSL block markers are not user-extensible.
-pub const DSL_BLOCK_SQL: &str = "Sql";
+pub const DSL_BLOCK_SQL: &str = "SQL";
 
-/// D-DSLBLOCK1=A: initial fixed stdlib DSL block marker whitelist. `Html`
-/// reuses `ATTR_HTML`; block form (`#Html { ... }`) is distinct from the
-/// existing file-level companion-page form (`#Html("path.html")`).
+/// D-DSLBLOCK1=A: initial fixed stdlib DSL block marker whitelist. `HTML`
+/// reuses `ATTR_HTML`; block form (`#HTML { ... }`) is distinct from the
+/// existing file-level companion-page form (`#HTML("path.html")`).
 pub const STDLIB_DSL_BLOCK_MARKERS: &[&str] = &[DSL_BLOCK_SQL, ATTR_HTML];
 
 /// D-TYPEDTEXT2: parser-only sentinels for `sql"..."` / `html"..."` literals.
 /// These are impossible user identifiers; sema rewrites them to the existing
-/// synthetic `Sql`/`Html` typed-text calls before codegen.
+/// synthetic `SQL`/`HTML` typed-text calls before codegen.
 pub const TYPED_TEXT_SQL_PREFIX_CALL: &str = "$typed_text_sql";
 pub const TYPED_TEXT_HTML_PREFIX_CALL: &str = "$typed_text_html";
 /// D-FFI-SH1=A: `Sh` is D-TYPEDTEXT1's argv-safe shell-command instance.
@@ -371,19 +371,19 @@ pub const TYPE_SH: &str = "Sh";
 /// D-FFI-SH1=A / D-TYPEDTEXT2: parser sentinel for user spelling `sh"…"`.
 pub const TYPED_TEXT_SH_PREFIX_CALL: &str = "$typed_text_sh";
 
-/// D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(Os. … )` namespace — the
+/// D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(OS. … )` namespace — the
 /// second, mutually-exclusive axis of the `#Target(...)` marker family
-/// (`Wasm`/`Js`/`Web` above are the first, web-bucket axis). Attaches at
+/// (`Wasm`/`JS`/`Web` above are the first, web-bucket axis). Attaches at
 /// `impl` block scope, not file/module scope.
-pub const TARGET_OS_NAMESPACE: &str = "Os";
+pub const TARGET_OS_NAMESPACE: &str = "OS";
 
-/// D-OSTARGET1=A: `#Target(Os.Linux)`.
+/// D-OSTARGET1=A: `#Target(OS.Linux)`.
 pub const TARGET_OS_LINUX: &str = "Linux";
 
-/// D-OSTARGET1=A: `#Target(Os.Macos)`.
-pub const TARGET_OS_MACOS: &str = "Macos";
+/// D-OSTARGET1=A: `#Target(OS.MacOS)`.
+pub const TARGET_OS_MACOS: &str = "MacOS";
 
-/// D-OSTARGET1=A: `#Target(Os.Windows)`.
+/// D-OSTARGET1=A: `#Target(OS.Windows)`.
 pub const TARGET_OS_WINDOWS: &str = "Windows";
 
 /// D-OSTARGET2=B (ratified 2026-07-03): the compiler-known comptime value
@@ -492,15 +492,15 @@ pub const TYPE_EMAIL_ADDRESS: &str = "Address";
 pub const TYPE_EMAIL_MESSAGE: &str = "Message";
 pub const TYPE_EMAIL_ATTACHMENT: &str = "Attachment";
 pub const TYPE_EMAIL_ENVELOPE: &str = "Envelope";
-pub const TYPE_EMAIL_SMTP_SECURITY: &str = "SmtpSecurity";
+pub const TYPE_EMAIL_SMTP_SECURITY: &str = "SMTPSecurity";
 pub const TYPE_EMAIL_RECIPIENT_POLICY: &str = "RecipientPolicy";
 pub const TYPE_EMAIL_RECIPIENT_REPORT: &str = "RecipientReport";
 pub const TYPE_EMAIL_SEND_REPORT: &str = "SendReport";
 pub const TYPE_EMAIL_ERROR: &str = "EmailError";
 pub const TYPE_EMAIL_LIMITS: &str = "Limits";
-pub const TYPE_EMAIL_SMTP_AUTH: &str = "SmtpAuth";
-pub const TYPE_EMAIL_TLS_TRUST: &str = "TlsTrust";
-pub const TYPE_EMAIL_SMTP_CONFIG: &str = "SmtpConfig";
+pub const TYPE_EMAIL_SMTP_AUTH: &str = "SMTPAuth";
+pub const TYPE_EMAIL_TLS_TRUST: &str = "TLSTrust";
+pub const TYPE_EMAIL_SMTP_CONFIG: &str = "SMTPConfig";
 pub const TYPE_EMAIL_DKIM_CONFIG: &str = "DkimConfig"; // D-EMAIL-DKIM-CONFIG1=A
 pub const TYPE_EMAIL_MAILER: &str = "Mailer";
 pub const EMAIL_LIMITS_SAFE_METHOD: &str = "safe";

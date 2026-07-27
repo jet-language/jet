@@ -301,7 +301,7 @@ thread_local! {
     static TERM_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
 
-pub(crate) struct IoHostFns {
+pub(crate) struct IOHostFns {
     pub stdout: FuncId,
     pub stderr: FuncId,
     pub stdin: FuncId,
@@ -371,7 +371,7 @@ pub(crate) fn register_io_symbols(builder: &mut JITBuilder) {
     builder.symbol("jet_jit_term_leave", jet_jit_term_leave as *const u8);
 }
 
-pub(crate) fn declare_io_host_fns(module: &mut JITModule) -> Result<IoHostFns, String> {
+pub(crate) fn declare_io_host_fns(module: &mut JITModule) -> Result<IOHostFns, String> {
     let cc = module.target_config().default_call_conv;
     let mut nullary = Signature::new(cc);
     nullary.returns.push(AbiParam::new(types::I64));
@@ -393,7 +393,7 @@ pub(crate) fn declare_io_host_fns(module: &mut JITModule) -> Result<IoHostFns, S
             .declare_function(name, Linkage::Import, sig)
             .map_err(|e| e.to_string())
     };
-    Ok(IoHostFns {
+    Ok(IOHostFns {
         stdout: import("jet_jit_io_stdout", &nullary)?,
         stderr: import("jet_jit_io_stderr", &nullary)?,
         stdin: import("jet_jit_io_stdin", &nullary)?,

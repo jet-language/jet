@@ -27,7 +27,7 @@ struct JetFileWriter {
 // handle map (`rusqlite::Connection` can't cross into this always-compiled
 // prelude — I6). `JetDbConnection` is a thin, move-only handle wrapper so
 // `.query`/`.execute`/`.begin`/`.commit`/`.rollback`/`.close` dispatch by
-// receiver TYPE (`DbConnection`), the same mechanism `FileReader`/`FileWriter`
+// receiver TYPE (`DBConnection`), the same mechanism `FileReader`/`FileWriter`
 // use, instead of exposing the bare `u64` to Jet code.
 #[derive(Debug)]
 struct JetDbConnection {

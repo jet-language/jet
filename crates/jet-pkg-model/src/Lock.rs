@@ -1612,7 +1612,7 @@ mod a4_envelope_tests {
             Some(env("sha256-x", "x86_64-linux", "", "r via core-source")),
         );
         p.content_hash = Some("sha256-tree".to_string());
-        p.effects = vec!["Net".to_string(), "Fs".to_string()];
+        p.effects = vec!["Net".to_string(), "FS".to_string()];
         let lock = base_lock(vec![p.clone()], Vec::new());
         let back = parse(&write(&lock)).expect("parse");
         assert_eq!(back.packages[0], p);

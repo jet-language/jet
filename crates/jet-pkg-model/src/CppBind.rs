@@ -1,8 +1,8 @@
 //! D-FFI-CPP1=A: clang-AST C++ surfaces lowered to a cached C ABI shim.
-//! Clang's JSON is the declaration source of truth. The binder never parses
+//! Clang's JSONValue is the declaration source of truth. The binder never parses
 //! header text, and every native input participates in provenance/cache identity.
 
-use crate::JSON::{self, Json};
+use crate::JSON::{self, JSONValue};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -46,13 +46,13 @@ pub enum BindError {
     Source(String),
     ToolMissing(String),
     ToolFailed(String),
-    Io(String),
+    IO(String),
 }
 
 impl std::fmt::Display for BindError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Source(value) | Self::Io(value) => f.write_str(value),
+            Self::Source(value) | Self::IO(value) => f.write_str(value),
             Self::ToolMissing(value) => write!(f, "the selected `{value}` tool was not found"),
             Self::ToolFailed(value) => write!(f, "the C++ toolchain rejected the binding: {value}"),
         }
@@ -133,16 +133,16 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
     validate_options(options)?;
     let mut resolved = options.clone();
     resolved.clang = std::fs::canonicalize(&options.clang).map_err(|e| {
-        BindError::Io(format!("could not resolve `{}`: {e}", options.clang.display()))
+        BindError::IO(format!("could not resolve `{}`: {e}", options.clang.display()))
     })?;
     resolved.archiver = std::fs::canonicalize(&options.archiver).map_err(|e| {
-        BindError::Io(format!("could not resolve `{}`: {e}", options.archiver.display()))
+        BindError::IO(format!("could not resolve `{}`: {e}", options.archiver.display()))
     })?;
     let options = &resolved;
     let canonical = std::fs::canonicalize(header)
-        .map_err(|e| BindError::Io(format!("could not resolve `{}`: {e}", header.display())))?;
+        .map_err(|e| BindError::IO(format!("could not resolve `{}`: {e}", header.display())))?;
     let header_bytes = std::fs::read(&canonical)
-        .map_err(|e| BindError::Io(format!("could not read `{}`: {e}", canonical.display())))?;
+        .map_err(|e| BindError::IO(format!("could not read `{}`: {e}", canonical.display())))?;
     let asts = clang_asts(&canonical, options)?;
     let mut ast_identity = Vec::new();
     let mut surface = Surface {
@@ -186,7 +186,7 @@ pub fn bind(header: &Path, cache: &Path, options: &BindOptions) -> Result<BindRe
     let store = cache.join(&digest);
     let archive = store.join(format!("libjet_cpp_{}.a", options.lib));
     std::fs::create_dir_all(&store)
-        .map_err(|e| BindError::Io(format!("could not create the C++ binding cache: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not create the C++ binding cache: {e}")))?;
 
     if !archive.is_file() {
         build_archive(&canonical, &shim, &archive, &store, options)?;
@@ -427,7 +427,7 @@ fn push_identity_count(identity: &mut Vec<u8>, tag: &str, count: usize) {
     push_identity(identity, tag, &(count as u64).to_le_bytes());
 }
 
-fn project_surface(ast: &Json, header: &Path, selected: &[String]) -> Result<Surface, BindError> {
+fn project_surface(ast: &JSONValue, header: &Path, selected: &[String]) -> Result<Surface, BindError> {
     let mut surface = Surface {
         classes: Vec::new(),
         functions: Vec::new(),
@@ -440,7 +440,7 @@ fn project_surface(ast: &Json, header: &Path, selected: &[String]) -> Result<Sur
 }
 
 fn walk_ast(
-    value: &Json,
+    value: &JSONValue,
     header: &str,
     inherited_main: bool,
     namespace: &mut Vec<String>,
@@ -490,7 +490,7 @@ fn walk_ast(
     Ok(())
 }
 
-fn parse_class(map: &BTreeMap<String, Json>, namespace: &[String]) -> Result<Class, BindError> {
+fn parse_class(map: &BTreeMap<String, JSONValue>, namespace: &[String]) -> Result<Class, BindError> {
     let name = string(map, "name").unwrap_or("");
     if !ident(name) {
         return Err(BindError::Source("clang reported an unnamed C++ class".into()));
@@ -532,7 +532,7 @@ fn parse_class(map: &BTreeMap<String, Json>, namespace: &[String]) -> Result<Cla
 }
 
 fn parse_template(
-    map: &BTreeMap<String, Json>,
+    map: &BTreeMap<String, JSONValue>,
     namespace: &[String],
 ) -> Result<FunctionTemplate, BindError> {
     let name = string(map, "name").unwrap_or("");
@@ -633,7 +633,7 @@ fn instantiate_templates(
 }
 
 fn parse_routine(
-    map: &BTreeMap<String, Json>,
+    map: &BTreeMap<String, JSONValue>,
     cpp_name: String,
     jet_name: Option<String>,
 ) -> Result<Routine, BindError> {
@@ -652,7 +652,7 @@ fn parse_routine(
 }
 
 fn parse_params(
-    map: &BTreeMap<String, Json>,
+    map: &BTreeMap<String, JSONValue>,
     substitutions: &BTreeMap<String, String>,
 ) -> Result<Vec<Param>, BindError> {
     raw_params(map)?
@@ -670,7 +670,7 @@ fn parse_params(
         .collect()
 }
 
-fn raw_params(map: &BTreeMap<String, Json>) -> Result<Vec<(String, String)>, BindError> {
+fn raw_params(map: &BTreeMap<String, JSONValue>) -> Result<Vec<(String, String)>, BindError> {
     children(map)
         .iter()
         .filter_map(|value| object(value))
@@ -688,14 +688,14 @@ fn raw_params(map: &BTreeMap<String, Json>) -> Result<Vec<(String, String)>, Bin
         .collect()
 }
 
-fn return_type(map: &BTreeMap<String, Json>) -> Result<&str, BindError> {
+fn return_type(map: &BTreeMap<String, JSONValue>) -> Result<&str, BindError> {
     let ty = qual_type(map)?;
     ty.split_once(" (")
         .map(|(result, _)| result.trim())
         .ok_or_else(|| BindError::Source(format!("clang returned an invalid function type `{ty}`")))
 }
 
-fn qual_type(map: &BTreeMap<String, Json>) -> Result<&str, BindError> {
+fn qual_type(map: &BTreeMap<String, JSONValue>) -> Result<&str, BindError> {
     map.get("type")
         .and_then(object)
         .and_then(|value| string(value, "qualType"))
@@ -741,32 +741,32 @@ fn qualified(namespace: &[String], name: &str) -> String {
     }
 }
 
-fn object(value: &Json) -> Option<&BTreeMap<String, Json>> {
+fn object(value: &JSONValue) -> Option<&BTreeMap<String, JSONValue>> {
     match value {
-        Json::Object(value) => Some(value),
+        JSONValue::Object(value) => Some(value),
         _ => None,
     }
 }
 
-fn string<'a>(map: &'a BTreeMap<String, Json>, key: &str) -> Option<&'a str> {
+fn string<'a>(map: &'a BTreeMap<String, JSONValue>, key: &str) -> Option<&'a str> {
     map.get(key).and_then(|value| match value {
-        Json::Str(value) => Some(value.as_str()),
+        JSONValue::Str(value) => Some(value.as_str()),
         _ => None,
     })
 }
 
-fn bool_field(map: &BTreeMap<String, Json>, key: &str) -> bool {
-    matches!(map.get(key), Some(Json::Bool(true)))
+fn bool_field(map: &BTreeMap<String, JSONValue>, key: &str) -> bool {
+    matches!(map.get(key), Some(JSONValue::Bool(true)))
 }
 
-fn children(map: &BTreeMap<String, Json>) -> &[Json] {
+fn children(map: &BTreeMap<String, JSONValue>) -> &[JSONValue] {
     match map.get("inner") {
-        Some(Json::Array(values)) => values,
+        Some(JSONValue::Array(values)) => values,
         _ => &[],
     }
 }
 
-fn location_file(map: &BTreeMap<String, Json>) -> Option<&str> {
+fn location_file(map: &BTreeMap<String, JSONValue>) -> Option<&str> {
     map.get("loc").and_then(object).and_then(|loc| string(loc, "file"))
 }
 
@@ -816,7 +816,7 @@ fn build_archive(
     let build = store.join(".build");
     let _ = std::fs::remove_dir_all(&build);
     std::fs::create_dir_all(&build)
-        .map_err(|e| BindError::Io(format!("could not create the C++ build directory: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not create the C++ build directory: {e}")))?;
     let cpp = build.join("shim.cpp");
     let object = build.join("shim.o");
     let proof = build.join(format!(
@@ -824,7 +824,7 @@ fn build_archive(
         crate::FFI::proof_suffix_for_target(&options.target)
     ));
     std::fs::write(&cpp, shim)
-        .map_err(|e| BindError::Io(format!("could not write the C++ shim: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not write the C++ shim: {e}")))?;
 
     let mut compile = Command::new(&options.clang);
     compile
@@ -867,9 +867,9 @@ fn materialize_projection(
     options: &BindOptions,
 ) -> Result<(), BindError> {
     std::fs::create_dir_all(cache)
-        .map_err(|e| BindError::Io(format!("could not create the C++ binding directory: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not create the C++ binding directory: {e}")))?;
     std::fs::copy(archive, cache.join(format!("libjet_cpp_{}.a", options.lib)))
-        .map_err(|e| BindError::Io(format!("could not materialize the C++ archive: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not materialize the C++ archive: {e}")))?;
     let mut links = String::new();
     links.push_str("target\t");
     links.push_str(&options.target);
@@ -888,7 +888,7 @@ fn materialize_projection(
     links.push_str(crate::FFI::cxx_runtime_for_target(&options.target));
     links.push('\n');
     std::fs::write(cache.join(format!("{}.link", options.lib)), links)
-        .map_err(|e| BindError::Io(format!("could not write C++ link provenance: {e}")))
+        .map_err(|e| BindError::IO(format!("could not write C++ link provenance: {e}")))
 }
 
 fn render_provenance(
@@ -1128,16 +1128,16 @@ fn supervised(command: &mut Command, timeout: Duration, tool: &str) -> Result<Ou
         if error.kind() == std::io::ErrorKind::NotFound {
             BindError::ToolMissing(tool.into())
         } else {
-            BindError::Io(format!("could not start `{tool}`: {error}"))
+            BindError::IO(format!("could not start `{tool}`: {error}"))
         }
     })?;
-    let stdout = child.stdout.take().ok_or_else(|| BindError::Io("could not supervise stdout".into()))?;
-    let stderr = child.stderr.take().ok_or_else(|| BindError::Io("could not supervise stderr".into()))?;
+    let stdout = child.stdout.take().ok_or_else(|| BindError::IO("could not supervise stdout".into()))?;
+    let stderr = child.stderr.take().ok_or_else(|| BindError::IO("could not supervise stderr".into()))?;
     let out = std::thread::spawn(move || drain(stdout, CAP));
     let err = std::thread::spawn(move || drain(stderr, CAP));
     let deadline = Instant::now() + timeout;
     let status = loop {
-        match child.try_wait().map_err(|error| BindError::Io(format!("could not supervise `{tool}`: {error}")))? {
+        match child.try_wait().map_err(|error| BindError::IO(format!("could not supervise `{tool}`: {error}")))? {
             Some(status) => break status,
             None if Instant::now() >= deadline => {
                 let _ = child.kill();
@@ -1149,8 +1149,8 @@ fn supervised(command: &mut Command, timeout: Duration, tool: &str) -> Result<Ou
     };
     Ok(Output {
         status,
-        stdout: out.join().map_err(|_| BindError::Io("stdout reader failed".into()))??,
-        stderr: err.join().map_err(|_| BindError::Io("stderr reader failed".into()))??,
+        stdout: out.join().map_err(|_| BindError::IO("stdout reader failed".into()))??,
+        stderr: err.join().map_err(|_| BindError::IO("stderr reader failed".into()))??,
     })
 }
 
@@ -1181,7 +1181,7 @@ fn drain(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError> {
     let mut out = Vec::new();
     let mut buffer = [0; 8192];
     loop {
-        let count = input.read(&mut buffer).map_err(|error| BindError::Io(format!("could not read foreign output: {error}")))?;
+        let count = input.read(&mut buffer).map_err(|error| BindError::IO(format!("could not read foreign output: {error}")))?;
         if count == 0 {
             break;
         }

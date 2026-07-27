@@ -171,10 +171,10 @@ impl<'a> Parser<'a> {
                     let span = self.peek().span;
                     return Err(Diagnostic::error(
                         "E0003",
-                        "only one web partition rule (`#Target(Wasm)`, `#Target(Js)`, `#WasmExport`) is allowed per function"
+                        "only one web partition rule (`#Target(Wasm)`, `#Target(JS)`, `#WasmExport`) is allowed per function"
                             .to_string(),
                         "per-function web overrides are mutually exclusive".to_string(),
-                        "keep one of `#Target(Wasm)`, `#Target(Js)`, or `#WasmExport`".to_string(),
+                        "keep one of `#Target(Wasm)`, `#Target(JS)`, or `#WasmExport`".to_string(),
                         Some(span),
                     ));
                 } else {
@@ -262,21 +262,21 @@ impl<'a> Parser<'a> {
             })
         }
     
-        /// D-WASM1=A: is the cursor at `#Target(Wasm|Js)`?
+        /// D-WASM1=A: is the cursor at `#Target(Wasm|JS)`?
         pub(in crate::Parser) fn at_web_target(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_TARGET)
                 && matches!(self.peek3().kind, TokKind::LParen)
         }
     
-        /// D-HTMLPAIR1 (ratified 2026-07-01, c134): detect `#Html(`.
+        /// D-HTMLPAIR1 (ratified 2026-07-01, c134): detect `#HTML(`.
         pub(super) fn at_html_marker(&self) -> bool {
             matches!(self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_HTML)
                 && matches!(self.peek3().kind, TokKind::LParen)
         }
     
-        /// D-HTMLPAIR1 (ratified 2026-07-01, c134): parse `#Html("path.html")` — the file's
+        /// D-HTMLPAIR1 (ratified 2026-07-01, c134): parse `#HTML("path.html")` — the file's
         /// explicit companion host page for `--target=web` builds.
         pub(super) fn parse_html_marker(
             &mut self,
@@ -308,7 +308,7 @@ impl<'a> Parser<'a> {
             }
         }
     
-        /// D-WASM1=A / D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Wasm)` / `#Target(Js)`
+        /// D-WASM1=A / D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Wasm)` / `#Target(JS)`
         /// (a partition ceiling) or `#Target(Web)` (this file's default CLI
         /// backend — a different axis, same marker).
         pub(in crate::Parser) fn parse_web_target_marker(&mut self) -> Result<TargetMarker, Diagnostic> {
@@ -324,7 +324,7 @@ impl<'a> Parser<'a> {
                     marker.span,
                 ));
             };
-            // D-OSTARGET1=A: `#Target(Os.Linux|Os.Macos|Os.Windows)` — the second,
+            // D-OSTARGET1=A: `#Target(OS.Linux|OS.MacOS|OS.Windows)` — the second,
             // mutually-exclusive axis (native platform gating on an `impl`).
             if let crate::AST::Expr::Field(base, os_name, os_span) = target {
                 if matches!(
@@ -332,15 +332,15 @@ impl<'a> Parser<'a> {
                     crate::AST::Expr::Ident(namespace, _)
                         if namespace == crate::Syntax::TARGET_OS_NAMESPACE
                 ) {
-                    return crate::Syntax::OsTarget::parse(&os_name)
-                        .map(TargetMarker::Os)
+                    return crate::Syntax::OSTarget::parse(&os_name)
+                        .map(TargetMarker::OS)
                         .ok_or_else(|| {
                             Diagnostic::error(
                                 "E0003",
-                                format!("`#Target(Os.{os_name})` is not a known native OS"),
-                                "native OS targets are `Os.Linux`, `Os.Macos`, or `Os.Windows`".to_string(),
+                                format!("`#Target(OS.{os_name})` is not a known native OS"),
+                                "native OS targets are `OS.Linux`, `OS.MacOS`, or `OS.Windows`".to_string(),
                                 format!(
-                                    "write `#Target(Os.{})`, `#Target(Os.{})`, or `#Target(Os.{})`",
+                                    "write `#Target(OS.{})`, `#Target(OS.{})`, or `#Target(OS.{})`",
                                     Syntax::TARGET_OS_LINUX,
                                     Syntax::TARGET_OS_MACOS,
                                     Syntax::TARGET_OS_WINDOWS,
@@ -365,10 +365,10 @@ impl<'a> Parser<'a> {
                     Diagnostic::error(
                     "E0003",
                         format!("`#Target({name})` is not a known web partition"),
-                    "web targets are `Wasm` (compute), `Js` (DOM/view), `Web` (default CLI backend), or `Os.Linux`/`Os.Macos`/`Os.Windows` (native platform gating)"
+                    "web targets are `Wasm` (compute), `JS` (DOM/view), `Web` (default CLI backend), or `OS.Linux`/`OS.MacOS`/`OS.Windows` (native platform gating)"
                         .to_string(),
                     format!(
-                        "write `#Target({})`, `#Target({})`, `#Target({})`, or `#Target(Os.{{Linux|Macos|Windows}})`",
+                        "write `#Target({})`, `#Target({})`, `#Target({})`, or `#Target(OS.{{Linux|MacOS|Windows}})`",
                         Syntax::WEB_BUCKET_WASM,
                         Syntax::WEB_BUCKET_JS,
                         Syntax::WEB_TARGET_DEFAULT_WEB,
@@ -379,7 +379,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-MARK-TARGET1=A (ratified 2026-07-11, card #498): consume
-        /// `#Target(Wasm)` / `#Target(Js)` (per-function bucket override) or
+        /// `#Target(Wasm)` / `#Target(JS)` (per-function bucket override) or
         /// bare `#WasmExport`, when present.
         fn try_parse_web_partition_marker(
             &mut self,
@@ -398,7 +398,7 @@ impl<'a> Parser<'a> {
                 self.bump(); // `WasmExport`
                 return Ok(Some(crate::Syntax::WebPartitionMarker::WasmExport));
             }
-            // `#Target(Wasm)` / `#Target(Js)` per-function override.
+            // `#Target(Wasm)` / `#Target(JS)` per-function override.
             if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_TARGET)
                 && matches!(self.peek3().kind, TokKind::LParen)
             {
@@ -407,7 +407,7 @@ impl<'a> Parser<'a> {
                         Some(crate::Syntax::WebPartitionMarker::Wasm)
                     }
                     TokKind::Ident(n) if n == Syntax::WEB_BUCKET_JS => {
-                        Some(crate::Syntax::WebPartitionMarker::Js)
+                        Some(crate::Syntax::WebPartitionMarker::JS)
                     }
                     _ => None,
                 };

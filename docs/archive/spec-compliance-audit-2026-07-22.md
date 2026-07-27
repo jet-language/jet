@@ -41,7 +41,7 @@ No full suite ran.
 | D-BUILDLEGACY1 | gap -> #694 | Typed wrapper constructors/policy tests exist only in ActionSpec/build_graph; no Jet fn-build route or CI-ban vertical. Credit #225 substrate only. |
 | D-BUILDPLUGIN1 | gap -> #695 | BuildContext validates in-memory WasmComponentPluginSpec contribution, but no package load/component execution reaches real fn build. Distinct #549/application plugin. Credit #226 substrate only. |
 | D-FRONTENDAPI1 | partial -> #696 | Source/Compiler.rs Rust facade is real and compiler_api 7/7 passes. Ratified Jet core.compiler and CLI JSON mirror are absent. Distinct #549/#129. Credit #227 substrate. |
-| D-DSLBLOCK1 | gap -> #698 | Syntax.rs owns the fixed Sql/Html whitelist and has no user registration path, but no first-party block parser/sema/value/test vertical exists. Archived #128 records the law only; #698 owns the narrow shipment gap. |
+| D-DSLBLOCK1 | gap -> #698 | Syntax.rs owns the fixed SQL/HTML whitelist and has no user registration path, but no first-party block parser/sema/value/test vertical exists. Archived #128 records the law only; #698 owns the narrow shipment gap. |
 | D-METAMUTATE1 | shipped negative law | Program/build inspection values are read-only; runtime_bridge only registers canonical graph/generated values; build_entry enforcement proves no mutation path. |
 
 ## Diagnostic matrix

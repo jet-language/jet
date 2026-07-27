@@ -341,12 +341,12 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
             fields.iter().all(|(_, v, _)| expr_in_subset(v, cx, locals))
                 && scoped_stmts_in_subset(body, cx, locals)
         }
-        // c109 Phase 26: a `#Caps(Io) { … }` effect-restriction region (D-EFF1/D-QUAL1)
+        // c109 Phase 26: a `#Caps(IO) { … }` effect-restriction region (D-EFF1/D-QUAL1)
         // erases to a plain Rust block — `emit_stmt`'s `Stmt::Caps` arm is byte-for-byte
         // identical to `Stmt::Region` (`{ <body> }`). The cap set is enforced entirely
         // in sema (E0741); codegen is dumb (I3).
         Stmt::Caps { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-        // D-SCAP1: a `#grant(Fs) { caps -> … }` scoped-capability grant erases to a
+        // D-SCAP1: a `#grant(FS) { caps -> … }` scoped-capability grant erases to a
         // plain Rust block (the grant/revoke is a compile-time capability fact, I3).
         // The capability handle is sema-only — it is NOT emitted, so the body lowers
         // exactly like a lexical `Stmt::Region`.
@@ -454,7 +454,7 @@ pub(crate) fn if_cond_in_subset(
         // c109 Phase 24: a JSON variant if-let (`if data == Object(entries)` /
         // `if port == Number(n)`). The prelude JSON enum is matched via a single-payload
         // variant pattern (`Object`/`Number`/`Text`/`Boolean`/`Array`) binding one name.
-        // The Rust if-let pattern (`{root}jet_std::Json::Object(user_entries)`) is produced
+        // The Rust if-let pattern (`{root}jet_std::JSON::Object(user_entries)`) is produced
         // by the JSON-aware `emit_if_let_pattern` (reused at lowering), and the binding's
         // type comes from `core_json_pattern_types` (totality). Cover ONLY the JSON-variant
         // single-bind case (a user-enum variant if-let stays on the AST path — conservative,

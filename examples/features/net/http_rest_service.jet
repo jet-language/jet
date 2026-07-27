@@ -5,7 +5,7 @@ use core.files as files
 use core.net as net
 use core.tasks as tasks
 
-fn handle_api(req: HttpRequest) => HttpResponse ? HttpError {
+fn handle_api(req: HTTPRequest) => HTTPResponse ? HTTPError {
     body :: req.body().text(64) ?? "invalid body"
     return Ok(http_server.response(200, "{req.param("name") ?? "missing"}|{req.param("path") ?? "missing"}|{req.header("cookie") ?? "missing"}|{req.body_len()}|{req.under_limit(64)}|{body}"))
 }
@@ -15,9 +15,9 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     addr :: listener.local_addr() ?? panic("address")
     mux :: http_server.mux()
-    mux.post("/api/:name/*path", (req: HttpRequest) => handle_api(req))
-    mux.get("/events", (req: HttpRequest) => Ok(http_server.sse("ready")))
-    mux.get("/file", (req: HttpRequest) => Ok(http_server.static_file_range(req, "/tmp/jet_http_static.txt", "text/plain") ?? http_server.response(500, "range")))
+    mux.post("/api/:name/*path", (req: HTTPRequest) => handle_api(req))
+    mux.get("/events", (req: HTTPRequest) => Ok(http_server.sse("ready")))
+    mux.get("/file", (req: HTTPRequest) => Ok(http_server.static_file_range(req, "/tmp/jet_http_static.txt", "text/plain") ?? http_server.response(500, "range")))
     t :: tasks.spawn(() => {
         http_server.serve_once_listener(listener, mux) ?? panic("serve1")
         http_server.serve_once_listener(listener, mux) ?? panic("serve2")

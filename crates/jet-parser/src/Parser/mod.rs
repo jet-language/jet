@@ -455,7 +455,7 @@ impl<'a> Parser<'a> {
     }
 
     /// D-EFFTREE1: an *effect path* — `ident (.ident)*` — for effect-list
-    /// entries (`Fs`, `Fs.Read`, `Net.Http.Get`). The root is validated in
+    /// entries (`FS`, `FS.Read`, `Net.HTTP.Get`). The root is validated in
     /// sema against the closed ten-name D-EFF4/5 vocabulary; further segments
     /// are an open, user-chosen leaf path (mirrors D-TAG1's tag-tree dotted
     /// paths) — not validated here, and with no depth limit.
@@ -801,8 +801,8 @@ mod s61_tests {
                 "#[Unsafe(\"register ABI\"), FFI(c)]",
             ),
             (
-                "#Target(Web)\n#Html(\"index.html\")\nfn main() {}\n",
-                "#[Target(Web), Html(\"index.html\")]",
+                "#Target(Web)\n#HTML(\"index.html\")\nfn main() {}\n",
+                "#[Target(Web), HTML(\"index.html\")]",
             ),
             (
                 "#PubFile\n#NoPrelude\nfn main() {}\n",
@@ -834,8 +834,8 @@ mod s61_tests {
                 "#[Policy(no_alloc), Meta(category: \"ffi\"), Task, Unsafe(\"register ABI\", obligations: .None), FFI(c)]",
             ),
             (
-                "#[Html(\"index.html\"), PubFile, Target(Web), NoPrelude]\nfn main() {}\n",
-                "#[Html(\"index.html\"), PubFile, Target(Web), NoPrelude]",
+                "#[HTML(\"index.html\"), PubFile, Target(Web), NoPrelude]\nfn main() {}\n",
+                "#[HTML(\"index.html\"), PubFile, Target(Web), NoPrelude]",
             ),
         ] {
             let once = format_source(src).expect("format once");
@@ -864,8 +864,8 @@ mod s61_tests {
     #[test]
     fn abi_function_markers_route_to_the_c_declaration_diagnostic() {
         for src in [
-            "#[Abi(C), MustUse]\nfn work() {}\n",
-            "#Abi(C) fn work() {}\n",
+            "#[ABI(C), MustUse]\nfn work() {}\n",
+            "#ABI(C) fn work() {}\n",
         ] {
             let (tokens, lex_diagnostics) = lex(src);
             assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
@@ -883,7 +883,7 @@ mod s61_tests {
     #[test]
     fn abi_lowers_to_the_c_declaration_field_and_groups_reject_extra_rules() {
         let program = program(
-            "#Extern module c.demo {\n    #Abi(sysv64) fn ping(x: I32) => I32 = \"ping\"\n}\n",
+            "#Extern module c.demo {\n    #ABI(sysv64) fn ping(x: I32) => I32 = \"ping\"\n}\n",
         );
         let function = program
             .items
@@ -899,7 +899,7 @@ mod s61_tests {
         );
 
         let src =
-            "#Extern module c.demo {\n    #[Abi(sysv64), MustUse] fn ping() = \"ping\"\n}\n";
+            "#Extern module c.demo {\n    #[ABI(sysv64), MustUse] fn ping() = \"ping\"\n}\n";
         let (tokens, lex_diagnostics) = lex(src);
         assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
         let diagnostics =
@@ -1035,7 +1035,7 @@ fn notify(ready: Bool) =[Net]=> Void {
     taskgroup group {
         task :: group.task => fetch()
     }
-    #Grant(caps: Fs, Net) {
+    #Grant(caps: FS, Net) {
         use_caps(caps)
     }
 }
@@ -1049,7 +1049,7 @@ fn notify(ready: Bool) =[Net]=> Void {
         assert!(once.contains("loop item; items audit(item)"), "{once}");
         assert!(once.contains("next(outer)"), "{once}");
         assert!(once.contains("task :: group.task => fetch()"), "{once}");
-        assert!(once.contains("#Grant(caps: Fs, Net)"), "{once}");
+        assert!(once.contains("#Grant(caps: FS, Net)"), "{once}");
         let twice = format_source(&once).expect("canonical arrow/control syntax reformats");
         assert_eq!(once, twice);
     }
@@ -1091,9 +1091,9 @@ fn notify(ready: Bool) =[Net]=> Void {
     fn retired_arrow_control_forms_have_specific_teaching_diagnostics() {
         for (src, code) in [
             ("fn old() -> Int { return 1 }\n", "E0070"),
-            ("fn old() --[Fs]-> Int { return 1 }\n", "E0066"),
+            ("fn old() --[FS]-> Int { return 1 }\n", "E0066"),
             ("fn run() { if ready -> send() }\n", "E0071"),
-            ("fn run() { #Grant(Fs) { caps -> use_caps(caps) } }\n", "E0077"),
+            ("fn run() { #Grant(FS) { caps -> use_caps(caps) } }\n", "E0077"),
             (
                 "protocol Old { client -> server: Hello(id: Int) }\n",
                 "E0154",

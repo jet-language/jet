@@ -1,5 +1,5 @@
 // D-DBDRIVER1: core.db — the generic parameterized driver interface. SQL text
-// plus a separate `[DbValue]` bind list; the driver binds the values, so they
+// plus a separate `[DBValue]` bind list; the driver binds the values, so they
 // never get concatenated into the SQL string. There is no raw execute(sql)
 // escape hatch — `.query`/`.query_one`/`.execute` are the only ways to talk
 // to the database.
@@ -11,8 +11,8 @@ fn run() {
     // An "injection-looking" literal — because it is a BIND PARAMETER, not
     // spliced SQL text, it round-trips as inert data.
     evil :: "'; DROP TABLE greet; --"
-    _ins1 :: conn.execute("INSERT INTO greet (msg) VALUES (?)", [DbValue.Text(evil)]) ?? panic("insert failed")
-    _ins2 :: conn.execute("INSERT INTO greet (msg) VALUES (?)", [DbValue.Text("hello, jet.db!")]) ?? panic("insert failed")
+    _ins1 :: conn.execute("INSERT INTO greet (msg) VALUES (?)", [DBValue.Text(evil)]) ?? panic("insert failed")
+    _ins2 :: conn.execute("INSERT INTO greet (msg) VALUES (?)", [DBValue.Text("hello, jet.db!")]) ?? panic("insert failed")
     rows :: conn.query("SELECT msg FROM greet ORDER BY id", []) ?? panic("query failed")
     loop row; rows {
         msg_val :: row.get("msg") ?? panic("missing msg")
@@ -28,7 +28,7 @@ fn run() {
     }
     // A transaction: an insert inside begin/rollback must not stick.
     _begun :: conn.begin()
-    _ins3 :: conn.execute("INSERT INTO greet (msg) VALUES (?)", [DbValue.Text("temporary")]) ?? panic("insert failed")
+    _ins3 :: conn.execute("INSERT INTO greet (msg) VALUES (?)", [DBValue.Text("temporary")]) ?? panic("insert failed")
     _rolledback :: conn.rollback()
     after_opt :: conn.query_one("SELECT COUNT(*) AS n FROM greet", []) ?? panic("count failed")
     if after_opt == Val(after_row) {

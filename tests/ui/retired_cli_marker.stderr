@@ -1,0 +1,15 @@
+Error [E0927]: `#Cli` is retired
+  --> tests/ui/retired_cli_marker.jet:1:2
+    |
+  1 | #Cli struct Args {
+    |  ^^^
+ Why: the registry keeps this old spelling only to teach its replacement; it no longer applies a rule
+ Fix: write `#CLI` instead
+
+Error [E1308]: `run`'s parameter isn't a CLI-derived type
+  --> tests/ui/retired_cli_marker.jet:5:14
+    |
+  5 | fn run(args: Args) {
+    |              ^^^^
+ Why: a typed `fn run(args: T)` entry only works when `T` is a `#[CLI]`-derived struct, or an `enum` whose every variant carries a `#[CLI]` struct payload.
+ Fix: mark the struct `#[CLI]`, or give the enum's variants `#[CLI]` struct payloads

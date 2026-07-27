@@ -107,7 +107,7 @@ pub enum Stmt {
     /// audited Tier-2 comptime effect gate. `reason` is the argument of
     /// `#Impure` itself (lint L3102 fires when it is `None`). Both this gate
     /// AND `--allow-impure` at build time are required to execute ambient
-    /// comptime I/O (Fs/Env/Exec/Io). Erases to a plain block at codegen;
+    /// comptime I/O (FS/Env/Exec/IO). Erases to a plain block at codegen;
     /// the gate is enforced entirely in the comptime interpreter (I3).
     Impure {
         reason: Option<String>,
@@ -186,7 +186,7 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-EFF1 / D-QUAL1: a `#Caps(Net, Db) { … }` effect-restriction region. The
+    /// D-EFF1 / D-QUAL1: a `#Caps(Net, DB) { … }` effect-restriction region. The
     /// `caps` list is the only effects the body (and everything it transitively
     /// calls) may use; an out-of-set effect is E0741. `caps` names are validated
     /// in sema. A lexical scope emitted as a plain Rust block — the restriction
@@ -198,7 +198,7 @@ pub enum Stmt {
         span: Span,
     },
     /// D-SCAP1 (ratified 2026-06-21, opt A): a scoped-capability grant region
-    /// `#grant(Fs) { caps -> … }`. The listed effects are **authorized** inside
+    /// `#grant(FS) { caps -> … }`. The listed effects are **authorized** inside
     /// the block via the first-class handle `binding` (here `caps`), and the
     /// capability is **revoked at scope end** by the RAII rule (S63) — the handle
     /// is bound only for the block's extent. The dual of `#Caps`: `#Caps`
@@ -210,7 +210,7 @@ pub enum Stmt {
     Grant {
         caps: Vec<(String, Span)>,
         caps_span: Span,
-        /// The bound capability handle name (`caps` in `#grant(Fs) { caps -> … }`).
+        /// The bound capability handle name (`caps` in `#grant(FS) { caps -> … }`).
         binding: String,
         binding_span: Span,
         body: Vec<Stmt>,
@@ -232,13 +232,13 @@ pub enum Stmt {
         selected_then: Option<bool>,
     },
     /// D-OSTARGET2 (=B, ratified 2026-07-03): `comptime if build.os == { .Linux
-    /// -> … .Macos -> … .Windows -> … [else -> …] }` — the compile-time switch
+    /// -> … .MacOS -> … .Windows -> … [else -> …] }` — the compile-time switch
     /// that lets ungated code reach an OS-gated `impl`. `build.os` is a
     /// compiler-known comptime value; the switch folds to the arm matching the
     /// build's active OS (`ProgramBundle.active_os`), discarding the others
     /// *before* any OS-gating check or full type-check sees them. Sema desugars
     /// this node into a chain of `ComptimeIf` (each arm's condition is the
-    /// compile-time constant `build.os == .Os`) as the very first step of
+    /// compile-time constant `build.os == .OS`) as the very first step of
     /// `check_bundle`, so no later sema/codegen pass ever sees this variant —
     /// only the parser, formatter, and semindex do. Arm heads are bare OS
     /// variants (reuses the `Stmt::Switch` arm IR / `SwitchArm`).
@@ -297,7 +297,7 @@ pub enum Stmt {
     /// D-TXN1–D-TXN4 (ratified 2026-06-24): `#Transact(name) { … }` — a
     /// transaction block. `name` binds a user-chosen transaction handle (any
     /// lowercase ident, mirroring `region r { … }`) typed `Transaction`.
-    /// Inside the block an irreversible effect (Net/Fs/Exec) that can't be rolled
+    /// Inside the block an irreversible effect (Net/FS/Exec) that can't be rolled
     /// back is a compile error (E0746, D-TXN2) — the fix is to move it after the
     /// block or register it via `name.on_commit(() => { … })` (D-TXN3) so it runs
     /// only on a clean commit. `on_commit` lambdas are Drop-backed and run LIFO on

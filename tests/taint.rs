@@ -115,8 +115,8 @@ fn run() {
     );
 }
 
-/// A tainted value at a non-sink call (an ordinary `print`, an `Io` effect — not
-/// a sink) is NOT E0721. Only `Db`/`Exec`/`Net` are sinks.
+/// A tainted value at a non-sink call (an ordinary `print`, an `IO` effect — not
+/// a sink) is NOT E0721. Only `DB`/`Exec`/`Net` are sinks.
 #[test]
 fn tainted_at_non_sink_is_ok() {
     let src = r#"
@@ -244,7 +244,7 @@ fn run() {
 }
 
 /// Bare `#Tainted` (no kind) at `print` is NOT E0722 — only Credential kind triggers it.
-/// (E0721 would fire only at Db/Exec/Net sinks; bare taint at print is permitted.)
+/// (E0721 would fire only at DB/Exec/Net sinks; bare taint at print is permitted.)
 #[test]
 fn tainted_input_to_print_is_not_e0722() {
     let src = r#"

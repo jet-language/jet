@@ -346,16 +346,16 @@ impl<'a> Checker<'a> {
             if let Some(e) = core_effect(module, name) {
                 // D-EFFTREE1: Core calls (this module-call path) stay tagged with
                 // a bare root — real stdlib call sites are unchanged (no migration
-                // break: existing diagnostics naming `Fs`/`Db`/… keep their exact
-                // wording). Leaf precision (`Fs.Read`, …) is otherwise a
+                // break: existing diagnostics naming `FS`/`DB`/… keep their exact
+                // wording). Leaf precision (`FS.Read`, …) is otherwise a
                 // user-declared-contract concept (a function's own `#(…)` bound,
                 // D-PROP1-seeded into its `direct` set) — see Registration.rs /
                 // Bundle.rs. The one exception is D-EFFDBREAD1=A: `core.db`'s own
-                // closed connection-method table infers `Db.Read`/`Db.Write` leaves
+                // closed connection-method table infers `DB.Read`/`DB.Write` leaves
                 // (in `check_db_connection_method`, the method-call path — those
                 // methods never reach this module-call `core_effect`).
                 self.record_effect(e.name(), span);
-                // D-TXN2: an irreversible effect (Net/Fs/Exec — a network/file/
+                // D-TXN2: an irreversible effect (Net/FS/Exec — a network/file/
                 // subprocess effect) can't be rolled back, so it is rejected when it
                 // occurs directly inside a `#Transact { … }` block (E0746). The fix
                 // is to move it after the block, or register it via
@@ -420,7 +420,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // D-EFF1: `#Pure` is the empty effect set, so any effectful Core call —
-            // `Fs`/`Net`/`Env`/`Exec`/`Db`/`Log`/`Io` — is impure inside a `#Pure fn`.
+            // `FS`/`Net`/`Env`/`Exec`/`DB`/`Log`/`IO` — is impure inside a `#Pure fn`.
             // (Time/Rand return early above via E3403; stdin via the E3401 check
             // above, so this catches the remaining effect-carrying Core modules.)
             if self.in_pure && self.det_suppress == 0 && core_effect(module, name).is_some() {
@@ -489,11 +489,11 @@ impl<'a> Checker<'a> {
                     vec![
                         (AccessConvention::Move, Type::Named("TcpStream".to_string())),
                         (AccessConvention::Read, Type::String),
-                        (AccessConvention::Read, Type::Named("TlsClientConfig".to_string())),
+                        (AccessConvention::Read, Type::Named("TLSClientConfig".to_string())),
                         (AccessConvention::Read, Type::Named("Duration".to_string())),
                     ],
                     Some(result_ty(
-                        Type::Named("TlsStream".to_string()),
+                        Type::Named("TLSStream".to_string()),
                         Type::Named("NetError".to_string()),
                     )),
                 ))
@@ -505,7 +505,7 @@ impl<'a> Checker<'a> {
                         (AccessConvention::Read, Type::Named("Duration".to_string())),
                     ],
                     Some(result_ty(
-                        Type::Named("TlsStream".to_string()),
+                        Type::Named("TLSStream".to_string()),
                         Type::Named("NetError".to_string()),
                     )),
                 ))
@@ -878,7 +878,7 @@ impl<'a> Checker<'a> {
                 }
                 // D-ENC1 / D-SERDE6: typed encode/decode over the Encode/Decode model.
                 // `to_string`/`to_string_pretty` accept any encodable value (the dynamic
-                // `Json` / `[[String]]` / `Map` forms AND a `#[Codable]` value); the
+                // `JSON` / `[[String]]` / `Map` forms AND a `#[Codable]` value); the
                 // codegen routes by the lowered arg type. `decode<T>` is the typed decode
                 // (→ `T`, or `[T]` for CSV) keyed by the call-site type argument.
                 (
@@ -2243,7 +2243,7 @@ impl<'a> Checker<'a> {
                         ),
                     ]));
                 }
-                // D-ROUTE1=A: jet.http.router() → HttpRouter.
+                // D-ROUTE1=A: jet.http.router() → HTTPRouter.
                 ("jet.http", "router") => {
                     if !args.is_empty() {
                         self.diags
@@ -2252,9 +2252,9 @@ impl<'a> Checker<'a> {
                             self.infer(&mut a.expr);
                         }
                     }
-                    return Some(Type::Named("HttpRouter".to_string()));
+                    return Some(Type::Named("HTTPRouter".to_string()));
                 }
-                // D-ROUTE1=A: http.parse(raw_string) → HttpRequest (parses HTTP/1.1 bytes).
+                // D-ROUTE1=A: http.parse(raw_string) → HTTPRequest (parses HTTP/1.1 bytes).
                 ("jet.http", "parse") => {
                     if args.len() != 1 {
                         self.diags
@@ -2265,9 +2265,9 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                     self.expect_core_arg("parse", 0, &Type::String, &mut args[0]);
-                    return Some(Type::Named("HttpRequest".to_string()));
+                    return Some(Type::Named("HTTPRequest".to_string()));
                 }
-                // D-HTTP-CORE2=A: the router's sole Handler propagates HttpError.
+                // D-HTTP-CORE2=A: the router's sole Handler propagates HTTPError.
                 ("jet.http", "dispatch") => {
                     if args.len() != 2 {
                         self.diags
@@ -2279,11 +2279,11 @@ impl<'a> Checker<'a> {
                     }
                     let router_ty = self.infer(&mut args[0].expr);
                     match &router_ty {
-                        Some(Type::Named(n)) if n == "HttpRouter" => {}
+                        Some(Type::Named(n)) if n == "HTTPRouter" => {}
                         Some(other) => {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
-                                format!("`http.dispatch` needs an HttpRouter, not {}", other.show()),
+                                format!("`http.dispatch` needs an HTTPRouter, not {}", other.show()),
                                 "build a router with `http.router()` and register routes with `.get/.post/…`".to_string(),
                                 "write `http.dispatch(router, req)`".to_string(),
                                 Some(args[0].expr.span()),
@@ -2294,16 +2294,16 @@ impl<'a> Checker<'a> {
                     if let Some(arg) = args.get_mut(1) {
                         let req_ty = self.infer(&mut arg.expr);
                         match &req_ty {
-                            Some(Type::Named(n)) if n == "HttpRequest" => {}
+                            Some(Type::Named(n)) if n == "HTTPRequest" => {}
                             Some(other) => {
                                 self.diags.push(Diagnostic::error(
                                     "E0112",
                                     format!(
-                                        "`http.dispatch` needs an HttpRequest, not {}",
+                                        "`http.dispatch` needs an HTTPRequest, not {}",
                                         other.show()
                                     ),
                                     "parse the raw request with `http.parse(raw)`".to_string(),
-                                    "write `http.dispatch(router, req)` where `req` is an HttpRequest"
+                                    "write `http.dispatch(router, req)` where `req` is an HTTPRequest"
                                         .to_string(),
                                     Some(arg.expr.span()),
                                 ));
@@ -2312,12 +2312,12 @@ impl<'a> Checker<'a> {
                         }
                     }
                     return Some(Type::Result {
-                        ok: Box::new(Type::Named("HttpResponse".to_string())),
-                        err: Box::new(Type::Named("HttpError".to_string())),
+                        ok: Box::new(Type::Named("HTTPResponse".to_string())),
+                        err: Box::new(Type::Named("HTTPError".to_string())),
                     });
                 }
                 // E2-M10: jet.http.serve(addr, handler) — blocking accept loop.
-                // handler: fn(HttpRequest) => HttpResponse (lambda) or HttpRouter.
+                // handler: fn(HTTPRequest) => HTTPResponse (lambda) or HTTPRouter.
                 ("jet.http", "serve") => {
                     if args.len() != 2 {
                         self.diags
@@ -2328,17 +2328,17 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                     self.expect_core_arg("serve", 0, &Type::String, &mut args[0]);
-                    // Accept an HttpRouter or a callable (lambda/fn pointer).
+                    // Accept an HTTPRouter or a callable (lambda/fn pointer).
                     let handler_ty = self.infer(&mut args[1].expr);
                     match &handler_ty {
                         Some(Type::Fn { .. }) => {}
-                        Some(Type::Named(n)) if n == "HttpRouter" => {}
+                        Some(Type::Named(n)) if n == "HTTPRouter" => {}
                         Some(other) => {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
-                                format!("`http.serve` handler must be a function or HttpRouter, not {}", other.show()),
-                                "the handler is called with each incoming `HttpRequest`".to_string(),
-                                "pass a router (`http.router()`) or a lambda: `(req) => HttpResponse { … }`".to_string(),
+                                format!("`http.serve` handler must be a function or HTTPRouter, not {}", other.show()),
+                                "the handler is called with each incoming `HTTPRequest`".to_string(),
+                                "pass a router (`http.router()`) or a lambda: `(req) => HTTPResponse { … }`".to_string(),
                                 Some(args[1].expr.span()),
                             ));
                         }
@@ -2902,8 +2902,8 @@ impl<'a> Checker<'a> {
                     }
                     self.expect_url_arg("get", 0, &mut args[0]);
                     return Some(Type::Result {
-                        ok: Box::new(Type::Named("HttpResponse".to_string())),
-                        err: Box::new(Type::Named("HttpError".to_string())),
+                        ok: Box::new(Type::Named("HTTPResponse".to_string())),
+                        err: Box::new(Type::Named("HTTPError".to_string())),
                     });
                 }
                 ("core.http.client", "post") => {
@@ -2918,8 +2918,8 @@ impl<'a> Checker<'a> {
                     self.expect_url_arg("post", 0, &mut args[0]);
                     self.expect_core_arg("post", 1, &Type::String, &mut args[1]);
                     return Some(Type::Result {
-                        ok: Box::new(Type::Named("HttpResponse".to_string())),
-                        err: Box::new(Type::Named("HttpError".to_string())),
+                        ok: Box::new(Type::Named("HTTPResponse".to_string())),
+                        err: Box::new(Type::Named("HTTPError".to_string())),
                     });
                 }
                 ("core.http.client", "request") => {
@@ -2933,7 +2933,7 @@ impl<'a> Checker<'a> {
                     }
                     self.expect_core_arg("request", 0, &Type::String, &mut args[0]);
                     self.expect_url_arg("request", 1, &mut args[1]);
-                    return Some(Type::Named("HttpRequest".to_string()));
+                    return Some(Type::Named("HTTPRequest".to_string()));
                 }
                 // D-WS1=B: WebSocket entry points.
                 ("core.ws", "connect") => {
@@ -2963,7 +2963,7 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(
                         "upgrade",
                         0,
-                        &Type::Named("HttpRequest".to_string()),
+                        &Type::Named("HTTPRequest".to_string()),
                         &mut args[0],
                     );
                     return Some(Type::Result {
@@ -3052,7 +3052,7 @@ impl<'a> Checker<'a> {
                     for a in args.iter_mut() {
                         self.infer(&mut a.expr);
                     }
-                    return Some(Type::Named("HttpMux".to_string()));
+                    return Some(Type::Named("HTTPMux".to_string()));
                 }
                 ("core.http.server", "bind") => {
                     if args.len() != 2 && args.len() != 3 {
@@ -3067,7 +3067,7 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                     self.expect_core_arg("bind", 0, &Type::String, &mut args[0]);
-                    self.expect_core_arg("bind", 1, &Type::Named("HttpMux".to_string()), &mut args[1]);
+                    self.expect_core_arg("bind", 1, &Type::Named("HTTPMux".to_string()), &mut args[1]);
                     if args.len() == 3 {
                         match args[2].label.as_ref().map(|(label, span)| (label.as_str(), *span)) {
                             Some(("tls", _)) => {}
@@ -3089,13 +3089,13 @@ impl<'a> Checker<'a> {
                         self.expect_core_arg(
                             "bind",
                             2,
-                            &Type::Named("HttpServerTls".to_string()),
+                            &Type::Named("HTTPServerTls".to_string()),
                             &mut args[2],
                         );
                     }
                     return Some(Type::Result {
-                        ok: Box::new(Type::Named("HttpServer".to_string())),
-                        err: Box::new(Type::Named("HttpError".to_string())),
+                        ok: Box::new(Type::Named("HTTPServer".to_string())),
+                        err: Box::new(Type::Named("HTTPError".to_string())),
                     });
                 }
                 ("core.http.server", "serve") => {
@@ -3136,13 +3136,13 @@ impl<'a> Checker<'a> {
                         self.expect_core_arg(
                             "serve",
                             2,
-                            &Type::Named("HttpServerTls".to_string()),
+                            &Type::Named("HTTPServerTls".to_string()),
                             &mut args[2],
                         );
                     }
                     return Some(Type::Result {
                         ok: Box::new(unit_ty()),
-                        err: Box::new(Type::Named("HttpError".to_string())),
+                        err: Box::new(Type::Named("HTTPError".to_string())),
                     });
                 }
                 ("core.http.server", "serve_once") => {
@@ -3158,7 +3158,7 @@ impl<'a> Checker<'a> {
                     self.infer(&mut args[1].expr);
                     return Some(Type::Result {
                         ok: Box::new(unit_ty()),
-                        err: Box::new(Type::Named("HttpError".to_string())),
+                        err: Box::new(Type::Named("HTTPError".to_string())),
                     });
                 }
                 ("core.http.server", "serve_once_listener") => {
@@ -3179,7 +3179,7 @@ impl<'a> Checker<'a> {
                     self.infer(&mut args[1].expr);
                     return Some(Type::Result {
                         ok: Box::new(unit_ty()),
-                        err: Box::new(Type::Named("HttpError".to_string())),
+                        err: Box::new(Type::Named("HTTPError".to_string())),
                     });
                 }
                 ("core.http.server", "tls") => {
@@ -3193,7 +3193,7 @@ impl<'a> Checker<'a> {
                     }
                     self.expect_core_arg("tls", 0, &Type::String, &mut args[0]);
                     self.expect_core_arg("tls", 1, &Type::String, &mut args[1]);
-                    return Some(Type::Named("HttpServerTls".to_string()));
+                    return Some(Type::Named("HTTPServerTls".to_string()));
                 }
                 ("core.http.server", "response") => {
                     if args.len() != 2 {
@@ -3206,7 +3206,7 @@ impl<'a> Checker<'a> {
                     }
                     self.expect_core_arg("response", 0, &Type::Int, &mut args[0]);
                     self.expect_core_arg("response", 1, &Type::String, &mut args[1]);
-                    return Some(Type::Named("HttpResponse".to_string()));
+                    return Some(Type::Named("HTTPResponse".to_string()));
                 }
                 ("core.http.server", "sse") => {
                     if args.len() != 1 {
@@ -3218,7 +3218,7 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                     self.expect_core_arg("sse", 0, &Type::String, &mut args[0]);
-                    return Some(Type::Named("HttpResponse".to_string()));
+                    return Some(Type::Named("HTTPResponse".to_string()));
                 }
                 ("core.http.server", "static_file") => {
                     if args.len() != 2 {
@@ -3232,8 +3232,8 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg("static_file", 0, &Type::String, &mut args[0]);
                     self.expect_core_arg("static_file", 1, &Type::String, &mut args[1]);
                     return Some(Type::Result {
-                        ok: Box::new(Type::Named("HttpResponse".to_string())),
-                        err: Box::new(Type::Named("HttpError".to_string())),
+                        ok: Box::new(Type::Named("HTTPResponse".to_string())),
+                        err: Box::new(Type::Named("HTTPError".to_string())),
                     });
                 }
                 ("core.http.server", "static_file_range") => {
@@ -3248,14 +3248,14 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(
                         "static_file_range",
                         0,
-                        &Type::Named("HttpRequest".to_string()),
+                        &Type::Named("HTTPRequest".to_string()),
                         &mut args[0],
                     );
                     self.expect_core_arg("static_file_range", 1, &Type::String, &mut args[1]);
                     self.expect_core_arg("static_file_range", 2, &Type::String, &mut args[2]);
                     return Some(Type::Result {
-                        ok: Box::new(Type::Named("HttpResponse".to_string())),
-                        err: Box::new(Type::Named("HttpError".to_string())),
+                        ok: Box::new(Type::Named("HTTPResponse".to_string())),
+                        err: Box::new(Type::Named("HTTPError".to_string())),
                     });
                 }
                 ("core.http.server", "access_log") => {
@@ -3270,7 +3270,7 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(
                         "access_log",
                         0,
-                        &Type::Named("HttpRequest".to_string()),
+                        &Type::Named("HTTPRequest".to_string()),
                         &mut args[0],
                     );
                     self.expect_core_arg("access_log", 1, &Type::Int, &mut args[1]);
@@ -3288,7 +3288,7 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(
                         "request_id",
                         0,
-                        &Type::Named("HttpMux".to_string()),
+                        &Type::Named("HTTPMux".to_string()),
                         &mut args[0],
                     );
                     return Some(Type::Named("Unit".to_string()));
@@ -3305,10 +3305,10 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(
                         "mux_handler",
                         0,
-                        &Type::Named("HttpMux".to_string()),
+                        &Type::Named("HTTPMux".to_string()),
                         &mut args[0],
                     );
-                    return Some(Type::Named("HttpHandler".to_string()));
+                    return Some(Type::Named("HTTPHandler".to_string()));
                 }
                 ("core.http.server", "static_files") => {
                     if args.len() != 1 {
@@ -3320,7 +3320,7 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                     self.expect_core_arg("static_files", 0, &Type::String, &mut args[0]);
-                    return Some(Type::Named("HttpHandler".to_string()));
+                    return Some(Type::Named("HTTPHandler".to_string()));
                 }
                 ("core.http.middleware", "timeout") => {
                     if args.len() != 2 {
@@ -3340,10 +3340,10 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(
                         "timeout",
                         1,
-                        &Type::Named("HttpHandler".to_string()),
+                        &Type::Named("HTTPHandler".to_string()),
                         &mut args[1],
                     );
-                    return Some(Type::Named("HttpHandler".to_string()));
+                    return Some(Type::Named("HTTPHandler".to_string()));
                 }
                 ("core.http.middleware", "body_limit") => {
                     if args.len() != 2 {
@@ -3358,10 +3358,10 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(
                         "body_limit",
                         1,
-                        &Type::Named("HttpHandler".to_string()),
+                        &Type::Named("HTTPHandler".to_string()),
                         &mut args[1],
                     );
-                    return Some(Type::Named("HttpHandler".to_string()));
+                    return Some(Type::Named("HTTPHandler".to_string()));
                 }
                 ("core.http.middleware", "cors_policy") => {
                     if args.len() != 1 {
@@ -3373,7 +3373,7 @@ impl<'a> Checker<'a> {
                         return None;
                     }
                     self.expect_core_arg("cors_policy", 0, &Type::String, &mut args[0]);
-                    return Some(Type::Named("HttpCorsPolicy".to_string()));
+                    return Some(Type::Named("HTTPCorsPolicy".to_string()));
                 }
                 ("core.http.middleware", "cors") => {
                     if args.len() != 2 {
@@ -3387,16 +3387,16 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(
                         "cors",
                         0,
-                        &Type::Named("HttpCorsPolicy".to_string()),
+                        &Type::Named("HTTPCorsPolicy".to_string()),
                         &mut args[0],
                     );
                     self.expect_core_arg(
                         "cors",
                         1,
-                        &Type::Named("HttpHandler".to_string()),
+                        &Type::Named("HTTPHandler".to_string()),
                         &mut args[1],
                     );
-                    return Some(Type::Named("HttpHandler".to_string()));
+                    return Some(Type::Named("HTTPHandler".to_string()));
                 }
                 ("core.http.middleware", "compress") => {
                     if args.len() != 2 {
@@ -3410,16 +3410,16 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(
                         "compress",
                         0,
-                        &Type::Named("HttpCompressEncoding".to_string()),
+                        &Type::Named("HTTPCompressEncoding".to_string()),
                         &mut args[0],
                     );
                     self.expect_core_arg(
                         "compress",
                         1,
-                        &Type::Named("HttpHandler".to_string()),
+                        &Type::Named("HTTPHandler".to_string()),
                         &mut args[1],
                     );
-                    return Some(Type::Named("HttpHandler".to_string()));
+                    return Some(Type::Named("HTTPHandler".to_string()));
                 }
                 ("core.http.middleware", "access_log") => {
                     if args.len() != 1 {
@@ -3433,10 +3433,10 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(
                         "access_log",
                         0,
-                        &Type::Named("HttpHandler".to_string()),
+                        &Type::Named("HTTPHandler".to_string()),
                         &mut args[0],
                     );
-                    return Some(Type::Named("HttpHandler".to_string()));
+                    return Some(Type::Named("HTTPHandler".to_string()));
                 }
                 // D-TIMEDEPTH1=A: civil-time constructors.
                 ("core.time.date", "new") => {

@@ -356,7 +356,7 @@ pub(crate) fn run_compile_cmd(
         jet::compile_allow_impure(file)
     } else {
         // D-OSTARGET1=A: thread the real `--target=<triple>` through so
-        // codegen only emits/links `#Target(Os.*)`-gated impls for the OS
+        // codegen only emits/links `#Target(OS.*)`-gated impls for the OS
         // that triple builds for (host OS when the flag is absent).
         jet::compile_with_target(&src, file, cross_target)
     };
@@ -2298,7 +2298,7 @@ pub(crate) struct WebBuildPaths {
 ///
 /// `file` is the `.jet` source path — used only to look for a companion
 /// `<stem>.html` next to it, which wins over the generic `index_html` codegen
-/// emits (an example wiring a button to an exported `#Js` function ships its
+/// emits (an example wiring a button to an exported `#JS` function ships its
 /// own page; see `Codegen::Web::emit_web`'s `index_html` doc comment).
 ///
 /// Returns the paths written on success. On failure to run/pass rustc for the
@@ -2337,7 +2337,7 @@ pub(crate) fn write_web_artifacts(
     let wasm_map_path = out_dir.join("app.wasm.map");
     let html_path = out_dir.join("index.html");
     // D-HTMLPAIR1 (ratified 2026-07-01, c134): precedence for the served HTML source —
-    // (1) an explicit `#Html("path.html")` marker, relative to the source
+    // (1) an explicit `#HTML("path.html")` marker, relative to the source
     //     file's own directory; a path that doesn't resolve is a hard error
     //     naming the missing file, never a silent fallback;
     // (2) the legacy `<stem>.html` sibling-filename convention, kept for
@@ -2348,7 +2348,7 @@ pub(crate) fn write_web_artifacts(
         let explicit_path = source_dir.join(rel);
         fs::read_to_string(&explicit_path).map_err(|e| {
             format!(
-                "error: `#Html(\"{}\")` names a file that doesn't exist: {} ({})",
+                "error: `#HTML(\"{}\")` names a file that doesn't exist: {} ({})",
                 rel,
                 explicit_path.display(),
                 e
@@ -2438,7 +2438,7 @@ pub(crate) fn write_web_artifacts(
 
     let mut wasm = fs::read(&wasm_path)
         .map_err(|e| format!("error: couldn't read {}: {}", wasm_path.display(), e))?;
-    jet_foundation::CliSchema::embed_wasm_record(&mut wasm, &web.command_record)
+    jet_foundation::CLISchema::embed_wasm_record(&mut wasm, &web.command_record)
         .map_err(|e| format!("error: couldn't embed JetCommandSchema metadata: {e}"))?;
 
     let mut wasm_map_written = None;

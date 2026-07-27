@@ -2,14 +2,14 @@
 // client and server runtime paths.
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum JetHttpOperation {
+enum JetHTTPOperation {
     ClientConnect,
     ServerBind,
     ServeListener,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum JetHttpError {
+enum JetHTTPError {
     InvalidMethod,
     InvalidUrl,
     InvalidHeader,
@@ -20,23 +20,23 @@ enum JetHttpError {
     UnsupportedEncoding,
     Resolve { host: String },
     Connect { address: String },
-    Tls { stage: String },
+    TLS { stage: String },
     Timeout { phase: String },
     Proxy { stage: String },
     Redirect { reason: String },
     Protocol { version: String },
-    Io { operation: String },
+    IO { operation: String },
     Cancelled,
     ResourceUnavailable { resource: String },
-    UnsupportedTarget { operation: JetHttpOperation },
+    UnsupportedTarget { operation: JetHTTPOperation },
     Internal { incident_id: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct JetHttpMethod(String);
+struct JetHTTPMethod(String);
 
-impl JetHttpMethod {
-    fn custom(token: String) -> Result<Self, JetHttpError> {
+impl JetHTTPMethod {
+    fn custom(token: String) -> Result<Self, JetHTTPError> {
         if token.is_empty()
             || !token.bytes().all(|byte| {
                 byte.is_ascii_alphanumeric()
@@ -44,7 +44,7 @@ impl JetHttpMethod {
                         | b'+' | b'-' | b'.' | b'^' | b'_' | b'`' | b'|' | b'~')
             })
         {
-            return Err(JetHttpError::InvalidMethod);
+            return Err(JetHTTPError::InvalidMethod);
         }
         Ok(Self(token))
     }
@@ -60,57 +60,57 @@ impl JetHttpMethod {
     fn patch() -> Self { Self("PATCH".to_string()) }
 }
 
-impl JetShow for JetHttpMethod { fn jet_show(&self) -> String { self.0.clone() } }
+impl JetShow for JetHTTPMethod { fn jet_show(&self) -> String { self.0.clone() } }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct JetHttpStatus(i64);
+struct JetHTTPStatus(i64);
 
-impl JetHttpStatus {
-    fn new(code: i64) -> Result<Self, JetHttpError> {
-        (100..=599).contains(&code).then_some(Self(code)).ok_or(JetHttpError::InvalidStatus)
+impl JetHTTPStatus {
+    fn new(code: i64) -> Result<Self, JetHTTPError> {
+        (100..=599).contains(&code).then_some(Self(code)).ok_or(JetHTTPError::InvalidStatus)
     }
 }
 
-impl JetShow for JetHttpStatus { fn jet_show(&self) -> String { self.0.to_string() } }
+impl JetShow for JetHTTPStatus { fn jet_show(&self) -> String { self.0.to_string() } }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum JetHttpVersion { Http10, Http11, Http2 }
+enum JetHTTPVersion { HTTP10, HTTP11, HTTP2 }
 
-impl JetHttpVersion {
-    fn http_1_0() -> Self { Self::Http10 }
-    fn http_1_1() -> Self { Self::Http11 }
-    fn http_2() -> Self { Self::Http2 }
+impl JetHTTPVersion {
+    fn http_1_0() -> Self { Self::HTTP10 }
+    fn http_1_1() -> Self { Self::HTTP11 }
+    fn http_2() -> Self { Self::HTTP2 }
 }
 
-impl JetShow for JetHttpVersion {
+impl JetShow for JetHTTPVersion {
     fn jet_show(&self) -> String {
-        match self { Self::Http10 => "HTTP/1.0", Self::Http11 => "HTTP/1.1", Self::Http2 => "HTTP/2" }.to_string()
+        match self { Self::HTTP10 => "HTTP/1.0", Self::HTTP11 => "HTTP/1.1", Self::HTTP2 => "HTTP/2" }.to_string()
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct JetHttpHeaderName(String);
+struct JetHTTPHeaderName(String);
 
-impl JetHttpHeaderName {
-    fn new(name: String) -> Result<Self, JetHttpError> {
-        JetHttpHeaders::valid_name(&name).then_some(Self(name)).ok_or(JetHttpError::InvalidHeader)
+impl JetHTTPHeaderName {
+    fn new(name: String) -> Result<Self, JetHTTPError> {
+        JetHTTPHeaders::valid_name(&name).then_some(Self(name)).ok_or(JetHTTPError::InvalidHeader)
     }
 }
 
-impl JetShow for JetHttpHeaderName { fn jet_show(&self) -> String { self.0.clone() } }
+impl JetShow for JetHTTPHeaderName { fn jet_show(&self) -> String { self.0.clone() } }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct JetHttpHeaderValue(String);
+struct JetHTTPHeaderValue(String);
 
-impl JetHttpHeaderValue {
-    fn new(value: String) -> Result<Self, JetHttpError> {
-        JetHttpHeaders::valid_value(&value).then_some(Self(value)).ok_or(JetHttpError::InvalidHeader)
+impl JetHTTPHeaderValue {
+    fn new(value: String) -> Result<Self, JetHTTPError> {
+        JetHTTPHeaders::valid_value(&value).then_some(Self(value)).ok_or(JetHTTPError::InvalidHeader)
     }
 }
 
-impl JetShow for JetHttpHeaderValue { fn jet_show(&self) -> String { self.0.clone() } }
+impl JetShow for JetHTTPHeaderValue { fn jet_show(&self) -> String { self.0.clone() } }
 
-impl std::fmt::Display for JetHttpError {
+impl std::fmt::Display for JetHTTPError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidMethod => formatter.write_str("invalid HTTP method"),
@@ -123,19 +123,19 @@ impl std::fmt::Display for JetHttpError {
             Self::UnsupportedEncoding => formatter.write_str("unsupported HTTP body encoding"),
             Self::Resolve { host } => write!(formatter, "HTTP name resolution failed for {host}"),
             Self::Connect { address } => write!(formatter, "HTTP connection failed for {address}"),
-            Self::Tls { stage } => write!(formatter, "HTTP TLS failed during {stage}"),
+            Self::TLS { stage } => write!(formatter, "HTTP TLS failed during {stage}"),
             Self::Timeout { phase } => write!(formatter, "HTTP timeout during {phase}"),
             Self::Proxy { stage } => write!(formatter, "HTTP proxy failed during {stage}"),
             Self::Redirect { reason } => write!(formatter, "HTTP redirect failed: {reason}"),
             Self::Protocol { version } => write!(formatter, "unsupported HTTP protocol {version}"),
-            Self::Io { operation } => write!(formatter, "HTTP I/O failed during {operation}"),
+            Self::IO { operation } => write!(formatter, "HTTP I/O failed during {operation}"),
             Self::Cancelled => formatter.write_str("HTTP operation cancelled"),
             Self::ResourceUnavailable { resource } => write!(formatter, "HTTP resource unavailable: {resource}"),
             Self::UnsupportedTarget { operation } => {
                 let operation = match operation {
-                    JetHttpOperation::ClientConnect => "client connect",
-                    JetHttpOperation::ServerBind => "server bind",
-                    JetHttpOperation::ServeListener => "serve listener",
+                    JetHTTPOperation::ClientConnect => "client connect",
+                    JetHTTPOperation::ServerBind => "server bind",
+                    JetHTTPOperation::ServeListener => "serve listener",
                 };
                 write!(formatter, "HTTP {operation} is unavailable on this build target")
             }
@@ -144,18 +144,18 @@ impl std::fmt::Display for JetHttpError {
     }
 }
 
-impl JetShow for JetHttpError {
+impl JetShow for JetHTTPError {
     fn jet_show(&self) -> String {
         self.to_string()
     }
 }
 
-struct JetHttpBodyCloser {
+struct JetHTTPBodyCloser {
     closed: std::sync::atomic::AtomicBool,
     close: Box<dyn Fn() + Send + Sync>,
 }
 
-impl JetHttpBodyCloser {
+impl JetHTTPBodyCloser {
     fn new(close: impl Fn() + Send + Sync + 'static) -> std::sync::Arc<Self> {
         std::sync::Arc::new(Self {
             closed: std::sync::atomic::AtomicBool::new(false),
@@ -168,22 +168,22 @@ impl JetHttpBodyCloser {
     }
 }
 
-enum JetHttpBodySource {
+enum JetHTTPBodySource {
     Bytes(std::io::Cursor<Vec<u8>>),
     File(std::io::Take<std::fs::File>),
     Reader {
         reader: Box<dyn std::io::Read + Send>,
-        closer: Option<std::sync::Arc<JetHttpBodyCloser>>,
+        closer: Option<std::sync::Arc<JetHTTPBodyCloser>>,
     },
     Bridge {
         handle: i64,
-        read: fn(i64, usize) -> Result<Option<Vec<u8>>, JetHttpError>,
-        closer: std::sync::Arc<JetHttpBodyCloser>,
+        read: fn(i64, usize) -> Result<Option<Vec<u8>>, JetHTTPError>,
+        closer: std::sync::Arc<JetHTTPBodyCloser>,
     },
 }
 
-impl JetHttpBodySource {
-    fn closer(&self) -> Option<std::sync::Arc<JetHttpBodyCloser>> {
+impl JetHTTPBodySource {
+    fn closer(&self) -> Option<std::sync::Arc<JetHTTPBodyCloser>> {
         match self {
             Self::Reader { closer, .. } => closer.clone(),
             Self::Bridge { closer, .. } => Some(closer.clone()),
@@ -200,25 +200,25 @@ impl JetHttpBodySource {
     }
 }
 
-struct JetHttpBodyState {
-    source: Option<JetHttpBodySource>,
+struct JetHTTPBodyState {
+    source: Option<JetHTTPBodySource>,
     length: Option<usize>,
     content_type: Option<String>,
     drained: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
-impl Drop for JetHttpBodyState {
+impl Drop for JetHTTPBodyState {
     fn drop(&mut self) {
         if let Some(source) = self.source.take() { source.close(); }
     }
 }
 
 #[derive(Clone)]
-struct JetHttpBody {
-    state: std::sync::Arc<std::sync::Mutex<JetHttpBodyState>>,
+struct JetHTTPBody {
+    state: std::sync::Arc<std::sync::Mutex<JetHTTPBodyState>>,
 }
 
-impl JetHttpBody {
+impl JetHTTPBody {
     fn empty() -> Self {
         Self::from_bytes(Vec::new())
     }
@@ -230,8 +230,8 @@ impl JetHttpBody {
     fn from_bytes_with_content_type(bytes: Vec<u8>, content_type: Option<String>) -> Self {
         let length = bytes.len();
         let drained = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(length == 0));
-        Self { state: std::sync::Arc::new(std::sync::Mutex::new(JetHttpBodyState {
-            source: Some(JetHttpBodySource::Bytes(std::io::Cursor::new(bytes))),
+        Self { state: std::sync::Arc::new(std::sync::Mutex::new(JetHTTPBodyState {
+            source: Some(JetHTTPBodySource::Bytes(std::io::Cursor::new(bytes))),
             length: Some(length),
             content_type,
             drained,
@@ -245,7 +245,7 @@ impl JetHttpBody {
         )
     }
 
-    fn from_text_with_mime(text: String, content_type: jet_std::JetMime) -> Self {
+    fn from_text_with_mime(text: String, content_type: jet_std::JetMIME) -> Self {
         Self::from_bytes_with_content_type(
             text.into_bytes(),
             Some(content_type.to_string_value()),
@@ -330,8 +330,8 @@ impl JetHttpBody {
     ) -> Self {
         let drained = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(length == Some(0)));
         Self {
-            state: std::sync::Arc::new(std::sync::Mutex::new(JetHttpBodyState {
-                source: Some(JetHttpBodySource::Reader { reader: Box::new(reader), closer: None }),
+            state: std::sync::Arc::new(std::sync::Mutex::new(JetHTTPBodyState {
+                source: Some(JetHTTPBodySource::Reader { reader: Box::new(reader), closer: None }),
                 length,
                 content_type,
                 drained,
@@ -345,10 +345,10 @@ impl JetHttpBody {
         close: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         let drained = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(length == Some(0)));
-        Self { state: std::sync::Arc::new(std::sync::Mutex::new(JetHttpBodyState {
-            source: Some(JetHttpBodySource::Reader {
+        Self { state: std::sync::Arc::new(std::sync::Mutex::new(JetHTTPBodyState {
+            source: Some(JetHTTPBodySource::Reader {
                 reader: Box::new(reader),
-                closer: Some(JetHttpBodyCloser::new(close)),
+                closer: Some(JetHTTPBodyCloser::new(close)),
             }),
             length,
             content_type: None,
@@ -358,35 +358,35 @@ impl JetHttpBody {
 
     fn file(file: std::fs::File, length: usize) -> Self {
         let drained = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(length == 0));
-        Self { state: std::sync::Arc::new(std::sync::Mutex::new(JetHttpBodyState {
-            source: Some(JetHttpBodySource::File(std::io::Read::take(file, length as u64))),
+        Self { state: std::sync::Arc::new(std::sync::Mutex::new(JetHTTPBodyState {
+            source: Some(JetHTTPBodySource::File(std::io::Read::take(file, length as u64))),
             length: Some(length),
             content_type: None,
             drained,
         })) }
     }
 
-    fn from_reader(reader: JetFileReader) -> Result<Self, JetHttpError> {
+    fn from_reader(reader: JetFileReader) -> Result<Self, JetHTTPError> {
         Ok(Self::reader(reader.inner, None))
     }
 
-    fn from_reader_with_length(reader: JetFileReader, length: i64) -> Result<Self, JetHttpError> {
+    fn from_reader_with_length(reader: JetFileReader, length: i64) -> Result<Self, JetHTTPError> {
         let length = usize::try_from(length).ok().filter(|length| *length <= 1024 * 1024 * 1024)
-            .ok_or(JetHttpError::BodyTooLarge { limit: length })?;
+            .ok_or(JetHTTPError::BodyTooLarge { limit: length })?;
         Ok(Self::reader(reader.inner, Some(length)))
     }
 
     fn bridge(
         handle: i64,
         length: Option<usize>,
-        read: fn(i64, usize) -> Result<Option<Vec<u8>>, JetHttpError>,
+        read: fn(i64, usize) -> Result<Option<Vec<u8>>, JetHTTPError>,
         close: fn(i64),
     ) -> Self {
         let drained = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(length == Some(0)));
-        let closer = JetHttpBodyCloser::new(move || close(handle));
+        let closer = JetHTTPBodyCloser::new(move || close(handle));
         Self {
-            state: std::sync::Arc::new(std::sync::Mutex::new(JetHttpBodyState {
-                source: Some(JetHttpBodySource::Bridge {
+            state: std::sync::Arc::new(std::sync::Mutex::new(JetHTTPBodyState {
+                source: Some(JetHTTPBodySource::Bridge {
                     handle,
                     read,
                     closer,
@@ -421,22 +421,22 @@ impl JetHttpBody {
         self.length() == Some(0)
     }
 
-    fn chunks(&self, max_chunk: usize) -> Result<JetHttpBodyChunks, JetHttpError> {
+    fn chunks(&self, max_chunk: usize) -> Result<JetHTTPBodyChunks, JetHTTPError> {
         if max_chunk == 0 {
-            return Err(JetHttpError::BodyTooLarge { limit: 0 });
+            return Err(JetHTTPError::BodyTooLarge { limit: 0 });
         }
         let mut state = self
             .state
             .lock()
-            .map_err(|_| JetHttpError::Internal {
+            .map_err(|_| JetHTTPError::Internal {
                 incident_id: "http-body-lock".to_string(),
             })?;
         let source = state
             .source
             .take()
-            .ok_or(JetHttpError::BodyConsumed)?;
+            .ok_or(JetHTTPError::BodyConsumed)?;
         let drained = state.drained.clone();
-        Ok(JetHttpBodyChunks {
+        Ok(JetHTTPBodyChunks {
             source,
             max_chunk,
             done: false,
@@ -445,39 +445,39 @@ impl JetHttpBody {
         })
     }
 
-    fn bytes(&self, limit: usize) -> Result<Vec<u8>, JetHttpError> {
+    fn bytes(&self, limit: usize) -> Result<Vec<u8>, JetHTTPError> {
         if self.length().is_some_and(|length| length > limit) {
             let _ = self.chunks(64 * 1024)?;
-            return Err(JetHttpError::BodyTooLarge { limit: limit as i64 });
+            return Err(JetHTTPError::BodyTooLarge { limit: limit as i64 });
         }
         let mut bytes = Vec::new();
         for chunk in self.chunks(64 * 1024)? {
             let chunk = chunk?;
             if bytes.len().saturating_add(chunk.len()) > limit {
-                return Err(JetHttpError::BodyTooLarge { limit: limit as i64 });
+                return Err(JetHTTPError::BodyTooLarge { limit: limit as i64 });
             }
             bytes.extend(chunk);
         }
         Ok(bytes)
     }
 
-    fn text(&self, limit: usize) -> Result<String, JetHttpError> {
-        String::from_utf8(self.bytes(limit)?).map_err(|_| JetHttpError::UnsupportedEncoding)
+    fn text(&self, limit: usize) -> Result<String, JetHTTPError> {
+        String::from_utf8(self.bytes(limit)?).map_err(|_| JetHTTPError::UnsupportedEncoding)
     }
 }
 
-struct JetHttpBodyChunks {
-    source: JetHttpBodySource,
+struct JetHTTPBodyChunks {
+    source: JetHTTPBodySource,
     max_chunk: usize,
     done: bool,
-    initial_error: Option<JetHttpError>,
+    initial_error: Option<JetHTTPError>,
     drained: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
-impl JetHttpBodyChunks {
-    fn failed(error: JetHttpError) -> Self {
+impl JetHTTPBodyChunks {
+    fn failed(error: JetHTTPError) -> Self {
         Self {
-            source: JetHttpBodySource::Bytes(std::io::Cursor::new(Vec::new())),
+            source: JetHTTPBodySource::Bytes(std::io::Cursor::new(Vec::new())),
             max_chunk: 1,
             done: false,
             initial_error: Some(error),
@@ -487,11 +487,11 @@ impl JetHttpBodyChunks {
 
     fn h2_cancellable(&self) -> bool { self.source.h2_cancellable() }
 
-    fn closer(&self) -> Option<std::sync::Arc<JetHttpBodyCloser>> { self.source.closer() }
+    fn closer(&self) -> Option<std::sync::Arc<JetHTTPBodyCloser>> { self.source.closer() }
 }
 
-impl Iterator for JetHttpBodyChunks {
-    type Item = Result<Vec<u8>, JetHttpError>;
+impl Iterator for JetHTTPBodyChunks {
+    type Item = Result<Vec<u8>, JetHTTPError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(error) = self.initial_error.take() {
@@ -503,10 +503,10 @@ impl Iterator for JetHttpBodyChunks {
         }
         let mut chunk = vec![0; self.max_chunk];
         let read = match &mut self.source {
-            JetHttpBodySource::Bytes(reader) => std::io::Read::read(reader, &mut chunk),
-            JetHttpBodySource::File(file) => std::io::Read::read(file, &mut chunk),
-            JetHttpBodySource::Reader { reader, .. } => reader.read(&mut chunk),
-            JetHttpBodySource::Bridge { handle, read, .. } => match read(*handle, self.max_chunk) {
+            JetHTTPBodySource::Bytes(reader) => std::io::Read::read(reader, &mut chunk),
+            JetHTTPBodySource::File(file) => std::io::Read::read(file, &mut chunk),
+            JetHTTPBodySource::Reader { reader, .. } => reader.read(&mut chunk),
+            JetHTTPBodySource::Bridge { handle, read, .. } => match read(*handle, self.max_chunk) {
                 Ok(Some(bytes)) => return Some(Ok(bytes)),
                 Ok(None) => Ok(0),
                 Err(error) => {
@@ -528,108 +528,108 @@ impl Iterator for JetHttpBodyChunks {
             Err(error) => {
                 self.done = true;
                 Some(Err(match error.kind() {
-                    std::io::ErrorKind::InvalidData | std::io::ErrorKind::UnexpectedEof => JetHttpError::InvalidFraming,
-                    std::io::ErrorKind::OutOfMemory => JetHttpError::BodyTooLarge { limit: 32 * 1024 },
-                    _ => JetHttpError::Io { operation: "read body".to_string() },
+                    std::io::ErrorKind::InvalidData | std::io::ErrorKind::UnexpectedEof => JetHTTPError::InvalidFraming,
+                    std::io::ErrorKind::OutOfMemory => JetHTTPError::BodyTooLarge { limit: 32 * 1024 },
+                    _ => JetHTTPError::IO { operation: "read body".to_string() },
                 }))
             }
         }
     }
 }
 
-impl Drop for JetHttpBodyChunks {
+impl Drop for JetHTTPBodyChunks {
     fn drop(&mut self) { self.source.close(); }
 }
 
-impl std::fmt::Debug for JetHttpBody {
+impl std::fmt::Debug for JetHTTPBody {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
-            .debug_struct("HttpBody")
+            .debug_struct("HTTPBody")
             .field("length", &self.length())
             .finish_non_exhaustive()
     }
 }
 
-fn jet_http_body_bytes(body: &JetHttpBody, limit: i64) -> Result<Vec<u8>, JetHttpError> {
+fn jet_http_body_bytes(body: &JetHTTPBody, limit: i64) -> Result<Vec<u8>, JetHTTPError> {
     let limit = jet_http_consume_limit(limit)?;
     body.bytes(limit)
 }
 
-fn jet_http_body_text(body: &JetHttpBody, limit: i64) -> Result<String, JetHttpError> {
+fn jet_http_body_text(body: &JetHTTPBody, limit: i64) -> Result<String, JetHTTPError> {
     let limit = jet_http_consume_limit(limit)?;
     body.text(limit)
 }
 
-fn jet_http_body_json<T: user_Decode>(body: &JetHttpBody, limit: i64) -> Result<T, JetHttpError> {
+fn jet_http_body_json<T: user_Decode>(body: &JetHTTPBody, limit: i64) -> Result<T, JetHTTPError> {
     let text = jet_http_body_text(body, limit)?;
-    jet_enc_json_decode(&text).map_err(|_| JetHttpError::InvalidFraming)
+    jet_enc_json_decode(&text).map_err(|_| JetHTTPError::InvalidFraming)
 }
 
 fn jet_http_body_copy_to(
-    body: &JetHttpBody,
+    body: &JetHTTPBody,
     writer: &mut JetFileWriter,
     limit: i64,
-) -> Result<i64, JetHttpError> {
+) -> Result<i64, JetHTTPError> {
     use std::io::Write;
     let limit = jet_http_consume_limit(limit)?;
     if body.length().is_some_and(|length| length > limit) {
         let _ = body.chunks(64 * 1024)?;
-        return Err(JetHttpError::BodyTooLarge { limit: limit as i64 });
+        return Err(JetHTTPError::BodyTooLarge { limit: limit as i64 });
     }
     let mut total = 0usize;
     for chunk in body.chunks(64 * 1024)? {
         let chunk = chunk?;
-        total = total.checked_add(chunk.len()).ok_or(JetHttpError::BodyTooLarge { limit: limit as i64 })?;
+        total = total.checked_add(chunk.len()).ok_or(JetHTTPError::BodyTooLarge { limit: limit as i64 })?;
         if total > limit {
-            return Err(JetHttpError::BodyTooLarge { limit: limit as i64 });
+            return Err(JetHTTPError::BodyTooLarge { limit: limit as i64 });
         }
-        writer.inner.write_all(&chunk).map_err(|_| JetHttpError::Io { operation: "copy body".to_string() })?;
+        writer.inner.write_all(&chunk).map_err(|_| JetHTTPError::IO { operation: "copy body".to_string() })?;
     }
-    i64::try_from(total).map_err(|_| JetHttpError::BodyTooLarge { limit: limit as i64 })
+    i64::try_from(total).map_err(|_| JetHTTPError::BodyTooLarge { limit: limit as i64 })
 }
 
-fn jet_http_consume_limit(limit: i64) -> Result<usize, JetHttpError> {
+fn jet_http_consume_limit(limit: i64) -> Result<usize, JetHTTPError> {
     if !(0..=1024 * 1024 * 1024).contains(&limit) {
-        return Err(JetHttpError::BodyTooLarge { limit });
+        return Err(JetHTTPError::BodyTooLarge { limit });
     }
     Ok(limit as usize)
 }
 
-fn jet_http_body_chunks(body: &JetHttpBody, max_chunk: i64) -> JetHttpBodyChunks {
+fn jet_http_body_chunks(body: &JetHTTPBody, max_chunk: i64) -> JetHTTPBodyChunks {
     let max_chunk = usize::try_from(max_chunk)
         .ok()
         .filter(|limit| (1..=1024 * 1024 * 1024).contains(limit));
     match max_chunk {
-        Some(max_chunk) => body.chunks(max_chunk).unwrap_or_else(JetHttpBodyChunks::failed),
-        None => JetHttpBodyChunks::failed(JetHttpError::BodyTooLarge { limit: 0 }),
+        Some(max_chunk) => body.chunks(max_chunk).unwrap_or_else(JetHTTPBodyChunks::failed),
+        None => JetHTTPBodyChunks::failed(JetHTTPError::BodyTooLarge { limit: 0 }),
     }
 }
 
-impl PartialEq<&str> for JetHttpBody {
+impl PartialEq<&str> for JetHTTPBody {
     fn eq(&self, expected: &&str) -> bool {
         self.text(1024 * 1024).as_deref() == Ok(*expected)
     }
 }
 
-impl PartialEq<String> for JetHttpBody {
+impl PartialEq<String> for JetHTTPBody {
     fn eq(&self, expected: &String) -> bool {
         self.text(1024 * 1024).as_ref() == Ok(expected)
     }
 }
 
 #[derive(Clone)]
-struct JetHttpRequest {
+struct JetHTTPRequest {
     method: String,
     url: String,
     path: String,
     version: String,
-    headers: JetHttpHeaders,
-    trailers: std::sync::Arc<std::sync::Mutex<JetHttpHeaders>>,
-    body: JetHttpBody,
+    headers: JetHTTPHeaders,
+    trailers: std::sync::Arc<std::sync::Mutex<JetHTTPHeaders>>,
+    body: JetHTTPBody,
     body_set: bool,
     params: std::collections::BTreeMap<String, String>,
     route_template: Option<String>,
-    header_error: Option<JetHttpError>,
+    header_error: Option<JetHTTPError>,
     timeout_ms: Option<i64>,
     connect_timeout_ms: Option<i64>,
     read_timeout_ms: Option<i64>,
@@ -646,12 +646,12 @@ struct JetHttpRequest {
 }
 
 #[derive(Clone)]
-struct JetHttpResponse {
+struct JetHTTPResponse {
     status: i64,
     version: String,
-    headers: JetHttpHeaders,
-    body: JetHttpBody,
-    trailers: JetHttpHeaders,
+    headers: JetHTTPHeaders,
+    body: JetHTTPBody,
+    trailers: JetHTTPHeaders,
     head_content_length: Option<usize>,
     suppress_body: bool,
     protocol: String,
@@ -662,36 +662,36 @@ struct JetHttpResponse {
     raw_content_encoding: Option<String>,
 }
 
-type JetHttpHandler = std::sync::Arc<
-    dyn Fn(JetHttpRequest) -> Result<JetHttpResponse, JetHttpError> + Send + Sync,
+type JetHTTPHandler = std::sync::Arc<
+    dyn Fn(JetHTTPRequest) -> Result<JetHTTPResponse, JetHTTPError> + Send + Sync,
 >;
 
-impl JetHttpRequest {
-    fn server(method: &str, path: String, body: Vec<u8>, headers: JetHttpHeaders) -> Self {
-        Self::server_body(method, path, JetHttpBody::from_bytes(body), headers)
+impl JetHTTPRequest {
+    fn server(method: &str, path: String, body: Vec<u8>, headers: JetHTTPHeaders) -> Self {
+        Self::server_body(method, path, JetHTTPBody::from_bytes(body), headers)
     }
 
     fn server_body(
         method: &str,
         path: String,
-        body: JetHttpBody,
-        headers: JetHttpHeaders,
+        body: JetHTTPBody,
+        headers: JetHTTPHeaders,
     ) -> Self {
         Self::server_body_with_trailers(
             method,
             path,
             body,
             headers,
-            std::sync::Arc::new(std::sync::Mutex::new(JetHttpHeaders::new())),
+            std::sync::Arc::new(std::sync::Mutex::new(JetHTTPHeaders::new())),
         )
     }
 
     fn server_body_with_trailers(
         method: &str,
         path: String,
-        body: JetHttpBody,
-        headers: JetHttpHeaders,
-        trailers: std::sync::Arc<std::sync::Mutex<JetHttpHeaders>>,
+        body: JetHTTPBody,
+        headers: JetHTTPHeaders,
+        trailers: std::sync::Arc<std::sync::Mutex<JetHTTPHeaders>>,
     ) -> Self {
         Self {
             method: method.to_string(),
@@ -723,11 +723,11 @@ impl JetHttpRequest {
 }
 
 #[derive(Clone, Default, PartialEq, Eq)]
-struct JetHttpHeaders {
+struct JetHTTPHeaders {
     entries: Vec<(String, String)>,
 }
 
-impl JetHttpHeaders {
+impl JetHTTPHeaders {
     fn new() -> Self {
         Self::default()
     }
@@ -820,38 +820,38 @@ impl JetHttpHeaders {
     }
 }
 
-fn jet_http_headers_first(headers: &JetHttpHeaders, name: &String) -> Option<String> {
+fn jet_http_headers_first(headers: &JetHTTPHeaders, name: &String) -> Option<String> {
     headers.get(name).cloned()
 }
 
-fn jet_http_headers_all(headers: &JetHttpHeaders, name: &String) -> Vec<String> {
+fn jet_http_headers_all(headers: &JetHTTPHeaders, name: &String) -> Vec<String> {
     headers.all(name).into_iter().map(str::to_string).collect()
 }
 
 fn jet_http_headers_append(
-    mut headers: JetHttpHeaders,
+    mut headers: JetHTTPHeaders,
     name: &String,
     value: &String,
-) -> Result<JetHttpHeaders, JetHttpError> {
-    headers.append(name, value).map_err(|_| JetHttpError::InvalidHeader)?;
+) -> Result<JetHTTPHeaders, JetHTTPError> {
+    headers.append(name, value).map_err(|_| JetHTTPError::InvalidHeader)?;
     Ok(headers)
 }
 
 fn jet_http_headers_set(
-    mut headers: JetHttpHeaders,
+    mut headers: JetHTTPHeaders,
     name: &String,
     value: &String,
-) -> Result<JetHttpHeaders, JetHttpError> {
-    headers.set(name, value).map_err(|_| JetHttpError::InvalidHeader)?;
+) -> Result<JetHTTPHeaders, JetHTTPError> {
+    headers.set(name, value).map_err(|_| JetHTTPError::InvalidHeader)?;
     Ok(headers)
 }
 
-fn jet_http_headers_remove(mut headers: JetHttpHeaders, name: &String) -> JetHttpHeaders {
+fn jet_http_headers_remove(mut headers: JetHTTPHeaders, name: &String) -> JetHTTPHeaders {
     headers.remove(name);
     headers
 }
 
-impl std::fmt::Debug for JetHttpHeaders {
+impl std::fmt::Debug for JetHTTPHeaders {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut list = formatter.debug_list();
         for (name, value) in &self.entries {
@@ -865,7 +865,7 @@ impl std::fmt::Debug for JetHttpHeaders {
     }
 }
 
-impl FromIterator<(String, String)> for JetHttpHeaders {
+impl FromIterator<(String, String)> for JetHTTPHeaders {
     fn from_iter<T: IntoIterator<Item = (String, String)>>(iter: T) -> Self {
         let mut headers = Self::new();
         for (name, value) in iter {
@@ -877,7 +877,7 @@ impl FromIterator<(String, String)> for JetHttpHeaders {
     }
 }
 
-impl<'a> IntoIterator for &'a JetHttpHeaders {
+impl<'a> IntoIterator for &'a JetHTTPHeaders {
     type Item = &'a (String, String);
     type IntoIter = std::slice::Iter<'a, (String, String)>;
 

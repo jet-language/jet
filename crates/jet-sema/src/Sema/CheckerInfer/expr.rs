@@ -594,13 +594,13 @@ impl<'a> Checker<'a> {
             }
             Expr::Bool(_, _) => Some(Type::Bool),
             // D-TYPEDTEXT1=D: a string literal in a position whose expected
-            // type is `Sql`/`Html`/`Sh` elaborates to that typed value instead of
+            // type is `SQL`/`HTML`/`Sh` elaborates to that typed value instead of
             // `String` — the same expected-type law as `.{ }` construction.
-            // Each `{hole}` becomes a bound parameter (Sql) or an escaped
-            // insertion (Html) at codegen; it is checked here like any other
+            // Each `{hole}` becomes a bound parameter (SQL) or an escaped
+            // insertion (HTML) at codegen; it is checked here like any other
             // value, not run through the Display-ability check below (a hole
             // is never printed as text).
-            Expr::Str(_, str_span) if matches!(&self.expected_type, Some(Type::Named(n)) if n == "Sql" || n == "Html" || n == Syntax::TYPE_SH) =>
+            Expr::Str(_, str_span) if matches!(&self.expected_type, Some(Type::Named(n)) if n == "SQL" || n == "HTML" || n == Syntax::TYPE_SH) =>
             {
                 let Some(Type::Named(type_name)) = self.expected_type.clone() else {
                     unreachable!()
@@ -1599,11 +1599,11 @@ impl<'a> Checker<'a> {
             } => self.infer_or_fallback(value, fallback, *span, is_option),
             Expr::Lambda(lam) => {
                 let expected = match self.expected_type.as_ref() {
-                    Some(Type::Named(name)) if name == "HttpHandler" => Some(Type::Fn {
-                        params: vec![Type::Named("HttpRequest".to_string())],
+                    Some(Type::Named(name)) if name == "HTTPHandler" => Some(Type::Fn {
+                        params: vec![Type::Named("HTTPRequest".to_string())],
                         ret: Some(Box::new(Type::Result {
-                            ok: Box::new(Type::Named("HttpResponse".to_string())),
-                            err: Box::new(Type::Named("HttpError".to_string())),
+                            ok: Box::new(Type::Named("HTTPResponse".to_string())),
+                            err: Box::new(Type::Named("HTTPError".to_string())),
                         })),
                         effect_bound: None,
                     }),
@@ -2628,7 +2628,7 @@ impl<'a> Checker<'a> {
                     return Some(ret);
                 }
             }
-            // D-DBDRIVER1: `DbValue.Null` — the only zero-arg `DbValue` variant,
+            // D-DBDRIVER1: `DBValue.Null` — the only zero-arg `DBValue` variant,
             // reaching sema as a `Field` (mirrors `Data.Null` just above).
             if type_name == crate::Syntax::TYPE_DB_VALUE {
                 if let Some(ret) = self.check_core_dbvalue_lit(member, &mut [], span) {

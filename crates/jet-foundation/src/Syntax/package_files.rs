@@ -1,6 +1,6 @@
-pub use crate::OsTarget::{
+pub use crate::OSTarget::{
     os_target_build_context, os_target_dispatch_arm, os_target_dispatch_exhaustive,
-    os_target_mixed_axis, os_target_unmatched_call, OsTarget,
+    os_target_mixed_axis, os_target_unmatched_call, OSTarget,
 };
 pub use crate::RingLayer::{
     core_module_layer, core_usage_layer, layer_ceiling_exceeded, RuntimeLayer,
@@ -156,7 +156,7 @@ pub const ATTR_PUBLISHED_SCHEMA: &str = "PublishedSchema"; // D-MIGRATE1
 pub const ATTR_SINGLE_USE: &str = "SingleUse"; // D-LIN1
 
 /// D-REPLAY1: `#Replayable fn` marks a function whose reachable effects must be
-/// deterministic by default. Ambient `Time`/`Rand`/`Net`/`Io` are rejected unless
+/// deterministic by default. Ambient `Time`/`Rand`/`Net`/`IO` are rejected unless
 /// the work is routed through explicit deterministic/mockable capabilities.
 pub const ATTR_REPLAYABLE: &str = "Replayable";
 

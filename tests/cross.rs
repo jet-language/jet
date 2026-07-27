@@ -143,7 +143,7 @@ fn e3301_snapshot() {
 
 // ── D-OSTARGET1=A: native OS platform gating (c134 Phase 9.3) ───────────────
 
-/// `#Target(Os.Linux)` / `#Target(Os.Macos)` impls, both present in source —
+/// `#Target(OS.Linux)` / `#Target(OS.MacOS)` impls, both present in source —
 /// only the `impl` matching `--target=<triple>`'s OS reaches the generated
 /// Rust (mirrors how `Codegen/Web.rs` filters function membership by
 /// `WebBucket`, E2-M15's cross-compile flag reused, no new flag). The
@@ -175,12 +175,12 @@ fn os_target_gating_emits_only_linux_impl_for_linux_triple() {
         });
     assert!(
         out.rust.contains("impl user_Backend for user_LinuxBackend"),
-        "Linux triple should keep the Os.Linux impl:\n{}",
+        "Linux triple should keep the OS.Linux impl:\n{}",
         out.rust
     );
     assert!(
         !out.rust.contains("impl user_Backend for user_MacosBackend"),
-        "Linux triple should strip the Os.Macos impl:\n{}",
+        "Linux triple should strip the OS.MacOS impl:\n{}",
         out.rust
     );
     // D-OSTARGET2=B: `comptime if build.os == { … }` in `main` must fold to the
@@ -193,7 +193,7 @@ fn os_target_gating_emits_only_linux_impl_for_linux_triple() {
     );
     assert!(
         !out.rust.contains("\"appkit\"") && !out.rust.contains("\"win32\""),
-        "Linux triple should discard the .Macos/.Windows dispatch arms:\n{}",
+        "Linux triple should discard the .MacOS/.Windows dispatch arms:\n{}",
         out.rust
     );
 }
@@ -212,19 +212,19 @@ fn os_target_gating_emits_only_macos_impl_for_macos_triple() {
     );
     assert!(
         out.rust.contains("impl user_Backend for user_MacosBackend"),
-        "macOS triple should keep the Os.Macos impl:\n{}",
+        "macOS triple should keep the OS.MacOS impl:\n{}",
         out.rust
     );
     assert!(
         !out.rust.contains("impl user_Backend for user_LinuxBackend"),
-        "macOS triple should strip the Os.Linux impl:\n{}",
+        "macOS triple should strip the OS.Linux impl:\n{}",
         out.rust
     );
-    // D-OSTARGET2=B: the same `main` switch folds to the .Macos arm for a macOS
-    // triple — constructing `MacosBackend.{ name: "appkit" }`.
+    // D-OSTARGET2=B: the same `main` switch folds to the .MacOS arm for a macOS
+    // triple — constructing `MacOSBackend.{ name: "appkit" }`.
     assert!(
         out.rust.contains("\"appkit\""),
-        "macOS triple should keep only the .Macos dispatch arm (\"appkit\"):\n{}",
+        "macOS triple should keep only the .MacOS dispatch arm (\"appkit\"):\n{}",
         out.rust
     );
     assert!(
@@ -244,8 +244,8 @@ fn os_target_gating_defaults_to_host_os_with_no_target_flag() {
             jet::render_diagnostics(&file, &src, &diags)
         )
     });
-    // This repo's dev shell / CI host is Linux (see env: `jet::OsTarget::host()`).
-    let host_is_linux = jet::Syntax::OsTarget::host() == jet::Syntax::OsTarget::Linux;
+    // This repo's dev shell / CI host is Linux (see env: `jet::OSTarget::host()`).
+    let host_is_linux = jet::Syntax::OSTarget::host() == jet::Syntax::OSTarget::Linux;
     assert_eq!(
         out.rust.contains("impl user_Backend for user_LinuxBackend"),
         host_is_linux,
@@ -256,7 +256,7 @@ fn os_target_gating_defaults_to_host_os_with_no_target_flag() {
 
 // ── D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend ────────────────
 //
-// Phase 8 is the real native backend behind the `#Target(Os.Linux)` / `comptime
+// Phase 8 is the real native backend behind the `#Target(OS.Linux)` / `comptime
 // if build.os` frame. These structural tests are the headless proof (this
 // environment has no reliable display): they inspect the generated Rust to show
 // (a) a Linux build emits the vetted `jet_gtk` FFI module and wires real
@@ -346,7 +346,7 @@ fn gtk_backend_folds_away_for_macos_triple() {
     );
     assert!(
         out.rust.contains("not yet on macOS"),
-        "macOS build should keep only the .Macos dispatch arm:\n{}",
+        "macOS build should keep only the .MacOS dispatch arm:\n{}",
         out.rust
     );
 }

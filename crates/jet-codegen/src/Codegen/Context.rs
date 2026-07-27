@@ -223,11 +223,11 @@ pub(crate) struct Cx {
     pub(crate) needed_variadic_arities:
         std::cell::RefCell<std::collections::BTreeMap<String, std::collections::BTreeSet<usize>>>,
     /// D-OSTARGET1=A (ratified 2026-07-01, c134): the native OS bucket this
-    /// build is compiling for — an `impl` gated to a different `#Target(Os.*)`
+    /// build is compiling for — an `impl` gated to a different `#Target(OS.*)`
     /// is skipped entirely (mirrors how `Codegen/Web.rs` filters by
     /// `WebBucket`). Defaults to the host OS; the real build pipeline
     /// (`emit_bundle_dbg`) overwrites it from the resolved `--target=<triple>`.
-    pub(crate) active_os: crate::Syntax::OsTarget,
+    pub(crate) active_os: crate::Syntax::OSTarget,
     /// D-ENC712: resolved package edition for encoding surface dispatch.
     pub(crate) package_edition: String,
     /// D-STM1=A (card #506): true while lowering the body of a `#Transact` block,
@@ -257,14 +257,14 @@ pub(crate) struct IndexHook {
     pub value_type: Type,
 }
 
-// D-ENC-DYN1=A+: the dynamic encoding value `Data` (+ aliases `Json`/`Toml`/
-// `Yaml`/`Csv`) is the user-facing face of `jet_std::DataTree`.
+// D-ENC-DYN1=A+: the dynamic encoding value `Data` (+ aliases `JSON`/`TOML`/
+// `YAML`/`CSV`) is the user-facing face of `jet_std::DataTree`.
 pub(crate) fn is_json_type_name(name: &str) -> bool {
     Syntax::is_data_type_name(name)
 }
 
-// D-DBDRIVER1: the `DbValue` dynamic tagged SQL value — same construction
-// mechanism as `Data`/`Json`, mirrored via `jet_std::DbValue`.
+// D-DBDRIVER1: the `DBValue` dynamic tagged SQL value — same construction
+// mechanism as `Data`/`JSON`, mirrored via `jet_std::DBValue`.
 pub(crate) fn is_db_value_type_name(name: &str) -> bool {
     Syntax::is_db_value_type_name(name)
 }
@@ -272,12 +272,12 @@ pub(crate) fn is_db_value_type_name(name: &str) -> bool {
 pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     match name {
         n if is_json_type_name(n) => Some("DataTree"),
-        n if n == Syntax::TYPE_JSON_ERROR || n == "JsonError" => Some("JsonError"),
-        n if n == Syntax::TYPE_IO_ERROR || n == "IoError" => Some("IoError"),
-        n if n == Syntax::TYPE_IO_CONTEXT => Some("IoContext"),
-        n if n == Syntax::TYPE_IO_OPERATION => Some("IoOperation"),
+        n if n == Syntax::TYPE_JSON_ERROR || n == "JSONError" => Some("JSONError"),
+        n if n == Syntax::TYPE_IO_ERROR || n == "IOError" => Some("IOError"),
+        n if n == Syntax::TYPE_IO_CONTEXT => Some("IOContext"),
+        n if n == Syntax::TYPE_IO_OPERATION => Some("IOOperation"),
         "EnvError" => Some("EnvError"),
-        n if n == Syntax::TYPE_UTF8_ERROR || n == "Utf8Error" => Some("Utf8Error"),
+        n if n == Syntax::TYPE_UTF8_ERROR || n == "UTF8Error" => Some("UTF8Error"),
         "ProcessResult" => Some("ProcessResult"),
         "ProcessSpec" => Some("ProcessSpec"),
         "ProcessChild" => Some("ProcessChild"),
@@ -312,8 +312,8 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "Period" => Some("JetPeriod"),
         "Zone" => Some("JetZone"),
         "ZonedDateTime" => Some("JetZonedDateTime"),
-        "Url" => Some("JetUrl"),
-        "Mime" => Some("JetMime"),
+        "Url" => Some("JetURL"),
+        "Mime" => Some("JetMIME"),
         "Regex" => Some("JetRegex"),
         "RegexFlags" => Some("RegexFlags"),
         "Match" => Some("JetRegexMatch"),
@@ -385,17 +385,17 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // this table only covers non-generic names).
         "MigrationStatus" => Some("MigrationStatus"),
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
-        "DbValue" => Some("DbValue"),
-        "DbError" => Some("DbError"),
+        "DBValue" => Some("DBValue"),
+        "DBError" => Some("DBError"),
         // D-RAYLIB1=A: display-gated graphics bridge types.
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
-        // D-TYPEDTEXT1=D: `Sql`/`Html` — this table's `.is_some()` is only a
+        // D-TYPEDTEXT1=D: `SQL`/`HTML` — this table's `.is_some()` is only a
         // "known core value type" gate for the TIR subset check; the actual Rust
         // spelling for these two comes from the earlier explicit `rust_type` arms
         // (`(String, Vec<String>)` / `String`), not this placeholder.
-        "Sql" => Some("Sql"),
-        "Html" => Some("Html"),
+        "SQL" => Some("SQL"),
+        "HTML" => Some("HTML"),
         "Sh" => Some("Sh"),
         // D-SIMD2 / D-LINALG1: built-in math value types (lane + linalg structs).
         "F32x4" => Some("F32x4"),
@@ -499,7 +499,7 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
         // D-PATHFS1: typed path handle.
         "Path" => Some("JetPath"),
         // D-DBDRIVER1: the SQLite connection handle wrapper.
-        "DbConnection" => Some("JetDbConnection"),
+        "DBConnection" => Some("JetDbConnection"),
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): the sandboxed WASM plugin handle.
         "Plugin" => Some("JetPlugin"),
         _ => None,
@@ -534,39 +534,39 @@ pub(crate) fn game_handle_rust_type(name: &str) -> Option<&'static str> {
 /// E2-M10: networking opaque types map to top-level prelude structs.
 pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
-        "TcpListener" => Some("JetTcpListener"),
-        "TcpStream" => Some("JetTcpStream"),
-        "IpAddr" => Some("JetIpAddr"),
+        "TcpListener" => Some("JetTCPListener"),
+        "TcpStream" => Some("JetTCPStream"),
+        "IPAddr" => Some("JetIpAddr"),
         "SocketAddr" => Some("JetSocketAddr"),
-        "UdpSocket" => Some("JetUdpSocket"),
-        "UdpPacket" => Some("JetUdpPacket"),
-        "DnsSrv" => Some("JetDnsSrv"),
+        "UdpSocket" => Some("JetUDPSocket"),
+        "UDPPacket" => Some("JetUDPPacket"),
+        "DNSSrv" => Some("JetDNSSrv"),
         "UnixListener" => Some("JetUnixListener"),
         "UnixStream" => Some("JetUnixStream"),
-        "TlsStream" => Some("JetTlsStream"),
-        "TlsClientConfig" => Some("JetTlsClientConfig"),
-        "TlsRootCertificates" => Some("JetTlsRootCertificates"),
-        "TlsClientIdentity" => Some("JetTlsClientIdentity"),
-        "TlsClientTrust" => Some("JetTlsTrust"),
-        "TlsVersion" => Some("JetTlsVersion"),
-        "TlsPeerIdentity" => Some("JetTlsPeerIdentity"),
-        "TlsCertificate" => Some("JetTlsCertificate"),
+        "TLSStream" => Some("JetTLSStream"),
+        "TLSClientConfig" => Some("JetTLSClientConfig"),
+        "TLSRootCertificates" => Some("JetTLSRootCertificates"),
+        "TLSClientIdentity" => Some("JetTLSClientIdentity"),
+        "TLSClientTrust" => Some("JetTLSTrust"),
+        "TLSVersion" => Some("JetTLSVersion"),
+        "TLSPeerIdentity" => Some("JetTLSPeerIdentity"),
+        "TLSCertificate" => Some("JetTLSCertificate"),
         "NetError" => Some("JetNetError"),
         "NetErrorDetail" => Some("JetNetErrorDetail"),
         "NetDnsError" => Some("JetNetDnsError"),
         "NetShutdown" => Some("JetNetShutdown"),
         "NetReadyInterest" => Some("JetNetReadyInterest"),
         "NetReady" => Some("JetNetReady"),
-        "HttpRequest" => Some("JetHttpRequest"),
-        "HttpResponse" => Some("JetHttpResponse"),
-        "HttpClient" => Some("JetHttpClient"),
-        "HttpProxy" => Some("JetHttpProxy"),
-        "HttpRedirectPolicy" => Some("JetHttpRedirectPolicy"),
-        "HttpRetryPolicy" => Some("JetHttpRetryPolicy"),
-        "HttpCookieJar" => Some("JetHttpCookieJar"),
-        "HttpCorsPolicy" => Some("JetHttpCorsPolicy"),
-        "HttpCompressEncoding" => Some("JetHttpCompressEncoding"),
-        "HttpRouter" => Some("JetHttpRouter"),
+        "HTTPRequest" => Some("JetHTTPRequest"),
+        "HTTPResponse" => Some("JetHTTPResponse"),
+        "HTTPClient" => Some("JetHTTPClient"),
+        "HTTPProxy" => Some("JetHTTPProxy"),
+        "HTTPRedirectPolicy" => Some("JetHTTPRedirectPolicy"),
+        "HTTPRetryPolicy" => Some("JetHTTPRetryPolicy"),
+        "HTTPCookieJar" => Some("JetHTTPCookieJar"),
+        "HTTPCorsPolicy" => Some("JetHTTPCorsPolicy"),
+        "HTTPCompressEncoding" => Some("JetHTTPCompressEncoding"),
+        "HTTPRouter" => Some("JetHTTPRouter"),
         _ => None,
     }
 }
@@ -595,13 +595,13 @@ impl Cx {
             (Some("core.crypto" | "jet.crypto"), leaf) => core_crypto_type_name(leaf),
             (Some("core.auth"), "Claims") => Some("Claims"),
             (Some("core.auth"), "AuthError") => Some("AuthError"),
-            (Some("core.http.client"), "Proxy") => Some("HttpProxy"),
-            (Some("core.http.client"), "RedirectPolicy") => Some("HttpRedirectPolicy"),
-            (Some("core.http.client"), "RetryPolicy") => Some("HttpRetryPolicy"),
-            (Some("core.http.client"), "CookieJar") => Some("HttpCookieJar"),
-            (Some("core.tls"), "TlsVersion") => Some("TlsVersion"),
-            (Some("core.tls"), "RootCertificates") => Some("TlsRootCertificates"),
-            (Some("core.tls"), "ClientIdentity") => Some("TlsClientIdentity"),
+            (Some("core.http.client"), "Proxy") => Some("HTTPProxy"),
+            (Some("core.http.client"), "RedirectPolicy") => Some("HTTPRedirectPolicy"),
+            (Some("core.http.client"), "RetryPolicy") => Some("HTTPRetryPolicy"),
+            (Some("core.http.client"), "CookieJar") => Some("HTTPCookieJar"),
+            (Some("core.tls"), "TLSVersion") => Some("TLSVersion"),
+            (Some("core.tls"), "RootCertificates") => Some("TLSRootCertificates"),
+            (Some("core.tls"), "ClientIdentity") => Some("TLSClientIdentity"),
             (Some("core.env"), "EnvError") => Some("EnvError"),
             (Some("core.encoding"), "DataTree") => Some("DataTree"),
             (Some("core.encoding"), "EncodingLimits") => Some("EncodingLimits"),
@@ -614,15 +614,15 @@ impl Cx {
             (Some("core.email"), "Message") => Some("Message"),
             (Some("core.email"), "Attachment") => Some("Attachment"),
             (Some("core.email"), "Envelope") => Some("Envelope"),
-            (Some("core.email"), "SmtpSecurity") => Some("SmtpSecurity"),
+            (Some("core.email"), "SMTPSecurity") => Some("SMTPSecurity"),
             (Some("core.email"), "Limits") => Some("Limits"),
             (Some("core.email"), "RecipientPolicy") => Some("RecipientPolicy"),
             (Some("core.email"), "RecipientReport") => Some("RecipientReport"),
             (Some("core.email"), "SendReport") => Some("SendReport"),
             (Some("core.email"), "EmailError") => Some("EmailError"),
-            (Some("core.email"), "SmtpAuth") => Some("SmtpAuth"),
-            (Some("core.email"), "TlsTrust") => Some("TlsTrust"),
-            (Some("core.email"), "SmtpConfig") => Some("SmtpConfig"),
+            (Some("core.email"), "SMTPAuth") => Some("SMTPAuth"),
+            (Some("core.email"), "TLSTrust") => Some("TLSTrust"),
+            (Some("core.email"), "SMTPConfig") => Some("SMTPConfig"),
             (Some("core.email"), "DkimConfig") => Some("DkimConfig"),
             (Some("core.email"), "Mailer") => Some("Mailer"),
             (Some("core.encoding.json"), "JSONReader") => Some("JSONReader"),
@@ -1015,65 +1015,65 @@ impl Cx {
             Type::Named(name) if name == "ZonedDateTime" => "JetZonedDateTime".to_string(),
             // D-URL1=A: URL/MIME values live in the corelib prelude module.
             Type::Named(name) if name == "Url" => {
-                format!("{}jet_std::JetUrl", self.root_prefix)
+                format!("{}jet_std::JetURL", self.root_prefix)
             }
             Type::Named(name) if name == "Mime" => {
-                format!("{}jet_std::JetMime", self.root_prefix)
+                format!("{}jet_std::JetMIME", self.root_prefix)
             }
             Type::Named(name) if matches!(name.as_str(),
-                "Address" | "Message" | "Attachment" | "Envelope" | "SmtpSecurity"
+                "Address" | "Message" | "Attachment" | "Envelope" | "SMTPSecurity"
                 | "RecipientPolicy" | "RecipientReport" | "SendReport" | "EmailError" | "Limits"
             ) && !self.type_names.contains(name) => {
                 let rust = match name.as_str() {
                     "Address" => "Address", "Message" => "Message", "Attachment" => "Attachment",
-                    "Envelope" => "Envelope", "SmtpSecurity" => "SmtpSecurity",
+                    "Envelope" => "Envelope", "SMTPSecurity" => "SMTPSecurity",
                     "RecipientPolicy" => "RecipientPolicy", "RecipientReport" => "RecipientReport",
                     "SendReport" => "SendReport", "Limits" => "Limits", _ => "Error",
                 };
                 format!("{}jet_email::{rust}", self.root_prefix)
             }
-            Type::Named(name) if name == "SmtpAuth" && !self.type_names.contains(name) => {
+            Type::Named(name) if name == "SMTPAuth" && !self.type_names.contains(name) => {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                format!("{}jet_email::SmtpAuth<{}::Secret>", self.root_prefix, ffi)
+                format!("{}jet_email::SMTPAuth<{}::Secret>", self.root_prefix, ffi)
             }
             Type::Named(name)
-                if matches!(name.as_str(), "DkimConfig" | "SmtpConfig")
+                if matches!(name.as_str(), "DkimConfig" | "SMTPConfig")
                     && !self.type_names.contains(name) => {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
                 format!("{}jet_email::{}<{}::Secret>", self.root_prefix, name, ffi)
             }
             Type::Named(name)
-                if matches!(name.as_str(), "TlsTrust" | "Mailer")
+                if matches!(name.as_str(), "TLSTrust" | "Mailer")
                     && !self.type_names.contains(name) => {
                 format!("{}jet_email::{}", self.root_prefix, name)
             }
             // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types → opaque Rust structs.
-            Type::Named(name) if name == "HttpRequest" => "JetHttpRequest".to_string(),
-            Type::Named(name) if name == "HttpResponse" => "JetHttpResponse".to_string(),
-            Type::Named(name) if name == "HttpClient" => "JetHttpClient".to_string(),
-            Type::Named(name) if name == "HttpProxy" => "JetHttpProxy".to_string(),
-            Type::Named(name) if name == "HttpRedirectPolicy" => "JetHttpRedirectPolicy".to_string(),
-            Type::Named(name) if name == "HttpRetryPolicy" => "JetHttpRetryPolicy".to_string(),
-            Type::Named(name) if name == "HttpCookieJar" => "JetHttpCookieJar".to_string(),
-            Type::Named(name) if name == "HttpCorsPolicy" => "JetHttpCorsPolicy".to_string(),
-            Type::Named(name) if name == "HttpCompressEncoding" => "JetHttpCompressEncoding".to_string(),
-            Type::Named(name) if name == "HttpMethod" => "JetHttpMethod".to_string(),
-            Type::Named(name) if name == "HttpStatus" => "JetHttpStatus".to_string(),
-            Type::Named(name) if name == "HttpVersion" => "JetHttpVersion".to_string(),
-            Type::Named(name) if name == "HttpHeaderName" => "JetHttpHeaderName".to_string(),
-            Type::Named(name) if name == "HttpHeaderValue" => "JetHttpHeaderValue".to_string(),
-            Type::Named(name) if name == "HttpBody" => "JetHttpBody".to_string(),
-            Type::Named(name) if name == "HttpBodyChunks" => "JetHttpBodyChunks".to_string(),
-            Type::Named(name) if name == "HttpError" => "JetHttpError".to_string(),
-            Type::Named(name) if name == "HttpOperation" => "JetHttpOperation".to_string(),
-            Type::Named(name) if name == "HttpHeaders" => "JetHttpHeaders".to_string(),
-            Type::Named(name) if name == "HttpMux" => "JetHttpMux".to_string(),
-            Type::Named(name) if name == "HttpHandler" => "JetHttpHandler".to_string(),
-            Type::Named(name) if name == "HttpServer" => "JetHttpServer".to_string(),
-            Type::Named(name) if name == "HttpShutdownReport" => "JetHttpShutdownReport".to_string(),
-            Type::Named(name) if name == "HttpRequest" => "JetHttpRequest".to_string(),
-            Type::Named(name) if name == "HttpResponse" => "JetHttpResponse".to_string(),
-            Type::Named(name) if name == "HttpServerTls" => "JetHttpServerTls".to_string(),
+            Type::Named(name) if name == "HTTPRequest" => "JetHTTPRequest".to_string(),
+            Type::Named(name) if name == "HTTPResponse" => "JetHTTPResponse".to_string(),
+            Type::Named(name) if name == "HTTPClient" => "JetHTTPClient".to_string(),
+            Type::Named(name) if name == "HTTPProxy" => "JetHTTPProxy".to_string(),
+            Type::Named(name) if name == "HTTPRedirectPolicy" => "JetHTTPRedirectPolicy".to_string(),
+            Type::Named(name) if name == "HTTPRetryPolicy" => "JetHTTPRetryPolicy".to_string(),
+            Type::Named(name) if name == "HTTPCookieJar" => "JetHTTPCookieJar".to_string(),
+            Type::Named(name) if name == "HTTPCorsPolicy" => "JetHTTPCorsPolicy".to_string(),
+            Type::Named(name) if name == "HTTPCompressEncoding" => "JetHTTPCompressEncoding".to_string(),
+            Type::Named(name) if name == "HTTPMethod" => "JetHTTPMethod".to_string(),
+            Type::Named(name) if name == "HTTPStatus" => "JetHTTPStatus".to_string(),
+            Type::Named(name) if name == "HTTPVersion" => "JetHTTPVersion".to_string(),
+            Type::Named(name) if name == "HTTPHeaderName" => "JetHTTPHeaderName".to_string(),
+            Type::Named(name) if name == "HTTPHeaderValue" => "JetHTTPHeaderValue".to_string(),
+            Type::Named(name) if name == "HTTPBody" => "JetHTTPBody".to_string(),
+            Type::Named(name) if name == "HTTPBodyChunks" => "JetHTTPBodyChunks".to_string(),
+            Type::Named(name) if name == "HTTPError" => "JetHTTPError".to_string(),
+            Type::Named(name) if name == "HTTPOperation" => "JetHTTPOperation".to_string(),
+            Type::Named(name) if name == "HTTPHeaders" => "JetHTTPHeaders".to_string(),
+            Type::Named(name) if name == "HTTPMux" => "JetHTTPMux".to_string(),
+            Type::Named(name) if name == "HTTPHandler" => "JetHTTPHandler".to_string(),
+            Type::Named(name) if name == "HTTPServer" => "JetHTTPServer".to_string(),
+            Type::Named(name) if name == "HTTPShutdownReport" => "JetHTTPShutdownReport".to_string(),
+            Type::Named(name) if name == "HTTPRequest" => "JetHTTPRequest".to_string(),
+            Type::Named(name) if name == "HTTPResponse" => "JetHTTPResponse".to_string(),
+            Type::Named(name) if name == "HTTPServerTls" => "JetHTTPServerTls".to_string(),
             // D-WS1=B: WebSocket types.
             Type::Named(name) if name == "WsConn" => "JetWsConn".to_string(),
             Type::Named(name) if name == "WsError" => "JetWsError".to_string(),
@@ -1098,11 +1098,11 @@ impl Cx {
             Type::Named(name) if name == "ParseError" && !self.type_names.contains(name) => {
                 "String".to_string()
             }
-            // D-TYPEDTEXT1=D: `Sql` is a checked (template, bound params) pair — the
-            // params never re-enter the template text. `Html` is already the fully
+            // D-TYPEDTEXT1=D: `SQL` is a checked (template, bound params) pair — the
+            // params never re-enter the template text. `HTML` is already the fully
             // escaped text, so it's just a `String` underneath.
-            Type::Named(name) if name == "Sql" => "(String, Vec<String>)".to_string(),
-            Type::Named(name) if name == "Html" => "String".to_string(),
+            Type::Named(name) if name == "SQL" => "(String, Vec<String>)".to_string(),
+            Type::Named(name) if name == "HTML" => "String".to_string(),
             Type::Named(name) if name == "Sh" => "Vec<String>".to_string(),
             // D-DEFER1: ScopeGuard is generic over F (the closure type); emit `_`
             // so Rust infers the monomorphised type from the initialiser expression.
@@ -1295,17 +1295,17 @@ impl Cx {
                     return format!("{ffi}::{rust}");
                 }
                 if matches!(resolved,
-                    "Address" | "Message" | "Attachment" | "Envelope" | "SmtpSecurity"
+                    "Address" | "Message" | "Attachment" | "Envelope" | "SMTPSecurity"
                     | "RecipientPolicy" | "RecipientReport" | "SendReport" | "EmailError" | "Limits"
                 ) {
                     let rust = if resolved == "EmailError" { "Error" } else { resolved };
                     return format!("{}jet_email::{rust}", self.root_prefix);
                 }
-                if matches!(resolved, "SmtpAuth" | "DkimConfig" | "SmtpConfig") {
+                if matches!(resolved, "SMTPAuth" | "DkimConfig" | "SMTPConfig") {
                     let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
                     return format!("{}jet_email::{}<{}::Secret>", self.root_prefix, resolved, ffi);
                 }
-                if resolved == "TlsTrust" || resolved == "Mailer" {
+                if resolved == "TLSTrust" || resolved == "Mailer" {
                     return format!("{}jet_email::{}", self.root_prefix, resolved);
                 }
                 format!(
@@ -1677,8 +1677,8 @@ impl Cx {
         mut_capture: bool,
     ) -> String {
         let thread_safe = params.len() == 1
-            && matches!(&params[0], Type::Named(name) if name == "HttpHandler")
-            && matches!(ret, Some(Type::Named(name)) if name == "HttpHandler");
+            && matches!(&params[0], Type::Named(name) if name == "HTTPHandler")
+            && matches!(ret, Some(Type::Named(name)) if name == "HTTPHandler");
         let ps = params
             .iter()
             .map(|p| {
@@ -1913,7 +1913,7 @@ fn register_core_close_types(cx: &mut Cx) {
     }
     if imports("core.net") {
         cx.close_types.extend(
-            ["TcpStream", "UnixStream", "TlsStream"]
+            ["TcpStream", "UnixStream", "TLSStream"]
                 .into_iter()
                 .map(str::to_string),
         );
@@ -1926,7 +1926,7 @@ fn register_core_close_types(cx: &mut Cx) {
         );
     }
     if imports("jet.db") {
-        cx.close_types.insert("DbConnection".to_string());
+        cx.close_types.insert("DBConnection".to_string());
     }
 }
 
@@ -1976,34 +1976,34 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
             ("Tls12".to_string(), VariantPayload::Unit),
             ("Tls13".to_string(), VariantPayload::Unit),
         ];
-        for (variant, _) in &versions { cx.variant_owner.insert(variant.clone(), "TlsVersion".to_string()); }
-        cx.enum_variants.insert("TlsVersion".to_string(), versions);
-        cx.cloneable.insert("TlsVersion".to_string());
-        let roots = Type::Named("TlsRootCertificates".to_string());
+        for (variant, _) in &versions { cx.variant_owner.insert(variant.clone(), "TLSVersion".to_string()); }
+        cx.enum_variants.insert("TLSVersion".to_string(), versions);
+        cx.cloneable.insert("TLSVersion".to_string());
+        let roots = Type::Named("TLSRootCertificates".to_string());
         let trust = vec![
             ("System".to_string(), VariantPayload::Unit),
             ("SystemPlus".to_string(), VariantPayload::Single(roots.clone(), zero)),
             ("CustomOnly".to_string(), VariantPayload::Single(roots, zero)),
         ];
-        for (variant, _) in &trust { cx.variant_owner.insert(variant.clone(), "TlsClientTrust".to_string()); }
-        cx.enum_variants.insert("TlsClientTrust".to_string(), trust);
-        cx.cloneable.insert("TlsClientTrust".to_string());
+        for (variant, _) in &trust { cx.variant_owner.insert(variant.clone(), "TLSClientTrust".to_string()); }
+        cx.enum_variants.insert("TLSClientTrust".to_string(), trust);
+        cx.cloneable.insert("TLSClientTrust".to_string());
     }
     if !cx.core_imports.values().any(|module| module == Syntax::CORE_EMAIL_MODULE) {
         return;
     }
     let zero = Span::new(0, 0);
     for (name, variants) in [
-        ("SmtpSecurity", vec![("StartTls".to_string(), VariantPayload::Unit), ("Tls".to_string(), VariantPayload::Unit)]),
+        ("SMTPSecurity", vec![("StartTls".to_string(), VariantPayload::Unit), ("TLS".to_string(), VariantPayload::Unit)]),
         ("RecipientPolicy", vec![("RequireAll".to_string(), VariantPayload::Unit), ("DeliverAccepted".to_string(), VariantPayload::Unit)]),
-        ("SmtpAuth", vec![
+        ("SMTPAuth", vec![
             ("None".to_string(), VariantPayload::Unit),
             ("Password".to_string(), VariantPayload::Named(vec![
                 VariantField { name: "username".to_string(), name_span: zero, ty: Type::String, ty_span: zero },
                 VariantField { name: "password".to_string(), name_span: zero, ty: Type::Named("Secret".to_string()), ty_span: zero },
             ])),
         ]),
-        ("TlsTrust", vec![
+        ("TLSTrust", vec![
             ("System".to_string(), VariantPayload::Unit),
             ("SystemPlusCa".to_string(), VariantPayload::Named(vec![
                 VariantField { name: "pem".to_string(), name_span: zero,
@@ -2024,7 +2024,7 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         name: field.to_string(), name_span: zero, ty, ty_span: zero,
     }).collect();
     let errors = [
-        "Configuration", "Dns", "Connect", "Tls", "Auth", "Protocol", "Rejected",
+        "Configuration", "DNS", "Connect", "TLS", "Auth", "Protocol", "Rejected",
         "Transient", "TimedOut", "Cancelled", "DeliveryUnknown",
     ].into_iter().map(|variant| (variant.to_string(), VariantPayload::Named(error_fields()))).collect::<Vec<_>>();
     for (variant, _) in &errors { cx.variant_owner.insert(variant.clone(), "EmailError".to_string()); }
@@ -2054,12 +2054,12 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         ("max_message_bytes".to_string(), Type::Int),
         ("max_auth_challenge_bytes".to_string(), Type::Int),
     ]);
-    cx.struct_fields.insert("SmtpConfig".to_string(), vec![
+    cx.struct_fields.insert("SMTPConfig".to_string(), vec![
         ("host".to_string(), Type::String), ("port".to_string(), Type::Int),
-        ("security".to_string(), Type::Named("SmtpSecurity".to_string())),
-        ("auth".to_string(), Type::Named("SmtpAuth".to_string())),
+        ("security".to_string(), Type::Named("SMTPSecurity".to_string())),
+        ("auth".to_string(), Type::Named("SMTPAuth".to_string())),
         ("recipient_policy".to_string(), Type::Named("RecipientPolicy".to_string())),
-        ("trust".to_string(), Type::Named("TlsTrust".to_string())),
+        ("trust".to_string(), Type::Named("TLSTrust".to_string())),
         ("limits".to_string(), Type::Named("Limits".to_string())),
         ("dkim".to_string(), Type::Option(Box::new(Type::Named("DkimConfig".to_string())))),
     ]);
@@ -2141,7 +2141,7 @@ pub(crate) fn build_cx_items(
         fn_type_params: HashMap::new(),
         variadic_bound_fns: HashMap::new(),
         needed_variadic_arities: std::cell::RefCell::new(std::collections::BTreeMap::new()),
-        active_os: crate::Syntax::OsTarget::host(),
+        active_os: crate::Syntax::OSTarget::host(),
         package_edition: "2027".to_string(),
         in_stm_transact: std::cell::Cell::new(false),
         stm_touched: std::cell::Cell::new(false),
@@ -2164,7 +2164,7 @@ pub(crate) fn build_cx_items(
     let zero = Span::new(0, 0);
     let http_operations = ["ClientConnect", "ServerBind", "ServeListener"];
     cx.enum_variants.insert(
-        "HttpOperation".to_string(),
+        "HTTPOperation".to_string(),
         http_operations
             .iter()
             .map(|name| ((*name).to_string(), VariantPayload::Unit))
@@ -2172,7 +2172,7 @@ pub(crate) fn build_cx_items(
     );
     for name in http_operations {
         cx.variant_owner
-            .insert(name.to_string(), "HttpOperation".to_string());
+            .insert(name.to_string(), "HTTPOperation".to_string());
     }
     let http_proxy = vec![
         ("FromEnvironment".to_string(), VariantPayload::Unit),
@@ -2181,10 +2181,10 @@ pub(crate) fn build_cx_items(
     ];
     for (variant, _) in &http_proxy {
         cx.variant_owner
-            .insert(variant.clone(), "HttpProxy".to_string());
+            .insert(variant.clone(), "HTTPProxy".to_string());
     }
-    cx.enum_variants.insert("HttpProxy".to_string(), http_proxy);
-    cx.cloneable.insert("HttpProxy".to_string());
+    cx.enum_variants.insert("HTTPProxy".to_string(), http_proxy);
+    cx.cloneable.insert("HTTPProxy".to_string());
     let http_redirect_policy = vec![(
         "Follow".to_string(),
         VariantPayload::Named(vec![
@@ -2204,11 +2204,11 @@ pub(crate) fn build_cx_items(
     )];
     for (variant, _) in &http_redirect_policy {
         cx.variant_owner
-            .insert(variant.clone(), "HttpRedirectPolicy".to_string());
+            .insert(variant.clone(), "HTTPRedirectPolicy".to_string());
     }
     cx.enum_variants
-        .insert("HttpRedirectPolicy".to_string(), http_redirect_policy);
-    cx.cloneable.insert("HttpRedirectPolicy".to_string());
+        .insert("HTTPRedirectPolicy".to_string(), http_redirect_policy);
+    cx.cloneable.insert("HTTPRedirectPolicy".to_string());
     let http_retry_policy = vec![
         ("None".to_string(), VariantPayload::Unit),
         ("Safe".to_string(), VariantPayload::Unit),
@@ -2216,24 +2216,24 @@ pub(crate) fn build_cx_items(
     ];
     for (variant, _) in &http_retry_policy {
         cx.variant_owner
-            .insert(variant.clone(), "HttpRetryPolicy".to_string());
+            .insert(variant.clone(), "HTTPRetryPolicy".to_string());
     }
     cx.enum_variants
-        .insert("HttpRetryPolicy".to_string(), http_retry_policy);
-    cx.cloneable.insert("HttpRetryPolicy".to_string());
+        .insert("HTTPRetryPolicy".to_string(), http_retry_policy);
+    cx.cloneable.insert("HTTPRetryPolicy".to_string());
     let http_cookie_jar = vec![("Memory".to_string(), VariantPayload::Unit)];
     cx.variant_owner
-        .insert("Memory".to_string(), "HttpCookieJar".to_string());
+        .insert("Memory".to_string(), "HTTPCookieJar".to_string());
     cx.enum_variants
-        .insert("HttpCookieJar".to_string(), http_cookie_jar);
-    cx.cloneable.insert("HttpCookieJar".to_string());
+        .insert("HTTPCookieJar".to_string(), http_cookie_jar);
+    cx.cloneable.insert("HTTPCookieJar".to_string());
     let http_compress_encoding = vec![("Gzip".to_string(), VariantPayload::Unit)];
     cx.variant_owner
-        .insert("Gzip".to_string(), "HttpCompressEncoding".to_string());
+        .insert("Gzip".to_string(), "HTTPCompressEncoding".to_string());
     cx.enum_variants
-        .insert("HttpCompressEncoding".to_string(), http_compress_encoding);
-    cx.cloneable.insert("HttpCompressEncoding".to_string());
-    cx.cloneable.insert("HttpCorsPolicy".to_string());
+        .insert("HTTPCompressEncoding".to_string(), http_compress_encoding);
+    cx.cloneable.insert("HTTPCompressEncoding".to_string());
+    cx.cloneable.insert("HTTPCorsPolicy".to_string());
     let mut http_errors = [
         "InvalidMethod",
         "InvalidUrl",
@@ -2251,18 +2251,18 @@ pub(crate) fn build_cx_items(
         ("BodyTooLarge", "limit", Type::Int),
         ("Resolve", "host", Type::String),
         ("Connect", "address", Type::String),
-        ("Tls", "stage", Type::String),
+        ("TLS", "stage", Type::String),
         ("Timeout", "phase", Type::String),
         ("Proxy", "stage", Type::String),
         ("Redirect", "reason", Type::String),
         ("Protocol", "version", Type::String),
-        ("Io", "operation", Type::String),
+        ("IO", "operation", Type::String),
         ("ResourceUnavailable", "resource", Type::String),
         ("Internal", "incident_id", Type::String),
         (
             "UnsupportedTarget",
             "operation",
-            Type::Named("HttpOperation".to_string()),
+            Type::Named("HTTPOperation".to_string()),
         ),
     ] {
         http_errors.push((
@@ -2277,12 +2277,12 @@ pub(crate) fn build_cx_items(
     }
     for (name, _) in &http_errors {
         cx.variant_owner
-            .insert(name.clone(), "HttpError".to_string());
+            .insert(name.clone(), "HTTPError".to_string());
     }
     cx.enum_variants
-        .insert("HttpError".to_string(), http_errors);
-    cx.cloneable.insert("HttpError".to_string());
-    cx.cloneable.insert("HttpOperation".to_string());
+        .insert("HTTPError".to_string(), http_errors);
+    cx.cloneable.insert("HTTPError".to_string());
+    cx.cloneable.insert("HTTPOperation".to_string());
     // D-WS1=B
     let mut ws_errors: Vec<(String, VariantPayload)> = [
         "InvalidUrl",
@@ -2306,7 +2306,7 @@ pub(crate) fn build_cx_items(
         }]),
     ));
     ws_errors.push((
-        "Io".to_string(),
+        "IO".to_string(),
         VariantPayload::Named(vec![VariantField {
             name: "operation".to_string(),
             name_span: zero,

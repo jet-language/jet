@@ -23,7 +23,7 @@ use super::Position::{
 };
 use super::SymbolDB::{build_symbol_db, InlayHint, SymKind, SymbolDB};
 use jet_foundation::JSON::{
-    json_escape, json_get, json_str, json_u32, parse_json, read_protocol_content_length, JsonValue,
+    json_escape, json_get, json_str, json_u32, parse_json, read_protocol_content_length, JSONValue,
     MAX_PROTOCOL_MESSAGE_BYTES,
 };
 
@@ -159,7 +159,7 @@ pub fn run_stdio() -> io::Result<()> {
             Err((code, message)) => {
                 write_message(
                     &mut stdout,
-                    &error_response(&JsonValue::Null, code, message),
+                    &error_response(&JSONValue::Null, code, message),
                 )?;
                 continue;
             }
@@ -214,15 +214,15 @@ fn lock_cancelled(
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn cancellation_key(params: Option<&JsonValue>) -> Option<String> {
+fn cancellation_key(params: Option<&JSONValue>) -> Option<String> {
     let id = params.and_then(|params| json_get(params, "id"))?;
-    matches!(id, JsonValue::Number(_) | JsonValue::String(_)).then(|| serialize_id(id))
+    matches!(id, JSONValue::Number(_) | JSONValue::String(_)).then(|| serialize_id(id))
 }
 
 fn cancellable_response<F>(
     cancelled: &Mutex<std::collections::HashSet<String>>,
     key: &str,
-    id: &JsonValue,
+    id: &JSONValue,
     run: F,
 ) -> Option<String>
 where
@@ -239,20 +239,20 @@ where
     }
 }
 
-fn parse_rpc_message(body: &str) -> Result<JsonValue, (i64, &'static str)> {
+fn parse_rpc_message(body: &str) -> Result<JSONValue, (i64, &'static str)> {
     let message = parse_json(body).map_err(|()| (-32700, "Parse error"))?;
-    let JsonValue::Object(_) = &message else {
+    let JSONValue::Object(_) = &message else {
         return Err((-32600, "Invalid Request"));
     };
     if json_get(&message, "jsonrpc").and_then(json_str) != Some("2.0")
         || json_get(&message, "method").and_then(json_str).is_none()
         || !matches!(
             json_get(&message, "id"),
-            None | Some(JsonValue::Null | JsonValue::Number(_) | JsonValue::String(_))
+            None | Some(JSONValue::Null | JSONValue::Number(_) | JSONValue::String(_))
         )
         || !matches!(
             json_get(&message, "params"),
-            None | Some(JsonValue::Array(_) | JsonValue::Object(_))
+            None | Some(JSONValue::Array(_) | JSONValue::Object(_))
         )
     {
         return Err((-32600, "Invalid Request"));
@@ -328,8 +328,8 @@ fn write_message<W: Write>(w: &mut W, json: &str) -> io::Result<()> {
 fn handle_request(
     server: &mut Server,
     method: &str,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     // c121 Step 5: record per-request latency when JET_TIMING=1. Off by
     // default, so the normal LSP path pays nothing.
@@ -388,8 +388,8 @@ fn handle_request(
 
 fn build_graph_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let uri = params
         .and_then(|params| json_get(params, "textDocument"))
@@ -418,12 +418,12 @@ fn record_lsp_latency(method: &str, us: u128) {
     }
 }
 
-fn configure_workspace_roots(server: &mut Server, params: Option<&JsonValue>) {
+fn configure_workspace_roots(server: &mut Server, params: Option<&JSONValue>) {
     let mut roots = Vec::new();
     if let Some(params) = params {
         server.workspace_folders = json_get(params, "workspaceFolders").is_some();
         if let Some(folders) = json_get(params, "workspaceFolders") {
-            if let JsonValue::Array(folders) = folders {
+            if let JSONValue::Array(folders) = folders {
                 for folder in folders {
                     if let Some(uri) = json_get(folder, "uri").and_then(json_str) {
                         push_workspace_root(&mut roots, uri_to_path(uri));
@@ -448,12 +448,12 @@ fn push_workspace_root(roots: &mut Vec<String>, path: String) {
     }
 }
 
-fn update_workspace_roots(server: &mut Server, params: Option<&JsonValue>) {
+fn update_workspace_roots(server: &mut Server, params: Option<&JSONValue>) {
     let Some(event) = params.and_then(|params| json_get(params, "event")) else {
         return;
     };
     server.workspace_folders = true;
-    if let Some(JsonValue::Array(removed)) = json_get(event, "removed") {
+    if let Some(JSONValue::Array(removed)) = json_get(event, "removed") {
         for folder in removed {
             let Some(uri) = json_get(folder, "uri").and_then(json_str) else {
                 continue;
@@ -462,7 +462,7 @@ fn update_workspace_roots(server: &mut Server, params: Option<&JsonValue>) {
             server.workspace_roots.retain(|root| root != &path);
         }
     }
-    if let Some(JsonValue::Array(added)) = json_get(event, "added") {
+    if let Some(JSONValue::Array(added)) = json_get(event, "added") {
         for folder in added {
             if let Some(uri) = json_get(folder, "uri").and_then(json_str) {
                 push_workspace_root(&mut server.workspace_roots, uri_to_path(uri));
@@ -474,7 +474,7 @@ fn update_workspace_roots(server: &mut Server, params: Option<&JsonValue>) {
 fn handle_notification(
     server: &mut Server,
     method: &str,
-    params: Option<&JsonValue>,
+    params: Option<&JSONValue>,
     stdout: &mut impl Write,
 ) -> io::Result<()> {
     match method {
@@ -510,7 +510,7 @@ fn handle_notification(
     }
 }
 
-fn initialize_response(id: &JsonValue) -> String {
+fn initialize_response(id: &JSONValue) -> String {
     let result = r#"{
   "capabilities": {
     "textDocumentSync": 2,
@@ -570,7 +570,7 @@ fn initialize_response(id: &JsonValue) -> String {
     response(id, result)
 }
 
-fn response(id: &JsonValue, result_json: &str) -> String {
+fn response(id: &JSONValue, result_json: &str) -> String {
     let id_json = serialize_id(id);
     format!(
         r#"{{"jsonrpc":"2.0","id":{},"result":{}}}"#,
@@ -578,7 +578,7 @@ fn response(id: &JsonValue, result_json: &str) -> String {
     )
 }
 
-fn error_response(id: &JsonValue, code: i64, message: &str) -> String {
+fn error_response(id: &JSONValue, code: i64, message: &str) -> String {
     let id_json = serialize_id(id);
     format!(
         r#"{{"jsonrpc":"2.0","id":{},"error":{{"code":{},"message":"{}"}}}}"#,
@@ -588,17 +588,17 @@ fn error_response(id: &JsonValue, code: i64, message: &str) -> String {
     )
 }
 
-fn serialize_id(id: &JsonValue) -> String {
+fn serialize_id(id: &JSONValue) -> String {
     match id {
-        JsonValue::Number(n) => n.to_string(),
-        JsonValue::String(s) => format!("\"{}\"", json_escape(s)),
+        JSONValue::Number(n) => n.to_string(),
+        JSONValue::String(s) => format!("\"{}\"", json_escape(s)),
         _ => "null".to_string(),
     }
 }
 
 fn publish_after_change(
     server: &mut Server,
-    params: Option<&JsonValue>,
+    params: Option<&JSONValue>,
     stdout: &mut impl Write,
 ) -> io::Result<()> {
     publish_after_change_impl(server, params, stdout, false)
@@ -606,7 +606,7 @@ fn publish_after_change(
 
 fn publish_after_open(
     server: &mut Server,
-    params: Option<&JsonValue>,
+    params: Option<&JSONValue>,
     stdout: &mut impl Write,
 ) -> io::Result<()> {
     publish_after_change_impl(server, params, stdout, true)
@@ -617,7 +617,7 @@ fn publish_after_open(
 /// Dirty documents are flushed before the next request that reads document state.
 fn publish_after_change_impl(
     server: &mut Server,
-    params: Option<&JsonValue>,
+    params: Option<&JSONValue>,
     stdout: &mut impl Write,
     is_open: bool,
 ) -> io::Result<()> {
@@ -634,7 +634,7 @@ fn publish_after_change_impl(
         None => return Ok(()),
     };
     let Some(version) = json_get(td, "version").and_then(|value| match value {
-        JsonValue::Number(version) => i32::try_from(*version).ok(),
+        JSONValue::Number(version) => i32::try_from(*version).ok(),
         _ => None,
     }) else {
         return Ok(());
@@ -649,7 +649,7 @@ fn publish_after_change_impl(
             Document::new(uri_to_path(&uri), text.to_string(), version),
         );
     } else {
-        let Some(JsonValue::Array(changes)) = json_get(params, "contentChanges") else {
+        let Some(JSONValue::Array(changes)) = json_get(params, "contentChanges") else {
             return Ok(());
         };
         let Some(current) = server.docs.get(&uri) else {
@@ -683,9 +683,9 @@ fn publish_after_change_impl(
     Ok(())
 }
 
-fn apply_content_change(doc: &mut Document, change: &JsonValue) -> bool {
+fn apply_content_change(doc: &mut Document, change: &JSONValue) -> bool {
     let obj = match change {
-        JsonValue::Object(obj) => obj,
+        JSONValue::Object(obj) => obj,
         _ => return false,
     };
     let text = match obj.get("text").and_then(json_str) {
@@ -712,7 +712,7 @@ fn apply_content_change(doc: &mut Document, change: &JsonValue) -> bool {
     }
 }
 
-fn range_from_json(value: &JsonValue) -> Option<LspRange> {
+fn range_from_json(value: &JSONValue) -> Option<LspRange> {
     let start = json_get(value, "start")?;
     let end = json_get(value, "end")?;
     Some(LspRange {
@@ -721,14 +721,14 @@ fn range_from_json(value: &JsonValue) -> Option<LspRange> {
     })
 }
 
-fn pos_from_json(value: &JsonValue) -> Option<LspPos> {
+fn pos_from_json(value: &JSONValue) -> Option<LspPos> {
     Some(LspPos {
         line: lsp_uinteger(json_get(value, "line")?)?,
         character: lsp_uinteger(json_get(value, "character")?)?,
     })
 }
 
-fn lsp_uinteger(value: &JsonValue) -> Option<u32> {
+fn lsp_uinteger(value: &JSONValue) -> Option<u32> {
     json_u32(value).filter(|value| *value <= i32::MAX as u32)
 }
 
@@ -794,8 +794,8 @@ fn diagnostic_json(d: &Diagnostic, file: &str, src: &str) -> String {
 
 fn code_action_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -916,7 +916,7 @@ fn action_json(
     )
 }
 
-fn format_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) -> Option<String> {
+fn format_response(server: &Server, params: Option<&JSONValue>, id: &JSONValue) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
     let uri = json_get(td, "uri").and_then(json_str)?;
@@ -936,8 +936,8 @@ fn format_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) 
 
 fn range_format_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1004,8 +1004,8 @@ fn line_boundary(src: &str, line: u32) -> Option<usize> {
 
 fn completion_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1049,8 +1049,8 @@ fn completion_response(
 
 fn signature_help_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1126,8 +1126,8 @@ fn signature_help_response(
 
 fn document_symbol_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1166,8 +1166,8 @@ fn document_symbol_response(
 
 fn workspace_symbol_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let query = params
         .and_then(|p| json_get(p, "query"))
@@ -1221,8 +1221,8 @@ fn workspace_symbol_response(
 
 fn folding_range_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1241,8 +1241,8 @@ fn folding_range_response(
 
 fn document_highlight_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1298,15 +1298,15 @@ fn document_highlight_response(
 
 fn selection_range_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
     let uri = json_get(td, "uri").and_then(json_str)?;
     let doc = server.docs.get(uri)?;
     let positions = match json_get(params, "positions") {
-        Some(JsonValue::Array(values)) => values,
+        Some(JSONValue::Array(values)) => values,
         _ => return Some(response(id, "[]")),
     };
     let tokens = server.lex(doc);
@@ -1334,8 +1334,8 @@ fn selection_range_response(
 
 fn document_link_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1348,8 +1348,8 @@ fn document_link_response(
 
 fn code_lens_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1361,8 +1361,8 @@ fn code_lens_response(
 
 fn prepare_call_hierarchy_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1395,8 +1395,8 @@ fn prepare_call_hierarchy_response(
 
 fn call_hierarchy_incoming_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let item = json_get(params, "item")?;
@@ -1447,8 +1447,8 @@ fn call_hierarchy_incoming_response(
 
 fn call_hierarchy_outgoing_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let item = json_get(params, "item")?;
@@ -1496,8 +1496,8 @@ fn call_hierarchy_outgoing_response(
 
 fn prepare_type_hierarchy_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1530,8 +1530,8 @@ fn prepare_type_hierarchy_response(
 
 fn type_hierarchy_supertypes_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let (uri, name) = type_hierarchy_item_params(params)?;
     let doc = server.docs.get(uri)?;
@@ -1556,8 +1556,8 @@ fn type_hierarchy_supertypes_response(
 
 fn type_hierarchy_subtypes_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let (uri, name) = type_hierarchy_item_params(params)?;
     let doc = server.docs.get(uri)?;
@@ -1578,7 +1578,7 @@ fn type_hierarchy_subtypes_response(
     Some(response(id, &format!("[{}]", out.join(","))))
 }
 
-fn hover_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) -> Option<String> {
+fn hover_response(server: &Server, params: Option<&JSONValue>, id: &JSONValue) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
     let uri = json_get(td, "uri").and_then(json_str)?;
@@ -1610,8 +1610,8 @@ fn hover_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) -
 
 fn definition_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1670,17 +1670,17 @@ fn definition_response(
 
 fn execute_command_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let command = json_get(params, "command").and_then(json_str)?;
     if command == "jet.budgetReports" {
         let args = match json_get(params, "arguments") {
-            Some(JsonValue::Array(args)) => args,
+            Some(JSONValue::Array(args)) => args,
             _ => return Some(error_response(id, -32602, "jet.budgetReports expects arguments [uri]")),
         };
-        let Some(uri) = args.first().and_then(|value| match value { JsonValue::String(value) => Some(value.as_str()), _ => None }) else {
+        let Some(uri) = args.first().and_then(|value| match value { JSONValue::String(value) => Some(value.as_str()), _ => None }) else {
             return Some(error_response(id, -32602, "jet.budgetReports expects arguments [uri]"));
         };
         let Some(doc) = server.docs.get(uri) else { return Some(error_response(id, -32602, "document not open in LSP session")) };
@@ -1696,7 +1696,7 @@ fn execute_command_response(
         return Some(error_response(id, -32601, "unknown executeCommand"));
     }
     let args = match json_get(params, "arguments") {
-        Some(JsonValue::Array(arr)) => arr,
+        Some(JSONValue::Array(arr)) => arr,
         _ => {
             return Some(error_response(
                 id,
@@ -1706,11 +1706,11 @@ fn execute_command_response(
         }
     };
     let uri = args.first().and_then(|v| match v {
-        JsonValue::String(s) => Some(s.as_str()),
+        JSONValue::String(s) => Some(s.as_str()),
         _ => None,
     });
     let symbol = args.get(1).and_then(|v| match v {
-        JsonValue::String(s) => Some(s.as_str()),
+        JSONValue::String(s) => Some(s.as_str()),
         _ => None,
     });
     let depth = args
@@ -1756,8 +1756,8 @@ fn execute_command_response(
 
 fn references_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1773,7 +1773,7 @@ fn references_response(
     let include_decl = ctx
         .and_then(|c| json_get(c, "includeDeclaration"))
         .and_then(|v| {
-            if let JsonValue::Bool(b) = v {
+            if let JSONValue::Bool(b) = v {
                 Some(*b)
             } else {
                 None
@@ -1812,8 +1812,8 @@ fn references_response(
 
 fn prepare_rename_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1850,7 +1850,7 @@ fn prepare_rename_response(
     }
 }
 
-fn rename_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) -> Option<String> {
+fn rename_response(server: &Server, params: Option<&JSONValue>, id: &JSONValue) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
     let uri = json_get(td, "uri").and_then(json_str)?;
@@ -1911,8 +1911,8 @@ fn rename_response(server: &Server, params: Option<&JsonValue>, id: &JsonValue) 
 
 fn semantic_tokens_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1926,8 +1926,8 @@ fn semantic_tokens_response(
 
 fn semantic_tokens_range_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1946,8 +1946,8 @@ fn semantic_tokens_range_response(
 
 fn semantic_tokens_delta_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -1974,8 +1974,8 @@ fn semantic_tokens_result_id(src: &str, data: &[u32]) -> String {
 
 fn inlay_hint_response(
     server: &Server,
-    params: Option<&JsonValue>,
-    id: &JsonValue,
+    params: Option<&JSONValue>,
+    id: &JSONValue,
 ) -> Option<String> {
     let params = params?;
     let td = json_get(params, "textDocument")?;
@@ -2116,7 +2116,7 @@ fn type_hierarchy_item_json(def: &jet_semindex::SymDef, src: &str) -> Option<Str
     ))
 }
 
-fn type_hierarchy_item_params(params: Option<&JsonValue>) -> Option<(&str, &str)> {
+fn type_hierarchy_item_params(params: Option<&JSONValue>) -> Option<(&str, &str)> {
     let item = json_get(params?, "item")?;
     let uri = json_get(item, "uri").and_then(json_str)?;
     let name = json_get(item, "name").and_then(json_str)?;
@@ -2254,7 +2254,7 @@ mod project_part_tests {
             end.character,
         ))
         .unwrap();
-        code_action_response(server, Some(&params), &JsonValue::Number(1)).unwrap()
+        code_action_response(server, Some(&params), &JSONValue::Number(1)).unwrap()
     }
 
     #[test]
@@ -2843,10 +2843,10 @@ mod project_part_tests {
             worker_rendezvous.wait();
         });
 
-        let response = cancellable_response(&cancelled, "7", &JsonValue::Number(7), || {
+        let response = cancellable_response(&cancelled, "7", &JSONValue::Number(7), || {
             rendezvous.wait();
             rendezvous.wait();
-            Some(response(&JsonValue::Number(7), "true"))
+            Some(response(&JSONValue::Number(7), "true"))
         })
         .expect("cancel response");
         canceller.join().unwrap();

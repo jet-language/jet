@@ -1,4 +1,4 @@
-//! Typed CLI entry adapter (#1219) — CliSchema + canonical Args parser.
+//! Typed CLI entry adapter (#1219) — CLISchema + canonical Args parser.
 //! Zero-arg `jet_jit_cli_main` decodes argv and calls user `run(args)`.
 
 use super::Concurrency;
@@ -6,8 +6,8 @@ use cranelift_codegen::ir::Signature;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use jet_foundation::AST::{CtValue, Item, ProgramBundle, StructDef, Type, VariantPayload};
-use jet_foundation::CliSchema::{
-    self, CliCommandSchema, CliDefault, CliInputSchema, CliInputShape, CliValueKind,
+use jet_foundation::CLISchema::{
+    self, CLICommandSchema, CLIDefault, CLIInputSchema, CLIInputShape, CLIValueKind,
 };
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicPtr, Ordering};
@@ -72,8 +72,8 @@ mod runtime {
 use runtime::{empty_spec, flag, flag_set, help_text, option, option_val, parse, positional, Parsed, Spec};
 
 #[derive(Clone)]
-pub(crate) struct CliPlan {
-    pub schema: CliCommandSchema,
+pub(crate) struct CLIPlan {
+    pub schema: CLICommandSchema,
     /// Field types for the entry struct (struct CLI) or empty (enum CLI).
     pub field_types: Vec<(String, Type)>,
     /// Enum variant order: (variant_name_lower, payload_struct_fields).
@@ -82,7 +82,7 @@ pub(crate) struct CliPlan {
 }
 
 thread_local! {
-    static CLI_PLAN: RefCell<Option<CliPlan>> = const { RefCell::new(None) };
+    static CLI_PLAN: RefCell<Option<CLIPlan>> = const { RefCell::new(None) };
 }
 
 static CLI_RUN_PTR: AtomicPtr<()> = AtomicPtr::new(std::ptr::null_mut());
@@ -92,7 +92,7 @@ pub(crate) fn clear_cli_plan() {
     CLI_RUN_PTR.store(std::ptr::null_mut(), Ordering::SeqCst);
 }
 
-pub(crate) fn install_cli_plan(plan: CliPlan) {
+pub(crate) fn install_cli_plan(plan: CLIPlan) {
     CLI_PLAN.with(|slot| *slot.borrow_mut() = Some(plan));
 }
 
@@ -110,8 +110,8 @@ pub(crate) fn prepare_cli_from_bundle(bundle: &ProgramBundle) {
     }
 }
 
-pub(crate) fn cli_plan_from_items(items: &[Item]) -> Option<CliPlan> {
-    let schema = CliSchema::entry_schema(items)?;
+pub(crate) fn cli_plan_from_items(items: &[Item]) -> Option<CLIPlan> {
+    let schema = CLISchema::entry_schema(items)?;
     let entry = schema.entry_type.clone();
     if !schema.commands.is_empty() {
         let enumeration = items.iter().find_map(|item| match item {
@@ -126,7 +126,7 @@ pub(crate) fn cli_plan_from_items(items: &[Item]) -> Option<CliPlan> {
             let fields = struct_fields(items, payload)?;
             variants.push((v.name.to_lowercase(), fields));
         }
-        return Some(CliPlan {
+        return Some(CLIPlan {
             schema,
             field_types: Vec::new(),
             variants,
@@ -134,7 +134,7 @@ pub(crate) fn cli_plan_from_items(items: &[Item]) -> Option<CliPlan> {
         });
     }
     let field_types = struct_fields(items, &entry)?;
-    Some(CliPlan {
+    Some(CLIPlan {
         schema,
         field_types,
         variants: Vec::new(),
@@ -160,16 +160,16 @@ fn alloc_str(s: String) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
 }
 
-fn build_spec(inputs: &[CliInputSchema]) -> Spec {
+fn build_spec(inputs: &[CLIInputSchema]) -> Spec {
     let mut spec = empty_spec();
     for input in inputs {
         let flag_name = input.flag.clone();
         let help = input.help.clone();
         match &input.shape {
-            CliInputShape::Flag => {
+            CLIInputShape::Flag => {
                 spec = flag(spec, &flag_name, &help);
             }
-            CliInputShape::Value { .. } => {
+            CLIInputShape::Value { .. } => {
                 let meta = input
                     .metavar
                     .clone()
@@ -185,7 +185,7 @@ fn build_spec(inputs: &[CliInputSchema]) -> Spec {
 }
 
 fn decode_struct(
-    inputs: &[CliInputSchema],
+    inputs: &[CLIInputSchema],
     field_types: &[(String, Type)],
     parsed: &Parsed,
     spec: &Spec,
@@ -196,13 +196,13 @@ fn decode_struct(
         let input = inputs
             .iter()
             .find(|i| i.field == *fname)
-            .ok_or_else(|| format!("missing Cli input for `{fname}`"))?;
+            .ok_or_else(|| format!("missing CLI input for `{fname}`"))?;
         let flag_name = &input.flag;
         let bits = match (&input.shape, fty) {
-            (CliInputShape::Flag, Type::Bool) => i64::from(flag_set(parsed, flag_name)),
+            (CLIInputShape::Flag, Type::Bool) => i64::from(flag_set(parsed, flag_name)),
             (
-                CliInputShape::Value {
-                    kind: CliValueKind::Int,
+                CLIInputShape::Value {
+                    kind: CLIValueKind::Int,
                     optional: false,
                     default,
                 },
@@ -212,13 +212,13 @@ fn decode_struct(
                     .parse::<i64>()
                     .map_err(|_| format!("invalid int for --{flag_name}"))?,
                 None => match default {
-                    Some(CliDefault::Value(CtValue::Int(n))) => *n,
-                    Some(CliDefault::TypeDefault) => 0,
-                    Some(CliDefault::Value(other)) => other
+                    Some(CLIDefault::Value(CtValue::Int(n))) => *n,
+                    Some(CLIDefault::TypeDefault) => 0,
+                    Some(CLIDefault::Value(other)) => other
                         .jet_show()
                         .parse()
                         .map_err(|_| format!("bad default for --{flag_name}"))?,
-                    Some(CliDefault::Recorded(s)) => s
+                    Some(CLIDefault::Recorded(s)) => s
                         .parse()
                         .map_err(|_| format!("bad default for --{flag_name}"))?,
                     None if input.positional.is_some() => {
@@ -236,8 +236,8 @@ fn decode_struct(
                 },
             },
             (
-                CliInputShape::Value {
-                    kind: CliValueKind::String | CliValueKind::Path,
+                CLIInputShape::Value {
+                    kind: CLIValueKind::String | CLIValueKind::Path,
                     optional: false,
                     default,
                 },
@@ -246,10 +246,10 @@ fn decode_struct(
                 let text = match option_val(parsed, flag_name) {
                     Some(v) => v,
                     None => match default {
-                        Some(CliDefault::Value(CtValue::Str(s))) => s.clone(),
-                        Some(CliDefault::TypeDefault) => String::new(),
-                        Some(CliDefault::Value(other)) => other.jet_show(),
-                        Some(CliDefault::Recorded(s)) => s.clone(),
+                        Some(CLIDefault::Value(CtValue::Str(s))) => s.clone(),
+                        Some(CLIDefault::TypeDefault) => String::new(),
+                        Some(CLIDefault::Value(other)) => other.jet_show(),
+                        Some(CLIDefault::Recorded(s)) => s.clone(),
                         None if input.positional.is_some() => {
                             return Err(format!(
                                 "missing required argument {flag_name}\n\n{}",
@@ -267,8 +267,8 @@ fn decode_struct(
                 alloc_str(text)
             }
             (
-                CliInputShape::Value {
-                    kind: CliValueKind::String | CliValueKind::Path,
+                CLIInputShape::Value {
+                    kind: CLIValueKind::String | CLIValueKind::Path,
                     optional: true,
                     ..
                 },
@@ -290,7 +290,7 @@ fn decode_struct(
     Ok(rec)
 }
 
-fn print_usage(schema: &CliCommandSchema) {
+fn print_usage(schema: &CLICommandSchema) {
     let mut out = String::from("Usage: <program> <command> [options]\n\nCommands:\n");
     for cmd in &schema.commands {
         out.push_str("  ");

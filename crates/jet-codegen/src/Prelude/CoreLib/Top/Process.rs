@@ -28,10 +28,10 @@ fn jet_process_stdio(mode: &jet_std::ProcessStreamMode) -> std::process::Stdio {
 }
 fn jet_process_command(
     spec: &jet_std::ProcessSpec,
-) -> Result<std::process::Command, jet_std::IoError> {
+) -> Result<std::process::Command, jet_std::IOError> {
     if spec.cmd.is_empty() {
-        return Err(jet_std::IoError::InvalidInput(jet_std::IoContext::new(
-            jet_std::IoOperation::Resolve,
+        return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+            jet_std::IOOperation::Resolve,
             None,
             None,
             Some("process command needs at least one word".to_string()),
@@ -51,11 +51,11 @@ fn jet_process_command(
         jet_std_env_snapshot_raw()
     };
     for (name, value) in &spec.env_set {
-        jet_env_validate_name(name).map_err(|error| jet_std::IoError::InvalidInput(jet_std::IoContext::new(
-            jet_std::IoOperation::Resolve, Some(name.clone()), None, Some(error.jet_show()),
+        jet_env_validate_name(name).map_err(|error| jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+            jet_std::IOOperation::Resolve, Some(name.clone()), None, Some(error.jet_show()),
         )))?;
-        jet_env_validate_value(value).map_err(|error| jet_std::IoError::InvalidInput(jet_std::IoContext::new(
-            jet_std::IoOperation::Resolve, Some(name.clone()), None, Some(error.jet_show()),
+        jet_env_validate_value(value).map_err(|error| jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+            jet_std::IOOperation::Resolve, Some(name.clone()), None, Some(error.jet_show()),
         )))?;
         let os_name = std::ffi::OsString::from(name);
         child_env.retain(|(candidate, _)| {
@@ -64,8 +64,8 @@ fn jet_process_command(
         child_env.push((os_name, std::ffi::OsString::from(value)));
     }
     for name in &spec.env_remove {
-        jet_env_validate_name(name).map_err(|error| jet_std::IoError::InvalidInput(jet_std::IoContext::new(
-            jet_std::IoOperation::Resolve, Some(name.clone()), None, Some(error.jet_show()),
+        jet_env_validate_name(name).map_err(|error| jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+            jet_std::IOOperation::Resolve, Some(name.clone()), None, Some(error.jet_show()),
         )))?;
         let name = std::ffi::OsStr::new(name);
         child_env.retain(|(candidate, _)| !jet_env_key_eq(candidate.as_os_str(), name));
@@ -84,7 +84,7 @@ fn jet_process_command(
 }
 fn jet_process_spec_spawn(
     spec: &jet_std::ProcessSpec,
-) -> Result<jet_std::ProcessChild, jet_std::IoError> {
+) -> Result<jet_std::ProcessChild, jet_std::IOError> {
     let mut command = jet_process_command(spec)?;
     if spec.detached {
         command.stdin(std::process::Stdio::null());
@@ -92,7 +92,7 @@ fn jet_process_spec_spawn(
         command.stderr(std::process::Stdio::null());
     }
     let mut child = command.spawn().map_err(|error| {
-        jet_std::IoError::other(jet_std::IoOperation::Resolve, spec.cmd.first().cloned(), error)
+        jet_std::IOError::other(jet_std::IOOperation::Resolve, spec.cmd.first().cloned(), error)
     })?;
     Ok(jet_std::ProcessChild {
         stdin: std::rc::Rc::new(std::cell::RefCell::new(child.stdin.take())),
@@ -137,22 +137,22 @@ fn jet_process_start_output_drain(
 fn jet_process_finish_output_drain(
     drain: Option<std::thread::JoinHandle<std::io::Result<String>>>,
     stream: &'static str,
-) -> Result<String, jet_std::IoError> {
+) -> Result<String, jet_std::IOError> {
     let Some(drain) = drain else {
         return Ok(String::new());
     };
     drain
         .join()
         .map_err(|_| {
-            jet_std::IoError::other(
-                jet_std::IoOperation::Read,
+            jet_std::IOError::other(
+                jet_std::IOOperation::Read,
                 Some(stream.to_string()),
                 "process output reader panicked",
             )
         })?
         .map_err(|error| {
-            jet_std::IoError::other(
-                jet_std::IoOperation::Read,
+            jet_std::IOError::other(
+                jet_std::IOOperation::Read,
                 Some(stream.to_string()),
                 error,
             )
@@ -163,26 +163,26 @@ fn jet_process_collect_output(
         Option<std::thread::JoinHandle<std::io::Result<String>>>,
         Option<std::thread::JoinHandle<std::io::Result<String>>>,
     ),
-) -> Result<(String, String), jet_std::IoError> {
+) -> Result<(String, String), jet_std::IOError> {
     let output = jet_process_finish_output_drain(drains.0, "process stdout")?;
     let errors = jet_process_finish_output_drain(drains.1, "process stderr")?;
     Ok((output, errors))
 }
 fn jet_process_spec_run_inner(
     spec: &jet_std::ProcessSpec,
-) -> Result<jet_std::ProcessResult, jet_std::IoError> {
+) -> Result<jet_std::ProcessResult, jet_std::IOError> {
     let child = jet_process_spec_spawn(spec)?;
     let result = jet_process_child_wait(&child)?;
     if let Some(limit) = spec.output_limit {
         if (result.output.len() + result.errors.len()) as i64 > limit {
-            return Err(jet_std::IoError::other(jet_std::IoOperation::Read, None, "process output exceeded output_limit"));
+            return Err(jet_std::IOError::other(jet_std::IOOperation::Read, None, "process output exceeded output_limit"));
         }
     }
     Ok(result)
 }
 fn jet_process_spec_run(
     spec: &jet_std::ProcessSpec,
-) -> Result<jet_std::ProcessResult, jet_std::IoError> {
+) -> Result<jet_std::ProcessResult, jet_std::IOError> {
     jet_process_spec_run_inner(spec)
 }
 fn jet_process_child_id(child: &jet_std::ProcessChild) -> i64 {
@@ -195,7 +195,7 @@ fn jet_process_child_id(child: &jet_std::ProcessChild) -> i64 {
 }
 fn jet_process_child_wait(
     child: &jet_std::ProcessChild,
-) -> Result<jet_std::ProcessResult, jet_std::IoError> {
+) -> Result<jet_std::ProcessResult, jet_std::IOError> {
     // Capture pipes must be drained while the child runs. Waiting first can
     // deadlock when either pipe fills; stdout and stderr need independent
     // readers because a child may fill both concurrently. Stream consumers
@@ -215,14 +215,14 @@ fn jet_process_child_wait(
                 errors,
             });
         };
-        if let Some(status) = inner.try_wait().map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Close, Some("process".to_string()), error))? {
+        if let Some(status) = inner.try_wait().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))? {
             break status;
         }
         if let Some(timeout) = child.timeout_ms {
             if child.started.elapsed() >= std::time::Duration::from_millis(timeout as u64) {
-                inner.kill().map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Close, Some("process".to_string()), error))?;
+                inner.kill().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))?;
                 timed_out = true;
-                break inner.wait().map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Close, Some("process".to_string()), error))?;
+                break inner.wait().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))?;
             }
         }
         drop(slot);
@@ -243,16 +243,16 @@ fn jet_process_child_wait(
         errors,
     })
 }
-fn jet_process_child_kill(child: &jet_std::ProcessChild) -> Result<(), jet_std::IoError> {
+fn jet_process_child_kill(child: &jet_std::ProcessChild) -> Result<(), jet_std::IOError> {
     if let Some(inner) = child.inner.borrow_mut().as_mut() {
-        inner.kill().map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Close, Some("process".to_string()), error))?;
+        inner.kill().map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Close, Some("process".to_string()), error))?;
     }
     Ok(())
 }
-fn jet_process_child_terminate(child: &jet_std::ProcessChild) -> Result<(), jet_std::IoError> {
+fn jet_process_child_terminate(child: &jet_std::ProcessChild) -> Result<(), jet_std::IOError> {
     jet_process_child_kill(child)
 }
-fn jet_process_child_interrupt(child: &jet_std::ProcessChild) -> Result<(), jet_std::IoError> {
+fn jet_process_child_interrupt(child: &jet_std::ProcessChild) -> Result<(), jet_std::IOError> {
     jet_process_child_kill(child)
 }
 // D-PROCESS1=A: `child.stdin` is a writer handle (`.write(text)`); `child.stdout`/
@@ -262,20 +262,20 @@ fn jet_process_child_interrupt(child: &jet_std::ProcessChild) -> Result<(), jet_
 fn jet_process_stdin_write(
     handle: &std::rc::Rc<std::cell::RefCell<Option<std::process::ChildStdin>>>,
     text: &String,
-) -> Result<(), jet_std::IoError> {
+) -> Result<(), jet_std::IOError> {
     if let Some(stdin) = handle.borrow_mut().as_mut() {
-        std::io::Write::write_all(stdin, text.as_bytes()).map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Write, Some("process stdin".to_string()), error))?;
+        std::io::Write::write_all(stdin, text.as_bytes()).map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Write, Some("process stdin".to_string()), error))?;
     }
     Ok(())
 }
 fn jet_process_child_read_line<R: std::io::Read>(
     reader: &mut Option<std::io::BufReader<R>>,
-) -> Result<Option<String>, jet_std::IoError> {
+) -> Result<Option<String>, jet_std::IOError> {
     let Some(reader) = reader.as_mut() else {
         return Ok(None);
     };
     let mut line = String::new();
-    let n = std::io::BufRead::read_line(reader, &mut line).map_err(|error| jet_std::IoError::other(jet_std::IoOperation::Read, Some("process output".to_string()), error))?;
+    let n = std::io::BufRead::read_line(reader, &mut line).map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Read, Some("process output".to_string()), error))?;
     if n == 0 {
         Ok(None)
     } else {
@@ -290,7 +290,7 @@ fn jet_process_child_read_line<R: std::io::Read>(
 }
 fn jet_process_stream_next_line<R: std::io::Read>(
     handle: &std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<R>>>>,
-) -> Result<Option<String>, jet_std::IoError> {
+) -> Result<Option<String>, jet_std::IOError> {
     jet_process_child_read_line(&mut handle.borrow_mut())
 }
 

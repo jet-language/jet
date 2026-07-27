@@ -373,7 +373,7 @@
             self.after_values.push((ms, value));
             self
         }
-        pub fn read(self, _stream: super::JetTcpStream) -> JetSelectBuilder<T> {
+        pub fn read(self, _stream: super::JetTCPStream) -> JetSelectBuilder<T> {
             self
         }
         pub fn wait(self) -> T {
@@ -565,7 +565,7 @@
             JetShared(self.0.clone())
         }
     }
-    // D-MEM1 S6: an opaque-handle placeholder, mirroring `JetTcpListener`'s
+    // D-MEM1 S6: an opaque-handle placeholder, mirroring `JetTCPListener`'s
     // `JetShow` (Prelude/CoreLib.rs) — `Shared<T>`'s point is the lock-guarded
     // access methods, not a direct print of the handle itself.
     impl<T> super::JetShow for JetShared<T> {

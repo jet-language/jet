@@ -152,7 +152,7 @@ pub(crate) fn parse_generation_metadata(
     text: &str,
     expected_generation: u64,
 ) -> io::Result<GenerationMetadata> {
-    let JSON::Json::Object(root) = JSON::parse(text).map_err(invalid)? else {
+    let JSON::JSONValue::Object(root) = JSON::parse(text).map_err(invalid)? else {
         return Err(invalid("profile metadata root is not an object"));
     };
     expect_exact_keys(
@@ -171,7 +171,7 @@ pub(crate) fn parse_generation_metadata(
         return Err(invalid("profile generation metadata disagrees with path"));
     }
     let created_at = integer_field(&root, "created_at")?;
-    let JSON::Json::Array(entries) = root
+    let JSON::JSONValue::Array(entries) = root
         .get("tools")
         .ok_or_else(|| invalid("profile metadata lacks tools"))?
     else {
@@ -182,7 +182,7 @@ pub(crate) fn parse_generation_metadata(
     }
     let mut tools = Vec::with_capacity(entries.len());
     for entry in entries {
-        let JSON::Json::Object(tool) = entry else {
+        let JSON::JSONValue::Object(tool) = entry else {
             return Err(invalid("profile tool entry is not an object"));
         };
         expect_exact_keys(
@@ -1035,7 +1035,7 @@ fn write_string_array(out: &mut String, key: &str, values: &[String], comma: boo
 }
 
 fn expect_exact_keys(
-    object: &BTreeMap<String, JSON::Json>,
+    object: &BTreeMap<String, JSON::JSONValue>,
     expected: &[&str],
     label: &str,
 ) -> io::Result<()> {
@@ -1048,7 +1048,7 @@ fn expect_exact_keys(
     Ok(())
 }
 
-fn string_field<'a>(object: &'a BTreeMap<String, JSON::Json>, key: &str) -> io::Result<&'a str> {
+fn string_field<'a>(object: &'a BTreeMap<String, JSON::JSONValue>, key: &str) -> io::Result<&'a str> {
     object
         .get(key)
         .ok_or_else(|| invalid(format!("missing key `{key}`")))?
@@ -1056,14 +1056,14 @@ fn string_field<'a>(object: &'a BTreeMap<String, JSON::Json>, key: &str) -> io::
         .map_err(invalid)
 }
 
-fn bounded_string(object: &BTreeMap<String, JSON::Json>, key: &str) -> io::Result<String> {
+fn bounded_string(object: &BTreeMap<String, JSON::JSONValue>, key: &str) -> io::Result<String> {
     let value = string_field(object, key)?;
     validate_string(value)?;
     Ok(value.to_string())
 }
 
-fn integer_field(object: &BTreeMap<String, JSON::Json>, key: &str) -> io::Result<u64> {
-    let Some(JSON::Json::Num(value)) = object.get(key) else {
+fn integer_field(object: &BTreeMap<String, JSON::JSONValue>, key: &str) -> io::Result<u64> {
+    let Some(JSON::JSONValue::Num(value)) = object.get(key) else {
         return Err(invalid(format!("profile field `{key}` is not a number")));
     };
     if !value.is_finite()
@@ -1076,8 +1076,8 @@ fn integer_field(object: &BTreeMap<String, JSON::Json>, key: &str) -> io::Result
     Ok(*value as u64)
 }
 
-fn string_array(object: &BTreeMap<String, JSON::Json>, key: &str) -> io::Result<Vec<String>> {
-    let Some(JSON::Json::Array(values)) = object.get(key) else {
+fn string_array(object: &BTreeMap<String, JSON::JSONValue>, key: &str) -> io::Result<Vec<String>> {
+    let Some(JSON::JSONValue::Array(values)) = object.get(key) else {
         return Err(invalid(format!("profile field `{key}` is not an array")));
     };
     values

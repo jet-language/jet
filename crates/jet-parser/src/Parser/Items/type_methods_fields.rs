@@ -21,7 +21,7 @@ impl<'a> Parser<'a> {
             }
             self.expect(TokKind::RParen, "to close the parameter list")?;
             self.validate_variadic_params(&params);
-            // D-EFF3 / D-SHAPE8 / D-ARROW-CONTROL1: optional `=[Gpu]=>`
+            // D-EFF3 / D-SHAPE8 / D-ARROW-CONTROL1: optional `=[GPU]=>`
             // effect bound.
             let declared_effects = self.parse_opt_effect_annotation()?;
             let decorated_arrow = declared_effects.is_some();

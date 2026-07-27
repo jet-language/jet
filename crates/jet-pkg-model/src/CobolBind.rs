@@ -46,13 +46,13 @@ impl FieldKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BindError {
-    Source(String), ToolMissing(&'static str), ToolFailed { tool: &'static str, detail: String }, Io(String),
+    Source(String), ToolMissing(&'static str), ToolFailed { tool: &'static str, detail: String }, IO(String),
 }
 
 impl std::fmt::Display for BindError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Source(s) | Self::Io(s) => f.write_str(s),
+            Self::Source(s) | Self::IO(s) => f.write_str(s),
             Self::ToolMissing(t) => write!(f, "the provisioned `{t}` tool was not found"),
             Self::ToolFailed { tool, detail } => write!(f, "`{tool}` rejected the COBOL binding: {detail}"),
         }
@@ -66,7 +66,7 @@ pub fn bind(source_path: &Path, source: &str, copybook_path: &Path, copybook: &s
     let packed = layout.fields.iter().filter(|f| matches!(f.kind, FieldKind::PackedDecimal { .. })).collect::<Vec<_>>();
     if packed.len() != 1 { return Err(BindError::Source("the callable v1 bridge requires exactly one COMP-3 field".into())); }
     let input = layout.fields.iter().find(|f| matches!(f.kind, FieldKind::NativeInt { .. }));
-    std::fs::create_dir_all(cache).map_err(|e| BindError::Io(format!("could not create binding cache: {e}")))?;
+    std::fs::create_dir_all(cache).map_err(|e| BindError::IO(format!("could not create binding cache: {e}")))?;
     let stem = format!("jet_cobol_{lib}");
     let object = cache.join(format!("{stem}_program.o"));
     let bridge_c = cache.join(format!("{stem}_bridge.c"));
@@ -77,7 +77,7 @@ pub fn bind(source_path: &Path, source: &str, copybook_path: &Path, copybook: &s
     let config = output(Command::new("cob-config").arg("--cflags"), "cob-config")?;
     let cflags = String::from_utf8_lossy(&config.stdout).split_whitespace().map(str::to_string).collect::<Vec<_>>();
     std::fs::write(&bridge_c, render_bridge(&program, &layout, packed[0], input, lib))
-        .map_err(|e| BindError::Io(format!("could not write the COBOL C bridge: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not write the COBOL C bridge: {e}")))?;
     let mut cc = Command::new("cc"); cc.arg("-c").arg("-fPIC"); cc.args(&cflags).arg(&bridge_c).arg("-o").arg(&bridge_o);
     run(&mut cc, "cc")?;
     run(Command::new("ar").arg("rcs").arg(&archive).arg(&object).arg(&bridge_o), "ar")?;
@@ -177,13 +177,13 @@ int64_t jet_cobol_{lib}_apply_minor({args}) {{
 struct ToolOutput { status: std::process::ExitStatus, stdout: Vec<u8>, stderr: Vec<u8> }
 fn run(command: &mut Command, tool: &'static str) -> Result<(), BindError> { let o=output(command,tool)?; if o.status.success(){Ok(())}else{Err(BindError::ToolFailed{tool,detail:launder(&o.stderr)})} }
 fn output(command: &mut Command, tool: &'static str) -> Result<ToolOutput, BindError> {
-    const LIMIT:usize=64*1024; command.stdout(Stdio::piped()).stderr(Stdio::piped()); let mut child=command.spawn().map_err(|e|if e.kind()==std::io::ErrorKind::NotFound{BindError::ToolMissing(tool)}else{BindError::Io(format!("could not start `{tool}`: {e}"))})?;
-    let stdout=child.stdout.take().ok_or_else(||BindError::Io(format!("could not supervise `{tool}` stdout")))?; let stderr=child.stderr.take().ok_or_else(||BindError::Io(format!("could not supervise `{tool}` stderr")))?;
+    const LIMIT:usize=64*1024; command.stdout(Stdio::piped()).stderr(Stdio::piped()); let mut child=command.spawn().map_err(|e|if e.kind()==std::io::ErrorKind::NotFound{BindError::ToolMissing(tool)}else{BindError::IO(format!("could not start `{tool}`: {e}"))})?;
+    let stdout=child.stdout.take().ok_or_else(||BindError::IO(format!("could not supervise `{tool}` stdout")))?; let stderr=child.stderr.take().ok_or_else(||BindError::IO(format!("could not supervise `{tool}` stderr")))?;
     let out=std::thread::spawn(move||bounded(stdout,LIMIT)); let err=std::thread::spawn(move||bounded(stderr,LIMIT)); let deadline=Instant::now()+Duration::from_secs(60);
-    let status=loop{match child.try_wait().map_err(|e|BindError::Io(format!("could not supervise `{tool}`: {e}")))?{Some(s)=>break s,None if Instant::now()>=deadline=>{let _=child.kill();let _=child.wait();let _=out.join();let _=err.join();return Err(BindError::ToolFailed{tool,detail:"the tool exceeded the 60 second limit".into()})},None=>std::thread::sleep(Duration::from_millis(10))}};
-    let stdout=out.join().map_err(|_|BindError::Io(format!("`{tool}` stdout reader failed")))??; let stderr=err.join().map_err(|_|BindError::Io(format!("`{tool}` stderr reader failed")))??; Ok(ToolOutput{status,stdout,stderr})
+    let status=loop{match child.try_wait().map_err(|e|BindError::IO(format!("could not supervise `{tool}`: {e}")))?{Some(s)=>break s,None if Instant::now()>=deadline=>{let _=child.kill();let _=child.wait();let _=out.join();let _=err.join();return Err(BindError::ToolFailed{tool,detail:"the tool exceeded the 60 second limit".into()})},None=>std::thread::sleep(Duration::from_millis(10))}};
+    let stdout=out.join().map_err(|_|BindError::IO(format!("`{tool}` stdout reader failed")))??; let stderr=err.join().map_err(|_|BindError::IO(format!("`{tool}` stderr reader failed")))??; Ok(ToolOutput{status,stdout,stderr})
 }
-fn bounded(mut input:impl Read,limit:usize)->Result<Vec<u8>,BindError>{let mut out=Vec::new();let mut buf=[0;8192];loop{let n=input.read(&mut buf).map_err(|e|BindError::Io(format!("could not read foreign tool output: {e}")))?;if n==0{break}let keep=limit.saturating_sub(out.len()).min(n);out.extend_from_slice(&buf[..keep]);}Ok(out)}
+fn bounded(mut input:impl Read,limit:usize)->Result<Vec<u8>,BindError>{let mut out=Vec::new();let mut buf=[0;8192];loop{let n=input.read(&mut buf).map_err(|e|BindError::IO(format!("could not read foreign tool output: {e}")))?;if n==0{break}let keep=limit.saturating_sub(out.len()).min(n);out.extend_from_slice(&buf[..keep]);}Ok(out)}
 fn launder(_stderr:&[u8])->String{"the foreign tool returned a failure status".into()}
 fn jet_name(s:&str)->String{s.trim_end_matches('.').to_ascii_lowercase().replace('-',"_")}
 fn upper_camel(s:&str)->String{s.split('_').map(|p|{let mut c=p.chars();c.next().map(|h|h.to_ascii_uppercase().to_string()+c.as_str()).unwrap_or_default()}).collect()}

@@ -1136,7 +1136,7 @@ impl<'a> Checker<'a> {
                 }
                 Stmt::Return(expr, span) => {
                     // D-ENC-DYN1=A+: the declared return type may be a `Data` alias
-                    // (`Json`/`Toml`/…); canonicalize it so it unifies with the returned value.
+                    // (`JSON`/`TOML`/…); canonicalize it so it unifies with the returned value.
                     let resolved_ret = self.ret.clone().map(|t| self.resolve_type(t));
                     // D-STREAMYIELD1: a generator (`=> Stream<T>`) yields values; `return`
                     // only ever ends the stream early — bare `return;` is fine, `return
@@ -1309,11 +1309,11 @@ impl<'a> Checker<'a> {
                                 let http_handler_lambda = matches!(
                                     (&rt, &et),
                                     (Type::Named(name), Type::Fn { params, ret: Some(ret), .. })
-                                        if name == "HttpHandler"
-                                            && params == &vec![Type::Named("HttpRequest".to_string())]
+                                        if name == "HTTPHandler"
+                                            && params == &vec![Type::Named("HTTPRequest".to_string())]
                                             && ret.as_ref() == &Type::Result {
-                                                ok: Box::new(Type::Named("HttpResponse".to_string())),
-                                                err: Box::new(Type::Named("HttpError".to_string())),
+                                                ok: Box::new(Type::Named("HTTPResponse".to_string())),
+                                                err: Box::new(Type::Named("HTTPError".to_string())),
                                             }
                                 );
                                 let string_view_compatible = string_view_return && et == Type::String;
@@ -1682,7 +1682,7 @@ impl<'a> Checker<'a> {
                                 Some(Type::Named(n)) if n == "ProcessLines" => {
                                     self.declare_loop_var(var.clone(), *var_span, &Type::String);
                                 }
-                                Some(Type::Named(n)) if n == "HttpBodyChunks" => {
+                                Some(Type::Named(n)) if n == "HTTPBodyChunks" => {
                                     self.declare_loop_var(
                                         var.clone(),
                                         *var_span,
@@ -1690,7 +1690,7 @@ impl<'a> Checker<'a> {
                                             ok: Box::new(Type::List(Box::new(Type::Named(
                                                 "U8".to_string(),
                                             )))),
-                                            err: Box::new(Type::Named("HttpError".to_string())),
+                                            err: Box::new(Type::Named("HTTPError".to_string())),
                                         },
                                     );
                                 }
@@ -2160,7 +2160,7 @@ impl<'a> Checker<'a> {
                     }
                     self.pop_scope();
                 }
-                // D-EFF1 / D-QUAL1: a `#Caps(Net, Db) { … }` effect-restriction
+                // D-EFF1 / D-QUAL1: a `#Caps(Net, DB) { … }` effect-restriction
                 // region. Validate the cap names (E0119), open an accumulator so the
                 // effects reached inside are tallied, check the body, then seal the
                 // region for the post-pass E0741 subset check. A lexical scope.
@@ -2206,7 +2206,7 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                // D-SCAP1 (ratified 2026-06-21, opt A): a `#grant(Fs) { caps -> … }`
+                // D-SCAP1 (ratified 2026-06-21, opt A): a `#grant(FS) { caps -> … }`
                 // scoped-capability grant region — the dual of `#Caps`. Validate the
                 // granted effect names (E0119), bind the first-class capability handle
                 // `caps` in a fresh scope (revoked at scope end, RAII), open a grant
@@ -2333,7 +2333,7 @@ impl<'a> Checker<'a> {
                 // Bind the user-chosen handle `name` (typed `Transaction`) so
                 // `name.on_commit(() => { … })` resolves inside the block, then check
                 // the body with the transaction depth raised: an irreversible Core
-                // effect (Net/Fs/Exec) reached directly in the block is E0746
+                // effect (Net/FS/Exec) reached directly in the block is E0746
                 // (D-TXN2) at its call site. A lexical scope; erased in codegen (I3).
                 Stmt::Transact {
                     name,

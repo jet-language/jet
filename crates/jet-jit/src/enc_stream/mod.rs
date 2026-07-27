@@ -248,24 +248,24 @@ pub(crate) mod runtime {
             pub(crate) line: i64,
             pub(crate) column: i64,
             pub(crate) lookahead: Option<u8>,
-            pub(crate) frames: Vec<super::JetJsonReadFrame>,
+            pub(crate) frames: Vec<super::JetJSONReadFrame>,
             pub(crate) root_started: bool,
             pub(crate) root_done: bool,
             pub(crate) terminal: Option<EncodingError>,
             pub(crate) eof: bool,
             pub(crate) record_mode: bool,
-            pub(crate) allocation_budget: Option<super::JetJsonAllocationBudget>,
+            pub(crate) allocation_budget: Option<super::JetJSONAllocationBudget>,
         }
         pub struct JSONWriter {
             pub(crate) output: super::JetFileWriter,
             pub(crate) limits: EncodingLimits,
-            pub(crate) frames: Vec<super::JetJsonWriteFrame>,
+            pub(crate) frames: Vec<super::JetJSONWriteFrame>,
             pub(crate) root_written: bool,
             pub(crate) finished: bool,
             pub(crate) terminal: Option<EncodingError>,
             pub(crate) total: i64,
             pub(crate) canonical: bool,
-            pub(crate) canonical_frames: Vec<super::JetJsonCanonicalFrame>,
+            pub(crate) canonical_frames: Vec<super::JetJSONCanonicalFrame>,
             pub(crate) canonical_retained: usize,
         }
         pub struct JSONLReader {
@@ -307,7 +307,7 @@ pub(crate) mod runtime {
             pub(crate) terminal: Option<EncodingError>,
             pub(crate) total: i64,
             pub(crate) eof: bool,
-            pub(crate) allocation: super::JetJsonAllocationBudget,
+            pub(crate) allocation: super::JetJSONAllocationBudget,
         }
         pub struct XMLWriter {
             pub(crate) output: super::JetFileWriter,
@@ -326,22 +326,22 @@ pub(crate) mod runtime {
             pub(crate) eof: bool,
             pub(crate) root_done: bool,
             pub(crate) lookahead: Option<u8>,
-            pub(crate) frames: Vec<super::JetCborReadFrame>,
+            pub(crate) frames: Vec<super::JetCBORReadFrame>,
             pub(crate) retained: usize,
             pub(crate) workspace: usize,
-            pub(crate) allocation: super::JetJsonAllocationBudget,
+            pub(crate) allocation: super::JetJSONAllocationBudget,
         }
         pub struct CBORWriter {
             pub(crate) output: super::JetFileWriter,
             pub(crate) limits: EncodingLimits,
             pub(crate) terminal: Option<EncodingError>,
             pub(crate) total: i64,
-            pub(crate) frames: Vec<super::JetCborWriteFrame>,
+            pub(crate) frames: Vec<super::JetCBORWriteFrame>,
             pub(crate) root_written: bool,
             pub(crate) finished: bool,
             pub(crate) retained: usize,
             pub(crate) workspace: usize,
-            pub(crate) allocation: super::JetJsonAllocationBudget,
+            pub(crate) allocation: super::JetJSONAllocationBudget,
         }
     }
 
@@ -608,16 +608,16 @@ macro_rules! codec_slots {
 }
 
 codec_slots! {
-    JsonReaderSlot => runtime::jet_std::JSONReader,
-    JsonWriterSlot => runtime::jet_std::JSONWriter,
+    JSONReaderSlot => runtime::jet_std::JSONReader,
+    JSONWriterSlot => runtime::jet_std::JSONWriter,
     JsonlReaderSlot => runtime::jet_std::JSONLReader,
     JsonlWriterSlot => runtime::jet_std::JSONLWriter,
-    CsvReaderSlot => runtime::jet_std::CSVReader,
-    CsvWriterSlot => runtime::jet_std::CSVWriter,
+    CSVReaderSlot => runtime::jet_std::CSVReader,
+    CSVWriterSlot => runtime::jet_std::CSVWriter,
     XmlReaderSlot => runtime::jet_std::XMLReader,
     XmlWriterSlot => runtime::jet_std::XMLWriter,
-    CborReaderSlot => runtime::jet_std::CBORReader,
-    CborWriterSlot => runtime::jet_std::CBORWriter,
+    CBORReaderSlot => runtime::jet_std::CBORReader,
+    CBORWriterSlot => runtime::jet_std::CBORWriter,
 }
 
 fn push_ok_handle(handle: i64) -> i64 {
@@ -897,7 +897,7 @@ pub(crate) extern "C" fn jet_jit_json_writer(file: i64, limits: i64, canonical: 
     match runtime::enc_json_writer(w, lim, canonical != 0) {
         Ok(writer) => {
             let h = Concurrency::with_runtime_mut(|rt| {
-                push_codec!(rt, json_writers, JsonWriterSlot, writer)
+                push_codec!(rt, json_writers, JSONWriterSlot, writer)
             });
             push_ok_handle(h)
         }
@@ -918,7 +918,7 @@ pub(crate) extern "C" fn jet_jit_json_reader(file: i64, limits: i64) -> i64 {
     match runtime::enc_json_reader(r, lim) {
         Ok(reader) => {
             let h = Concurrency::with_runtime_mut(|rt| {
-                push_codec!(rt, json_readers, JsonReaderSlot, reader)
+                push_codec!(rt, json_readers, JSONReaderSlot, reader)
             });
             push_ok_handle(h)
         }
@@ -981,7 +981,7 @@ pub(crate) extern "C" fn jet_jit_csv_writer(file: i64, limits: i64) -> i64 {
     match runtime::enc_csv_writer(w, lim) {
         Ok(writer) => {
             let h = Concurrency::with_runtime_mut(|rt| {
-                push_codec!(rt, csv_writers, CsvWriterSlot, writer)
+                push_codec!(rt, csv_writers, CSVWriterSlot, writer)
             });
             push_ok_handle(h)
         }
@@ -1002,7 +1002,7 @@ pub(crate) extern "C" fn jet_jit_csv_reader(file: i64, limits: i64) -> i64 {
     match runtime::enc_csv_reader(r, lim) {
         Ok(reader) => {
             let h = Concurrency::with_runtime_mut(|rt| {
-                push_codec!(rt, csv_readers, CsvReaderSlot, reader)
+                push_codec!(rt, csv_readers, CSVReaderSlot, reader)
             });
             push_ok_handle(h)
         }
@@ -1023,7 +1023,7 @@ pub(crate) extern "C" fn jet_jit_cbor_writer(file: i64, limits: i64) -> i64 {
     match runtime::enc_cbor_writer(w, lim) {
         Ok(writer) => {
             let h = Concurrency::with_runtime_mut(|rt| {
-                push_codec!(rt, cbor_writers, CborWriterSlot, writer)
+                push_codec!(rt, cbor_writers, CBORWriterSlot, writer)
             });
             push_ok_handle(h)
         }
@@ -1044,7 +1044,7 @@ pub(crate) extern "C" fn jet_jit_cbor_reader(file: i64, limits: i64) -> i64 {
     match runtime::enc_cbor_reader(r, lim) {
         Ok(reader) => {
             let h = Concurrency::with_runtime_mut(|rt| {
-                push_codec!(rt, cbor_readers, CborReaderSlot, reader)
+                push_codec!(rt, cbor_readers, CBORReaderSlot, reader)
             });
             push_ok_handle(h)
         }
@@ -1115,7 +1115,7 @@ pub(crate) extern "C" fn jet_jit_json_writer_write(handle: i64, event: i64) -> i
         Ok(e) => e,
         Err(e) => return result_err_msg(&e),
     };
-    match with_writer!(json_writers, JsonWriterSlot, handle, |w| {
+    match with_writer!(json_writers, JSONWriterSlot, handle, |w| {
         runtime::enc_json_writer_write(w, ev.clone())
     }) {
         Some(Ok(())) => push_ok_handle(0),
@@ -1125,7 +1125,7 @@ pub(crate) extern "C" fn jet_jit_json_writer_write(handle: i64, event: i64) -> i
 }
 
 pub(crate) extern "C" fn jet_jit_json_writer_flush(handle: i64) -> i64 {
-    match with_writer!(json_writers, JsonWriterSlot, handle, |w| {
+    match with_writer!(json_writers, JSONWriterSlot, handle, |w| {
         runtime::enc_json_writer_flush(w)
     }) {
         Some(Ok(())) => push_ok_handle(0),
@@ -1135,7 +1135,7 @@ pub(crate) extern "C" fn jet_jit_json_writer_flush(handle: i64) -> i64 {
 }
 
 pub(crate) extern "C" fn jet_jit_json_writer_finish(handle: i64) -> i64 {
-    match with_writer!(json_writers, JsonWriterSlot, handle, |w| {
+    match with_writer!(json_writers, JSONWriterSlot, handle, |w| {
         runtime::enc_json_writer_finish(w)
     }) {
         Some(Ok(())) => push_ok_handle(0),
@@ -1145,7 +1145,7 @@ pub(crate) extern "C" fn jet_jit_json_writer_finish(handle: i64) -> i64 {
 }
 
 pub(crate) extern "C" fn jet_jit_json_reader_next(handle: i64) -> i64 {
-    match with_writer!(json_readers, JsonReaderSlot, handle, |r| {
+    match with_writer!(json_readers, JSONReaderSlot, handle, |r| {
         runtime::enc_json_reader_next(r)
     }) {
         Some(Ok(None)) => push_ok_handle(0),
@@ -1216,7 +1216,7 @@ pub(crate) extern "C" fn jet_jit_csv_writer_write(handle: i64, row: i64) -> i64 
         }
         out
     });
-    match with_writer!(csv_writers, CsvWriterSlot, handle, |w| {
+    match with_writer!(csv_writers, CSVWriterSlot, handle, |w| {
         runtime::enc_csv_writer_write(w, cells.clone())
     }) {
         Some(Ok(())) => push_ok_handle(0),
@@ -1226,7 +1226,7 @@ pub(crate) extern "C" fn jet_jit_csv_writer_write(handle: i64, row: i64) -> i64 
 }
 
 pub(crate) extern "C" fn jet_jit_csv_writer_flush(handle: i64) -> i64 {
-    match with_writer!(csv_writers, CsvWriterSlot, handle, |w| {
+    match with_writer!(csv_writers, CSVWriterSlot, handle, |w| {
         runtime::enc_csv_writer_flush(w)
     }) {
         Some(Ok(())) => push_ok_handle(0),
@@ -1236,7 +1236,7 @@ pub(crate) extern "C" fn jet_jit_csv_writer_flush(handle: i64) -> i64 {
 }
 
 pub(crate) extern "C" fn jet_jit_csv_writer_finish(handle: i64) -> i64 {
-    match with_writer!(csv_writers, CsvWriterSlot, handle, |w| {
+    match with_writer!(csv_writers, CSVWriterSlot, handle, |w| {
         runtime::enc_csv_writer_finish(w)
     }) {
         Some(Ok(())) => push_ok_handle(0),
@@ -1246,7 +1246,7 @@ pub(crate) extern "C" fn jet_jit_csv_writer_finish(handle: i64) -> i64 {
 }
 
 pub(crate) extern "C" fn jet_jit_csv_reader_next(handle: i64) -> i64 {
-    match with_writer!(csv_readers, CsvReaderSlot, handle, |r| {
+    match with_writer!(csv_readers, CSVReaderSlot, handle, |r| {
         runtime::enc_csv_reader_next(r)
     }) {
         Some(Ok(None)) => push_ok_handle(0),
@@ -1271,7 +1271,7 @@ pub(crate) extern "C" fn jet_jit_cbor_writer_write(handle: i64, event: i64) -> i
         Ok(e) => e,
         Err(e) => return result_err_msg(&e),
     };
-    match with_writer!(cbor_writers, CborWriterSlot, handle, |w| {
+    match with_writer!(cbor_writers, CBORWriterSlot, handle, |w| {
         runtime::enc_cbor_writer_write(w, ev.clone())
     }) {
         Some(Ok(())) => push_ok_handle(0),
@@ -1281,7 +1281,7 @@ pub(crate) extern "C" fn jet_jit_cbor_writer_write(handle: i64, event: i64) -> i
 }
 
 pub(crate) extern "C" fn jet_jit_cbor_writer_flush(handle: i64) -> i64 {
-    match with_writer!(cbor_writers, CborWriterSlot, handle, |w| {
+    match with_writer!(cbor_writers, CBORWriterSlot, handle, |w| {
         runtime::enc_cbor_writer_flush(w)
     }) {
         Some(Ok(())) => push_ok_handle(0),
@@ -1291,7 +1291,7 @@ pub(crate) extern "C" fn jet_jit_cbor_writer_flush(handle: i64) -> i64 {
 }
 
 pub(crate) extern "C" fn jet_jit_cbor_writer_finish(handle: i64) -> i64 {
-    match with_writer!(cbor_writers, CborWriterSlot, handle, |w| {
+    match with_writer!(cbor_writers, CBORWriterSlot, handle, |w| {
         runtime::enc_cbor_writer_finish(w)
     }) {
         Some(Ok(())) => push_ok_handle(0),
@@ -1301,7 +1301,7 @@ pub(crate) extern "C" fn jet_jit_cbor_writer_finish(handle: i64) -> i64 {
 }
 
 pub(crate) extern "C" fn jet_jit_cbor_reader_next(handle: i64) -> i64 {
-    match with_writer!(cbor_readers, CborReaderSlot, handle, |r| {
+    match with_writer!(cbor_readers, CBORReaderSlot, handle, |r| {
         runtime::enc_cbor_reader_next(r)
     }) {
         Some(Ok(None)) => push_ok_handle(0),

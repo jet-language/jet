@@ -83,14 +83,14 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
         THostCall::TypedText { kind, arg } => {
             let a = emit_tir_expr(arg, cx);
             match kind {
-                TTypedTextForm::SqlRaw => format!("(({a}).clone(), Vec::new())"),
-                TTypedTextForm::HtmlRaw => format!("({a}).clone()"),
+                TTypedTextForm::SQLRaw => format!("(({a}).clone(), Vec::new())"),
+                TTypedTextForm::HTMLRaw => format!("({a}).clone()"),
                 TTypedTextForm::ShRaw => format!(
                     "({a}).split_whitespace().map(|word| word.to_string()).collect::<Vec<String>>()"
                 ),
-                TTypedTextForm::SqlTemplate => format!("({a}).0.clone()"),
-                TTypedTextForm::SqlParams => format!("({a}).1.clone()"),
-                TTypedTextForm::HtmlText => format!("({a}).clone()"),
+                TTypedTextForm::SQLTemplate => format!("({a}).0.clone()"),
+                TTypedTextForm::SQLParams => format!("({a}).1.clone()"),
+                TTypedTextForm::HTMLText => format!("({a}).clone()"),
             }
         }
         THostCall::FnName(name) => cx.mangle_name(name),
@@ -194,7 +194,7 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
             use crate::Codegen::TIR::TTypedTextInterpKind;
             use crate::Codegen::escape_rust_str;
             match kind {
-                TTypedTextInterpKind::Sql => {
+                TTypedTextInterpKind::SQL => {
                     let template = literals.join("?");
                     let hole_s = holes
                         .iter()
@@ -218,7 +218,7 @@ pub(crate) fn emit_host_call(call: &THostCall, recv_ty: Option<&Type>, cx: &Cx) 
                     }
                     format!("vec![{}]", argv.join(", "))
                 }
-                TTypedTextInterpKind::Html => {
+                TTypedTextInterpKind::HTML => {
                     let mut fmt_str = String::new();
                     let mut fmt_args = Vec::new();
                     for (i, lit) in literals.iter().enumerate() {
@@ -1253,7 +1253,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                         )
                                     },
                                 )
-                            } else if matches!(name.as_str(), "DkimConfig" | "SmtpConfig") {
+                            } else if matches!(name.as_str(), "DkimConfig" | "SMTPConfig") {
                                 format!("{}jet_email::{}", cx.root_prefix, name)
                             } else {
                                 user_type_rust(name)
@@ -1271,7 +1271,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
                 // rust_type embeds `<ffi::Secret>` in type position; value
                 // constructors need turbofish or rustc parses `<` as comparison.
-                Type::Named(n) if matches!(n.as_str(), "DkimConfig" | "SmtpConfig") => {
+                Type::Named(n) if matches!(n.as_str(), "DkimConfig" | "SMTPConfig") => {
                     let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
                     format!(
                         "{}jet_email::{}::<{}::Secret>",
@@ -1300,7 +1300,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             | "SendReport"
                             | "Limits"
                             | "DkimConfig"
-                            | "SmtpConfig"
+                            | "SMTPConfig"
                     )
             );
             let mut parts = fields
@@ -1320,7 +1320,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{field_rust}: {value}")
                 })
                 .collect::<Vec<_>>();
-            if let Some(TStructExtra::HttpRequestParams) = extra {
+            if let Some(TStructExtra::HTTPRequestParams) = extra {
                 parts.push("params: std::collections::BTreeMap::new()".to_string());
                 parts.push("route_template: None".to_string());
             }
@@ -1402,7 +1402,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
         }
         },
-        // c109 Phase 24: a JSON construction — `{root}jet_std::Json::<Variant>(<arg>)`.
+        // c109 Phase 24: a JSON construction — `{root}jet_std::JSON::<Variant>(<arg>)`.
         // Reproduces `emit_core_json_lit` (Expression.rs): the arg is wrapped in
         // `(…).clone()` iff its `implicit_clone` flag was set; `Null` has no arg.
         // D-ENC-DYN1=A+ / D-SERDE2: a dynamic `DataTree` construction. Object
@@ -1410,7 +1410,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // field order survives; routing the literal through Jet's key-sorted Map would
         // silently alphabetize the wire shape. A computed Map still collects in its
         // ordinary Map iteration order. Scalars/`Array` bind directly.
-        TExprKind::JsonLit { variant, arg } => {
+        TExprKind::JSONLit { variant, arg } => {
             let prefix = format!("{}jet_std::DataTree", cx.root_prefix);
             match arg {
                 None => format!("{}::{}", prefix, variant),
@@ -1437,11 +1437,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 }
             }
         }
-        // D-DBDRIVER1: a `DbValue` construction — `{root}jet_std::DbValue::<Variant>(<arg>)`.
-        // Same shape as `JsonLit` (a foreign prelude enum), minus the recursive
-        // `Array`/`Object` special-case (`DbValue` has no compound variants).
-        TExprKind::DbValueLit { variant, arg } => {
-            let prefix = format!("{}jet_std::DbValue", cx.root_prefix);
+        // D-DBDRIVER1: a `DBValue` construction — `{root}jet_std::DBValue::<Variant>(<arg>)`.
+        // Same shape as `JSONLit` (a foreign prelude enum), minus the recursive
+        // `Array`/`Object` special-case (`DBValue` has no compound variants).
+        TExprKind::DBValueLit { variant, arg } => {
+            let prefix = format!("{}jet_std::DBValue", cx.root_prefix);
             match arg {
                 None => format!("{}::{}", prefix, variant),
                 Some(boxed) => {
@@ -2125,45 +2125,45 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{}jet_game_replay_record(&({}))", root, recv)
                 }
                 THandleOp::GameBackendHeadless => format!("{}jet_game_backend_headless()", root),
-                THandleOp::TlsClientConfigDefault => {
+                THandleOp::TLSClientConfigDefault => {
                     format!("{}jet_tls_client_config_default()", root)
                 }
-                THandleOp::TlsClientConfigWithAlpn => format!(
+                THandleOp::TLSClientConfigWithAlpn => format!(
                     "{}jet_tls_client_config_with_alpn(({}).clone(), &({}))",
                     root,
                     recv,
                     a(0)
                 ),
-                THandleOp::TlsRootCertificatesFromPem => {
+                THandleOp::TLSRootCertificatesFromPem => {
                     let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
                     format!(
                         "{}jet_tls_root_certificates_from_pem(&({}), {}::jet_net_tls_validate_roots_impl)",
                         root, a(0), ffi,
                     )
                 }
-                THandleOp::TlsClientIdentityFromPem => {
+                THandleOp::TLSClientIdentityFromPem => {
                     let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
                     format!(
                         "{}jet_tls_client_identity_from_pem(&({}), &({}), {}::jet_net_tls_validate_identity_impl)",
                         root, a(0), a(1), ffi,
                     )
                 }
-                THandleOp::TlsClientConfigWithTrust => format!(
+                THandleOp::TLSClientConfigWithTrust => format!(
                     "{}jet_tls_client_config_with_trust(({}).clone(), ({}).clone())",
                     root, recv, a(0),
                 ),
-                THandleOp::TlsClientConfigWithIdentity => format!(
+                THandleOp::TLSClientConfigWithIdentity => format!(
                     "{}jet_tls_client_config_with_client_identity(({}).clone(), &({}))",
                     root, recv, a(0),
                 ),
-                THandleOp::TlsClientConfigWithVersionBounds => format!(
+                THandleOp::TLSClientConfigWithVersionBounds => format!(
                     "{}jet_tls_client_config_with_version_bounds(({}).clone(), ({}).clone(), ({}).clone())",
                     root, recv, a(0), a(1),
                 ),
-                THandleOp::HttpClientNew => {
+                THandleOp::HTTPClientNew => {
                     let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
                     format!(
-                        "JetHttpClient::new({ffi}::jet_http_client_new_impl(), {ffi}::jet_http_client_drop_impl)"
+                        "JetHTTPClient::new({ffi}::jet_http_client_new_impl(), {ffi}::jet_http_client_drop_impl)"
                     )
                 }
                 THandleOp::GameSceneOnFrame => {
@@ -2303,22 +2303,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::UnixStreamSetTimeout => format!(
                     "{}jet_net_unix_set_timeout(&mut ({}), &({}))", root, recv, a(0)
                 ),
-                THandleOp::TlsStreamReadDeadline => format!(
+                THandleOp::TLSStreamReadDeadline => format!(
                     "{}jet_net_tls_read_bytes_deadline(&mut ({}), {}, &({}))", root, recv, a(0), a(1)
                 ),
-                THandleOp::TlsStreamWriteAllDeadline => format!(
+                THandleOp::TLSStreamWriteAllDeadline => format!(
                     "{}jet_net_tls_write_all_bytes_deadline(&mut ({}), &({}), &({}))", root, recv, a(0), a(1)
                 ),
-                THandleOp::TlsStreamReady => format!(
+                THandleOp::TLSStreamReady => format!(
                     "{}jet_net_tls_ready(&({}), {}, &({}))", root, recv, a(0), a(1)
                 ),
-                THandleOp::TlsStreamClose => format!(
+                THandleOp::TLSStreamClose => format!(
                     "{}jet_net_tls_close(&mut ({}))", root, recv
                 ),
-                THandleOp::TlsStreamCloseWrite => format!(
+                THandleOp::TLSStreamCloseWrite => format!(
                     "{}jet_net_tls_close_write(&mut ({}), &({}))", root, recv, a(0)
                 ),
-                THandleOp::TlsStreamPeerIdentity => format!(
+                THandleOp::TLSStreamPeerIdentity => format!(
                     "{}jet_net_tls_peer_identity(&({}))", root, recv
                 ),
                 // c109 Phase 19: arena allocator methods (byte-for-byte the AST arms).
@@ -2327,22 +2327,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("({}).alloc({})", recv, a0)
                 }
                 THandleOp::AllocReset => format!("({}).reset()", recv),
-                // c109 Phase 20: HttpRequest/HttpResponse accessors, byte-for-byte the
+                // c109 Phase 20: HTTPRequest/HTTPResponse accessors, byte-for-byte the
                 // `emit_builtin_method` arms. The plain field accessors clone the field;
                 // `header` does a map lookup; `param` calls the prelude helper.
-                THandleOp::HttpReqField(field) | THandleOp::HttpRespField(field) => {
+                THandleOp::HTTPReqField(field) | THandleOp::HTTPRespField(field) => {
                     format!("({}).{}.clone()", recv, field)
                 }
-                THandleOp::HttpReqHeader | THandleOp::HttpRespHeader => {
+                THandleOp::HTTPReqHeader | THandleOp::HTTPRespHeader => {
                     format!("({}).headers.get(&{}).cloned()", recv, a(0))
                 }
-                THandleOp::HttpReqParam => {
+                THandleOp::HTTPReqParam => {
                     format!("{}jet_http_request_param(&({}), &({}))", root, recv, a(0))
                 }
-                THandleOp::HttpReqTrailers => {
+                THandleOp::HTTPReqTrailers => {
                     format!("{}jet_http_srv_req_trailers(&({}))", root, recv)
                 }
-                THandleOp::HttpRespTrailers => {
+                THandleOp::HTTPRespTrailers => {
                     format!("{}jet_http_srv_response_trailers({}, {})", root, recv, a(0))
                 }
                 // c109 Phase 21: Task/Channel/Sender methods, byte-for-byte the
@@ -2696,9 +2696,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 },
                 // D-NETDEP1=A / D-HTTPLIB1=A: HTTP client method call.
                 // "body"/"header" dispatch by arity: 0-arg=response accessor, 1-arg=request builder.
-                THandleOp::HttpClientMethod { kind, method } => {
+                THandleOp::HTTPClientMethod { kind, method } => {
                     let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                    if kind == "HttpClient" {
+                    if kind == "HTTPClient" {
                         let policy = |call: String| {
                             let error = emit_http_bridge_error(ffi, "error");
                             format!(
@@ -2708,13 +2708,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         };
                         match method.as_str() {
                             "cookies" => policy(format!(
-                                "{{ let _jar = &({}); match _jar {{ JetHttpCookieJar::Memory => {ffi}::jet_http_client_cookies_impl(_client.owner.handle, true), }} }}",
+                                "{{ let _jar = &({}); match _jar {{ JetHTTPCookieJar::Memory => {ffi}::jet_http_client_cookies_impl(_client.owner.handle, true), }} }}",
                                 a(0),
                             )),
                             "redirects" => {
                                 let error = emit_http_bridge_error(ffi, "error");
                                 format!(
-                                    "{{ let _client = ({recv}); let _policy = &({arg}); let _next = (match _policy {{ JetHttpRedirectPolicy::Follow {{ max, same_origin_credentials }} => {ffi}::jet_http_client_redirects_impl(_client.owner.handle, *max, *same_origin_credentials), }}).map_err(|error| {error}); _client.policy(_next, {ffi}::jet_http_client_drop_impl) }}",
+                                    "{{ let _client = ({recv}); let _policy = &({arg}); let _next = (match _policy {{ JetHTTPRedirectPolicy::Follow {{ max, same_origin_credentials }} => {ffi}::jet_http_client_redirects_impl(_client.owner.handle, *max, *same_origin_credentials), }}).map_err(|error| {error}); _client.policy(_next, {ffi}::jet_http_client_drop_impl) }}",
                                     recv = recv,
                                     arg = a(0),
                                     ffi = ffi,
@@ -2735,7 +2735,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             "proxy" => {
                                 let error = emit_http_bridge_error(ffi, "error");
                                 format!(
-                                    "{{ let _client = ({recv}); let _proxy = &({arg}); let _next = (match _proxy {{ JetHttpProxy::FromEnvironment => {ffi}::jet_http_client_proxy_from_environment_impl(_client.owner.handle), JetHttpProxy::None => {ffi}::jet_http_client_proxy_impl(_client.owner.handle, None), JetHttpProxy::Url(url) => {ffi}::jet_http_client_proxy_impl(_client.owner.handle, Some(url.as_str())), }}).map_err(|error| {error}); _client.policy(_next, {ffi}::jet_http_client_drop_impl) }}",
+                                    "{{ let _client = ({recv}); let _proxy = &({arg}); let _next = (match _proxy {{ JetHTTPProxy::FromEnvironment => {ffi}::jet_http_client_proxy_from_environment_impl(_client.owner.handle), JetHTTPProxy::None => {ffi}::jet_http_client_proxy_impl(_client.owner.handle, None), JetHTTPProxy::Url(url) => {ffi}::jet_http_client_proxy_impl(_client.owner.handle, Some(url.as_str())), }}).map_err(|error| {error}); _client.policy(_next, {ffi}::jet_http_client_drop_impl) }}",
                                     recv = recv,
                                     arg = a(0),
                                     ffi = ffi,
@@ -2759,7 +2759,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             "retries" => {
                                 let error = emit_http_bridge_error(ffi, "error");
                                 format!(
-                                    "{{ let _client = ({recv}); let _policy = &({arg}); let _mode = match _policy {{ JetHttpRetryPolicy::None => 0_i64, JetHttpRetryPolicy::Safe => 1_i64, JetHttpRetryPolicy::Idempotent => 2_i64, }}; let _next = {ffi}::jet_http_client_retries_impl(_client.owner.handle, _mode).map_err(|error| {error}); _client.policy(_next, {ffi}::jet_http_client_drop_impl) }}",
+                                    "{{ let _client = ({recv}); let _policy = &({arg}); let _mode = match _policy {{ JetHTTPRetryPolicy::None => 0_i64, JetHTTPRetryPolicy::Safe => 1_i64, JetHTTPRetryPolicy::Idempotent => 2_i64, }}; let _next = {ffi}::jet_http_client_retries_impl(_client.owner.handle, _mode).map_err(|error| {error}); _client.policy(_next, {ffi}::jet_http_client_drop_impl) }}",
                                     recv = recv,
                                     arg = a(0),
                                     ffi = ffi,
@@ -2773,7 +2773,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                 let response = emit_http_response_from_bridge(call, ffi);
                                 let error = emit_http_bridge_error(ffi, "error");
                                 format!(
-                                    "{{ let _client = &({recv}); match &_client.policy_error {{ Some(error) => Err(error.clone()), None => {{ let _r = &({arg}); match &_r.header_error {{ Some(error) => Err(error.clone()), None => {{ {ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()).map_err(|error| {error}).and_then(|_ambient| jet_http_client_body_upload(_r).and_then(|(body_len, has_body, mut chunks)| {{ let mut body_read = || -> Result<Option<Vec<u8>>, {ffi}::JetHttpBridgeError> {{ match chunks.as_mut() {{ None => Ok(None), Some(iter) => match iter.next() {{ None => Ok(None), Some(Ok(chunk)) => Ok(Some(chunk)), Some(Err(_)) => Err({ffi}::JetHttpBridgeError::Io) }} }} }}; {response} }})) }} }} }} }} }}",
+                                    "{{ let _client = &({recv}); match &_client.policy_error {{ Some(error) => Err(error.clone()), None => {{ let _r = &({arg}); match &_r.header_error {{ Some(error) => Err(error.clone()), None => {{ {ffi}::JetHTTPAmbientDeadline::push(jet_deadline_remaining_ms()).map_err(|error| {error}).and_then(|_ambient| jet_http_client_body_upload(_r).and_then(|(body_len, has_body, mut chunks)| {{ let mut body_read = || -> Result<Option<Vec<u8>>, {ffi}::JetHTTPBridgeError> {{ match chunks.as_mut() {{ None => Ok(None), Some(iter) => match iter.next() {{ None => Ok(None), Some(Ok(chunk)) => Ok(Some(chunk)), Some(Err(_)) => Err({ffi}::JetHTTPBridgeError::IO) }} }} }}; {response} }})) }} }} }} }} }}",
                                     recv = recv,
                                     arg = a(0),
                                     ffi = ffi,
@@ -2781,16 +2781,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                     response = response,
                                 )
                             }
-                            _ => unreachable!("unknown HttpClient method {method}"),
+                            _ => unreachable!("unknown HTTPClient method {method}"),
                         }
-                    } else if kind == "HttpBody" {
+                    } else if kind == "HTTPBody" {
                         match method.as_str() {
                             "bytes" => format!("{}jet_http_body_bytes(&({}), {})", root, recv, a(0)),
                             "text" => format!("{}jet_http_body_text(&({}), {})", root, recv, a(0)),
                             "json" => {
                                 let target = match &e.ty {
                                     Type::Result { ok, .. } => cx.rust_type(ok),
-                                    _ => unreachable!("Body.json must return Result<T, HttpError>"),
+                                    _ => unreachable!("Body.json must return Result<T, HTTPError>"),
                                 };
                                 format!("{}jet_http_body_json::<{}>(&({}), {})", root, target, recv, a(0))
                             }
@@ -2801,18 +2801,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                 if args.is_empty() { "65536".to_string() } else { a(0) },
                             ),
                             "copy_to" => format!("{}jet_http_body_copy_to(&({}), &mut ({}), {})", root, recv, a(0), a(1)),
-                            _ => unreachable!("unknown HttpBody method {method}"),
+                            _ => unreachable!("unknown HTTPBody method {method}"),
                         }
-                    } else if kind == "HttpHeaders" {
+                    } else if kind == "HTTPHeaders" {
                         match method.as_str() {
                             "first" => format!("{}jet_http_headers_first(&({}), &({}))", root, recv, a(0)),
                             "all" => format!("{}jet_http_headers_all(&({}), &({}))", root, recv, a(0)),
                             "append" => format!("{}jet_http_headers_append({}, &({}), &({}))", root, recv, a(0), a(1)),
                             "set" => format!("{}jet_http_headers_set({}, &({}), &({}))", root, recv, a(0), a(1)),
                             "remove" => format!("{}jet_http_headers_remove({}, &({}))", root, recv, a(0)),
-                            _ => unreachable!("unknown HttpHeaders method {method}"),
+                            _ => unreachable!("unknown HTTPHeaders method {method}"),
                         }
-                    } else if kind == "HttpRequest" {
+                    } else if kind == "HTTPRequest" {
                         match method.as_str() {
                             "trailers" => format!("{}jet_http_srv_req_trailers(&({}))", root, recv),
                             "header" => format!(
@@ -2824,7 +2824,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             ),
                             "body" => {
                                 let arg = &args[0];
-                                if matches!(&arg.ty, Type::Named(name) if name == "HttpBody") {
+                                if matches!(&arg.ty, Type::Named(name) if name == "HTTPBody") {
                                     format!(
                                         "{}jet_http_client_request_body_stream({}, ({}))",
                                         root,
@@ -2922,7 +2922,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                 a(1)
                             ),
                             "send" => {
-                                // call bridge with req fields; assemble JetHttpResponse
+                                // call bridge with req fields; assemble JetHTTPResponse
                                 let call = format!(
                                     "{ffi}::jet_http_client_send_stream_impl(&_r.method, &_r.url, &_r.headers.to_flat(), body_len, has_body, &mut body_read, _r.timeout_ms, _r.connect_timeout_ms, _r.read_timeout_ms, _r.total_timeout_ms, _r.dns_timeout_ms, _r.tls_timeout_ms, _r.write_timeout_ms, _r.first_byte_timeout_ms, _r.redirects, _r.proxy.as_deref(), &_r.cookies, &_r.form, &_r.multipart)",
                                     ffi = ffi
@@ -2930,7 +2930,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                 let response = emit_http_response_from_bridge(call, ffi);
                                 let error = emit_http_bridge_error(ffi, "error");
                                 format!(
-                                    "{{ let _r = &({recv}); match &_r.header_error {{ Some(error) => Err(error.clone()), None => {{ {ffi}::JetHttpAmbientDeadline::push(jet_deadline_remaining_ms()).map_err(|error| {error}).and_then(|_ambient| jet_http_client_body_upload(_r).and_then(|(body_len, has_body, mut chunks)| {{ let mut body_read = || -> Result<Option<Vec<u8>>, {ffi}::JetHttpBridgeError> {{ match chunks.as_mut() {{ None => Ok(None), Some(iter) => match iter.next() {{ None => Ok(None), Some(Ok(chunk)) => Ok(Some(chunk)), Some(Err(_)) => Err({ffi}::JetHttpBridgeError::Io) }} }} }}; {response} }})) }} }} }}",
+                                    "{{ let _r = &({recv}); match &_r.header_error {{ Some(error) => Err(error.clone()), None => {{ {ffi}::JetHTTPAmbientDeadline::push(jet_deadline_remaining_ms()).map_err(|error| {error}).and_then(|_ambient| jet_http_client_body_upload(_r).and_then(|(body_len, has_body, mut chunks)| {{ let mut body_read = || -> Result<Option<Vec<u8>>, {ffi}::JetHTTPBridgeError> {{ match chunks.as_mut() {{ None => Ok(None), Some(iter) => match iter.next() {{ None => Ok(None), Some(Ok(chunk)) => Ok(Some(chunk)), Some(Err(_)) => Err({ffi}::JetHTTPBridgeError::IO) }} }} }}; {response} }})) }} }} }}",
                                     recv = recv,
                                     ffi = ffi,
                                     error = error,
@@ -2978,9 +2978,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                 }
                 // D-NETDEP1=A / D-HTTPLIB1=A: HTTP server method call.
-                THandleOp::HttpServerMethod { kind, method } => {
+                THandleOp::HTTPServerMethod { kind, method } => {
                     match (kind.as_str(), method.as_str()) {
-                        ("HttpMux", "get" | "post" | "put" | "delete" | "patch" | "head" | "options") => {
+                        ("HTTPMux", "get" | "post" | "put" | "delete" | "patch" | "head" | "options") => {
                             format!(
                                 "{{ {}jet_http_mux_add_handler(&({}), \"{}\", &({}), {}) }}",
                                 root,
@@ -2990,32 +2990,32 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                 a(1)
                             )
                         }
-                        ("HttpMux", "middleware") => {
+                        ("HTTPMux", "middleware") => {
                             format!("{{ {}jet_http_mux_middleware(&({}), {}) }}", root, recv, a(0))
                         }
-                        ("HttpHandler", "handle") => format!("({})({})", recv, a(0)),
-                        ("HttpRequest", "method") => {
+                        ("HTTPHandler", "handle") => format!("({})({})", recv, a(0)),
+                        ("HTTPRequest", "method") => {
                             format!("{}jet_http_srv_req_method(&({}))", root, recv)
                         }
-                        ("HttpRequest", "path") => {
+                        ("HTTPRequest", "path") => {
                             format!("{}jet_http_srv_req_path(&({}))", root, recv)
                         }
-                        ("HttpRequest", "body") => {
+                        ("HTTPRequest", "body") => {
                             format!("{}jet_http_srv_req_body(&({}))", root, recv)
                         }
-                        ("HttpRequest", "trailers") => {
+                        ("HTTPRequest", "trailers") => {
                             format!("{}jet_http_srv_req_trailers(&({}))", root, recv)
                         }
-                        ("HttpRequest", "param") => {
+                        ("HTTPRequest", "param") => {
                             format!("{}jet_http_srv_req_param(&({}), &({}))", root, recv, a(0))
                         }
-                        ("HttpRequest", "header") => {
+                        ("HTTPRequest", "header") => {
                             format!("{}jet_http_srv_req_header(&({}), &({}))", root, recv, a(0))
                         }
-                        ("HttpRequest", "body_len") => {
+                        ("HTTPRequest", "body_len") => {
                             format!("{}jet_http_srv_req_body_len(&({}))", root, recv)
                         }
-                        ("HttpRequest", "under_limit") => format!(
+                        ("HTTPRequest", "under_limit") => format!(
                             "{}jet_http_srv_req_under_limit(&({}), {})",
                             root,
                             recv,
@@ -3144,25 +3144,25 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         ("BrowserTrace", "summary") => {
                             format!("{}jet_browser_trace_summary(&({}))", root, recv)
                         }
-                        ("HttpResponse", "header") => format!(
+                        ("HTTPResponse", "header") => format!(
                             "{}jet_http_srv_response_header({}, &({}), &({}))",
                             root,
                             recv,
                             a(0),
                             a(1)
                         ),
-                        ("HttpResponse", "status") => format!("{}jet_http_srv_response_status(&({}))", root, recv),
-                        ("HttpResponse", "body") => format!("{}jet_http_srv_response_body(&({}))", root, recv),
-                        ("HttpResponse", "trailers") => format!(
+                        ("HTTPResponse", "status") => format!("{}jet_http_srv_response_status(&({}))", root, recv),
+                        ("HTTPResponse", "body") => format!("{}jet_http_srv_response_body(&({}))", root, recv),
+                        ("HTTPResponse", "trailers") => format!(
                             "{}jet_http_srv_response_trailers({}, {})",
                             root,
                             recv,
                             a(0)
                         ),
-                        ("HttpResponse", "cookies") => format!("{}jet_http_response_cookies(&({}))", root, recv),
-                        ("HttpServer", "local_addr") => format!("{}jet_http_server_local_addr(&({})).map_err(|_| JetHttpError::Io {{ operation: \"local address\".to_string() }})", root, recv),
-                        ("HttpServer", "serve") => format!("{}jet_http_server_serve(&({})).map_err(|_| JetHttpError::Io {{ operation: \"serve\".to_string() }})", root, recv),
-                        ("HttpServer", "shutdown") => format!("{}jet_http_server_shutdown(&({}), &({})).map_err(|_| JetHttpError::Io {{ operation: \"shutdown\".to_string() }})", root, recv, a(0)),
+                        ("HTTPResponse", "cookies") => format!("{}jet_http_response_cookies(&({}))", root, recv),
+                        ("HTTPServer", "local_addr") => format!("{}jet_http_server_local_addr(&({})).map_err(|_| JetHTTPError::IO {{ operation: \"local address\".to_string() }})", root, recv),
+                        ("HTTPServer", "serve") => format!("{}jet_http_server_serve(&({})).map_err(|_| JetHTTPError::IO {{ operation: \"serve\".to_string() }})", root, recv),
+                        ("HTTPServer", "shutdown") => format!("{}jet_http_server_shutdown(&({}), &({})).map_err(|_| JetHTTPError::IO {{ operation: \"shutdown\".to_string() }})", root, recv, a(0)),
                         _ => {
                             if args.is_empty() {
                                 format!("({}).{}()", recv, method)
@@ -3263,11 +3263,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         }
                     }
                 }
-                // c109 Phase 25: HttpRouter route registration, byte-for-byte the
+                // c109 Phase 25: HTTPRouter route registration, byte-for-byte the
                 // `emit_builtin_method` router arm (Source/Codegen/Expression.rs ~L937).
                 // `recv` is `&mut`-borrowed; the path is plain (args[0]); the handler is
                 // the pre-rendered boxed closure.
-                THandleOp::HttpRouterRegister {
+                THandleOp::HTTPRouterRegister {
                     verb,
                     handler,
                     file,
@@ -3315,13 +3315,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     recv
                 ),
                 THandleOp::SerdeEncode => format!("user_Encode::jet_encode(&({}))", recv),
-                // D-SERDE-ACCESS=B: same accessors on Json/Data.
-                THandleOp::JsonField => format!("({}).field(&({}))", recv, a(0)),
-                THandleOp::JsonAt => format!("({}).at({})", recv, a(0)),
-                THandleOp::JsonInt => format!("({}).int()", recv),
-                THandleOp::JsonText => format!("({}).text()", recv),
-                THandleOp::JsonBool => format!("({}).bool()", recv),
-                THandleOp::JsonFloat => format!("({}).float()", recv),
+                // D-SERDE-ACCESS=B: same accessors on JSON/Data.
+                THandleOp::JSONField => format!("({}).field(&({}))", recv, a(0)),
+                THandleOp::JSONAt => format!("({}).at({})", recv, a(0)),
+                THandleOp::JSONInt => format!("({}).int()", recv),
+                THandleOp::JSONText => format!("({}).text()", recv),
+                THandleOp::JSONBool => format!("({}).bool()", recv),
+                THandleOp::JSONFloat => format!("({}).float()", recv),
                 // D-PATHFS1: Path object methods.
                 THandleOp::PathFrom => format!("{}jet_path_from(&({}))", root, recv),
                 THandleOp::PathJoin => format!("{}jet_path_join(&({}), &({}))", root, recv, a(0)),
@@ -3436,40 +3436,40 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         ok_val = ok_val,
                     )
                 }
-                // D-DBDRIVER1: `DbConnection` instance methods. `query`/`query_one`/
+                // D-DBDRIVER1: `DBConnection` instance methods. `query`/`query_one`/
                 // `execute` cross the FFI bridge boundary as plain wire text (params
-                // encoded, rows/count/error decoded) — see `Source/Prelude/Db.rs` and
+                // encoded, rows/count/error decoded) — see `Source/Prelude/DB.rs` and
                 // `jet_std::jet_db_{encode_params,decode_query_result,decode_execute_result}`
                 // in `Source/Prelude/CoreLib.rs`.
-                THandleOp::DbQuery => format!(
+                THandleOp::DBQuery => format!(
                     "{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(({recv}).handle, &({}), &{root}jet_std::jet_db_encode_params(&({}))))",
                     a(0),
                     a(1)
                 ),
-                THandleOp::DbQueryOne => format!(
+                THandleOp::DBQueryOne => format!(
                     "{root}jet_std::jet_db_decode_query_result(&{ffi}::jet_db_query(({recv}).handle, &({}), &{root}jet_std::jet_db_encode_params(&({})))).map(|__rows| __rows.into_iter().next())",
                     a(0),
                     a(1)
                 ),
-                THandleOp::DbExecute => format!(
+                THandleOp::DBExecute => format!(
                     "{root}jet_std::jet_db_decode_execute_result(&{ffi}::jet_db_execute(({recv}).handle, &({}), &{root}jet_std::jet_db_encode_params(&({}))))",
                     a(0),
                     a(1)
                 ),
-                THandleOp::DbBegin => format!("{ffi}::jet_db_begin(({recv}).handle)"),
-                THandleOp::DbCommit => format!("{ffi}::jet_db_commit(({recv}).handle)"),
-                THandleOp::DbRollback => format!("{ffi}::jet_db_rollback(({recv}).handle)"),
-                THandleOp::DbClose => format!("{ffi}::jet_db_close(({recv}).handle)"),
-                // D-DBDRIVER1: `DbValue` accessors — plain inherent Rust methods on
-                // the always-compiled `jet_std::DbValue` enum (no FFI bridge involved).
-                THandleOp::DbValueInt => format!("({}).int()", recv),
-                THandleOp::DbValueFloat => format!("({}).float()", recv),
-                THandleOp::DbValueText => format!("({}).text()", recv),
-                THandleOp::DbValueBool => format!("({}).bool()", recv),
-                THandleOp::DbValueIsNull => format!("({}).is_null()", recv),
+                THandleOp::DBBegin => format!("{ffi}::jet_db_begin(({recv}).handle)"),
+                THandleOp::DBCommit => format!("{ffi}::jet_db_commit(({recv}).handle)"),
+                THandleOp::DBRollback => format!("{ffi}::jet_db_rollback(({recv}).handle)"),
+                THandleOp::DBClose => format!("{ffi}::jet_db_close(({recv}).handle)"),
+                // D-DBDRIVER1: `DBValue` accessors — plain inherent Rust methods on
+                // the always-compiled `jet_std::DBValue` enum (no FFI bridge involved).
+                THandleOp::DBValueInt => format!("({}).int()", recv),
+                THandleOp::DBValueFloat => format!("({}).float()", recv),
+                THandleOp::DBValueText => format!("({}).text()", recv),
+                THandleOp::DBValueBool => format!("({}).bool()", recv),
+                THandleOp::DBValueIsNull => format!("({}).is_null()", recv),
                 // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `Plugin.call`/`.call_int` —
                 // a homogeneous scalar call across the sandboxed Component
-                // Model boundary, wire-encoded exactly like `DbQuery` above
+                // Model boundary, wire-encoded exactly like `DBQuery` above
                 // (args encoded, result decoded; see `Prelude/Plugin.rs` and
                 // `jet_std::jet_plugin_{encode_args_float,decode_result_float}`
                 // in `Prelude/CoreLib.rs`).

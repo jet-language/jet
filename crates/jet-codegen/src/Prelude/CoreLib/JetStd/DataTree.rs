@@ -1,7 +1,7 @@
     // ── core.encoding: format-agnostic value tree (D-SERDE2 = A) ───────────────
     // The one tree every format adapter speaks. The built-in `#[Codable]` derive
     // (D-ENC1) lowers `encode`/`decode` to walks over this; each adapter turns it
-    // into / parses it from wire text. Distinct from the dynamic `Json` enum:
+    // into / parses it from wire text. Distinct from the dynamic `JSON` enum:
     // `DataTree` preserves field order (ordered `Object`) and keeps Int vs Float.
     #[derive(Clone, Debug, PartialEq)]
     pub enum DataTree {

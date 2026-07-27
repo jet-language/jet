@@ -297,7 +297,7 @@ pub enum IngestError {
     PathLaw(super::super::Envelope::PathLawError),
     Mutated(String),
     Invalid(String),
-    Io(String),
+    IO(String),
 }
 
 impl IngestError {
@@ -305,7 +305,7 @@ impl IngestError {
         match self {
             IngestError::PathLaw(_) => "E1299",
             IngestError::Mutated(_) => "E1315",
-            IngestError::Invalid(_) | IngestError::Io(_) => "E1315",
+            IngestError::Invalid(_) | IngestError::IO(_) => "E1315",
         }
     }
 
@@ -314,7 +314,7 @@ impl IngestError {
             IngestError::PathLaw(err) => err.what(),
             IngestError::Mutated(msg) => format!("hangar ingest aborted: {msg}"),
             IngestError::Invalid(msg) => format!("hangar ingest rejected: {msg}"),
-            IngestError::Io(msg) => format!("hangar ingest failed: {msg}"),
+            IngestError::IO(msg) => format!("hangar ingest failed: {msg}"),
         }
     }
 
@@ -326,7 +326,7 @@ impl IngestError {
                     .into()
             }
             IngestError::Invalid(msg) => msg.clone(),
-            IngestError::Io(msg) => msg.clone(),
+            IngestError::IO(msg) => msg.clone(),
         }
     }
 
@@ -339,7 +339,7 @@ impl IngestError {
             IngestError::Invalid(_) => {
                 "Fix the rejected tree (path law, special files, or unsupported xattrs) and ingest again."
             }
-            IngestError::Io(_) => "Check hangar permissions and free disk space, then retry.",
+            IngestError::IO(_) => "Check hangar permissions and free disk space, then retry.",
         }
     }
 
@@ -350,7 +350,7 @@ impl IngestError {
 
 impl From<std::io::Error> for IngestError {
     fn from(err: std::io::Error) -> Self {
-        IngestError::Io(err.to_string())
+        IngestError::IO(err.to_string())
     }
 }
 
@@ -406,8 +406,8 @@ pub fn ingest_tree(roots: &Roots, req: &IngestRequest) -> Result<IngestedObject,
         outcome = Some(ingest_tree_unlocked(roots, req));
         Ok(())
     })
-    .map_err(|e| IngestError::Io(e.to_string()))?;
-    outcome.unwrap_or_else(|| Err(IngestError::Io("ingest produced no result".into())))
+    .map_err(|e| IngestError::IO(e.to_string()))?;
+    outcome.unwrap_or_else(|| Err(IngestError::IO("ingest produced no result".into())))
 }
 
 fn ingest_tree_unlocked(
@@ -620,9 +620,9 @@ fn valid_output_name(name: &str) -> bool {
 fn source_metadata(path: &Path) -> Result<fs::Metadata, IngestError> {
     fs::symlink_metadata(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
-            IngestError::Io(format!("output `{}` does not exist", path.display()))
+            IngestError::IO(format!("output `{}` does not exist", path.display()))
         } else {
-            IngestError::Io(format!(
+            IngestError::IO(format!(
                 "cannot inspect output `{}`: {error}",
                 path.display()
             ))
@@ -639,12 +639,12 @@ fn reject_semantic_xattrs_tree(root: &Path) -> Result<(), IngestError> {
         }
         if meta.is_dir() {
             for ent in fs::read_dir(path).map_err(|error| {
-                IngestError::Io(format!(
+                IngestError::IO(format!(
                     "cannot read output directory `{}`: {error}",
                     path.display()
                 ))
             })? {
-                let ent = ent.map_err(|e| IngestError::Io(e.to_string()))?;
+                let ent = ent.map_err(|e| IngestError::IO(e.to_string()))?;
                 walk(&ent.path())?;
             }
         }
@@ -663,8 +663,8 @@ fn copy_semantic_xattrs_tree(src_root: &Path, dst_root: &Path) -> Result<(), Ing
             return Ok(());
         }
         if meta.is_dir() {
-            for ent in fs::read_dir(src).map_err(|e| IngestError::Io(e.to_string()))? {
-                let ent = ent.map_err(|e| IngestError::Io(e.to_string()))?;
+            for ent in fs::read_dir(src).map_err(|e| IngestError::IO(e.to_string()))? {
+                let ent = ent.map_err(|e| IngestError::IO(e.to_string()))?;
                 let name = ent.file_name();
                 walk(&ent.path(), &dst.join(&name))?;
             }
@@ -702,7 +702,7 @@ fn semantic_xattr_names(path: &Path) -> Result<Vec<String>, IngestError> {
         .map_err(|_| IngestError::Invalid("xattr path contains NUL".into()))?;
     let size = unsafe { listxattr(path.as_ptr(), std::ptr::null_mut(), 0, XATTR_NOFOLLOW) };
     if size < 0 {
-        return Err(IngestError::Io(format!(
+        return Err(IngestError::IO(format!(
             "listxattr failed: {}",
             std::io::Error::last_os_error()
         )));
@@ -710,7 +710,7 @@ fn semantic_xattr_names(path: &Path) -> Result<Vec<String>, IngestError> {
     let mut names = vec![0i8; size as usize];
     let wrote = unsafe { listxattr(path.as_ptr(), names.as_mut_ptr(), names.len(), XATTR_NOFOLLOW) };
     if wrote < 0 {
-        return Err(IngestError::Io(format!(
+        return Err(IngestError::IO(format!(
             "listxattr failed: {}",
             std::io::Error::last_os_error()
         )));
@@ -749,7 +749,7 @@ fn get_xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, IngestError> {
         .map_err(|_| IngestError::Invalid(format!("xattr name `{name}` contains NUL")))?;
     let size = unsafe { lgetxattr(c_path.as_ptr(), c_name.as_ptr(), std::ptr::null_mut(), 0) };
     if size < 0 {
-        return Err(IngestError::Io(format!(
+        return Err(IngestError::IO(format!(
             "lgetxattr `{}` on `{}`: {}",
             name,
             path.display(),
@@ -759,7 +759,7 @@ fn get_xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, IngestError> {
     let mut buf = vec![0u8; size as usize];
     let wrote = unsafe { lgetxattr(c_path.as_ptr(), c_name.as_ptr(), buf.as_mut_ptr(), buf.len()) };
     if wrote < 0 {
-        return Err(IngestError::Io(format!(
+        return Err(IngestError::IO(format!(
             "lgetxattr `{}` on `{}`: {}",
             name,
             path.display(),
@@ -792,7 +792,7 @@ fn get_xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, IngestError> {
         getxattr(c_path.as_ptr(), c_name.as_ptr(), std::ptr::null_mut(), 0, 0, XATTR_NOFOLLOW)
     };
     if size < 0 {
-        return Err(IngestError::Io(format!(
+        return Err(IngestError::IO(format!(
             "getxattr `{name}` on `{}`: {}",
             path.display(),
             std::io::Error::last_os_error()
@@ -803,7 +803,7 @@ fn get_xattr_value(path: &Path, name: &str) -> Result<Vec<u8>, IngestError> {
         getxattr(c_path.as_ptr(), c_name.as_ptr(), value.as_mut_ptr(), value.len(), 0, XATTR_NOFOLLOW)
     };
     if wrote < 0 {
-        return Err(IngestError::Io(format!(
+        return Err(IngestError::IO(format!(
             "getxattr `{name}` on `{}`: {}",
             path.display(),
             std::io::Error::last_os_error()
@@ -848,7 +848,7 @@ fn set_xattr_value(path: &Path, name: &str, value: &[u8]) -> Result<(), IngestEr
         )
     };
     if rc != 0 {
-        return Err(IngestError::Io(format!(
+        return Err(IngestError::IO(format!(
             "lsetxattr `{}` on `{}`: {}",
             name,
             path.display(),
@@ -880,7 +880,7 @@ fn set_xattr_value(path: &Path, name: &str, value: &[u8]) -> Result<(), IngestEr
         setxattr(c_path.as_ptr(), c_name.as_ptr(), value.as_ptr(), value.len(), 0, XATTR_NOFOLLOW)
     } != 0
     {
-        return Err(IngestError::Io(format!(
+        return Err(IngestError::IO(format!(
             "setxattr `{name}` on `{}`: {}",
             path.display(),
             std::io::Error::last_os_error()
@@ -902,13 +902,13 @@ fn directory_snapshot(
     let mut snapshot = Vec::new();
     let mut path_names = Vec::new();
     for ent in fs::read_dir(src).map_err(|error| {
-        IngestError::Io(format!(
+        IngestError::IO(format!(
             "cannot read output directory `{}`: {error}",
             src.display()
         ))
     })? {
         let ent = ent.map_err(|error| {
-            IngestError::Io(format!(
+            IngestError::IO(format!(
                 "cannot read output directory `{}`: {error}",
                 src.display()
             ))
@@ -976,10 +976,10 @@ fn copy_nofollow_tree(src: &Path, dst: &Path) -> Result<(), IngestError> {
             )));
         }
     } else if meta.file_type().is_symlink() {
-        let target = fs::read_link(src).map_err(|e| IngestError::Io(e.to_string()))?;
+        let target = fs::read_link(src).map_err(|e| IngestError::IO(e.to_string()))?;
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink(&target, dst).map_err(|e| IngestError::Io(e.to_string()))?;
+            std::os::unix::fs::symlink(&target, dst).map_err(|e| IngestError::IO(e.to_string()))?;
         }
         #[cfg(not(unix))]
         {
@@ -999,7 +999,7 @@ fn copy_nofollow_tree(src: &Path, dst: &Path) -> Result<(), IngestError> {
         if error.kind() == std::io::ErrorKind::NotFound {
             IngestError::Mutated(format!("`{}` disappeared during ingest", src.display()))
         } else {
-            IngestError::Io(format!(
+            IngestError::IO(format!(
                 "cannot re-inspect output `{}`: {error}",
                 src.display()
             ))
@@ -1036,10 +1036,10 @@ fn copy_nofollow_file(
         options.custom_flags(contract.open_reparse_point);
         let file = options
             .open(src)
-            .map_err(|e| IngestError::Io(format!("reparse-safe open `{}`: {e}", src.display())))?;
+            .map_err(|e| IngestError::IO(format!("reparse-safe open `{}`: {e}", src.display())))?;
         if file
             .metadata()
-            .map_err(|e| IngestError::Io(e.to_string()))?
+            .map_err(|e| IngestError::IO(e.to_string()))?
             .file_attributes()
             & contract.reparse_attribute
             != 0
@@ -1053,10 +1053,10 @@ fn copy_nofollow_file(
     }
     let mut file = options
         .open(src)
-        .map_err(|e| IngestError::Io(format!("nofollow open `{}`: {e}", src.display())))?;
+        .map_err(|e| IngestError::IO(format!("nofollow open `{}`: {e}", src.display())))?;
     let opened = file
         .metadata()
-        .map_err(|e| IngestError::Io(e.to_string()))?;
+        .map_err(|e| IngestError::IO(e.to_string()))?;
     if stable_meta_identity(&opened)? != stable_meta_identity(expected)? {
         return Err(IngestError::Mutated(format!(
             "`{}` changed before copy",
@@ -1065,23 +1065,23 @@ fn copy_nofollow_file(
     }
     let mut bytes = Vec::new();
     std::io::Read::read_to_end(&mut file, &mut bytes)
-        .map_err(|e| IngestError::Io(e.to_string()))?;
+        .map_err(|e| IngestError::IO(e.to_string()))?;
     let after = file
         .metadata()
-        .map_err(|e| IngestError::Io(e.to_string()))?;
+        .map_err(|e| IngestError::IO(e.to_string()))?;
     if stable_meta_identity(&opened)? != stable_meta_identity(&after)? {
         return Err(IngestError::Mutated(format!(
             "`{}` changed while copying",
             src.display()
         )));
     }
-    fs::write(dst, &bytes).map_err(|e| IngestError::Io(e.to_string()))?;
+    fs::write(dst, &bytes).map_err(|e| IngestError::IO(e.to_string()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::{PermissionsExt as _, MetadataExt as _};
         let mode = expected.mode() & 0o7777;
         fs::set_permissions(dst, fs::Permissions::from_mode(mode))
-            .map_err(|e| IngestError::Io(e.to_string()))?;
+            .map_err(|e| IngestError::IO(e.to_string()))?;
     }
     Ok(())
 }
@@ -1093,17 +1093,17 @@ fn copy_open_file(
     dst: &Path,
     expected: &fs::Metadata,
 ) -> Result<(), IngestError> {
-    let opened = file.metadata().map_err(|e| IngestError::Io(e.to_string()))?;
+    let opened = file.metadata().map_err(|e| IngestError::IO(e.to_string()))?;
     if stable_meta_identity(&opened)? != stable_meta_identity(expected)? {
         return Err(IngestError::Mutated(format!("`{}` changed before copy", src.display())));
     }
     let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut file, &mut bytes).map_err(|e| IngestError::Io(e.to_string()))?;
-    let after = file.metadata().map_err(|e| IngestError::Io(e.to_string()))?;
+    std::io::Read::read_to_end(&mut file, &mut bytes).map_err(|e| IngestError::IO(e.to_string()))?;
+    let after = file.metadata().map_err(|e| IngestError::IO(e.to_string()))?;
     if stable_meta_identity(&opened)? != stable_meta_identity(&after)? {
         return Err(IngestError::Mutated(format!("`{}` changed while copying", src.display())));
     }
-    fs::write(dst, bytes).map_err(|e| IngestError::Io(e.to_string()))
+    fs::write(dst, bytes).map_err(|e| IngestError::IO(e.to_string()))
 }
 
 fn stable_meta_identity(meta: &fs::Metadata) -> Result<StableMetaIdentity, IngestError> {

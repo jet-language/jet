@@ -62,41 +62,41 @@ fn package_refs(pack: ^Pack) => [String] {
     }
     return out
 }
-fn source_directives(sources: ^[Source]) => [Json] {
-    out: [Json] = []
+fn source_directives(sources: ^[Source]) => [JSON] {
+    out: [JSON] = []
     loop s; sources {
         out.push(source_json(^s))
     }
     return out
 }
-fn text_array(items: ^[String]) => [Json] {
-    out: [Json] = []
+fn text_array(items: ^[String]) => [JSON] {
+    out: [JSON] = []
     loop item; items {
-        out.push(Json.Text(item))
+        out.push(JSON.Text(item))
     }
     return out
 }
-fn source_json(s: ^Source) => Json {
-    m: [String: Json] = []
-    m["kind"] = Json.Text("source")
-    m["name"] = Json.Text(s.name)
-    m["upstream"] = Json.Text(s.upstream)
-    m["via"] = Json.Text(s.via)
-    return Json.Object(m)
+fn source_json(s: ^Source) => JSON {
+    m: [String: JSON] = []
+    m["kind"] = JSON.Text("source")
+    m["name"] = JSON.Text(s.name)
+    m["upstream"] = JSON.Text(s.upstream)
+    m["via"] = JSON.Text(s.via)
+    return JSON.Object(m)
 }
-fn packages_json(pack: ^Pack) => Json {
-    m: [String: Json] = []
-    m["kind"] = Json.Text("packages")
-    m["items"] = Json.Array(text_array(package_refs(^pack)))
-    return Json.Object(m)
+fn packages_json(pack: ^Pack) => JSON {
+    m: [String: JSON] = []
+    m["kind"] = JSON.Text("packages")
+    m["items"] = JSON.Array(text_array(package_refs(^pack)))
+    return JSON.Object(m)
 }
-fn prompt_json(label: ^String) => Json {
-    m: [String: Json] = []
-    m["kind"] = Json.Text("prompt")
-    m["label"] = Json.Text(label)
-    return Json.Object(m)
+fn prompt_json(label: ^String) => JSON {
+    m: [String: JSON] = []
+    m["kind"] = JSON.Text("prompt")
+    m["label"] = JSON.Text(label)
+    return JSON.Object(m)
 }
-pub fn shell() => [Json] {
+pub fn shell() => [JSON] {
     pack :: Pack.{sources: [nix_source("stable", "NixOS/nixpkgs/nixos-24.05@github"), nix_source("unstable", "NixOS/nixpkgs/nixpkgs-unstable@github"), core_source("mine", "./jet-pkgs")], overlays: [overlay("stable", ["ripgrep", "fd"]), overlay("unstable", ["neovim"]), overlay("mine", ["hello"])], prompt: "jetpack-fp"}
     directives := source_directives(~pack.sources)
     directives.push(packages_json(~pack))
@@ -104,5 +104,5 @@ pub fn shell() => [Json] {
     return directives
 }
 fn run() {
-    print(json.to_string_pretty(Json.Array(shell())))
+    print(json.to_string_pretty(JSON.Array(shell())))
 }

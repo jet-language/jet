@@ -1,4 +1,4 @@
-//! Canonical NetHttp/HttpMessage/HttpRoute/HttpServer/Ws substrate for JIT hosts.
+//! Canonical NetHttp/HTTPMessage/HTTPRoute/HTTPServer/Ws substrate for JIT hosts.
 #![allow(
     dead_code,
     unused_imports,
@@ -101,7 +101,7 @@ fn jet_log_emit(_level: &str, _msg: &str, _fields: &[jet_std::LogField]) {}
 
 pub mod jet_std {
     #[derive(Clone, Copy, Debug, PartialEq)]
-    pub enum IoOperation {
+    pub enum IOOperation {
         Read,
         Write,
         Flush,
@@ -113,16 +113,16 @@ pub mod jet_std {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct IoContext {
-        pub operation: IoOperation,
+    pub struct IOContext {
+        pub operation: IOOperation,
         pub resource: Option<String>,
         pub os_code: Option<i64>,
         pub cause: Option<String>,
     }
 
-    impl IoContext {
+    impl IOContext {
         pub fn new(
-            operation: IoOperation,
+            operation: IOOperation,
             resource: Option<String>,
             os_code: Option<i64>,
             cause: Option<String>,
@@ -137,15 +137,15 @@ pub mod jet_std {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub enum IoError {
-        InvalidInput(IoContext),
-        NotFound(IoContext),
-        PermissionDenied(IoContext),
-        TimedOut(IoContext),
-        Cancelled(IoContext),
-        Closed(IoContext),
-        Protocol(IoContext),
-        Other(IoContext),
+    pub enum IOError {
+        InvalidInput(IOContext),
+        NotFound(IOContext),
+        PermissionDenied(IOContext),
+        TimedOut(IOContext),
+        Cancelled(IOContext),
+        Closed(IOContext),
+        Protocol(IOContext),
+        Other(IOContext),
     }
 
     #[derive(Clone, Copy, Debug, PartialEq)]
@@ -154,7 +154,7 @@ pub mod jet_std {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct JetUrl {
+    pub struct JetURL {
         pub scheme: String,
         pub host: Option<String>,
         pub port: Option<i64>,
@@ -164,26 +164,26 @@ pub mod jet_std {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct JetMime {
+    pub struct JetMIME {
         pub top: String,
         pub sub: String,
         pub params: Vec<(String, String)>,
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct JsonError {
+    pub struct JSONError {
         pub line: i64,
         pub message: String,
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub enum Json {
+    pub enum JSON {
         Null,
         Boolean(bool),
         Number(f64),
         Text(String),
-        Array(Vec<Json>),
-        Object(std::collections::BTreeMap<String, Json>),
+        Array(Vec<JSON>),
+        Object(std::collections::BTreeMap<String, JSON>),
     }
 
     #[derive(Clone, Debug, PartialEq)]
@@ -213,12 +213,12 @@ pub mod jet_std {
         String::new()
     }
 
-    pub fn datatree_from_json(_j: &Json) -> super::JetDataTreeStub {
+    pub fn datatree_from_json(_j: &JSON) -> super::JetDataTreeStub {
         super::JetDataTreeStub
     }
 
     include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
-    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JsonCodec.rs");
+    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
 }
 
 type JetDeadlineGuard = JetSchedulerDeadlineGuard;
@@ -308,11 +308,11 @@ fn jet_scheduler_unix_stream_ready_wait(
     (read, write)
 }
 
-include!("../../jet-codegen/src/Prelude/CoreLib/Top/DnsResolverPolicy.rs");
-include!("../../jet-codegen/src/Prelude/CoreLib/Top/HttpMessage.rs");
-include!("../../jet-codegen/src/Prelude/CoreLib/Top/HttpRoute.rs");
-include!("../../jet-codegen/src/Prelude/CoreLib/Top/NetHttp.rs");
-include!("../../jet-codegen/src/Prelude/CoreLib/Top/HttpServer.rs");
+include!("../../jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs");
+include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs");
+include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs");
+include!("../../jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs");
+include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs");
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/Ws.rs");
 

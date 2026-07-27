@@ -403,10 +403,10 @@ fn run() {
     // a=5, b=3, c=7, d=10, p ∈ {1,2,3}; sum = 25 + p ∈ {26,27,28}.
 }
 
-/// c109 Phase 20: HttpRequest/HttpResponse method accessors (`req.method()`/
+/// c109 Phase 20: HTTPRequest/HTTPResponse method accessors (`req.method()`/
 /// `req.path()`/`req.body()`/`req.header(n)`/`req.param(n)`/`resp.status()`/
-/// `resp.body()`/`resp.header(n)`). These carry `recv_type == Some(HttpRequest|
-/// HttpResponse)`; now that the lambda-param type is written back onto `p.ty`
+/// `resp.body()`/`resp.header(n)`). These carry `recv_type == Some(HTTPRequest|
+/// HTTPResponse)`; now that the lambda-param type is written back onto `p.ty`
 /// (sema), the slot type is total and the handle-op shape selects correctly. The
 /// emit (`(recv).<field>.clone()`, `(recv).headers.get(&a0).cloned()`,
 /// `jet_http_request_param(&(recv), &(a0))`) reproduces `emit_builtin_method`
@@ -416,13 +416,13 @@ fn http_request_response_accessors() {
     if !have_rustc() {
         return;
     }
-    // `http.parse` triggers the http prelude (so `JetHttpRequest`/the accessor
-    // helpers are in scope) and yields an HttpRequest without networking; a
+    // `http.parse` triggers the http prelude (so `JetHTTPRequest`/the accessor
+    // helpers are in scope) and yields an HTTPRequest without networking; a
     // single-line request keeps the lexer happy (Jet has no `\r` escape).
     let src = "\
 use core.http as http
 use core.http.server as server
-fn handle(req: HttpRequest) => HttpResponse {
+fn handle(req: HTTPRequest) => HTTPResponse {
     m :: req.method()
     p :: req.path()
     h :: req.header(\"host\")
@@ -430,7 +430,7 @@ fn handle(req: HttpRequest) => HttpResponse {
     body :: \"m={m} p={p}\"
     return server.response(200, body)
 }
-fn describe(resp: HttpResponse) => String {
+fn describe(resp: HTTPResponse) => String {
     s :: resp.status()
     b :: resp.body().text(1048576) ?? \"invalid body\"
     return \"{s}: {b}\"

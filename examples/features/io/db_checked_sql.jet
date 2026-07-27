@@ -1,4 +1,4 @@
-// D-DBMIGRATE1: checked Sql literals feed the parameterized core.db path.
+// D-DBMIGRATE1: checked SQL literals feed the parameterized core.db path.
 use core.db as db
 
 fn run() {
@@ -10,7 +10,7 @@ fn run() {
     insert :: sql"INSERT INTO person (id, name, active) VALUES ({id}, {name}, 1)"
     _inserted :: conn.execute(insert.template(), db.params(insert)) ?? panic("insert")
     failed :: db.transaction(conn, "bad batch", ["INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)", "INSERT INTO missing_table VALUES (1)"]) ?? 0
-    row :: conn.query_one("SELECT id, name, active FROM person WHERE id = ?", [DbValue.Int(7)]) ?? panic("query")
+    row :: conn.query_one("SELECT id, name, active FROM person WHERE id = ?", [DBValue.Int(7)]) ?? panic("query")
     found :: row ?? panic("missing")
     count :: conn.query_one("SELECT COUNT(*) AS n FROM person", []) ?? panic("count")
     counted :: count ?? panic("missing count")

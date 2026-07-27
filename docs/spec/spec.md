@@ -26,7 +26,7 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
   and interpolation. The newline right after the opening `"""` and the one right
   before the closing `"""` are dropped, and the closing `"""`'s indentation is
   stripped from every line (Swift-style). An unterminated `"""` is E0002.
-- Typed text (D-TYPEDTEXT1/2, D-FFI-SH1): a literal expected as `Sql`, `Html`,
+- Typed text (D-TYPEDTEXT1/2, D-FFI-SH1): a literal expected as `SQL`, `HTML`,
   or `Sh` uses one checked interpolation engine. `sql"…"`, `html"…"`, and
   `sh"…"` provide the same rewrite without an expected type. For `Sh`, literal
   words become argv items and each `{hole}` becomes exactly one argv item;
@@ -471,7 +471,7 @@ fn transfer(from: Shared<Account>, to: Shared<Account>, amount: Int) {
 
 (examples/features/memory/shared_transact.jet) A `Shared.edit` here yields
 nothing — the write happens at commit — so its closure ends in a statement.
-An irreversible effect (`Net`/`Fs`/`Exec`) directly in the block is still
+An irreversible effect (`Net`/`FS`/`Exec`) directly in the block is still
 E0746: move it after the block or register it with `tx.on_commit(…)`.
 
 **`Pool<T>`/`Id<T>`** (D-POOLID-API1) is a generational arena: every value
@@ -681,11 +681,11 @@ impl Circle {
   attaches checked tooling facts to bindings, top-level consts, and functions.
   `category` must be a non-empty plain string literal; `tunable` is a bare flag.
   The marker emits no code and changes no runtime behavior.
-- **OS-target gating & dispatch (D-OSTARGET1/D-OSTARGET2):** `#Target(Os.Linux
-  |Macos|Windows)` gates one `impl` block to a native OS; `jet build
+- **OS-target gating & dispatch (D-OSTARGET1/D-OSTARGET2):** `#Target(OS.Linux
+  |MacOS|Windows)` gates one `impl` block to a native OS; `jet build
   --target=<triple>` emits only the matching build's impls (host OS by default).
   Ungated code reaches the surviving impl through the compile-time switch
-  **`comptime if build.os == { .Linux -> … .Macos -> … .Windows -> … [else -> …]
+  **`comptime if build.os == { .Linux -> … .MacOS -> … .Windows -> … [else -> …]
   }`** — `build.os` is a compiler-known comptime value, the switch folds to the
   arm matching the build's target OS and discards the rest before any gating
   check runs. Arms must cover every OS or carry an `else`
@@ -1887,7 +1887,7 @@ roots while retaining hostname verification. Passwords use the existing
 move-only `Secret`, cross one private extraction boundary, and are zeroized on
 failure and drop. Ambient task cancellation and `#Context` deadlines govern
 every transport wait; interruption after DATA is `DeliveryUnknown`.
-Optional `SmtpConfig.dkim:DkimConfig?` binds one Ed25519 signing identity to
+Optional `SMTPConfig.dkim:DkimConfig?` binds one Ed25519 signing identity to
 every send through that Mailer. The signer uses relaxed/relaxed DKIM over final
 MIME bytes, requires `from`, rejects invalid or absent requested headers before
 connecting, and never falls back to unsigned mail. Environment configuration
@@ -2471,16 +2471,16 @@ function's set when the function reaches an operation that carries it.
 
 | Effect  | Carried by |
 |---------|-----------|
-| `Io`    | `print`, `eprint`, `input`, `read_all_input`, `core.io.*` |
-| `Fs`    | `core.files.*` (whole-file helpers and streaming handles), `core.watcher.files` |
+| `IO`    | `print`, `eprint`, `input`, `read_all_input`, `core.io.*` |
+| `FS`    | `core.files.*` (whole-file helpers and streaming handles), `core.watcher.files` |
 | `Net`   | `core.net.*`, `core.http.*`, `core.watcher.port` |
 | `Time`  | ambient `core.time` clock/zone reads (`now`, `now_utc`, `today`, `instant`, `zone`, `sleep`, `start`) |
 | `Rand`  | `core.random.*` |
 | `Env`   | `core.env.*` |
 | `Exec`  | `core.process.run`/`exit`/`cmd`/`pipeline`, `ProcessSpec.run`/`spawn`, `ProcessChild` wait/control/stream calls, `core.watcher.process_pid` |
-| `Db`    | `core.db.*`; leaves (D-EFFDBREAD1): `conn.query`/`conn.query_one` carry `Db.Read`, `conn.execute` carries `Db.Write`, `begin`/`commit`/`rollback`/`close` and `open`/`open_memory` keep the bare `Db` root |
+| `DB`    | `core.db.*`; leaves (D-EFFDBREAD1): `conn.query`/`conn.query_one` carry `DB.Read`, `conn.execute` carries `DB.Write`, `begin`/`commit`/`rollback`/`close` and `open`/`open_memory` keep the bare `DB` root |
 | `Log`   | `core.log.*` |
-| `Gpu`   | `core.raylib.*`, future `core.gpu.*` / `core.game.*` |
+| `GPU`   | `core.raylib.*`, future `core.gpu.*` / `core.game.*` |
 
 A call to an `extern rust`/C foreign function, whose body the compiler can't
 inspect, contributes the **maximal** set (every effect) — it is assumed to do
@@ -2579,8 +2579,8 @@ fn_effects = "fn" ident "(" params ")"
 ```
 
 ```jet
-fn load(path: String) =[Fs]=> String {
-    core.files.read(path)?     // OK: Fs ⊆ {Fs}
+fn load(path: String) =[FS]=> String {
+    core.files.read(path)?     // OK: FS ⊆ {FS}
 }
 ```
 
@@ -2593,7 +2593,7 @@ than the bound (the bound is a ceiling, not an exact set), but never larger.
 `=[]=>` is the same contract with an empty bound: any effect at all is a
 purity violation (reported as **E3401**, the established purity diagnostic).
 
-Effects are erased: `=[Fs]=>`, `=[]=>`, and an unannotated function with the same
+Effects are erased: `=[FS]=>`, `=[]=>`, and an unannotated function with the same
 body all generate byte-identical Rust.
 
 ### Restricting a region — `#Caps(…) { … }`
@@ -2610,9 +2610,9 @@ caps_region = "#Caps" "(" [ effect { "," effect } ] ")" block ;
 
 ```jet
 fn run() {
-    #Caps(Fs, Io) {
-        text :: core.files.read("x") ?? "";   // Fs — allowed
-        print(text);                            // Io — allowed
+    #Caps(FS, IO) {
+        text :: core.files.read("x") ?? "";   // FS — allowed
+        print(text);                            // IO — allowed
     }
 }
 ```
@@ -2631,8 +2631,8 @@ zero-syntax default:
 ```jet
 fn apply(f: fn(Int) => Int, x: Int) => Int { return f(x); }
 
-fn run() =[Io]=> {
-    apply(log_it, 1);   // if `log_it` uses Net, this line is E0740 — Net ⊄ {Io}
+fn run() =[IO]=> {
+    apply(log_it, 1);   // if `log_it` uses Net, this line is E0740 — Net ⊄ {IO}
 }
 ```
 
@@ -2653,7 +2653,7 @@ precision.
 ### Effects on trait methods (D-EFF3)
 
 A trait method may declare an effect upper bound — `fn hash(self) =[]=>` (the
-empty set) or `fn render(self) =[Gpu]=>`. The bound is two things at once:
+empty set) or `fn render(self) =[GPU]=>`. The bound is two things at once:
 
 - **The impl obligation.** Every implementation's inferred effects must fit
   inside the bound, or it is **E0742**. So a trait can promise "all `hash`
@@ -2746,7 +2746,7 @@ the project root descriptor fixed at session start; every later component is
 opened descriptor-relative without following symlinks. Platforms unable to
 enforce that confinement fail closed. Ambient random draws require `Rand`, but
 explicitly seeded `Rng` values are injected data. REPL-owned `print`/`eprint`
-capture is inherent and needs no `Io` grant.
+capture is inherent and needs no `IO` grant.
 
 Process execution opens the canonical executable before authorization and
 launches that exact descriptor without resolving its pathname again. Stdin is
@@ -2939,7 +2939,7 @@ no separate flag DSL to learn. `fn run()` (S12, zero-arg) is the simple program
 entry; a program opts into CLI parsing by defining `fn run` with one parameter:
 
 ```jet
-#Cli
+#CLI
 struct ServeArgs {
     #[Doc("port to listen on"), Default(3000)] port: Int
     verbose: Bool
@@ -2951,7 +2951,7 @@ fn run(args: ServeArgs) {
 }
 ```
 
-`#Cli` is a sibling derive of `#Codable` on the same marker/derive
+`#CLI` is a sibling derive of `#Codable` on the same marker/derive
 machinery (D-MARKERMOVE1). `#Doc("...")` is a field-level marker giving
 that flag's `--help` line; a field with no `#Doc(...)` gets a generic
 "value for --name" line instead.
@@ -2986,7 +2986,7 @@ fn verify_release() => Void ? {}
 `Output` is a closed sum with exactly `Library`, `Executable`, `Service`,
 `Check`, `Environment`, `Image`, `Bundle`, `System`, and `Fleet`. Every Output
 has fixed text `name:`. Executable, Service, and Check also require `entry:`.
-An Executable takes zero or one `#Cli`-derived parameter; Service and Check
+An Executable takes zero or one `#CLI`-derived parameter; Service and Check
 take none. All three return `Void` or `Void ?`. Sema resolves and validates the
 callable before TIR or Rust emission, and publishes its definition and solved
 effect row to semantic tooling.
@@ -2995,7 +2995,7 @@ For a singular run, explicit selection is handled by the command layer. With
 no explicit address, legacy `fn run` wins; otherwise a sole compatible
 Executable is selected. Multiple candidates produce E1321 with a sorted list.
 
-**Pinned field-mapping rule** — every `#Cli` struct field maps to exactly
+**Pinned field-mapping rule** — every `#CLI` struct field maps to exactly
 one named `--flag`, by this rule (checked top to bottom, first match wins).
 D-CLI-POS1=A adds positional filling for required value fields:
 
@@ -3009,7 +3009,7 @@ D-CLI-POS1=A adds positional filling for required value fields:
 
 Supported scalars: `Int`, `Float`, `Bool`, `String`, `Path`. Any other field
 type (a `[K: V]`, a closure, a `[T]`, a nested struct that isn't itself
-`#Cli`, …) is **E1305** — there is no flag shape for it. Field defaults
+`#CLI`, …) is **E1305** — there is no flag shape for it. Field defaults
 use the *existing* `#Default(expr)` marker (D-SERDE5) — not a second,
 inline `= expr` mechanism (that syntax is reserved for function-parameter
 defaults, S61, a different grammar slot; reusing `#Default(...)` here is
@@ -3021,13 +3021,13 @@ named value and a bare positional appear for the same field, the named value
 wins. `#Flag` on a Bool / optional / defaulted field is **E1309** (nothing
 to opt out of). Declaration order of required value fields is part of the
 command interface; reordering them is a breaking shape change reported through
-the checked `CliSchema` / dossier / embedded command metadata.
+the checked `CLISchema` / dossier / embedded command metadata.
 Every generated CLI spec also registers `--help` automatically (rendering
 the struct's fields/types/`#Doc` text); a field named `help` collides
 with it and is **E1306**.
 
-**Nested `#Cli` structs are not supported in v1** — a field whose type is
-itself a `#Cli`-derived struct is E1305, same as any other unmapped type.
+**Nested `#CLI` structs are not supported in v1** — a field whose type is
+itself a `#CLI`-derived struct is E1305, same as any other unmapped type.
 (Grouped `--outer-inner` flag prefixing was scoped out rather than bolted
 onto the decode machinery under time pressure that would otherwise force a
 second, prefix-threaded code path — a real feature, not a punt: it needs
@@ -3044,9 +3044,9 @@ fn run(cmd: Cmd) { ... }   // $ myapp import data.csv
 ```
 
 The first positional token picks the variant by its **lowercased** name;
-the rest of argv re-parses against that variant's own `#Cli` spec (its
+the rest of argv re-parses against that variant's own `#CLI` spec (its
 own `--help`, its own flags — no flag namespace is shared across
-variants). Every variant's payload must be a single `#Cli`-derived
+variants). Every variant's payload must be a single `#CLI`-derived
 struct — any other payload shape is **E1307**. Given **zero** arguments (no
 subcommand token at all), or given root `--help`, the generated entry prints
 the lowercased command list to stdout and exits 0 — an invocation asking "what
@@ -3095,11 +3095,11 @@ stderr.
 
 **Diagnostics:** E1305 (unmappable field type), E1306 (flag-name collision,
 including the reserved `--help`), E1307 (subcommand payload isn't
-`#Cli`), E1308 (`run`'s one parameter isn't a `#Cli` struct or an enum
-of `#Cli` payloads), E1309 (`#Flag` on a field that is already flag-only).
+`#CLI`), E1308 (`run`'s one parameter isn't a `#CLI` struct or an enum
+of `#CLI` payloads), E1309 (`#Flag` on a field that is already flag-only).
 See docs/spec/diagnostics.md.
 
-The public `#Cli` struct or subcommand enum may be declared in the entry file
+The public `#CLI` struct or subcommand enum may be declared in the entry file
 or in one directly imported module. Its generated parser/decode helpers remain
 internal projections over the same `ArgsSpec` engine.
 
@@ -3451,7 +3451,7 @@ target_triple)` records the target identity; `b.probe(name, kind, value)`
 supports `find_program`, `pkg_config`, and `header` probe kinds.
 
 ```jet
-fn build(b: BuildContext) =[Exec, Fs]=> BuildPlan ? {
+fn build(b: BuildContext) =[Exec, FS]=> BuildPlan ? {
     #Impure("run declared toolchain probe and action") {
     shell :: b.probe("shell", "find_program", "sh")?
     native :: b.toolchain("native", "x86_64-linux")?
@@ -3460,7 +3460,7 @@ fn build(b: BuildContext) =[Exec, Fs]=> BuildPlan ? {
         ["assets/version.txt"],
         ["build/version.txt"],
         ["sh", "-c", "cp assets/version.txt build/version.txt"],
-        ["Exec", "Fs"],
+        ["Exec", "FS"],
         native,
         [shell]
     )?

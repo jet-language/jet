@@ -34,11 +34,11 @@ fn jet_ws_take_upgraded() -> bool {
     })
 }
 
-fn jet_ws_header_get<'a>(headers: &'a JetHttpHeaders, name: &str) -> Option<&'a str> {
+fn jet_ws_header_get<'a>(headers: &'a JetHTTPHeaders, name: &str) -> Option<&'a str> {
     headers.get(name).map(String::as_str)
 }
 
-fn jet_ws_header_has_token(headers: &JetHttpHeaders, name: &str, token: &str) -> bool {
+fn jet_ws_header_has_token(headers: &JetHTTPHeaders, name: &str, token: &str) -> bool {
     headers.all(name).iter().any(|value| {
         value
             .split(',')
@@ -47,7 +47,7 @@ fn jet_ws_header_has_token(headers: &JetHttpHeaders, name: &str, token: &str) ->
     })
 }
 
-fn jet_ws_validate_upgrade_request(req: &JetHttpRequest) -> Result<String, JetWsError> {
+fn jet_ws_validate_upgrade_request(req: &JetHTTPRequest) -> Result<String, JetWsError> {
     if req.method != "GET" {
         return Err(JetWsError::InvalidHandshake);
     }
@@ -80,16 +80,16 @@ fn jet_ws_write_upgrade_response(
     );
     stream
         .write_all(response.as_bytes())
-        .map_err(|_| JetWsError::Io {
+        .map_err(|_| JetWsError::IO {
             operation: "write upgrade response".to_string(),
         })?;
-    stream.flush().map_err(|_| JetWsError::Io {
+    stream.flush().map_err(|_| JetWsError::IO {
         operation: "flush upgrade response".to_string(),
     })?;
     Ok(())
 }
 
-fn jet_ws_upgrade(req: &JetHttpRequest) -> Result<JetWsConn, JetWsError> {
+fn jet_ws_upgrade(req: &JetHTTPRequest) -> Result<JetWsConn, JetWsError> {
     let key = jet_ws_validate_upgrade_request(req)?;
     let accept = jet_ws_accept_key(&key);
     let mut stream = JET_WS_ACTIVE_STREAM.with(|slot| -> Result<std::net::TcpStream, JetWsError> {
@@ -98,7 +98,7 @@ fn jet_ws_upgrade(req: &JetHttpRequest) -> Result<JetWsConn, JetWsError> {
         // JET_VETTED_UNSAFE_BEGIN: jet_ws_upgrade
         let stream = unsafe { &mut *ptr };
         // JET_VETTED_UNSAFE_END: jet_ws_upgrade
-        stream.try_clone().map_err(|_| JetWsError::Io {
+        stream.try_clone().map_err(|_| JetWsError::IO {
             operation: "clone upgrade stream".to_string(),
         })
     })?;

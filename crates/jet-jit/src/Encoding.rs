@@ -14,19 +14,19 @@ use std::collections::{BTreeSet, HashMap};
 /// Canonical `jet_std` JSON/DataTree runtime — types stubbed, algorithm via include!
 pub(crate) mod json_rt {
     #[derive(Clone, Debug, PartialEq)]
-    pub struct JsonError {
+    pub struct JSONError {
         pub line: i64,
         pub message: String,
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub enum Json {
+    pub enum JSON {
         Null,
         Boolean(bool),
         Number(f64),
         Text(String),
-        Array(Vec<Json>),
-        Object(std::collections::BTreeMap<String, Json>),
+        Array(Vec<JSON>),
+        Object(std::collections::BTreeMap<String, JSON>),
     }
 
     #[derive(Clone, Debug, PartialEq)]
@@ -41,9 +41,9 @@ pub(crate) mod json_rt {
         Object(Vec<(String, DataTree)>),
     }
 
-    // Json.rs starts with `io_error_at`; provide the Io surface it names.
+    // JSON.rs starts with `io_error_at`; provide the IO surface it names.
     #[derive(Clone, Copy, Debug, PartialEq)]
-    pub enum IoOperation {
+    pub enum IOOperation {
         Read,
         Write,
         Flush,
@@ -55,16 +55,16 @@ pub(crate) mod json_rt {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct IoContext {
-        pub operation: IoOperation,
+    pub struct IOContext {
+        pub operation: IOOperation,
         pub resource: Option<String>,
         pub os_code: Option<i64>,
         pub cause: Option<String>,
     }
 
-    impl IoContext {
+    impl IOContext {
         pub fn new(
-            operation: IoOperation,
+            operation: IOOperation,
             resource: Option<String>,
             os_code: Option<i64>,
             cause: Option<String>,
@@ -79,41 +79,41 @@ pub(crate) mod json_rt {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub enum IoError {
-        InvalidInput(IoContext),
-        NotFound(IoContext),
-        PermissionDenied(IoContext),
-        TimedOut(IoContext),
-        Cancelled(IoContext),
-        Closed(IoContext),
-        Protocol(IoContext),
-        Other(IoContext),
+    pub enum IOError {
+        InvalidInput(IOContext),
+        NotFound(IOContext),
+        PermissionDenied(IOContext),
+        TimedOut(IOContext),
+        Cancelled(IOContext),
+        Closed(IOContext),
+        Protocol(IOContext),
+        Other(IOContext),
     }
 
-    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/Json.rs");
-    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/Toml.rs");
+    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSON.rs");
+    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/TOML.rs");
 
     /// D-JSON3 coerce walk — same as `jet_std_json_coerce_walk` (MathRandomTime.rs).
-    pub fn coerce_walk(value: &Json, path: &str) -> Json {
+    pub fn coerce_walk(value: &JSON, path: &str) -> JSON {
         match value {
-            Json::Text(s) => {
+            JSON::Text(s) => {
                 if s == "true" {
                     emit_coerce(path, "string", "boolean");
-                    return Json::Boolean(true);
+                    return JSON::Boolean(true);
                 }
                 if s == "false" {
                     emit_coerce(path, "string", "boolean");
-                    return Json::Boolean(false);
+                    return JSON::Boolean(false);
                 }
                 if let Ok(n) = s.parse::<f64>() {
                     if n.is_finite() {
                         emit_coerce(path, "string", "number");
-                        return Json::Number(n);
+                        return JSON::Number(n);
                     }
                 }
                 value.clone()
             }
-            Json::Object(entries) => {
+            JSON::Object(entries) => {
                 let mut out = std::collections::BTreeMap::new();
                 for (k, v) in entries {
                     let child = if path.is_empty() {
@@ -123,9 +123,9 @@ pub(crate) mod json_rt {
                     };
                     out.insert(k.clone(), coerce_walk(v, &child));
                 }
-                Json::Object(out)
+                JSON::Object(out)
             }
-            Json::Array(items) => Json::Array(
+            JSON::Array(items) => JSON::Array(
                 items
                     .iter()
                     .enumerate()
@@ -153,17 +153,17 @@ pub(crate) mod json_rt {
         eprintln!("{{\"level\":\"info\",\"body\":\"{msg}\",\"ts\":{ts}}}");
     }
 
-    pub fn parse_datatree(text: &str) -> Result<DataTree, JsonError> {
+    pub fn parse_datatree(text: &str) -> Result<DataTree, JSONError> {
         parse_json(text).map(|j| datatree_from_json(&j))
     }
 
-    pub fn decode_lenient(text: &str) -> Result<DataTree, JsonError> {
+    pub fn decode_lenient(text: &str) -> Result<DataTree, JSONError> {
         let parsed = parse_json(text)?;
         Ok(datatree_from_json(&coerce_walk(&parsed, "")))
     }
 }
 
-/// Canonical Yaml via build.rs-stripped include (trailing prelude brace removed).
+/// Canonical YAML via build.rs-stripped include (trailing prelude brace removed).
 mod yaml_rt {
     use super::json_rt::DataTree;
     include!(concat!(env!("OUT_DIR"), "/yaml_std.rs"));
@@ -1049,7 +1049,7 @@ extern "C" fn jet_jit_xml_to_bytes(tree: i64) -> i64 {
     match xml_tree_value(tree).and_then(|v| {
         jet_foundation::XmlPull::render_document_bytes(
             &v,
-            jet_foundation::XmlPull::RenderEncoding::Utf8,
+            jet_foundation::XmlPull::RenderEncoding::UTF8,
             jet_foundation::XmlPull::LexicalPolicy::PreserveValid,
         )
         .map_err(xml_err_msg)
@@ -1521,7 +1521,7 @@ extern "C" fn jet_jit_encoding_error_show(handle: i64) -> i64 {
     text
 }
 
-/// Pack a lowered DataTree/Json enum lit into the heap record ABI.
+/// Pack a lowered DataTree/JSON enum lit into the heap record ABI.
 pub(crate) fn pack_datatree_host(disc: i64, payload: i64) -> i64 {
     alloc_dt_record(disc, payload)
 }

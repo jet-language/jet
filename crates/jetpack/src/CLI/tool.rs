@@ -732,7 +732,7 @@ fn migrate_legacy_generations_locked() -> io::Result<()> {
         }
         let metadata = read_bounded(&entry.path().join("meta.json"))?;
         let parsed = JSON::parse(&metadata).map_err(io::Error::other)?;
-        let JSON::Json::Object(root) = parsed else {
+        let JSON::JSONValue::Object(root) = parsed else {
             return Err(io::Error::other("profile metadata root is not an object"));
         };
         if !root.contains_key("schema") {
@@ -1169,7 +1169,7 @@ fn parse_legacy_generation_meta(
     text: &str,
     expected_generation: u64,
 ) -> Result<Vec<InstalledTool>, String> {
-    let JSON::Json::Object(root) = JSON::parse(text)? else {
+    let JSON::JSONValue::Object(root) = JSON::parse(text)? else {
         return Err("legacy profile metadata root is not an object".into());
     };
     expect_exact_keys(
@@ -1183,7 +1183,7 @@ fn parse_legacy_generation_meta(
         return Err("legacy profile metadata identity mismatch".into());
     }
     let _ = json_field_u64(&root, "created_at")?;
-    let JSON::Json::Array(entries) = root.get("tools").ok_or("legacy metadata lacks tools")? else {
+    let JSON::JSONValue::Array(entries) = root.get("tools").ok_or("legacy metadata lacks tools")? else {
         return Err("legacy profile tools field is not an array".into());
     };
     if entries.len() > MAX_PROFILE_TOOLS {
@@ -1195,7 +1195,7 @@ fn parse_legacy_generation_meta(
     let mut tools = Vec::with_capacity(entries.len());
     let mut seen_bins = std::collections::BTreeSet::new();
     for entry in entries {
-        let JSON::Json::Object(tool) = entry else {
+        let JSON::JSONValue::Object(tool) = entry else {
             return Err("legacy profile tool entry is not an object".into());
         };
         expect_exact_keys(
@@ -1258,7 +1258,7 @@ fn parse_legacy_generation_meta(
 }
 
 fn expect_exact_keys(
-    object: &std::collections::BTreeMap<String, JSON::Json>,
+    object: &std::collections::BTreeMap<String, JSON::JSONValue>,
     expected: &[&str],
     label: &str,
 ) -> Result<(), String> {
@@ -1272,7 +1272,7 @@ fn expect_exact_keys(
 }
 
 fn json_field_string<'a>(
-    object: &'a std::collections::BTreeMap<String, JSON::Json>,
+    object: &'a std::collections::BTreeMap<String, JSON::JSONValue>,
     key: &str,
 ) -> Result<&'a str, String> {
     object
@@ -1282,7 +1282,7 @@ fn json_field_string<'a>(
 }
 
 fn bounded_json_string(
-    object: &std::collections::BTreeMap<String, JSON::Json>,
+    object: &std::collections::BTreeMap<String, JSON::JSONValue>,
     key: &str,
 ) -> Result<String, String> {
     let value = json_field_string(object, key)?;
@@ -1293,10 +1293,10 @@ fn bounded_json_string(
 }
 
 fn json_field_u64(
-    object: &std::collections::BTreeMap<String, JSON::Json>,
+    object: &std::collections::BTreeMap<String, JSON::JSONValue>,
     key: &str,
 ) -> Result<u64, String> {
-    let Some(JSON::Json::Num(value)) = object.get(key) else {
+    let Some(JSON::JSONValue::Num(value)) = object.get(key) else {
         return Err(format!("profile field `{key}` is not a number"));
     };
     if !value.is_finite() || *value < 0.0 || value.fract() != 0.0 || *value > 9_007_199_254_740_991.0 {
@@ -1306,18 +1306,18 @@ fn json_field_u64(
 }
 
 fn json_string_array(
-    object: &std::collections::BTreeMap<String, JSON::Json>,
+    object: &std::collections::BTreeMap<String, JSON::JSONValue>,
     key: &str,
 ) -> Result<Vec<String>, String> {
     json_bounded_string_array(object, key, 255)
 }
 
 fn json_bounded_string_array(
-    object: &std::collections::BTreeMap<String, JSON::Json>,
+    object: &std::collections::BTreeMap<String, JSON::JSONValue>,
     key: &str,
     max_len: usize,
 ) -> Result<Vec<String>, String> {
-    let Some(JSON::Json::Array(values)) = object.get(key) else {
+    let Some(JSON::JSONValue::Array(values)) = object.get(key) else {
         return Err(format!("profile field `{key}` is not an array"));
     };
     values

@@ -24,9 +24,9 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
     let is_json = etype.map(is_json_type_name).unwrap_or(false);
     let is_io = etype.map(|t| matches!(t, "IOError" | "IOOperation")).unwrap_or(false);
     let is_http = etype
-        .map(|t| matches!(t, "HttpError" | "HttpOperation"))
+        .map(|t| matches!(t, "HTTPError" | "HTTPOperation"))
         .unwrap_or(false);
-    let is_email = etype.is_some_and(|t| matches!(t, "SmtpSecurity" | "RecipientPolicy" | "EmailError"));
+    let is_email = etype.is_some_and(|t| matches!(t, "SMTPSecurity" | "RecipientPolicy" | "EmailError"));
     let is_auth = etype == Some("AuthError");
     let is_hook_outcome = etype == Some("HookOutcome");
     // D-UNIONTYPE1=A: anonymous unions lower to `__JetUnion_*` with bare tags.
@@ -50,14 +50,14 @@ pub(crate) fn emit_match_pattern(cx: &Cx, pattern: &Pattern, enum_type: Option<&
             } else if t == crate::Syntax::TYPE_KEY {
                 format!("{}JetKey", cx.root_prefix)
             } else if t == crate::Syntax::TYPE_IO_ERROR {
-                format!("{}jet_std::IoError", cx.root_prefix)
+                format!("{}jet_std::IOError", cx.root_prefix)
             } else if t == crate::Syntax::TYPE_IO_OPERATION {
-                format!("{}jet_std::IoOperation", cx.root_prefix)
-            } else if t == "HttpError" {
-                format!("{}JetHttpError", cx.root_prefix)
-            } else if t == "HttpOperation" {
-                format!("{}JetHttpOperation", cx.root_prefix)
-            } else if matches!(t, "SmtpSecurity" | "RecipientPolicy" | "EmailError") {
+                format!("{}jet_std::IOOperation", cx.root_prefix)
+            } else if t == "HTTPError" {
+                format!("{}JetHTTPError", cx.root_prefix)
+            } else if t == "HTTPOperation" {
+                format!("{}JetHTTPOperation", cx.root_prefix)
+            } else if matches!(t, "SMTPSecurity" | "RecipientPolicy" | "EmailError") {
                 let rust = if t == "EmailError" { "Error" } else { t };
                 format!("{}jet_email::{rust}", cx.root_prefix)
             } else if t == "AuthError" {
@@ -280,7 +280,7 @@ pub(crate) fn emit_if_let_pattern(cx: &Cx, pattern: &Pattern) -> String {
                     .collect();
                 if let Some(names) = variant_field_names(cx, variant) {
                     let plain = cx.variant_owner.get(variant).is_some_and(|owner| {
-                        matches!(owner.as_str(), "EmailError" | "SmtpAuth" | "TlsTrust" | "AuthError")
+                        matches!(owner.as_str(), "EmailError" | "SMTPAuth" | "TLSTrust" | "AuthError")
                     });
                     let fields = names
                         .iter()
@@ -327,8 +327,8 @@ pub(crate) fn emit_named_fn_value(cx: &Cx, name: &str, ft: &Type) -> String {
         return rust_name;
     };
     let middleware = params.len() == 1
-        && matches!(&params[0], Type::Named(name) if name == "HttpHandler")
-        && matches!(ret.as_deref(), Some(Type::Named(name)) if name == "HttpHandler");
+        && matches!(&params[0], Type::Named(name) if name == "HTTPHandler")
+        && matches!(ret.as_deref(), Some(Type::Named(name)) if name == "HTTPHandler");
     let arg_decls: Vec<String> = params
         .iter()
         .enumerate()

@@ -6,7 +6,7 @@
 use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::io::Write as IoWrite;
+use std::io::Write as IOWrite;
 use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::panic::{catch_unwind, AssertUnwindSafe};

@@ -11,7 +11,7 @@ mod runtime {
 
     pub mod jet_std {
         #[derive(Clone, Debug, PartialEq)]
-        pub struct JetUrl {
+        pub struct JetURL {
             pub scheme: String,
             pub host: Option<String>,
             pub port: Option<i64>,
@@ -21,30 +21,30 @@ mod runtime {
         }
 
         #[derive(Clone, Debug, PartialEq)]
-        pub struct JetMime {
+        pub struct JetMIME {
             pub top: String,
             pub sub: String,
             pub params: Vec<(String, String)>,
         }
 
         #[derive(Clone, Debug, PartialEq)]
-        pub struct JsonError {
+        pub struct JSONError {
             pub line: i64,
             pub message: String,
         }
 
         #[derive(Clone, Debug, PartialEq)]
-        pub enum Json {
+        pub enum JSON {
             Null,
             Boolean(bool),
             Number(f64),
             Text(String),
-            Array(Vec<Json>),
-            Object(std::collections::BTreeMap<String, Json>),
+            Array(Vec<JSON>),
+            Object(std::collections::BTreeMap<String, JSON>),
         }
 
         include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
-        include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JsonCodec.rs");
+        include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
     }
 
     fn jet_deadline_remaining_ms() -> Option<i64> {
@@ -59,7 +59,7 @@ mod runtime {
     }
     include!("../../jet-codegen/src/Prelude/CoreLib/Email.rs");
 
-    pub use jet_std::{JetMime, JetUrl};
+    pub use jet_std::{JetMIME, JetURL};
 
     fn email_tls_begin(
         _: std::net::TcpStream,
@@ -114,14 +114,14 @@ mod runtime {
         }
     }
 
-    pub fn url_parse(s: &String) -> Result<JetUrl, String> {
-        JetUrl::parse(s)
+    pub fn url_parse(s: &String) -> Result<JetURL, String> {
+        JetURL::parse(s)
     }
-    pub fn url_file(path: &String) -> JetUrl {
-        JetUrl::file(path)
+    pub fn url_file(path: &String) -> JetURL {
+        JetURL::file(path)
     }
-    pub fn url_data(mime: &JetMime, text: &String) -> JetUrl {
-        JetUrl::data(mime, text)
+    pub fn url_data(mime: &JetMIME, text: &String) -> JetURL {
+        JetURL::data(mime, text)
     }
     pub fn url_query(pairs: &Vec<Vec<String>>) -> String {
         let rows: Vec<(String, String)> = pairs
@@ -151,8 +151,8 @@ mod runtime {
     pub fn url_percent_decode(s: &String) -> Result<String, String> {
         jet_std::jet_url_percent_decode_str(s)
     }
-    pub fn mime_parse(s: &String) -> Result<JetMime, String> {
-        JetMime::parse(s)
+    pub fn mime_parse(s: &String) -> Result<JetMIME, String> {
+        JetMIME::parse(s)
     }
     pub fn mime_from_extension(ext: &String) -> Option<String> {
         jet_std::jet_mime_from_extension(ext).map(|s| s.to_string())
@@ -177,8 +177,8 @@ mod runtime {
 }
 
 pub(crate) enum NetValue {
-    Url(runtime::JetUrl),
-    Mime(runtime::JetMime),
+    Url(runtime::JetURL),
+    Mime(runtime::JetMIME),
     EmailAddress(runtime::jet_email::Address),
     EmailAttachment(runtime::jet_email::Attachment),
     EmailMessage(runtime::jet_email::Message),
@@ -527,30 +527,30 @@ fn unpack_dkim(handle: i64) -> Option<runtime::jet_email::DkimConfig<Vec<u8>>> {
     })
 }
 
-fn unpack_auth(handle: i64) -> Option<runtime::jet_email::SmtpAuth<Vec<u8>>> {
+fn unpack_auth(handle: i64) -> Option<runtime::jet_email::SMTPAuth<Vec<u8>>> {
     let disc = record_get_i64(handle, 0);
     if disc == 0 {
-        return Some(runtime::jet_email::SmtpAuth::None);
+        return Some(runtime::jet_email::SMTPAuth::None);
     }
     if disc == 1 {
         let username = record_get_string(handle, 1);
         let password_handle = record_get_i64(handle, 2);
         let password = crate::Crypto::secret_copy_for_smtp(password_handle)?;
-        return Some(runtime::jet_email::SmtpAuth::Password { username, password });
+        return Some(runtime::jet_email::SMTPAuth::Password { username, password });
     }
     None
 }
 
-fn unpack_smtp_config(config: i64) -> Option<runtime::jet_email::SmtpConfig<Vec<u8>>> {
+fn unpack_smtp_config(config: i64) -> Option<runtime::jet_email::SMTPConfig<Vec<u8>>> {
     let host = record_get_string(config, 0);
     let port = record_get_i64(config, 1);
     let security = match record_get_i64(config, 2) {
-        1 => runtime::jet_email::SmtpSecurity::Tls,
-        _ => runtime::jet_email::SmtpSecurity::StartTls,
+        1 => runtime::jet_email::SMTPSecurity::TLS,
+        _ => runtime::jet_email::SMTPSecurity::StartTls,
     };
     let auth_raw = record_get_i64(config, 3);
     let auth = if auth_raw == 0 {
-        runtime::jet_email::SmtpAuth::None
+        runtime::jet_email::SMTPAuth::None
     } else {
         unpack_auth(auth_raw)?
     };
@@ -558,7 +558,7 @@ fn unpack_smtp_config(config: i64) -> Option<runtime::jet_email::SmtpConfig<Vec<
         1 => runtime::jet_email::RecipientPolicy::DeliverAccepted,
         _ => runtime::jet_email::RecipientPolicy::RequireAll,
     };
-    let trust = runtime::jet_email::TlsTrust::System;
+    let trust = runtime::jet_email::TLSTrust::System;
     let _ = record_get_i64(config, 5);
     let limits = unpack_limits(record_get_i64(config, 6));
     let dkim_opt = record_get_i64(config, 7);
@@ -567,7 +567,7 @@ fn unpack_smtp_config(config: i64) -> Option<runtime::jet_email::SmtpConfig<Vec<
     } else {
         unpack_dkim(dkim_opt - 1)
     };
-    Some(runtime::jet_email::SmtpConfig {
+    Some(runtime::jet_email::SMTPConfig {
         host,
         port,
         security,
@@ -719,7 +719,7 @@ extern "C" fn jet_jit_email_smtp(config: i64) -> i64 {
     let extract = |s: &Vec<u8>| s.clone();
     match runtime::jet_email::smtp(&config, extract, runtime::email_runtime()) {
         Ok(mailer) => {
-            if let runtime::jet_email::SmtpAuth::Password { password, .. } = &mut config.auth {
+            if let runtime::jet_email::SMTPAuth::Password { password, .. } = &mut config.auth {
                 crate::Crypto::runtime::jet_crypto_zeroize_email_impl(password);
             }
             if let Some(dkim) = &mut config.dkim {
@@ -728,7 +728,7 @@ extern "C" fn jet_jit_email_smtp(config: i64) -> i64 {
             result_ok(push(NetValue::EmailMailer(mailer)) as u64)
         }
         Err(err) => {
-            if let runtime::jet_email::SmtpAuth::Password { password, .. } = &mut config.auth {
+            if let runtime::jet_email::SMTPAuth::Password { password, .. } = &mut config.auth {
                 crate::Crypto::runtime::jet_crypto_zeroize_email_impl(password);
             }
             if let Some(dkim) = &mut config.dkim {

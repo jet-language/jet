@@ -73,7 +73,7 @@ impl<'a> Checker<'a> {
             Some(json)
         }
     
-        /// D-DBDRIVER1: `DbValue.Null` / `.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)`
+        /// D-DBDRIVER1: `DBValue.Null` / `.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)`
         /// — the tagged SQL parameter/column value construction. Mirrors
         /// `check_core_json_lit` exactly (same dynamic-value mechanism, SQL-shaped
         /// variants); `Int` stays `Type::Int` (64-bit), never widened through `Float`.
@@ -102,7 +102,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0304",
                         format!("`{}` has no variant `{}`", Syntax::TYPE_DB_VALUE, variant),
-                        "`DbValue` is the tagged SQL parameter/column value: Null/Int/Float/Text/Bool"
+                        "`DBValue` is the tagged SQL parameter/column value: Null/Int/Float/Text/Bool"
                             .to_string(),
                         fix,
                         Some(span),
@@ -124,7 +124,7 @@ impl<'a> Checker<'a> {
                         if expected.len() == 1 { "" } else { "s" },
                         args.len()
                     ),
-                    "each `DbValue` variant has a fixed payload (Int→64-bit int, Float→float, Text→String, Bool→bool, Null→none)".to_string(),
+                    "each `DBValue` variant has a fixed payload (Int→64-bit int, Float→float, Text→String, Bool→bool, Null→none)".to_string(),
                     "check the variant payload".to_string(),
                     Some(span),
                 ));

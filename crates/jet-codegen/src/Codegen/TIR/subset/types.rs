@@ -43,7 +43,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "KeyStatus" | "VaultError" | "WrappedVaultKey" | "KeyUnlock" | "KeyWrapError")) {
         return true;
     }
-    if matches!(&ty, Type::Named(n) if n == "HttpHandler") {
+    if matches!(&ty, Type::Named(n) if n == "HTTPHandler") {
         return true;
     }
     if matches!(&ty, Type::Named(n) if matches!(n.as_str(),
@@ -318,8 +318,8 @@ pub(crate) fn is_type_var_param_ty(ty: &Type, cx: &Cx) -> bool {
 /// These all render through `cx.rust_type` already (a prelude handle/core struct → its
 /// `Jet…`/`jet_std::…` Rust name), so passing/binding/returning one is byte-identical to
 /// the AST path with no new emit. Only the constructable PRELUDE STRUCTS
-/// (HttpRequest/HttpResponse — `net_handle_rust_type` + a struct-literal form) and the
-/// CORE structs (ProcessResult/Stopwatch/Json/…) are admitted as value types here; a
+/// (HTTPRequest/HTTPResponse — `net_handle_rust_type` + a struct-literal form) and the
+/// CORE structs (ProcessResult/Stopwatch/JSON/…) are admitted as value types here; a
 /// foreign *imported user* struct/enum needs cross-module `import_ns` construction (a
 /// Phase-14 surface) and stays excluded. A METHOD on any of these is still out of subset
 /// (handle/prelude methods → Phase 13's residue), so a function that *calls* a method on
@@ -388,18 +388,18 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
 /// c109 Phase 17: a PRELUDE STRUCT name with a struct-literal construction form — the
 /// HTTP request/response types (`net_handle_rust_type` + the `is_prelude_struct` branch in
 /// `emit_struct_lit`). These get a Rust head `<root>Jet…` with PLAIN (unmangled) fields,
-/// and HttpRequest additionally an injected `params: BTreeMap::new()` field.
+/// and HTTPRequest additionally an injected `params: BTreeMap::new()` field.
 pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
     // D-TEXTWIDTH1=B: `TextWidth` is a plain dot-ctor core struct (no auto
-    // fields, unlike HttpRequest's `params`) — see the lowering branch keyed
+    // fields, unlike HTTPRequest's `params`) — see the lowering branch keyed
     // on `type_name == "TextWidth"` in `lower_expr`'s StructLit arm.
     matches!(
         name,
-        "HttpRequest" | "HttpResponse" | "TextWidth" | "AsyncPolicy" | "DecodeError" | "FieldError"
+        "HTTPRequest" | "HTTPResponse" | "TextWidth" | "AsyncPolicy" | "DecodeError" | "FieldError"
             | "EncodingLimits" | "EncodingCause" | "EncodingError"
             | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions"
             | "XMLRenderOptions" | "XMLCanonical" | "XMLError"
-            | "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SmtpConfig"
+            | "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig"
     )
 }
 
@@ -594,7 +594,7 @@ pub(crate) fn collection_elem_covered(ty: &Type, cx: &Cx) -> bool {
         // c109 Phase 24: a FOREIGN value-type element — the prelude JSON enum (`[JSON]` /
         // `[String: JSON]`) OR a cross-module imported user struct/enum (`[String: Note]`
         // where `Note` is an `import_ns` struct). These render via `cx.rust_type` to their
-        // own Rust head ({root}jet_std::Json / {root}{mod}::user_<Name>), and a foreign
+        // own Rust head ({root}jet_std::JSON / {root}{mod}::user_<Name>), and a foreign
         // element is moved/cloned by its own sub-expression (a construction or a bound
         // value), so the owning collection's `.iter().cloned()` / per-key/value clone is
         // byte-identical. (A foreign METHOD is still out of subset, so a fn that calls one

@@ -3,7 +3,7 @@ use super::generation::build_generation;
 use super::generation_files::systems_dir;
 use super::installer_media::write_installer_media;
 use super::load_validate::validate_system_options;
-use super::types::{Generation, OsFlags, VM_GUEST_PROOF_MARKER, VM_PROOF_TIMEOUT_MS, VM_TOOLS};
+use super::types::{Generation, OSFlags, VM_GUEST_PROOF_MARKER, VM_PROOF_TIMEOUT_MS, VM_TOOLS};
 use jet_env_model::ModuleEval::{EnvPlan, SystemPlan, VmTestPlan};
 use crate::Output::Theme;
 use crate::JSON;
@@ -686,7 +686,7 @@ pub(super) fn run_vmtest(
     plan: &EnvPlan,
     vmtest: &VmTestPlan,
     disk: &str,
-    flags: &OsFlags,
+    flags: &OSFlags,
     source_config: &Path,
 ) -> Result<PathBuf, String> {
     let proof_dir = systems_dir().join("vm-tests");

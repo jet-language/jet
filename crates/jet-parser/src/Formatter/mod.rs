@@ -177,7 +177,7 @@ fn format_program_with_tokens(
         f.fmt_marker_group(&rules, Syntax::RULE_PREFIX, true);
     }
     // D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Web)` — the file's
-    // default CLI backend. D-WASM1: `#Target(Wasm)`/`#Target(Js)` — the file's
+    // default CLI backend. D-WASM1: `#Target(Wasm)`/`#Target(JS)` — the file's
     // web partition ceiling. Neither carries a span (single-instance file
     // markers, same treatment as `#PubFile` above), so this fixed post-import
     // position is canonical, not a preservation of wherever the author
@@ -210,7 +210,7 @@ fn format_program_with_tokens(
         f.write(&format!("#{}({})", Syntax::ATTR_TARGET, bucket.name()));
         f.newline();
     }
-    // D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — the
+    // D-HTMLPAIR1 (ratified 2026-07-01, c134): `#HTML("path.html")` — the
     // file's explicit companion host page.
     if let Some(html_path) = prog
         .html_path
@@ -226,7 +226,7 @@ fn format_program_with_tokens(
     }
     // D-POLICY-WORD1=A: `#Policy(no_alloc)` — fixed post-import
     // position, same single-instance-marker treatment as `#PubFile`/
-    // `#Target(…)`/`#Html(…)` above (no span to preserve original placement).
+    // `#Target(…)`/`#HTML(…)` above (no span to preserve original placement).
     let module_policies = prog.policy_declarations.iter().filter(|d| d.scope == crate::Policy::PolicyScope::Module).cloned().collect::<Vec<_>>();
     if let Some(policy_span) = module_policies.first().map(|d| d.span) {
         if !first {

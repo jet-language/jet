@@ -55,14 +55,14 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
     if crate::Sema::is_polymorphic_core_special(module, method) {
         return true;
     }
-    // c109 Phase 25: the HttpRouter producer + the parse/dispatch core calls (D-ROUTE1=A).
+    // c109 Phase 25: the HTTPRouter producer + the parse/dispatch core calls (D-ROUTE1=A).
     // NOT in `core_fixed_sig` — their return types are fixed per `(module, method)` but
-    // live in sema's bespoke `infer_core_call` (`router` → HttpRouter, `parse` →
-    // HttpRequest, `dispatch` → HttpResponse). Each emits a fixed-string `CoreCall`
+    // live in sema's bespoke `infer_core_call` (`router` → HTTPRouter, `parse` →
+    // HTTPRequest, `dispatch` → HTTPResponse). Each emits a fixed-string `CoreCall`
     // (`{root}jet_http_router_new()` / `{root}jet_http_parse_request(&(raw))` /
     // `{root}jet_http_router_dispatch(&(router), req)`), reproduced in `emit_tir_core_call`.
     // `http.serve` stays out (closure-taking, covered by `CoreClosureCall`); `http.router`
-    // is arg-free so it can't collide. The producer's `HttpRouter` value type is covered
+    // is arg-free so it can't collide. The producer's `HTTPRouter` value type is covered
     // (`is_covered_handle_ty`) and its binding is forced to `let mut` (D-ROUTE1=A).
     if module == "jet.http" && matches!(method, "router" | "parse" | "dispatch") {
         return true;
@@ -274,7 +274,7 @@ pub(super) fn core_call_args_in_subset(
 ///     path — excluded (its byte shape differs).
 ///   - `http.serve(addr, <lambda>)` — 2 args; arg0 (addr) any in-subset value, arg1 a
 ///     literal lambda (the `jet_http_serve(&(addr), <lambda>)` branch). The
-///     router-handler branch needs an HttpRouter value, which can only come from
+///     router-handler branch needs an HTTPRouter value, which can only come from
 ///     `http.router()` (not in `core_fixed_sig`) — so it can't arise in a covered fn.
 ///   - `scope.guard(<lambda>)` — 1 arg, a literal zero-param lambda.
 pub(crate) fn core_closure_call_in_subset(

@@ -12,15 +12,15 @@ trait JetShow {
 
 /// Canonical `jet.db` FFI runtime (rusqlite).
 mod runtime {
-    include!("../../jet-pkg-model/src/Prelude/Db.rs");
+    include!("../../jet-pkg-model/src/Prelude/DB.rs");
 }
 
-/// Canonical wire encode/decode (`jet_std` DbPluginWire fragment).
+/// Canonical wire encode/decode (`jet_std` DBPluginWire fragment).
 mod wire {
-    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DbPluginWire.rs");
+    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/DBPluginWire.rs");
 }
 
-// DbValue heap record ABI (same 2-slot shape as DataTree): [disc:i64, payload].
+// DBValue heap record ABI (same 2-slot shape as DataTree): [disc:i64, payload].
 const DV_NULL: i64 = 0;
 const DV_INT: i64 = 1;
 const DV_FLOAT: i64 = 2;
@@ -67,24 +67,24 @@ fn alloc_dbvalue_float(f: f64) -> i64 {
     })
 }
 
-fn read_dbvalue(handle: i64) -> Option<wire::DbValue> {
+fn read_dbvalue(handle: i64) -> Option<wire::DBValue> {
     Concurrency::with_runtime_mut(|rt| {
         let disc = rt.heap.record_get_int(handle, 0)?;
         match disc {
-            DV_NULL => Some(wire::DbValue::Null),
-            DV_INT => Some(wire::DbValue::Int(
+            DV_NULL => Some(wire::DBValue::Null),
+            DV_INT => Some(wire::DBValue::Int(
                 rt.heap.record_get_int(handle, 1).unwrap_or(0),
             )),
-            DV_FLOAT => Some(wire::DbValue::Float(
+            DV_FLOAT => Some(wire::DBValue::Float(
                 rt.heap.record_get_float(handle, 1).unwrap_or(0.0),
             )),
             DV_TEXT => {
                 let sid = rt.heap.record_get_int(handle, 1).unwrap_or(0);
-                Some(wire::DbValue::Text(
+                Some(wire::DBValue::Text(
                     rt.heap.clone_string(sid).unwrap_or_default(),
                 ))
             }
-            DV_BOOL => Some(wire::DbValue::Bool(
+            DV_BOOL => Some(wire::DBValue::Bool(
                 rt.heap.record_get_int(handle, 1).unwrap_or(0) != 0,
             )),
             _ => None,
@@ -101,14 +101,14 @@ fn encode_params_list(list: i64) -> String {
         }
         out
     });
-    let vals: Vec<wire::DbValue> = handles
+    let vals: Vec<wire::DBValue> = handles
         .into_iter()
-        .map(|h| read_dbvalue(h).unwrap_or(wire::DbValue::Null))
+        .map(|h| read_dbvalue(h).unwrap_or(wire::DBValue::Null))
         .collect();
     wire::jet_db_encode_params(&vals)
 }
 
-fn rows_to_list_of_maps(rows: Vec<std::collections::BTreeMap<String, wire::DbValue>>) -> i64 {
+fn rows_to_list_of_maps(rows: Vec<std::collections::BTreeMap<String, wire::DBValue>>) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
         for row in rows {
@@ -116,32 +116,32 @@ fn rows_to_list_of_maps(rows: Vec<std::collections::BTreeMap<String, wire::DbVal
             for (k, v) in row {
                 let kid = rt.heap.alloc_string(k);
                 let vh = match &v {
-                    wire::DbValue::Null => {
+                    wire::DBValue::Null => {
                         let h = rt.heap.alloc_record(2);
                         let _ = rt.heap.record_set_int(h, 0, DV_NULL);
                         let _ = rt.heap.record_set_int(h, 1, 0);
                         h
                     }
-                    wire::DbValue::Int(n) => {
+                    wire::DBValue::Int(n) => {
                         let h = rt.heap.alloc_record(2);
                         let _ = rt.heap.record_set_int(h, 0, DV_INT);
                         let _ = rt.heap.record_set_int(h, 1, *n);
                         h
                     }
-                    wire::DbValue::Float(f) => {
+                    wire::DBValue::Float(f) => {
                         let h = rt.heap.alloc_record(2);
                         let _ = rt.heap.record_set_int(h, 0, DV_FLOAT);
                         let _ = rt.heap.record_set_float(h, 1, *f);
                         h
                     }
-                    wire::DbValue::Text(s) => {
+                    wire::DBValue::Text(s) => {
                         let sid = rt.heap.alloc_string(s.clone());
                         let h = rt.heap.alloc_record(2);
                         let _ = rt.heap.record_set_int(h, 0, DV_TEXT);
                         let _ = rt.heap.record_set_int(h, 1, sid);
                         h
                     }
-                    wire::DbValue::Bool(b) => {
+                    wire::DBValue::Bool(b) => {
                         let h = rt.heap.alloc_record(2);
                         let _ = rt.heap.record_set_int(h, 0, DV_BOOL);
                         let _ = rt.heap.record_set_int(h, 1, i64::from(*b));
@@ -220,7 +220,7 @@ extern "C" fn jet_jit_db_query_one(handle: i64, sql: i64, params: i64) -> i64 {
 }
 
 fn empty_params_wire() -> String {
-    let empty: Vec<wire::DbValue> = Vec::new();
+    let empty: Vec<wire::DBValue> = Vec::new();
     wire::jet_db_encode_params(&empty)
 }
 
@@ -259,7 +259,7 @@ extern "C" fn jet_jit_db_migrate(conn: i64, name: i64, steps: i64) -> i64 {
     }
     let checksum = wire::jet_db_migration_checksum(&steps_v);
     let check_sql = "SELECT checksum FROM __jet_migrations WHERE name = ?".to_string();
-    let check_vec = vec![wire::DbValue::Text(name_s.clone())];
+    let check_vec = vec![wire::DBValue::Text(name_s.clone())];
     let check_params = wire::jet_db_encode_params(&check_vec);
     let existing = match wire::jet_db_decode_query_result(&runtime::jet_db_query(
         conn as u64,
@@ -300,8 +300,8 @@ extern "C" fn jet_jit_db_migrate(conn: i64, name: i64, steps: i64) -> i64 {
     }
     let insert_sql = "INSERT INTO __jet_migrations (name, checksum) VALUES (?, ?)".to_string();
     let insert_vec = vec![
-        wire::DbValue::Text(name_s.clone()),
-        wire::DbValue::Text(checksum),
+        wire::DBValue::Text(name_s.clone()),
+        wire::DBValue::Text(checksum),
     ];
     let insert_params = wire::jet_db_encode_params(&insert_vec);
     match wire::jet_db_decode_execute_result(&runtime::jet_db_execute(
@@ -347,7 +347,7 @@ extern "C" fn jet_jit_db_transaction(conn: i64, _label: i64, steps: i64) -> i64 
     }
 }
 
-/// `db.params(sql)` — Sql is a 2-slot record `(template, params_list)`.
+/// `db.params(sql)` — SQL is a 2-slot record `(template, params_list)`.
 extern "C" fn jet_jit_db_params(sql: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let params_list = rt.heap.record_get_int(sql, 1).unwrap_or(0);
@@ -411,7 +411,7 @@ extern "C" fn jet_jit_dbvalue_int(handle: i64) -> i64 {
             Ok(n) => result_ok_bits(n as u64),
             Err(e) => result_err_msg(&e),
         },
-        None => result_err_msg("invalid DbValue"),
+        None => result_err_msg("invalid DBValue"),
     }
 }
 
@@ -421,7 +421,7 @@ extern "C" fn jet_jit_dbvalue_float(handle: i64) -> i64 {
             Ok(f) => result_ok_bits(f.to_bits()),
             Err(e) => result_err_msg(&e),
         },
-        None => result_err_msg("invalid DbValue"),
+        None => result_err_msg("invalid DBValue"),
     }
 }
 
@@ -434,7 +434,7 @@ extern "C" fn jet_jit_dbvalue_text(handle: i64) -> i64 {
             }
             Err(e) => result_err_msg(&e),
         },
-        None => result_err_msg("invalid DbValue"),
+        None => result_err_msg("invalid DBValue"),
     }
 }
 
@@ -444,7 +444,7 @@ extern "C" fn jet_jit_dbvalue_bool(handle: i64) -> i64 {
             Ok(b) => result_ok_bits(u64::from(b)),
             Err(e) => result_err_msg(&e),
         },
-        None => result_err_msg("invalid DbValue"),
+        None => result_err_msg("invalid DBValue"),
     }
 }
 
@@ -455,7 +455,7 @@ extern "C" fn jet_jit_dbvalue_is_null(handle: i64) -> i8 {
     }
 }
 
-pub(crate) struct DbHostFns {
+pub(crate) struct DBHostFns {
     pub open_memory: FuncId,
     pub open: FuncId,
     pub close: FuncId,
@@ -504,7 +504,7 @@ pub(crate) fn register_db_symbols(builder: &mut JITBuilder) {
     );
 }
 
-pub(crate) fn declare_db_host_fns(module: &mut JITModule) -> Result<DbHostFns, String> {
+pub(crate) fn declare_db_host_fns(module: &mut JITModule) -> Result<DBHostFns, String> {
     let cc = module.target_config().default_call_conv;
     let mut nullary = Signature::new(cc);
     nullary.returns.push(AbiParam::new(types::I64));
@@ -528,7 +528,7 @@ pub(crate) fn declare_db_host_fns(module: &mut JITModule) -> Result<DbHostFns, S
             .declare_function(name, Linkage::Import, sig)
             .map_err(|e| e.to_string())
     };
-    Ok(DbHostFns {
+    Ok(DBHostFns {
         open_memory: import("jet_jit_db_open_memory", &nullary)?,
         open: import("jet_jit_db_open", &unary)?,
         close: import("jet_jit_db_close", &unary_i8)?,

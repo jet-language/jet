@@ -24,12 +24,12 @@ fn describe_conn(c: Conn) => String {
     return "unknown"
 }
 
-enum Http {
+enum HTTP {
     Good(Int)
     Fail(Int)
 }
 
-fn classify(r: Http) => String {
+fn classify(r: HTTP) => String {
     if r == {
         .Good(200..299) -> { return "success" }
         .Good(300..399) -> { return "redirect" }
@@ -60,11 +60,11 @@ fn run() {
     print(describe_conn(Conn.Reconnecting(7)))
     print(describe_conn(Conn.Idle(99)))
     print(describe_conn(Conn.Closed))
-    print(classify(Http.Good(201)))
-    print(classify(Http.Good(301)))
-    print(classify(Http.Good(404)))
-    print(classify(Http.Good(503)))
-    print(classify(Http.Fail(0)))
+    print(classify(HTTP.Good(201)))
+    print(classify(HTTP.Good(301)))
+    print(classify(HTTP.Good(404)))
+    print(classify(HTTP.Good(503)))
+    print(classify(HTTP.Fail(0)))
     print(score_grade(95))
     print(score_grade(72))
     print(score_grade(45))

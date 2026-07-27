@@ -4,18 +4,18 @@ use std::collections::HashMap;
 use std::io::{self, BufRead};
 
 #[derive(Debug, Clone)]
-pub enum JsonValue {
+pub enum JSONValue {
     Null,
     Bool(bool),
     Number(i64),
     Flt(f64),
     String(String),
-    Array(Vec<JsonValue>),
-    Object(HashMap<String, JsonValue>),
+    Array(Vec<JSONValue>),
+    Object(HashMap<String, JSONValue>),
 }
 
-pub fn parse_json(text: &str) -> Result<JsonValue, ()> {
-    let mut p = JsonParser { s: text, i: 0 };
+pub fn parse_json(text: &str) -> Result<JSONValue, ()> {
+    let mut p = JSONParser { s: text, i: 0 };
     let v = p.value(0)?;
     p.skip_ws();
     if p.i < p.s.len() {
@@ -80,12 +80,12 @@ pub fn read_protocol_content_length(reader: &mut impl BufRead) -> io::Result<Opt
     }
 }
 
-struct JsonParser<'a> {
+struct JSONParser<'a> {
     s: &'a str,
     i: usize,
 }
 
-impl<'a> JsonParser<'a> {
+impl<'a> JSONParser<'a> {
     fn peek(&self) -> Option<char> {
         self.s[self.i..].chars().next()
     }
@@ -102,22 +102,22 @@ impl<'a> JsonParser<'a> {
         }
     }
 
-    fn value(&mut self, depth: usize) -> Result<JsonValue, ()> {
+    fn value(&mut self, depth: usize) -> Result<JSONValue, ()> {
         self.skip_ws();
         match self.peek() {
             Some('n') => {
                 self.expect_literal("null")?;
-                Ok(JsonValue::Null)
+                Ok(JSONValue::Null)
             }
             Some('t') => {
                 self.expect_literal("true")?;
-                Ok(JsonValue::Bool(true))
+                Ok(JSONValue::Bool(true))
             }
             Some('f') => {
                 self.expect_literal("false")?;
-                Ok(JsonValue::Bool(false))
+                Ok(JSONValue::Bool(false))
             }
-            Some('"') => Ok(JsonValue::String(self.string()?)),
+            Some('"') => Ok(JSONValue::String(self.string()?)),
             Some('[') => {
                 if depth >= MAX_JSON_DEPTH {
                     return Err(());
@@ -127,7 +127,7 @@ impl<'a> JsonParser<'a> {
                 self.skip_ws();
                 if self.peek() == Some(']') {
                     self.bump();
-                    return Ok(JsonValue::Array(arr));
+                    return Ok(JSONValue::Array(arr));
                 }
                 loop {
                     arr.push(self.value(depth + 1)?);
@@ -138,7 +138,7 @@ impl<'a> JsonParser<'a> {
                         _ => return Err(()),
                     }
                 }
-                Ok(JsonValue::Array(arr))
+                Ok(JSONValue::Array(arr))
             }
             Some('{') => {
                 if depth >= MAX_JSON_DEPTH {
@@ -149,7 +149,7 @@ impl<'a> JsonParser<'a> {
                 self.skip_ws();
                 if self.peek() == Some('}') {
                     self.bump();
-                    return Ok(JsonValue::Object(obj));
+                    return Ok(JSONValue::Object(obj));
                 }
                 loop {
                     self.skip_ws();
@@ -169,14 +169,14 @@ impl<'a> JsonParser<'a> {
                         _ => return Err(()),
                     }
                 }
-                Ok(JsonValue::Object(obj))
+                Ok(JSONValue::Object(obj))
             }
             Some(c) if c == '-' || c.is_ascii_digit() => self.number(),
             _ => Err(()),
         }
     }
 
-    fn number(&mut self) -> Result<JsonValue, ()> {
+    fn number(&mut self) -> Result<JSONValue, ()> {
         let start = self.i;
         if self.peek() == Some('-') {
             self.bump();
@@ -227,9 +227,9 @@ impl<'a> JsonParser<'a> {
             if !value.is_finite() {
                 return Err(());
             }
-            Ok(JsonValue::Flt(value))
+            Ok(JSONValue::Flt(value))
         } else {
-            Ok(JsonValue::Number(raw.parse().map_err(|_| ())?))
+            Ok(JSONValue::Number(raw.parse().map_err(|_| ())?))
         }
     }
 
@@ -308,31 +308,31 @@ impl<'a> JsonParser<'a> {
     }
 }
 
-pub fn json_get<'a>(v: &'a JsonValue, key: &str) -> Option<&'a JsonValue> {
+pub fn json_get<'a>(v: &'a JSONValue, key: &str) -> Option<&'a JSONValue> {
     match v {
-        JsonValue::Object(m) => m.get(key),
+        JSONValue::Object(m) => m.get(key),
         _ => None,
     }
 }
 
-pub fn json_str(v: &JsonValue) -> Option<&str> {
+pub fn json_str(v: &JSONValue) -> Option<&str> {
     match v {
-        JsonValue::String(s) => Some(s),
+        JSONValue::String(s) => Some(s),
         _ => None,
     }
 }
 
-pub fn json_int(v: &JsonValue) -> Option<i64> {
+pub fn json_int(v: &JSONValue) -> Option<i64> {
     match v {
-        JsonValue::Number(n) => Some(*n),
-        JsonValue::Flt(f) => Some(*f as i64),
+        JSONValue::Number(n) => Some(*n),
+        JSONValue::Flt(f) => Some(*f as i64),
         _ => None,
     }
 }
 
-pub fn json_u32(v: &JsonValue) -> Option<u32> {
+pub fn json_u32(v: &JSONValue) -> Option<u32> {
     match v {
-        JsonValue::Number(n) => u32::try_from(*n).ok(),
+        JSONValue::Number(n) => u32::try_from(*n).ok(),
         _ => None,
     }
 }
@@ -387,10 +387,10 @@ mod tests {
 
     #[test]
     fn protocol_positions_require_nonnegative_integer_u32_values() {
-        assert_eq!(json_u32(&JsonValue::Number(42)), Some(42));
-        assert_eq!(json_u32(&JsonValue::Number(-1)), None);
-        assert_eq!(json_u32(&JsonValue::Flt(1.5)), None);
-        assert_eq!(json_u32(&JsonValue::Number(i64::MAX)), None);
+        assert_eq!(json_u32(&JSONValue::Number(42)), Some(42));
+        assert_eq!(json_u32(&JSONValue::Number(-1)), None);
+        assert_eq!(json_u32(&JSONValue::Flt(1.5)), None);
+        assert_eq!(json_u32(&JSONValue::Number(i64::MAX)), None);
     }
 
     #[test]

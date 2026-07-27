@@ -688,7 +688,7 @@ fn jet_data_csv_reader(
     let reader = jet_enc_csv_reader(input, limits.encoding.clone())
         .map_err(|enc| jet_data_from_encoding("csv_reader", None, enc))?;
     Ok(jet_std::DataStream {
-        inner: jet_std::DataStreamInner::Csv {
+        inner: jet_std::DataStreamInner::CSV {
             reader,
             headers: None,
         },
@@ -707,7 +707,7 @@ fn jet_data_json_reader(
     let reader = jet_enc_json_reader(input, limits.encoding.clone())
         .map_err(|enc| jet_data_from_encoding("json_reader", None, enc))?;
     Ok(jet_std::DataStream {
-        inner: jet_std::DataStreamInner::Json {
+        inner: jet_std::DataStreamInner::JSON {
             reader,
             array_started: false,
             array_done: false,
@@ -889,7 +889,7 @@ fn jet_data_stream_next<T: user_Decode>(
         return Ok(None);
     }
     match &mut stream.inner {
-        jet_std::DataStreamInner::Csv { reader, headers } => {
+        jet_std::DataStreamInner::CSV { reader, headers } => {
             if headers.is_none() {
                 match reader.next_record() {
                     Ok(Some(header)) => *headers = Some(header),
@@ -924,7 +924,7 @@ fn jet_data_stream_next<T: user_Decode>(
                 ),
             }
         }
-        jet_std::DataStreamInner::Json {
+        jet_std::DataStreamInner::JSON {
             reader,
             array_started,
             array_done,

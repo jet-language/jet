@@ -624,7 +624,7 @@ pub fn core_fixed_sig(
             Some(Type::String),
         )),
         // D-ENC-DYN1=A+ (c152): TOML is a full adapter over the rich `Data` value —
-        // `parse` returns `Toml` (= `Data`); `to_string` takes any encodable value.
+        // `parse` returns `TOML` (= `Data`); `to_string` takes any encodable value.
         ("core.encoding.toml", "parse") => Some((
             vec![(read, Type::String)],
             Some(result_ty(json.clone(), json_error_ty())),
@@ -808,7 +808,7 @@ pub fn core_fixed_sig(
             Some(result_ty(list_u8, Type::Named("EmailError".to_string()))),
         )),
         ("core.email", "smtp") => Some((
-            vec![(AccessConvention::Read, Type::Named("SmtpConfig".to_string()))],
+            vec![(AccessConvention::Read, Type::Named("SMTPConfig".to_string()))],
             Some(result_ty(Type::Named("Mailer".to_string()), Type::Named("EmailError".to_string()))),
         )),
         ("core.email", "smtp_from_env") => Some((
@@ -1122,14 +1122,14 @@ pub fn core_fixed_sig(
         )),
         ("core.net", "ip_addr") => Some((
             vec![(read, Type::String)],
-            Some(result_ty(Type::Named("IpAddr".to_string()), Type::Named("NetError".to_string()))),
+            Some(result_ty(Type::Named("IPAddr".to_string()), Type::Named("NetError".to_string()))),
         )),
         ("core.net", "ip_to_string") => Some((
-            vec![(read, Type::Named("IpAddr".to_string()))],
+            vec![(read, Type::Named("IPAddr".to_string()))],
             Some(Type::String),
         )),
         ("core.net", "ip_is_ipv4") => Some((
-            vec![(read, Type::Named("IpAddr".to_string()))],
+            vec![(read, Type::Named("IPAddr".to_string()))],
             Some(Type::Bool),
         )),
         ("core.net", "socket_addr") => Some((
@@ -1384,7 +1384,7 @@ pub fn core_fixed_sig(
                 (read, Type::Int),
             ],
             Some(result_ty(
-                Type::Named("UdpPacket".to_string()),
+                Type::Named("UDPPacket".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
@@ -1402,28 +1402,28 @@ pub fn core_fixed_sig(
                 (read, Type::Int),
             ],
             Some(result_ty(
-                Type::Named("UdpPacket".to_string()),
+                Type::Named("UDPPacket".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "udp_packet_data") => Some((
-            vec![(read, Type::Named("UdpPacket".to_string()))],
+            vec![(read, Type::Named("UDPPacket".to_string()))],
             Some(Type::String),
         )),
         ("core.net", "udp_packet_addr") => Some((
-            vec![(read, Type::Named("UdpPacket".to_string()))],
+            vec![(read, Type::Named("UDPPacket".to_string()))],
             Some(Type::Named("SocketAddr".to_string())),
         )),
         ("core.net", "udp_packet_bytes") => Some((
-            vec![(read, Type::Named("UdpPacket".to_string()))],
+            vec![(read, Type::Named("UDPPacket".to_string()))],
             Some(Type::List(Box::new(u8_ty()))),
         )),
         ("core.net", "udp_packet_original_len") => Some((
-            vec![(read, Type::Named("UdpPacket".to_string()))],
+            vec![(read, Type::Named("UDPPacket".to_string()))],
             Some(Type::Int),
         )),
         ("core.net", "udp_packet_truncated") => Some((
-            vec![(read, Type::Named("UdpPacket".to_string()))],
+            vec![(read, Type::Named("UDPPacket".to_string()))],
             Some(Type::Bool),
         )),
         ("core.net", "unix_listen") => Some((
@@ -1495,7 +1495,7 @@ pub fn core_fixed_sig(
         ("core.net", "dns_a" | "dns_aaaa") => Some((
             vec![(read, Type::String), (read, Type::Int)],
             Some(result_ty(
-                Type::List(Box::new(Type::Named("IpAddr".to_string()))),
+                Type::List(Box::new(Type::Named("IPAddr".to_string()))),
                 Type::Named("NetError".to_string()),
             )),
         )),
@@ -1506,7 +1506,7 @@ pub fn core_fixed_sig(
                 (read, Type::Int),
             ],
             Some(result_ty(
-                Type::List(Box::new(Type::Named("IpAddr".to_string()))),
+                Type::List(Box::new(Type::Named("IPAddr".to_string()))),
                 Type::Named("NetError".to_string()),
             )),
         )),
@@ -1525,7 +1525,7 @@ pub fn core_fixed_sig(
         ("core.net", "dns_srv") => Some((
             vec![(read, Type::String), (read, Type::Int)],
             Some(result_ty(
-                Type::List(Box::new(Type::Named("DnsSrv".to_string()))),
+                Type::List(Box::new(Type::Named("DNSSrv".to_string()))),
                 Type::Named("NetError".to_string()),
             )),
         )),
@@ -1536,16 +1536,16 @@ pub fn core_fixed_sig(
                 (read, Type::Int),
             ],
             Some(result_ty(
-                Type::List(Box::new(Type::Named("DnsSrv".to_string()))),
+                Type::List(Box::new(Type::Named("DNSSrv".to_string()))),
                 Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "dns_srv_target") => Some((
-            vec![(read, Type::Named("DnsSrv".to_string()))],
+            vec![(read, Type::Named("DNSSrv".to_string()))],
             Some(Type::String),
         )),
         ("core.net", "dns_srv_port" | "dns_srv_priority" | "dns_srv_weight") => Some((
-            vec![(read, Type::Named("DnsSrv".to_string()))],
+            vec![(read, Type::Named("DNSSrv".to_string()))],
             Some(Type::Int),
         )),
         ("core.net", "tls_connect") => Some((
@@ -1554,14 +1554,14 @@ pub fn core_fixed_sig(
                 (read, Type::String),
             ],
             Some(result_ty(
-                Type::Named("TlsStream".to_string()),
+                Type::Named("TLSStream".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
         ("core.net", "tls_read") => Some((
             vec![(
                 AccessConvention::Write,
-                Type::Named("TlsStream".to_string()),
+                Type::Named("TLSStream".to_string()),
             )],
             Some(result_ty(Type::String, Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
@@ -1569,14 +1569,14 @@ pub fn core_fixed_sig(
             vec![
                 (
                     AccessConvention::Write,
-                    Type::Named("TlsStream".to_string()),
+                    Type::Named("TLSStream".to_string()),
                 ),
                 (read, Type::String),
             ],
             Some(result_ty(unit_ty(), Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
         ("core.net", "tls_close") => Some((
-            vec![(AccessConvention::Move, Type::Named("TlsStream".to_string()))],
+            vec![(AccessConvention::Move, Type::Named("TLSStream".to_string()))],
             Some(result_ty(unit_ty(), Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
         ("core.tls", "client") => Some((
@@ -1585,13 +1585,13 @@ pub fn core_fixed_sig(
                 (read, Type::String),
             ],
             Some(result_ty(
-                Type::Named("TlsStream".to_string()),
+                Type::Named("TLSStream".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
         ("core.tls", "read") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TlsStream".to_string())),
+                (AccessConvention::Write, Type::Named("TLSStream".to_string())),
                 (read, Type::Int),
             ],
             Some(result_ty(
@@ -1601,34 +1601,34 @@ pub fn core_fixed_sig(
         )),
         ("core.tls", "read_text") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TlsStream".to_string())),
+                (AccessConvention::Write, Type::Named("TLSStream".to_string())),
                 (read, Type::Int),
             ],
             Some(result_ty(Type::String, Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
         ("core.tls", "write") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TlsStream".to_string())),
+                (AccessConvention::Write, Type::Named("TLSStream".to_string())),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
             Some(result_ty(Type::Int, Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
         ("core.tls", "write_all") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TlsStream".to_string())),
+                (AccessConvention::Write, Type::Named("TLSStream".to_string())),
                 (read, Type::List(Box::new(u8_ty()))),
             ],
             Some(result_ty(unit_ty(), Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
         ("core.tls", "write_text") => Some((
             vec![
-                (AccessConvention::Write, Type::Named("TlsStream".to_string())),
+                (AccessConvention::Write, Type::Named("TLSStream".to_string())),
                 (read, Type::String),
             ],
             Some(result_ty(unit_ty(), Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
         ("core.tls", "close") => Some((
-            vec![(AccessConvention::Write, Type::Named("TlsStream".to_string()))],
+            vec![(AccessConvention::Write, Type::Named("TLSStream".to_string()))],
             Some(result_ty(unit_ty(), Type::Named(Syntax::TYPE_IO_ERROR.to_string()))),
         )),
         // E2-M10: jet.http — HTTP client/server over blocking I/O.
@@ -1636,16 +1636,16 @@ pub fn core_fixed_sig(
         ("jet.http", "get") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
-                Type::Named("HttpResponse".to_string()),
-                Type::Named("HttpError".to_string()),
+                Type::Named("HTTPResponse".to_string()),
+                Type::Named("HTTPError".to_string()),
             )),
         )),
         // POST / PUT / PATCH requests (body sent).
         ("jet.http", "post") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(result_ty(
-                Type::Named("HttpResponse".to_string()),
-                Type::Named("HttpError".to_string()),
+                Type::Named("HTTPResponse".to_string()),
+                Type::Named("HTTPError".to_string()),
             )),
         )),
         // serve blocks until the listener is closed; handler is called per request.
@@ -1821,21 +1821,21 @@ pub fn core_fixed_sig(
             Some(result_ty(Type::List(Box::new(u8_ty())), Type::String)),
         )),
         // D-DBDRIVER1: jet.db — SQLite via rusqlite (bundled). `open`/`open_memory`
-        // are the only module-level entry points; they PRODUCE a `DbConnection`
+        // are the only module-level entry points; they PRODUCE a `DBConnection`
         // handle (mirrors `core.files`'s `open`/`create` producing a `FileReader`/
         // `FileWriter`). Every other operation — `query`/`query_one`/`execute`/
         // `begin`/`commit`/`rollback`/`close` — is an INSTANCE method dispatched
-        // by the receiver's `DbConnection` type (see `check_db_connection_method`
+        // by the receiver's `DBConnection` type (see `check_db_connection_method`
         // below), not a second module-call surface. There is no raw-string
         // `execute(sql)` escape (D-DBDRIVER1's build plan: "must not expose a
         // generic `execute_raw(sql)` escape").
         ("jet.db", "open") => Some((
             vec![(read, Type::String)],
-            Some(Type::Named("DbConnection".to_string())),
+            Some(Type::Named("DBConnection".to_string())),
         )),
-        ("jet.db", "open_memory") => Some((vec![], Some(Type::Named("DbConnection".to_string())))),
+        ("jet.db", "open_memory") => Some((vec![], Some(Type::Named("DBConnection".to_string())))),
         ("jet.db", "params") => Some((
-            vec![(read, Type::Named("Sql".to_string()))],
+            vec![(read, Type::Named("SQL".to_string()))],
             Some(Type::List(Box::new(Type::Named(Syntax::TYPE_DB_VALUE.to_string())))),
         )),
         ("jet.db", "row_value") => Some((
@@ -1875,7 +1875,7 @@ pub fn core_fixed_sig(
         )),
         ("jet.db", "transaction") | ("jet.db", "migrate") => Some((
             vec![
-                (read, Type::Named("DbConnection".to_string())),
+                (read, Type::Named("DBConnection".to_string())),
                 (read, Type::String),
                 (read, Type::List(Box::new(Type::String))),
             ],
@@ -1884,7 +1884,7 @@ pub fn core_fixed_sig(
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): `core.plugin` — sandboxed WASM
         // Component Model plugin loader (wasmtime, runtime-side only, I6).
         // `load` is the only module-level entry point; it PRODUCES a `Plugin`
-        // handle (mirrors `jet.db`'s `open` producing a `DbConnection`). The
+        // handle (mirrors `jet.db`'s `open` producing a `DBConnection`). The
         // actual calls (`.call`/`.call_int`) are instance methods dispatched by
         // the receiver's `Plugin` type (see `check_plugin_method` below).
         ("jet.plugin", "load") => Some((

@@ -7,7 +7,7 @@ use crate::Codegen::TIR::TNumericOp;
 /// `filter`/`each`/`find`/`any`/`all`/`sort_by`/`reduce` — `Collections::
 /// is_closure_method`) are deferred to the lambda phase; the numeric width/predicate/
 /// numeric queries (`is_nan`/`count_ones`/… — D-NUMOPS1) and the handle methods
-/// (FileWriter/TcpStream/HttpRequest/… — Phase 10) carry a `Some(recv_type)`, so the
+/// (FileWriter/TcpStream/HTTPRequest/… — Phase 10) carry a `Some(recv_type)`, so the
 /// gate's `recv_type.is_none()` guard already excludes them; this name list is the
 /// final filter. The arg count disambiguates `join()` (no separator) vs `join(sep)`.
 pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
@@ -236,15 +236,15 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
     matches!(
         recv_type,
         Some(
-            "HttpRequest"
-                | "HttpClient"
-                | "HttpResponse"
-                | "HttpHeaders"
-                | "HttpBody"
-                | "HttpMux"
-                | "HttpHandler"
-                | "HttpServer"
-                | "HttpServerTls"
+            "HTTPRequest"
+                | "HTTPClient"
+                | "HTTPResponse"
+                | "HTTPHeaders"
+                | "HTTPBody"
+                | "HTTPMux"
+                | "HTTPHandler"
+                | "HTTPServer"
+                | "HTTPServerTls"
                 | "WsConn"
                 | "WsMessage"
                 | "Browser"
@@ -262,7 +262,7 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
 /// D-NETDEP1=A / D-HTTPLIB1=A: is `method` valid for this HTTP type?
 pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool {
     match recv_type {
-        Some("HttpRequest") => matches!(
+        Some("HTTPRequest") => matches!(
             method,
             "method" | "path" | "param" | "body_len" | "under_limit" | "header" | "body"
                 | "timeout" | "connect_timeout" | "read_timeout" | "total_timeout"
@@ -270,13 +270,13 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
                 | "redirects" | "proxy" | "cookie" | "form" | "multipart_text" | "send"
                 | "trailers"
         ),
-        Some("HttpResponse") => matches!(method, "status" | "body" | "header" | "cookies" | "trailers" | "protocol" | "remote_address" | "redirect_history" | "timings" | "reused_connection" | "raw_content_encoding"),
-        Some("HttpClient") => matches!(method, "cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding" | "proxy" | "tls" | "allow_http_downgrade" | "retries" | "send"),
-        Some("HttpHeaders") => matches!(method, "first" | "all" | "append" | "set" | "remove"),
-        Some("HttpBody") => matches!(method, "bytes" | "text" | "json" | "chunks" | "copy_to"),
-        Some("HttpMux") => matches!(method, "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "middleware"),
-        Some("HttpHandler") => method == "handle",
-        Some("HttpServer") => matches!(method, "local_addr" | "serve" | "shutdown"),
+        Some("HTTPResponse") => matches!(method, "status" | "body" | "header" | "cookies" | "trailers" | "protocol" | "remote_address" | "redirect_history" | "timings" | "reused_connection" | "raw_content_encoding"),
+        Some("HTTPClient") => matches!(method, "cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding" | "proxy" | "tls" | "allow_http_downgrade" | "retries" | "send"),
+        Some("HTTPHeaders") => matches!(method, "first" | "all" | "append" | "set" | "remove"),
+        Some("HTTPBody") => matches!(method, "bytes" | "text" | "json" | "chunks" | "copy_to"),
+        Some("HTTPMux") => matches!(method, "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "middleware"),
+        Some("HTTPHandler") => method == "handle",
+        Some("HTTPServer") => matches!(method, "local_addr" | "serve" | "shutdown"),
         Some("WsConn") => matches!(method, "send_text" | "send_bytes" | "recv" | "close"),
         Some("WsMessage") => matches!(method, "is_text" | "is_binary" | "is_close" | "text" | "bytes"),
         Some("Browser") => matches!(

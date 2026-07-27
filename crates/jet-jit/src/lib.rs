@@ -13,19 +13,19 @@
 
 mod Archive;
 mod Args;
-mod Cli;
+mod CLI;
 mod Collections;
 mod Compress;
 mod Concurrency;
 mod CoreHost;
 mod Crypto;
 mod Data;
-mod Db;
+mod DB;
 mod Encoding;
 mod enc_stream;
 mod Fmt;
 mod Game;
-mod Io;
+mod IO;
 mod Layout;
 mod Math;
 mod Ffi;

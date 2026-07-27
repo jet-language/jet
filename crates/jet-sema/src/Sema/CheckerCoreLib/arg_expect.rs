@@ -139,7 +139,7 @@ impl<'a> Checker<'a> {
     
         /// Same elaboration as `expect_core_arg`, but for the handful of std
         /// constructors that genuinely store the argument as their own payload
-        /// (`Json.Text`/`DbValue.Text` own their `String`, etc. — see
+        /// (`JSON.Text`/`DBValue.Text` own their `String`, etc. — see
         /// `check_core_json_lit` / `check_core_dbvalue_lit`). Only these call
         /// sites may trip the implicit-clone E0209 below; an ordinary read-only
         /// stdlib call (e.g. `fs.read(path)`) must not, even though its param

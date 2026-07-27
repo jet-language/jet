@@ -28,11 +28,11 @@
 //!
 //! D-EFFTREE1 (ratified 2026-07-03) amends D-EFF4/5: the ten flat names below
 //! become tree **roots**. A user-written effect name may now be a dotted path
-//! rooted at one of them (`Fs.Read`, `Net.Http.Get`) — the root is validated
+//! rooted at one of them (`FS.Read`, `Net.HTTP.Get`) — the root is validated
 //! against the closed vocabulary (E0119 otherwise); further segments are an
 //! open, user-chosen leaf path with no fixed vocabulary of children (the same
 //! shape as D-TAG1's tag-tree dotted paths). An `EffectSet` element is now the
-//! canonical dotted string (`"Fs"`, `"Fs.Read"`) rather than a bare `Effect`.
+//! canonical dotted string (`"FS"`, `"FS.Read"`) rather than a bare `Effect`.
 //! **Ancestor matching is subsumption**: a bound entry covers any effect at or
 //! below it in the tree (`effect_covers`) — the same ancestor-subtree rule as
 //! D-TAG1's nested variant groups (CheckerCore.rs's switch-arm coverage:
@@ -50,15 +50,15 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Effect {
     Net,
-    Fs,
-    Io,
-    Db,
+    FS,
+    IO,
+    DB,
     Time,
     Rand,
     Env,
     Exec,
     Log,
-    Gpu,
+    GPU,
     /// D-FFI-GO1=A: an in-process Go runtime call may block in Go code.
     Go,
     /// D-FFI-JVM1=A: an embedded JVM invocation.
@@ -105,15 +105,15 @@ impl Effect {
     pub fn name(self) -> &'static str {
         match self {
             Effect::Net => "Net",
-            Effect::Fs => "Fs",
-            Effect::Io => "Io",
-            Effect::Db => "Db",
+            Effect::FS => "FS",
+            Effect::IO => "IO",
+            Effect::DB => "DB",
             Effect::Time => "Time",
             Effect::Rand => "Rand",
             Effect::Env => "Env",
             Effect::Exec => "Exec",
             Effect::Log => "Log",
-            Effect::Gpu => "Gpu",
+            Effect::GPU => "GPU",
             Effect::Go => "Go",
             Effect::Java => "Java",
             Effect::DotNet => "DotNet",
@@ -139,15 +139,15 @@ impl Effect {
     pub fn parse(s: &str) -> Option<Effect> {
         Some(match s {
             "Net" => Effect::Net,
-            "Fs" => Effect::Fs,
-            "Io" => Effect::Io,
-            "Db" => Effect::Db,
+            "FS" => Effect::FS,
+            "IO" => Effect::IO,
+            "DB" => Effect::DB,
             "Time" => Effect::Time,
             "Rand" => Effect::Rand,
             "Env" => Effect::Env,
             "Exec" => Effect::Exec,
             "Log" => Effect::Log,
-            "Gpu" => Effect::Gpu,
+            "GPU" => Effect::GPU,
             "Go" => Effect::Go,
             "Java" => Effect::Java,
             "DotNet" => Effect::DotNet,
@@ -177,15 +177,15 @@ impl Effect {
     pub fn all() -> EffectSet {
         [
             Effect::Net,
-            Effect::Fs,
-            Effect::Io,
-            Effect::Db,
+            Effect::FS,
+            Effect::IO,
+            Effect::DB,
             Effect::Time,
             Effect::Rand,
             Effect::Env,
             Effect::Exec,
             Effect::Log,
-            Effect::Gpu,
+            Effect::GPU,
             Effect::Go,
             Effect::Java,
             Effect::DotNet,
@@ -211,8 +211,8 @@ impl Effect {
     }
 }
 
-/// D-EFFTREE1: an effect set's elements are canonical dotted paths (`"Fs"`,
-/// `"Fs.Read"`) rather than bare `Effect` roots — see the module doc.
+/// D-EFFTREE1: an effect set's elements are canonical dotted paths (`"FS"`,
+/// `"FS.Read"`) rather than bare `Effect` roots — see the module doc.
 pub type EffectSet = BTreeSet<String>;
 
 /// D-SHAPE8 open-row entry (`..E`). The parser stores row variables beside
@@ -223,14 +223,14 @@ pub fn effect_row_var(name: &str) -> Option<&str> {
     name.strip_prefix("..").filter(|name| !name.is_empty())
 }
 
-/// The root segment of a dotted effect path (`"Fs.Read"` → `"Fs"`; a bare
+/// The root segment of a dotted effect path (`"FS.Read"` → `"FS"`; a bare
 /// name is its own root). D-EFFTREE1.
 pub fn effect_root(name: &str) -> &str {
     name.split('.').next().unwrap_or(name)
 }
 
-/// D-EFFTREE1: validate a user-written effect path — bare (`Fs`) or dotted
-/// (`Fs.Read`, `Net.Http.Get`). The root must be one of the closed ten
+/// D-EFFTREE1: validate a user-written effect path — bare (`FS`) or dotted
+/// (`FS.Read`, `Net.HTTP.Get`). The root must be one of the closed ten
 /// D-EFF4/5 names (the caller reports E0119 on `None`); further segments are
 /// an open, user-chosen leaf path with no fixed vocabulary — mirrors D-TAG1's
 /// tag-tree dotted paths. Returns the path unchanged (as the canonical form)
@@ -243,9 +243,9 @@ pub fn parse_effect_name(name: &str) -> Option<String> {
 /// D-EFFTREE1: does `bound` (one entry of a declared/granted/prohibited set)
 /// cover `e`? Exact match, or `bound` is a dot-path ancestor of `e` — ancestor
 /// subsumption, the same rule as D-TAG1's tag-tree subtree matching. A
-/// root-only bound (`Fs`) covers every leaf under it; a leaf bound
-/// (`Fs.Read`) covers only itself and any deeper path under it — a sibling
-/// (`Fs.Write`) is never covered.
+/// root-only bound (`FS`) covers every leaf under it; a leaf bound
+/// (`FS.Read`) covers only itself and any deeper path under it — a sibling
+/// (`FS.Write`) is never covered.
 pub fn effect_covers(bound: &str, e: &str) -> bool {
     e == bound || e.starts_with(&format!("{bound}."))
 }
@@ -459,7 +459,7 @@ impl<'a> super::Checker<'a> {
     }
 }
 
-/// Render a set as `Net, Fs.Read` (canonical order) for diagnostics.
+/// Render a set as `Net, FS.Read` (canonical order) for diagnostics.
 pub fn show_set(set: &EffectSet) -> String {
     set.iter().cloned().collect::<Vec<_>>().join(", ")
 }
@@ -501,7 +501,7 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
     }
     if module == "core.watcher" {
         return match method {
-            "files" => Some(Effect::Fs),
+            "files" => Some(Effect::FS),
             "process_pid" => Some(Effect::Exec),
             "port" => Some(Effect::Net),
             "set" => None,
@@ -514,17 +514,17 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
         return None;
     }
     Some(match module {
-        "core.files" => Effect::Fs,
+        "core.files" => Effect::FS,
         // D-BROWSER-AUTO1=A: browser automation is a versioned network protocol.
         "core.net" | "core.tls" | "jet.http" | "core.http.client" | "core.http.server" | "core.http.middleware" | "core.browser" => Effect::Net,
         // D-RAYLIB1=A: windowing/drawing/input/audio bridge.
-        "core.raylib" => Effect::Gpu,
+        "core.raylib" => Effect::GPU,
         "core.time" => Effect::Time,
         "core.random" | "core.crypto.random" => Effect::Rand,
         "core.env" => Effect::Env,
         "core.process" => Effect::Exec,
-        "core.io" => Effect::Io,
-        "jet.db" | "jet.sql" => Effect::Db,
+        "core.io" => Effect::IO,
+        "jet.db" | "jet.sql" => Effect::DB,
         // D-DEP-WASM1=A (c81): loading a sandboxed plugin executes foreign
         // code, even though the sandbox makes it memory-safe — same bucket as
         // `core.process` (an effects-budget `deny: [Exec]` also denies plugins).
@@ -551,14 +551,14 @@ pub fn core_effect(module: &str, method: &str) -> Option<Effect> {
 /// D-TXN2: the irreversible effects — a network, filesystem, or subprocess
 /// effect that, once performed, cannot be rolled back. These are rejected when
 /// reached directly inside a `#Transact { … }` block (E0746). The remaining
-/// effects (Io/Time/Rand/Env/Db/Log/Gpu) are reversible-or-benign for this
+/// effects (IO/Time/Rand/Env/DB/Log/GPU) are reversible-or-benign for this
 /// purpose: reads, clock/RNG reads, and logging leave no committed external
-/// state a rollback must undo, and Db rollback is the transaction's own job.
+/// state a rollback must undo, and DB rollback is the transaction's own job.
 pub fn is_irreversible_effect(e: Effect) -> bool {
-    matches!(e, Effect::Net | Effect::Fs | Effect::Exec)
+    matches!(e, Effect::Net | Effect::FS | Effect::Exec)
 }
 
-/// E0746 (D-TXN2): an irreversible effect (Net/Fs/Exec) used directly inside a
+/// E0746 (D-TXN2): an irreversible effect (Net/FS/Exec) used directly inside a
 /// `#Transact { … }` block. Points at the offending call; the fix is to move it
 /// after the block or register it via `name.on_commit(() => { … })`.
 pub fn e0746(api: &str, e: Effect, span: Span) -> Diagnostic {
@@ -583,7 +583,7 @@ pub fn e0746(api: &str, e: Effect, span: Span) -> Diagnostic {
 /// The effect carried by an ambient builtin call (`print`, `input`, …).
 pub fn builtin_effect(name: &str) -> Option<Effect> {
     if crate::Syntax::IMPURE_BUILTINS.contains(&name) {
-        Some(Effect::Io)
+        Some(Effect::IO)
     } else {
         None
     }
@@ -1095,7 +1095,7 @@ pub fn check_callback_bounds(
 }
 
 /// D-REPLAY1: `#Replayable` functions may not reach ambient
-/// Time/Rand/Net/Io. Deterministic handles (`Clock.new(seed)`,
+/// Time/Rand/Net/IO. Deterministic handles (`Clock.new(seed)`,
 /// `random.rng(seed)`, mockable capability objects) stay valid because they do
 /// not enter the ambient Core-call effect graph.
 pub fn check_replayable_effects(
@@ -1106,7 +1106,7 @@ pub fn check_replayable_effects(
     use crate::AST::Item;
 
     fn replay_forbidden(effects: &EffectSet) -> EffectSet {
-        let roots = [Effect::Time, Effect::Rand, Effect::Net, Effect::Io];
+        let roots = [Effect::Time, Effect::Rand, Effect::Net, Effect::IO];
         effects
             .iter()
             .filter(|effect| roots.iter().any(|root| effect_root(effect) == root.name()))
@@ -1245,8 +1245,8 @@ pub fn e0740(fn_name: &str, over: &EffectSet, declared: &EffectSet, span: Span) 
 /// E0749 (D-PROP1=A): a function's reachable call graph uses a prohibited
 /// effect. `reached` is the actual offending effect(s); `prohibited` is the
 /// declared `#(!…)` set that covers them — D-EFFTREE1: since ancestor
-/// prohibits descendant, `reached` may name a leaf (`Fs.Write`) under a
-/// broader declared root (`Fs`), so the two are shown separately rather than
+/// prohibits descendant, `reached` may name a leaf (`FS.Write`) under a
+/// broader declared root (`FS`), so the two are shown separately rather than
 /// assuming they're always the same text (they always were, pre-D-EFFTREE1).
 pub fn e0749(fn_name: &str, reached: &EffectSet, prohibited: &EffectSet, span: Span) -> Diagnostic {
     let reached_list = show_set(reached);
@@ -1632,7 +1632,7 @@ pub fn unknown_effect(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0119",
         format!("`{}` isn't a known effect", name),
-        "an effect list names compiler-known effects like `Net`, `Fs`, `Io`, `Db`, or `Time`"
+        "an effect list names compiler-known effects like `Net`, `FS`, `IO`, `DB`, or `Time`"
             .to_string(),
         "use one of the known effect names, or remove it from the list".to_string(),
         Some(span),
@@ -1640,7 +1640,7 @@ pub fn unknown_effect(name: &str, span: Span) -> Diagnostic {
 }
 
 /// E0742 (D-EFF3): an impl of a trait method uses effects beyond the upper
-/// bound the trait method declares (`#Pure fn …` / `fn … #(Gpu)`).
+/// bound the trait method declares (`#Pure fn …` / `fn … #(GPU)`).
 pub fn e0742(
     trait_name: &str,
     method: &str,

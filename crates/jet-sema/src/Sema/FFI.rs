@@ -45,7 +45,7 @@ pub(crate) fn check_extern_block(
     }
     for ef in &block.functions {
         if let Some((_, span)) = &ef.abi {
-            diags.push(Diagnostic::error("E3212", "`#Abi` only applies to C declarations".to_string(), "Rust FFI uses its declared Rust ABI and cannot select a C calling convention".to_string(), "remove `#Abi` from the `extern rust` function".to_string(), Some(*span)));
+            diags.push(Diagnostic::error("E3212", "`#ABI` only applies to C declarations".to_string(), "Rust FFI uses its declared Rust ABI and cannot select a C calling convention".to_string(), "remove `#ABI` from the `extern rust` function".to_string(), Some(*span)));
             ok = false;
         }
         if !check_extern_fn(ef, registry, diags) {
@@ -288,7 +288,7 @@ pub(crate) fn check_c_module(
         if let Some((abi, span)) = &ef.abi {
             let known = matches!(abi.as_str(), "system" | "cdecl" | "stdcall" | "fastcall" | "win64" | "sysv64");
             if !known {
-                diags.push(Diagnostic::error("E3212", format!("`{abi}` is not a known C calling convention"), "`#Abi` accepts only the ratified native ABI names".to_string(), "use `system`, `cdecl`, `stdcall`, `fastcall`, `win64`, or `sysv64`".to_string(), Some(*span)));
+                diags.push(Diagnostic::error("E3212", format!("`{abi}` is not a known C calling convention"), "`#ABI` accepts only the ratified native ABI names".to_string(), "use `system`, `cdecl`, `stdcall`, `fastcall`, `win64`, or `sysv64`".to_string(), Some(*span)));
                 ok = false;
             } else {
                 let available = match abi.as_str() {
@@ -305,7 +305,7 @@ pub(crate) fn check_c_module(
                 if ef.params.iter().any(|p| p.variadic)
                     && !(abi == "cdecl" && cfg!(all(target_os = "windows", target_arch = "x86")))
                 {
-                    diags.push(Diagnostic::error("E3214", format!("variadic C function `{}` cannot use `{abi}`", ef.name), "variadics allow only the default C ABI, or cdecl on Windows x86".to_string(), "remove `#Abi`, or use `#Abi(cdecl)` on Windows x86".to_string(), Some(*span)));
+                    diags.push(Diagnostic::error("E3214", format!("variadic C function `{}` cannot use `{abi}`", ef.name), "variadics allow only the default C ABI, or cdecl on Windows x86".to_string(), "remove `#ABI`, or use `#ABI(cdecl)` on Windows x86".to_string(), Some(*span)));
                     ok = false;
                 }
             }

@@ -134,7 +134,7 @@ hides required inference or makes an executable example fail.
 
 ### Use current data constructors
 
-`examples/features/serde/json.jet` used an obsolete mixture of `Json` and
+`examples/features/serde/json.jet` used an obsolete mixture of `JSON` and
 `DataTree` constructors. It now constructs the current `DataTree` shape
 directly. The example passes `jet check`.
 

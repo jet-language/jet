@@ -511,8 +511,8 @@ fn jet_enc_csv_to_string<T: user_Encode>(values: &Vec<T>) -> String {
 // `DataTree` — nested `[table]`s, arrays-of-tables, dotted keys, and typed scalars.
 // The dynamic `parse` returns the `Data` value; `decode<T>` walks the rich tree;
 // `to_string` renders a `DataTree` back to a nested document.
-fn jet_std_toml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::JsonError> {
-    jet_std::toml::parse_to_tree(text).map_err(|e| jet_std::JsonError {
+fn jet_std_toml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::JSONError> {
+    jet_std::toml::parse_to_tree(text).map_err(|e| jet_std::JSONError {
         line: e.line as i64,
         message: e.message,
     })
@@ -544,8 +544,8 @@ fn jet_enc_toml_decode_traced<T: user_Decode>(
 // D-ENC-DYN1=A+ / D-ENC-YAML1 (c152): YAML is a full serde adapter over the one
 // rich `DataTree` — block + flow maps/sequences, typed core scalars, block scalars,
 // comments, documents, anchors/aliases. parse → `Data`; decode<T> → typed tree.
-fn jet_std_yaml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::JsonError> {
-    jet_std::yaml::parse_to_tree(text).map_err(|e| jet_std::JsonError {
+fn jet_std_yaml_parse(text: &String) -> Result<jet_std::DataTree, jet_std::JSONError> {
+    jet_std::yaml::parse_to_tree(text).map_err(|e| jet_std::JSONError {
         line: e.line as i64,
         message: e.message,
     })

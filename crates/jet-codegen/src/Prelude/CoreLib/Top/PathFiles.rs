@@ -188,13 +188,13 @@ fn jet_atomic_sync_parent(_dir: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn jet_path_write_atomic(p: &JetPath, content: &Vec<u8>) -> Result<(), jet_std::IoError> {
+fn jet_path_write_atomic(p: &JetPath, content: &Vec<u8>) -> Result<(), jet_std::IOError> {
     use std::io::Write;
 
     let path_s = p.inner.to_string_lossy();
     let parent = p.inner.parent().ok_or_else(|| {
         jet_std::io_error_at(
-            jet_std::IoOperation::Write,
+            jet_std::IOOperation::Write,
             &path_s,
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -214,22 +214,22 @@ fn jet_path_write_atomic(p: &JetPath, content: &Vec<u8>) -> Result<(), jet_std::
         .ok()
         .map(|metadata| metadata.permissions());
     let mut temp = JetAtomicTemp::create(dir)
-        .map_err(|error| jet_std::io_error_at(jet_std::IoOperation::Write, dir.to_string_lossy().as_ref(), error))?;
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, dir.to_string_lossy().as_ref(), error))?;
     temp.file_mut()
         .write_all(content)
-        .map_err(|error| jet_std::io_error_at(jet_std::IoOperation::Write, temp.path.to_string_lossy().as_ref(), error))?;
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, temp.path.to_string_lossy().as_ref(), error))?;
     if let Some(permissions) = existing_permissions {
         temp.file_mut()
             .set_permissions(permissions)
-            .map_err(|error| jet_std::io_error_at(jet_std::IoOperation::Write, temp.path.to_string_lossy().as_ref(), error))?;
+            .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, temp.path.to_string_lossy().as_ref(), error))?;
     }
     temp.file_mut()
         .sync_all()
-        .map_err(|error| jet_std::io_error_at(jet_std::IoOperation::Flush, temp.path.to_string_lossy().as_ref(), error))?;
+        .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Flush, temp.path.to_string_lossy().as_ref(), error))?;
     temp.close();
-    jet_atomic_replace(&temp.path, &p.inner).map_err(|error| jet_std::io_error_at(jet_std::IoOperation::Write, &path_s, error))?;
+    jet_atomic_replace(&temp.path, &p.inner).map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, &path_s, error))?;
     temp.commit();
-    jet_atomic_sync_parent(dir).map_err(|error| jet_std::io_error_at(jet_std::IoOperation::Flush, &path_s, error))
+    jet_atomic_sync_parent(dir).map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Flush, &path_s, error))
 }
 fn jet_path_walk(p: &JetPath) -> Vec<JetPath> {
     let mut result = Vec::new();
@@ -262,26 +262,26 @@ fn jet_path_walk(p: &JetPath) -> Vec<JetPath> {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn jet_std_files_open(path: &String) -> Result<JetFileReader, jet_std::IoError> {
-    let f = std::fs::File::open(path).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Read, path, e))?;
+fn jet_std_files_open(path: &String) -> Result<JetFileReader, jet_std::IOError> {
+    let f = std::fs::File::open(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
     Ok(JetFileReader {
         inner: std::io::BufReader::new(f),
         path: path.clone(),
     })
 }
-fn jet_std_files_create(path: &String) -> Result<JetFileWriter, jet_std::IoError> {
-    let f = std::fs::File::create(path).map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Write, path, e))?;
+fn jet_std_files_create(path: &String) -> Result<JetFileWriter, jet_std::IOError> {
+    let f = std::fs::File::create(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))?;
     Ok(JetFileWriter {
         inner: std::io::BufWriter::new(f),
         path: path.clone(),
     })
 }
-fn jet_std_files_append(path: &String) -> Result<JetFileWriter, jet_std::IoError> {
+fn jet_std_files_append(path: &String) -> Result<JetFileWriter, jet_std::IOError> {
     let f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)
-        .map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Write, path, e))?;
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))?;
     Ok(JetFileWriter {
         inner: std::io::BufWriter::new(f),
         path: path.clone(),
@@ -289,7 +289,7 @@ fn jet_std_files_append(path: &String) -> Result<JetFileWriter, jet_std::IoError
 }
 fn jet_std_file_reader_read_line(
     r: &mut JetFileReader,
-) -> Result<Option<String>, jet_std::IoError> {
+) -> Result<Option<String>, jet_std::IOError> {
     use std::io::BufRead;
     let mut line = String::new();
     match r.inner.read_line(&mut line) {
@@ -300,20 +300,20 @@ fn jet_std_file_reader_read_line(
             }
             Ok(Some(line))
         }
-        Err(e) => Err(jet_std::io_error_at(jet_std::IoOperation::Read, &r.path, e)),
+        Err(e) => Err(jet_std::io_error_at(jet_std::IOOperation::Read, &r.path, e)),
     }
 }
 fn jet_std_file_writer_write_line(
     w: &mut JetFileWriter,
     line: &String,
-) -> Result<(), jet_std::IoError> {
+) -> Result<(), jet_std::IOError> {
     use std::io::Write;
     w.inner
         .write_all(line.as_bytes())
         .and_then(|_| w.inner.write_all(b"\n"))
-        .map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Write, &w.path, e))
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, &w.path, e))
 }
-fn jet_std_file_writer_flush(w: &mut JetFileWriter) -> Result<(), jet_std::IoError> {
+fn jet_std_file_writer_flush(w: &mut JetFileWriter) -> Result<(), jet_std::IOError> {
     use std::io::Write;
-    w.inner.flush().map_err(|e| jet_std::io_error_at(jet_std::IoOperation::Flush, &w.path, e))
+    w.inner.flush().map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Flush, &w.path, e))
 }

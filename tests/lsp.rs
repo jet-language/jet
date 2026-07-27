@@ -2276,7 +2276,7 @@ fn lsp_accepts_hidden_generic_constructor_arguments() {
 
 #[test]
 fn lsp_hover_preserves_via_effect_row() {
-    let source = "fn invoke(act: fn() =[Io]=>) =[via act]=> { act() }\nfn run() {}\n";
+    let source = "fn invoke(act: fn() =[IO]=>) =[via act]=> { act() }\nfn run() {}\n";
     let uri = "file:///tmp/lsp_hover_effect_via.jet";
 
     run_transcript(

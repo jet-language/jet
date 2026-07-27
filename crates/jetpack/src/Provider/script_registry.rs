@@ -2,7 +2,7 @@
 
 use super::{producer_record, provider_cache_identity, Ctx, Provider, ProviderError, Realized, SourceState};
 use crate::RefSpec::{RefSpec, SourceTable};
-use crate::JSON::Json;
+use crate::JSON::JSONValue;
 use crate::SHA256;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
@@ -562,7 +562,7 @@ fn fetch_cpan(
     let releases = value
         .get("hits")
         .and_then(|hits| hits.get("hits"))
-        .and_then(Json::as_array)
+        .and_then(JSONValue::as_array)
         .map_err(|error| fail(Kind::Cpan, format!("invalid MetaCPAN release search: {error}")))?;
     let mut out = Vec::new();
     for hit in releases {
@@ -580,7 +580,7 @@ fn fetch_cpan(
     Ok(out)
 }
 
-fn parse_cpan_release(repository: &str, value: &Json) -> Result<Package, ProviderError> {
+fn parse_cpan_release(repository: &str, value: &JSONValue) -> Result<Package, ProviderError> {
     let package_name = json_string(&value, "distribution", Kind::Cpan)?;
     let version = json_string(&value, "version", Kind::Cpan)?;
     let url = json_string(&value, "download_url", Kind::Cpan)?;
@@ -595,7 +595,7 @@ fn parse_cpan_release(repository: &str, value: &Json) -> Result<Package, Provide
         ));
     }
     let mut dependencies = Vec::new();
-    if let Some(Json::Array(items)) = value.as_object().ok().and_then(|obj| obj.get("dependency")) {
+    if let Some(JSONValue::Array(items)) = value.as_object().ok().and_then(|obj| obj.get("dependency")) {
         for item in items {
             let relationship = json_string(item, "relationship", Kind::Cpan)?;
             let phase = json_string(item, "phase", Kind::Cpan)?;
@@ -649,7 +649,7 @@ fn fetch_packagist(
     )?;
     let packages = value
         .get("packages")
-        .and_then(Json::as_object)
+        .and_then(JSONValue::as_object)
         .map_err(|error| {
             fail(
                 Kind::Packagist,
@@ -728,7 +728,7 @@ fn fetch_packagist(
             }
         };
         let mut dependencies = Vec::new();
-        if let Some(Json::Object(require)) =
+        if let Some(JSONValue::Object(require)) =
             release.as_object().ok().and_then(|obj| obj.get("require"))
         {
             for (dep_name, requirement) in require {
@@ -752,7 +752,7 @@ fn fetch_packagist(
             }
         }
         let mut psr4 = BTreeMap::new();
-        if let Some(Json::Object(autoload)) =
+        if let Some(JSONValue::Object(autoload)) =
             release.as_object().ok().and_then(|obj| obj.get("autoload"))
         {
             if autoload.keys().any(|key| key != "psr-4") {
@@ -761,11 +761,11 @@ fn fetch_packagist(
                     format!("package `{name}` {version} uses unsupported executable or non-PSR-4 autoload metadata"),
                 ));
             }
-            if let Some(Json::Object(mappings)) = autoload.get("psr-4") {
+            if let Some(JSONValue::Object(mappings)) = autoload.get("psr-4") {
                 for (prefix, value) in mappings {
                     let paths = match value {
-                        Json::Str(path) => vec![path.clone()],
-                        Json::Array(paths) => paths
+                        JSONValue::Str(path) => vec![path.clone()],
+                        JSONValue::Array(paths) => paths
                             .iter()
                             .map(|path| {
                                 path.as_str()
@@ -806,9 +806,9 @@ fn fetch_packagist(
 }
 
 fn expand_packagist_releases(
-    metadata: &Json,
-    releases: &[Json],
-) -> Result<Vec<Json>, ProviderError> {
+    metadata: &JSONValue,
+    releases: &[JSONValue],
+) -> Result<Vec<JSONValue>, ProviderError> {
     let minified = metadata
         .as_object()
         .ok()
@@ -833,13 +833,13 @@ fn expand_packagist_releases(
             )
         })?;
         for (key, value) in changes {
-            if matches!(value, Json::Str(value) if value == "__unset") {
+            if matches!(value, JSONValue::Str(value) if value == "__unset") {
                 previous.remove(key);
             } else {
                 previous.insert(key.clone(), value.clone());
             }
         }
-        expanded.push(Json::Object(previous.clone()));
+        expanded.push(JSONValue::Object(previous.clone()));
     }
     Ok(expanded)
 }
@@ -849,7 +849,7 @@ fn fetch_json(
     authority: &super::fetch::Authority,
     scratch: &Scratch,
     url: &str,
-) -> Result<Json, ProviderError> {
+) -> Result<JSONValue, ProviderError> {
     let raw = authority
         .text(url, &scratch.path)
         .map_err(|error| fail(kind, error))?;
@@ -861,7 +861,7 @@ fn fetch_json(
     })
 }
 
-fn verified_packagist_git_source(release: &Json, dist_url: &str, reference: &str) -> Option<String> {
+fn verified_packagist_git_source(release: &JSONValue, dist_url: &str, reference: &str) -> Option<String> {
     if !matches!(reference.len(), 40 | 64)
         || !reference.bytes().all(|byte| byte.is_ascii_hexdigit())
     {
@@ -884,10 +884,10 @@ fn verified_packagist_git_source(release: &Json, dist_url: &str, reference: &str
     (dist_url.split('?').next()? == expected).then(|| repository.to_string())
 }
 
-fn json_string<'a>(value: &'a Json, field: &str, kind: Kind) -> Result<&'a str, ProviderError> {
+fn json_string<'a>(value: &'a JSONValue, field: &str, kind: Kind) -> Result<&'a str, ProviderError> {
     value
         .get(field)
-        .and_then(Json::as_str)
+        .and_then(JSONValue::as_str)
         .map_err(|error| fail(kind, format!("invalid metadata field `{field}`: {error}")))
 }
 

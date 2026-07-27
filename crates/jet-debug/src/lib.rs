@@ -78,7 +78,7 @@ enum Resume {
 /// Interactive mode reads stdin and writes the real terminal; scripted mode
 /// pops from a fixed input queue and appends output to an owned buffer so tests
 /// can assert on the exact session (the same model as `REPL::run_transcript`).
-enum Io {
+enum IO {
     /// Live session: prompt + read a line from stdin, print to stdout.
     Interactive,
     /// Scripted session: a queue of typed inputs and an owned output buffer.
@@ -88,15 +88,15 @@ enum Io {
     },
 }
 
-impl Io {
+impl IO {
     /// True for the scripted (test/transcript) path.
     fn is_scripted(&self) -> bool {
-        matches!(self, Io::Scripted { .. })
+        matches!(self, IO::Scripted { .. })
     }
     /// Append a line of debugger/program output (scripted buffer only; the
     /// interactive path writes the terminal directly at the call site).
     fn push_line(&mut self, s: &str) {
-        if let Io::Scripted { out, .. } = self {
+        if let IO::Scripted { out, .. } = self {
             out.push_str(s);
             out.push('\n');
         }
@@ -104,8 +104,8 @@ impl Io {
     /// Take the captured transcript (empty for the interactive path).
     fn into_output(self) -> String {
         match self {
-            Io::Scripted { out, .. } => out,
-            Io::Interactive => String::new(),
+            IO::Scripted { out, .. } => out,
+            IO::Interactive => String::new(),
         }
     }
 }
@@ -124,7 +124,7 @@ struct Debugger {
     file: String,
     /// The live call stack, innermost last. Updated each time the hook fires.
     stack: Vec<Frame>,
-    io: Io,
+    io: IO,
     /// True once the program has stopped at least once, so the first pause
     /// prints the full banner and later ones print just the moved line.
     started: bool,
@@ -133,7 +133,7 @@ struct Debugger {
 }
 
 impl Debugger {
-    fn new(src: String, file: String, io: Io) -> Self {
+    fn new(src: String, file: String, io: IO) -> Self {
         Debugger {
             breakpoints: HashSet::new(),
             // Stop on the very first statement so the user lands inside `main`
@@ -161,8 +161,8 @@ impl Debugger {
     /// Emit a line of debugger output (to stdout or the transcript buffer).
     fn emit(&mut self, s: &str) {
         match &mut self.io {
-            Io::Interactive => println!("{}", s),
-            Io::Scripted { out, .. } => {
+            IO::Interactive => println!("{}", s),
+            IO::Scripted { out, .. } => {
                 out.push_str(s);
                 out.push('\n');
             }
@@ -174,7 +174,7 @@ impl Debugger {
     /// transcript ran out (also `continue` to let the program finish).
     fn read_command(&mut self) -> Option<String> {
         match &mut self.io {
-            Io::Interactive => {
+            IO::Interactive => {
                 use std::io::Write;
                 print!("{} ", Syntax::DBG_PROMPT);
                 let _ = std::io::stdout().flush();
@@ -185,7 +185,7 @@ impl Debugger {
                     Err(_) => None,
                 }
             }
-            Io::Scripted { inputs, out } => {
+            IO::Scripted { inputs, out } => {
                 let next = inputs.pop_front()?;
                 // Echo the typed command after the prompt so the transcript
                 // reads like a real session.
@@ -434,7 +434,7 @@ fn render_locals(scope: &HashMap<String, CtValue>) -> String {
 /// Load + check `file`, then run it under the debugger driving `io`. Returns
 /// the process exit code and the captured transcript (empty in interactive
 /// mode, where output already went to the terminal).
-fn run_with_io(file: &str, mut io: Io) -> (i32, String) {
+fn run_with_io(file: &str, mut io: IO) -> (i32, String) {
     let scripted = io.is_scripted();
     let bundle = match crate::Loader::load_entry(file) {
         Ok(b) => b,
@@ -471,17 +471,17 @@ fn run_with_io(file: &str, mut io: Io) -> (i32, String) {
     run_checked(&bundle, file, io)
 }
 
-fn emit_diags(io: &mut Io, file: &str, src: &str, diags: &[Diagnostic]) {
+fn emit_diags(io: &mut IO, file: &str, src: &str, diags: &[Diagnostic]) {
     let rendered = crate::Diagnostics::render_all(file, src, diags);
     match io {
-        Io::Scripted { out, .. } => out.push_str(&rendered),
-        Io::Interactive => eprint!("{}", rendered),
+        IO::Scripted { out, .. } => out.push_str(&rendered),
+        IO::Interactive => eprint!("{}", rendered),
     }
 }
 
 /// Drive the interpreter with the debugger hook attached, then flush the
 /// program's own stdout/stderr around the debugger's `(jet)` session.
-fn run_checked(bundle: &crate::AST::ProgramBundle, file: &str, mut io: Io) -> (i32, String) {
+fn run_checked(bundle: &crate::AST::ProgramBundle, file: &str, mut io: IO) -> (i32, String) {
     let funcs = collect_funcs(bundle);
     let main = match funcs.get("run") {
         Some(f) => *f,
@@ -554,7 +554,7 @@ fn collect_funcs(bundle: &crate::AST::ProgramBundle) -> HashMap<String, &crate::
 /// and steps the program with a live `(jet)` prompt on stdin/stdout. Returns
 /// the process exit code.
 pub fn run_debug(file: &str) -> i32 {
-    let (code, _captured) = run_with_io(file, Io::Interactive);
+    let (code, _captured) = run_with_io(file, IO::Interactive);
     code
 }
 
@@ -563,7 +563,7 @@ pub fn run_debug(file: &str) -> i32 {
 /// `locals:` dumps, command echoes, program output, and the final marker).
 pub fn run_session(file: &str, inputs: &[&str]) -> String {
     let queue: std::collections::VecDeque<String> = inputs.iter().map(|s| s.to_string()).collect();
-    let io = Io::Scripted {
+    let io = IO::Scripted {
         inputs: queue,
         out: String::new(),
     };

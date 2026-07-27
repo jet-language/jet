@@ -408,7 +408,7 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(&resugared));
                 self.end_block();
             }
-            // D-EFF1 / D-QUAL1: `#Caps(Net, Db) { … }` effect-restriction region.
+            // D-EFF1 / D-QUAL1: `#Caps(Net, DB) { … }` effect-restriction region.
             Stmt::Caps { caps, body, .. } => {
                 let list = caps
                     .iter()
@@ -421,7 +421,7 @@ impl<'a> Fmt<'a> {
                 self.end_block();
             }
             // D-SCAP1 / D-ARROW-CONTROL1:
-            // `#Grant(caps: Fs, Net) { … }` scoped-capability grant region.
+            // `#Grant(caps: FS, Net) { … }` scoped-capability grant region.
             Stmt::Grant {
                 caps,
                 binding,

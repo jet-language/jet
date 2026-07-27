@@ -138,8 +138,8 @@ fn jet_browser_fact_hash(value: &str) -> String {
     format!("{hash:016x}")
 }
 
-fn jet_browser_object(entries: Vec<(&str, jet_std::Json)>) -> jet_std::Json {
-    jet_std::Json::Object(
+fn jet_browser_object(entries: Vec<(&str, jet_std::JSON)>) -> jet_std::JSON {
+    jet_std::JSON::Object(
         entries
             .into_iter()
             .map(|(key, value)| (key.to_string(), value))
@@ -147,27 +147,27 @@ fn jet_browser_object(entries: Vec<(&str, jet_std::Json)>) -> jet_std::Json {
     )
 }
 
-fn jet_browser_text(value: &str) -> jet_std::Json {
-    jet_std::Json::Text(value.to_string())
+fn jet_browser_text(value: &str) -> jet_std::JSON {
+    jet_std::JSON::Text(value.to_string())
 }
 
-fn jet_browser_get<'a>(value: &'a jet_std::Json, key: &str) -> Option<&'a jet_std::Json> {
+fn jet_browser_get<'a>(value: &'a jet_std::JSON, key: &str) -> Option<&'a jet_std::JSON> {
     match value {
-        jet_std::Json::Object(fields) => fields.get(key),
+        jet_std::JSON::Object(fields) => fields.get(key),
         _ => None,
     }
 }
 
-fn jet_browser_string(value: &jet_std::Json, key: &str) -> Result<String, JetBrowserError> {
+fn jet_browser_string(value: &jet_std::JSON, key: &str) -> Result<String, JetBrowserError> {
     match jet_browser_get(value, key) {
-        Some(jet_std::Json::Text(text)) => Ok(text.clone()),
+        Some(jet_std::JSON::Text(text)) => Ok(text.clone()),
         _ => Err(JetBrowserError::new("protocol")),
     }
 }
 
-fn jet_browser_id(value: &jet_std::Json) -> Option<i64> {
+fn jet_browser_id(value: &jet_std::JSON) -> Option<i64> {
     match jet_browser_get(value, "id") {
-        Some(jet_std::Json::Number(value))
+        Some(jet_std::JSON::Number(value))
             if value.is_finite()
                 && value.fract() == 0.0
                 && *value >= 0.0
@@ -198,10 +198,10 @@ fn jet_browser_set_timeout(conn: &JetWsConn, milliseconds: i64) -> Result<(), Je
         .map_err(|_| JetBrowserError::new("transport"))
 }
 
-fn jet_browser_parse_message(text: &str) -> Result<jet_std::Json, JetBrowserError> {
+fn jet_browser_parse_message(text: &str) -> Result<jet_std::JSON, JetBrowserError> {
     let value =
         jet_std::parse_json_strict(text).map_err(|_| JetBrowserError::new("protocol"))?;
-    if matches!(value, jet_std::Json::Object(_)) {
+    if matches!(value, jet_std::JSON::Object(_)) {
         Ok(value)
     } else {
         Err(JetBrowserError::new("protocol"))
@@ -219,7 +219,7 @@ fn jet_browser_remaining_ms(deadline: std::time::Instant) -> Result<i64, JetBrow
 fn jet_browser_recv_json(
     state: &mut JetBrowserState,
     deadline: std::time::Instant,
-) -> Result<jet_std::Json, JetBrowserError> {
+) -> Result<jet_std::JSON, JetBrowserError> {
     jet_browser_set_timeout(&state.conn, jet_browser_remaining_ms(deadline)?)?;
     let message = jet_ws_recv(&state.conn).map_err(jet_browser_ws_error)?;
     let text = jet_ws_message_text(&message).map_err(jet_browser_ws_error)?;
@@ -228,9 +228,9 @@ fn jet_browser_recv_json(
 
 fn jet_browser_capture_event(
     state: &mut JetBrowserState,
-    value: &jet_std::Json,
+    value: &jet_std::JSON,
 ) -> Result<bool, JetBrowserError> {
-    let Some(jet_std::Json::Text(kind)) = jet_browser_get(value, "type") else {
+    let Some(jet_std::JSON::Text(kind)) = jet_browser_get(value, "type") else {
         return Err(JetBrowserError::new("protocol"));
     };
     if kind != "event" {
@@ -292,9 +292,9 @@ fn jet_browser_profile_allows(profile: &str, method: &str) -> bool {
 fn jet_browser_command_with_timeout(
     browser: &JetBrowser,
     method: &str,
-    params: jet_std::Json,
+    params: jet_std::JSON,
     timeout_ms: i64,
-) -> Result<jet_std::Json, JetBrowserError> {
+) -> Result<jet_std::JSON, JetBrowserError> {
     let mut state = browser.state.borrow_mut();
     if state.closed {
         return Err(JetBrowserError::new("closed"));
@@ -311,7 +311,7 @@ fn jet_browser_command_with_timeout(
     let id = state.next_id;
     state.next_id += 1;
     let request = jet_browser_object(vec![
-        ("id", jet_std::Json::Number(id as f64)),
+        ("id", jet_std::JSON::Number(id as f64)),
         ("method", jet_browser_text(method)),
         ("params", params),
     ]);
@@ -346,8 +346,8 @@ fn jet_browser_command_with_timeout(
 fn jet_browser_command(
     browser: &JetBrowser,
     method: &str,
-    params: jet_std::Json,
-) -> Result<jet_std::Json, JetBrowserError> {
+    params: jet_std::JSON,
+) -> Result<jet_std::JSON, JetBrowserError> {
     let timeout_ms = browser.state.borrow().timeout_ms;
     jet_browser_command_with_timeout(browser, method, params, timeout_ms)
 }
@@ -407,9 +407,9 @@ fn jet_browser_connect_profile(
     )?;
     if !matches!(
         jet_browser_get(&status, "ready"),
-        Some(jet_std::Json::Boolean(true))
+        Some(jet_std::JSON::Boolean(true))
     )
-        || !matches!(jet_browser_get(&status, "message"), Some(jet_std::Json::Text(_)))
+        || !matches!(jet_browser_get(&status, "message"), Some(jet_std::JSON::Text(_)))
     {
         return Err(JetBrowserError::new("protocol"));
     }
@@ -424,10 +424,10 @@ fn jet_browser_connect_profile(
     browser.state.borrow_mut().session_started = true;
     let _session_id = jet_browser_string(&new_session, "sessionId")?;
     let capabilities = jet_browser_get(&new_session, "capabilities")
-        .filter(|value| matches!(value, jet_std::Json::Object(_)))
+        .filter(|value| matches!(value, jet_std::JSON::Object(_)))
         .ok_or_else(|| JetBrowserError::new("protocol"))?;
     let cdp = jet_browser_get(capabilities, "goog:cdp")
-        .is_some_and(|value| matches!(value, jet_std::Json::Boolean(true)));
+        .is_some_and(|value| matches!(value, jet_std::JSON::Boolean(true)));
     browser.state.borrow_mut().cdp = cdp;
     Ok(browser)
 }
@@ -460,7 +460,7 @@ fn jet_browser_subscribe(
     browser: &JetBrowser,
     event: &String,
 ) -> Result<(), JetBrowserError> {
-    let events = jet_std::Json::Array(vec![jet_browser_text(event)]);
+    let events = jet_std::JSON::Array(vec![jet_browser_text(event)]);
     jet_browser_command(
         browser,
         "session.subscribe",
@@ -683,11 +683,11 @@ fn jet_browser_locator_query_with_timeout(
                     ("value", value),
                 ]),
             ),
-            ("maxNodeCount", jet_std::Json::Number(1.0)),
+            ("maxNodeCount", jet_std::JSON::Number(1.0)),
         ]),
         timeout_ms,
     )?;
-    let Some(jet_std::Json::Array(nodes)) = jet_browser_get(&result, "nodes") else {
+    let Some(jet_std::JSON::Array(nodes)) = jet_browser_get(&result, "nodes") else {
         return Err(JetBrowserError::new("protocol"));
     };
     match nodes.first() {
@@ -724,20 +724,20 @@ fn jet_browser_locator_click(locator: &JetBrowserLocator) -> Result<(), JetBrows
             jet_browser_object(vec![("sharedId", jet_browser_text(&shared_id))]),
         ),
     ]);
-    let actions = jet_std::Json::Array(vec![
+    let actions = jet_std::JSON::Array(vec![
         jet_browser_object(vec![
             ("type", jet_browser_text("pointerMove")),
-            ("x", jet_std::Json::Number(0.0)),
-            ("y", jet_std::Json::Number(0.0)),
+            ("x", jet_std::JSON::Number(0.0)),
+            ("y", jet_std::JSON::Number(0.0)),
             ("origin", origin),
         ]),
         jet_browser_object(vec![
             ("type", jet_browser_text("pointerDown")),
-            ("button", jet_std::Json::Number(0.0)),
+            ("button", jet_std::JSON::Number(0.0)),
         ]),
         jet_browser_object(vec![
             ("type", jet_browser_text("pointerUp")),
-            ("button", jet_std::Json::Number(0.0)),
+            ("button", jet_std::JSON::Number(0.0)),
         ]),
     ]);
     let source = jet_browser_object(vec![
@@ -754,7 +754,7 @@ fn jet_browser_locator_click(locator: &JetBrowserLocator) -> Result<(), JetBrows
         "input.performActions",
         jet_browser_object(vec![
             ("context", jet_browser_text(&locator.page.id)),
-            ("actions", jet_std::Json::Array(vec![source])),
+            ("actions", jet_std::JSON::Array(vec![source])),
         ]),
     )
     .map(|_| ())
@@ -771,7 +771,7 @@ fn jet_browser_protocol_send(
 ) -> Result<String, JetBrowserError> {
     let params =
         jet_std::parse_json_strict(params_json).map_err(|_| JetBrowserError::new("protocol"))?;
-    if !matches!(params, jet_std::Json::Object(_)) {
+    if !matches!(params, jet_std::JSON::Object(_)) {
         return Err(JetBrowserError::new("protocol"));
     }
     let result = if protocol.kind == "bidi" {

@@ -1198,7 +1198,7 @@ fn scheduler() -> Arc<Scheduler> {
         .clone()
 }
 
-// pub for JIT NetHttp/HttpServer include (same crate-local visibility as AOT prelude).
+// pub for JIT NetHttp/HTTPServer include (same crate-local visibility as AOT prelude).
 #[derive(Debug)]
 pub enum JetSchedulerResult<T> {
     Value(T),

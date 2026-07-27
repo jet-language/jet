@@ -76,7 +76,7 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::RParen, "to close the parameter list")?;
             self.validate_variadic_params(&params);
     
-            // D-ARROW-CONTROL1=A: an optional `=[Net, Db]=>` callable effect
+            // D-ARROW-CONTROL1=A: an optional `=[Net, DB]=>` callable effect
             // arrow. Effect names are validated in sema. D-EFF2 keeps `via f`
             // in the same row.
             let (declared_effects, effect_via) = self.parse_opt_func_effects()?;
@@ -259,9 +259,9 @@ impl<'a> Parser<'a> {
         }
     
         /// D-EFF1 / D-SHAPE8 / D-ARROW-CONTROL1: parse an optional
-        /// `=[Net, Db]=>` effect bound.
+        /// `=[Net, DB]=>` effect bound.
         /// Returns `None` when the cursor is not at the decorated arrow. D-EFFTREE1: an entry may be a
-        /// dotted effect path (`Fs.Read`); sema validates the root against the
+        /// dotted effect path (`FS.Read`); sema validates the root against the
         /// known effect vocabulary.
         pub(super) fn parse_opt_effect_annotation(&mut self) -> Result<Option<Vec<(String, Span)>>, Diagnostic> {
             // Trait methods (and any caller that can't host a `#(via f)` pass-through)
@@ -272,7 +272,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-EFF1 / D-EFF2 / D-SHAPE8 / D-ARROW-CONTROL1: parse the decorated
-        /// effect arrow, either a declared bound (`=[Net, Db]=>`) or an
+        /// effect arrow, either a declared bound (`=[Net, DB]=>`) or an
         /// `=[via f]=>` pass-through. Returns
         /// `(declared_effects, effect_via)` — at most one is `Some`. `None`/`None` when
         /// the cursor is not at `=[`.

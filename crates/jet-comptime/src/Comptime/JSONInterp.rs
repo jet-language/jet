@@ -6,13 +6,13 @@ use std::collections::BTreeMap;
 use crate::AST::{CtFloat, CtKey, CtValue};
 
 #[derive(Clone, Debug)]
-pub(super) struct JsonError {
+pub(super) struct JSONError {
     line: i64,
     message: String,
 }
 
-fn json_err(line: i64, message: impl Into<String>) -> JsonError {
-    JsonError {
+fn json_err(line: i64, message: impl Into<String>) -> JSONError {
+    JSONError {
         line,
         message: message.into(),
     }
@@ -32,7 +32,7 @@ impl Parser {
             + 1
     }
 
-    fn err(&self, msg: &str) -> JsonError {
+    fn err(&self, msg: &str) -> JSONError {
         json_err(self.line(), msg)
     }
 
@@ -46,7 +46,7 @@ impl Parser {
         }
     }
 
-    fn parse_value(&mut self) -> Result<CtValue, JsonError> {
+    fn parse_value(&mut self) -> Result<CtValue, JSONError> {
         self.ws();
         match self.peek() {
             Some('n') => self.word("null", json_variant("Null", None)),
@@ -60,7 +60,7 @@ impl Parser {
         }
     }
 
-    fn word(&mut self, w: &str, v: CtValue) -> Result<CtValue, JsonError> {
+    fn word(&mut self, w: &str, v: CtValue) -> Result<CtValue, JSONError> {
         for ch in w.chars() {
             if self.peek() != Some(ch) {
                 return Err(self.err("expected a JSON word"));
@@ -70,7 +70,7 @@ impl Parser {
         Ok(v)
     }
 
-    fn string(&mut self) -> Result<String, JsonError> {
+    fn string(&mut self) -> Result<String, JSONError> {
         if self.peek() != Some('"') {
             return Err(self.err("expected quoted text"));
         }
@@ -105,7 +105,7 @@ impl Parser {
         Err(self.err("missing closing quote"))
     }
 
-    fn unicode_escape(&mut self, out: &mut String) -> Result<(), JsonError> {
+    fn unicode_escape(&mut self, out: &mut String) -> Result<(), JSONError> {
         let cp = self.hex4()?;
         match char::from_u32(cp) {
             Some(ch) => out.push(ch),
@@ -114,7 +114,7 @@ impl Parser {
         Ok(())
     }
 
-    fn hex4(&mut self) -> Result<u32, JsonError> {
+    fn hex4(&mut self) -> Result<u32, JSONError> {
         let mut v = 0u32;
         for _ in 0..4 {
             let Some(c) = self.peek() else {
@@ -129,7 +129,7 @@ impl Parser {
         Ok(v)
     }
 
-    fn number(&mut self) -> Result<CtValue, JsonError> {
+    fn number(&mut self) -> Result<CtValue, JSONError> {
         let start = self.pos;
         if self.peek() == Some('-') {
             self.pos += 1;
@@ -177,7 +177,7 @@ impl Parser {
         }
     }
 
-    fn array(&mut self) -> Result<CtValue, JsonError> {
+    fn array(&mut self) -> Result<CtValue, JSONError> {
         self.pos += 1;
         let mut items = Vec::new();
         self.ws();
@@ -203,7 +203,7 @@ impl Parser {
         Ok(json_variant("Array", Some(CtValue::List(items))))
     }
 
-    fn object(&mut self) -> Result<CtValue, JsonError> {
+    fn object(&mut self) -> Result<CtValue, JSONError> {
         self.pos += 1;
         let mut map = BTreeMap::new();
         self.ws();
@@ -241,14 +241,14 @@ impl Parser {
     }
 }
 
-/// D-SERDE-ACCESS=B / D-DYNAMIC-TYPE1=A: build one node of the `Json`/`Data`
+/// D-SERDE-ACCESS=B / D-DYNAMIC-TYPE1=A: build one node of the `JSON`/`Data`
 /// dynamic-value tree — a `CtValue::Enum` so it round-trips through the exact
 /// same pattern-matching (`data == .Object(entries)`, S31) and explicit
-/// construction (`Json.Text("jet")`) machinery a user enum already gets, with
+/// construction (`JSON.Text("jet")`) machinery a user enum already gets, with
 /// no interpreter-specific special case needed on either of those paths.
 pub(super) fn json_variant(variant: &str, payload: Option<CtValue>) -> CtValue {
     CtValue::Enum {
-        type_name: "Json".to_string(),
+        type_name: "JSON".to_string(),
         variant: variant.to_string(),
         args: match payload {
             Some(v) => vec![(None, v)],
@@ -257,7 +257,7 @@ pub(super) fn json_variant(variant: &str, payload: Option<CtValue>) -> CtValue {
     }
 }
 
-/// The payload of a `Json`-tagged `CtValue` with the given variant name, or
+/// The payload of a `JSON`-tagged `CtValue` with the given variant name, or
 /// `None` if `v` isn't that shape (used by the `.field`/`.at`/`.int`/`.text`/
 /// `.bool`/`.float` accessor methods in `Builtins.rs`).
 pub(super) fn json_payload<'a>(v: &'a CtValue, variant: &str) -> Option<&'a CtValue> {
@@ -266,12 +266,12 @@ pub(super) fn json_payload<'a>(v: &'a CtValue, variant: &str) -> Option<&'a CtVa
             type_name,
             variant: vname,
             args,
-        } if type_name == "Json" && vname == variant => args.first().map(|(_, v)| v),
+        } if type_name == "JSON" && vname == variant => args.first().map(|(_, v)| v),
         _ => None,
     }
 }
 
-pub(super) fn parse_json(text: &str) -> Result<CtValue, JsonError> {
+pub(super) fn parse_json(text: &str) -> Result<CtValue, JSONError> {
     let mut p = Parser {
         chars: text.chars().collect(),
         pos: 0,
@@ -284,9 +284,9 @@ pub(super) fn parse_json(text: &str) -> Result<CtValue, JsonError> {
     Ok(v)
 }
 
-pub(super) fn json_error_value(e: JsonError) -> CtValue {
+pub(super) fn json_error_value(e: JSONError) -> CtValue {
     CtValue::Struct {
-        type_name: "JsonError".to_string(),
+        type_name: "JSONError".to_string(),
         fields: vec![
             ("line".to_string(), CtValue::Int(e.line)),
             ("message".to_string(), CtValue::Str(e.message)),
@@ -298,8 +298,8 @@ pub(super) fn json_error_value(e: JsonError) -> CtValue {
 /// on line `idx` of the JSONL document at `idx + e.line` — mirrors AOT's
 /// `jet_std_jsonl_parse` (`MathRandomTime.rs`), which adds the 0-based JSONL
 /// line index to the per-line JSON parser's own line number.
-pub(super) fn json_error_value_at_line(e: JsonError, line_offset: i64) -> CtValue {
-    json_error_value(JsonError {
+pub(super) fn json_error_value_at_line(e: JSONError, line_offset: i64) -> CtValue {
+    json_error_value(JSONError {
         line: line_offset + e.line,
         message: e.message,
     })
@@ -307,14 +307,14 @@ pub(super) fn json_error_value_at_line(e: JsonError, line_offset: i64) -> CtValu
 
 pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> String {
     match v {
-        // D-SERDE-ACCESS=B: a `Json`-tagged dynamic value (from `.parse()`, or
-        // built by hand with `Json.Text(…)`/`Json.Object(…)`) — unwrap the tag
+        // D-SERDE-ACCESS=B: a `JSON`-tagged dynamic value (from `.parse()`, or
+        // built by hand with `JSON.Text(…)`/`JSON.Object(…)`) — unwrap the tag
         // and render its payload the same way the untagged shapes below do.
         CtValue::Enum {
             type_name,
             variant,
             args,
-        } if type_name == "Json" => match variant.as_str() {
+        } if type_name == "JSON" => match variant.as_str() {
             "Null" => "null".to_string(),
             _ => match args.first() {
                 Some((_, payload)) => render_json_pretty(payload, pretty, depth),
@@ -384,7 +384,7 @@ pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> Str
         CtValue::Struct {
             type_name,
             fields,
-        } if type_name == "JsonObject" => {
+        } if type_name == "JSONObject" => {
             let mut fields = fields.clone();
             fields.sort_by(|a, b| a.0.cmp(&b.0));
             if fields.is_empty() {

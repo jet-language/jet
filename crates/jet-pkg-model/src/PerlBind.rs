@@ -18,7 +18,7 @@ pub enum BindError {
     Source(String),
     ToolMissing(&'static str),
     ToolFailed(&'static str, String),
-    Io(String),
+    IO(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,7 +30,7 @@ struct BoundFunction {
 impl std::fmt::Display for BindError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Source(v) | Self::Io(v) => f.write_str(v),
+            Self::Source(v) | Self::IO(v) => f.write_str(v),
             Self::ToolMissing(v) => write!(f, "the provisioned `{v}` tool was not found"),
             Self::ToolFailed(t, v) => write!(f, "`{t}` rejected the Perl binding input: {v}"),
         }
@@ -44,17 +44,17 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     }
     let perl = tool_path("perl").ok_or(BindError::ToolMissing("perl"))?;
     let script = std::fs::canonicalize(path)
-        .map_err(|e| BindError::Io(format!("could not resolve the Perl script: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not resolve the Perl script: {e}")))?;
     std::fs::create_dir_all(cache)
-        .map_err(|e| BindError::Io(format!("could not create Perl binding cache: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not create Perl binding cache: {e}")))?;
     let build = cache.join(format!(".perl-build-{lib}"));
     let _ = std::fs::remove_dir_all(&build);
     std::fs::create_dir_all(&build)
-        .map_err(|e| BindError::Io(format!("could not create Perl build directory: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not create Perl build directory: {e}")))?;
 
     let discoverer = build.join("JetDiscover.pm");
     std::fs::write(&discoverer, DISCOVERER)
-        .map_err(|e| BindError::Io(format!("could not write Perl binding inspector: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not write Perl binding inspector: {e}")))?;
     let discovered = run_capture(
         Command::new(&perl)
             .arg(format!("-I{}", build.display()))
@@ -68,9 +68,9 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     let worker = cache.join(format!("{lib}_worker.pl"));
     let worker_source = render_worker(&functions);
     std::fs::write(&worker, &worker_source)
-        .map_err(|e| BindError::Io(format!("could not write Perl worker: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not write Perl worker: {e}")))?;
     let worker = std::fs::canonicalize(&worker)
-        .map_err(|e| BindError::Io(format!("could not resolve the Perl worker: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not resolve the Perl worker: {e}")))?;
 
     let abi = format!("jet_perl_{lib}");
     let mut wrappers = String::new();
@@ -91,7 +91,7 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     let c = build.join(format!("{abi}.c"));
     let object = build.join(format!("{abi}.o"));
     std::fs::write(&c, bridge)
-        .map_err(|e| BindError::Io(format!("could not write Perl process bridge: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not write Perl process bridge: {e}")))?;
     run(
         Command::new("cc")
             .args(["-std=c11", "-D_POSIX_C_SOURCE=200809L", "-fPIC", "-c"])
@@ -264,15 +264,15 @@ fn run(command: &mut Command, tool: &'static str) -> Result<(), BindError> {
     let mut child = command.spawn().map_err(|e| if e.kind() == std::io::ErrorKind::NotFound {
         BindError::ToolMissing(tool)
     } else {
-        BindError::Io(format!("could not start `{tool}`: {e}"))
+        BindError::IO(format!("could not start `{tool}`: {e}"))
     })?;
-    let stdout = child.stdout.take().ok_or_else(|| BindError::Io(format!("could not supervise `{tool}` stdout")))?;
-    let stderr = child.stderr.take().ok_or_else(|| BindError::Io(format!("could not supervise `{tool}` stderr")))?;
+    let stdout = child.stdout.take().ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
+    let stderr = child.stderr.take().ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
     let out = std::thread::spawn(move || drain(stdout, CAP));
     let err = std::thread::spawn(move || drain(stderr, CAP));
     let deadline = Instant::now() + Duration::from_secs(60);
     let status = loop {
-        match child.try_wait().map_err(|e| BindError::Io(format!("could not supervise `{tool}`: {e}")))? {
+        match child.try_wait().map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))? {
             Some(v) => break v,
             None if Instant::now() >= deadline => {
                 let _ = child.kill();
@@ -284,8 +284,8 @@ fn run(command: &mut Command, tool: &'static str) -> Result<(), BindError> {
             None => std::thread::sleep(Duration::from_millis(10)),
         }
     };
-    let stdout = out.join().map_err(|_| BindError::Io(format!("`{tool}` stdout reader failed")))??;
-    let stderr = err.join().map_err(|_| BindError::Io(format!("`{tool}` stderr reader failed")))??;
+    let stdout = out.join().map_err(|_| BindError::IO(format!("`{tool}` stdout reader failed")))??;
+    let stderr = err.join().map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
     if status.success() { Ok(()) } else {
         let detail = if stderr.is_empty() { &stdout } else { &stderr };
         Err(BindError::ToolFailed(tool, launder(detail)))
@@ -295,21 +295,21 @@ fn run(command: &mut Command, tool: &'static str) -> Result<(), BindError> {
 fn run_capture(command: &mut Command, tool: &'static str) -> Result<Vec<u8>, BindError> {
     const CAP: usize = 64 * 1024;
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { BindError::ToolMissing(tool) } else { BindError::Io(format!("could not start `{tool}`: {e}")) })?;
-    let stdout = child.stdout.take().ok_or_else(|| BindError::Io(format!("could not supervise `{tool}` stdout")))?;
-    let stderr = child.stderr.take().ok_or_else(|| BindError::Io(format!("could not supervise `{tool}` stderr")))?;
+    let mut child = command.spawn().map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { BindError::ToolMissing(tool) } else { BindError::IO(format!("could not start `{tool}`: {e}")) })?;
+    let stdout = child.stdout.take().ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
+    let stderr = child.stderr.take().ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
     let out = std::thread::spawn(move || drain(stdout, CAP));
     let err = std::thread::spawn(move || drain(stderr, CAP));
     let deadline = Instant::now() + Duration::from_secs(60);
     let status = loop {
-        match child.try_wait().map_err(|e| BindError::Io(format!("could not supervise `{tool}`: {e}")))? {
+        match child.try_wait().map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))? {
             Some(v) => break v,
             None if Instant::now() >= deadline => { let _=child.kill();let _=child.wait();let _=out.join();let _=err.join();return Err(BindError::ToolFailed(tool,"the tool exceeded the 60 second limit".into())); }
             None => std::thread::sleep(Duration::from_millis(10)),
         }
     };
-    let stdout=out.join().map_err(|_|BindError::Io(format!("`{tool}` stdout reader failed")))??;
-    let stderr=err.join().map_err(|_|BindError::Io(format!("`{tool}` stderr reader failed")))??;
+    let stdout=out.join().map_err(|_|BindError::IO(format!("`{tool}` stdout reader failed")))??;
+    let stderr=err.join().map_err(|_|BindError::IO(format!("`{tool}` stderr reader failed")))??;
     if status.success(){Ok(stdout)}else{Err(BindError::ToolFailed(tool,launder(&stderr)))}
 }
 
@@ -317,7 +317,7 @@ fn drain(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError> {
     let mut out = Vec::new();
     let mut buf = [0u8; 8192];
     loop {
-        let n = input.read(&mut buf).map_err(|e| BindError::Io(format!("could not read foreign tool output: {e}")))?;
+        let n = input.read(&mut buf).map_err(|e| BindError::IO(format!("could not read foreign tool output: {e}")))?;
         if n == 0 { break; }
         let keep = (limit - out.len()).min(n);
         out.extend_from_slice(&buf[..keep]);

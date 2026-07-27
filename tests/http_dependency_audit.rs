@@ -82,12 +82,12 @@ fn http_prelude_sources_do_not_import_forbidden_http_crates() {
         "extern crate flate2",
     ];
     let sources = [
-        "crates/jet-codegen/src/Prelude/CoreLib/Top/HttpMessage.rs",
-        "crates/jet-codegen/src/Prelude/CoreLib/Top/HttpRoute.rs",
-        "crates/jet-codegen/src/Prelude/CoreLib/Top/HttpClient.rs",
-        "crates/jet-codegen/src/Prelude/CoreLib/Top/HttpServer.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs",
         "crates/jet-codegen/src/Prelude/CoreLib/Top/Ws.rs",
-        "crates/jet-pkg-model/src/Prelude/Http.rs",
+        "crates/jet-pkg-model/src/Prelude/HTTP.rs",
     ];
     for path in sources {
         let text = read(path);
@@ -98,11 +98,11 @@ fn http_prelude_sources_do_not_import_forbidden_http_crates() {
             );
         }
     }
-    // Comment noise in HttpClient.rs historically mentioned ureq; keep it gone.
-    let client = read("crates/jet-codegen/src/Prelude/CoreLib/Top/HttpClient.rs");
+    // Comment noise in HTTPClient.rs historically mentioned ureq; keep it gone.
+    let client = read("crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs");
     assert!(
         !client.to_ascii_lowercase().contains("ureq"),
-        "HttpClient prelude must not mention ureq"
+        "HTTPClient prelude must not mention ureq"
     );
 }
 
@@ -110,26 +110,26 @@ fn http_prelude_sources_do_not_import_forbidden_http_crates() {
 fn unsupported_target_variant_is_mapped_from_bridge_and_server_bind() {
     let bridge = read("crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs");
     assert!(
-        bridge.contains("JetHttpBridgeError::UnsupportedTarget => JetHttpError::UnsupportedTarget")
-            && bridge.contains("JetHttpOperation::ClientConnect"),
+        bridge.contains("JetHTTPBridgeError::UnsupportedTarget => JetHTTPError::UnsupportedTarget")
+            && bridge.contains("JetHTTPOperation::ClientConnect"),
         "client bridge must map UnsupportedTarget to ClientConnect"
     );
     assert!(
         bridge.contains("unsupported-target:server-bind"),
-        "server bind must map UnsupportedTarget before Io fallback"
+        "server bind must map UnsupportedTarget before IO fallback"
     );
     assert!(
-        bridge.contains("JetHttpOperation::ServerBind"),
+        bridge.contains("JetHTTPOperation::ServerBind"),
         "server bind UnsupportedTarget must name ServerBind"
     );
-    let server = read("crates/jet-codegen/src/Prelude/CoreLib/Top/HttpServer.rs");
+    let server = read("crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
     assert!(
         server.contains("unsupported-target:server-bind"),
         "server bind must preflight unsupported targets"
     );
-    let client = read("crates/jet-pkg-model/src/Prelude/Http.rs");
+    let client = read("crates/jet-pkg-model/src/Prelude/HTTP.rs");
     assert!(
-        client.contains("JetHttpBridgeError::UnsupportedTarget"),
+        client.contains("JetHTTPBridgeError::UnsupportedTarget"),
         "client send must be able to return UnsupportedTarget"
     );
 }

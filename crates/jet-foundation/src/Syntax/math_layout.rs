@@ -165,25 +165,25 @@ pub const TYPE_JSON_ERROR: &str = "JSONError";
 /// constructs and returns. `DataTree` is the single canonical user-facing
 /// spelling — renamed from the old `Data` face by D-SERDE13=B (it is a tree of
 /// data, distinct from any user type named `Data`; the retired `Data` spelling is
-/// a teaching error, E0351, not an alias, per I8). `Json`/`Toml`/`Yaml`/`Csv` are
+/// a teaching error, E0351, not an alias, per I8). `JSON`/`TOML`/`YAML`/`CSV` are
 /// format-tagged aliases over the same structure, so `json.parse` is typed
-/// `Json`, `toml.parse` is typed `Toml`, etc., but one walker and one accessor
+/// `JSON`, `toml.parse` is typed `TOML`, etc., but one walker and one accessor
 /// set back them. Variants: `Null`, `Bool`, `Int`, `Float`, `Text`, `Array`,
 /// `Object`.
 pub const TYPE_DATA: &str = "DataTree";
 /// D-SERDE16=A (ratified 2026-07-11): public target-directed subtree dispatch.
 /// `tree.decode<T>()` calls only `T`'s ordinary `Decode` protocol impl.
 pub const METHOD_DATATREE_DECODE: &str = "decode";
-pub const TYPE_DATA_JSON: &str = "Json";
-pub const TYPE_DATA_TOML: &str = "Toml";
-pub const TYPE_DATA_YAML: &str = "Yaml";
-pub const TYPE_DATA_CSV: &str = "Csv";
+pub const TYPE_DATA_JSON: &str = "JSON";
+pub const TYPE_DATA_TOML: &str = "TOML";
+pub const TYPE_DATA_YAML: &str = "YAML";
+pub const TYPE_DATA_CSV: &str = "CSV";
 
 /// The accepted spellings of the dynamic encoding value (D-ENC-DYN1=A+ /
 /// D-SERDE13=B): canonical `DataTree` plus the four format-tagged aliases. The
 /// old bare `Data` spelling is intentionally absent — it is caught as E0351.
 pub fn is_data_type_name(name: &str) -> bool {
-    matches!(name, "DataTree" | "Json" | "Toml" | "Yaml" | "Csv")
+    matches!(name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
 }
 
 /// The variants of the dynamic `Data` value (D-ENC-DYN1=A+), the user-facing face
@@ -196,18 +196,18 @@ pub fn is_data_variant(variant: &str) -> bool {
 }
 
 /// D-DBDRIVER1 (ratified): the tagged SQL parameter/column value. Construct with
-/// `DbValue.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)` / `.Null`; a `[DbValue]`
+/// `DBValue.Int(n)` / `.Float(f)` / `.Text(s)` / `.Bool(b)` / `.Null`; a `[DBValue]`
 /// is the parameterized-query bind list, never a raw SQL string. A dedicated
 /// dynamic-value type (mirrors `Data`'s construction mechanism, D-ENC-DYN1=A+)
 /// — not a user-registrable enum, so it never appears in `match`.
-pub const TYPE_DB_VALUE: &str = "DbValue";
+pub const TYPE_DB_VALUE: &str = "DBValue";
 
-/// D-DBDRIVER1: is `name` the `DbValue` dynamic-value type name?
+/// D-DBDRIVER1: is `name` the `DBValue` dynamic-value type name?
 pub fn is_db_value_type_name(name: &str) -> bool {
     name == TYPE_DB_VALUE
 }
 
-/// D-DBDRIVER1: the variants of `DbValue`.
+/// D-DBDRIVER1: the variants of `DBValue`.
 pub fn is_db_value_variant(variant: &str) -> bool {
     matches!(variant, "Null" | "Int" | "Float" | "Text" | "Bool")
 }
@@ -232,7 +232,7 @@ pub const OP_RANGE_EXCLUSIVE: &str = "..<";
 /// retained only so the range-arm porting diagnostic can recognize it.
 pub const RETIRED_LOOP_STEP: &str = "step";
 
-/// S23 + D-LOOPSTATE1=A: loop control. Bare payloads return from the innermost
+/// S23 (ratified) + D-LOOPSTATE1=A: loop control. Bare payloads return from the innermost
 /// loop; `break(name[, value])` and `next(name)` select named loop targets.
 pub const KW_BREAK: &str = "break";
 /// D-LOOP-CONTROLWORD1=B: contextual statement/fallback control.
@@ -248,7 +248,7 @@ pub const KW_SWITCH: &str = "if";
 /// value if, and finite yielding loops.
 pub const OP_ARM_ARROW: &str = "->";
 
-/// S46 + D-ARROW-CONTROL1=A: callable-result arrow for named functions,
+/// S46 (ratified) + D-ARROW-CONTROL1=A: callable-result arrow for named functions,
 /// function types, lambdas, computed fields, conversions, and task bodies.
 pub const OP_CALLABLE_ARROW: &str = "=>";
 /// Transitional internal name. Remove after every parser/formatter consumer

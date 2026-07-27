@@ -3,11 +3,11 @@ use std::net::TcpStream;
 use std::sync::Arc;
 use std::time::Duration;
 
-type JetHttpRustlsStream = rustls::StreamOwned<rustls::ServerConnection, TcpStream>;
+type JetHTTPRustlsStream = rustls::StreamOwned<rustls::ServerConnection, TcpStream>;
 
-struct JetHttpTlsSharedReader(Arc<std::sync::Mutex<JetHttpRustlsStream>>);
+struct JetHTTPTlsSharedReader(Arc<std::sync::Mutex<JetHTTPRustlsStream>>);
 
-impl Read for JetHttpTlsSharedReader {
+impl Read for JetHTTPTlsSharedReader {
     fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
         self.0
             .lock()
@@ -16,9 +16,9 @@ impl Read for JetHttpTlsSharedReader {
     }
 }
 
-struct JetHttpTlsSharedWriter(Arc<std::sync::Mutex<JetHttpRustlsStream>>);
+struct JetHTTPTlsSharedWriter(Arc<std::sync::Mutex<JetHTTPRustlsStream>>);
 
-impl Write for JetHttpTlsSharedWriter {
+impl Write for JetHTTPTlsSharedWriter {
     fn write(&mut self, input: &[u8]) -> std::io::Result<usize> {
         self.0
             .lock()
@@ -156,8 +156,8 @@ fn jet_http_server_tls_session_limited(
         let read_timeout = shared.clone();
         let write_timeout = shared.clone();
         let result = on_h2(
-            Box::new(JetHttpTlsSharedReader(shared.clone())),
-            Box::new(JetHttpTlsSharedWriter(shared.clone())),
+            Box::new(JetHTTPTlsSharedReader(shared.clone())),
+            Box::new(JetHTTPTlsSharedWriter(shared.clone())),
             Box::new(move |timeout| {
                 read_timeout
                     .lock()
@@ -190,19 +190,19 @@ fn jet_http_server_tls_session_limited(
         let between = request_index > 0;
         let idle = if between { IDLE_TIMEOUT } else { HEADER_TIMEOUT };
         let started = std::time::Instant::now();
-        let mut framing = JetHttpTlsMessageState::new();
+        let mut framing = JetHTTPTlsMessageState::new();
         let (request, rejected) = loop {
             if between && pending.is_empty() && should_stop() {
                 return Ok(());
             }
             match framing.advance(&pending, MAX_HEADER_BYTES, MAX_BODY_BYTES) {
-                JetHttpTlsMessageStatus::Complete(end) => {
+                JetHTTPTlsMessageStatus::Complete(end) => {
                     break (pending.drain(..end).collect::<Vec<u8>>(), false);
                 }
-                JetHttpTlsMessageStatus::Reject => {
+                JetHTTPTlsMessageStatus::Reject => {
                     break (std::mem::take(&mut pending), true);
                 }
-                JetHttpTlsMessageStatus::Pending => {}
+                JetHTTPTlsMessageStatus::Pending => {}
             }
             let deadline = if framing.reading_body() {
                 started + BODY_TIMEOUT
@@ -299,47 +299,47 @@ pub fn jet_http_server_tls_handle_impl(
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum JetHttpTlsMessageStatus {
+enum JetHTTPTlsMessageStatus {
     Pending,
     Complete(usize),
     Reject,
 }
 
-enum JetHttpTlsBodyState {
+enum JetHTTPTlsBodyState {
     Headers,
     ContentLength(usize),
     Chunked {
         body_start: usize,
-        state: JetHttpTlsChunkState,
+        state: JetHTTPTlsChunkState,
     },
 }
 
-struct JetHttpTlsMessageState {
+struct JetHTTPTlsMessageState {
     header_scan: usize,
     #[cfg(test)]
     inspected: usize,
-    body: JetHttpTlsBodyState,
+    body: JetHTTPTlsBodyState,
 }
 
-impl JetHttpTlsMessageState {
+impl JetHTTPTlsMessageState {
     fn new() -> Self {
         Self {
             header_scan: 0,
             #[cfg(test)]
             inspected: 0,
-            body: JetHttpTlsBodyState::Headers,
+            body: JetHTTPTlsBodyState::Headers,
         }
     }
 
     fn reading_body(&self) -> bool {
-        !matches!(self.body, JetHttpTlsBodyState::Headers)
+        !matches!(self.body, JetHTTPTlsBodyState::Headers)
     }
 
     #[cfg(test)]
     fn inspected(&self) -> usize {
         self.inspected
             + match &self.body {
-                JetHttpTlsBodyState::Chunked { state, .. } => state.inspected,
+                JetHTTPTlsBodyState::Chunked { state, .. } => state.inspected,
                 _ => 0,
             }
     }
@@ -349,8 +349,8 @@ impl JetHttpTlsMessageState {
         raw: &[u8],
         max_header: usize,
         max_body: usize,
-    ) -> JetHttpTlsMessageStatus {
-        if matches!(self.body, JetHttpTlsBodyState::Headers) {
+    ) -> JetHTTPTlsMessageStatus {
+        if matches!(self.body, JetHTTPTlsBodyState::Headers) {
             let start = self.header_scan.saturating_sub(3);
             let found = raw.get(start..).and_then(|tail| {
                 tail.windows(4)
@@ -366,33 +366,33 @@ impl JetHttpTlsMessageState {
             let Some(position) = found else {
                 self.header_scan = raw.len();
                 return if raw.len() > max_header.saturating_add(4) {
-                    JetHttpTlsMessageStatus::Reject
+                    JetHTTPTlsMessageStatus::Reject
                 } else {
-                    JetHttpTlsMessageStatus::Pending
+                    JetHTTPTlsMessageStatus::Pending
                 };
             };
             let header_end = start + position;
             if header_end > max_header {
-                return JetHttpTlsMessageStatus::Reject;
+                return JetHTTPTlsMessageStatus::Reject;
             }
             self.body = match jet_http_tls_body_state(&raw[..header_end], header_end + 4, max_body) {
                 Some(body) => body,
-                None => return JetHttpTlsMessageStatus::Reject,
+                None => return JetHTTPTlsMessageStatus::Reject,
             };
         }
         match &mut self.body {
-            JetHttpTlsBodyState::Headers => JetHttpTlsMessageStatus::Pending,
-            JetHttpTlsBodyState::ContentLength(end) => {
+            JetHTTPTlsBodyState::Headers => JetHTTPTlsMessageStatus::Pending,
+            JetHTTPTlsBodyState::ContentLength(end) => {
                 if raw.len() >= *end {
-                    JetHttpTlsMessageStatus::Complete(*end)
+                    JetHTTPTlsMessageStatus::Complete(*end)
                 } else {
-                    JetHttpTlsMessageStatus::Pending
+                    JetHTTPTlsMessageStatus::Pending
                 }
             }
-            JetHttpTlsBodyState::Chunked { body_start, state } => {
+            JetHTTPTlsBodyState::Chunked { body_start, state } => {
                 match state.advance(&raw[*body_start..], max_body) {
-                    JetHttpTlsMessageStatus::Complete(end) => {
-                        JetHttpTlsMessageStatus::Complete(*body_start + end)
+                    JetHTTPTlsMessageStatus::Complete(end) => {
+                        JetHTTPTlsMessageStatus::Complete(*body_start + end)
                     }
                     status => status,
                 }
@@ -405,7 +405,7 @@ fn jet_http_tls_body_state(
     header: &[u8],
     body_start: usize,
     max_body: usize,
-) -> Option<JetHttpTlsBodyState> {
+) -> Option<JetHTTPTlsBodyState> {
     let header = std::str::from_utf8(header).ok()?;
     let mut lines = header.split("\r\n");
     lines.next()?;
@@ -441,36 +441,36 @@ fn jet_http_tls_body_state(
         if !encoding.eq_ignore_ascii_case("chunked") {
             return None;
         }
-        return Some(JetHttpTlsBodyState::Chunked {
+        return Some(JetHTTPTlsBodyState::Chunked {
             body_start,
-            state: JetHttpTlsChunkState::new(),
+            state: JetHTTPTlsChunkState::new(),
         });
     }
     let length = content_length.unwrap_or(0);
     if length > max_body {
         return None;
     }
-    Some(JetHttpTlsBodyState::ContentLength(body_start.checked_add(length)?))
+    Some(JetHTTPTlsBodyState::ContentLength(body_start.checked_add(length)?))
 }
 
 #[derive(Clone, Copy)]
-enum JetHttpTlsChunkPhase {
+enum JetHTTPTlsChunkPhase {
     Size,
     Data(usize),
     Trailers,
 }
 
-struct JetHttpTlsChunkState {
+struct JetHTTPTlsChunkState {
     cursor: usize,
     search: usize,
     decoded: usize,
     framing: usize,
     #[cfg(test)]
     inspected: usize,
-    phase: JetHttpTlsChunkPhase,
+    phase: JetHTTPTlsChunkPhase,
 }
 
-impl JetHttpTlsChunkState {
+impl JetHTTPTlsChunkState {
     const MAX_FRAMING: usize = 32 * 1024;
 
     fn new() -> Self {
@@ -481,7 +481,7 @@ impl JetHttpTlsChunkState {
             framing: 0,
             #[cfg(test)]
             inspected: 0,
-            phase: JetHttpTlsChunkPhase::Size,
+            phase: JetHTTPTlsChunkPhase::Size,
         }
     }
 
@@ -490,10 +490,10 @@ impl JetHttpTlsChunkState {
         self.framing <= Self::MAX_FRAMING
     }
 
-    fn advance(&mut self, body: &[u8], max_body: usize) -> JetHttpTlsMessageStatus {
+    fn advance(&mut self, body: &[u8], max_body: usize) -> JetHTTPTlsMessageStatus {
         loop {
             match self.phase {
-                JetHttpTlsChunkPhase::Size => {
+                JetHTTPTlsChunkPhase::Size => {
                     let start = self.search.saturating_sub(1).max(self.cursor);
                     let found = body.get(start..).and_then(|tail| {
                         tail.windows(2).position(|window| window == b"\r\n")
@@ -512,48 +512,48 @@ impl JetHttpTlsChunkState {
                             .saturating_add(body.len().saturating_sub(self.cursor))
                             > Self::MAX_FRAMING
                         {
-                            JetHttpTlsMessageStatus::Reject
+                            JetHTTPTlsMessageStatus::Reject
                         } else {
-                            JetHttpTlsMessageStatus::Pending
+                            JetHTTPTlsMessageStatus::Pending
                         };
                     };
                     let line_end = start + position;
                     if !self.add_framing(line_end - self.cursor + 2) {
-                        return JetHttpTlsMessageStatus::Reject;
+                        return JetHTTPTlsMessageStatus::Reject;
                     }
                     let Some(size) = jet_http_tls_chunk_size(&body[self.cursor..line_end]) else {
-                        return JetHttpTlsMessageStatus::Reject;
+                        return JetHTTPTlsMessageStatus::Reject;
                     };
                     self.cursor = line_end + 2;
                     if size == 0 {
                         self.search = self.cursor;
-                        self.phase = JetHttpTlsChunkPhase::Trailers;
+                        self.phase = JetHTTPTlsChunkPhase::Trailers;
                     } else {
                         let Some(decoded) = self.decoded.checked_add(size) else {
-                            return JetHttpTlsMessageStatus::Reject;
+                            return JetHTTPTlsMessageStatus::Reject;
                         };
                         if decoded > max_body {
-                            return JetHttpTlsMessageStatus::Reject;
+                            return JetHTTPTlsMessageStatus::Reject;
                         }
                         self.decoded = decoded;
                         let Some(end) = self.cursor.checked_add(size) else {
-                            return JetHttpTlsMessageStatus::Reject;
+                            return JetHTTPTlsMessageStatus::Reject;
                         };
-                        self.phase = JetHttpTlsChunkPhase::Data(end);
+                        self.phase = JetHTTPTlsChunkPhase::Data(end);
                     }
                 }
-                JetHttpTlsChunkPhase::Data(end) => {
+                JetHTTPTlsChunkPhase::Data(end) => {
                     let Some(crlf) = body.get(end..end.saturating_add(2)) else {
-                        return JetHttpTlsMessageStatus::Pending;
+                        return JetHTTPTlsMessageStatus::Pending;
                     };
                     if crlf != b"\r\n" || !self.add_framing(2) {
-                        return JetHttpTlsMessageStatus::Reject;
+                        return JetHTTPTlsMessageStatus::Reject;
                     }
                     self.cursor = end + 2;
                     self.search = self.cursor;
-                    self.phase = JetHttpTlsChunkPhase::Size;
+                    self.phase = JetHTTPTlsChunkPhase::Size;
                 }
-                JetHttpTlsChunkPhase::Trailers => {
+                JetHTTPTlsChunkPhase::Trailers => {
                     let start = self.search.saturating_sub(1).max(self.cursor);
                     let found = body.get(start..).and_then(|tail| {
                         tail.windows(2).position(|window| window == b"\r\n")
@@ -572,20 +572,20 @@ impl JetHttpTlsChunkState {
                             .saturating_add(body.len().saturating_sub(self.cursor))
                             > Self::MAX_FRAMING
                         {
-                            JetHttpTlsMessageStatus::Reject
+                            JetHTTPTlsMessageStatus::Reject
                         } else {
-                            JetHttpTlsMessageStatus::Pending
+                            JetHTTPTlsMessageStatus::Pending
                         };
                     };
                     let line_end = start + position;
                     if !self.add_framing(line_end - self.cursor + 2) {
-                        return JetHttpTlsMessageStatus::Reject;
+                        return JetHTTPTlsMessageStatus::Reject;
                     }
                     let empty = line_end == self.cursor;
                     self.cursor = line_end + 2;
                     self.search = self.cursor;
                     if empty {
-                        return JetHttpTlsMessageStatus::Complete(self.cursor);
+                        return JetHTTPTlsMessageStatus::Complete(self.cursor);
                     }
                 }
             }

@@ -395,7 +395,7 @@ impl<'a> JitMeta<'a> {
         enum_name: &str,
         variant: &str,
     ) -> Option<&[Type]> {
-        if matches!(enum_name, "DataTree" | "Json" | "Toml" | "Yaml" | "Csv") {
+        if matches!(enum_name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") {
             return Some(datatree_payload(variant));
         }
         if enum_name == "Key" {
@@ -650,7 +650,7 @@ impl<'a> JitMeta<'a> {
             };
         }
         // DataTree (+ format aliases): Null/Bool/Int/Float/Text/Array/Object.
-        if matches!(enum_name, "DataTree" | "Json" | "Toml" | "Yaml" | "Csv") {
+        if matches!(enum_name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV") {
             return match variant {
                 "Null" => Some(0),
                 "Bool" => Some(1),
@@ -694,10 +694,10 @@ impl<'a> JitMeta<'a> {
         matches!(
             name,
             "DataTree"
-                | "Json"
-                | "Toml"
-                | "Yaml"
-                | "Csv"
+                | "JSON"
+                | "TOML"
+                | "YAML"
+                | "CSV"
                 | "ProcessStreamMode"
                 | "EncodingFormat"
                 | "EncodingErrorKind"
@@ -967,7 +967,7 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
             "path" | "reason" => Some(Type::String),
             _ => None,
         },
-        "HttpShutdownReport" => match field {
+        "HTTPShutdownReport" => match field {
             "accepted" | "overloaded" | "completed" | "cancelled" => Some(Type::Int),
             _ => None,
         },

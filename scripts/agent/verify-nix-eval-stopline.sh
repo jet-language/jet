@@ -46,7 +46,7 @@ if ! grep -Fq 'use of a disallowed type `std::process::Command`' "$log"; then
 fi
 
 for authority in \
-  'std::net::TcpStream' \
+  'std::net::TCPStream' \
   'std::net::ToSocketAddrs' \
   'std::os::unix::net::UnixStream'; do
   if ! grep -Fq "use of a disallowed type \`$authority\`" "$log"; then

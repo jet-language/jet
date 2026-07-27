@@ -255,7 +255,7 @@ pub(crate) fn lower_callable_lambda(
 ) -> Result<FuncId, String> {
     let capturing = !lam.captures.is_empty();
     // Capturing callables are supported when every capture is an i64 handle/scalar
-    // (HttpHandler middleware closures). Prep is AOT-only Rust clone text.
+    // (HTTPHandler middleware closures). Prep is AOT-only Rust clone text.
     if !lam.prep.is_empty() && !capturing {
         return Err("jit callable captures unsupported".to_string());
     }
@@ -758,7 +758,7 @@ pub(crate) fn compile_program_tiered(
     let mut func_ids: HashMap<String, FuncId> = HashMap::new();
     let mut cli_import_id: Option<FuncId> = None;
     if cli_entry {
-        cli_import_id = Some(crate::Cli::declare_cli_main_import(module)?);
+        cli_import_id = Some(crate::CLI::declare_cli_main_import(module)?);
         let main_id = match existing_main {
             Some(id) => id,
             None => {
@@ -894,7 +894,7 @@ pub(crate) fn compile_program_tiered(
             .copied()
             .ok_or_else(|| "jit CLI entry missing `run`".to_string())?;
         let code = module.get_finalized_function(run_id);
-        crate::Cli::install_cli_run_ptr(code);
+        crate::CLI::install_cli_run_ptr(code);
     }
     Ok(func_ids
         .get(&program.entry)

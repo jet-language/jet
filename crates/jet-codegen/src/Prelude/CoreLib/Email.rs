@@ -11,9 +11,9 @@ pub mod jet_email {
     #[derive(Clone, Debug, PartialEq)]
     pub enum Error {
         Configuration { operation: String, server: Option<String>, code: Option<i64>, reason: String },
-        Dns { operation: String, server: Option<String>, code: Option<i64>, reason: String },
+        DNS { operation: String, server: Option<String>, code: Option<i64>, reason: String },
         Connect { operation: String, server: Option<String>, code: Option<i64>, reason: String },
-        Tls { operation: String, server: Option<String>, code: Option<i64>, reason: String },
+        TLS { operation: String, server: Option<String>, code: Option<i64>, reason: String },
         Auth { operation: String, server: Option<String>, code: Option<i64>, reason: String },
         Protocol { operation: String, server: Option<String>, code: Option<i64>, reason: String },
         Rejected { operation: String, server: Option<String>, code: Option<i64>, reason: String },
@@ -56,7 +56,7 @@ pub mod jet_email {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub enum SmtpSecurity { StartTls, Tls }
+    pub enum SMTPSecurity { StartTls, TLS }
 
     #[derive(Clone, Debug, PartialEq)]
     pub enum RecipientPolicy { RequireAll, DeliverAccepted }
@@ -103,7 +103,7 @@ pub mod jet_email {
     }
 
     // Hidden Rust generic preserves Jet's single canonical Secret type.
-    pub enum SmtpAuth<S> {
+    pub enum SMTPAuth<S> {
         None,
         Password { username: String, password: S },
     }
@@ -116,18 +116,18 @@ pub mod jet_email {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub enum TlsTrust {
+    pub enum TLSTrust {
         System,
         SystemPlusCa { pem: Vec<u8> },
     }
 
-    pub struct SmtpConfig<S> {
+    pub struct SMTPConfig<S> {
         pub host: String,
         pub port: i64,
-        pub security: SmtpSecurity,
-        pub auth: SmtpAuth<S>,
+        pub security: SMTPSecurity,
+        pub auth: SMTPAuth<S>,
         pub recipient_policy: RecipientPolicy,
-        pub trust: TlsTrust,
+        pub trust: TLSTrust,
         pub limits: Limits,
         pub dkim: Option<DkimConfig<S>>,
     }
@@ -155,13 +155,13 @@ pub mod jet_email {
     }
 
     pub struct Mailer {
-        config: SmtpConfig<Vec<u8>>,
+        config: SMTPConfig<Vec<u8>>,
         runtime: RuntimeFns,
     }
 
     impl Drop for Mailer {
         fn drop(&mut self) {
-            if let SmtpAuth::Password { password, .. } = &mut self.config.auth {
+            if let SMTPAuth::Password { password, .. } = &mut self.config.auth {
                 (self.runtime.wipe)(password);
             }
             if let Some(dkim) = &mut self.config.dkim {
@@ -171,13 +171,13 @@ pub mod jet_email {
     }
 
     pub fn smtp<S>(
-        config: &SmtpConfig<S>,
+        config: &SMTPConfig<S>,
         extract: fn(&S) -> Vec<u8>,
         runtime: RuntimeFns,
     ) -> Result<Mailer, Error> {
         let auth = match &config.auth {
-            SmtpAuth::None => SmtpAuth::None,
-            SmtpAuth::Password { username, password } => SmtpAuth::Password {
+            SMTPAuth::None => SMTPAuth::None,
+            SMTPAuth::Password { username, password } => SMTPAuth::Password {
                 username: username.clone(),
                 password: extract(password),
             },
@@ -188,14 +188,14 @@ pub mod jet_email {
             private_key: extract(&dkim.private_key),
             signed_headers: dkim.signed_headers.clone(),
         });
-        smtp_bytes(SmtpConfig {
+        smtp_bytes(SMTPConfig {
             host: config.host.clone(), port: config.port, security: config.security.clone(), auth,
             recipient_policy: config.recipient_policy.clone(), trust: config.trust.clone(),
             limits: config.limits.clone(), dkim,
         }, runtime)
     }
 
-    fn smtp_bytes(mut config: SmtpConfig<Vec<u8>>, runtime: RuntimeFns) -> Result<Mailer, Error> {
+    fn smtp_bytes(mut config: SMTPConfig<Vec<u8>>, runtime: RuntimeFns) -> Result<Mailer, Error> {
         if let Err(error) = validate_smtp_config(&config) {
             wipe_config_secrets(&mut config, runtime);
             return Err(error);
@@ -204,7 +204,7 @@ pub mod jet_email {
             wipe_config_secrets(&mut config, runtime);
             return Err(error("dkim", "private_key must contain exactly 32 bytes"));
         }
-        if let SmtpAuth::Password { password, .. } = &config.auth {
+        if let SMTPAuth::Password { password, .. } = &config.auth {
             if std::str::from_utf8(password).is_err() {
                 wipe_config_secrets(&mut config, runtime);
                 return Err(error("auth", "SMTP password must be UTF-8"));
@@ -213,8 +213,8 @@ pub mod jet_email {
         Ok(Mailer { config, runtime })
     }
 
-    fn wipe_config_secrets(config: &mut SmtpConfig<Vec<u8>>, runtime: RuntimeFns) {
-        if let SmtpAuth::Password { password, .. } = &mut config.auth { (runtime.wipe)(password); }
+    fn wipe_config_secrets(config: &mut SMTPConfig<Vec<u8>>, runtime: RuntimeFns) {
+        if let SMTPAuth::Password { password, .. } = &mut config.auth { (runtime.wipe)(password); }
         if let Some(dkim) = &mut config.dkim { (runtime.wipe)(&mut dkim.private_key); }
     }
 
@@ -223,11 +223,11 @@ pub mod jet_email {
             .map_err(|_| error("smtp_from_env", "SMTP_HOST is required"))?;
         let security_text = std::env::var("SMTP_SECURITY").unwrap_or_else(|_| "starttls".to_string());
         let security = match security_text.to_ascii_lowercase().as_str() {
-            "starttls" => SmtpSecurity::StartTls,
-            "tls" => SmtpSecurity::Tls,
+            "starttls" => SMTPSecurity::StartTls,
+            "tls" => SMTPSecurity::TLS,
             _ => return Err(error("smtp_from_env", "SMTP_SECURITY must be `starttls` or `tls`")),
         };
-        let default_port = if security == SmtpSecurity::Tls { 465 } else { 587 };
+        let default_port = if security == SMTPSecurity::TLS { 465 } else { 587 };
         let port = match std::env::var("SMTP_PORT") {
             Ok(value) => value.parse::<i64>().map_err(|_| error("smtp_from_env", "SMTP_PORT must be an integer"))?,
             Err(_) => default_port,
@@ -239,16 +239,16 @@ pub mod jet_email {
             _ => return Err(error("smtp_from_env", "SMTP_RECIPIENT_POLICY must be `require_all` or `deliver_accepted`")),
         };
         let trust = match std::env::var("SMTP_CA_PEM") {
-            Ok(mut pem) => TlsTrust::SystemPlusCa { pem: std::mem::take(&mut pem).into_bytes() },
-            Err(_) => TlsTrust::System,
+            Ok(mut pem) => TLSTrust::SystemPlusCa { pem: std::mem::take(&mut pem).into_bytes() },
+            Err(_) => TLSTrust::System,
         };
         let username = std::env::var("SMTP_USERNAME").ok();
         let password = std::env::var("SMTP_PASSWORD").ok();
         let mut auth = match (username, password) {
-            (None, None) => SmtpAuth::None,
+            (None, None) => SMTPAuth::None,
             (Some(username), Some(mut password)) => {
                 let bytes = std::mem::take(&mut password).into_bytes();
-                SmtpAuth::Password { username, password: bytes }
+                SMTPAuth::Password { username, password: bytes }
             }
             (None, Some(mut password)) => {
                 let mut bytes = std::mem::take(&mut password).into_bytes();
@@ -288,15 +288,15 @@ pub mod jet_email {
                 return Err(error("smtp_from_env", "SMTP_DKIM_DOMAIN, SMTP_DKIM_SELECTOR, and SMTP_DKIM_PRIVATE_KEY_BASE64 must be set together"));
             }
         };
-        smtp_bytes(SmtpConfig { host, port, security, auth, recipient_policy, trust,
+        smtp_bytes(SMTPConfig { host, port, security, auth, recipient_policy, trust,
             limits: Limits::safe(), dkim }, runtime)
     }
 
-    fn wipe_auth(auth: &mut SmtpAuth<Vec<u8>>, runtime: RuntimeFns) {
-        if let SmtpAuth::Password { password, .. } = auth { (runtime.wipe)(password); }
+    fn wipe_auth(auth: &mut SMTPAuth<Vec<u8>>, runtime: RuntimeFns) {
+        if let SMTPAuth::Password { password, .. } = auth { (runtime.wipe)(password); }
     }
 
-    pub fn validate_smtp_config<S>(config: &SmtpConfig<S>) -> Result<(), Error> {
+    pub fn validate_smtp_config<S>(config: &SMTPConfig<S>) -> Result<(), Error> {
         config.limits.validate()?;
         if config.host.is_empty() || config.host.len() > 253 || !config.host.is_ascii()
             || config.host.bytes().any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
@@ -306,20 +306,20 @@ pub mod jet_email {
         if !(1..=65_535).contains(&config.port) {
             return Err(error("smtp", "port must be between 1 and 65535"));
         }
-        if config.port == 587 && config.security != SmtpSecurity::StartTls {
+        if config.port == 587 && config.security != SMTPSecurity::StartTls {
             return Err(error("smtp", "port 587 requires verified STARTTLS"));
         }
-        if config.port == 465 && config.security != SmtpSecurity::Tls {
+        if config.port == 465 && config.security != SMTPSecurity::TLS {
             return Err(error("smtp", "port 465 requires TLS from connect"));
         }
-        if let SmtpAuth::Password { username, .. } = &config.auth {
+        if let SMTPAuth::Password { username, .. } = &config.auth {
             if username.is_empty() || username.len() > 512
                 || username.bytes().any(|byte| byte.is_ascii_control())
             {
                 return Err(error("smtp", "SMTP username must contain 1 to 512 bytes without controls"));
             }
         }
-        if let TlsTrust::SystemPlusCa { pem } = &config.trust {
+        if let TLSTrust::SystemPlusCa { pem } = &config.trust {
             validate_ca_pem(pem)?;
         }
         if let Some(dkim) = &config.dkim { validate_dkim_config(dkim)?; }
@@ -500,10 +500,10 @@ pub mod jet_email {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct SmtpReply { pub code: i64, pub lines: Vec<String> }
+    pub struct SMTPReply { pub code: i64, pub lines: Vec<String> }
 
     // Byte-at-a-time CRLF reading keeps the configured line bound prospective.
-    pub fn read_smtp_reply<R: std::io::Read>(reader: &mut R, limits: &Limits) -> Result<SmtpReply, Error> {
+    pub fn read_smtp_reply<R: std::io::Read>(reader: &mut R, limits: &Limits) -> Result<SMTPReply, Error> {
         limits.validate()?;
         let mut lines = Vec::new();
         let mut expected = None;
@@ -540,7 +540,7 @@ pub mod jet_email {
             let body = std::str::from_utf8(&line[4..line.len() - 2])
                 .map_err(|_| protocol_error("SMTP reply is not UTF-8"))?;
             lines.push(body.to_string());
-            if !continued { return Ok(SmtpReply { code, lines }); }
+            if !continued { return Ok(SMTPReply { code, lines }); }
         }
     }
 
@@ -549,12 +549,12 @@ pub mod jet_email {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct SmtpCapabilities {
+    pub struct SMTPCapabilities {
         pub names: Vec<String>,
         auth_mechanisms: Vec<String>,
     }
 
-    pub fn smtp_capabilities(reply: &SmtpReply, limits: &Limits) -> Result<SmtpCapabilities, Error> {
+    pub fn smtp_capabilities(reply: &SMTPReply, limits: &Limits) -> Result<SMTPCapabilities, Error> {
         limits.validate()?;
         if reply.code != 250 { return Err(protocol_error("EHLO requires a 250 reply")); }
         let mut names = Vec::new();
@@ -584,28 +584,28 @@ pub mod jet_email {
                 }
             }
         }
-        Ok(SmtpCapabilities { names, auth_mechanisms })
+        Ok(SMTPCapabilities { names, auth_mechanisms })
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    pub struct SmtpState { greeted: bool, ehlo: bool, verified_tls: bool, authenticated: bool }
+    pub struct SMTPState { greeted: bool, ehlo: bool, verified_tls: bool, authenticated: bool }
 
-    impl SmtpState {
-        pub fn new() -> SmtpState {
-            SmtpState { greeted: false, ehlo: false, verified_tls: false, authenticated: false }
+    impl SMTPState {
+        pub fn new() -> SMTPState {
+            SMTPState { greeted: false, ehlo: false, verified_tls: false, authenticated: false }
         }
-        pub fn greeting(&mut self, reply: &SmtpReply) -> Result<(), Error> {
+        pub fn greeting(&mut self, reply: &SMTPReply) -> Result<(), Error> {
             if self.greeted || reply.code != 220 { return Err(protocol_error("expected one SMTP 220 greeting")); }
             self.greeted = true; Ok(())
         }
-        pub fn ehlo(&mut self, reply: &SmtpReply, limits: &Limits) -> Result<SmtpCapabilities, Error> {
+        pub fn ehlo(&mut self, reply: &SMTPReply, limits: &Limits) -> Result<SMTPCapabilities, Error> {
             if !self.greeted { return Err(protocol_error("EHLO cannot precede greeting")); }
             let caps = smtp_capabilities(reply, limits)?;
             self.ehlo = true; Ok(caps)
         }
-        pub fn start_tls(&mut self, caps: &SmtpCapabilities) -> Result<(), Error> {
+        pub fn start_tls(&mut self, caps: &SMTPCapabilities) -> Result<(), Error> {
             if !self.ehlo || self.verified_tls || !caps.names.iter().any(|name| name == "STARTTLS") {
-                return Err(Error::Tls { operation: "starttls".to_string(), server: None, code: None,
+                return Err(Error::TLS { operation: "starttls".to_string(), server: None, code: None,
                     reason: "verified STARTTLS requires an advertised capability after EHLO".to_string() });
             }
             self.ehlo = false; Ok(())
@@ -649,26 +649,26 @@ pub mod jet_email {
     // Hidden transport seam for D-EMAIL1's one synchronous send mechanism.
     // Concrete runtime adapters own TCP, verified rustls, scheduler waits, and
     // ambient context. This engine owns SMTP ordering and never retries.
-    pub trait SmtpTransport: std::io::Read + std::io::Write {
+    pub trait SMTPTransport: std::io::Read + std::io::Write {
         fn verified_tls(&self) -> bool;
-        fn start_tls(&mut self, server: &str, trust: &TlsTrust) -> Result<(), String>;
+        fn start_tls(&mut self, server: &str, trust: &TLSTrust) -> Result<(), String>;
         fn close(&mut self);
-        fn take_stop(&mut self) -> Option<SmtpStop> { None }
+        fn take_stop(&mut self) -> Option<SMTPStop> { None }
     }
 
     #[derive(Clone, Copy, Debug, PartialEq)]
-    pub enum SmtpStop { Cancelled, TimedOut }
+    pub enum SMTPStop { Cancelled, TimedOut }
 
-    pub trait SmtpControl {
-        fn checkpoint(&self, operation: &str) -> Result<(), SmtpStop>;
+    pub trait SMTPControl {
+        fn checkpoint(&self, operation: &str) -> Result<(), SMTPStop>;
         fn accepted_at(&self) -> String;
         fn wipe(&self, bytes: &mut Vec<u8>) { bytes.fill(0); }
     }
 
     pub struct NoopSmtpControl;
 
-    impl SmtpControl for NoopSmtpControl {
-        fn checkpoint(&self, _operation: &str) -> Result<(), SmtpStop> { Ok(()) }
+    impl SMTPControl for NoopSmtpControl {
+        fn checkpoint(&self, _operation: &str) -> Result<(), SMTPStop> { Ok(()) }
 
         fn accepted_at(&self) -> String {
             std::time::SystemTime::now()
@@ -681,11 +681,11 @@ pub mod jet_email {
     #[derive(Clone, Copy)]
     struct AmbientSmtpControl(RuntimeFns);
 
-    impl SmtpControl for AmbientSmtpControl {
-        fn checkpoint(&self, _operation: &str) -> Result<(), SmtpStop> {
-            if (self.0.cancelled)() { return Err(SmtpStop::Cancelled); }
+    impl SMTPControl for AmbientSmtpControl {
+        fn checkpoint(&self, _operation: &str) -> Result<(), SMTPStop> {
+            if (self.0.cancelled)() { return Err(SMTPStop::Cancelled); }
             if matches!((self.0.remaining_ms)(), Some(value) if value <= 0) {
-                return Err(SmtpStop::TimedOut);
+                return Err(SMTPStop::TimedOut);
             }
             Ok(())
         }
@@ -697,7 +697,7 @@ pub mod jet_email {
 
     enum RuntimeStream {
         Plain(Option<std::net::TcpStream>),
-        Tls(i64),
+        TLS(i64),
         Closed,
     }
 
@@ -705,19 +705,19 @@ pub mod jet_email {
         stream: RuntimeStream,
         runtime: RuntimeFns,
         control: AmbientSmtpControl,
-        stopped: Option<SmtpStop>,
+        stopped: Option<SMTPStop>,
     }
 
     impl RuntimeTransport {
-        fn connect(config: &SmtpConfig<Vec<u8>>, runtime: RuntimeFns) -> Result<Self, Error> {
+        fn connect(config: &SMTPConfig<Vec<u8>>, runtime: RuntimeFns) -> Result<Self, Error> {
             use std::net::ToSocketAddrs;
             let control = AmbientSmtpControl(runtime);
             control.checkpoint("connect").map_err(|stop| stop_error(stop, "connect", &config.host, false))?;
             let addresses = (config.host.as_str(), config.port as u16).to_socket_addrs()
-                .map_err(|reason| smtp_error(ErrorKind::Dns, "dns", &config.host, None, format!("SMTP DNS lookup failed: {reason}")))?
+                .map_err(|reason| smtp_error(ErrorKind::DNS, "dns", &config.host, None, format!("SMTP DNS lookup failed: {reason}")))?
                 .collect::<Vec<_>>();
             if addresses.is_empty() {
-                return Err(smtp_error(ErrorKind::Dns, "dns", &config.host, None, "SMTP DNS lookup returned no addresses"));
+                return Err(smtp_error(ErrorKind::DNS, "dns", &config.host, None, "SMTP DNS lookup returned no addresses"));
             }
             let mut last = None;
             let mut connected = None;
@@ -750,10 +750,10 @@ pub mod jet_email {
             let mut transport = RuntimeTransport {
                 stream: RuntimeStream::Plain(Some(stream)), runtime, control, stopped: None,
             };
-            if config.security == SmtpSecurity::Tls {
+            if config.security == SMTPSecurity::TLS {
                 transport.upgrade(&config.host, &config.trust).map_err(|reason| {
                     if let Some(stop) = transport.take_stop() { stop_error(stop, "connect_tls", &config.host, false) }
-                    else { smtp_error(ErrorKind::Tls, "connect_tls", &config.host, None, reason) }
+                    else { smtp_error(ErrorKind::TLS, "connect_tls", &config.host, None, reason) }
                 })?;
             }
             Ok(transport)
@@ -766,7 +766,7 @@ pub mod jet_email {
             }
         }
 
-        fn upgrade(&mut self, server: &str, trust: &TlsTrust) -> Result<(), String> {
+        fn upgrade(&mut self, server: &str, trust: &TLSTrust) -> Result<(), String> {
             let RuntimeStream::Plain(slot) = &mut self.stream else {
                 return Err("SMTP transport is not a plaintext stream".to_string());
             };
@@ -774,10 +774,10 @@ pub mod jet_email {
             stream.set_read_timeout(None).map_err(|e| format!("TLS socket setup failed: {e}"))?;
             stream.set_write_timeout(None).map_err(|e| format!("TLS socket setup failed: {e}"))?;
             let id = match trust {
-                TlsTrust::System => (self.runtime.tls_begin)(stream, &server.to_string()),
-                TlsTrust::SystemPlusCa { pem } => (self.runtime.tls_begin_ca)(stream, &server.to_string(), pem),
+                TLSTrust::System => (self.runtime.tls_begin)(stream, &server.to_string()),
+                TLSTrust::SystemPlusCa { pem } => (self.runtime.tls_begin_ca)(stream, &server.to_string(), pem),
             }?;
-            self.stream = RuntimeStream::Tls(id);
+            self.stream = RuntimeStream::TLS(id);
             loop {
                 if self.poll_stop() {
                     let _ = (self.runtime.tls_close)(id);
@@ -802,7 +802,7 @@ pub mod jet_email {
             loop {
                 let result = match &mut self.stream {
                     RuntimeStream::Plain(Some(stream)) => std::io::Read::read(stream, out),
-                    RuntimeStream::Tls(id) => (self.runtime.tls_read)(*id, out.len() as i64)
+                    RuntimeStream::TLS(id) => (self.runtime.tls_read)(*id, out.len() as i64)
                         .map(|bytes| { let count = bytes.len(); out[..count].copy_from_slice(&bytes); count })
                         .map_err(std::io::Error::other),
                     _ => return Ok(0),
@@ -822,7 +822,7 @@ pub mod jet_email {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
             match &mut self.stream {
                 RuntimeStream::Plain(Some(stream)) => std::io::Write::write(stream, bytes),
-                RuntimeStream::Tls(id) => {
+                RuntimeStream::TLS(id) => {
                     let owned = bytes.to_vec();
                     (self.runtime.tls_write_all)(*id, &owned).map(|_| bytes.len()).map_err(std::io::Error::other)
                 }
@@ -833,20 +833,20 @@ pub mod jet_email {
         fn flush(&mut self) -> std::io::Result<()> {
             match &mut self.stream {
                 RuntimeStream::Plain(Some(stream)) => std::io::Write::flush(stream),
-                RuntimeStream::Tls(_) => Ok(()),
+                RuntimeStream::TLS(_) => Ok(()),
                 _ => Err(std::io::Error::new(std::io::ErrorKind::NotConnected, "SMTP transport is closed")),
             }
         }
     }
 
-    impl SmtpTransport for RuntimeTransport {
-        fn verified_tls(&self) -> bool { matches!(self.stream, RuntimeStream::Tls(_)) }
-        fn start_tls(&mut self, server: &str, trust: &TlsTrust) -> Result<(), String> { self.upgrade(server, trust) }
+    impl SMTPTransport for RuntimeTransport {
+        fn verified_tls(&self) -> bool { matches!(self.stream, RuntimeStream::TLS(_)) }
+        fn start_tls(&mut self, server: &str, trust: &TLSTrust) -> Result<(), String> { self.upgrade(server, trust) }
         fn close(&mut self) {
             let old = std::mem::replace(&mut self.stream, RuntimeStream::Closed);
-            if let RuntimeStream::Tls(id) = old { let _ = (self.runtime.tls_close)(id); }
+            if let RuntimeStream::TLS(id) = old { let _ = (self.runtime.tls_close)(id); }
         }
-        fn take_stop(&mut self) -> Option<SmtpStop> { self.stopped.take() }
+        fn take_stop(&mut self) -> Option<SMTPStop> { self.stopped.take() }
     }
 
     fn relaxed_body(body: &[u8]) -> Result<Vec<u8>, Error> {
@@ -960,7 +960,7 @@ pub mod jet_email {
         Ok(out)
     }
 
-    fn prepare_message(config: &SmtpConfig<Vec<u8>>, message: &Message, runtime: Option<RuntimeFns>)
+    fn prepare_message(config: &SMTPConfig<Vec<u8>>, message: &Message, runtime: Option<RuntimeFns>)
         -> Result<Vec<u8>, Error>
     {
         validate_smtp_config(config)?;
@@ -990,9 +990,9 @@ pub mod jet_email {
         }
     }
 
-    pub fn smtp_transaction<T: SmtpTransport, C: SmtpControl>(
+    pub fn smtp_transaction<T: SMTPTransport, C: SMTPControl>(
         transport: &mut T,
-        config: &SmtpConfig<Vec<u8>>,
+        config: &SMTPConfig<Vec<u8>>,
         message: &Message,
         control: &C,
     ) -> Result<SendReport, Error> {
@@ -1002,9 +1002,9 @@ pub mod jet_email {
         result
     }
 
-    fn smtp_transaction_inner<T: SmtpTransport, C: SmtpControl>(
+    fn smtp_transaction_inner<T: SMTPTransport, C: SMTPControl>(
         transport: &mut T,
-        config: &SmtpConfig<Vec<u8>>,
+        config: &SMTPConfig<Vec<u8>>,
         message: &Message,
         mime: &[u8],
         control: &C,
@@ -1016,7 +1016,7 @@ pub mod jet_email {
                 "envelope exceeds configured max_recipients",
             ));
         }
-        if let SmtpAuth::Password { password, .. } = &config.auth {
+        if let SMTPAuth::Password { password, .. } = &config.auth {
             std::str::from_utf8(password).map_err(|_| smtp_error(
                 ErrorKind::Configuration, "auth", &config.host, None,
                 "SMTP password must be UTF-8",
@@ -1024,30 +1024,30 @@ pub mod jet_email {
         }
 
         checkpoint(control, "greeting", &config.host, false)?;
-        if config.security == SmtpSecurity::Tls && !transport.verified_tls() {
+        if config.security == SMTPSecurity::TLS && !transport.verified_tls() {
             return Err(smtp_error(
-                ErrorKind::Tls, "connect_tls", &config.host, None,
+                ErrorKind::TLS, "connect_tls", &config.host, None,
                 "implicit TLS transport is not verified",
             ));
         }
         let greeting = read_reply(transport, config, "greeting", false)?;
-        let mut state = SmtpState::new();
+        let mut state = SMTPState::new();
         state.greeting(&greeting).map_err(|error| with_server(error, &config.host))?;
-        if config.security == SmtpSecurity::Tls { state.verified_tls(); }
+        if config.security == SMTPSecurity::TLS { state.verified_tls(); }
 
         let mut capabilities = ehlo(transport, config, control, &mut state)?;
-        if config.security == SmtpSecurity::StartTls {
+        if config.security == SMTPSecurity::StartTls {
             state.start_tls(&capabilities).map_err(|error| with_server(error, &config.host))?;
             command(transport, control, config, "starttls", b"STARTTLS\r\n", false)?;
             let reply = read_reply(transport, config, "starttls", false)?;
             expect_code(&reply, 220, "starttls", &config.host)?;
             checkpoint(control, "tls_handshake", &config.host, false)?;
             if let Err(reason) = transport.start_tls(&config.host, &config.trust) {
-                return Err(transport_failure(transport, "starttls", &config.host, false, ErrorKind::Tls, reason));
+                return Err(transport_failure(transport, "starttls", &config.host, false, ErrorKind::TLS, reason));
             }
             if !transport.verified_tls() {
                 return Err(smtp_error(
-                    ErrorKind::Tls, "starttls", &config.host, None,
+                    ErrorKind::TLS, "starttls", &config.host, None,
                     "STARTTLS completed without verified peer identity",
                 ));
             }
@@ -1121,25 +1121,25 @@ pub mod jet_email {
         Ok(report)
     }
 
-    fn ehlo<T: SmtpTransport, C: SmtpControl>(
+    fn ehlo<T: SMTPTransport, C: SMTPControl>(
         transport: &mut T,
-        config: &SmtpConfig<Vec<u8>>,
+        config: &SMTPConfig<Vec<u8>>,
         control: &C,
-        state: &mut SmtpState,
-    ) -> Result<SmtpCapabilities, Error> {
+        state: &mut SMTPState,
+    ) -> Result<SMTPCapabilities, Error> {
         command(transport, control, config, "ehlo", b"EHLO localhost\r\n", false)?;
         let reply = read_reply(transport, config, "ehlo", false)?;
         state.ehlo(&reply, &config.limits).map_err(|error| with_server(error, &config.host))
     }
 
-    fn authenticate<T: SmtpTransport, C: SmtpControl>(
+    fn authenticate<T: SMTPTransport, C: SMTPControl>(
         transport: &mut T,
-        config: &SmtpConfig<Vec<u8>>,
+        config: &SMTPConfig<Vec<u8>>,
         control: &C,
-        state: &mut SmtpState,
-        capabilities: &SmtpCapabilities,
+        state: &mut SMTPState,
+        capabilities: &SMTPCapabilities,
     ) -> Result<(), Error> {
-        let SmtpAuth::Password { username, password } = &config.auth else { return Ok(()); };
+        let SMTPAuth::Password { username, password } = &config.auth else { return Ok(()); };
         let mechanism = if capabilities.auth_mechanisms.iter().any(|item| item == "PLAIN") {
             "PLAIN"
         } else if capabilities.auth_mechanisms.iter().any(|item| item == "LOGIN") {
@@ -1187,7 +1187,7 @@ pub mod jet_email {
         }
     }
 
-    fn expect_auth_success(reply: &SmtpReply, config: &SmtpConfig<Vec<u8>>) -> Result<(), Error> {
+    fn expect_auth_success(reply: &SMTPReply, config: &SMTPConfig<Vec<u8>>) -> Result<(), Error> {
         if reply.code == 235 { return Ok(()); }
         if (400..=599).contains(&reply.code) {
             return Err(smtp_error(
@@ -1200,7 +1200,7 @@ pub mod jet_email {
         ))
     }
 
-    fn expect_auth_challenge(reply: &SmtpReply, config: &SmtpConfig<Vec<u8>>) -> Result<(), Error> {
+    fn expect_auth_challenge(reply: &SMTPReply, config: &SMTPConfig<Vec<u8>>) -> Result<(), Error> {
         expect_code(reply, 334, "auth", &config.host)?;
         if reply.lines.iter().map(String::len).sum::<usize>() > config.limits.max_auth_challenge_bytes as usize {
             return Err(smtp_error(
@@ -1211,10 +1211,10 @@ pub mod jet_email {
         Ok(())
     }
 
-    fn command<T: SmtpTransport, C: SmtpControl>(
+    fn command<T: SMTPTransport, C: SMTPControl>(
         transport: &mut T,
         control: &C,
-        config: &SmtpConfig<Vec<u8>>,
+        config: &SMTPConfig<Vec<u8>>,
         operation: &str,
         bytes: &[u8],
         ambiguous: bool,
@@ -1233,12 +1233,12 @@ pub mod jet_email {
         Ok(())
     }
 
-    fn read_reply<T: SmtpTransport>(
+    fn read_reply<T: SMTPTransport>(
         transport: &mut T,
-        config: &SmtpConfig<Vec<u8>>,
+        config: &SMTPConfig<Vec<u8>>,
         operation: &str,
         ambiguous: bool,
-    ) -> Result<SmtpReply, Error> {
+    ) -> Result<SMTPReply, Error> {
         read_smtp_reply(transport, &config.limits).map_err(|error| {
             if let Some(stop) = transport.take_stop() {
                 return stop_error(stop, operation, &config.host, ambiguous);
@@ -1279,7 +1279,7 @@ pub mod jet_email {
         Ok(out)
     }
 
-    fn checkpoint<C: SmtpControl>(
+    fn checkpoint<C: SMTPControl>(
         control: &C,
         operation: &str,
         server: &str,
@@ -1288,20 +1288,20 @@ pub mod jet_email {
         control.checkpoint(operation).map_err(|stop| stop_error(stop, operation, server, ambiguous))
     }
 
-    fn stop_error(stop: SmtpStop, operation: &str, server: &str, ambiguous: bool) -> Error {
+    fn stop_error(stop: SMTPStop, operation: &str, server: &str, ambiguous: bool) -> Error {
         if ambiguous {
             smtp_error(ErrorKind::DeliveryUnknown, operation, server, None,
                 "operation stopped after DATA was transmitted; relay acceptance is unknown")
         } else {
             smtp_error(
-                match stop { SmtpStop::Cancelled => ErrorKind::Cancelled, SmtpStop::TimedOut => ErrorKind::TimedOut },
+                match stop { SMTPStop::Cancelled => ErrorKind::Cancelled, SMTPStop::TimedOut => ErrorKind::TimedOut },
                 operation, server, None,
-                match stop { SmtpStop::Cancelled => "SMTP operation cancelled", SmtpStop::TimedOut => "SMTP operation timed out" },
+                match stop { SMTPStop::Cancelled => "SMTP operation cancelled", SMTPStop::TimedOut => "SMTP operation timed out" },
             )
         }
     }
 
-    fn transport_failure<T: SmtpTransport>(
+    fn transport_failure<T: SMTPTransport>(
         transport: &mut T,
         operation: &str,
         server: &str,
@@ -1313,7 +1313,7 @@ pub mod jet_email {
         else { smtp_error(fallback, operation, server, None, reason) }
     }
 
-    fn expect_success(reply: &SmtpReply, operation: &str, server: &str) -> Result<(), Error> {
+    fn expect_success(reply: &SMTPReply, operation: &str, server: &str) -> Result<(), Error> {
         if (200..=299).contains(&reply.code) { Ok(()) }
         else if (400..=599).contains(&reply.code) {
             Err(reply_failure(operation, server, reply.code, &reply_text(reply)))
@@ -1325,7 +1325,7 @@ pub mod jet_email {
         }
     }
 
-    fn expect_code(reply: &SmtpReply, code: i64, operation: &str, server: &str) -> Result<(), Error> {
+    fn expect_code(reply: &SMTPReply, code: i64, operation: &str, server: &str) -> Result<(), Error> {
         if reply.code == code { Ok(()) }
         else if (400..=599).contains(&reply.code) {
             Err(reply_failure(operation, server, reply.code, &reply_text(reply)))
@@ -1344,12 +1344,12 @@ pub mod jet_email {
         )
     }
 
-    fn reply_text(reply: &SmtpReply) -> String { reply.lines.join("\n") }
+    fn reply_text(reply: &SMTPReply) -> String { reply.lines.join("\n") }
 
     fn error_reason(error: &Error) -> &str {
         match error {
-            Error::Configuration { reason, .. } | Error::Dns { reason, .. }
-            | Error::Connect { reason, .. } | Error::Tls { reason, .. }
+            Error::Configuration { reason, .. } | Error::DNS { reason, .. }
+            | Error::Connect { reason, .. } | Error::TLS { reason, .. }
             | Error::Auth { reason, .. } | Error::Protocol { reason, .. }
             | Error::Rejected { reason, .. } | Error::Transient { reason, .. }
             | Error::TimedOut { reason, .. } | Error::Cancelled { reason, .. }
@@ -1364,8 +1364,8 @@ pub mod jet_email {
     fn with_operation_server(error: Error, operation: &str, server: &str) -> Error {
         let reason = error_reason(&error).to_string();
         let code = match &error {
-            Error::Configuration { code, .. } | Error::Dns { code, .. }
-            | Error::Connect { code, .. } | Error::Tls { code, .. }
+            Error::Configuration { code, .. } | Error::DNS { code, .. }
+            | Error::Connect { code, .. } | Error::TLS { code, .. }
             | Error::Auth { code, .. } | Error::Protocol { code, .. }
             | Error::Rejected { code, .. } | Error::Transient { code, .. }
             | Error::TimedOut { code, .. } | Error::Cancelled { code, .. }
@@ -1373,9 +1373,9 @@ pub mod jet_email {
         };
         let kind = match error {
             Error::Configuration { .. } => ErrorKind::Configuration,
-            Error::Dns { .. } => ErrorKind::Dns,
+            Error::DNS { .. } => ErrorKind::DNS,
             Error::Connect { .. } => ErrorKind::Connect,
-            Error::Tls { .. } => ErrorKind::Tls,
+            Error::TLS { .. } => ErrorKind::TLS,
             Error::Auth { .. } => ErrorKind::Auth,
             Error::Protocol { .. } => ErrorKind::Protocol,
             Error::Rejected { .. } => ErrorKind::Rejected,
@@ -1389,7 +1389,7 @@ pub mod jet_email {
 
     #[derive(Clone, Copy)]
     enum ErrorKind {
-        Configuration, Dns, Connect, Tls, Auth, Protocol, Rejected, Transient,
+        Configuration, DNS, Connect, TLS, Auth, Protocol, Rejected, Transient,
         TimedOut, Cancelled, DeliveryUnknown,
     }
 
@@ -1405,9 +1405,9 @@ pub mod jet_email {
         let reason = reason.into();
         match kind {
             ErrorKind::Configuration => Error::Configuration { operation, server, code, reason },
-            ErrorKind::Dns => Error::Dns { operation, server, code, reason },
+            ErrorKind::DNS => Error::DNS { operation, server, code, reason },
             ErrorKind::Connect => Error::Connect { operation, server, code, reason },
-            ErrorKind::Tls => Error::Tls { operation, server, code, reason },
+            ErrorKind::TLS => Error::TLS { operation, server, code, reason },
             ErrorKind::Auth => Error::Auth { operation, server, code, reason },
             ErrorKind::Protocol => Error::Protocol { operation, server, code, reason },
             ErrorKind::Rejected => Error::Rejected { operation, server, code, reason },

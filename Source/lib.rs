@@ -124,7 +124,7 @@ pub fn compile_with_path(src: &str, file: &str) -> Result<CompileOutput, Vec<Dia
 
 /// Like `compile_with_path`, but threads a `--target=<triple>` (or `None`)
 /// through to codegen's native OS-target gating (D-OSTARGET1=A, ratified
-/// 2026-07-01, c134) — an `impl` gated to a different `#Target(Os.*)` than
+/// 2026-07-01, c134) — an `impl` gated to a different `#Target(OS.*)` than
 /// the resolved active OS is skipped entirely. `jet build`/`jet run`'s real
 /// `--target=` flag is the only caller; `compile_with_path` keeps its
 /// existing host-OS-default behavior unchanged for every other caller.

@@ -91,32 +91,32 @@ fn jet_auth_ct_eq(a: &[u8], b: &[u8]) -> bool {
     difference == 0
 }
 
-fn jet_auth_object(text: &str) -> Result<std::collections::BTreeMap<String, jet_std::Json>, JetAuthError> {
+fn jet_auth_object(text: &str) -> Result<std::collections::BTreeMap<String, jet_std::JSON>, JetAuthError> {
     match jet_std::parse_json_strict(text) {
-        Ok(jet_std::Json::Object(fields)) => Ok(fields),
+        Ok(jet_std::JSON::Object(fields)) => Ok(fields),
         Ok(_) => Err(JetAuthError::MalformedToken("token JSON must be an object".to_string())),
         Err(error) => Err(JetAuthError::DecodeError(error.message)),
     }
 }
 
 fn jet_auth_optional_text(
-    fields: &std::collections::BTreeMap<String, jet_std::Json>,
+    fields: &std::collections::BTreeMap<String, jet_std::JSON>,
     name: &str,
 ) -> Result<Option<String>, JetAuthError> {
     match fields.get(name) {
         None => Ok(None),
-        Some(jet_std::Json::Text(value)) => Ok(Some(value.clone())),
+        Some(jet_std::JSON::Text(value)) => Ok(Some(value.clone())),
         Some(_) => Err(JetAuthError::MalformedToken(format!("claim `{name}` must be text"))),
     }
 }
 
 fn jet_auth_required_i64(
-    fields: &std::collections::BTreeMap<String, jet_std::Json>,
+    fields: &std::collections::BTreeMap<String, jet_std::JSON>,
     name: &str,
 ) -> Result<i64, JetAuthError> {
     match fields.get(name) {
         None => Err(JetAuthError::MissingClaim(name.to_string())),
-        Some(jet_std::Json::Number(value))
+        Some(jet_std::JSON::Number(value))
             if value.is_finite()
                 && value.fract() == 0.0
                 && *value >= i64::MIN as f64
@@ -126,12 +126,12 @@ fn jet_auth_required_i64(
 }
 
 fn jet_auth_optional_i64(
-    fields: &std::collections::BTreeMap<String, jet_std::Json>,
+    fields: &std::collections::BTreeMap<String, jet_std::JSON>,
     name: &str,
 ) -> Result<Option<i64>, JetAuthError> {
     match fields.get(name) {
         None => Ok(None),
-        Some(jet_std::Json::Number(value))
+        Some(jet_std::JSON::Number(value))
             if value.is_finite()
                 && value.fract() == 0.0
                 && *value >= i64::MIN as f64
@@ -141,18 +141,18 @@ fn jet_auth_optional_i64(
 }
 
 fn jet_auth_audience(
-    fields: &std::collections::BTreeMap<String, jet_std::Json>,
+    fields: &std::collections::BTreeMap<String, jet_std::JSON>,
     expected: &str,
 ) -> Result<String, JetAuthError> {
     match fields.get("aud") {
         None => Err(JetAuthError::MissingClaim("aud".to_string())),
-        Some(jet_std::Json::Text(actual)) if actual == expected => Ok(actual.clone()),
-        Some(jet_std::Json::Text(actual)) => Err(JetAuthError::WrongAudience {
+        Some(jet_std::JSON::Text(actual)) if actual == expected => Ok(actual.clone()),
+        Some(jet_std::JSON::Text(actual)) => Err(JetAuthError::WrongAudience {
             expected: expected.to_string(), actual: actual.clone(),
         }),
-        Some(jet_std::Json::Array(actual)) => {
+        Some(jet_std::JSON::Array(actual)) => {
             let values = actual.iter().map(|value| match value {
-                jet_std::Json::Text(text) => Ok(text),
+                jet_std::JSON::Text(text) => Ok(text),
                 _ => Err(JetAuthError::MalformedToken("claim `aud` must contain only text".to_string())),
             }).collect::<Result<Vec<_>, _>>()?;
             if values.iter().any(|value| value.as_str() == expected) {
@@ -229,8 +229,8 @@ fn jet_auth_verify_jwt_impl(
         .map_err(|_| JetAuthError::MalformedToken("JWT header is not valid UTF-8".to_string()))?;
     let header = jet_auth_object(header)?;
     match header.get("alg") {
-        Some(jet_std::Json::Text(algorithm)) if algorithm == "HS256" => {}
-        Some(jet_std::Json::Text(algorithm)) => {
+        Some(jet_std::JSON::Text(algorithm)) if algorithm == "HS256" => {}
+        Some(jet_std::JSON::Text(algorithm)) => {
             return Err(JetAuthError::UnsupportedToken(format!("unsupported JWT algorithm `{algorithm}`")));
         }
         _ => return Err(JetAuthError::MalformedToken("JWT header requires text `alg`".to_string())),

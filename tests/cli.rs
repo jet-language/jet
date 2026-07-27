@@ -1322,7 +1322,7 @@ fn shape_cli_entry_type_drives_shell_inputs_but_remains_optional() {
     let dir = isolated_cwd("shape_cli_entry_source");
     fs::write(
         dir.join("typed.jet"),
-        r#"#Cli
+        r#"#CLI
 struct RunArgs {
     #Doc("person to greet") name: String
     #Default(2) retries: Int
@@ -1444,7 +1444,7 @@ fn typed_cli_entry_accepts_an_imported_argument_type() {
     let dir = isolated_cwd("shape_cli_imported_entry_type");
     fs::write(
         dir.join("args.jet"),
-        r#"#Cli
+        r#"#CLI
 pub struct RunArgs {
     #Doc("person to greet") pub name: String
     #Default(2) pub retries: Int
@@ -1504,10 +1504,10 @@ fn typed_cli_entry_accepts_an_imported_subcommand_type() {
     let dir = isolated_cwd("shape_cli_imported_subcommand_type");
     fs::write(
         dir.join("commands.jet"),
-        r#"#Cli
+        r#"#CLI
 pub struct ServeArgs { pub port: Int }
 
-#Cli
+#CLI
 pub struct ImportArgs { pub file: String }
 
 pub enum Cmd { Serve(ServeArgs) Import(ImportArgs) }
@@ -1557,7 +1557,7 @@ fn colliding_imported_cli_type_resolution_stays_in_codegen_sync() {
     let dir = isolated_cwd("shape_cli_ambiguous_imported_type");
     fs::write(
         dir.join("cli.jet"),
-        "#Cli\npub struct RunArgs { pub name: String }\n",
+        "#CLI\npub struct RunArgs { pub name: String }\n",
     )
     .unwrap();
     fs::write(
@@ -1596,7 +1596,7 @@ fn local_cli_type_wins_over_same_named_import() {
         dir.join("run.jet"),
         r#"use "other"
 
-#Cli
+#CLI
 struct RunArgs { name: String }
 
 fn run(args: RunArgs) { print(args.name) }
@@ -1717,9 +1717,9 @@ fn external_completion_rejects_hostile_files_and_names() {
 #[test]
 fn external_completion_preserves_checked_subcommands() {
     let dir = isolated_cwd("shape_cli_subcommands");
-    fs::write(dir.join("commands.jet"), r#"#Cli
+    fs::write(dir.join("commands.jet"), r#"#CLI
 struct ServeArgs { port: Int }
-#Cli
+#CLI
 struct ImportArgs { file: String }
 enum Cmd { Serve(ServeArgs) Import(ImportArgs) }
 fn run(cmd: Cmd) {}
@@ -2705,7 +2705,7 @@ func main() {}
 
     fs::write(
         dir.join("main.jet"),
-        "use go.handles as handles\n\nfn run() =[Go, Io]=> {\n    handle :: handles.new_handle(42)\n    print(handles.consume_handle(handle))\n}\n",
+        "use go.handles as handles\n\nfn run() =[Go, IO]=> {\n    handle :: handles.new_handle(42)\n    print(handles.consume_handle(handle))\n}\n",
     )
     .unwrap();
     let run = Command::new(jet())
@@ -2778,7 +2778,7 @@ fn java_bind_embeds_jvm_handles_methods_and_exceptions() {
     assert!(dir.join(".jet/bindings/java/counter.provenance").is_file());
     fs::write(dir.join("main.jet"),r#"use java.counter as counter
 
-fn run() =[Java, Io]=> {
+fn run() =[Java, IO]=> {
     handle :: counter.new(40) ?? panic("JVM create failed")
     print(counter.add(handle, 2) ?? -1)
     print(counter.twice(2.5) ?? -1.0)
@@ -2817,7 +2817,7 @@ fn dotnet_bind_embeds_coreclr_state_calls_and_errors(){
     assert!(dir.join(".jet/bindings/cs/libjet_cs_counter.a").is_file());assert!(dir.join(".jet/bindings/cs/counter.dotnet/JetBinding.dll").is_file());assert!(dir.join(".jet/bindings/cs/counter.provenance").is_file());
     fs::write(dir.join("main.jet"),r#"use cs.counter as counter
 
-fn run() =[DotNet, Io]=> {
+fn run() =[DotNet, IO]=> {
     handle :: counter.new(40) ?? panic("CoreCLR create failed")
     print(counter.add(handle, 2) ?? -1)
     print(counter.twice(2.5) ?? -1.0)
@@ -2841,7 +2841,7 @@ fn tcl_bind_runs_one_shot_and_persistent_typed_sessions() {
     assert!(dir.join(".jet/bindings/tcl/eda.provenance").is_file());
     fs::write(dir.join("main.jet"),r#"use tcl.eda as tcl
 
-fn run() =[Tcl, Io]=> {
+fn run() =[Tcl, IO]=> {
     session :: tcl.open() ?? panic("Tcl open failed")
     print(tcl.eval_int(session, "incr counter 2") ?? -1)
     print(tcl.eval_int(session, "incr counter 1") ?? -1)
@@ -2892,7 +2892,7 @@ end Geodesy;
     assert!(dir.join(".jet/bindings/ada/geodesy.provenance").is_file());
     fs::write(dir.join("main.jet"),r#"use ada.geodesy as geo
 
-fn run() =[Ada, Io]=> {
+fn run() =[Ada, IO]=> {
     print(geo.double_lat(95.0) ?? -1.0)
     print(geo.calls(0) ?? -1)
     print(geo.double_lat(21.0) ?? -1.0)
@@ -2943,7 +2943,7 @@ end.
     let cache=dir.join(".jet/bindings/pascal");assert!(cache.join("libjet_pascal_inventory.a").is_file());assert!(cache.join("libjet_pascal_inventory_runtime.so").is_file());assert!(cache.join("inventory.provenance").is_file());
     fs::write(dir.join("main.jet"),r#"use pascal.inventory as inv
 
-fn run() =[Pascal, Io]=> {
+fn run() =[Pascal, IO]=> {
     print(inv.add_scalar(20, 22))
     handle :: inv.counter_new(40) ?? panic("Pascal constructor failed")
     print(inv.counter_add(handle, 2) ?? -1)
@@ -3015,7 +3015,7 @@ function Sleep { param($InputObject) Start-Sleep -Seconds 30; return $InputObjec
     fs::write(dir.join("main.jet"),r#"use pwsh.ops as ops
 use core.encoding.json as json
 
-fn run() =[PowerShell, Io]=> {
+fn run() =[PowerShell, IO]=> {
     session :: ops.open() ?? panic("PowerShell open failed")
     input :: DataTree.Object(["nested": DataTree.Object(["ok": DataTree.Bool(true)]), "list": DataTree.Array([DataTree.Int(1), DataTree.Text("two")]), "scalar": DataTree.Float(3.5), "nothing": DataTree.Null])
     first :: ops.get_stateful(session, ~input, 5000) ?? panic("first call failed")

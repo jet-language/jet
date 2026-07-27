@@ -199,7 +199,7 @@ fn collect_func(graph: &mut PolicyFactGraph, func: &Func) {
         graph.record(
             PolicyDomain::Replay,
             func.name.clone(),
-            "#Replayable forbids ambient Time/Rand/Net/Io (D-REPLAY1)",
+            "#Replayable forbids ambient Time/Rand/Net/IO (D-REPLAY1)",
         );
     }
     if let Some(effects) = func.declared_effects.as_ref() {

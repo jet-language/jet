@@ -730,7 +730,7 @@ fn attribute_value(attribute: Attribute) -> Value {
 
 fn wire_bytes(text: &str, encoding: WireEncoding) -> Vec<u8> {
     match encoding {
-        WireEncoding::Utf8 => text.as_bytes().to_vec(),
+        WireEncoding::UTF8 => text.as_bytes().to_vec(),
         WireEncoding::Utf16Le => text.encode_utf16().flat_map(u16::to_le_bytes).collect(),
         WireEncoding::Utf16Be => text.encode_utf16().flat_map(u16::to_be_bytes).collect(),
     }
@@ -746,7 +746,7 @@ pub fn stream_event_value(item: StreamEvent) -> Value {
     let encoding = item.encoding;
     let lex = |raw: Vec<u8>, semantic: Value| byte_lexical(raw, semantic);
     match item.event {
-        Event::DocumentStart => object(vec![("$xml_event", text("document_start")), ("encoding", text(match encoding { WireEncoding::Utf8=>"UTF-8", WireEncoding::Utf16Le=>"UTF-16LE", WireEncoding::Utf16Be=>"UTF-16BE" })), ("bom", Value::Array(item.bom.into_iter().map(|b|Value::Int(i64::from(b))).collect()))]),
+        Event::DocumentStart => object(vec![("$xml_event", text("document_start")), ("encoding", text(match encoding { WireEncoding::UTF8=>"UTF-8", WireEncoding::Utf16Le=>"UTF-16LE", WireEncoding::Utf16Be=>"UTF-16BE" })), ("bom", Value::Array(item.bom.into_iter().map(|b|Value::Int(i64::from(b))).collect()))]),
         Event::DocumentEnd => object(vec![("$xml_event",text("document_end"))]),
         Event::Declaration{version,encoding:declared,standalone,raw:_} => { let fields=vec![("version",text(version)),("encoding",optional_text(declared)),("standalone",standalone.map(Value::Bool).unwrap_or(Value::Null))]; let mut out=vec![("$xml_event",text("declaration"))];out.extend(fields.clone());out.push(("lexical",lex(item.raw_bytes,strip_lexical(&object(fields)))));object(out) }
         Event::DocumentWhitespace{value,raw:_} => leaf_event("document_whitespace",vec![("value",text(value))],item.raw_bytes),
@@ -1499,7 +1499,7 @@ pub fn render_document(value: &Value) -> Result<String, String> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RenderEncoding { Utf8, Utf8Bom, Utf16Le, Utf16Be }
+pub enum RenderEncoding { UTF8, UTF8Bom, Utf16Le, Utf16Be }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LexicalPolicy { PreserveValid, Deterministic }
@@ -1741,12 +1741,12 @@ fn valid_event_raw_bytes(event: &Value, tag: &str) -> Option<Vec<u8>> {
 }
 
 fn source_encoding_matches(source: Option<&str>, bom: &[u8], target: RenderEncoding) -> bool {
-    matches!((source, bom, target), (Some("UTF-8"), [], RenderEncoding::Utf8) | (Some("UTF-8"), [0xef,0xbb,0xbf], RenderEncoding::Utf8Bom) | (Some("UTF-16LE"), [0xff,0xfe], RenderEncoding::Utf16Le) | (Some("UTF-16BE"), [0xfe,0xff], RenderEncoding::Utf16Be))
+    matches!((source, bom, target), (Some("UTF-8"), [], RenderEncoding::UTF8) | (Some("UTF-8"), [0xef,0xbb,0xbf], RenderEncoding::UTF8Bom) | (Some("UTF-16LE"), [0xff,0xfe], RenderEncoding::Utf16Le) | (Some("UTF-16BE"), [0xfe,0xff], RenderEncoding::Utf16Be))
 }
-fn target_bom(target: RenderEncoding) -> Vec<u8> { match target { RenderEncoding::Utf8 => vec![], RenderEncoding::Utf8Bom => vec![0xef,0xbb,0xbf], RenderEncoding::Utf16Le => vec![0xff,0xfe], RenderEncoding::Utf16Be => vec![0xfe,0xff] } }
-fn encoding_declaration(target: RenderEncoding) -> &'static str { match target { RenderEncoding::Utf8 | RenderEncoding::Utf8Bom => "UTF-8", RenderEncoding::Utf16Le | RenderEncoding::Utf16Be => "UTF-16" } }
-fn validate_declared_encoding(name: &str, target: RenderEncoding) -> Result<(), Error> { let ok = match target { RenderEncoding::Utf8 | RenderEncoding::Utf8Bom => name.eq_ignore_ascii_case("UTF-8"), RenderEncoding::Utf16Le | RenderEncoding::Utf16Be => name.eq_ignore_ascii_case("UTF-16") || name.eq_ignore_ascii_case("UTF-16LE") || name.eq_ignore_ascii_case("UTF-16BE") }; if ok { Ok(()) } else { Err(Error::at_kind(0, Reason::InvalidEncoding, "XML declaration conflicts with selected output encoding")) } }
-fn encode_text(text: &str, target: RenderEncoding) -> Vec<u8> { match target { RenderEncoding::Utf8 | RenderEncoding::Utf8Bom => text.as_bytes().to_vec(), RenderEncoding::Utf16Le => text.encode_utf16().flat_map(u16::to_le_bytes).collect(), RenderEncoding::Utf16Be => text.encode_utf16().flat_map(u16::to_be_bytes).collect() } }
+fn target_bom(target: RenderEncoding) -> Vec<u8> { match target { RenderEncoding::UTF8 => vec![], RenderEncoding::UTF8Bom => vec![0xef,0xbb,0xbf], RenderEncoding::Utf16Le => vec![0xff,0xfe], RenderEncoding::Utf16Be => vec![0xfe,0xff] } }
+fn encoding_declaration(target: RenderEncoding) -> &'static str { match target { RenderEncoding::UTF8 | RenderEncoding::UTF8Bom => "UTF-8", RenderEncoding::Utf16Le | RenderEncoding::Utf16Be => "UTF-16" } }
+fn validate_declared_encoding(name: &str, target: RenderEncoding) -> Result<(), Error> { let ok = match target { RenderEncoding::UTF8 | RenderEncoding::UTF8Bom => name.eq_ignore_ascii_case("UTF-8"), RenderEncoding::Utf16Le | RenderEncoding::Utf16Be => name.eq_ignore_ascii_case("UTF-16") || name.eq_ignore_ascii_case("UTF-16LE") || name.eq_ignore_ascii_case("UTF-16BE") }; if ok { Ok(()) } else { Err(Error::at_kind(0, Reason::InvalidEncoding, "XML declaration conflicts with selected output encoding")) } }
+fn encode_text(text: &str, target: RenderEncoding) -> Vec<u8> { match target { RenderEncoding::UTF8 | RenderEncoding::UTF8Bom => text.as_bytes().to_vec(), RenderEncoding::Utf16Le => text.encode_utf16().flat_map(u16::to_le_bytes).collect(), RenderEncoding::Utf16Be => text.encode_utf16().flat_map(u16::to_be_bytes).collect() } }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CanonicalMode { Inclusive11, Exclusive10 }
@@ -2401,7 +2401,7 @@ mod tests {
         let tree = parse_document(source).expect("whole tree");
         assert_eq!(render_document(&tree), Ok(source.to_string()));
         for split in 0..=source.len() {
-            let mut writer = StreamWriter::new(RenderEncoding::Utf8, LexicalPolicy::PreserveValid);
+            let mut writer = StreamWriter::new(RenderEncoding::UTF8, LexicalPolicy::PreserveValid);
             let mut output = Vec::new();
             for event in stream_values(source.as_bytes(), split) {
                 output.extend(writer.write(&event).expect("write event"));
@@ -2824,7 +2824,7 @@ mod tests {
     #[test]
     fn stream_bytes_validate_declaration_and_preserve_encoding_identity() {
         for (wire, bom, declared) in [
-            (WireEncoding::Utf8, vec![0xef, 0xbb, 0xbf], "UTF-16"),
+            (WireEncoding::UTF8, vec![0xef, 0xbb, 0xbf], "UTF-16"),
             (WireEncoding::Utf16Le, vec![0xff, 0xfe], "UTF-8"),
             (WireEncoding::Utf16Be, vec![0xfe, 0xff], "UTF-8"),
         ] {
@@ -2841,7 +2841,7 @@ mod tests {
         }
 
         for (wire, render, bom, declared) in [
-            (WireEncoding::Utf8, RenderEncoding::Utf8Bom, vec![0xef, 0xbb, 0xbf], "UTF-8"),
+            (WireEncoding::UTF8, RenderEncoding::UTF8Bom, vec![0xef, 0xbb, 0xbf], "UTF-8"),
             (WireEncoding::Utf16Le, RenderEncoding::Utf16Le, vec![0xff, 0xfe], "UTF-16"),
             (WireEncoding::Utf16Be, RenderEncoding::Utf16Be, vec![0xfe, 0xff], "UTF-16BE"),
         ] {
@@ -2861,7 +2861,7 @@ mod tests {
     #[test]
     fn whole_bytes_share_stream_encoding_and_identity() {
         for (wire, render, bom, declared) in [
-            (WireEncoding::Utf8, RenderEncoding::Utf8Bom, vec![0xef, 0xbb, 0xbf], "UTF-8"),
+            (WireEncoding::UTF8, RenderEncoding::UTF8Bom, vec![0xef, 0xbb, 0xbf], "UTF-8"),
             (WireEncoding::Utf16Le, RenderEncoding::Utf16Le, vec![0xff, 0xfe], "UTF-16"),
             (WireEncoding::Utf16Be, RenderEncoding::Utf16Be, vec![0xfe, 0xff], "UTF-16BE"),
         ] {
@@ -2934,7 +2934,7 @@ mod tests {
     fn stream_writer_preserves_every_event_across_every_input_split() {
         let source = b"\xef\xbb\xbf<?xml version='1.0' encoding='UTF-8'?><r xmlns:p='urn:p' p:z='1'>x&amp;<![CDATA[<y>]]><!--c--><?go now?><p:e/></r>";
         for split in 0..=source.len() {
-            let mut writer = StreamWriter::new(RenderEncoding::Utf8Bom, LexicalPolicy::PreserveValid);
+            let mut writer = StreamWriter::new(RenderEncoding::UTF8Bom, LexicalPolicy::PreserveValid);
             let mut output = Vec::new();
             for event in stream_values(source, split) { output.extend(writer.write(&event).expect("write event")); }
             assert!(writer.is_finished());
@@ -2968,7 +2968,7 @@ mod tests {
             }
 
             let mut writer =
-                StreamWriter::new(RenderEncoding::Utf8, LexicalPolicy::PreserveValid);
+                StreamWriter::new(RenderEncoding::UTF8, LexicalPolicy::PreserveValid);
             let mut output = Vec::new();
             for event in &events {
                 output.extend(writer.write(event).expect("write hostile event deterministically"));
@@ -2983,7 +2983,7 @@ mod tests {
         let source = b"<r a='x'>z</r>";
         let events = stream_values(source, source.len());
         for (encoding, bom, body) in [
-            (RenderEncoding::Utf8, Vec::new(), source.to_vec()),
+            (RenderEncoding::UTF8, Vec::new(), source.to_vec()),
             (RenderEncoding::Utf16Le, vec![0xff, 0xfe], String::from_utf8(source.to_vec()).unwrap().encode_utf16().flat_map(u16::to_le_bytes).collect()),
             (RenderEncoding::Utf16Be, vec![0xfe, 0xff], String::from_utf8(source.to_vec()).unwrap().encode_utf16().flat_map(u16::to_be_bytes).collect()),
         ] {
@@ -2993,7 +2993,7 @@ mod tests {
             let mut expected = bom; expected.extend(body);
             assert_eq!(output, expected);
         }
-        let mut writer = StreamWriter::new(RenderEncoding::Utf8, LexicalPolicy::Deterministic);
+        let mut writer = StreamWriter::new(RenderEncoding::UTF8, LexicalPolicy::Deterministic);
         let before = writer.clone();
         let error = writer.write(&events[1]).expect_err("missing document start");
         assert!(error.reason.contains("document_start"));
@@ -3114,7 +3114,7 @@ mod tests {
         let mut utf8_bom = vec![0xef, 0xbb, 0xbf];
         utf8_bom.extend(source.as_bytes());
         let mut tree = parse_document_bytes(&utf8_bom).expect("parse bom");
-        let identity = render_document_bytes(&tree, RenderEncoding::Utf8Bom, LexicalPolicy::PreserveValid)
+        let identity = render_document_bytes(&tree, RenderEncoding::UTF8Bom, LexicalPolicy::PreserveValid)
             .expect("identity");
         assert_eq!(identity, utf8_bom);
 
@@ -3177,7 +3177,7 @@ mod tests {
             .expect("semantic")
             .1 = object(vec![("value", text("edited"))]);
 
-        let out = render_document_bytes(&tree, RenderEncoding::Utf8Bom, LexicalPolicy::PreserveValid)
+        let out = render_document_bytes(&tree, RenderEncoding::UTF8Bom, LexicalPolicy::PreserveValid)
             .expect("token edit");
         assert_ne!(out, utf8_bom);
         let out_text = String::from_utf8(out[3..].to_vec()).expect("utf8 body");
@@ -3420,7 +3420,7 @@ mod tests {
         assert_eq!(err.kind, Reason::MismatchedTag);
 
         // Writer hostile order / terminal lifecycle.
-        let mut writer = StreamWriter::new(RenderEncoding::Utf8, LexicalPolicy::Deterministic);
+        let mut writer = StreamWriter::new(RenderEncoding::UTF8, LexicalPolicy::Deterministic);
         let err = writer
             .write(&object(vec![
                 ("$xml_event", text("document_end")),
@@ -3428,12 +3428,12 @@ mod tests {
             .expect_err("end before start");
         assert!(err.reason.contains("document_start"));
 
-        writer = StreamWriter::new(RenderEncoding::Utf8, LexicalPolicy::Deterministic);
+        writer = StreamWriter::new(RenderEncoding::UTF8, LexicalPolicy::Deterministic);
         writer.write(&expected[0]).expect("document_start");
         let err = writer.write(&expected[0]).expect_err("duplicate start");
         assert!(err.reason.contains("duplicate"));
 
-        writer = StreamWriter::new(RenderEncoding::Utf8, LexicalPolicy::Deterministic);
+        writer = StreamWriter::new(RenderEncoding::UTF8, LexicalPolicy::Deterministic);
         for event in &expected {
             writer.write(event).expect("write complete");
         }
@@ -3444,7 +3444,7 @@ mod tests {
         assert!(err.reason.contains("after document_end"));
 
         // Finish before document_end: writer not finished; incomplete stack.
-        writer = StreamWriter::new(RenderEncoding::Utf8, LexicalPolicy::Deterministic);
+        writer = StreamWriter::new(RenderEncoding::UTF8, LexicalPolicy::Deterministic);
         writer.write(&expected[0]).expect("start");
         // Skip to first element_start and write an explicit open without close.
         let start = expected
@@ -3671,7 +3671,7 @@ impl ParseOptions {
 /// lexer keeps each decoded scalar paired with its original bytes so stream
 /// lexical evidence never requires retaining a document-sized source buffer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WireEncoding { Utf8, Utf16Le, Utf16Be }
+pub enum WireEncoding { UTF8, Utf16Le, Utf16Be }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TokenKind { Text, Entity, Markup }
@@ -3718,15 +3718,15 @@ impl ByteLexer {
     fn choose_encoding(&mut self, final_input: bool) -> Result<(), Error> {
         if self.encoding.is_some() { return Ok(()); }
         if self.undecided.starts_with(&[0xef, 0xbb, 0xbf]) {
-            self.encoding = Some(WireEncoding::Utf8); self.bom = self.undecided.drain(..3).collect(); self.wire_offset = 3;
+            self.encoding = Some(WireEncoding::UTF8); self.bom = self.undecided.drain(..3).collect(); self.wire_offset = 3;
         } else if self.undecided.starts_with(&[0xff, 0xfe]) {
             self.encoding = Some(WireEncoding::Utf16Le); self.bom = self.undecided.drain(..2).collect(); self.wire_offset = 2;
         } else if self.undecided.starts_with(&[0xfe, 0xff]) {
             self.encoding = Some(WireEncoding::Utf16Be); self.bom = self.undecided.drain(..2).collect(); self.wire_offset = 2;
         } else if self.undecided.len() >= 4 {
-            self.encoding = Some(if self.undecided[..4] == [0, b'<', 0, b'?'] { WireEncoding::Utf16Be } else if self.undecided[..4] == [b'<', 0, b'?', 0] { WireEncoding::Utf16Le } else { WireEncoding::Utf8 });
+            self.encoding = Some(if self.undecided[..4] == [0, b'<', 0, b'?'] { WireEncoding::Utf16Be } else if self.undecided[..4] == [b'<', 0, b'?', 0] { WireEncoding::Utf16Le } else { WireEncoding::UTF8 });
         } else if final_input || self.undecided.len() >= 3 {
-            self.encoding = Some(WireEncoding::Utf8);
+            self.encoding = Some(WireEncoding::UTF8);
         }
         if self.encoding.is_some() { self.pending.append(&mut self.undecided); }
         Ok(())
@@ -3759,7 +3759,7 @@ impl ByteLexer {
                 break;
             }
             match encoding {
-                WireEncoding::Utf8 => {
+                WireEncoding::UTF8 => {
                     let Some(&first) = self.pending.first() else { break };
                     let width = if first < 0x80 { 1 } else if first & 0xe0 == 0xc0 { 2 } else if first & 0xf0 == 0xe0 { 3 } else if first & 0xf8 == 0xf0 { 4 } else { return self.fail(Reason::InvalidEncoding, "invalid UTF-8 leading byte"); };
                     if self.pending.len() < width { break; }
@@ -4397,8 +4397,8 @@ fn declaration_fields(data: &str) -> Result<(String, Option<String>, Option<bool
 }
 
 fn declaration_matches_input(name: &str, encoding: Option<WireEncoding>) -> bool {
-    match encoding.unwrap_or(WireEncoding::Utf8) {
-        WireEncoding::Utf8 => name.eq_ignore_ascii_case("UTF-8"),
+    match encoding.unwrap_or(WireEncoding::UTF8) {
+        WireEncoding::UTF8 => name.eq_ignore_ascii_case("UTF-8"),
         WireEncoding::Utf16Le | WireEncoding::Utf16Be => matches!(
             name.to_ascii_uppercase().as_str(),
             "UTF-16" | "UTF-16LE" | "UTF-16BE"

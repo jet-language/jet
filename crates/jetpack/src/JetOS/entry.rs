@@ -9,7 +9,7 @@ use super::generations_activation::{
 use super::load_validate::load_user_profile_target;
 use super::nixos_import::cmd_import;
 use super::options_rendering::render_user_profile_json;
-use super::types::{OsFlags, Target};
+use super::types::{OSFlags, Target};
 use super::vm_commands::cmd_vm;
 use crate::Output::Theme;
 use crate::Syntax;
@@ -17,7 +17,7 @@ use crate::JSON;
 use std::fs;
 use std::path::PathBuf;
 
-pub fn main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OsFlags) -> i32 {
+pub fn main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OSFlags) -> i32 {
     match verb {
         Some(v) if v == Syntax::OS_VERB_CHECK => cmd_check(theme, args),
         Some(v) if v == Syntax::OS_VERB_PLAN => cmd_plan(theme, args, flags),
@@ -51,7 +51,7 @@ pub fn main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OsFlags)
     }
 }
 
-pub fn user_main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OsFlags) -> i32 {
+pub fn user_main(theme: &Theme, verb: Option<&str>, args: &[String], flags: &OSFlags) -> i32 {
     let Some(action) = verb else {
         theme.error(
             "user needs an action",

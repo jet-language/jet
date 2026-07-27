@@ -1853,11 +1853,11 @@ fn canvas_projects_function_metadata_and_callback_event_views() {
 fn canvas_preserves_via_effect_row_for_signature_edits() {
     let path = write_fixture(
         "function_via_effect",
-        "fn invoke(act: fn() =[Io]=>) =[via act]=> { act() }\nfn run() {}\n",
+        "fn invoke(act: fn() =[IO]=>) =[via act]=> { act() }\nfn run() {}\n",
     );
     let graph = jet::Canvas::graph_json_for_file(&path).expect("canvas graph");
     assert!(
-        graph.contains("\"signature\":\"fn invoke(act: fn() =[Io]=>) =[via act]=>\""),
+        graph.contains("\"signature\":\"fn invoke(act: fn() =[IO]=>) =[via act]=>\""),
         "{graph}"
     );
     assert!(graph.contains("\"effect_via\":\"act\""), "{graph}");
@@ -3793,7 +3793,7 @@ fn canvas_reconstructs_checked_output_callable_from_semindex() {
         "\"kind\":\"Executable\"",
         "\"identity\":\"main::launch\"",
         "\"fact_source\":\"semindex_resolved_output\"",
-        "\"effects\":[\"Io\"]",
+        "\"effects\":[\"IO\"]",
     ] {
         assert!(graph.contains(field), "Canvas Output fact missing {field}: {graph}");
     }

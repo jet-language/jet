@@ -30,7 +30,7 @@ Verse is a functional-logic language with a rich static type system. Core mechan
 
 | Video topic | Jet status | Evidence |
 |---|---|---|
-| Effect system + purity | **Already implemented** | D-EFF1 Koka-style **inferred** effect rows; `--[E1,E2]->` arrow (D-SHAPE8=A, card #543); purity = empty row `--[]->`; closed 10-root vocab (Net/Fs/Io/Db/Time/Rand/Env/Exec/Log/Gpu); `#Caps(…)` block restriction. `docs/spec/spec.md:2534-2643` |
+| Effect system + purity | **Already implemented** | D-EFF1 Koka-style **inferred** effect rows; `--[E1,E2]->` arrow (D-SHAPE8=A, card #543); purity = empty row `--[]->`; closed 10-root vocab (Net/FS/IO/DB/Time/Rand/Env/Exec/Log/GPU); `#Caps(…)` block restriction. `docs/spec/spec.md:2534-2643` |
 | `decides` (failure-as-effect, no payload) | **Deliberately rejected** | Jet uses errors-as-values `T ? E` with **typed** `E`, postfix `?` propagation, `??` fallback. `docs/spec/spec.md:784-806`. This *is* the Rust-Result path commenters preferred over `decides`. |
 | Transactional rollback on failure | **Tracked as "watch" — the one open idea** | `docs/proposals/language-shape-research.md:354`, `docs/archive/language-lessons-and-regrets.md:399-407`: rollback only via *explicit* checked transaction regions, sema-proven rollback-safe; "ordinary `?` propagation never implies rollback." Not built; correctly deferred. |
 | Dual `[]`/`()` call syntax by fallibility | **Rejected by design** | Jet keeps one call syntax; fallibility is in return type + `?`. I7 (ratified syntax) + owner anti-idiosyncrasy. Commenter critique validates the choice. |

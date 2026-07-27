@@ -661,19 +661,19 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
     if matches!(type_name, "NetError" | "NetDnsError") {
         return format!("{}Jet{}::{}", cx.root_prefix, type_name, variant);
     }
-    if type_name == "TlsClientTrust" {
-        return format!("{}JetTlsTrust::{}", cx.root_prefix, variant);
+    if type_name == "TLSClientTrust" {
+        return format!("{}JetTLSTrust::{}", cx.root_prefix, variant);
     }
-    if type_name == "TlsVersion" {
-        return format!("{}JetTlsVersion::{}", cx.root_prefix, variant);
+    if type_name == "TLSVersion" {
+        return format!("{}JetTLSVersion::{}", cx.root_prefix, variant);
     }
     if matches!(type_name, "IOError" | "IOOperation") {
-        return format!("{}jet_std::{}::{}", cx.root_prefix, if type_name == "IOError" { "IoError" } else { "IoOperation" }, variant);
+        return format!("{}jet_std::{}::{}", cx.root_prefix, if type_name == "IOError" { "IOError" } else { "IOOperation" }, variant);
     }
-    if matches!(type_name, "HttpError" | "HttpOperation" | "HttpProxy" | "HttpRedirectPolicy" | "HttpRetryPolicy" | "HttpCookieJar" | "HttpCompressEncoding") {
+    if matches!(type_name, "HTTPError" | "HTTPOperation" | "HTTPProxy" | "HTTPRedirectPolicy" | "HTTPRetryPolicy" | "HTTPCookieJar" | "HTTPCompressEncoding") {
         return format!("{}Jet{}::{}", cx.root_prefix, type_name, variant);
     }
-    if matches!(type_name, "SmtpSecurity" | "RecipientPolicy" | "EmailError" | "SmtpAuth" | "TlsTrust") {
+    if matches!(type_name, "SMTPSecurity" | "RecipientPolicy" | "EmailError" | "SMTPAuth" | "TLSTrust") {
         let rust = if type_name == "EmailError" { "Error" } else { type_name };
         return format!("{}jet_email::{}::{}", cx.root_prefix, rust, variant);
     }

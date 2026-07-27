@@ -19,11 +19,11 @@ pub struct Program {
     /// backend is the web target, so `jet run`/`jet dev`/`jet build` don't
     /// need `--target=web` on every invocation. `None` means the native
     /// default applies unless `pkg.jet` or an explicit `--target=` flag says
-    /// otherwise. Distinct from `web_target_ceiling` (`Wasm`/`Js`, a partition
+    /// otherwise. Distinct from `web_target_ceiling` (`Wasm`/`JS`, a partition
     /// ceiling *within* a web build) — `Web` here means "build for the web
     /// backend at all," a different axis, same marker family (I8).
     pub default_target: Option<String>,
-    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — this program's
+    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#HTML("path.html")` — this program's
     /// companion host page for `--target=web` builds, explicit instead of
     /// the silent `<stem>.html` sibling-filename convention. Relative to the
     /// `.jet` source file's own directory.
@@ -139,7 +139,7 @@ pub enum ForeignLanguage {
     Cpp,
     Rust,
     Py,
-    Js,
+    JS,
     Swift,
     Go,
     Java,
@@ -165,7 +165,7 @@ impl ForeignLanguage {
         ForeignLanguage::Cpp,
         ForeignLanguage::Rust,
         ForeignLanguage::Py,
-        ForeignLanguage::Js,
+        ForeignLanguage::JS,
         ForeignLanguage::Swift,
         ForeignLanguage::Go,
         ForeignLanguage::Java,
@@ -191,7 +191,7 @@ impl ForeignLanguage {
             Syntax::CPP_MODULE_ROOT => Some(ForeignLanguage::Cpp),
             Syntax::KW_RUST => Some(ForeignLanguage::Rust),
             Syntax::PY_MODULE_ROOT => Some(ForeignLanguage::Py),
-            Syntax::JS_MODULE_ROOT => Some(ForeignLanguage::Js),
+            Syntax::JS_MODULE_ROOT => Some(ForeignLanguage::JS),
             Syntax::SWIFT_MODULE_ROOT => Some(ForeignLanguage::Swift),
             Syntax::GO_MODULE_ROOT => Some(ForeignLanguage::Go),
             Syntax::JAVA_MODULE_ROOT => Some(ForeignLanguage::Java),
@@ -219,7 +219,7 @@ impl ForeignLanguage {
             ForeignLanguage::Cpp => Syntax::CPP_MODULE_ROOT,
             ForeignLanguage::Rust => Syntax::KW_RUST,
             ForeignLanguage::Py => Syntax::PY_MODULE_ROOT,
-            ForeignLanguage::Js => Syntax::JS_MODULE_ROOT,
+            ForeignLanguage::JS => Syntax::JS_MODULE_ROOT,
             ForeignLanguage::Swift => Syntax::SWIFT_MODULE_ROOT,
             ForeignLanguage::Go => Syntax::GO_MODULE_ROOT,
             ForeignLanguage::Java => Syntax::JAVA_MODULE_ROOT,
@@ -342,7 +342,7 @@ pub struct ProgramBundle {
     /// `comptime if build.os == { … }` desugar reads it to fold the switch to
     /// the arm matching this OS, and it must equal codegen's `active_os` so the
     /// selected arm's gated `impl` is the one codegen keeps.
-    pub active_os: crate::OsTarget::OsTarget,
+    pub active_os: crate::OSTarget::OSTarget,
     /// D-REL3 / card #712: resolved package edition (`"2026"`, `"2027"`, …).
     /// Single-file programs use the toolchain's newest stable edition.
     pub edition: String,
@@ -366,7 +366,7 @@ pub struct LoadedModule {
     pub pub_file: bool,
     /// D-PRELUDEX1=A: `#NoPrelude` disables ambient `print`/`input` in this file.
     pub no_prelude: bool,
-    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#Html("path.html")` — this file's explicit
+    /// D-HTMLPAIR1 (ratified 2026-07-01, c134): `#HTML("path.html")` — this file's explicit
     /// companion host page for `--target=web` builds.
     pub html_path: Option<String>,
     /// D-MEM1/S7 (D-NOALLOC-SEM1=A): mirrors `Program::no_alloc_policy`.

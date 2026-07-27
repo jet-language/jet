@@ -1,14 +1,14 @@
     // Canonical std-only JSON codec shared by AOT, JIT encoding, and tier 0.
-    pub fn parse_json(text: &str) -> Result<Json, JsonError> {
+    pub fn parse_json(text: &str) -> Result<JSON, JSONError> {
         parse_json_with(text, false)
     }
 
-    pub fn parse_json_strict(text: &str) -> Result<Json, JsonError> {
+    pub fn parse_json_strict(text: &str) -> Result<JSON, JSONError> {
         parse_json_with(text, true)
     }
 
-    fn parse_json_with(text: &str, reject_duplicate_keys: bool) -> Result<Json, JsonError> {
-        let mut p = JsonParser {
+    fn parse_json_with(text: &str, reject_duplicate_keys: bool) -> Result<JSON, JSONError> {
+        let mut p = JSONParser {
             chars: text.chars().collect(),
             pos: 0,
             reject_duplicate_keys,
@@ -21,13 +21,13 @@
         Ok(v)
     }
 
-    pub fn render_json(j: &Json, pretty: bool, depth: usize) -> String {
+    pub fn render_json(j: &JSON, pretty: bool, depth: usize) -> String {
         match j {
-            Json::Null => "null".to_string(),
-            Json::Boolean(b) => b.to_string(),
-            Json::Number(n) => format!("{:?}", n),
-            Json::Text(s) => quote_json(s),
-            Json::Array(items) => {
+            JSON::Null => "null".to_string(),
+            JSON::Boolean(b) => b.to_string(),
+            JSON::Number(n) => format!("{:?}", n),
+            JSON::Text(s) => quote_json(s),
+            JSON::Array(items) => {
                 if items.is_empty() {
                     return "[]".to_string();
                 }
@@ -44,7 +44,7 @@
                     .collect();
                 format!("[\n{}\n{}]", parts.join(",\n"), end)
             }
-            Json::Object(entries) => {
+            JSON::Object(entries) => {
                 if entries.is_empty() {
                     return "{}".to_string();
                 }
@@ -92,20 +92,20 @@
         out
     }
 
-    struct JsonParser {
+    struct JSONParser {
         chars: Vec<char>,
         pos: usize,
         reject_duplicate_keys: bool,
     }
 
-    impl JsonParser {
-        fn err(&self, msg: &str) -> JsonError {
+    impl JSONParser {
+        fn err(&self, msg: &str) -> JSONError {
             let line = self.chars[..self.pos.min(self.chars.len())]
                 .iter()
                 .filter(|c| **c == '\n')
                 .count() as i64
                 + 1;
-            JsonError {
+            JSONError {
                 line,
                 message: msg.to_string(),
             }
@@ -117,13 +117,13 @@
             }
         }
 
-        fn value(&mut self) -> Result<Json, JsonError> {
+        fn value(&mut self) -> Result<JSON, JSONError> {
             self.ws();
             match self.peek() {
-                Some('n') => self.word("null", Json::Null),
-                Some('t') => self.word("true", Json::Boolean(true)),
-                Some('f') => self.word("false", Json::Boolean(false)),
-                Some('"') => Ok(Json::Text(self.string()?)),
+                Some('n') => self.word("null", JSON::Null),
+                Some('t') => self.word("true", JSON::Boolean(true)),
+                Some('f') => self.word("false", JSON::Boolean(false)),
+                Some('"') => Ok(JSON::Text(self.string()?)),
                 Some('[') => self.array(),
                 Some('{') => self.object(),
                 Some('-') | Some('0'..='9') => self.number(),
@@ -135,7 +135,7 @@
             self.chars.get(self.pos).copied()
         }
 
-        fn word(&mut self, w: &str, v: Json) -> Result<Json, JsonError> {
+        fn word(&mut self, w: &str, v: JSON) -> Result<JSON, JSONError> {
             for ch in w.chars() {
                 if self.peek() != Some(ch) {
                     return Err(self.err("expected a JSON word"));
@@ -145,7 +145,7 @@
             Ok(v)
         }
 
-        fn string(&mut self) -> Result<String, JsonError> {
+        fn string(&mut self) -> Result<String, JSONError> {
             if self.peek() != Some('"') {
                 return Err(self.err("expected quoted text"));
             }
@@ -182,7 +182,7 @@
 
         // A `\uXXXX` escape, already past the `u`. Combines a high+low surrogate
         // pair into one code point; rejects a lone or malformed surrogate.
-        fn unicode_escape(&mut self, out: &mut String) -> Result<(), JsonError> {
+        fn unicode_escape(&mut self, out: &mut String) -> Result<(), JSONError> {
             let cp = self.hex4()?;
             if (0xD800..=0xDBFF).contains(&cp) {
                 if self.peek() != Some('\\') {
@@ -213,7 +213,7 @@
             Ok(())
         }
 
-        fn hex4(&mut self) -> Result<u32, JsonError> {
+        fn hex4(&mut self) -> Result<u32, JSONError> {
             let mut v = 0u32;
             for _ in 0..4 {
                 let Some(c) = self.peek() else {
@@ -228,7 +228,7 @@
             Ok(v)
         }
 
-        fn number(&mut self) -> Result<Json, JsonError> {
+        fn number(&mut self) -> Result<JSON, JSONError> {
             let start = self.pos;
             if self.peek() == Some('-') {
                 self.pos += 1;
@@ -269,19 +269,19 @@
             }
             let s: String = self.chars[start..self.pos].iter().collect();
             match s.parse::<f64>() {
-                Ok(n) => Ok(Json::Number(n)),
+                Ok(n) => Ok(JSON::Number(n)),
                 Err(_) => Err(self.err("bad number")),
             }
         }
 
-        fn array(&mut self) -> Result<Json, JsonError> {
+        fn array(&mut self) -> Result<JSON, JSONError> {
             self.pos += 1;
             let mut out = Vec::new();
             loop {
                 self.ws();
                 if self.peek() == Some(']') {
                     self.pos += 1;
-                    return Ok(Json::Array(out));
+                    return Ok(JSON::Array(out));
                 }
                 out.push(self.value()?);
                 self.ws();
@@ -293,14 +293,14 @@
             }
         }
 
-        fn object(&mut self) -> Result<Json, JsonError> {
+        fn object(&mut self) -> Result<JSON, JSONError> {
             self.pos += 1;
             let mut out = std::collections::BTreeMap::new();
             loop {
                 self.ws();
                 if self.peek() == Some('}') {
                     self.pos += 1;
-                    return Ok(Json::Object(out));
+                    return Ok(JSON::Object(out));
                 }
                 let key = self.string()?;
                 self.ws();

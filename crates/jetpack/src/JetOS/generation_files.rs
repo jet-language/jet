@@ -15,7 +15,7 @@ use super::module_storage_workload::{
 use super::options_rendering::{boot_profile, render_proof};
 use super::root_projection::{copy_file_replace, write_bootable_root_projection};
 use super::store_realize::RealizedPackage;
-use super::types::OsFlags;
+use super::types::OSFlags;
 use super::studio_projection::{make_executable, write_studio_app_projection};
 use super::system_facts::{
     write_hardware_facts, write_init_facts, write_network_facts, write_secret_manifest,
@@ -188,7 +188,7 @@ const EVALUATOR_SEMANTICS: &str = "jet-env-model.module-eval.v1";
 pub(super) fn write_generation_source_proof(
     dir: &Path,
     config: &Path,
-    flags: &OsFlags,
+    flags: &OSFlags,
 ) -> std::io::Result<()> {
     let source = fs::read(config)?;
     let source_closure = generation_source_closure(config)?;
@@ -256,7 +256,7 @@ pub(super) fn validate_generation_root_proof(
     name: &str,
     source_config: &Path,
     roots: &Store::Roots,
-    flags: &OsFlags,
+    flags: &OSFlags,
 ) -> std::io::Result<GenerationRootProof> {
     let root_metadata = fs::symlink_metadata(dir)?;
     if !root_metadata.is_dir() || root_metadata.file_type().is_symlink() {
@@ -377,7 +377,7 @@ fn validate_source_proof(
     source_proof: &[u8],
     plan: &[u8],
     source_config: &Path,
-    flags: &OsFlags,
+    flags: &OSFlags,
 ) -> std::io::Result<()> {
     let proof_text = std::str::from_utf8(source_proof).map_err(invalid_generation)?;
     let proof = JSON::parse(proof_text).map_err(invalid_generation)?;
@@ -400,7 +400,7 @@ fn validate_source_proof(
         }
     }
     let real_tier = match proof.get("real_tier").map_err(invalid_generation)? {
-        JSON::Json::Bool(value) => *value,
+        JSON::JSONValue::Bool(value) => *value,
         _ => return Err(invalid_generation("generation source tier is not boolean")),
     };
     if real_tier != flags.real_tier {
@@ -478,7 +478,7 @@ fn import_find_directory(import: &Expr) -> std::io::Result<String> {
     Ok(path)
 }
 
-fn json_string(value: &JSON::Json, key: &str) -> std::io::Result<String> {
+fn json_string(value: &JSON::JSONValue, key: &str) -> std::io::Result<String> {
     value
         .get(key)
         .map_err(invalid_generation)?
@@ -624,8 +624,8 @@ fn generation_mode(metadata: &fs::Metadata) -> u32 {
 mod request_proof_tests {
     use super::*;
 
-    fn flags(real_tier: bool) -> OsFlags {
-        OsFlags {
+    fn flags(real_tier: bool) -> OSFlags {
+        OSFlags {
             fixtures: None,
             offline: true,
             name: Some("same-name".to_string()),

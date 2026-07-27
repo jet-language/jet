@@ -23,7 +23,7 @@ pub fn apply_overlay_patches(
     for patch in &package.patches {
         let patch_path = workspace_root.join(patch);
         let text = std::fs::read_to_string(&patch_path).map_err(|e| {
-            OverlayError::Io(format!(
+            OverlayError::IO(format!(
                 "could not read patch `{}`: {e}",
                 patch_path.display()
             ))
@@ -52,7 +52,7 @@ fn apply_unified_patch(
         let target = normalize_patch_path(next.trim_start_matches("+++ ").trim());
         let path = source_root.join(&target);
         let original = std::fs::read_to_string(&path).map_err(|e| {
-            OverlayError::Io(format!(
+            OverlayError::IO(format!(
                 "could not read patched file `{}`: {e}",
                 path.display()
             ))
@@ -130,7 +130,7 @@ fn apply_unified_patch(
             output.push('\n');
         }
         std::fs::write(&path, output).map_err(|e| {
-            OverlayError::Io(format!(
+            OverlayError::IO(format!(
                 "could not write patched file `{}`: {e}",
                 path.display()
             ))

@@ -63,13 +63,13 @@ pub(crate) fn encoding_error_ty() -> Type {
     Type::Named("EncodingError".to_string())
 }
 
-// D-ENC-DYN1=A+: the dynamic encoding value `Data` (+ aliases `Json`/`Toml`/
-// `Yaml`/`Csv`).
+// D-ENC-DYN1=A+: the dynamic encoding value `Data` (+ aliases `JSON`/`TOML`/
+// `YAML`/`CSV`).
 pub(crate) fn is_json_type_name(name: &str) -> bool {
     Syntax::is_data_type_name(name)
 }
 
-// D-DBDRIVER1: the `DbValue` dynamic tagged SQL value.
+// D-DBDRIVER1: the `DBValue` dynamic tagged SQL value.
 pub(crate) fn is_db_value_type_name(name: &str) -> bool {
     Syntax::is_db_value_type_name(name)
 }
@@ -100,20 +100,31 @@ pub(crate) fn data_renamed_to_datatree(span: Span) -> Diagnostic {
     )
 }
 
+/// D-ACRO-CASE1=A / D-ACRO-LEX1=A: a retired word-cased acronym spelling.
+pub(crate) fn retired_acronym_spelling_diag(old: &str, canonical: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0358",
+        format!("`{old}` is spelled `{canonical}`"),
+        "Jet keeps acronyms fully capitalized inside PascalCase names (D-ACRO-CASE1=A, D-ACRO-LEX1=A)".to_string(),
+        format!("write `{canonical}` instead of `{old}`"),
+        Some(span),
+    )
+}
+
 pub(crate) fn is_json_error_type_name(name: &str) -> bool {
-    name == Syntax::TYPE_JSON_ERROR || name == "JsonError"
+    name == Syntax::TYPE_JSON_ERROR || name == "JSONError"
 }
 
 pub(crate) fn is_io_error_type_name(name: &str) -> bool {
-    name == Syntax::TYPE_IO_ERROR || name == "IoError"
+    name == Syntax::TYPE_IO_ERROR || name == "IOError"
 }
 
 pub(crate) fn is_utf8_error_type_name(name: &str) -> bool {
-    name == Syntax::TYPE_UTF8_ERROR || name == "Utf8Error"
+    name == Syntax::TYPE_UTF8_ERROR || name == "UTF8Error"
 }
 
 /// D-TEXTWIDTH1=B: `text.display_width(s, policy: cjk)`'s reject-path error
-/// (a `.Reject` control-character policy hit) — mirrors `Utf8Error`'s
+/// (a `.Reject` control-character policy hit) — mirrors `UTF8Error`'s
 /// minimal `{ message }` shape.
 pub(crate) fn is_text_error_type_name(name: &str) -> bool {
     name == "TextError"
@@ -144,8 +155,8 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "BigInt" | "Decimal"
         // D-DBDRIVER1 / D-EFFDBREAD1=A: the `core.db` connection handle and its
         // error. Nameable so a query function can annotate its connection
-        // parameter — the shape a `#(Db.Read)` live query (D-LIVEQUERY1) takes.
-        | "DbConnection" | "DbError"
+        // parameter — the shape a `#(DB.Read)` live query (D-LIVEQUERY1) takes.
+        | "DBConnection" | "DBError"
         | "FileReader" | "FileWriter" | "FileLines"
         | "StdinHandle" | "StdinLines" | "Stdout" | "Stderr"
         // D-LSDIR1/D-FSOPS1/D-WATCH-SCOPE1: filesystem and watcher values.
@@ -159,12 +170,12 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-ITERTOOLS1=A: expanded collection handles.
         | "BitSet" | "ByteBuffer"
         // E2-M10: networking opaque types.
-        | "TcpListener" | "TcpStream" | "IpAddr" | "SocketAddr" | "UdpSocket" | "UdpPacket"
-        | "DnsSrv" | "UnixListener" | "UnixStream" | "TlsStream" | "TlsClientConfig" | "TlsClientConfigType"
-        | "TlsRootCertificates" | "TlsRootCertificatesType" | "TlsClientIdentity" | "TlsClientIdentityType"
-        | "TlsClientTrust" | "TlsVersion" | "TlsPeerIdentity" | "TlsCertificate"
+        | "TcpListener" | "TcpStream" | "IPAddr" | "SocketAddr" | "UdpSocket" | "UDPPacket"
+        | "DNSSrv" | "UnixListener" | "UnixStream" | "TLSStream" | "TLSClientConfig" | "TLSClientConfigType"
+        | "TLSRootCertificates" | "TLSRootCertificatesType" | "TLSClientIdentity" | "TLSClientIdentityType"
+        | "TLSClientTrust" | "TLSVersion" | "TLSPeerIdentity" | "TLSCertificate"
         | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
-        | "HttpRequest" | "HttpResponse" | "HttpRouter" | "HttpClient" | "HttpClientType"
+        | "HTTPRequest" | "HTTPResponse" | "HTTPRouter" | "HTTPClient" | "HTTPClientType"
         // D-CRYPTO-API1=A: purpose-bound crypto values. Secret-bearing values
         // are opaque and receive no structural/collection capabilities.
         | "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey" | "X25519PublicKey"
@@ -239,13 +250,13 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Url" | "Mime"
         // D-EMAIL1=A / D-EMAIL-SMTP-SURFACE1=A: exact ungated email values.
         | "Address" | "Message" | "Attachment" | "Envelope" | "EmailError"
-        | "SmtpSecurity" | "RecipientPolicy" | "RecipientReport" | "SendReport"
-        | "Limits" | "SmtpAuth" | "TlsTrust" | "DkimConfig" | "SmtpConfig" | "Mailer"
+        | "SMTPSecurity" | "RecipientPolicy" | "RecipientReport" | "SendReport"
+        | "Limits" | "SMTPAuth" | "TLSTrust" | "DkimConfig" | "SMTPConfig" | "Mailer"
         // D-REGEXENGINE1=A: std-only linear regex values.
         | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
-        | "HttpMethod" | "HttpStatus" | "HttpVersion" | "HttpHeaderName" | "HttpHeaderValue"
-        | "HttpHeaders" | "HttpBody" | "HttpBodyChunks" | "HttpError" | "HttpOperation" | "HttpProxy" | "HttpRedirectPolicy" | "HttpRetryPolicy" | "HttpCookieJar" | "HttpMux" | "HttpHandler" | "HttpServerTls" | "HttpServer" | "HttpShutdownReport" | "HttpCorsPolicy" | "HttpCompressEncoding"
+        | "HTTPMethod" | "HTTPStatus" | "HTTPVersion" | "HTTPHeaderName" | "HTTPHeaderValue"
+        | "HTTPHeaders" | "HTTPBody" | "HTTPBodyChunks" | "HTTPError" | "HTTPOperation" | "HTTPProxy" | "HTTPRedirectPolicy" | "HTTPRetryPolicy" | "HTTPCookieJar" | "HTTPMux" | "HTTPHandler" | "HTTPServerTls" | "HTTPServer" | "HTTPShutdownReport" | "HTTPCorsPolicy" | "HTTPCompressEncoding"
         | "WsConn" | "WsError" | "WsMessage"
         | "Browser" | "BrowserContext" | "BrowserPage" | "BrowserLocator"
         | "BrowserEvent" | "BrowserTrace" | "BrowserError" | "BrowserCapabilities"
@@ -253,7 +264,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by
         // expected-type elaboration of a string literal (E0149 guards a plain
         // runtime `String` from filling this position).
-        | "Sql" | "Html" | "Sh"
+        | "SQL" | "HTML" | "Sh"
         // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` — consuming,
         // fallible, `?`-composed cursors over `[U8]`/`String`.
         | "Reader" | "Cursor"
@@ -272,15 +283,15 @@ pub(crate) fn core_type_known(name: &str) -> bool {
 }
 
 pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
-    if type_name == "TlsPeerIdentity" {
+    if type_name == "TLSPeerIdentity" {
         return match field {
             "verified_server_name" => Some(Type::String),
-            "leaf" => Some(Type::Named("TlsCertificate".to_string())),
-            "certificate_chain" => Some(Type::List(Box::new(Type::Named("TlsCertificate".to_string())))),
+            "leaf" => Some(Type::Named("TLSCertificate".to_string())),
+            "certificate_chain" => Some(Type::List(Box::new(Type::Named("TLSCertificate".to_string())))),
             _ => None,
         };
     }
-    if type_name == "TlsCertificate" {
+    if type_name == "TLSCertificate" {
         return match field {
             "der" | "sha256" | "spki_sha256" => Some(Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))),
             "dns_names" => Some(Type::List(Box::new(Type::String))),
@@ -306,10 +317,10 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
-    if type_name == "HttpShutdownReport" && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled") {
+    if type_name == "HTTPShutdownReport" && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled") {
         return Some(Type::Int);
     }
-    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError" | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions" | "XMLError" | "AsyncPolicy" | "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SmtpConfig") {
+    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError" | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions" | "XMLError" | "AsyncPolicy" | "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig") {
         return core_constructable_fields(type_name)?.into_iter().find(|(name, _)| name == field).map(|(_, ty)| ty);
     }
     if type_name == "Envelope" {
@@ -507,12 +518,12 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("ProcessChild", "stdout") => Some(Type::Named("ProcessStdoutStream".to_string())),
         ("ProcessChild", "stderr") => Some(Type::Named("ProcessStderrStream".to_string())),
         // D-HTTP-CORE2=A: one byte-native message model.
-        ("HttpRequest", "method" | "path") => Some(Type::String),
-        ("HttpRequest", "body") => Some(Type::Named("HttpBody".to_string())),
-        ("HttpRequest", "headers") => Some(Type::Named("HttpHeaders".to_string())),
-        ("HttpResponse", "status") => Some(Type::Int),
-        ("HttpResponse", "body") => Some(Type::Named("HttpBody".to_string())),
-        ("HttpResponse", "headers") => Some(Type::Named("HttpHeaders".to_string())),
+        ("HTTPRequest", "method" | "path") => Some(Type::String),
+        ("HTTPRequest", "body") => Some(Type::Named("HTTPBody".to_string())),
+        ("HTTPRequest", "headers") => Some(Type::Named("HTTPHeaders".to_string())),
+        ("HTTPResponse", "status") => Some(Type::Int),
+        ("HTTPResponse", "body") => Some(Type::Named("HTTPBody".to_string())),
+        ("HTTPResponse", "headers") => Some(Type::Named("HTTPHeaders".to_string())),
         // D-GAME-*: scene-owned headless game substrate fields.
         ("GameScene", "assets") => Some(Type::Named("GameAssets".to_string())),
         ("GameScene", "input") => Some(Type::Named("GameInputMap".to_string())),
@@ -705,14 +716,14 @@ pub(crate) fn core_net_error_variants(
     for name in [
         "InvalidInput", "PermissionDenied", "AddressInUse", "AddressUnavailable",
         "ConnectionRefused", "ConnectionReset", "NotConnected", "Closed", "Timeout",
-        "Cancelled", "Unsupported", "Tls", "Protocol", "Other",
+        "Cancelled", "Unsupported", "TLS", "Protocol", "Other",
     ] {
         variants.insert(name.to_string(), (
             zero,
             VariantPayload::Single(Type::Named("NetErrorDetail".to_string()), zero),
         ));
     }
-    variants.insert("Dns".to_string(), (
+    variants.insert("DNS".to_string(), (
         zero,
         VariantPayload::Single(Type::Named("NetDnsError".to_string()), zero),
     ));
@@ -727,13 +738,13 @@ pub(crate) fn core_http_variants(
     use crate::Diagnostics::Span;
     let zero = Span::new(0, 0);
     let mut variants = std::collections::HashMap::new();
-    if enum_name == "HttpOperation" {
+    if enum_name == "HTTPOperation" {
         for name in ["ClientConnect", "ServerBind", "ServeListener"] {
             variants.insert(name.to_string(), (zero, VariantPayload::Unit));
         }
         return Some(variants);
     }
-    if enum_name == "HttpProxy" {
+    if enum_name == "HTTPProxy" {
         variants.insert("FromEnvironment".to_string(), (zero, VariantPayload::Unit));
         variants.insert("None".to_string(), (zero, VariantPayload::Unit));
         variants.insert(
@@ -742,7 +753,7 @@ pub(crate) fn core_http_variants(
         );
         return Some(variants);
     }
-    if enum_name == "HttpRedirectPolicy" {
+    if enum_name == "HTTPRedirectPolicy" {
         // D-HTTP-CLIENT2=A: `.Follow(max:, same_origin_credentials:)`.
         variants.insert(
             "Follow".to_string(),
@@ -766,18 +777,18 @@ pub(crate) fn core_http_variants(
         );
         return Some(variants);
     }
-    if enum_name == "HttpRetryPolicy" {
+    if enum_name == "HTTPRetryPolicy" {
         // D-HTTP-CLIENT2=A: `.None` / `.Safe` / `.Idempotent`.
         for name in ["None", "Safe", "Idempotent"] {
             variants.insert(name.to_string(), (zero, VariantPayload::Unit));
         }
         return Some(variants);
     }
-    if enum_name == "HttpCookieJar" {
+    if enum_name == "HTTPCookieJar" {
         variants.insert("Memory".to_string(), (zero, VariantPayload::Unit));
         return Some(variants);
     }
-    if enum_name == "HttpCompressEncoding" {
+    if enum_name == "HTTPCompressEncoding" {
         variants.insert("Gzip".to_string(), (zero, VariantPayload::Unit));
         return Some(variants);
     }
@@ -806,7 +817,7 @@ pub(crate) fn core_http_variants(
             ),
         );
         variants.insert(
-            "Io".to_string(),
+            "IO".to_string(),
             (
                 zero,
                 VariantPayload::Named(vec![VariantField {
@@ -819,7 +830,7 @@ pub(crate) fn core_http_variants(
         );
         return Some(variants);
     }
-    if enum_name != "HttpError" {
+    if enum_name != "HTTPError" {
         return None;
     }
     for name in [
@@ -832,15 +843,15 @@ pub(crate) fn core_http_variants(
         ("BodyTooLarge", "limit", Type::Int),
         ("Resolve", "host", Type::String),
         ("Connect", "address", Type::String),
-        ("Tls", "stage", Type::String),
+        ("TLS", "stage", Type::String),
         ("Timeout", "phase", Type::String),
         ("Proxy", "stage", Type::String),
         ("Redirect", "reason", Type::String),
         ("Protocol", "version", Type::String),
-        ("Io", "operation", Type::String),
+        ("IO", "operation", Type::String),
         ("ResourceUnavailable", "resource", Type::String),
         ("Internal", "incident_id", Type::String),
-        ("UnsupportedTarget", "operation", Type::Named("HttpOperation".to_string())),
+        ("UnsupportedTarget", "operation", Type::Named("HTTPOperation".to_string())),
     ] {
         variants.insert(name.to_string(), (zero, VariantPayload::Named(vec![VariantField {
             name: field.to_string(),
@@ -1194,13 +1205,13 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("max_message_bytes".to_string(), Type::Int),
             ("max_auth_challenge_bytes".to_string(), Type::Int),
         ]),
-        "SmtpConfig" => Some(vec![
+        "SMTPConfig" => Some(vec![
             ("host".to_string(), Type::String),
             ("port".to_string(), Type::Int),
-            ("security".to_string(), Type::Named("SmtpSecurity".to_string())),
-            ("auth".to_string(), Type::Named("SmtpAuth".to_string())),
+            ("security".to_string(), Type::Named("SMTPSecurity".to_string())),
+            ("auth".to_string(), Type::Named("SMTPAuth".to_string())),
             ("recipient_policy".to_string(), Type::Named("RecipientPolicy".to_string())),
-            ("trust".to_string(), Type::Named("TlsTrust".to_string())),
+            ("trust".to_string(), Type::Named("TLSTrust".to_string())),
             ("limits".to_string(), Type::Named("Limits".to_string())),
             ("dkim".to_string(), Type::Option(Box::new(Type::Named("DkimConfig".to_string())))),
         ]),
@@ -1296,9 +1307,9 @@ pub(crate) fn core_email_variants(
     let zero = Span::new(0, 0);
     let mut variants = std::collections::HashMap::new();
     let units: &[&str] = match enum_name {
-        "SmtpSecurity" => &["StartTls", "Tls"],
+        "SMTPSecurity" => &["StartTls", "TLS"],
         "RecipientPolicy" => &["RequireAll", "DeliverAccepted"],
-        "EmailError" | "SmtpAuth" | "TlsTrust" => &[],
+        "EmailError" | "SMTPAuth" | "TLSTrust" => &[],
         _ => return None,
     };
     for name in units {
@@ -1306,7 +1317,7 @@ pub(crate) fn core_email_variants(
     }
     if enum_name == "EmailError" {
         for name in [
-            "Configuration", "Dns", "Connect", "Tls", "Auth", "Protocol", "Rejected",
+            "Configuration", "DNS", "Connect", "TLS", "Auth", "Protocol", "Rejected",
             "Transient", "TimedOut", "Cancelled", "DeliveryUnknown",
         ] {
             let fields = [
@@ -1319,7 +1330,7 @@ pub(crate) fn core_email_variants(
             }).collect();
             variants.insert(name.to_string(), (zero, VariantPayload::Named(fields)));
         }
-    } else if enum_name == "SmtpAuth" {
+    } else if enum_name == "SMTPAuth" {
         variants.insert("None".to_string(), (zero, VariantPayload::Unit));
         variants.insert("Password".to_string(), (zero, VariantPayload::Named(vec![
             VariantField { name: "username".to_string(), name_span: zero, ty: Type::String, ty_span: zero },
@@ -1330,7 +1341,7 @@ pub(crate) fn core_email_variants(
                 ty_span: zero,
             },
         ])));
-    } else if enum_name == "TlsTrust" {
+    } else if enum_name == "TLSTrust" {
         variants.insert("System".to_string(), (zero, VariantPayload::Unit));
         variants.insert("SystemPlusCa".to_string(), (zero, VariantPayload::Named(vec![
             VariantField { name: "pem".to_string(), name_span: zero,
@@ -1344,14 +1355,14 @@ pub(crate) fn core_tls_variants(
     enum_name: &str,
 ) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
     let zero = Span::new(0, 0);
-    let roots = Type::Named("TlsRootCertificates".to_string());
+    let roots = Type::Named("TLSRootCertificates".to_string());
     let mut variants = std::collections::HashMap::new();
     match enum_name {
-        "TlsVersion" => {
+        "TLSVersion" => {
             variants.insert("Tls12".to_string(), (zero, VariantPayload::Unit));
             variants.insert("Tls13".to_string(), (zero, VariantPayload::Unit));
         }
-        "TlsClientTrust" => {
+        "TLSClientTrust" => {
             variants.insert("System".to_string(), (zero, VariantPayload::Unit));
             variants.insert("SystemPlus".to_string(), (zero, VariantPayload::Single(roots.clone(), zero)));
             variants.insert("CustomOnly".to_string(), (zero, VariantPayload::Single(roots, zero)));

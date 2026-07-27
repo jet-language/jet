@@ -18,12 +18,12 @@ pub enum BindError {
     Source(String),
     ToolMissing(&'static str),
     ToolFailed(&'static str, String),
-    Io(String),
+    IO(String),
 }
 impl std::fmt::Display for BindError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Source(v) | Self::Io(v) => f.write_str(v),
+            Self::Source(v) | Self::IO(v) => f.write_str(v),
             Self::ToolMissing(v) => write!(f, "the provisioned `{v}` tool was not found"),
             Self::ToolFailed(t, v) => write!(f, "`{t}` rejected the R binding input: {v}"),
         }
@@ -39,16 +39,16 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     }
     let rscript = tool_path("Rscript").ok_or(BindError::ToolMissing("Rscript"))?;
     let script = std::fs::canonicalize(path)
-        .map_err(|e| BindError::Io(format!("could not resolve the R script: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not resolve the R script: {e}")))?;
     std::fs::create_dir_all(cache)
-        .map_err(|e| BindError::Io(format!("could not create R binding cache: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not create R binding cache: {e}")))?;
     let build = cache.join(format!(".r-build-{lib}"));
     let _ = std::fs::remove_dir_all(&build);
     std::fs::create_dir_all(&build)
-        .map_err(|e| BindError::Io(format!("could not create R build directory: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not create R build directory: {e}")))?;
     let discoverer = build.join("jet_discover.R");
     std::fs::write(&discoverer, DISCOVERER)
-        .map_err(|e| BindError::Io(format!("could not write R binding inspector: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not write R binding inspector: {e}")))?;
     let metadata = run_capture(
         Command::new(&rscript)
             .args(["--vanilla"])
@@ -60,9 +60,9 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     let worker = cache.join(format!("{lib}_worker.R"));
     let worker_source = render_worker(&functions);
     std::fs::write(&worker, &worker_source)
-        .map_err(|e| BindError::Io(format!("could not write R worker: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not write R worker: {e}")))?;
     let worker = std::fs::canonicalize(&worker)
-        .map_err(|e| BindError::Io(format!("could not resolve the R worker: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not resolve the R worker: {e}")))?;
     let abi = format!("jet_r_{lib}");
     let mut wrappers = String::new();
     for name in &functions {
@@ -82,7 +82,7 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
     let c = build.join(format!("{abi}.c"));
     let object = build.join(format!("{abi}.o"));
     std::fs::write(&c, bridge)
-        .map_err(|e| BindError::Io(format!("could not write R process bridge: {e}")))?;
+        .map_err(|e| BindError::IO(format!("could not write R process bridge: {e}")))?;
     run(
         Command::new("cc")
             .args(["-std=c11", "-D_POSIX_C_SOURCE=200809L", "-fPIC", "-c"])
@@ -509,24 +509,24 @@ fn run_capture(command: &mut Command, tool: &'static str) -> Result<Vec<u8>, Bin
         if e.kind() == std::io::ErrorKind::NotFound {
             BindError::ToolMissing(tool)
         } else {
-            BindError::Io(format!("could not start `{tool}`: {e}"))
+            BindError::IO(format!("could not start `{tool}`: {e}"))
         }
     })?;
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| BindError::Io(format!("could not supervise `{tool}` stdout")))?;
+        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stdout")))?;
     let stderr = child
         .stderr
         .take()
-        .ok_or_else(|| BindError::Io(format!("could not supervise `{tool}` stderr")))?;
+        .ok_or_else(|| BindError::IO(format!("could not supervise `{tool}` stderr")))?;
     let out = std::thread::spawn(move || drain(stdout, CAP));
     let err = std::thread::spawn(move || drain(stderr, CAP));
     let deadline = Instant::now() + Duration::from_secs(60);
     let status = loop {
         match child
             .try_wait()
-            .map_err(|e| BindError::Io(format!("could not supervise `{tool}`: {e}")))?
+            .map_err(|e| BindError::IO(format!("could not supervise `{tool}`: {e}")))?
         {
             Some(v) => break v,
             None if Instant::now() >= deadline => {
@@ -544,10 +544,10 @@ fn run_capture(command: &mut Command, tool: &'static str) -> Result<Vec<u8>, Bin
     };
     let stdout = out
         .join()
-        .map_err(|_| BindError::Io(format!("`{tool}` stdout reader failed")))??;
+        .map_err(|_| BindError::IO(format!("`{tool}` stdout reader failed")))??;
     let stderr = err
         .join()
-        .map_err(|_| BindError::Io(format!("`{tool}` stderr reader failed")))??;
+        .map_err(|_| BindError::IO(format!("`{tool}` stderr reader failed")))??;
     if status.success() {
         Ok(stdout)
     } else {
@@ -564,7 +564,7 @@ fn drain(mut input: impl Read, limit: usize) -> Result<Vec<u8>, BindError> {
     loop {
         let n = input
             .read(&mut buf)
-            .map_err(|e| BindError::Io(format!("could not read foreign tool output: {e}")))?;
+            .map_err(|e| BindError::IO(format!("could not read foreign tool output: {e}")))?;
         if n == 0 {
             break;
         }
