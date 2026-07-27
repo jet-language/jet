@@ -684,6 +684,11 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 }))
                 || (jit_list_of_int_list_type(&expr.ty)
                     && elems.iter().all(|e| resident_safe_expr(e, callees)))
+                || (matches!(
+                    &expr.ty,
+                    Type::List(inner) if jit_list_native_type(inner)
+                        && matches!(inner.as_ref(), Type::List(elem) if matches!(elem.as_ref(), Type::String))
+                ) && elems.iter().all(|e| resident_safe_expr(e, callees)))
                 || (jit_list_task_int_type(&expr.ty)
                     && elems.iter().all(|e| resident_safe_expr(e, callees)))
                 || (jit_list_record_type(&expr.ty)
@@ -2623,6 +2628,16 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::ReflectValueFields
         | THandleOp::ReflectFieldName
         | THandleOp::ReflectFieldValue => args.is_empty(),
+        THandleOp::UrlMimeMethod { method, .. } => match method.as_str() {
+            "to_string" | "host" | "path" | "query_pairs" | "path_segments" | "fragment"
+            | "essence"
+                if args.is_empty() =>
+            {
+                true
+            }
+            "join" | "param" if args.len() == 1 => true,
+            _ => false,
+        },
         _ => false,
     }
 }

@@ -9,7 +9,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use super::resident::resident_teardown;
 use super::{
     Archive, Collections, Compress, Concurrency, CoreHost, Crypto, Encoding, Fmt, JitResultValue,
-    Memory, Numeric, Parse, Process, Random, Sketch, Solver, Text, TRY_COMPILE_PANIC_HOOK_LOCK,
+    Memory, Net, Numeric, Parse, Process, Random, Sketch, Solver, Text, TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
 pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
@@ -113,6 +113,8 @@ pub(crate) struct JitRuntime {
     pub(crate) expirings: Vec<Memory::ExpiringState>,
     pub(crate) secrets: Vec<Option<Memory::SecretState>>,
     pub(crate) crypto_values: Vec<Option<Crypto::CryptoValue>>,
+    /// `core.url` / `core.mime` / net handles (#1221).
+    pub(crate) net_values: Vec<Option<Net::NetValue>>,
     /// `core.game` scene / frame / replay / backend handles (#1218).
     pub(crate) game_scenes: Vec<crate::Game::GameSceneState>,
     pub(crate) game_frames: Vec<crate::Game::GameFrameState>,
@@ -1526,6 +1528,7 @@ pub(crate) struct HostFns {
     pub(crate) args: crate::Args::ArgsHostFns,
     pub(crate) db: crate::Db::DbHostFns,
     pub(crate) crypto: Crypto::CryptoHostFns,
+    pub(crate) net: Net::NetHostFns,
     pub(crate) game: crate::Game::GameHostFns,
     pub(crate) raylib: crate::Raylib::RaylibHostFns,
     pub(crate) parse: crate::Parse::HostFns,
@@ -1714,6 +1717,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Args::register_args_symbols(&mut builder);
     crate::Db::register_db_symbols(&mut builder);
     Crypto::register_crypto_symbols(&mut builder);
+    Net::register_net_symbols(&mut builder);
     crate::Game::register_game_symbols(&mut builder);
     crate::Raylib::register_raylib_symbols(&mut builder);
     crate::Parse::register_symbols(&mut builder);
@@ -1746,6 +1750,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let args = crate::Args::declare_args_host_fns(&mut module)?;
     let db = crate::Db::declare_db_host_fns(&mut module)?;
     let crypto = Crypto::declare_crypto_host_fns(&mut module)?;
+    let net = Net::declare_net_host_fns(&mut module)?;
     let game = crate::Game::declare_game_host_fns(&mut module)?;
     let raylib = crate::Raylib::declare_raylib_host_fns(&mut module)?;
     let parse = crate::Parse::declare(&mut module)?;
@@ -1770,6 +1775,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         args,
         db,
         crypto,
+        net,
         game,
         raylib,
         parse,
@@ -1941,6 +1947,7 @@ fn declare_host_fns(
     args: crate::Args::ArgsHostFns,
     db: crate::Db::DbHostFns,
     crypto: Crypto::CryptoHostFns,
+    net: Net::NetHostFns,
     game: crate::Game::GameHostFns,
     raylib: crate::Raylib::RaylibHostFns,
     parse: crate::Parse::HostFns,
@@ -2281,6 +2288,7 @@ fn declare_host_fns(
         args,
         db,
         crypto,
+        net,
         game,
         raylib,
         parse,

@@ -57,6 +57,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         expirings: Vec::new(),
         secrets: Vec::new(),
         crypto_values: Vec::new(),
+        net_values: Vec::new(),
         game_scenes: Vec::new(),
         game_frames: Vec::new(),
         game_replays: Vec::new(),

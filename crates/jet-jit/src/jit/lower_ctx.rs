@@ -8895,6 +8895,118 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
+                if module == "core.url" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "parse" if args.len() == 1 => {
+                            (self.host.net.url_parse, vec![self.lower_expr(&args[0])?])
+                        }
+                        "file" if args.len() == 1 => {
+                            (self.host.net.url_file, vec![self.lower_expr(&args[0])?])
+                        }
+                        "data" if args.len() == 2 => (
+                            self.host.net.url_data,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "query" if args.len() == 1 => {
+                            (self.host.net.url_query, vec![self.lower_expr(&args[0])?])
+                        }
+                        "percent_encode" if args.len() == 1 => (
+                            self.host.net.url_percent_encode,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "percent_decode" if args.len() == 1 => (
+                            self.host.net.url_percent_decode,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.mime" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "parse" if args.len() == 1 => {
+                            (self.host.net.mime_parse, vec![self.lower_expr(&args[0])?])
+                        }
+                        "from_extension" if args.len() == 1 => (
+                            self.host.net.mime_from_extension,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "extension" if args.len() == 1 => (
+                            self.host.net.mime_extension,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.browser" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "profile" if args.len() == 1 => (
+                            self.host.net.browser_profile,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "timeout" if args.len() == 1 => (
+                            self.host.net.browser_timeout,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.email" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "address" if args.len() == 1 => (
+                            self.host.net.email_address,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "attachment" if args.len() == 3 => (
+                            self.host.net.email_attachment,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        "message" if args.len() == 7 => (
+                            self.host.net.email_message,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                                self.lower_expr(&args[3])?,
+                                self.lower_expr(&args[4])?,
+                                self.lower_expr(&args[5])?,
+                                self.lower_expr(&args[6])?,
+                            ],
+                        ),
+                        "serialize" if args.len() == 1 => (
+                            self.host.net.email_serialize,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "smtp" if args.len() == 1 => (
+                            self.host.net.email_smtp,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        _ => {
+                            return Err(format!("jit core call unsupported: {module}.{method}"))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 Err(format!("jit core call unsupported: {module}.{method}"))
             }
             TExprKind::CoreClosureCall { kind } => match kind {
@@ -9600,6 +9712,47 @@ impl LowerCtx<'_, '_> {
                     }
                     return Ok(handle);
                 }
+                // D-EMAIL1: `email.Limits.safe()` — fixed defaults, no host.
+                let is_email_limits_safe = method.name == "safe"
+                    && args.is_empty()
+                    && match owner {
+                        TStaticOwner::User(name) => name == "Limits",
+                        TStaticOwner::Prelude { path, .. } => {
+                            path == "Limits"
+                                || path.ends_with("::Limits")
+                                || path.ends_with(".Limits")
+                                || path.contains("jet_email::Limits")
+                        }
+                    }
+                    && owner_type
+                        .as_ref()
+                        .map(|t| matches!(t, Type::Named(n) if n == "Limits"))
+                        .unwrap_or(true);
+                if is_email_limits_safe {
+                    let n = self.b.ins().iconst(types::I64, 6);
+                    let new_ref = self
+                        .module
+                        .declare_func_in_func(self.host.struct_new, self.b.func);
+                    let new_call = self.b.ins().call(new_ref, &[n]);
+                    let handle = self.b.inst_results(new_call)[0];
+                    let set_i = self
+                        .module
+                        .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+                    let fields = [
+                        512i64,      // max_reply_line_bytes
+                        100,         // max_reply_lines
+                        100,         // max_capabilities
+                        100,         // max_recipients
+                        33_554_432,  // max_message_bytes
+                        4096,        // max_auth_challenge_bytes
+                    ];
+                    for (i, v) in fields.into_iter().enumerate() {
+                        let idx = self.b.ins().iconst(types::I64, i as i64);
+                        let val = self.b.ins().iconst(types::I64, v);
+                        self.b.ins().call(set_i, &[handle, idx, val]);
+                    }
+                    return Ok(handle);
+                }
                 // D-DATAFLOW1: `DataLimits.safe()` — nested EncodingLimits + max_* defaults.
                 let is_data_limits_safe = method.name == "safe"
                     && args.is_empty()
@@ -9687,6 +9840,11 @@ impl LowerCtx<'_, '_> {
                             ("TextWidthAmbiguous", "Wide") => Some(1),
                             ("TextWidthControls", "Zero") => Some(0),
                             ("TextWidthControls", "Reject") => Some(1),
+                            ("SmtpSecurity", "StartTls") => Some(0),
+                            ("SmtpSecurity", "Tls") => Some(1),
+                            ("RecipientPolicy", "RequireAll") => Some(0),
+                            ("RecipientPolicy", "DeliverAccepted") => Some(1),
+                            ("TlsTrust", "System") => Some(0),
                             _ => None,
                         })
                         .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
@@ -9710,7 +9868,48 @@ impl LowerCtx<'_, '_> {
                     }
                 }
                 TEnumPayload::Positional(_) => Err("jit enum positional payload unsupported".to_string()),
-                TEnumPayload::Named(_) => Err("jit enum named payload unsupported".to_string()),
+                TEnumPayload::Named(fields) => {
+                    let disc = self
+                        .meta
+                        .enum_variant_index(enum_type, variant)
+                        .or_else(|| match (enum_type.as_str(), variant.as_str()) {
+                            ("SmtpAuth", "Password") => Some(1),
+                            ("SmtpAuth", "None") => Some(0),
+                            ("TlsTrust", "SystemPlusCa") => Some(1),
+                            _ => None,
+                        })
+                        .ok_or_else(|| format!("jit enum lit `{enum_type}::{variant}`"))?;
+                    // Heap carrier: [disc, field0, field1, …] in source field order.
+                    let n = self.b.ins().iconst(types::I64, (fields.len() + 1) as i64);
+                    let new_ref = self
+                        .module
+                        .declare_func_in_func(self.host.struct_new, self.b.func);
+                    let call = self.b.ins().call(new_ref, &[n]);
+                    let handle = self.b.inst_results(call)[0];
+                    let set_i = self
+                        .module
+                        .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    let disc_v = self.b.ins().iconst(types::I64, disc);
+                    self.b.ins().call(set_i, &[handle, zero, disc_v]);
+                    for (i, (_name, arg)) in fields.iter().enumerate() {
+                        let idx = self.b.ins().iconst(types::I64, (i + 1) as i64);
+                        let payload = self.lower_expr(&arg.value)?;
+                        let bits = match self.meta.clif_ty(&arg.value.ty).or_else(|| clif_ty(&arg.value.ty)) {
+                            Some(ty) if ty == types::I64 => payload,
+                            Some(ty) if ty == types::I8 => self.b.ins().uextend(types::I64, payload),
+                            Some(ty) if ty == types::I32 => self.b.ins().sextend(types::I64, payload),
+                            _ => {
+                                return Err(format!(
+                                    "jit enum named payload field unsupported: {:?}",
+                                    arg.value.ty
+                                ))
+                            }
+                        };
+                        self.b.ins().call(set_i, &[handle, idx, bits]);
+                    }
+                    Ok(handle)
+                }
             }
             }
             TExprKind::Present(inner) => {
@@ -13097,7 +13296,41 @@ impl LowerCtx<'_, '_> {
                 }
             }
             THandleOp::CivilTimeMethod { .. } => Err("jit handle method unsupported".to_string()),
-            THandleOp::UrlMimeMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::UrlMimeMethod { method, .. } => {
+                let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                    "to_string" if args.is_empty() => {
+                        (self.host.net.url_to_string, vec![recv_val])
+                    }
+                    "host" if args.is_empty() => (self.host.net.url_host, vec![recv_val]),
+                    "path" if args.is_empty() => (self.host.net.url_path, vec![recv_val]),
+                    "query_pairs" if args.is_empty() => {
+                        (self.host.net.url_query_pairs, vec![recv_val])
+                    }
+                    "path_segments" if args.is_empty() => {
+                        (self.host.net.url_path_segments, vec![recv_val])
+                    }
+                    "fragment" if args.is_empty() => {
+                        (self.host.net.url_fragment, vec![recv_val])
+                    }
+                    "join" if args.len() == 1 => (
+                        self.host.net.url_join,
+                        vec![recv_val, self.lower_expr(&args[0])?],
+                    ),
+                    "essence" if args.is_empty() => {
+                        (self.host.net.mime_essence, vec![recv_val])
+                    }
+                    "param" if args.len() == 1 => (
+                        self.host.net.mime_param,
+                        vec![recv_val, self.lower_expr(&args[0])?],
+                    ),
+                    _ => {
+                        return Err(format!("jit UrlMime method unsupported: {method}"))
+                    }
+                };
+                let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host_ref, &arg_vals);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::EmailMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::RegexMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpClientMethod { .. } => Err("jit handle method unsupported".to_string()),
@@ -14033,7 +14266,22 @@ impl LowerCtx<'_, '_> {
             _ => {
                 let val = self.lower_expr(inner)?;
                 let print_ty = self.print_result_ty(inner);
+                // Some method chains type `list.join(sep)` as Unit in TIR even though
+                // the lowered value is a String handle (seen on Url.path_segments().join).
                 if matches!(&print_ty, Type::Named(n) if n == "Unit" || n == "Void") {
+                    if matches!(
+                        &inner.kind,
+                        TExprKind::BuiltinMethod {
+                            op: TBuiltinOp::JoinSep,
+                            ..
+                        }
+                    ) {
+                        let print = self
+                            .module
+                            .declare_func_in_func(self.host.print_str, self.b.func);
+                        self.b.ins().call(print, &[val]);
+                        return Ok(());
+                    }
                     return Ok(());
                 }
                 // List / materialized Iter — same jet_show `[a, b, c]` AOT uses.

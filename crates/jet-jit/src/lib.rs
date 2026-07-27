@@ -25,6 +25,7 @@ mod enc_stream;
 mod Fmt;
 mod Game;
 mod Memory;
+mod Net;
 mod Numeric;
 mod Parse;
 mod Process;
@@ -33,6 +34,11 @@ mod Raylib;
 mod Sketch;
 mod Solver;
 mod Text;
+
+/// Shared by prelude `include!` fragments that impl `crate::JetShow`.
+pub(crate) trait JetShow {
+    fn jet_show(&self) -> String;
+}
 
 /// Canonical XML pull engine — EncodingStream refers to `crate::jet_xml_pull`.
 pub mod jet_xml_pull {

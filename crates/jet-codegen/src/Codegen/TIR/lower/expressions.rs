@@ -1331,7 +1331,14 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
                         .collect();
                     return TExpr {
-                        ty: Type::Named(type_name.clone()),
+                        ty: if type_args.is_empty() {
+                            Type::Named(type_name.clone())
+                        } else {
+                            Type::Apply {
+                                name: type_name.clone(),
+                                args: type_args.clone(),
+                            }
+                        },
                         kind: TExprKind::StructLit {
                             fields: tfields,
                             extra: None,
@@ -1467,7 +1474,14 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .map(|(name, _, value)| (name.clone(), lower_expr(value, cx, env), false))
                     .collect();
                 return TExpr {
-                    ty: Type::Named(type_name.clone()),
+                    ty: if type_args.is_empty() {
+                        Type::Named(type_name.clone())
+                    } else {
+                        Type::Apply {
+                            name: type_name.clone(),
+                            args: type_args.clone(),
+                        }
+                    },
                     kind: TExprKind::StructLit {
                         fields: tfields,
                         extra: None,

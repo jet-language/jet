@@ -177,6 +177,14 @@ fn with_crypto<R>(handle: i64, f: impl FnOnce(&CryptoValue) -> Option<R>) -> Opt
     })
 }
 
+/// D-EMAIL-SMTP-CONFIG1=A: sole SMTP extraction boundary used by JIT email hosts.
+pub(crate) fn secret_copy_for_smtp(handle: i64) -> Option<Vec<u8>> {
+    with_crypto(handle, |value| match value {
+        CryptoValue::Secret(secret) => Some(runtime::jet_crypto_secret_copy_for_smtp_impl(secret)),
+        _ => None,
+    })
+}
+
 fn public_keys(list: i64) -> Option<Vec<runtime::JetX25519PublicKey>> {
     Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(list).unwrap_or(0);

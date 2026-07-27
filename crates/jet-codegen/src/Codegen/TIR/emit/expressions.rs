@@ -1252,6 +1252,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                         )
                                     },
                                 )
+                            } else if matches!(name.as_str(), "DkimConfig" | "SmtpConfig") {
+                                format!("{}jet_email::{}", cx.root_prefix, name)
                             } else {
                                 user_type_rust(name)
                             }
@@ -1266,11 +1268,20 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             .join(", ")
                     )
                 }
+                // rust_type embeds `<ffi::Secret>` in type position; value
+                // constructors need turbofish or rustc parses `<` as comparison.
+                Type::Named(n) if matches!(n.as_str(), "DkimConfig" | "SmtpConfig") => {
+                    let ffi = cx.ffi_crate.as_deref().unwrap_or("jet_ffi");
+                    format!(
+                        "{}jet_email::{}::<{}::Secret>",
+                        cx.root_prefix, n, ffi
+                    )
+                }
                 _ => cx.rust_type(&literal_ty),
             };
             let plain_fields = matches!(
                 &literal_ty,
-                Type::Named(n) if crate::Codegen::net_handle_rust_type(n).is_some()
+                Type::Named(n) | Type::Apply { name: n, .. } if crate::Codegen::net_handle_rust_type(n).is_some()
                     || matches!(
                         n.as_str(),
                         "TextWidth"
@@ -1284,6 +1295,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             | "XMLRenderOptions"
                             | "XMLCanonical"
                             | "XMLError"
+                            | "RecipientReport"
+                            | "SendReport"
+                            | "Limits"
+                            | "DkimConfig"
+                            | "SmtpConfig"
                     )
             );
             let mut parts = fields
