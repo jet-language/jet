@@ -4,12 +4,21 @@ use jet_sema::Sema::{check_bundle, CompileMode};
 use jet_sema::{Lexer, Parser, Syntax};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Once;
+
+fn ensure_tir_bridge() {
+    static INSTALL: Once = Once::new();
+    INSTALL.call_once(|| {
+        jet_codegen::Codegen::TIR::install_comptime_bridge();
+    });
+}
 
 fn check(src: &str) -> (ProgramBundle, Vec<Diagnostic>) {
     check_at(src, ".")
 }
 
 fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
+    ensure_tir_bridge();
     let (tokens, lex) = Lexer::lex(src);
     assert!(lex.is_empty(), "lexer diagnostics: {lex:?}");
     let mut program = Parser::parse(&tokens).expect("source parses");
@@ -61,6 +70,7 @@ fn only_instance_fingerprint(src: &str, root: &str) -> String {
 }
 
 fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, Vec<Diagnostic>) {
+    ensure_tir_bridge();
     let mut modules = Vec::new();
     let mut import_targets = HashMap::new();
     for (module_idx, (path, src, targets)) in sources.iter().enumerate() {
