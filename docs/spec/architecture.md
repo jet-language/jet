@@ -247,6 +247,12 @@ bytes to the caller (never into the trace). Locators upload files with
 exposes raw BiDi and capability-checked CDP commands through
 `Browser.protocol`.
 
+CDP is an explicit expert supplement (#1192), not a silent BiDi fallback.
+`session.new` must advertise `goog:cdp: true` before `protocol("cdp")`
+succeeds. CDP `send` accepts only audited `Domain.command` shapes (PascalCase
+domain). Raw BiDi `send` rejects `goog:cdp.*` so experts cannot smuggle CDP
+through the portable profile path.
+
 The protocol core accepts only strict JSON objects and exact response IDs.
 Malformed messages, protocol errors, unsupported profiles, unavailable expert
 protocols, and timeouts return `BrowserError`. Commands and waits use one
