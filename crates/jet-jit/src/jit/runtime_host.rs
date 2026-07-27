@@ -8,8 +8,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::resident::resident_teardown;
 use super::{
-    Archive, Collections, Compress, Concurrency, CoreHost, Encoding, Fmt, JitResultValue, Memory,
-    Numeric, Process, Random, Sketch, Solver, Text, TRY_COMPILE_PANIC_HOOK_LOCK,
+    Archive, Collections, Compress, Concurrency, CoreHost, Crypto, Encoding, Fmt, JitResultValue,
+    Memory, Numeric, Process, Random, Sketch, Solver, Text, TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
 pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
@@ -103,6 +103,7 @@ pub(crate) struct JitRuntime {
     pub(crate) shareds: Vec<std::sync::Arc<Memory::SharedState>>,
     pub(crate) expirings: Vec<Memory::ExpiringState>,
     pub(crate) secrets: Vec<Option<Memory::SecretState>>,
+    pub(crate) crypto_values: Vec<Option<Crypto::CryptoValue>>,
     /// Set by a host shim when the user program hits a runtime panic (overflow,
     /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
     /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,
@@ -610,6 +611,19 @@ extern "C" fn jet_jit_str_chars(id: i64) -> i64 {
             rt.heap
                 .list_push_int(list, ch as i64)
                 .expect("jit str chars: bad list handle");
+        }
+        list
+    })
+}
+
+extern "C" fn jet_jit_str_bytes(id: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let text = rt.heap.clone_string(id).unwrap_or_default();
+        let list = rt.heap.alloc_empty_list();
+        for byte in text.into_bytes() {
+            rt.heap
+                .list_push_int(list, i64::from(byte))
+                .expect("jit str bytes: bad list handle");
         }
         list
     })
@@ -1299,6 +1313,7 @@ pub(crate) struct HostFns {
     pub(crate) str_lines: FuncId,
     pub(crate) str_split: FuncId,
     pub(crate) str_chars: FuncId,
+    pub(crate) str_bytes: FuncId,
     pub(crate) str_scalar_strings: FuncId,
     pub(crate) str_after: FuncId,
     pub(crate) str_before: FuncId,
@@ -1373,6 +1388,7 @@ pub(crate) struct HostFns {
     pub(crate) sketch: crate::Sketch::SketchHostFns,
     pub(crate) args: crate::Args::ArgsHostFns,
     pub(crate) db: crate::Db::DbHostFns,
+    pub(crate) crypto: Crypto::CryptoHostFns,
 }
 
 pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
@@ -1413,6 +1429,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_lines", jet_jit_str_lines as *const u8);
     builder.symbol("jet_jit_str_split", jet_jit_str_split as *const u8);
     builder.symbol("jet_jit_str_chars", jet_jit_str_chars as *const u8);
+    builder.symbol("jet_jit_str_bytes", jet_jit_str_bytes as *const u8);
     builder.symbol("jet_jit_str_scalar_strings", jet_jit_str_scalar_strings as *const u8);
     builder.symbol("jet_jit_str_after", jet_jit_str_after as *const u8);
     builder.symbol("jet_jit_str_before", jet_jit_str_before as *const u8);
@@ -1538,6 +1555,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Sketch::register_sketch_symbols(&mut builder);
     crate::Args::register_args_symbols(&mut builder);
     crate::Db::register_db_symbols(&mut builder);
+    Crypto::register_crypto_symbols(&mut builder);
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
     let memory = Memory::declare_memory_host_fns(&mut module)?;
@@ -1556,6 +1574,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let sketch = crate::Sketch::declare_sketch_host_fns(&mut module)?;
     let args = crate::Args::declare_args_host_fns(&mut module)?;
     let db = crate::Db::declare_db_host_fns(&mut module)?;
+    let crypto = Crypto::declare_crypto_host_fns(&mut module)?;
     let host = declare_host_fns(
         &mut module,
         coll,
@@ -1575,6 +1594,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         sketch,
         args,
         db,
+        crypto,
     )?;
     Ok((module, host))
 }
@@ -1598,6 +1618,7 @@ fn declare_host_fns(
     sketch: crate::Sketch::SketchHostFns,
     args: crate::Args::ArgsHostFns,
     db: crate::Db::DbHostFns,
+    crypto: Crypto::CryptoHostFns,
 ) -> Result<HostFns, String> {
     let cc = module.target_config().default_call_conv;
     let mut sig_bin_i64 = Signature::new(cc);
@@ -1828,6 +1849,7 @@ fn declare_host_fns(
         str_lines: import("jet_jit_str_lines", &sig_str_unary_i64)?,
         str_split: import("jet_jit_str_split", &sig_str_binary_i64)?,
         str_chars: import("jet_jit_str_chars", &sig_str_unary_i64)?,
+        str_bytes: import("jet_jit_str_bytes", &sig_str_unary_i64)?,
         str_scalar_strings: import("jet_jit_str_scalar_strings", &sig_str_unary_i64)?,
         str_after: import("jet_jit_str_after", &sig_str_binary_i64)?,
         str_before: import("jet_jit_str_before", &sig_str_binary_i64)?,
@@ -1905,5 +1927,6 @@ fn declare_host_fns(
         sketch,
         args,
         db,
+        crypto,
     })
 }

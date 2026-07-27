@@ -1,9 +1,8 @@
 //! Native memory carriers for the resident Cranelift runtime.
 
 use super::Concurrency;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering, compiler_fence};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::{fs::File, io::Read, sync::atomic::compiler_fence};
 
 static SHARED_TRANSACTION_SERIAL: Mutex<()> = Mutex::new(());
 
@@ -461,42 +460,6 @@ extern "C" fn jet_jit_expiring_get(handle: i64, clock: i64) -> i64 {
     })
 }
 
-extern "C" fn jet_jit_signing_generate() -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let mut bytes = Box::new([0u8; 32]);
-        let Ok(mut random) = File::open("/dev/urandom") else {
-            rt.set_trap("the operating system random source is unavailable");
-            return 0;
-        };
-        if random.read_exact(bytes.as_mut_slice()).is_err() {
-            rt.set_trap("the operating system random source failed");
-            return 0;
-        }
-        let handle = rt.secrets.len() as i64 + 1;
-        rt.secrets.push(Some(SecretState { handle, bytes }));
-        handle
-    })
-}
-
-extern "C" fn jet_jit_signing_public(handle: i64) -> i64 {
-    Concurrency::with_runtime_mut(|rt| {
-        let live = rt
-            .secrets
-            .get((handle as usize).wrapping_sub(1))
-            .and_then(Option::as_ref)
-            .is_some()
-            || rt
-                .expirings
-                .iter()
-                .any(|value| value.secret.as_ref().is_some_and(|secret| secret.handle == handle));
-        if !live {
-            rt.set_trap("secret key has expired or was dropped");
-            return 0;
-        }
-        handle
-    })
-}
-
 extern "C" fn jet_jit_expiring_is_valid(handle: i64, clock: i64) -> i8 {
     i8::from(jet_jit_expiring_get(handle, clock) != 0)
 }
@@ -522,8 +485,6 @@ pub(crate) struct MemoryHostFns {
     pub expiring_new: cranelift_module::FuncId,
     pub expiring_get: cranelift_module::FuncId,
     pub expiring_is_valid: cranelift_module::FuncId,
-    pub signing_generate: cranelift_module::FuncId,
-    pub signing_public: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_memory_symbols(builder: &mut cranelift_jit::JITBuilder) {
@@ -567,14 +528,6 @@ pub(crate) fn register_memory_symbols(builder: &mut cranelift_jit::JITBuilder) {
     builder.symbol(
         "jet_jit_expiring_is_valid",
         jet_jit_expiring_is_valid as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_signing_generate",
-        jet_jit_signing_generate as *const u8,
-    );
-    builder.symbol(
-        "jet_jit_signing_public",
-        jet_jit_signing_public as *const u8,
     );
 }
 
@@ -632,7 +585,5 @@ pub(crate) fn declare_memory_host_fns(
         expiring_new: import("jet_jit_expiring_new", &quaternary)?,
         expiring_get: import("jet_jit_expiring_get", &binary)?,
         expiring_is_valid: import("jet_jit_expiring_is_valid", &binary_i8)?,
-        signing_generate: import("jet_jit_signing_generate", &noarg_i64)?,
-        signing_public: import("jet_jit_signing_public", &unary)?,
     })
 }

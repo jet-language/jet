@@ -454,6 +454,12 @@ extern "C" fn jet_jit_path_join(base: i64, part: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(joined))
 }
 
+extern "C" fn jet_jit_path_write_atomic(rec: i64, bytes: i64) -> i64 {
+    let p = path_string_from_record(rec);
+    let path_id = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(p));
+    jet_jit_fs_write_atomic(path_id, bytes)
+}
+
 extern "C" fn jet_jit_path_from(path: i64) -> i64 {
     path_record(clone_heap_string(path))
 }
@@ -708,6 +714,15 @@ fn jet_temp_path(prefix: &str) -> String {
         .join(format!("{}_{}_{}", clean, std::process::id(), nanos))
         .to_string_lossy()
         .to_string()
+}
+
+extern "C" fn jet_jit_fs_remove(path: i64) -> i64 {
+    let p = clone_heap_string(path);
+    let res = std::fs::remove_file(&p).or_else(|_| std::fs::remove_dir(&p));
+    match res {
+        Ok(()) => result_ok_bits(0),
+        Err(e) => result_err_msg(&format!("remove {p}: {e}")),
+    }
 }
 
 extern "C" fn jet_jit_fs_remove_all(path: i64) -> i64 {
@@ -1221,6 +1236,7 @@ pub(crate) struct CoreHostFns {
     pub fs_create_dir: cranelift_module::FuncId,
     pub fs_list_dir: cranelift_module::FuncId,
     pub fs_remove_all: cranelift_module::FuncId,
+    pub fs_remove: cranelift_module::FuncId,
     pub fs_stat: cranelift_module::FuncId,
     pub fs_read_at: cranelift_module::FuncId,
     pub fs_write_at: cranelift_module::FuncId,
@@ -1239,6 +1255,7 @@ pub(crate) struct CoreHostFns {
     pub fs_lock: cranelift_module::FuncId,
     pub path_join: cranelift_module::FuncId,
     pub path_from: cranelift_module::FuncId,
+    pub path_write_atomic: cranelift_module::FuncId,
     pub path_join_handle: cranelift_module::FuncId,
     pub path_parent: cranelift_module::FuncId,
     pub path_extension: cranelift_module::FuncId,
@@ -1305,6 +1322,7 @@ pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder
     builder.symbol("jet_jit_fs_create_dir", jet_jit_fs_create_dir as *const u8);
     builder.symbol("jet_jit_fs_list_dir", jet_jit_fs_list_dir as *const u8);
     builder.symbol("jet_jit_fs_remove_all", jet_jit_fs_remove_all as *const u8);
+    builder.symbol("jet_jit_fs_remove", jet_jit_fs_remove as *const u8);
     builder.symbol("jet_jit_fs_stat", jet_jit_fs_stat as *const u8);
     builder.symbol("jet_jit_fs_read_at", jet_jit_fs_read_at as *const u8);
     builder.symbol("jet_jit_fs_write_at", jet_jit_fs_write_at as *const u8);
@@ -1323,6 +1341,7 @@ pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder
     builder.symbol("jet_jit_fs_lock", jet_jit_fs_lock as *const u8);
     builder.symbol("jet_jit_path_join", jet_jit_path_join as *const u8);
     builder.symbol("jet_jit_path_from", jet_jit_path_from as *const u8);
+    builder.symbol("jet_jit_path_write_atomic", jet_jit_path_write_atomic as *const u8);
     builder.symbol("jet_jit_path_join_handle", jet_jit_path_join_handle as *const u8);
     builder.symbol("jet_jit_path_parent", jet_jit_path_parent as *const u8);
     builder.symbol("jet_jit_path_extension", jet_jit_path_extension as *const u8);
@@ -1464,6 +1483,7 @@ pub(crate) fn declare_core_host_fns(
         fs_create_dir: import("jet_jit_fs_create_dir", &sig_unary_i64)?,
         fs_list_dir: import("jet_jit_fs_list_dir", &sig_unary_i64)?,
         fs_remove_all: import("jet_jit_fs_remove_all", &sig_unary_i64)?,
+        fs_remove: import("jet_jit_fs_remove", &sig_unary_i64)?,
         fs_stat: import("jet_jit_fs_stat", &sig_unary_i64)?,
         fs_read_at: import("jet_jit_fs_read_at", &sig_i64_i64_i64_i64)?,
         fs_write_at: import("jet_jit_fs_write_at", &sig_i64_i64_i64_i64)?,
@@ -1482,6 +1502,7 @@ pub(crate) fn declare_core_host_fns(
         fs_lock: import("jet_jit_fs_lock", &sig_unary_i64)?,
         path_join: import("jet_jit_path_join", &sig_i64_i64_i64)?,
         path_from: import("jet_jit_path_from", &sig_unary_i64)?,
+        path_write_atomic: import("jet_jit_path_write_atomic", &sig_i64_i64_i64)?,
         path_join_handle: import("jet_jit_path_join_handle", &sig_i64_i64_i64)?,
         path_parent: import("jet_jit_path_parent", &sig_unary_i64)?,
         path_extension: import("jet_jit_path_extension", &sig_unary_i64)?,

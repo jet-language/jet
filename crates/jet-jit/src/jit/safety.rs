@@ -211,6 +211,7 @@ pub(crate) fn user_type_name(ty: &Type) -> Option<&str> {
     match ty {
         Type::Named(n) if n != "Unit" => Some(n.as_str()),
         Type::Apply { name, .. } => Some(name.as_str()),
+        Type::Tagged { inner, .. } => user_type_name(inner),
         _ => None,
     }
 }
@@ -385,10 +386,61 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         } => {
             if module == "jet.crypto" {
                 return match (method.as_str(), args.as_slice()) {
-                    ("__signing_generate", []) => true,
-                    ("__signing_public", [key]) => resident_safe_expr(key, callees),
+                    ("__signing_generate" | "__x25519_generate", []) => true,
+                    (
+                        "__signing_public"
+                        | "__x25519_public"
+                        | "sha256"
+                        | "__digest256_hex"
+                        | "__digest256_bytes"
+                        | "__signature_bytes"
+                        | "__sealed_bytes"
+                        | "__x25519_public_bytes"
+                        | "__x25519_public_text"
+                        | "__x25519_public_from_text"
+                        | "__secret_from_text"
+                        | "__vault_wrapped_from_bytes"
+                        | "__vault_wrapped_bytes"
+                        | "__vault_unlock_recipient"
+                        | "__vault_unlock_passphrase"
+                        | "password_hash",
+                        [value],
+                    ) => resident_safe_expr(value, callees),
+                    ("sign" | "password_verify", [a, b]) => {
+                        resident_safe_expr(a, callees) && resident_safe_expr(b, callees)
+                    }
+                    ("verify" | "seal" | "open" | "file_open", [a, b, c]) => {
+                        resident_safe_expr(a, callees)
+                            && resident_safe_expr(b, callees)
+                            && resident_safe_expr(c, callees)
+                    }
                     _ => false,
                 };
+            }
+            if module == "core.crypto.expert" {
+                return match (method.as_str(), args.as_slice()) {
+                    ("secret_bytes", [value]) => resident_safe_expr(value, callees),
+                    ("open_v1" | "x25519", args) if (2..=3).contains(&args.len()) => {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    ("aes256gcm_seal" | "aes256gcm_open" | "migrate_v1", args)
+                        if args.len() == 4 =>
+                    {
+                        args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    _ => false,
+                };
+            }
+            if module == "core.crypto.random" && method == "bytes" {
+                return matches!(args.as_slice(), [arg] if resident_safe_expr(arg, callees));
+            }
+            if module == "core.auth" && matches!(method.as_str(), "verify_jwt" | "verify_paseto") {
+                return (3..=7).contains(&args.len())
+                    && args.iter().all(|arg| resident_safe_expr(arg, callees));
+            }
+            if module == "core.vault" || module == "core.vault.expert" {
+                return !args.is_empty()
+                    && args.iter().all(|arg| resident_safe_expr(arg, callees));
             }
             if module == "core.text" {
                 return match method.as_str() {
@@ -1215,7 +1267,7 @@ fn resident_safe_builtin_op(
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
         }
-        TBuiltinOp::Chars => matches!(&recv.ty, Type::String) && args.is_empty(),
+        TBuiltinOp::Chars | TBuiltinOp::Bytes => matches!(&recv.ty, Type::String) && args.is_empty(),
         TBuiltinOp::After | TBuiltinOp::Before => {
             matches!(&recv.ty, Type::String)
                 && args.len() == 1
@@ -2236,7 +2288,8 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::PathExtension
         | THandleOp::PathStem
         | THandleOp::PathToString
-        | THandleOp::PathWalk => args.is_empty(),
+        |         THandleOp::PathWalk => args.is_empty(),
+        THandleOp::PathWriteAtomic => args.len() == 1,
         _ => false,
     }
 }
