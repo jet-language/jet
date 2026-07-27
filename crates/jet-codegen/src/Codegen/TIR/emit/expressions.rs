@@ -3123,6 +3123,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         ("Browser", "trace") => {
                             format!("{}jet_browser_trace(&({}))", root, recv)
                         }
+                        ("Browser", "privacy") => {
+                            format!("{}jet_browser_privacy(&({}))", root, recv)
+                        }
+                        ("Browser", "receipt") => {
+                            format!("{}jet_browser_receipt(&({}))", root, recv)
+                        }
                         ("Browser", "close") => {
                             format!("{}jet_browser_close(&({}))", root, recv)
                         }
@@ -3134,6 +3140,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         }
                         ("BrowserContext", "close") => {
                             format!("{}jet_browser_context_close(&({}))", root, recv)
+                        }
+                        ("BrowserContext", "isolated") => {
+                            format!("{}jet_browser_context_isolated(&({}))", root, recv)
+                        }
+                        ("BrowserContext", "user_hash") => {
+                            format!("{}jet_browser_context_user_hash(&({}))", root, recv)
                         }
                         ("BrowserPage", "goto") => format!(
                             "{}jet_browser_page_goto(&({}), &({}))",
@@ -3329,6 +3341,33 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         ("BrowserTrace", "summary") => {
                             format!("{}jet_browser_trace_summary(&({}))", root, recv)
                         }
+                        ("BrowserReceipt", "entry_count") => {
+                            format!("{}jet_browser_receipt_entry_count(&({}))", root, recv)
+                        }
+                        ("BrowserReceipt", "redacted") => {
+                            format!("{}jet_browser_receipt_redacted(&({}))", root, recv)
+                        }
+                        ("BrowserReceipt", "summary") => {
+                            format!("{}jet_browser_receipt_summary(&({}))", root, recv)
+                        }
+                        ("BrowserReceipt", "isolated") => {
+                            format!("{}jet_browser_receipt_isolated(&({}))", root, recv)
+                        }
+                        ("BrowserReceipt", "cleaned") => {
+                            format!("{}jet_browser_receipt_cleaned(&({}))", root, recv)
+                        }
+                        ("BrowserPrivacy", "isolated_profiles") => format!(
+                            "{}jet_browser_privacy_isolated_profiles(&({}))",
+                            root, recv
+                        ),
+                        ("BrowserPrivacy", "redact_receipts") => format!(
+                            "{}jet_browser_privacy_redact_receipts(&({}))",
+                            root, recv
+                        ),
+                        ("BrowserPrivacy", "shared_profiles") => format!(
+                            "{}jet_browser_privacy_shared_profiles(&({}))",
+                            root, recv
+                        ),
                         ("BrowserLocked", "engine") => {
                             format!("{}jet_browser_locked_engine(&({}))", root, recv)
                         }

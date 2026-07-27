@@ -255,6 +255,8 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
                 | "BrowserIntercept"
                 | "BrowserEvent"
                 | "BrowserTrace"
+                | "BrowserReceipt"
+                | "BrowserPrivacy"
                 | "BrowserCapabilities"
                 | "BrowserProtocol"
                 | "BrowserLocked",
@@ -296,9 +298,13 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
                 | "allow_downloads"
                 | "protocol"
                 | "trace"
+                | "privacy"
+                | "receipt"
                 | "close"
         ),
-        Some("BrowserContext") => matches!(method, "page" | "tab" | "close"),
+        Some("BrowserContext") => {
+            matches!(method, "page" | "tab" | "close" | "isolated" | "user_hash")
+        }
         Some("BrowserPage") => matches!(
             method,
             "goto"
@@ -342,6 +348,12 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
         Some("BrowserProtocol") => method == "send",
         Some("BrowserCapabilities") => matches!(method, "bidi" | "cdp" | "profile"),
         Some("BrowserTrace") => matches!(method, "entry_count" | "redacted" | "summary"),
+        Some("BrowserReceipt") => {
+            matches!(method, "entry_count" | "redacted" | "summary" | "isolated" | "cleaned")
+        }
+        Some("BrowserPrivacy") => {
+            matches!(method, "isolated_profiles" | "redact_receipts" | "shared_profiles")
+        }
         Some("BrowserLocked") => {
             matches!(method, "engine" | "version" | "binary" | "protocol" | "verify")
         }

@@ -264,6 +264,13 @@ session cleanup is explicit, idempotent, and retry-safe after protocol failure.
 Last-owner drops perform the same cleanup as a best effort; page leases keep
 their isolated user context alive until the final child is gone.
 
+`Browser.privacy()` reports the session defaults: isolated profiles on, shared
+profiles denied, and receipt redaction on. `Browser.receipt()` is the normal
+audit receipt — the same redacted fact stream as the trace, plus `isolated` and
+`cleaned` flags — and never carries endpoints, secrets, or page data.
+`BrowserContext.isolated()` is always true for BiDi user contexts;
+`user_hash()` exposes only a hashed context id for correlation.
+
 The AOT emitter and default development tier use the same `Browser.rs`,
 strict-JSON behavior, and extracted RFC6455 client source. Browser session
 handles are thread-confined. Programs that use them select the canonical TIR

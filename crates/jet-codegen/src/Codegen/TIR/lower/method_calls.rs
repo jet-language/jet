@@ -2001,10 +2001,14 @@ pub(crate) fn lower_method_call(
                 err: Box::new(Type::Named("BrowserError".to_string())),
             },
             ("Browser", "trace") => Type::Named("BrowserTrace".to_string()),
+            ("Browser", "privacy") => Type::Named("BrowserPrivacy".to_string()),
+            ("Browser", "receipt") => Type::Named("BrowserReceipt".to_string()),
             ("BrowserContext", "page" | "tab") => Type::Result {
                 ok: Box::new(Type::Named("BrowserPage".to_string())),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             },
+            ("BrowserContext", "isolated") => Type::Bool,
+            ("BrowserContext", "user_hash") => Type::String,
             ("BrowserContext", "close")
             | ("BrowserPage", "goto" | "close" | "clear_cookies" | "set_cookie" | "storage_set"
                 | "storage_clear")
@@ -2039,6 +2043,7 @@ pub(crate) fn lower_method_call(
                 | "download_id" | "suggested_filename_hash")
             | ("BrowserCapabilities", "profile")
             | ("BrowserTrace", "summary")
+            | ("BrowserReceipt", "summary")
             | ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => Type::String,
             ("BrowserEvent", "status_code") => Type::Int,
             ("BrowserProtocol", "send") => Type::Result {
@@ -2047,8 +2052,12 @@ pub(crate) fn lower_method_call(
             },
             ("BrowserEvent", "is_blocked")
             | ("BrowserCapabilities", "bidi" | "cdp")
-            | ("BrowserTrace", "redacted") => Type::Bool,
-            ("BrowserTrace", "entry_count") => Type::Int,
+            | ("BrowserTrace", "redacted")
+            | ("BrowserReceipt", "redacted" | "isolated" | "cleaned")
+            | ("BrowserPrivacy", "isolated_profiles" | "redact_receipts" | "shared_profiles") => {
+                Type::Bool
+            }
+            ("BrowserTrace", "entry_count") | ("BrowserReceipt", "entry_count") => Type::Int,
             ("BrowserLocked", "verify") => Type::Result {
                 ok: Box::new(unit_type()),
                 err: Box::new(Type::Named("BrowserError".to_string())),
@@ -2111,6 +2120,8 @@ pub(crate) fn lower_method_call(
                     | "BrowserIntercept"
                     | "BrowserEvent"
                     | "BrowserTrace"
+                    | "BrowserReceipt"
+                    | "BrowserPrivacy"
                     | "BrowserCapabilities"
                     | "BrowserProtocol"
                     | "BrowserLocked"

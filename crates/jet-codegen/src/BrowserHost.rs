@@ -365,6 +365,40 @@ pub(crate) fn eval_method(
                     )],
                 }
             }
+            (BrowserHostValue::Browser(browser), "privacy") => {
+                let privacy = jet_browser_privacy(browser);
+                CtValue::Struct {
+                    type_name: "BrowserPrivacy".to_string(),
+                    fields: vec![
+                        (
+                            "isolated_profiles".to_string(),
+                            CtValue::Bool(privacy.isolated_profiles),
+                        ),
+                        (
+                            "redact_receipts".to_string(),
+                            CtValue::Bool(privacy.redact_receipts),
+                        ),
+                        (
+                            "shared_profiles".to_string(),
+                            CtValue::Bool(privacy.shared_profiles),
+                        ),
+                    ],
+                }
+            }
+            (BrowserHostValue::Browser(browser), "receipt") => {
+                let receipt = jet_browser_receipt(browser);
+                CtValue::Struct {
+                    type_name: "BrowserReceipt".to_string(),
+                    fields: vec![
+                        (
+                            "entries".to_string(),
+                            CtValue::List(receipt.entries.into_iter().map(CtValue::Str).collect()),
+                        ),
+                        ("isolated".to_string(), CtValue::Bool(receipt.isolated)),
+                        ("cleaned".to_string(), CtValue::Bool(receipt.cleaned)),
+                    ],
+                }
+            }
             (BrowserHostValue::Browser(browser), "close") => {
                 result(jet_browser_close(browser), |_| CtValue::Unit)
             }
@@ -378,6 +412,12 @@ pub(crate) fn eval_method(
             ),
             (BrowserHostValue::Context(context), "close") => {
                 result(jet_browser_context_close(context), |_| CtValue::Unit)
+            }
+            (BrowserHostValue::Context(context), "isolated") => {
+                CtValue::Bool(jet_browser_context_isolated(context))
+            }
+            (BrowserHostValue::Context(context), "user_hash") => {
+                CtValue::Str(jet_browser_context_user_hash(context))
             }
             (BrowserHostValue::Page(page), "goto") => result(
                 jet_browser_page_goto(page, &string_arg(args, 0, span)?),
@@ -596,6 +636,50 @@ pub(crate) fn eval_value_method(
                 entries,
             })))
         }),
+        ("BrowserReceipt", "entry_count") => field(recv, kind, "entries").and_then(|value| {
+            if let CtValue::List(entries) = value {
+                Some(CtValue::Int(entries.len() as i64))
+            } else {
+                None
+            }
+        }),
+        ("BrowserReceipt", "summary") => field(recv, kind, "entries").and_then(|value| {
+            if let CtValue::List(entries) = value {
+                Some(CtValue::Str(
+                    entries
+                        .iter()
+                        .filter_map(|entry| match entry {
+                            CtValue::Str(entry) => Some(entry.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(","),
+                ))
+            } else {
+                None
+            }
+        }),
+        ("BrowserReceipt", "redacted") => field(recv, kind, "entries").and_then(|value| {
+            let CtValue::List(entries) = value else {
+                return None;
+            };
+            let entries = entries
+                .iter()
+                .map(|entry| match entry {
+                    CtValue::Str(entry) => Some(entry.clone()),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(CtValue::Bool(jet_browser_receipt_redacted(&JetBrowserReceipt {
+                entries,
+                isolated: true,
+                cleaned: false,
+            })))
+        }),
+        ("BrowserReceipt", "isolated" | "cleaned") => field(recv, kind, method).cloned(),
+        ("BrowserPrivacy", "isolated_profiles" | "redact_receipts" | "shared_profiles") => {
+            field(recv, kind, method).cloned()
+        }
         ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => {
             field(recv, kind, method).cloned()
         }

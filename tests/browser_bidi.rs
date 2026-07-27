@@ -2518,3 +2518,373 @@ fn run() {
     );
 }
 
+/// D-BROWSER-AUTO1=A (#1193): privacy defaults, isolated contexts, redacted
+/// receipt, and cleanup after close — success path.
+#[test]
+fn native_bidi_privacy_isolation_receipt_and_cleanup_success() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!(
+        "ws://{}/session?token=PRIVACY_SUCCESS_SECRET",
+        listener.local_addr().unwrap()
+    );
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        accept_websocket(&mut stream);
+        let mut methods = Vec::new();
+        let mut contexts = 0u32;
+        for _ in 0..20 {
+            let request = read_text_frame(&mut stream);
+            let id = field(&request, "id");
+            let method = field(&request, "method");
+            methods.push(method.clone());
+            let result = match method.as_str() {
+                "session.status" => r#"{"ready":true,"message":"ready"}"#,
+                "session.new" => {
+                    r#"{"sessionId":"privacy-ok","capabilities":{"browserName":"mock"}}"#
+                }
+                "browser.createUserContext" => {
+                    contexts += 1;
+                    if contexts == 1 {
+                        r#"{"userContext":"user-1"}"#
+                    } else {
+                        r#"{"userContext":"user-2"}"#
+                    }
+                }
+                "browsingContext.create" => {
+                    if request.contains(r#""userContext":"user-1""#) {
+                        r#"{"context":"page-1"}"#
+                    } else {
+                        r#"{"context":"page-2"}"#
+                    }
+                }
+                "storage.setCookie" => {
+                    assert!(
+                        request.contains(r#""value":"SECRET_COOKIE""#),
+                        "setCookie carries caller value (not traced): {request}"
+                    );
+                    assert!(
+                        !request.contains("PRIVACY_SUCCESS_SECRET"),
+                        "endpoint secret must not enter cookie params: {request}"
+                    );
+                    "{}"
+                }
+                "storage.getCookies" => {
+                    if request.contains(r#""context":"page-1""#) {
+                        r#"{"cookies":[{"name":"session","value":{"type":"string","value":"SECRET_COOKIE"},"domain":"example.test","path":"/"}]}"#
+                    } else {
+                        r#"{"cookies":[]}"#
+                    }
+                }
+                "browsingContext.close" | "browser.removeUserContext" | "session.end" => "{}",
+                other => panic!("unexpected privacy success method {other}: {request}"),
+            };
+            write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+            );
+            if method == "session.end" {
+                break;
+            }
+        }
+        methods
+    });
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+
+    privacy :: session.privacy()
+    print("privacy:{privacy.isolated_profiles()}:{privacy.redact_receipts()}:{privacy.shared_profiles()}")
+
+    left :: session.context() ?? panic("left")
+    right :: session.context() ?? panic("right")
+    print("isolated:{left.isolated()}:{right.isolated()}")
+    left_hash :: left.user_hash()
+    right_hash :: right.user_hash()
+    distinct :: left_hash != right_hash
+    print("hashes:{distinct}:{left_hash.len()}:{right_hash.len()}")
+
+    page_left :: left.page() ?? panic("page left")
+    page_right :: right.page() ?? panic("page right")
+    page_left.set_cookie("session", "SECRET_COOKIE", "https://example.test") ?? panic("set")
+    left_cookie_opt :: page_left.cookie("session") ?? panic("left cookie")
+    left_cookie :: left_cookie_opt ?? panic("missing left")
+    right_cookie_opt :: page_right.cookie("session") ?? panic("right cookie")
+    right_absent :: right_cookie_opt ?? "absent"
+    print("cookies:{left_cookie == "SECRET_COOKIE"}:{right_absent == "absent"}")
+
+    page_left.close() ?? panic("close left page")
+    page_right.close() ?? panic("close right page")
+    left.close() ?? panic("close left")
+    right.close() ?? panic("close right")
+    session.close() ?? panic("close session")
+
+    receipt :: session.receipt()
+    redacted :: receipt.redacted()
+    no_secret :: receipt.summary().contains("PRIVACY_SUCCESS_SECRET") == false
+    no_cookie :: receipt.summary().contains("SECRET_COOKIE") == false
+    no_endpoint :: receipt.summary().contains("ws://") == false
+    print("receipt:{redacted}:{receipt.isolated()}:{receipt.cleaned()}:{no_secret}:{no_cookie}:{no_endpoint}")
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_privacy_success",
+        "browser_bidi_privacy_success",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "privacy:true:true:false\nisolated:true:true\nhashes:true:16:16\ncookies:true:true\nreceipt:true:true:true:true:true:true\n"
+    );
+    assert!(!stdout.contains("PRIVACY_SUCCESS_SECRET"), "{stdout}");
+    assert!(!stderr.contains("PRIVACY_SUCCESS_SECRET"), "{stderr}");
+    assert_eq!(
+        server.join().unwrap(),
+        [
+            "session.status",
+            "session.new",
+            "browser.createUserContext",
+            "browser.createUserContext",
+            "browsingContext.create",
+            "browsingContext.create",
+            "storage.setCookie",
+            "storage.getCookies",
+            "storage.getCookies",
+            "browsingContext.close",
+            "browsingContext.close",
+            "browser.removeUserContext",
+            "browser.removeUserContext",
+            "session.end",
+        ]
+    );
+}
+
+/// D-BROWSER-AUTO1=A (#1193): hostile wire errors and closed-session receipt
+/// stay redacted — no endpoint/page secret leaks.
+#[test]
+fn native_bidi_privacy_receipt_hostile_and_closed_paths() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let hostile_endpoint = format!(
+        "ws://{}/session?token=PRIVACY_HOSTILE_SECRET",
+        listener.local_addr().unwrap()
+    );
+    let hostile_server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        accept_websocket(&mut stream);
+        let mut methods = Vec::new();
+        for _ in 0..6 {
+            let request = read_text_frame(&mut stream);
+            let id = field(&request, "id");
+            let method = field(&request, "method");
+            methods.push(method.clone());
+            match method.as_str() {
+                "session.status" => write_text_frame(
+                    &mut stream,
+                    &format!(
+                        r#"{{"type":"success","id":{id},"result":{{"ready":true,"message":"ready"}}}}"#
+                    ),
+                ),
+                "session.new" => write_text_frame(
+                    &mut stream,
+                    &format!(
+                        r#"{{"type":"success","id":{id},"result":{{"sessionId":"privacy-hostile","capabilities":{{}}}}}}"#
+                    ),
+                ),
+                "browser.createUserContext" => write_text_frame(
+                    &mut stream,
+                    &format!(
+                        r#"{{"type":"error","id":{id},"error":"unknown error","message":"PRIVACY_HOSTILE_SECRET page dump","stacktrace":"SECRET STACK"}}"#
+                    ),
+                ),
+                "session.end" => {
+                    write_text_frame(
+                        &mut stream,
+                        &format!(r#"{{"type":"success","id":{id},"result":{{}}}}"#),
+                    );
+                    break;
+                }
+                other => panic!("unexpected privacy hostile method {other}: {request}"),
+            }
+        }
+        methods
+    });
+
+    let closed = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let closed_endpoint = format!(
+        "ws://{}/session?token=PRIVACY_CLOSED_SECRET",
+        closed.local_addr().unwrap()
+    );
+    let closed_server = thread::spawn(move || {
+        let (mut stream, _) = closed.accept().unwrap();
+        accept_websocket(&mut stream);
+        let mut methods = Vec::new();
+        for _ in 0..5 {
+            let request = read_text_frame(&mut stream);
+            let id = field(&request, "id");
+            let method = field(&request, "method");
+            methods.push(method.clone());
+            let result = match method.as_str() {
+                "session.status" => r#"{"ready":true,"message":"ready"}"#,
+                "session.new" => r#"{"sessionId":"privacy-closed","capabilities":{}}"#,
+                "session.end" => "{}",
+                other => panic!("unexpected privacy closed method {other}: {request}"),
+            };
+            write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+            );
+            if method == "session.end" {
+                break;
+            }
+        }
+        methods
+    });
+
+    let source = r#"
+use core.browser as browser
+
+fn hostile(endpoint: String) => String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    session.context() ?? return "caught-context"
+    return "unexpected-success"
+}
+
+fn closed_receipt(endpoint: String) => String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    session.close() ?? return "unexpected-close"
+    loop attempt; [1] {
+        session.context() ?? next
+        return "unexpected-open"
+    }
+    receipt :: session.receipt()
+    privacy :: session.privacy()
+    ok :: receipt.redacted() && receipt.cleaned() && privacy.redact_receipts()
+    leak :: receipt.summary().contains("PRIVACY_CLOSED_SECRET")
+    if ok && leak == false {
+        return "cleaned"
+    }
+    return "bad-receipt"
+}
+
+fn run() {
+    print(hostile("__HOSTILE__"))
+    print(closed_receipt("__CLOSED__"))
+}
+"#
+    .replace("__HOSTILE__", &hostile_endpoint)
+    .replace("__CLOSED__", &closed_endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_privacy_hostile",
+        "browser_bidi_privacy_hostile",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "caught-context\ncleaned\n");
+    assert!(!stdout.contains("PRIVACY_HOSTILE_SECRET"), "{stdout}");
+    assert!(!stderr.contains("PRIVACY_HOSTILE_SECRET"), "{stderr}");
+    assert!(!stdout.contains("PRIVACY_CLOSED_SECRET"), "{stdout}");
+    assert!(!stderr.contains("PRIVACY_CLOSED_SECRET"), "{stderr}");
+    assert!(!stdout.contains("SECRET STACK"), "{stdout}");
+    assert!(!stderr.contains("SECRET STACK"), "{stderr}");
+    assert_eq!(
+        hostile_server.join().unwrap(),
+        [
+            "session.status",
+            "session.new",
+            "browser.createUserContext",
+            "session.end",
+        ]
+    );
+    assert_eq!(
+        closed_server.join().unwrap(),
+        ["session.status", "session.new", "session.end"]
+    );
+}
+
+/// D-BROWSER-AUTO1=A (#1193): privacy/receipt integrate with page lifecycle and
+/// leave a cleaned redacted receipt after explicit close.
+#[test]
+fn native_bidi_privacy_receipt_integrates_with_lifecycle() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!("ws://{}/session", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        accept_websocket(&mut stream);
+        let mut methods = Vec::new();
+        for _ in 0..10 {
+            let request = read_text_frame(&mut stream);
+            let id = field(&request, "id");
+            let method = field(&request, "method");
+            methods.push(method.clone());
+            let result = match method.as_str() {
+                "session.status" => r#"{"ready":true,"message":"ready"}"#,
+                "session.new" => r#"{"sessionId":"privacy-life","capabilities":{}}"#,
+                "browser.createUserContext" => r#"{"userContext":"user-life"}"#,
+                "browsingContext.create" => r#"{"context":"page-life"}"#,
+                "browsingContext.navigate" => "{}",
+                "browsingContext.close" | "browser.removeUserContext" | "session.end" => "{}",
+                other => panic!("unexpected privacy lifecycle method {other}: {request}"),
+            };
+            write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+            );
+            if method == "session.end" {
+                break;
+            }
+        }
+        methods
+    });
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    page.goto("https://example.test/app") ?? panic("goto")
+    print("hash:{context.user_hash().len()}")
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+    receipt :: session.receipt()
+    print("done:{receipt.cleaned()}:{receipt.redacted()}:{receipt.isolated()}")
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_privacy_lifecycle",
+        "browser_bidi_privacy_lifecycle",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "hash:16\ndone:true:true:true\n");
+    assert_eq!(
+        server.join().unwrap(),
+        [
+            "session.status",
+            "session.new",
+            "browser.createUserContext",
+            "browsingContext.create",
+            "browsingContext.navigate",
+            "browsingContext.close",
+            "browser.removeUserContext",
+            "session.end",
+        ]
+    );
+}
+

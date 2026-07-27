@@ -31,6 +31,8 @@ pub(super) fn handle(
             | "BrowserIntercept"
             | "BrowserEvent"
             | "BrowserTrace"
+            | "BrowserReceipt"
+            | "BrowserPrivacy"
             | "BrowserCapabilities"
             | "BrowserProtocol"
             | "BrowserLocked"
@@ -39,7 +41,12 @@ pub(super) fn handle(
     }
     Some(if matches!(
         kind.as_str(),
-        "BrowserEvent" | "BrowserTrace" | "BrowserCapabilities" | "BrowserLocked"
+        "BrowserEvent"
+            | "BrowserTrace"
+            | "BrowserReceipt"
+            | "BrowserPrivacy"
+            | "BrowserCapabilities"
+            | "BrowserLocked"
     ) {
         crate::BrowserHost::eval_value_method(kind, method, recv, span).and_then(|value| {
             value.ok_or_else(|| {
