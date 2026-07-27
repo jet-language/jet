@@ -66,7 +66,15 @@ pub(crate) fn jit_list_string_type(ty: &Type) -> bool {
 }
 
 pub(crate) fn jit_list_native_type(ty: &Type) -> bool {
-    jit_list_int_type(ty) || jit_list_float_type(ty) || jit_list_string_type(ty)
+    jit_list_int_type(ty)
+        || jit_list_float_type(ty)
+        || jit_list_string_type(ty)
+        || jit_list_option_type(ty)
+}
+
+/// `[T?]` for optional scalars (series missing counts, etc.).
+pub(crate) fn jit_list_option_type(ty: &Type) -> bool {
+    matches!(ty, Type::List(inner) if jit_optional_scalar_type(inner))
 }
 
 fn jit_list_intn_type(ty: &Type) -> bool {
@@ -507,6 +515,57 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             if module == "core.io" && method == "args" {
                 return args.is_empty();
             }
+            if module == "core.reflect" && method == "of" {
+                return args.len() == 1 && resident_safe_expr(&args[0], callees);
+            }
+            if module == "core.testing" {
+                return match method.as_str() {
+                    "temp_dir" | "fake_clock" | "fake_rng" if args.len() == 1 => {
+                        resident_safe_expr(&args[0], callees)
+                    }
+                    "snap" if args.len() == 2 => {
+                        args.iter().all(|a| resident_safe_expr(a, callees))
+                    }
+                    _ => false,
+                };
+            }
+            if module == "core.data" {
+                return match method.as_str() {
+                    "status" if args.is_empty() => true,
+                    "csv" | "json" | "count" | "mean" | "sum" | "min" | "max" | "median"
+                    | "variance" | "stddev" | "describe" | "bar_text" | "bar_svg"
+                    | "require_bridge" | "table" | "rows" | "schema" | "series"
+                    | "missing_count" | "lazy" | "collect" | "plan" | "values"
+                        if args.len() == 1 =>
+                    {
+                        resident_safe_expr(&args[0], callees)
+                    }
+                    "quantile" | "filter" | "sort_by" | "rolling_mean" if args.len() == 2 => {
+                        // filter/sort_by carry lambdas — still resident-safe when
+                        // the list + callable lower.
+                        args.iter().all(|a| resident_safe_expr(a, callees))
+                    }
+                    "group_count" if args.len() == 2 => {
+                        args.iter().all(|a| resident_safe_expr(a, callees))
+                    }
+                    "group_sum" | "group_mean" if args.len() == 3 => {
+                        args.iter().all(|a| resident_safe_expr(a, callees))
+                    }
+                    "inner_join" | "left_join" if args.len() == 4 => {
+                        args.iter().all(|a| resident_safe_expr(a, callees))
+                    }
+                    "pivot_sum" if args.len() == 4 => {
+                        args.iter().all(|a| resident_safe_expr(a, callees))
+                    }
+                    "lazy_filter" | "lazy_sort_by" if args.len() == 2 => {
+                        args.iter().all(|a| resident_safe_expr(a, callees))
+                    }
+                    "csv_reader" if args.len() == 2 => {
+                        args.iter().all(|a| resident_safe_expr(a, callees))
+                    }
+                    _ => false,
+                };
+            }
             if module == "core.tasks" && method == "channel" {
                 return args.len() <= 1 && args.iter().all(|a| resident_safe_expr(a, callees));
             }
@@ -613,14 +672,15 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::ListLit(elems) => {
             (jit_list_native_type(&expr.ty)
                 && elems.iter().all(|e| {
-                    matches!(
+                    (matches!(
                         &e.ty,
                         Type::Int
                             | Type::IntN { .. }
                             | Type::Float
                             | Type::String
                             | Type::Char
-                    ) && resident_safe_expr(e, callees)
+                    ) || jit_optional_scalar_type(&e.ty))
+                        && resident_safe_expr(e, callees)
                 }))
                 || (jit_list_of_int_list_type(&expr.ty)
                     && elems.iter().all(|e| resident_safe_expr(e, callees)))
@@ -702,7 +762,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     }
                     TNumericOp::FloatToInt { .. } | TNumericOp::FloatNarrow { .. } => recv.ty.is_float(),
                     TNumericOp::TryFrom { .. } => recv.ty.is_integer(),
-                    TNumericOp::Origin(_) => false,
+                    TNumericOp::Origin(_) => true,
                 }
         }
         TExprKind::DistinctConvert { arg, .. } | TExprKind::DistinctRaw(arg) => {
@@ -989,6 +1049,7 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             }
             THostCall::TupleIndex { base, .. } => resident_safe_expr(base, callees),
             THostCall::SwitchSubjectField { .. } => true,
+            THostCall::StrMatchScan { .. } | THostCall::BinMatchScan { .. } => true,
             THostCall::Method { recv, args, .. } => {
                 resident_safe_expr(recv, callees)
                     && args.iter().all(|arg| resident_safe_expr(arg, callees))
@@ -1051,6 +1112,8 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             }
             TIR::TRequireKind::Panic { msg } => resident_safe_expr(msg, callees),
         },
+        TExprKind::Todo { .. } => true,
+
         _ => false,
     }
 }
@@ -1581,6 +1644,12 @@ fn resident_safe_builtin_op(
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
         }
+        TBuiltinOp::StartsWith | TBuiltinOp::EndsWith => {
+            matches!(&recv.ty, Type::String)
+                && args.len() == 1
+                && matches!(&args[0].ty, Type::String)
+                && resident_safe_expr(&args[0], callees)
+        }
         TBuiltinOp::DequePushFront | TBuiltinOp::DequePushBack => {
             matches!(&recv.ty, Type::Apply { name, args: targs }
                 if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
@@ -1595,6 +1664,14 @@ fn resident_safe_builtin_op(
             matches!(&recv.ty, Type::Apply { name, args: targs }
                 if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
                 && args.is_empty()
+        }
+        TBuiltinOp::InsertList => {
+            jit_list_int_type(&recv.ty)
+                && args.len() == 2
+                && matches!(&args[0].ty, Type::Int)
+                && matches!(&args[1].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+                && resident_safe_expr(&args[1], callees)
         }
         _ => false,
     }
@@ -2525,6 +2602,27 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                 && matches!(&args[1].ty, Type::String)
         }
         THandleOp::GameInputPressed => args.len() == 1 && matches!(&args[0].ty, Type::String),
+        THandleOp::ReaderOver
+        | THandleOp::ReaderReadU8
+        | THandleOp::ReaderReadU16Le
+        | THandleOp::ReaderReadU16Be
+        | THandleOp::ReaderReadU32Le
+        | THandleOp::ReaderReadU32Be
+        | THandleOp::ReaderReadU64Le
+        | THandleOp::ReaderReadU64Be
+        | THandleOp::ReaderRemaining
+        | THandleOp::ReaderAtEnd
+        | THandleOp::CursorOver
+        | THandleOp::CursorSkipWs => args.is_empty(),
+        THandleOp::ReaderTake | THandleOp::CursorTakeUntil => args.len() == 1,
+        THandleOp::CursorTakePattern { .. } | THandleOp::ReaderTakePattern { .. } => {
+            args.is_empty()
+        }
+        THandleOp::ReflectValueTypeName
+        | THandleOp::ReflectValueDisplay
+        | THandleOp::ReflectValueFields
+        | THandleOp::ReflectFieldName
+        | THandleOp::ReflectFieldValue => args.is_empty(),
         _ => false,
     }
 }

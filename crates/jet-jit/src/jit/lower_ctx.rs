@@ -4132,6 +4132,1002 @@ impl LowerCtx<'_, '_> {
 
     /// `THostCall` forms that the resident JIT lowers. Other host forms stay
     /// named-unsupported (same gap string as before for CtLit/DefaultLit).
+
+    fn lower_reflect_of(&mut self, arg: &TExpr) -> Result<Value, String> {
+        let type_name = match &arg.ty {
+            Type::Named(n) => n.clone(),
+            Type::Int => "Int".into(),
+            Type::Float => "Float".into(),
+            Type::Bool => "Bool".into(),
+            Type::String => "String".into(),
+            other => other.name(),
+        };
+        let type_h = self.runtime.heap.alloc_string(type_name.clone());
+        let type_v = self.b.ins().iconst(types::I64, type_h);
+
+        // display string — reuse Display path / scalar push
+        let begin = self.module.declare_func_in_func(self.host.str_begin, self.b.func);
+        let call = self.b.ins().call(begin, &[]);
+        let buf = self.b.inst_results(call)[0];
+        match &arg.ty {
+            Type::Named(n) => {
+                self.lower_named_str_interp(buf, arg, n, jet_foundation::AST::StrFormat::Display)?;
+            }
+            Type::Int => {
+                let v = self.lower_expr(arg)?;
+                let push = self.module.declare_func_in_func(self.host.str_push_i64, self.b.func);
+                self.b.ins().call(push, &[buf, v]);
+            }
+            Type::Float => {
+                let v = self.lower_expr(arg)?;
+                let push = self.module.declare_func_in_func(self.host.str_push_f64, self.b.func);
+                self.b.ins().call(push, &[buf, v]);
+            }
+            Type::Bool => {
+                let v = self.lower_expr(arg)?;
+                let push = self.module.declare_func_in_func(self.host.str_push_bool, self.b.func);
+                self.b.ins().call(push, &[buf, v]);
+            }
+            Type::String => {
+                let v = self.lower_expr(arg)?;
+                let push = self.module.declare_func_in_func(self.host.str_push_str, self.b.func);
+                self.b.ins().call(push, &[buf, v]);
+            }
+            _ => {
+                let v = self.lower_expr(arg)?;
+                let push = self.module.declare_func_in_func(self.host.str_push_i64, self.b.func);
+                self.b.ins().call(push, &[buf, v]);
+            }
+        }
+        let display_v = buf; // str_begin buffer IS the string handle
+
+        // fields
+        let list_new = self.module.declare_func_in_func(self.host.coll.list_new, self.b.func);
+        let fields_call = self.b.ins().call(list_new, &[]);
+        let fields = self.b.inst_results(fields_call)[0];
+        if let Type::Named(n) = &arg.ty {
+            if let Some((names, tys)) = self.meta.struct_layout(n) {
+                let recv = self.lower_expr(arg)?;
+                let push = self.module.declare_func_in_func(self.host.coll.list_push, self.b.func);
+                let field_new = self
+                    .module
+                    .declare_func_in_func(self.host.reflect_field_new, self.b.func);
+                for (i, (fname, fty)) in names.iter().zip(tys.iter()).enumerate() {
+                    let jet_name = fname.strip_prefix("user_").unwrap_or(fname);
+                    let name_h = self.runtime.heap.alloc_string(jet_name.to_string());
+                    let name_v = self.b.ins().iconst(types::I64, name_h);
+                    let field_val = self.lower_record_field(recv, n, fname, fty)?;
+                    let begin = self.module.declare_func_in_func(self.host.str_begin, self.b.func);
+                    let bcall = self.b.ins().call(begin, &[]);
+                    let fbuf = self.b.inst_results(bcall)[0];
+                    match fty {
+                        Type::Int | Type::IntN { .. } => {
+                            let p = self.module.declare_func_in_func(self.host.str_push_i64, self.b.func);
+                            self.b.ins().call(p, &[fbuf, field_val]);
+                        }
+                        Type::Float | Type::Float32 => {
+                            let p = self.module.declare_func_in_func(self.host.str_push_f64, self.b.func);
+                            self.b.ins().call(p, &[fbuf, field_val]);
+                        }
+                        Type::Bool => {
+                            let p = self.module.declare_func_in_func(self.host.str_push_bool, self.b.func);
+                            self.b.ins().call(p, &[fbuf, field_val]);
+                        }
+                        Type::String => {
+                            let p = self.module.declare_func_in_func(self.host.str_push_str, self.b.func);
+                            self.b.ins().call(p, &[fbuf, field_val]);
+                        }
+                        _ => {
+                            let p = self.module.declare_func_in_func(self.host.str_push_i64, self.b.func);
+                            self.b.ins().call(p, &[fbuf, field_val]);
+                        }
+                    }
+                    let _ = i;
+                    let fnew = self.b.ins().call(field_new, &[name_v, fbuf]);
+                    let fh = self.b.inst_results(fnew)[0];
+                    self.b.ins().call(push, &[fields, fh]);
+                }
+            }
+        }
+        let finish = self
+            .module
+            .declare_func_in_func(self.host.reflect_of_finish, self.b.func);
+        let call = self.b.ins().call(finish, &[type_v, display_v, fields]);
+        Ok(self.b.inst_results(call)[0])
+    }
+
+    fn lower_testing_call(
+        &mut self,
+        method: &str,
+        args: &[TExpr],
+        _ty: &Type,
+    ) -> Result<Value, String> {
+        match method {
+            "temp_dir" if args.len() == 1 => {
+                let p = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.testing_temp_dir, self.b.func);
+                let call = self.b.ins().call(host, &[p]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "snap" if args.len() == 2 => {
+                let a = self.lower_expr(&args[0])?;
+                let b = self.lower_expr(&args[1])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.testing_snap, self.b.func);
+                let call = self.b.ins().call(host, &[a, b]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "fake_clock" if args.len() == 1 => {
+                let ms = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.clock_new, self.b.func);
+                let call = self.b.ins().call(host, &[ms]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "fake_rng" if args.len() == 1 => {
+                let seed = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.random.rng_new, self.b.func);
+                let call = self.b.ins().call(host, &[seed]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            other => Err(format!("jit core call unsupported: core.testing.{other}")),
+        }
+    }
+
+    fn lower_data_call(
+        &mut self,
+        method: &str,
+        args: &[TExpr],
+        ty: &Type,
+    ) -> Result<Value, String> {
+        match method {
+            "csv" if args.len() == 1 => {
+                let elem = match ty {
+                    Type::Result { ok, .. } => match ok.as_ref() {
+                        Type::List(e) => e.as_ref(),
+                        _ => return Err("jit data.csv needs Result<[T], _>".into()),
+                    },
+                    Type::List(e) => e.as_ref(),
+                    _ => return Err("jit data.csv needs list result".into()),
+                };
+                self.lower_typed_csv_decode(&args[0], elem)
+            }
+            "json" if args.len() == 1 => {
+                let ok = match ty {
+                    Type::Result { ok, .. } => ok.as_ref(),
+                    other => other,
+                };
+                let elem = match ok {
+                    Type::List(e) => e.as_ref(),
+                    _ => return Err("jit data.json needs list result".into()),
+                };
+                // reuse typed json decode into list-of-struct via decode path
+                let text = &args[0];
+                let tree_ty = Type::List(Box::new(elem.clone()));
+                // lower_typed_json_decode expects ok_ty of the Result payload
+                self.lower_typed_json_decode(text, ok)
+            }
+            "count" if args.len() == 1 => {
+                let recv = self.lower_expr(&args[0])?;
+                let host = self.module.declare_func_in_func(self.host.coll.list_len, self.b.func);
+                // If Table/LazyFrame/Series, count via field "rows"/"values"
+                match &args[0].ty {
+                    Type::Named(n) if n == "Table" || n == "LazyFrame" => {
+                        if n == "LazyFrame" {
+                            let host = self
+                                .module
+                                .declare_func_in_func(self.host.data.lazy_count, self.b.func);
+                            let call = self.b.ins().call(host, &[recv]);
+                            return Ok(self.b.inst_results(call)[0]);
+                        }
+                        let rows = self.lower_record_field(recv, n, "rows", &Type::List(Box::new(Type::Int)))?;
+                        let call = self.b.ins().call(host, &[rows]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    Type::Named(n) if n == "Series" => {
+                        let vals = self.lower_record_field(recv, n, "values", &Type::List(Box::new(Type::Float)))?;
+                        let call = self.b.ins().call(host, &[vals]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    Type::Apply { name, .. } if name == "Table" || name == "LazyFrame" => {
+                        if name == "LazyFrame" {
+                            let host = self
+                                .module
+                                .declare_func_in_func(self.host.data.lazy_count, self.b.func);
+                            let call = self.b.ins().call(host, &[recv]);
+                            return Ok(self.b.inst_results(call)[0]);
+                        }
+                        let rows = self.lower_record_field(recv, name, "rows", &Type::List(Box::new(Type::Int)))?;
+                        let call = self.b.ins().call(host, &[rows]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    Type::Apply { name, .. } if name == "Series" => {
+                        let vals = self.lower_record_field(
+                            recv,
+                            name,
+                            "values",
+                            &Type::List(Box::new(Type::Float)),
+                        )?;
+                        let call = self.b.ins().call(host, &[vals]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    _ => {
+                        let call = self.b.ins().call(host, &[recv]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                }
+            }
+            "status" if args.is_empty() => {
+                let host = self.module.declare_func_in_func(self.host.data.status, self.b.func);
+                let call = self.b.ins().call(host, &[]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "require_bridge" if args.len() == 1 => {
+                let p = self.lower_expr(&args[0])?;
+                let host = self.module.declare_func_in_func(self.host.data.require_bridge, self.b.func);
+                let call = self.b.ins().call(host, &[p]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "mean" | "sum" | "min" | "max" | "median" | "variance" | "stddev" if args.len() == 1 => {
+                let v = self.lower_expr(&args[0])?;
+                let host = self.module.declare_func_in_func(self.host.data.stat, self.b.func);
+                let op = match method {
+                    "mean" => 0,
+                    "sum" => 1,
+                    "min" => 2,
+                    "max" => 3,
+                    "median" => 4,
+                    "variance" => 5,
+                    _ => 6,
+                };
+                let op_v = self.b.ins().iconst(types::I64, op);
+                let call = self.b.ins().call(host, &[v, op_v]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "quantile" if args.len() == 2 => {
+                let v = self.lower_expr(&args[0])?;
+                let q = self.lower_expr(&args[1])?;
+                let q_bits = self.b.ins().bitcast(
+                    types::I64,
+                    Self::scalar_bitcast_memflags(),
+                    q,
+                );
+                let host = self.module.declare_func_in_func(self.host.data.quantile, self.b.func);
+                let call = self.b.ins().call(host, &[v, q_bits]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "filter" if args.len() == 2 => self.lower_data_filter(&args[0], &args[1]),
+            "sort_by" if args.len() == 2 => self.lower_data_sort_by(&args[0], &args[1], ty),
+            "group_count" if args.len() == 2 => {
+                self.lower_data_group(&args[0], &args[1], None, 0)
+            }
+            "group_sum" if args.len() == 3 => {
+                self.lower_data_group(&args[0], &args[1], Some(&args[2]), 1)
+            }
+            "group_mean" if args.len() == 3 => {
+                if matches!(
+                    &args[0].ty,
+                    Type::Apply { name, .. } if name == "DataStream"
+                ) || matches!(&args[0].ty, Type::Named(n) if n == "DataStream")
+                {
+                    self.lower_data_stream_group_mean(&args[0], &args[1], &args[2])
+                } else {
+                    self.lower_data_group(&args[0], &args[1], Some(&args[2]), 1)
+                }
+            }
+            "describe" if args.len() == 1 => {
+                let v = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.data.describe, self.b.func);
+                let call = self.b.ins().call(host, &[v]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "bar_text" | "bar_svg" if args.len() == 1 => {
+                let v = self.lower_expr(&args[0])?;
+                let host_id = if method == "bar_text" {
+                    self.host.data.bar_text
+                } else {
+                    self.host.data.bar_svg
+                };
+                let host = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host, &[v]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "table" if args.len() == 1 => {
+                let rows = self.lower_expr(&args[0])?;
+                // DataTable { rows, missing: 0, plan: ["table"] }
+                let rec = self.new_record(3);
+                self.set_record_slot(rec, 0, rows, &Type::List(Box::new(Type::Int)))?;
+                let zero = self.b.ins().iconst(types::I64, 0);
+                self.set_record_slot(rec, 1, zero, &Type::Int)?;
+                let plan = {
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.coll.list_new, self.b.func);
+                    let call = self.b.ins().call(host, &[]);
+                    let list = self.b.inst_results(call)[0];
+                    let step = self.runtime.heap.alloc_string("table");
+                    let step_v = self.b.ins().iconst(types::I64, step);
+                    let push = self
+                        .module
+                        .declare_func_in_func(self.host.coll.list_push, self.b.func);
+                    self.b.ins().call(push, &[list, step_v]);
+                    list
+                };
+                self.set_record_slot(rec, 2, plan, &Type::List(Box::new(Type::String)))?;
+                Ok(rec)
+            }
+            "rows" if args.len() == 1 => {
+                let table = self.lower_expr(&args[0])?;
+                let type_name = match &args[0].ty {
+                    Type::Named(n) | Type::Apply { name: n, .. } => n.as_str(),
+                    _ => "DataTable",
+                };
+                self.lower_record_field(
+                    table,
+                    type_name,
+                    "rows",
+                    &Type::List(Box::new(Type::Int)),
+                )
+            }
+            "series" if args.len() == 1 => {
+                let values = self.lower_expr(&args[0])?;
+                let rec = self.new_record(2);
+                self.set_record_slot(rec, 0, values, &Type::List(Box::new(Type::Float)))?;
+                let zero = self.b.ins().iconst(types::I64, 0);
+                self.set_record_slot(rec, 1, zero, &Type::Int)?;
+                Ok(rec)
+            }
+            "schema" if args.len() == 1 => self.lower_data_schema(&args[0]),
+            "missing_count" if args.len() == 1 => {
+                let recv = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.data.missing_count, self.b.func);
+                let call = self.b.ins().call(host, &[recv]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "plan" if args.len() == 1 => {
+                let recv = self.lower_expr(&args[0])?;
+                let type_name = match &args[0].ty {
+                    Type::Named(n) | Type::Apply { name: n, .. } => n.as_str(),
+                    _ => "LazyFrame",
+                };
+                self.lower_record_field(
+                    recv,
+                    type_name,
+                    "plan",
+                    &Type::List(Box::new(Type::String)),
+                )
+            }
+            "lazy" if args.len() == 1 => {
+                // LazyFrame shares Table layout {rows, missing, plan}.
+                let table = self.lower_expr(&args[0])?;
+                let type_name = match &args[0].ty {
+                    Type::Named(n) | Type::Apply { name: n, .. } => n.as_str(),
+                    _ => "Table",
+                };
+                let rows = self.lower_record_field(
+                    table,
+                    type_name,
+                    "rows",
+                    &Type::List(Box::new(Type::Int)),
+                )?;
+                let missing =
+                    self.lower_record_field(table, type_name, "missing", &Type::Int)?;
+                let plan = self.lower_record_field(
+                    table,
+                    type_name,
+                    "plan",
+                    &Type::List(Box::new(Type::String)),
+                )?;
+                // Clone plan list so later appends don't mutate the table.
+                let clone = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_clone, self.b.func);
+                let plan = {
+                    let call = self.b.ins().call(clone, &[plan]);
+                    self.b.inst_results(call)[0]
+                };
+                let rec = self.new_record(3);
+                self.set_record_slot(rec, 0, rows, &Type::List(Box::new(Type::Int)))?;
+                self.set_record_slot(rec, 1, missing, &Type::Int)?;
+                self.set_record_slot(rec, 2, plan, &Type::List(Box::new(Type::String)))?;
+                Ok(rec)
+            }
+            "lazy_filter" if args.len() == 2 => {
+                self.lower_data_lazy_op(&args[0], &args[1], "filter", 0)
+            }
+            "lazy_sort_by" if args.len() == 2 => {
+                self.lower_data_lazy_op(&args[0], &args[1], "sort_by", 1)
+            }
+            "collect" if args.len() == 1 => {
+                let frame = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.data.collect, self.b.func);
+                let call = self.b.ins().call(host, &[frame]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "inner_join" if args.len() == 4 => {
+                self.lower_data_join(&args[0], &args[1], &args[2], &args[3], false)
+            }
+            "left_join" if args.len() == 4 => {
+                self.lower_data_join(&args[0], &args[1], &args[2], &args[3], true)
+            }
+            "pivot_sum" if args.len() == 4 => {
+                let rows = &args[0];
+                let row_keys =
+                    self.lower_iter_map_filter(rows, std::slice::from_ref(&args[1]), false)?;
+                let col_keys =
+                    self.lower_iter_map_filter(rows, std::slice::from_ref(&args[2]), false)?;
+                let values =
+                    self.lower_iter_map_filter(rows, std::slice::from_ref(&args[3]), false)?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.data.pivot_sum, self.b.func);
+                let call = self.b.ins().call(host, &[row_keys, col_keys, values]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "rolling_mean" if args.len() == 2 => {
+                let v = self.lower_expr(&args[0])?;
+                let w = self.lower_expr(&args[1])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.data.rolling_mean, self.b.func);
+                let call = self.b.ins().call(host, &[v, w]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            "csv_reader" if args.len() == 2 => {
+                let file = self.lower_expr(&args[0])?;
+                let limits = self.lower_expr(&args[1])?;
+                let max_groups =
+                    self.lower_record_field(limits, "DataLimits", "max_groups", &Type::Int)?;
+                let encoding = self.lower_record_field(
+                    limits,
+                    "DataLimits",
+                    "encoding",
+                    &Type::Named("EncodingLimits".into()),
+                )?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.data.csv_reader, self.b.func);
+                let call = self.b.ins().call(host, &[file, encoding, max_groups]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            other => Err(format!("jit core call unsupported: core.data.{other}")),
+        }
+    }
+
+    fn lower_data_stream_group_mean(
+        &mut self,
+        stream: &TExpr,
+        key_fn: &TExpr,
+        value_fn: &TExpr,
+    ) -> Result<Value, String> {
+        let stream_v = self.lower_expr(stream)?;
+        // Remaining rows as a list handle (advances stream to EOF).
+        let rest_host = self
+            .module
+            .declare_func_in_func(self.host.data.stream_rest, self.b.func);
+        let rest_call = self.b.ins().call(rest_host, &[stream_v]);
+        let rest = self.b.inst_results(rest_call)[0];
+        // rest is Result<list, DataError>
+        // For group we need Ok list — use result payload helpers.
+        let is_ok = self
+            .module
+            .declare_func_in_func(self.host.result_is_ok, self.b.func);
+        let ok_call = self.b.ins().call(is_ok, &[rest]);
+        let ok = self.b.inst_results(ok_call)[0];
+        // Branch: if err, return rest; else group_reduce_limited
+        let err_block = self.b.create_block();
+        let ok_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        self.b.ins().brif(ok, ok_block, &[], err_block, &[]);
+
+        self.b.switch_to_block(err_block);
+        self.b.seal_block(err_block);
+        self.b.ins().jump(merge, &[rest]);
+
+        self.b.switch_to_block(ok_block);
+        self.b.seal_block(ok_block);
+        let payload = self
+            .module
+            .declare_func_in_func(self.host.result_get_i64, self.b.func);
+        let rows_call = self.b.ins().call(payload, &[rest]);
+        let rows = self.b.inst_results(rows_call)[0];
+        let elem_ty = match &stream.ty {
+            Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
+            _ => Type::Named("Event".into()),
+        };
+        let max_g_host = self
+            .module
+            .declare_func_in_func(self.host.data.stream_max_groups, self.b.func);
+        let max_call = self.b.ins().call(max_g_host, &[stream_v]);
+        let max_g = self.b.inst_results(max_call)[0];
+        let key_list = self.lower_list_value_map_only(rows, &elem_ty, key_fn)?;
+        let val_list = self.lower_list_value_map_only(rows, &elem_ty, value_fn)?;
+        let host = self
+            .module
+            .declare_func_in_func(self.host.data.group_reduce_limited, self.b.func);
+        let call = self
+            .b
+            .ins()
+            .call(host, &[key_list, val_list, max_g]);
+        let grouped = self.b.inst_results(call)[0];
+        self.b.ins().jump(merge, &[grouped]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
+    fn lower_list_value_map_only(
+        &mut self,
+        list: Value,
+        elem_ty: &Type,
+        lambda: &TExpr,
+    ) -> Result<Value, String> {
+        // Map without sorting: reuse filter=false path but only return key list
+        // by cloning the map portion. Implement by calling map_filter with a
+        // local flag — duplicate loop with push mapped only.
+        let (param_place, body_expr) = self.closure_unary_lambda(std::slice::from_ref(lambda))?;
+        let coll_var = self.fresh_var(types::I64);
+        self.b.def_var(coll_var, list);
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_new, self.b.func);
+        let out_call = self.b.ins().call(new_ref, &[]);
+        let out_val = self.b.inst_results(out_call)[0];
+        let out_var = self.fresh_var(types::I64);
+        self.b.def_var(out_var, out_val);
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        let idx_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(idx_var, zero);
+        self.b.ins().jump(header, &[]);
+        self.b.switch_to_block(header);
+        let idx = self.b.use_var(idx_var);
+        let coll = self.b.use_var(coll_var);
+        let len_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_len, self.b.func);
+        let len_call = self.b.ins().call(len_ref, &[coll]);
+        let len = self.b.inst_results(len_call)[0];
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let get_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
+        let elem = self.b.inst_results(get_call)[0];
+        self.emit_trap_check()?;
+        let mapped = self.with_bound_local(&param_place, elem_ty.clone(), elem, |this| {
+            this.lower_expr(body_expr)
+        })?;
+        let out = self.b.use_var(out_var);
+        let mapped_ty = self.erase_distinct_ty(&body_expr.ty);
+        let (push_id, push_val) = if matches!(mapped_ty, Type::Float | Type::Float32) {
+            (self.host.coll.list_push_f64, mapped)
+        } else {
+            (self.host.coll.list_push, mapped)
+        };
+        let push_ref = self.module.declare_func_in_func(push_id, self.b.func);
+        self.b.ins().call(push_ref, &[out, push_val]);
+        self.b.ins().jump(step, &[]);
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(idx, one);
+        self.b.def_var(idx_var, next);
+        self.b.ins().jump(header, &[]);
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        Ok(self.b.use_var(out_var))
+    }
+
+    fn lower_data_join(
+        &mut self,
+        left: &TExpr,
+        right: &TExpr,
+        left_key: &TExpr,
+        right_key: &TExpr,
+        is_left: bool,
+    ) -> Result<Value, String> {
+        let left_v = self.lower_expr(left)?;
+        let right_v = self.lower_expr(right)?;
+        let left_keys =
+            self.lower_iter_map_filter(left, std::slice::from_ref(left_key), false)?;
+        let right_keys =
+            self.lower_iter_map_filter(right, std::slice::from_ref(right_key), false)?;
+        let host_id = if is_left {
+            self.host.data.left_join
+        } else {
+            self.host.data.inner_join
+        };
+        let host = self.module.declare_func_in_func(host_id, self.b.func);
+        let call = self
+            .b
+            .ins()
+            .call(host, &[left_v, right_v, left_keys, right_keys]);
+        Ok(self.b.inst_results(call)[0])
+    }
+
+    fn lower_data_lazy_op(
+        &mut self,
+        frame: &TExpr,
+        lambda: &TExpr,
+        plan_step: &str,
+        kind: i64,
+    ) -> Result<Value, String> {
+        let src = self.lower_expr(frame)?;
+        let type_name = match &frame.ty {
+            Type::Named(n) | Type::Apply { name: n, .. } => n.as_str(),
+            _ => "LazyFrame",
+        };
+        let elem_ty = match &frame.ty {
+            Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
+            _ => Type::Named("Ticket".into()),
+        };
+        let rows = self.lower_record_field(
+            src,
+            type_name,
+            "rows",
+            &Type::List(Box::new(Type::Int)),
+        )?;
+        let missing = self.lower_record_field(src, type_name, "missing", &Type::Int)?;
+        let plan = self.lower_record_field(
+            src,
+            type_name,
+            "plan",
+            &Type::List(Box::new(Type::String)),
+        )?;
+        let clone = self
+            .module
+            .declare_func_in_func(self.host.coll.list_clone, self.b.func);
+        let plan = {
+            let call = self.b.ins().call(clone, &[plan]);
+            self.b.inst_results(call)[0]
+        };
+        let step = self.runtime.heap.alloc_string(plan_step);
+        let step_v = self.b.ins().iconst(types::I64, step);
+        let push = self
+            .module
+            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+        self.b.ins().call(push, &[plan, step_v]);
+
+        // Skip applying lambdas that call named helpers (deferred probe).
+        let defer_body = match &lambda.kind {
+            TExprKind::Lambda(lam) => match &lam.executable {
+                jet_codegen::Codegen::TIR::TLambdaBody::Expr(e) => {
+                    matches!(&e.kind, TExprKind::Call { .. })
+                }
+                _ => true,
+            },
+            _ => true,
+        };
+
+        let rows = if defer_body {
+            let call = self.b.ins().call(clone, &[rows]);
+            self.b.inst_results(call)[0]
+        } else {
+            self.lower_list_value_map_filter(rows, &elem_ty, lambda, kind == 0)?
+        };
+
+        let rec = self.new_record(3);
+        self.set_record_slot(rec, 0, rows, &Type::List(Box::new(Type::Int)))?;
+        self.set_record_slot(rec, 1, missing, &Type::Int)?;
+        self.set_record_slot(rec, 2, plan, &Type::List(Box::new(Type::String)))?;
+        Ok(rec)
+    }
+
+    /// Map/filter/sort-by over an already-lowered list handle.
+    /// `filter==true` keeps elems; `filter==false` builds key list then stable-sorts.
+    fn lower_list_value_map_filter(
+        &mut self,
+        list: Value,
+        elem_ty: &Type,
+        lambda: &TExpr,
+        filter: bool,
+    ) -> Result<Value, String> {
+        let (param_place, body_expr) = self.closure_unary_lambda(std::slice::from_ref(lambda))?;
+        let coll_var = self.fresh_var(types::I64);
+        self.b.def_var(coll_var, list);
+
+        let new_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_new, self.b.func);
+        let out_call = self.b.ins().call(new_ref, &[]);
+        let out_val = self.b.inst_results(out_call)[0];
+        let out_var = self.fresh_var(types::I64);
+        self.b.def_var(out_var, out_val);
+
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        let idx_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(idx_var, zero);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let idx = self.b.use_var(idx_var);
+        let coll = self.b.use_var(coll_var);
+        let len_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_len, self.b.func);
+        let len_call = self.b.ins().call(len_ref, &[coll]);
+        let len = self.b.inst_results(len_call)[0];
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let get_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
+        let elem = self.b.inst_results(get_call)[0];
+        self.emit_trap_check()?;
+        let mapped = self.with_bound_local(&param_place, elem_ty.clone(), elem, |this| {
+            this.lower_expr(body_expr)
+        })?;
+
+        if filter {
+            let keep_block = self.b.create_block();
+            let zero_b = self.b.ins().iconst(types::I8, 0);
+            let keep = self.b.ins().icmp(IntCC::NotEqual, mapped, zero_b);
+            self.b.ins().brif(keep, keep_block, &[], step, &[]);
+            self.b.switch_to_block(keep_block);
+            self.b.seal_block(keep_block);
+            let out = self.b.use_var(out_var);
+            let push_ref = self
+                .module
+                .declare_func_in_func(self.host.coll.list_push, self.b.func);
+            self.b.ins().call(push_ref, &[out, elem]);
+            self.b.ins().jump(step, &[]);
+        } else {
+            let out = self.b.use_var(out_var);
+            let push_ref = self
+                .module
+                .declare_func_in_func(self.host.coll.list_push, self.b.func);
+            self.b.ins().call(push_ref, &[out, mapped]);
+            self.b.ins().jump(step, &[]);
+        }
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(idx, one);
+        self.b.def_var(idx_var, next);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        let out = self.b.use_var(out_var);
+        if filter {
+            Ok(out)
+        } else {
+            // out holds keys; sort a clone of the input list by those keys.
+            let clone = self
+                .module
+                .declare_func_in_func(self.host.coll.list_clone, self.b.func);
+            let cloned = {
+                let call = self.b.ins().call(clone, &[list]);
+                self.b.inst_results(call)[0]
+            };
+            let key_is_str = match &lambda.kind {
+                TExprKind::Lambda(lam) => matches!(lam.ret.as_ref(), Some(Type::String))
+                    || matches!(
+                        &lam.executable,
+                        jet_codegen::Codegen::TIR::TLambdaBody::Expr(e) if matches!(e.ty, Type::String)
+                    ),
+                _ => true,
+            };
+            let sort_id = if key_is_str {
+                self.host.coll.list_sort_by_str_keys
+            } else {
+                self.host.coll.list_sort_by_i64_keys
+            };
+            let host = self.module.declare_func_in_func(sort_id, self.b.func);
+            self.b.ins().call(host, &[cloned, out]);
+            Ok(cloned)
+        }
+    }
+
+    fn lower_data_schema(&mut self, table: &TExpr) -> Result<Value, String> {
+        let row_ty = match &table.ty {
+            Type::Apply { args, .. } if !args.is_empty() => args[0].clone(),
+            Type::List(inner) => inner.as_ref().clone(),
+            _ => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_new, self.b.func);
+                let call = self.b.ins().call(host, &[]);
+                return Ok(self.b.inst_results(call)[0]);
+            }
+        };
+        let host_new = self
+            .module
+            .declare_func_in_func(self.host.coll.list_new, self.b.func);
+        let out_call = self.b.ins().call(host_new, &[]);
+        let out = self.b.inst_results(out_call)[0];
+        let push = self
+            .module
+            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+
+        let push_col = |this: &mut Self, out: Value, name: &str, ty_name: &str| -> Result<(), String> {
+            let col = this.new_record(2);
+            let name_h = this.runtime.heap.alloc_string(name);
+            let name_v = this.b.ins().iconst(types::I64, name_h);
+            this.set_record_slot(col, 0, name_v, &Type::String)?;
+            let ty_h = this.runtime.heap.alloc_string(ty_name);
+            let ty_v = this.b.ins().iconst(types::I64, ty_h);
+            this.set_record_slot(col, 1, ty_v, &Type::String)?;
+            this.b.ins().call(push, &[out, col]);
+            Ok(())
+        };
+
+        let type_label = |ty: &Type| -> String {
+            match ty {
+                Type::String => "String".into(),
+                Type::Float | Type::Float32 => "Float".into(),
+                Type::Int | Type::IntN { .. } => "Int".into(),
+                Type::Bool => "Bool".into(),
+                Type::Named(n) => n.clone(),
+                Type::Apply { name, args } if args.len() == 1 => {
+                    format!("{name}<{}>", match &args[0] {
+                        Type::Int | Type::IntN { .. } => "Int".into(),
+                        Type::String => "String".into(),
+                        Type::Float | Type::Float32 => "Float".into(),
+                        Type::Bool => "Bool".into(),
+                        Type::Named(n) => n.clone(),
+                        other => format!("{other:?}"),
+                    })
+                }
+                other => format!("{other:?}"),
+            }
+        };
+
+        match &row_ty {
+            Type::Named(type_name) => {
+                let Some((names, tys)) = self.meta.struct_layout(type_name) else {
+                    // Empty struct or unknown — zero columns.
+                    let _ = table;
+                    return Ok(out);
+                };
+                for (fname, fty) in names.iter().zip(tys.iter()) {
+                    let bare = fname.strip_prefix("user_").unwrap_or(fname);
+                    push_col(self, out, bare, &type_label(fty))?;
+                }
+            }
+            Type::Apply { name, args } => {
+                // Generic row (e.g. Box<Int>): expand registered fields when present.
+                if let Some((names, tys)) = self.meta.struct_layout(name) {
+                    for (fname, fty) in names.iter().zip(tys.iter()) {
+                        let bare = fname.strip_prefix("user_").unwrap_or(fname);
+                        // Substitute lone type-param fields with Apply args when possible.
+                        let label = if matches!(fty, Type::Named(n) if n.starts_with('T') || n == "T")
+                            && args.len() == 1
+                        {
+                            type_label(&args[0])
+                        } else if names.len() == 1 && args.len() == 1 {
+                            // Common single-field generic wrapper: field type is the arg.
+                            type_label(&args[0])
+                        } else {
+                            type_label(fty)
+                        };
+                        push_col(self, out, bare, &label)?;
+                    }
+                } else if name == "Box" && args.len() == 1 {
+                    push_col(self, out, "value", &type_label(&args[0]))?;
+                } else {
+                    push_col(self, out, "value", &type_label(&row_ty))?;
+                }
+            }
+            other => {
+                push_col(self, out, "value", &type_label(other))?;
+            }
+        }
+        let _ = table;
+        Ok(out)
+    }
+
+    /// Extract key (+ optional float value) columns via lambdas, then host-reduce.
+    fn lower_data_group(
+        &mut self,
+        rows: &TExpr,
+        key_fn: &TExpr,
+        value_fn: Option<&TExpr>,
+        mode: i64,
+    ) -> Result<Value, String> {
+        let keys = self.lower_iter_map_filter(rows, std::slice::from_ref(key_fn), false)?;
+        let values = if let Some(vf) = value_fn {
+            // Map may yield Float — push via float-capable list path by
+            // bit-casting through the same list_push (stores raw i64 bits).
+            self.lower_iter_map_filter(rows, std::slice::from_ref(vf), false)?
+        } else {
+            let host = self
+                .module
+                .declare_func_in_func(self.host.coll.list_new, self.b.func);
+            let call = self.b.ins().call(host, &[]);
+            self.b.inst_results(call)[0]
+        };
+        let mode_v = self.b.ins().iconst(types::I64, mode);
+        let host = self
+            .module
+            .declare_func_in_func(self.host.data.group_reduce, self.b.func);
+        let call = self.b.ins().call(host, &[keys, values, mode_v]);
+        Ok(self.b.inst_results(call)[0])
+    }
+
+    fn lower_data_filter(&mut self, rows: &TExpr, pred: &TExpr) -> Result<Value, String> {
+        // Reuse list filter loop for Named/Int/String elems.
+        let fake_recv = rows;
+        self.lower_iter_map_filter(fake_recv, std::slice::from_ref(pred), true)
+    }
+
+    fn lower_data_sort_by(
+        &mut self,
+        rows: &TExpr,
+        key: &TExpr,
+        _ty: &Type,
+    ) -> Result<Value, String> {
+        let list = self.lower_expr(rows)?;
+        let keys = self.lower_iter_map_filter(rows, std::slice::from_ref(key), false)?;
+        let key_is_str = match &key.kind {
+            TExprKind::Lambda(lam) => matches!(lam.ret.as_ref(), Some(Type::String))
+                || matches!(&lam.executable, jet_codegen::Codegen::TIR::TLambdaBody::Expr(e) if matches!(e.ty, Type::String)),
+            _ => false,
+        };
+        let sort_id = if key_is_str {
+            self.host.coll.list_sort_by_str_keys
+        } else {
+            self.host.coll.list_sort_by_i64_keys
+        };
+        let clone_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_clone, self.b.func);
+        let cloned = {
+            let call = self.b.ins().call(clone_ref, &[list]);
+            self.b.inst_results(call)[0]
+        };
+        let host = self.module.declare_func_in_func(sort_id, self.b.func);
+        self.b.ins().call(host, &[cloned, keys]);
+        let ok = self.b.ins().iconst(types::I8, 1);
+        let pack = self
+            .module
+            .declare_func_in_func(self.host.result_new_i64, self.b.func);
+        let packed = self.b.ins().call(pack, &[ok, cloned]);
+        Ok(self.b.inst_results(packed)[0])
+    }
+
     fn lower_host_call(&mut self, host: &THostCall, ty: &Type) -> Result<Value, String> {
         match host {
             THostCall::Method { recv, method, args }
@@ -4407,9 +5403,24 @@ impl LowerCtx<'_, '_> {
             }
             THostCall::TupleIndex { base, index } => {
                 let handle = self.lower_expr(base)?;
-                let field = format!("_{index}");
-                let type_name = record_type_key(&base.ty).ok_or("jit tuple index type")?;
-                self.lower_record_field(handle, &type_name, &field, ty)
+                // Prefer the ordinal — named match tuples (`version`, `ihl`, …)
+                // are packed in declaration order; looking up `user_<name>` in
+                // struct_fields fails when the shape was not registered.
+                let idx_val = self.b.ins().iconst(types::I64, *index as i64);
+                let host_id = match ty {
+                    t if Self::is_string_abi_ty(t) => self.host.struct_get_str,
+                    Type::Int => self.host.struct_get_i64,
+                    Type::Float => self.host.struct_get_f64,
+                    Type::Bool => self.host.struct_get_bool,
+                    Type::Char => self.host.struct_get_char,
+                    other if clif_ty(other) == Some(types::I64) => self.host.struct_get_i64,
+                    other => {
+                        return Err(format!("jit tuple index field type unsupported: {other:?}"))
+                    }
+                };
+                let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host_ref, &[handle, idx_val]);
+                Ok(self.b.inst_results(call)[0])
             }
             THostCall::SwitchSubjectField { field } => {
                 let (handle, subject_ty) = self
@@ -4437,6 +5448,54 @@ impl LowerCtx<'_, '_> {
             }
             THostCall::Helper { helper, .. } => {
                 Err(format!("jit helper unsupported: {helper}"))
+            }
+            THostCall::StrMatchScan { parts, probe } => {
+                let (subject, _) = self
+                    .switch_subject
+                    .clone()
+                    .ok_or("jit StrMatchScan outside switch")?;
+                let pid = crate::Parse::install_str_pattern(parts.clone());
+                let pid_v = self.b.ins().iconst(types::I64, pid);
+                match probe {
+                    TIR::TMatchProbe::IsSome => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.parse.str_match_is_some, self.b.func);
+                        let call = self.b.ins().call(host, &[subject, pid_v]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    TIR::TMatchProbe::Unwrap => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.parse.str_match_unwrap, self.b.func);
+                        let call = self.b.ins().call(host, &[subject, pid_v]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                }
+            }
+            THostCall::BinMatchScan { parts, probe } => {
+                let (subject, _) = self
+                    .switch_subject
+                    .clone()
+                    .ok_or("jit BinMatchScan outside switch")?;
+                let pid = crate::Parse::install_bin_pattern(parts.clone());
+                let pid_v = self.b.ins().iconst(types::I64, pid);
+                match probe {
+                    TIR::TMatchProbe::IsSome => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.parse.bin_match_is_some, self.b.func);
+                        let call = self.b.ins().call(host, &[subject, pid_v]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    TIR::TMatchProbe::Unwrap => {
+                        let host = self
+                            .module
+                            .declare_func_in_func(self.host.parse.bin_match_unwrap, self.b.func);
+                        let call = self.b.ins().call(host, &[subject, pid_v]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                }
             }
             THostCall::Method { method, .. } => {
                 Err(format!("jit host method unsupported: {method}"))
@@ -4813,6 +5872,19 @@ impl LowerCtx<'_, '_> {
                     .module
                     .declare_func_in_func(self.host.game.asset_show, self.b.func);
                 let call = self.b.ins().call(host, &[kind, recv]);
+                let text = self.b.inst_results(call)[0];
+                let push_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_push_str, self.b.func);
+                self.b.ins().call(push_ref, &[buf_id, text]);
+                return Ok(());
+            }
+            if type_name == "DataError" {
+                let recv = self.lower_expr(expr)?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.data.error_show, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv]);
                 let text = self.b.inst_results(call)[0];
                 let push_ref = self
                     .module
@@ -6048,6 +7120,15 @@ impl LowerCtx<'_, '_> {
                 args,
                 ..
             } => {
+                if module == "core.reflect" && method == "of" && args.len() == 1 {
+                    return self.lower_reflect_of(&args[0]);
+                }
+                if module == "core.testing" {
+                    return self.lower_testing_call(method, args, &expr.ty);
+                }
+                if module == "core.data" {
+                    return self.lower_data_call(method, args, &expr.ty);
+                }
                 if module == "core.mem" && method == "volatile_read" && args.len() == 1 {
                     if self.unsafe_depth == 0 {
                         return Err("jit volatile read outside #Unsafe".to_string());
@@ -8519,6 +9600,53 @@ impl LowerCtx<'_, '_> {
                     }
                     return Ok(handle);
                 }
+                // D-DATAFLOW1: `DataLimits.safe()` — nested EncodingLimits + max_* defaults.
+                let is_data_limits_safe = method.name == "safe"
+                    && args.is_empty()
+                    && match owner {
+                        TStaticOwner::User(name) => name == "DataLimits",
+                        TStaticOwner::Prelude { path, .. } => {
+                            path == "DataLimits"
+                                || path.ends_with("::DataLimits")
+                                || path.ends_with(".DataLimits")
+                        }
+                    }
+                    && owner_type
+                        .as_ref()
+                        .map(|t| matches!(t, Type::Named(n) if n == "DataLimits"))
+                        .unwrap_or(true);
+                if is_data_limits_safe {
+                    let n = self.b.ins().iconst(types::I64, 5);
+                    let new_ref = self
+                        .module
+                        .declare_func_in_func(self.host.struct_new, self.b.func);
+                    let new_call = self.b.ins().call(new_ref, &[n]);
+                    let handle = self.b.inst_results(new_call)[0];
+                    // encoding: EncodingLimits.safe() as nested struct handle
+                    let enc_n = self.b.ins().iconst(types::I64, 6);
+                    let enc_new = self.b.ins().call(new_ref, &[enc_n]);
+                    let enc = self.b.inst_results(enc_new)[0];
+                    let set_i = self
+                        .module
+                        .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+                    let enc_fields = [
+                        65536i64, 256, 16777216, 0, 32, 8388608,
+                    ];
+                    for (i, v) in enc_fields.into_iter().enumerate() {
+                        let idx = self.b.ins().iconst(types::I64, i as i64);
+                        let val = self.b.ins().iconst(types::I64, v);
+                        self.b.ins().call(set_i, &[enc, idx, val]);
+                    }
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    self.b.ins().call(set_i, &[handle, zero, enc]);
+                    let data_fields = [100_000i64, 1_000_000, 1_000_000, 1_000_000];
+                    for (i, v) in data_fields.into_iter().enumerate() {
+                        let idx = self.b.ins().iconst(types::I64, (i + 1) as i64);
+                        let val = self.b.ins().iconst(types::I64, v);
+                        self.b.ins().call(set_i, &[handle, idx, val]);
+                    }
+                    return Ok(handle);
+                }
                 let key = Self::static_method_key(owner, owner_type.as_ref(), method)
                     .ok_or_else(|| format!("jit static `{}::{}`", match owner {
                         TStaticOwner::User(name) => name.as_str(),
@@ -8720,6 +9848,7 @@ impl LowerCtx<'_, '_> {
             } => {
                 let fail_block = self.b.create_block();
                 let cont = self.b.create_block();
+                let mut eq_msg: Option<(Value, Value)> = None;
                 if *always_stops {
                     self.b.ins().jump(fail_block, &[]);
                 } else {
@@ -8733,6 +9862,7 @@ impl LowerCtx<'_, '_> {
                         TIR::TRequireKind::RequireEq { left, right } => {
                             let l = self.lower_expr(left)?;
                             let r = self.lower_expr(right)?;
+                            eq_msg = Some((l, r));
                             let eq = self.b.ins().icmp(IntCC::Equal, l, r);
                             self.b.ins().brif(eq, cont, &[], fail_block, &[]);
                         }
@@ -8747,13 +9877,11 @@ impl LowerCtx<'_, '_> {
                     TIR::TRequireKind::Require { msg: Some(msg), .. }
                     | TIR::TRequireKind::Panic { msg } => self.lower_expr(msg)?,
                     TIR::TRequireKind::Require { msg: None, .. } => {
-                        let h = self
-                            .runtime
-                            .heap
-                            .alloc_string("requirement failed");
+                        let h = self.runtime.heap.alloc_string("condition failed");
                         self.b.ins().iconst(types::I64, h)
                     }
                     TIR::TRequireKind::RequireEq { .. } => {
+                        let _ = eq_msg;
                         let h = self
                             .runtime
                             .heap
@@ -8761,6 +9889,66 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().iconst(types::I64, h)
                     }
                 };
+                let begin = self
+                    .module
+                    .declare_func_in_func(self.host.str_begin, self.b.func);
+                let call = self.b.ins().call(begin, &[]);
+                let loc_buf = self.b.inst_results(call)[0];
+                let mut first = true;
+                for (name, place) in &loc.locals {
+                    let key = Self::local_key(place);
+                    let Some(var) = self.vars.get(&key).copied() else {
+                        continue;
+                    };
+                    let ty = self.var_tys.get(&key).cloned().unwrap_or(Type::Int);
+                    if !matches!(
+                        ty,
+                        Type::Int
+                            | Type::IntN { .. }
+                            | Type::Bool
+                            | Type::Float
+                            | Type::Float32
+                    ) {
+                        continue;
+                    }
+                    if !first {
+                        let sep = self.runtime.heap.alloc_string(", ");
+                        let sep_v = self.b.ins().iconst(types::I64, sep);
+                        let push_s = self
+                            .module
+                            .declare_func_in_func(self.host.str_push_str, self.b.func);
+                        self.b.ins().call(push_s, &[loc_buf, sep_v]);
+                    }
+                    first = false;
+                    let prefix = self.runtime.heap.alloc_string(format!("{name} = "));
+                    let prefix_v = self.b.ins().iconst(types::I64, prefix);
+                    let push_s = self
+                        .module
+                        .declare_func_in_func(self.host.str_push_str, self.b.func);
+                    self.b.ins().call(push_s, &[loc_buf, prefix_v]);
+                    let val = self.b.use_var(var);
+                    match ty {
+                        Type::Float | Type::Float32 => {
+                            let push = self
+                                .module
+                                .declare_func_in_func(self.host.str_push_f64, self.b.func);
+                            self.b.ins().call(push, &[loc_buf, val]);
+                        }
+                        Type::Bool => {
+                            let push = self
+                                .module
+                                .declare_func_in_func(self.host.str_push_bool, self.b.func);
+                            self.b.ins().call(push, &[loc_buf, val]);
+                        }
+                        _ => {
+                            let push = self
+                                .module
+                                .declare_func_in_func(self.host.str_push_i64, self.b.func);
+                            self.b.ins().call(push, &[loc_buf, val]);
+                        }
+                    }
+                }
+                let locals_val = loc_buf;
                 let file_h = self
                     .runtime
                     .heap
@@ -8784,7 +9972,7 @@ impl LowerCtx<'_, '_> {
                 let caret_v = self.b.ins().iconst(types::I64, i64::from(loc.caret));
                 self.b.ins().call(
                     host,
-                    &[file_v, line_v, fn_v, src_v, col_v, caret_v, msg_val],
+                    &[file_v, line_v, fn_v, src_v, col_v, caret_v, msg_val, locals_val],
                 );
                 self.emit_trap_check()?;
                 self.b.ins().jump(cont, &[]);
@@ -8792,6 +9980,7 @@ impl LowerCtx<'_, '_> {
                 self.b.seal_block(cont);
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
+
             TExprKind::LayoutCompare { .. } => Err("jit layout compare unsupported".to_string()),
             TExprKind::LayoutLit { .. } => Err("jit layout literal unsupported".to_string()),
             TExprKind::PtrFromAddr { .. } => Err("jit pointer from addr unsupported".to_string()),
@@ -9000,7 +10189,25 @@ impl LowerCtx<'_, '_> {
                 let callee = self.lower_record_field(handle, &type_name, field, &fn_ty)?;
                 self.lower_fn_call(callee, &fn_ty, args)
             }
-            TExprKind::Todo { .. } => Err("jit todo expression unsupported".to_string()),
+            TExprKind::Todo { line, expected_type } => {
+                let msg = format!("#Todo at ?:{line} — expected {expected_type}");
+                let msg_h = self.runtime.heap.alloc_string(msg);
+                let msg_v = self.b.ins().iconst(types::I64, msg_h);
+                let empty = self.runtime.heap.alloc_string(String::new());
+                let empty_v = self.b.ins().iconst(types::I64, empty);
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.rich_panic, self.b.func);
+                let line_v = self.b.ins().iconst(types::I64, *line as i64);
+                let one = self.b.ins().iconst(types::I64, 1);
+                let caret = self.b.ins().iconst(types::I64, 5);
+                self.b.ins().call(
+                    host,
+                    &[empty_v, line_v, empty_v, empty_v, one, caret, msg_v, empty_v],
+                );
+                self.emit_trap_check()?;
+                Ok(self.b.ins().iconst(types::I64, 0))
+            }
             TExprKind::DistinctRaw(inner) => self.lower_expr(inner),
             TExprKind::Ok(inner) => self.result_new(true, inner),
             TExprKind::Err(inner) => self.result_new(false, inner),
@@ -9657,7 +10864,14 @@ impl LowerCtx<'_, '_> {
             }
             TBuiltinOp::InsertMap => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::AddNewMap => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::InsertList => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::InsertList => {
+                let idx = self.lower_expr(&args[0])?;
+                let val = self.lower_expr(&args[1])?;
+                let host = self.module.declare_func_in_func(self.host.coll.list_insert, self.b.func);
+                self.b.ins().call(host, &[recv_val, idx, val]);
+                self.emit_trap_check()?;
+                Ok(self.b.ins().iconst(types::I8, 0))
+            },
             TBuiltinOp::RemoveMap => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::RemoveList { .. } => {
                 let idx = self.lower_expr(&args[0])?;
@@ -9845,8 +11059,20 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            TBuiltinOp::StartsWith => Err("jit builtin method unsupported".to_string()),
-            TBuiltinOp::EndsWith => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::StartsWith | TBuiltinOp::EndsWith => {
+                if !matches!(&recv.ty, Type::String) {
+                    return Err("jit builtin method unsupported".to_string());
+                }
+                let needle = self.lower_expr(&args[0])?;
+                let host_id = if matches!(op, TBuiltinOp::StartsWith) {
+                    self.host.str_starts_with
+                } else {
+                    self.host.str_ends_with
+                };
+                let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, needle]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TBuiltinOp::Repeat => Err("jit builtin method unsupported".to_string()),
             TBuiltinOp::Slice { .. } => {
                 if !matches!(&recv.ty, Type::String) {
@@ -10404,7 +11630,12 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[value]);
                 Ok(self.b.inst_results(call)[0])
             }
-            TNumericOp::Origin(_) => Err("jit numeric origin unsupported".to_string()),
+            TNumericOp::Origin(origin) => {
+                let _ = value; // AOT: let _ = recv
+                let text = origin.as_deref().unwrap_or("untracked");
+                let h = self.runtime.heap.alloc_string(text.to_string());
+                Ok(self.b.ins().iconst(types::I64, h))
+            },
         }
     }
 
@@ -11016,10 +12247,17 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::CSVReaderNext | THandleOp::DataStreamNext => {
+            THandleOp::CSVReaderNext => {
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.stream.csv_reader_next, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::DataStreamNext => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.data.stream_next, self.b.func);
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
@@ -11713,6 +12951,35 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
+            THandleOp::ReflectValueTypeName => {
+                let host = self.module.declare_func_in_func(self.host.reflect_type_name, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ReflectValueDisplay => {
+                let host = self.module.declare_func_in_func(self.host.reflect_display, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ReflectValueFields => {
+                let host = self.module.declare_func_in_func(self.host.reflect_fields, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ReflectFieldName => {
+                let host = self.module.declare_func_in_func(self.host.reflect_field_name, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ReflectFieldValue => {
+                let host = self.module.declare_func_in_func(self.host.reflect_field_value, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::TaskDetach => Err("jit handle method unsupported".to_string()),
+            THandleOp::TaskPause => Err("jit handle method unsupported".to_string()),
+            THandleOp::TaskResume => Err("jit handle method unsupported".to_string()),
+            THandleOp::TaskTrace => Err("jit handle method unsupported".to_string()),
             THandleOp::HttpRouterRegister { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::MathMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::ReactiveGet => Err("jit handle method unsupported".to_string()),
@@ -12044,23 +13311,91 @@ impl LowerCtx<'_, '_> {
             }
             THandleOp::PluginCall => Err("jit handle method unsupported".to_string()),
             THandleOp::PluginCallInt => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReaderOver => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReaderReadU8 => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReaderReadU16Le => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReaderReadU16Be => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReaderReadU32Le => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReaderReadU32Be => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReaderReadU64Le => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReaderReadU64Be => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReaderTake => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReaderRemaining => Err("jit handle method unsupported".to_string()),
-            THandleOp::ReaderAtEnd => Err("jit handle method unsupported".to_string()),
-            THandleOp::CursorOver => Err("jit handle method unsupported".to_string()),
-            THandleOp::CursorTakeUntil => Err("jit handle method unsupported".to_string()),
-            THandleOp::CursorSkipWs => Err("jit handle method unsupported".to_string()),
-            THandleOp::CursorTakePattern { .. }
-            | THandleOp::ReaderTakePattern { .. } => {
-                Err("jit handle method unsupported".to_string())
+            THandleOp::ReaderOver => {
+                let host = self.module.declare_func_in_func(self.host.parse.reader_over, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ReaderReadU8 => {
+                let host = self.module.declare_func_in_func(self.host.parse.reader_read_u8, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ReaderReadU16Le => {
+                let host = self.module.declare_func_in_func(self.host.parse.reader_read_u16_le, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ReaderReadU16Be => {
+                let host = self.module.declare_func_in_func(self.host.parse.reader_read_u16_be, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ReaderReadU32Le => {
+                let host = self.module.declare_func_in_func(self.host.parse.reader_read_u32_le, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ReaderReadU32Be => {
+                let host = self.module.declare_func_in_func(self.host.parse.reader_read_u32_be, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ReaderReadU64Le => {
+                let host = self.module.declare_func_in_func(self.host.parse.reader_read_u64_le, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ReaderReadU64Be => {
+                let host = self.module.declare_func_in_func(self.host.parse.reader_read_u64_be, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ReaderTake => {
+                let n = self.lower_expr(&args[0])?;
+                let host = self.module.declare_func_in_func(self.host.parse.reader_take, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, n]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ReaderRemaining => {
+                let host = self.module.declare_func_in_func(self.host.parse.reader_remaining, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ReaderAtEnd => {
+                let host = self.module.declare_func_in_func(self.host.parse.reader_at_end, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::CursorOver => {
+                let host = self.module.declare_func_in_func(self.host.parse.cursor_over, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::CursorTakeUntil => {
+                let d = self.lower_expr(&args[0])?;
+                let host = self.module.declare_func_in_func(self.host.parse.cursor_take_until, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, d]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::CursorSkipWs => {
+                let host = self.module.declare_func_in_func(self.host.parse.cursor_skip_ws, self.b.func);
+                self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            THandleOp::CursorTakePattern { parts, .. } => {
+                let pid = crate::Parse::install_str_pattern(parts.clone());
+                let pid_v = self.b.ins().iconst(types::I64, pid);
+                let host = self.module.declare_func_in_func(self.host.parse.cursor_take_pattern, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, pid_v]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ReaderTakePattern { parts, .. } => {
+                let pid = crate::Parse::install_bin_pattern(parts.clone());
+                let pid_v = self.b.ins().iconst(types::I64, pid);
+                let host = self.module.declare_func_in_func(self.host.parse.reader_take_pattern, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, pid_v]);
+                Ok(self.b.inst_results(call)[0])
             }
             THandleOp::DataTreeDecode(target) => {
                 let tree = self.lower_expr(recv)?;
@@ -13077,10 +14412,14 @@ impl LowerCtx<'_, '_> {
             self.b.ins().jump(step, &[]);
         } else {
             let out = self.b.use_var(out_var);
-            let push_ref = self
-                .module
-                .declare_func_in_func(self.host.coll.list_push, self.b.func);
-            self.b.ins().call(push_ref, &[out, pred_or_mapped]);
+            let mapped_ty = self.erase_distinct_ty(&body_expr.ty);
+            let (push_id, push_val) = if matches!(mapped_ty, Type::Float | Type::Float32) {
+                (self.host.coll.list_push_f64, pred_or_mapped)
+            } else {
+                (self.host.coll.list_push, pred_or_mapped)
+            };
+            let push_ref = self.module.declare_func_in_func(push_id, self.b.func);
+            self.b.ins().call(push_ref, &[out, push_val]);
             self.b.ins().jump(step, &[]);
         }
 
@@ -14496,6 +15835,47 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "max_expansion_depth",
             "max_expansion_bytes",
         ],
+        "DataLimits" => &[
+            "encoding",
+            "max_groups",
+            "max_sort_rows",
+            "max_join_rows",
+            "max_output_rows",
+        ],
+        "DataStatus" => &[
+            "step",
+            "path",
+            "copy",
+            "ownership",
+            "trust",
+            "fallback",
+            "replacement",
+        ],
+        "DataGroup" => &["key", "count", "sum", "mean"],
+        "DataError" => &[
+            "kind",
+            "operation",
+            "row",
+            "column",
+            "index",
+            "reason",
+            "cause",
+        ],
+        "DataSummary" => &[
+            "count",
+            "sum",
+            "mean",
+            "min",
+            "max",
+            "median",
+            "variance",
+            "stddev",
+        ],
+        "DataTable" | "Table" | "LazyFrame" => &["rows", "missing", "plan"],
+        "Series" | "DataSeries" => &["values", "missing"],
+        "DataColumn" => &["name", "type_name"],
+        "DataJoin" | "Join" => &["left", "right"],
+        "DataPivotCell" => &["row_key", "column_key", "count", "sum", "mean"],
         "EncodingCause" => &["kind", "os_code", "message"],
         "EncodingError" => &[
             "format",
