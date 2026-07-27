@@ -116,7 +116,7 @@ test('restore round-trip: whole card back from archive, decisions+questions ride
 
   const s = st.load();
   assert.equal(s.cards.length, 1);
-  assert.equal(s.cards[0].updated, today(), 'clock resets to today');
+  assert.equal(s.cards[0].updated.slice(0, 10), today(), 'clock resets to today');
   assert.equal(s.decisions.length, 1);
   assert.equal(s.decisions[0].id, 'D-1');
   assert.equal(s.decisions[0].ratifiedAt, today(), 'decision clock resets too — otherwise it would standalone-retire right back out');
@@ -141,11 +141,12 @@ test('restore round-trip: a single decision, its card still live', () => {
   st.mutate((s) => { s.decisions = s.decisions.filter(d => d.id !== 'D-1'); });
   writeJSON(historyFile(st.dataDir), { version: 1, decisions: [{ id: 'D-1', cardId, title: 't', status: 'ratified', outcome: 'A', ratifiedAt: OLD }], cards: [], events: [] });
 
-  const { result } = st.restoreArchived('D-1', 'owner');
+  const { result } = st.restoreArchived('D-1', 'agent');
   assert.equal(result.kind, 'decision');
   const s = st.load();
   assert.ok(s.decisions.find(d => d.id === 'D-1'));
   assert.equal(s.decisions.find(d => d.id === 'D-1').ratifiedAt, today());
+  assert.equal(s.cards[0].updatedBy, 'agent');
 });
 
 test('restoreFromHistory refuses a decision whose card is archived too', () => {
@@ -300,4 +301,24 @@ test('undo of a retiring write does not corrupt history: no duplicate archive en
   assert.equal(st.load().cards.length, 0, 'self-healed back out of live');
   assert.equal(h.cards.filter(c => c.id === 'c-1').length, 1, 'no duplicate card in history');
   assert.equal(h.decisions.filter(d => d.id === 'D-1').length, 1, 'no duplicate decision in history');
+});
+
+test('archived cards still drive milestone completion', () => {
+  const st = fresh();
+  st.mutate((s) => db.addEpoch(s, { id: 'e1', name: 'One' }));
+  const milestone = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP' })).result;
+  st.mutate((s, cfg) => db.addCard(s, {
+    title: 'Archived done work', epoch: 'e1', milestoneId: milestone.id, phase: 'done',
+  }, cfg));
+  st.mutate((s, cfg) => db.addCard(s, {
+    title: 'Live open work', epoch: 'e1', milestoneId: milestone.id,
+  }, cfg));
+  st.mutate((s) => { s.cards.find(c => c.num === 1).updated = OLD; });
+  st.mutate((s) => db.setDigestCursor(s));
+  assert.equal(st.loadHistory().cards.length, 1, 'done card retired');
+  assert.equal(st.load().milestones[0].status, 'open', 'live work keeps milestone open');
+
+  st.mutate((s, cfg) => db.updateCard(s, '#2', { milestoneId: null, by: 'agent-1' }, cfg));
+  assert.equal(st.load().milestones[0].status, 'met', 'archived done work completes milestone');
+  assert.deepEqual(st.project().milestones[0].progress, { total: 1, done: 1, met: true });
 });

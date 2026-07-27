@@ -98,7 +98,7 @@ impl<'a> Checker<'a> {
                             "`Option.lift2`'s first argument must be a function, got {}",
                             other.show()
                         ),
-                        "`Option.lift2(f, a, b)` needs `f: fn(T, U) -> R`".to_string(),
+                        "`Option.lift2(f, a, b)` needs `f: fn(T, U) => R`".to_string(),
                         "pass a two-argument function or lambda".to_string(),
                         Some(args[0].expr.span()),
                     ));

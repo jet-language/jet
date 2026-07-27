@@ -5,8 +5,8 @@
 // impl that forgets to set `type Elem = …` is rejected (E0913).
 trait Indexed {
     type Elem
-    fn at(self, i: Int) -> Elem
-    fn count(self) -> Int
+    fn at(self, i: Int) => Elem
+    fn count(self) => Int
 }
 
 struct Nums {
@@ -16,9 +16,9 @@ struct Nums {
 impl Nums.Indexed {
     type Elem = Int
 
-    fn at(self, i: Int) -> Int { return self.vals[i] }
+    fn at(self, i: Int) => Int = self.vals[i]
 
-    fn count(self) -> Int { return self.vals.len() }
+    fn count(self) => Int = self.vals.len()
 }
 
 fn run() {

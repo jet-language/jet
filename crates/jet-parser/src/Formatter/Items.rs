@@ -107,7 +107,7 @@ impl<'a> Fmt<'a> {
             Item::Struct(s) => self.fmt_struct(s, true),
             Item::Enum(e) => self.fmt_enum(e, true),
             Item::Impl(i) => {
-                // External-method sugar (`fn Type.method(…) --[]->`) is
+                // External-method sugar (`fn Type.method(…) =[]=>`) is
                 // normalized to an ImplDef by the parser. Its AST deliberately
                 // no longer carries enough ordering information to reconstruct
                 // markers before `fn`, so preserve that source form verbatim.
@@ -174,10 +174,10 @@ impl<'a> Fmt<'a> {
             // D-ERR-CONV: error conversion declarations are emitted verbatim.
             Item::ErrorConv(ec) => {
                 let text = self.src[ec.body_span.start..ec.body_span.end].to_string();
-                // Re-emit as `impl From -> To { body }` verbatim for now.
+                // Re-emit as `impl From => To { body }` verbatim for now.
                 self.write("impl ");
                 self.write(&ec.from_ty);
-                self.write(" -> ");
+                self.write(" => ");
                 self.write(&ec.to_ty);
                 self.write(" ");
                 self.write(&text);
@@ -263,18 +263,18 @@ impl<'a> Fmt<'a> {
                     f.fmt_param(p);
                 }
                 f.write(")");
-                // D-EFF3 / D-SHAPE8: effect bound inside the arrow.
+                // D-EFF3 / D-ARROW-CONTROL1: effect bound inside the callable arrow.
                 if let Some(effects) = &m.declared_effects {
                     let list = effects
                         .iter()
                         .map(|(n, _)| n.as_str())
                         .collect::<Vec<_>>()
                         .join(", ");
-                    f.write(&format!(" --[{}]->", list));
+                    f.write(&format!(" =[{}]=>", list));
                 } else if m.is_pure {
-                    f.write(" --[]->");
+                    f.write(" =[]=>");
                 } else if m.return_type.is_some() {
-                    f.write(" ->");
+                    f.write(" =>");
                 }
                 if let Some(ret) = &m.return_type {
                     f.write(" ");
@@ -327,7 +327,7 @@ impl<'a> Fmt<'a> {
         }
         self.write(")");
         if let Some(ret) = &ef.return_type {
-            self.write(" -> ");
+            self.write(" => ");
             self.fmt_return_type(ret);
         }
         self.write(" = \"");
@@ -750,33 +750,47 @@ impl<'a> Fmt<'a> {
             self.fmt_param(p);
         }
         self.write(")");
-        // D-SHAPE8: effect row lives inside the return arrow.
+        // D-ARROW-CONTROL1: effect row lives inside the callable arrow.
         if let Some(effects) = &f.declared_effects {
-            self.write(" --[");
+            self.write(" =[");
             for (i, (name, _)) in effects.iter().enumerate() {
                 if i > 0 {
                     self.write(", ");
                 }
                 self.write(name);
             }
-            self.write("]->");
+            self.write("]=>");
         } else if f.is_pure {
-            self.write(" --[]->");
+            self.write(" =[]=>");
         }
         // D-EFF2: pass-through occupies the same row.
         if let Some((param, _)) = &f.effect_via {
-            self.write(" --[");
+            self.write(" =[");
             self.write(Syntax::KW_VIA);
             self.write(" ");
             self.write(param);
-            self.write("]->");
+            self.write("]=>");
         }
         if f.declared_effects.is_none() && f.effect_via.is_none() && f.return_type.is_some() {
-            self.write(" ->");
+            self.write(" =>");
         }
         if let Some(ret) = &f.return_type {
             self.write(" ");
             self.fmt_return_type(ret);
+        }
+        // D-ARROW-CONTROL1: preserve the canonical concise callable body.
+        // The parser desugars `= expr` to `return expr`; its synthetic return
+        // span starts on the author-written `=`.
+        if let [crate::AST::Stmt::Return(Some(expr), span)] = f.body.as_slice() {
+            if self
+                .src
+                .get(span.start..span.start.saturating_add(1))
+                .is_some_and(|source| source == "=")
+            {
+                self.write(" = ");
+                self.fmt_expr(expr, Prec::OrFallback);
+                return;
+            }
         }
         // D-FFI-INLINE1=A (card #501): an inline foreign fn's body is a single
         // foreign-source string. Reconstruct the string expression and reuse the

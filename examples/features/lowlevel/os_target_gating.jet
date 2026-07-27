@@ -17,7 +17,7 @@
 // arms never trip `E-OSTARGET-UNMATCHED-CALL`. This is the one dispatch
 // primitive: no fn-level `#Target` gating (option A was rejected).
 trait Backend {
-    fn label(self) -> String
+    fn label(self) => String
 }
 
 struct LinuxBackend {
@@ -34,23 +34,17 @@ struct WindowsBackend {
 
 #Target(Os.Linux)
 impl LinuxBackend.Backend {
-    fn label(self) -> String {
-        return "linux: {self.name}"
-    }
+    fn label(self) => String = "linux: {self.name}"
 }
 
 #Target(Os.Macos)
 impl MacosBackend.Backend {
-    fn label(self) -> String {
-        return "macos: {self.name}"
-    }
+    fn label(self) => String = "macos: {self.name}"
 }
 
 #Target(Os.Windows)
 impl WindowsBackend.Backend {
-    fn label(self) -> String {
-        return "windows: {self.name}"
-    }
+    fn label(self) => String = "windows: {self.name}"
 }
 
 fn run() {

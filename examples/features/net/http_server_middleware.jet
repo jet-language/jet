@@ -4,9 +4,9 @@ use core.http.server as http_server
 use core.tasks as tasks
 use core.time as time
 
-fn outer(next: HttpHandler) -> HttpHandler {
+fn outer(next: HttpHandler) => HttpHandler {
     owned :: ~next
-    return take(owned) (req: HttpRequest) => {
+    return (req: HttpRequest) => {
         if owned.handle(req) == {
             .Ok(response) -> {
                 return Ok(http_server.response(response.status(), "outer>{response.body().text(1048576) ?? "invalid body"}<outer"))
@@ -16,9 +16,9 @@ fn outer(next: HttpHandler) -> HttpHandler {
     }
 }
 
-fn inner(next: HttpHandler) -> HttpHandler {
+fn inner(next: HttpHandler) => HttpHandler {
     owned :: ~next
-    return take(owned) (req: HttpRequest) => {
+    return (req: HttpRequest) => {
         if req.path() == "/blocked" { return Ok(http_server.response(403, "blocked")) }
         if owned.handle(req) == {
             .Ok(response) -> {

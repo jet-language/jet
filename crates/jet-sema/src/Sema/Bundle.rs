@@ -282,6 +282,9 @@ fn stmts_have_comptime_evaluation(stmts: &[Stmt]) -> bool {
         }
         Stmt::Assign { value, .. } => expr_has_comptime_evaluation(value),
         Stmt::Return(Some(value), _) => expr_has_comptime_evaluation(value),
+        Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => {
+            expr_has_comptime_evaluation(value)
+        }
         Stmt::Return(None, _) => false,
         Stmt::If(value) => {
             expr_has_comptime_evaluation(&value.cond) || if_has_comptime_evaluation(value)
@@ -1827,7 +1830,7 @@ fn check_bundle_opts_for_output_inner(
                         "`run` returns the wrong kind of value".to_string(),
                         "`run` is where running starts; it either returns nothing or reports top-level errors with `Void ?`"
                             .to_string(),
-                        "write `fn run() { ... }`, or `fn run() -> Void ? { ... }` if the entry uses `?`"
+                        "write `fn run() { ... }`, or `fn run() => Void ? { ... }` if the entry uses `?`"
                             .to_string(),
                         Some(run_fn.name_span),
                     ));

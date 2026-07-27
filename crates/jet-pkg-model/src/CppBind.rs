@@ -73,7 +73,7 @@ impl Scalar {
             Self::Int => "Int",
             Self::Float => "Float",
             Self::Bool => "Bool",
-            Self::Callback => "fn(Int) --[]-> Int",
+            Self::Callback => "fn(Int) =[]=> Int",
         }
     }
 
@@ -939,14 +939,14 @@ fn render_provenance(
 fn render_jet(lib: &str, surface: &Surface) -> String {
     let abi = format!("jet_cpp_{lib}");
     let mut out = format!(
-        "#Extern module c.{abi} {{\n    fn take_error() -> Int = \"{abi}_take_error\"\n"
+        "#Extern module c.{abi} {{\n    fn take_error() => Int = \"{abi}_take_error\"\n"
     );
     for class in &surface.classes {
         let name = snake(&class.name);
         out.push_str(&format!("    fn {name}_new("));
         jet_params(&mut out, &class.ctor);
         out.push_str(&format!(
-            ") -> Int = \"{abi}_{name}_new\"\n    fn {name}_close(handle: Int) = \"{abi}_{name}_close\"\n"
+            ") => Int = \"{abi}_{name}_new\"\n    fn {name}_close(handle: Int) = \"{abi}_{name}_close\"\n"
         ));
         for method in &class.methods {
             out.push_str(&format!("    fn {name}_{}(handle: Int", method.jet_name));
@@ -955,7 +955,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
                 jet_params(&mut out, &method.params);
             }
             out.push_str(&format!(
-                ") -> {} = \"{abi}_{name}_{}\"\n",
+                ") => {} = \"{abi}_{name}_{}\"\n",
                 method.result.jet(),
                 method.jet_name
             ));
@@ -965,12 +965,12 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         out.push_str(&format!("    fn {}(", function.jet_name));
         jet_params(&mut out, &function.params);
         out.push_str(&format!(
-            ") -> {} = \"{abi}_{}\"\n",
+            ") => {} = \"{abi}_{}\"\n",
             function.result.jet(),
             function.jet_name
         ));
     }
-    out.push_str(&format!("}}\nuse c.{abi} as abi\n\npub enum CppError {{ Exception InvalidHandle ResourceLimit }}\n\nfn cpp_error(code: Int) -> CppError {{ if code == 2 {{ return CppError.InvalidHandle }} if code == 3 {{ return CppError.ResourceLimit }} return CppError.Exception }}\n\n"));
+    out.push_str(&format!("}}\nuse c.{abi} as abi\n\npub enum CppError {{ Exception InvalidHandle ResourceLimit }}\n\nfn cpp_error(code: Int) => CppError {{ if code == 2 {{ return CppError.InvalidHandle }} if code == 3 {{ return CppError.ResourceLimit }} return CppError.Exception }}\n\n"));
     for class in &surface.classes {
         let name = snake(&class.name);
         out.push_str(&format!(
@@ -979,7 +979,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         ));
         jet_params(&mut out, &class.ctor);
         out.push_str(&format!(
-            ") -> {} ? CppError {{\n    value :: abi.{name}_new(",
+            ") => {} ? CppError {{\n    value :: abi.{name}_new(",
             class.name
         ));
         jet_args(&mut out, &class.ctor);
@@ -997,7 +997,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
                 jet_params(&mut out, &method.params);
             }
             out.push_str(&format!(
-                ") -> {} ? CppError {{\n        result_value :: abi.{name}_{}(self.value",
+                ") => {} ? CppError {{\n        result_value :: abi.{name}_{}(self.value",
                 method.result.jet(),
                 method.jet_name
             ));
@@ -1016,7 +1016,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         out.push_str(&format!("pub fn {}(", function.jet_name));
         jet_params(&mut out, &function.params);
         out.push_str(&format!(
-            ") -> {} ? CppError {{\n    result_value :: abi.{}(",
+            ") => {} ? CppError {{\n    result_value :: abi.{}(",
             function.result.jet(),
             function.jet_name
         ));

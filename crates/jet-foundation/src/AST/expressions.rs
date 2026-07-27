@@ -145,18 +145,31 @@ pub enum LambdaBody {
     Block(Vec<Stmt>),
 }
 
-/// S47: filled by sema — capture/escape lowering hints for codegen.
+/// S47/D-ARROW-CONTROL1: capture and escape lowering hints filled by sema.
 #[derive(Debug, Clone, Default)]
 pub struct LambdaMeta {
     pub escapes: bool,
     pub needs_fn_mut: bool,
     pub mut_captures: Vec<String>,
     pub cloned_captures: Vec<String>,
+    pub moved_captures: Vec<String>,
+    /// D-LOOPEVAL1: compiler-private zero-parameter closure used to carry one
+    /// finite yielding loop through existing expression, comptime, JIT, and
+    /// AOT paths. The formatter restores the `loop … -> …` source surface.
+    pub collecting_loop: bool,
+    /// Item type inferred by sema for the compiler-private collecting closure.
+    pub collect_item_type: Option<Type>,
+    /// D-LOOPSTATE1: compiler-private carrier for a bare loop expression whose
+    /// final value comes from `break value`.
+    pub result_loop: bool,
+    pub loop_result_type: Option<Type>,
+    pub loop_label: Option<(String, Span)>,
 }
 
-/// S46/S47 (M8): `(take names) (params) => body`.
+/// S46/S47 (M8): `(params) => body`; captures are inferred.
 #[derive(Debug, Clone)]
 pub struct Lambda {
+    /// Retired `take(...)` names kept only for one-pass migration diagnostics.
     pub take_names: Vec<(String, Span)>,
     pub params: Vec<LambdaParam>,
     pub body: LambdaBody,

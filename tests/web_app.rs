@@ -65,7 +65,7 @@ fn web_app_routes_from_exhaustive() {
         r#"
 use core.web as web
 
-fn app() -> WebApp {
+fn app() => WebApp {
     return web.app().routes(from: "routes")
 }
 

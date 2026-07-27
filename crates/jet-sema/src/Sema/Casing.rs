@@ -283,6 +283,9 @@ fn stmt_names(stmts: &[Stmt], out: &mut Vec<Diagnostic>) {
             | Stmt::Shield { body, .. } | Stmt::Off { body, .. } | Stmt::DebugOnly { body, .. }
             | Stmt::Policy { body, .. } | Stmt::Caps { body, .. } | Stmt::ComptimeBlock { body, .. }
             | Stmt::Live { body, .. } | Stmt::AssumeDet { body, .. } => stmt_names(body, out),
+            Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => {
+                expr_names(value, out)
+            }
             Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
         }
     }

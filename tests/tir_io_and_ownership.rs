@@ -75,7 +75,7 @@ fn qualified_io_input_or_return() {
     }
     let src = "\
 use core.io as io
-fn collect() -> [String] {
+fn collect() => [String] {
     out := [String].{}
     loop true {
         line :: io.input(\"> \") ?? return ~out
@@ -121,17 +121,17 @@ fn generic_fns_and_trait_object_dispatch() {
     }
     let src = "\
 trait Shape {
-    fn area(self) -> Float
-    fn name(self) -> String
+    fn area(self) => Float
+    fn name(self) => String
 }
 struct Circle {
     radius: Float
 
     impl Shape {
-        fn area(self) -> Float {
+        fn area(self) => Float {
             return ((3.14159 * self.radius) * self.radius)
         }
-        fn name(self) -> String {
+        fn name(self) => String {
             return \"circle\"
         }
     }
@@ -140,14 +140,14 @@ struct Square {
     side: Float
 }
 impl Square.Shape {
-    fn area(self) -> Float {
+    fn area(self) => Float {
         return (self.side * self.side)
     }
-    fn name(self) -> String {
+    fn name(self) => String {
         return \"square\"
     }
 }
-fn largest<T: Comparable>(xs: [T]) -> (T?) {
+fn largest<T: Comparable>(xs: [T]) => (T?) {
     if xs.len() == 0 {
         return None
     }
@@ -219,7 +219,7 @@ fn borrowed_parameter_option_fallback_needs_explicit_copy() {
 struct Config {
     path: String?
 }
-fn selected(config: Config) -> String {
+fn selected(config: Config) => String {
     return config.path ?? \"default.toml\"
 }
 fn run() {
@@ -401,8 +401,8 @@ fn read_text(text: String) { print(text) }
 fn read_list(values: [Int]) { print(values.len()) }
 fn read_generic<T>(value: T) { print(7) }
 fn read_nested(branch: Branch) { print(branch.leaf.text) }
-fn apply(f: fn(Int) -> Int, value: Int) -> Int { return f(value) }
-fn increment(value: Int) -> Int { return value + 1 }
+fn apply(f: fn(Int) => Int, value: Int) => Int { return f(value) }
+fn increment(value: Int) => Int { return value + 1 }
 fn edit(values: &[Int]) { values[0] = 9 }
 fn consume(text: ^String) { print(text) }
 
@@ -436,28 +436,28 @@ fn generic_inherent_methods_use_per_method_clone_bounds() {
     }
     let src = r#"
 trait Measure {
-    fn measure(self) -> Int
+    fn measure(self) => Int
 }
 
 struct Holder<T> {
-    reader: fn(T) -> Int
+    reader: fn(T) => Int
 
-    fn inspect(self) -> Int {
+    fn inspect(self) => Int {
         return 1
     }
 
-    fn copy_tagged(self, value: #Tainted T) -> #Tainted T {
+    fn copy_tagged(self, value: #Tainted T) => #Tainted T {
         return ~value
     }
 }
 
-fn increment(value: Int) -> Int { return value + 1 }
-fn read_callback(value: fn(Int) -> Int) -> Int { return 1 }
-fn read_measure(value: Measure) -> Int { return 2 }
-fn read_string(value: String) -> Int { return value.len() }
+fn increment(value: Int) => Int { return value + 1 }
+fn read_callback(value: fn(Int) => Int) => Int { return 1 }
+fn read_measure(value: Measure) => Int { return 2 }
+fn read_string(value: String) => Int { return value.len() }
 
 fn run() {
-    callbacks :: Holder<fn(Int) -> Int>.{reader: read_callback}
+    callbacks :: Holder<fn(Int) => Int>.{reader: read_callback}
     measures :: Holder<Measure>.{reader: read_measure}
     strings :: Holder<String>.{reader: read_string}
     print(callbacks.inspect())

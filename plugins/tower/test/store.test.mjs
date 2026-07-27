@@ -121,7 +121,7 @@ test('card writes renew active claims and terminal phases clear them', () => {
   assert.equal(st.load().cards[0].claimedAt, undefined);
 });
 
-test('milestones: progress computes from linked cards; delete unlinks', () => {
+test('milestones: cards drive progress and completion; delete unlinks', () => {
   const st = fresh();
   st.mutate((s) => db.addEpoch(s, { id: 'e1', name: 'One' }));
   const { result: m } = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP' }));
@@ -129,23 +129,72 @@ test('milestones: progress computes from linked cards; delete unlinks', () => {
   st.mutate((s, cfg) => db.addCard(s, { title: 'B', epoch: 'e1', milestoneId: m.id }, cfg));
   let proj = project(st.load());
   assert.deepEqual(proj.milestones[0].progress, { total: 2, done: 1, met: false });
+  st.mutate((s, cfg) => db.updateCard(s, '#2', { phase: 'done', by: 'agent-1' }, cfg));
+  proj = project(st.load());
+  assert.deepEqual(proj.milestones[0].progress, { total: 2, done: 2, met: true });
+  assert.equal(st.load().milestones[0].status, 'met');
+  st.mutate((s, cfg) => db.updateCard(s, '#2', { phase: 'building', by: 'agent-1' }, cfg));
+  assert.equal(st.load().milestones[0].status, 'open');
+  st.mutate((s, cfg) => db.updateCard(s, '#2', { phase: 'done', by: 'agent-1' }, cfg));
+  st.mutate((s, cfg) => db.updateCard(s, '#1', { milestoneId: null, by: 'agent-1' }, cfg));
+  assert.equal(st.load().milestones[0].status, 'met', 'remaining linked card is done');
+  st.mutate((s, cfg) => db.updateCard(s, '#2', { milestoneId: null, by: 'agent-1' }, cfg));
+  assert.equal(st.load().milestones[0].status, 'open', 'empty milestone reopens');
+  assert.deepEqual(project(st.load()).milestones[0].progress, { total: 0, done: 0, met: false });
   st.mutate((s) => db.deleteMilestone(s, m.id, 'owner'));
   const s = st.load();
   assert.equal(s.milestones.length, 0);
   assert.equal(s.cards[0].milestoneId, null);
 });
 
-test('nextCards ordering: workOrder, then building > verify > implement > plan', () => {
+test('milestone progress deduplicates live and archived copies by card id', () => {
+  const milestone = { id: 'm-1', status: 'open' };
+  const live = [{ id: 'c-1', milestoneId: 'm-1', phase: 'building' }];
+  const history = [
+    { id: 'c-1', milestoneId: 'm-1', phase: 'done' },
+    { id: 'c-2', milestoneId: 'm-1', phase: 'done' },
+  ];
+  assert.deepEqual(db.milestoneProgress(milestone, live, history), { total: 2, done: 1, met: false });
+});
+
+test('milestones: cards cannot cross epochs and sidequests stay unlinked', () => {
+  const st = fresh();
+  st.mutate((s) => {
+    db.addEpoch(s, { id: 'e1', name: 'One' });
+    db.addEpoch(s, { id: 'e2', name: 'Two' });
+  });
+  const m = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP' })).result;
+  assert.throws(
+    () => st.mutate((s, cfg) => db.addCard(s, { title: 'Wrong epoch', epoch: 'e2', milestoneId: m.id }, cfg)),
+    /belongs to epoch e1/,
+  );
+  assert.throws(
+    () => st.mutate((s, cfg) => db.addCard(s, { title: 'Sidequest', track: 'sidequest', epoch: 'e1', milestoneId: m.id }, cfg)),
+    /sidequest cards cannot link to milestones/,
+  );
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Scoped', epoch: 'e1', milestoneId: m.id }, cfg));
+  assert.throws(
+    () => st.mutate((s, cfg) => db.updateCard(s, '#1', { epoch: 'e2', by: 'agent-1' }, cfg)),
+    /belongs to epoch e1/,
+  );
+  assert.throws(
+    () => st.mutate((s) => db.updateMilestone(s, m.id, { epochId: 'e2' }, 'owner')),
+    /milestone epoch is fixed/,
+  );
+});
+
+test('nextCards ordering: verify > building > implement > plan, then workOrder', () => {
   const st = fresh();
   st.mutate((s, cfg) => {
     db.addCard(s, { title: 'plan-2', phase: 'planning', workOrder: 2 }, cfg);
-    db.addCard(s, { title: 'build-3', phase: 'building', workOrder: 3 }, cfg);
-    db.addCard(s, { title: 'verify-2', phase: 'verify', workOrder: 2 }, cfg);
+    db.addCard(s, { title: 'build-1', phase: 'building', workOrder: 1 }, cfg);
+    db.addCard(s, { title: 'verify-99', phase: 'verify', workOrder: 99 }, cfg);
+    db.addCard(s, { title: 'implement-1', phase: 'ready', workOrder: 1 }, cfg);
     db.addCard(s, { title: 'no-order', phase: 'building' }, cfg);
     db.addCard(s, { title: 'frozen', phase: 'frozen', workOrder: 1 }, cfg);
   });
   const picks = nextCards(st.load()).map(c => c.title);
-  assert.deepEqual(picks, ['verify-2', 'plan-2', 'build-3', 'no-order']);
+  assert.deepEqual(picks, ['verify-99', 'build-1', 'no-order', 'implement-1', 'plan-2']);
 });
 
 test('blockedBy gates the lane until blocker closes', () => {
@@ -175,6 +224,7 @@ test('idea promote → planning card (agent-ready, no greenlight step), idea tag
 test('events are recorded with attribution', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', by: 'agent-7' }, cfg));
+  assert.equal(st.load().cards[0].updatedBy, 'agent-7');
   const e = st.load().events[0];
   assert.equal(e.action, 'card.add');
   assert.equal(e.by, 'agent-7');

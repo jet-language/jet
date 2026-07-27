@@ -3,24 +3,24 @@
 use core.tasks as tasks
 use core.time as time
 
-fn slow_one() -> Int {
+fn slow_one() => Int {
     time.sleep(200)
     return 1
 }
 
-fn boom() -> Int {
+fn boom() => Int {
     zero :: 0
     return 1 / zero
 }
 
 fn run() {
     taskgroup g {
-        slow :: g.task(() => {
+        slow :: g.task => {
             slow_one()
-        })
-        bad :: g.task(() => {
+        }
+        bad :: g.task => {
             boom()
-        })
+        }
         results :: g.all([slow, bad])
         print(results[0])
     }

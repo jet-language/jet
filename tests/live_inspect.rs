@@ -34,7 +34,7 @@ fn run() {
     secret_sender.send("TOP_SECRET_CHANNEL_PAYLOAD")
     (ready_sender, ready) :: tasks.channel<Int>()
     (_sender, blocked) :: tasks.channel<Int>(1)
-    child :: tasks.spawn(take(ready_sender, blocked) () => {
+    child :: tasks.spawn(() => {
         ready_sender.send(1)
         blocked.receive() ?? panic("closed")
     })

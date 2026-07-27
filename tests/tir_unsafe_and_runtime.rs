@@ -21,7 +21,7 @@ fn unsafe_fn_block_and_ptr_ops() {
     let src = "\
 use core.mem
 #Unsafe(\"reads through a raw pointer; addr must be a live, valid Int\")
-fn read_reg(addr: Int) -> Int {
+fn read_reg(addr: Int) => Int {
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
@@ -50,7 +50,7 @@ fn unsafe_tier_emit_is_byte_exact() {
     let src = "\
 use core.mem
 #Unsafe(\"reads through a raw pointer; addr must be valid\")
-fn read_reg(addr: Int) -> Int {
+fn read_reg(addr: Int) => Int {
     p :: mem.Ptr<Int>.from_addr(addr)
     return mem.volatile_read(p)
 }
@@ -188,16 +188,16 @@ struct Pair<T> {
     first: T
     second: T
 }
-fn make_pair<T>(a: T, b: T) -> Pair<T> {
+fn make_pair<T>(a: T, b: T) => Pair<T> {
     return Pair<T>.{first: a, second: b}
 }
 struct Stack<T> {
     items: [T]
 }
-fn empty_stack<T>() -> Stack<T> {
+fn empty_stack<T>() => Stack<T> {
     return Stack<T>.{items: []}
 }
-fn push<T>(s: Stack<T>, item: T) -> Stack<T> {
+fn push<T>(s: Stack<T>, item: T) => Stack<T> {
     dup := s
     dup.items.push(item)
     return dup
@@ -232,7 +232,7 @@ fn foreign_struct_construction() {
     .unwrap();
     let main_src = "\
 use \"note\"
-fn make() -> Note {
+fn make() => Note {
     return note.Note.{ title: \"hello\", pages: 3 }
 }
 fn run() {
@@ -383,7 +383,7 @@ fn polymorphic_core_specials() {
 use core.math as math
 use core.random as random
 use core.io as io
-fn calc() -> Int {
+fn calc() => Int {
     a :: math.abs((-5))
     b :: math.min(3, 7)
     c :: math.max(3, 7)
@@ -422,7 +422,7 @@ fn http_request_response_accessors() {
     let src = "\
 use core.http as http
 use core.http.server as server
-fn handle(req: HttpRequest) -> HttpResponse {
+fn handle(req: HttpRequest) => HttpResponse {
     m :: req.method()
     p :: req.path()
     h :: req.header(\"host\")
@@ -430,7 +430,7 @@ fn handle(req: HttpRequest) -> HttpResponse {
     body :: \"m={m} p={p}\"
     return server.response(200, body)
 }
-fn describe(resp: HttpResponse) -> String {
+fn describe(resp: HttpResponse) => String {
     s :: resp.status()
     b :: resp.body().text(1048576) ?? \"invalid body\"
     return \"{s}: {b}\"
@@ -456,7 +456,7 @@ fn task_spawn_join() {
     }
     let src = "\
 use core.tasks as tasks
-fn sum_range(first: Int, last: Int) -> Int {
+fn sum_range(first: Int, last: Int) => Int {
     total := 0
     loop n; first..last {
         total = (total + n)
@@ -508,10 +508,10 @@ use core.tasks as tasks
 fn run() {
 (s1, ch) :: tasks.channel<Int>()
     s2 :: ~s1
-    t1 :: tasks.spawn(take(s1) () => {
+    t1 :: tasks.spawn(() => {
         s1.send(30)
     })
-    t2 :: tasks.spawn(take(s2) () => {
+    t2 :: tasks.spawn(() => {
         s2.send(12)
     })
     t1.join()
@@ -560,14 +560,14 @@ fn method_call_collection_iteration() {
         return;
     }
     let src = "\
-fn count_chars(s: String) -> Int {
+fn count_chars(s: String) => Int {
     n := 0
     loop c; s.chars() {
         n+= 1
     }
     return n
 }
-fn join_words(s: String) -> String {
+fn join_words(s: String) => String {
     out := \"\"
     loop w; s.split(\",\") {
         out = \"{out}[{w}]\"
@@ -593,7 +593,7 @@ fn optional_binding_if_condition() {
         return;
     }
     let src = "\
-fn describe(x: Int?) -> String {
+fn describe(x: Int?) => String {
     if x == Val(n) {
         return \"got {n}\"
     }
@@ -602,7 +602,7 @@ fn describe(x: Int?) -> String {
     }
     return \"?\"
 }
-fn first_even(xs: [Int]) -> Int {
+fn first_even(xs: [Int]) => Int {
     out := [Int].{}
     i := 0
     loop i < xs.len() {
@@ -631,32 +631,32 @@ fn optional_flow_narrowing_after_none_check() {
         return;
     }
     let src = "\
-fn from_ne(x: Int?) -> Int {
+fn from_ne(x: Int?) => Int {
     if x != None {
         return x + 1
     }
     return 0
 }
-fn from_else(x: Int?) -> Int {
+fn from_else(x: Int?) => Int {
     if x == None {
         return 0
     } else {
         return x + 2
     }
 }
-fn and_tail(x: Int?) -> Int {
+fn and_tail(x: Int?) => Int {
     if x != None && x > 0 {
         return x
     }
     return -1
 }
-fn still_binds(x: Int?) -> Int {
+fn still_binds(x: Int?) => Int {
     if x == Val(n) {
         return n * 10
     }
     return -2
 }
-fn text_ne(x: String?) -> String {
+fn text_ne(x: String?) => String {
     if x != None {
         return x
     }
@@ -719,7 +719,7 @@ fn run() {
 
     let call = jet::compile(
         "\
-fn get() -> Int? { return Val(1) }
+fn get() => Int? { return Val(1) }
 fn run() {
     if get() != None {
         print(get() + 1)
@@ -760,4 +760,3 @@ fn run() {
         "Optional narrowing must not travel through ||"
     );
 }
-

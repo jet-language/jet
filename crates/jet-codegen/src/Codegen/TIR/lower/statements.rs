@@ -1231,8 +1231,16 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             }
         },
         Stmt::Break(_) => TStmt::Break(None),
+        Stmt::BreakValue(value, _) => TStmt::BreakValue {
+            label: None,
+            value: lower_expr(value, cx, env),
+        },
         Stmt::Continue(_) => TStmt::Continue(None),
         Stmt::BreakLabel(name, _) => TStmt::Break(Some(name.clone())),
+        Stmt::BreakLabelValue(name, _, value, _) => TStmt::BreakValue {
+            label: Some(name.clone()),
+            value: lower_expr(value, cx, env),
+        },
         Stmt::ContinueLabel(name, _) => TStmt::Continue(Some(name.clone())),
         // c109 Phase 4: a `when`/match. The gate already classified it as either an
         // exhaustive enum match (shape A) or an all-range scalar switch (shape B).

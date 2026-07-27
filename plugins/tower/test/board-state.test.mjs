@@ -6,14 +6,14 @@ const card = (num, lane, phase = lane, extra = {}) => ({
   num, title: `Card ${num}`, phase, priority: 'P1', lane: { lane, label: lane }, ...extra,
 });
 
-test('workflow order is in-progress, ready, plan, blocked, closed', () => {
+test('workflow order is verify, building, ready, plan, blocked, closed', () => {
   const cards = [
     card(5, 'done'),
     card(4, 'blocked', 'planning'),
     card(3, 'plan', 'planning'),
     card(2, 'implement', 'ready'),
-    card(1, 'verify'),
-    card(6, 'building'),
+    card(1, 'verify', 'verify', { workOrder: 99 }),
+    card(6, 'building', 'building', { workOrder: 1 }),
   ];
   assert.deepEqual(sortCards(cards).map(c => c.num), [1, 6, 2, 3, 4, 5]);
   assert.deepEqual(cards.map(workflowRank), [4, 3, 2, 1, 0, 0]);
@@ -43,6 +43,10 @@ test('explicit sorts keep stable work-order, priority, and number ties', () => {
     card(1, 'blocked', 'planning', { workOrder: 1, priority: 'P0' }),
   ];
   assert.deepEqual(sortCards(cards, { col: 'workOrder' }).map(c => c.num), [1, 2, 3]);
+  assert.deepEqual(sortCards([
+    card(4, 'verify', 'verify', { workOrder: 2 }),
+    card(5, 'building', 'building', { workOrder: 1 }),
+  ], { col: 'workOrder' }).map(c => c.num), [5, 4], 'an explicit sort overrides workflow order');
   assert.deepEqual(sortCards(cards, { col: 'priority', dir: 'desc' }).map(c => c.num), [3, 2, 1]);
   assert.deepEqual(sortCards([
     card(4, 'plan', 'planning', { priority: 'Urgent' }),
@@ -54,10 +58,17 @@ test('show closed adds finished epochs that the active radar omits', () => {
   const radar = [{ id: 'e1', name: 'Active' }];
   const epochs = [{ id: 'e1', name: 'Active' }, { id: 'e2', name: 'Finished', goal: 'shipped' }];
   const cards = [card(20, 'done', 'done', { epoch: 'e2', track: 'epoch' })];
-  assert.deepEqual(boardEpochs(radar, epochs, cards, [], false), radar);
-  assert.deepEqual(boardEpochs(radar, epochs, cards, [], true).map(e => e.id), ['e1', 'e2']);
-  assert.deepEqual(boardEpochs(radar, epochs, cards, [], true)[1], {
-    id: 'e2', name: 'Finished', goal: 'shipped', active: 0, done: 1, pct: 100, burndown: [], milestones: [],
+  const milestones = [{ id: 'm1', epochId: 'e2', title: 'Shipped', status: 'met', progress: { total: 1, done: 1, met: true } }];
+  assert.deepEqual(boardEpochs(radar, epochs, cards, milestones, false), radar);
+  assert.deepEqual(boardEpochs(radar, epochs, cards, milestones, true).map(e => e.id), ['e1', 'e2']);
+  assert.deepEqual(boardEpochs(radar, epochs, cards, milestones, true)[1], {
+    id: 'e2', name: 'Finished', goal: 'shipped', active: 0, done: 1,
+    milestoneTotal: 1, milestonesMet: 1, pct: 100, burndown: [],
+    milestones: [{
+      id: 'm1', epochId: 'e2', title: 'Shipped', status: 'met',
+      progress: { total: 1, done: 1, met: true },
+      total: 1, done: 1, met: true, stalledDays: null,
+    }],
   });
 });
 

@@ -52,6 +52,9 @@ pub fn parse_for_check(toks: &[Token]) -> Result<(Program, Vec<Diagnostic>), Vec
         type_generic_truncated: false,
         pub_file_default: false,
         in_layout_body: 0,
+        adjacent_if_body_depth: 0,
+        block_depth: 0,
+        callable_tail_block_depth: None,
         module_arg_expr_depth: None,
         policy_declarations: Vec::new(),
         applied_rules: Vec::new(),
@@ -82,6 +85,9 @@ fn parse_inner(toks: &[Token], for_fmt: bool) -> Result<Program, Vec<Diagnostic>
         type_generic_truncated: false,
         pub_file_default: false,
         in_layout_body: 0,
+        adjacent_if_body_depth: 0,
+        block_depth: 0,
+        callable_tail_block_depth: None,
         module_arg_expr_depth: None,
         policy_declarations: Vec::new(),
         applied_rules: Vec::new(),
@@ -135,6 +141,12 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0048"
             | "E0049"
             | "E0055"
+            | "E0057"
+            | "E0066"
+            | "E0070"
+            | "E0071"
+            | "E0077"
+            | "E0154"
             | "E0210"
             | "E0986"
             | "E0320"
@@ -186,6 +198,13 @@ struct Parser<'a> {
     /// so the parser lets `Expr::Binary` through here; sema (E2932/E2933)
     /// enforces that it's actually a valid constraint, not the parser.
     in_layout_body: usize,
+    /// >0 while a one-line effect-only `if` body is being parsed. The body's
+    /// statement may end at an adjacent `else` instead of a line terminator.
+    adjacent_if_body_depth: usize,
+    /// Current statement-block nesting. An explicit callable result contract
+    /// may admit one final value expression only at its own body depth.
+    block_depth: usize,
+    callable_tail_block_depth: Option<usize>,
     /// While parsing a value in `Template<...>`, a top-level `>` closes the
     /// application instead of becoming a comparison. Nested expressions can
     /// still use `>` normally.
@@ -351,6 +370,7 @@ impl<'a> Parser<'a> {
             // it. A struct/map literal's `}` is consumed by the expression
             // parser, so it never reaches here — no risk to literals.
             TokKind::RBrace | TokKind::Eof => Ok(()),
+            TokKind::KwElse if self.adjacent_if_body_depth > 0 => Ok(()),
             other => Err(Diagnostic::error(
                 "E0003",
                 format!(
@@ -549,11 +569,11 @@ mod s61_tests {
         );
     }
 
-    /// D-TASKSCOPE1=A: `g.task { … }` parses as a scoped spawn call, not struct lit.
+    /// D-TASKSCOPE1=A: `g.task => { … }` parses as a scoped spawn call.
     #[test]
-    fn taskgroup_task_block_parses_as_spawn() {
+    fn taskgroup_task_callable_body_parses_as_spawn() {
         let p =
-            program("fn run() {\n    taskgroup g {\n        h :: g.task { return 1 }\n    }\n}\n");
+            program("fn run() {\n    taskgroup g {\n        h :: g.task => { return 1 }\n    }\n}\n");
         let run = p.items.iter().find_map(|i| match i {
             crate::AST::Item::Func(f) if f.name == "run" => Some(f),
             _ => None,
@@ -573,7 +593,7 @@ mod s61_tests {
                 assert_eq!(args.len(), 1);
                 assert!(matches!(args[0].expr, Expr::Lambda(_)));
             }
-            other => panic!("expected g.task {{ … }} MethodCall, got {other:?}"),
+            other => panic!("expected g.task => {{ … }} MethodCall, got {other:?}"),
         }
     }
 
@@ -582,7 +602,7 @@ mod s61_tests {
     /// captured as foreign source and the statement body is empty.
     #[test]
     fn ffi_c_inline_tier_parses() {
-        let src = "#FFI(c) fn add(a: Int, b: Int) -> Int {\n    \"\"\"long add(long a, long b) { return a + b; }\\n\"quoted\"\n\"\"\"\n}\n";
+        let src = "#FFI(c) fn add(a: Int, b: Int) => Int {\n    \"\"\"long add(long a, long b) { return a + b; }\\n\"quoted\"\n\"\"\"\n}\n";
         let p = program(src);
         let func = p
             .items
@@ -609,7 +629,7 @@ mod s61_tests {
     /// parses with both the unsafe contract and the inline foreign payload.
     #[test]
     fn ffi_asm_inline_tier_with_unsafe_gate_parses() {
-        let src = "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() -> U64 {\n    \"\"\"rdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n; clobbers rdx\"\"\"\n}\n";
+        let src = "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() => U64 {\n    \"\"\"rdtsc\nshl rdx, 32\nor rax, rdx        ; -> return\n; clobbers rdx\"\"\"\n}\n";
         let p = program(src);
         let func = p
             .items
@@ -632,7 +652,7 @@ mod s61_tests {
 
     #[test]
     fn grouped_ffi_keeps_unsafe_gate_and_raw_payload() {
-        let src = "use core.mem\n#[Unsafe(\"scalar registers\"), FFI(asm)]\nfn add(a: Int, b: Int) -> Int {\n    \"\"\"add {a}, {b} ; -> return\"\"\"\n}\n";
+        let src = "use core.mem\n#[Unsafe(\"scalar registers\"), FFI(asm)]\nfn add(a: Int, b: Int) => Int {\n    \"\"\"add {a}, {b} ; -> return\"\"\"\n}\n";
         let p = program(src);
         let func = p.items.iter().find_map(|item| match item {
             crate::AST::Item::Func(func) if func.name == "add" => Some(func),
@@ -863,7 +883,7 @@ mod s61_tests {
     #[test]
     fn abi_lowers_to_the_c_declaration_field_and_groups_reject_extra_rules() {
         let program = program(
-            "#Extern module c.demo {\n    #Abi(sysv64) fn ping(x: I32) -> I32 = \"ping\"\n}\n",
+            "#Extern module c.demo {\n    #Abi(sysv64) fn ping(x: I32) => I32 = \"ping\"\n}\n",
         );
         let function = program
             .items
@@ -912,8 +932,8 @@ mod s61_tests {
     fn ffi_inline_tier_formats_idempotently() {
         use crate::Formatter::format_source;
         for src in [
-            "#FFI(c) fn add(a: Int, b: Int) -> Int {\n    \"\"\"long add(long a, long b) { return a + b; }\n\"\"\"\n}\n",
-            "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() -> U64 {\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}\n",
+            "#FFI(c) fn add(a: Int, b: Int) => Int {\n    \"\"\"long add(long a, long b) { return a + b; }\n\"\"\"\n}\n",
+            "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] fn rdtsc() => U64 {\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}\n",
         ] {
             let once = format_source(src).expect("format once");
             assert!(once.contains("FFI("), "formatted output keeps the FFI marker: {once}");
@@ -927,11 +947,11 @@ mod s61_tests {
     fn pub_file_marker_sets_default_visibility() {
         let src = r#"#PubFile
 
-fn greet() -> String {
+fn greet() => String {
     return "hi"
 }
 
-priv fn secret() -> Int {
+priv fn secret() => Int {
     return 0
 }
 
@@ -974,6 +994,9 @@ fn run() {
             type_generic_truncated: false,
             pub_file_default: false,
             in_layout_body: 0,
+            adjacent_if_body_depth: 0,
+            block_depth: 0,
+            callable_tail_block_depth: None,
             module_arg_expr_depth: None,
             policy_declarations: Vec::new(),
             applied_rules: Vec::new(),
@@ -986,6 +1009,108 @@ fn run() {
             "expected E0415, got {:?}",
             p.diags
         );
+    }
+
+    #[test]
+    fn arrow_control_law_formats_canonical_forms_idempotently() {
+        use crate::Formatter::format_source;
+
+        let src = r#"protocol Exchange {
+    client: Hello(id: Int)
+    server: Ready()
+}
+
+fn classify(score: Int) => Grade = if {
+    score >= 90 -> .A
+    score >= 80 -> .B
+    else -> .C
+}
+
+fn notify(ready: Bool) =[Net]=> Void {
+    if ready send() else skip()
+    loop item; items audit(item)
+    outer :: loop {
+        next(outer)
+    }
+    taskgroup group {
+        task :: group.task => fetch()
+    }
+    #Grant(caps: Fs, Net) {
+        use_caps(caps)
+    }
+}
+"#;
+
+        let once = format_source(src).expect("canonical arrow/control syntax formats");
+        assert!(once.contains("fn classify(score: Int) => Grade = if {"), "{once}");
+        assert!(once.contains("score >= 90 -> .A"), "{once}");
+        assert!(once.contains("fn notify(ready: Bool) =[Net]=> Void"), "{once}");
+        assert!(once.contains("if ready send() else skip()"), "{once}");
+        assert!(once.contains("loop item; items audit(item)"), "{once}");
+        assert!(once.contains("next(outer)"), "{once}");
+        assert!(once.contains("task :: group.task => fetch()"), "{once}");
+        assert!(once.contains("#Grant(caps: Fs, Net)"), "{once}");
+        let twice = format_source(&once).expect("canonical arrow/control syntax reformats");
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn named_effect_loop_stops_value_lookahead_at_its_body() {
+        use crate::Formatter::format_source;
+
+        let src = r#"fn run() {
+    outer :: loop {
+        break
+    }
+    values :: loop item; [1, 2] -> item
+    state :: if ready -> 1 else -> 2
+}
+"#;
+        format_source(src).expect("later value arrows must not reclassify the named effect loop");
+    }
+
+    #[test]
+    fn multiline_callable_tail_preserves_its_source_expression() {
+        let p = program(
+            "fn double(value: Int) => Int {\n    adjusted :: value + 1\n    adjusted * 2\n}\n",
+        );
+        let func = p.items.iter().find_map(|item| match item {
+            crate::AST::Item::Func(func) if func.name == "double" => Some(func),
+            _ => None,
+        });
+        assert!(
+            matches!(
+                func.expect("double").body.last(),
+                Some(Stmt::Expr(_))
+            ),
+            "parser must preserve the final expression; sema lowers it to the callable result"
+        );
+    }
+
+    #[test]
+    fn retired_arrow_control_forms_have_specific_teaching_diagnostics() {
+        for (src, code) in [
+            ("fn old() -> Int { return 1 }\n", "E0070"),
+            ("fn old() --[Fs]-> Int { return 1 }\n", "E0066"),
+            ("fn run() { if ready -> send() }\n", "E0071"),
+            ("fn run() { #Grant(Fs) { caps -> use_caps(caps) } }\n", "E0077"),
+            (
+                "protocol Old { client -> server: Hello(id: Int) }\n",
+                "E0154",
+            ),
+            (
+                "fn run() { f :: take(value) (x: Int) => x + value }\n",
+                "E0057",
+            ),
+        ] {
+            let (tokens, lex_diagnostics) = lex(src);
+            assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+            let diagnostics = parse(&tokens).expect_err("retired syntax must teach");
+            assert!(
+                diagnostics.iter().any(|diagnostic| diagnostic.code == code),
+                "expected {code}, got {diagnostics:?}"
+            );
+        }
     }
 
     #[test]

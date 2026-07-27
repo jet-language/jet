@@ -2,7 +2,7 @@
 // `live { … }` enters un-buffered/no-echo mode for its body and guarantees
 // terminal-state restore on every exit path (normal, return, ?, panic) via
 // the D-DEFER1 scope-guard mechanism. `use core.term as term` gives
-// `term.read_key() -> Key` inside or outside a live block.
+// `term.read_key() => Key` inside or outside a live block.
 //
 // Pattern-tests on Key use the `== Variant(binding)` form.
 // Unit-variant equality (`== Enter`) works as a pattern test when the
@@ -13,7 +13,7 @@
 // golden test runs without requiring interactive stdin.
 use core.term as term
 
-fn describe_key(k: Key) -> String {
+fn describe_key(k: Key) => String {
     if k == .Char(c) {
         return "char: {c}"
     }

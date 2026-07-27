@@ -27,6 +27,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/crypto_secret_nested_provenance.jet",
     "tests/ui/debug_unknown_selector.jet",
     "tests/ui/defer_only_close.jet",
+    "tests/ui/deref_forbidden.jet",
     "tests/ui/dunder_marker_not_generated.jet",
     "tests/ui/dunder_reserved.jet",
     "tests/ui/effect_arrow_retired.jet",
@@ -44,7 +45,6 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/interp_empty.jet",
     "tests/ui/interp_unclosed.jet",
     "tests/ui/label_not_on_loop.jet",
-    "tests/ui/lambda_escape_no_take.jet",
     "tests/ui/layer_ceiling_exceeded/pkg.jet",
     "tests/ui/layout_columnar_partial.jet",
     "tests/ui/layout_columnar_prefix_reserved.jet",
@@ -149,6 +149,8 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/use_unrealized_library/pkg.jet",
     "tests/ui/variadic_not_last.jet",
     "tests/ui/web_target_web_on_module.jet",
+    "tests/ui/yielding_loop_missing_item.jet",
+    "tests/ui/yielding_loop_nonfinite.jet",
 ];
 
 fn collect_jet_files_recursive(dir: &PathBuf) -> Vec<PathBuf> {
@@ -1327,13 +1329,8 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "external method",
-            "fn Point.len(self) -> Int { return 1 }\n",
-            "impl Point { fn len(self) -> Int { return 1 } }\n",
-        ),
-        (
-            "task block",
-            "fn run() { g.task { work() } }\n",
-            "fn run() { g.task(() => { work() }) }\n",
+            "fn Point.len(self) => Int { return 1 }\n",
+            "impl Point { fn len(self) => Int { return 1 } }\n",
         ),
         (
             "enum group separators",
@@ -1431,13 +1428,13 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "external-method rewrite preserves receiver",
-            "fn Point.len(self) -> Int { return 1 }\n",
-            "impl Other { fn len(self) -> Int { return 1 } }\n",
+            "fn Point.len(self) => Int { return 1 }\n",
+            "impl Other { fn len(self) => Int { return 1 } }\n",
         ),
         (
             "task-block rewrite preserves body",
             "fn run() { g.task { work() } }\n",
-            "fn run() { g.task(() => { other() }) }\n",
+            "fn run() { g.task => { other() } }\n",
         ),
         (
             "enum-group comma rule preserves variant order",

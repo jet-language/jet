@@ -645,6 +645,19 @@ pub(crate) struct LocalInfo {
     constant_value: Option<crate::Comptime::CtValue>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LoopValueKind {
+    Effect,
+    Collecting,
+    Result,
+}
+
+struct LoopValueFrame {
+    label: Option<String>,
+    kind: LoopValueKind,
+    ty: Option<Type>,
+}
+
 /// D-MEM1 S9 / #649: one source-level fact graph for every borrowed window.
 /// Representation-specific flags may still guide lowering, but soundness uses
 /// only these sema facts and never asks rustc to discover an invalid alias.
@@ -1100,6 +1113,12 @@ pub(crate) struct Checker<'a> {
     loop_depth: usize,
     /// D-LOOPLABEL3=A: stack of `name :: loop` names; scope, innermost last.
     loop_labels: Vec<String>,
+    /// D-LOOPEVAL1: item type under each compiler-private collecting loop.
+    /// Nested yielding loops push independent slots.
+    collect_item_types: Vec<Option<Type>>,
+    loop_value_frames: Vec<LoopValueFrame>,
+    pending_loop_value: Option<(LoopValueKind, Option<String>)>,
+    last_loop_result_type: Option<Type>,
     /// D-EFF1: effects this function body reaches directly (Core calls, impure
     /// builtins). Accumulated during the walk; rolled into the per-function
     /// `EffectSummary` after the body is checked.
@@ -1294,7 +1313,7 @@ pub(crate) struct Checker<'a> {
     liveness_frames: Vec<(*const crate::AST::Stmt, usize)>,
     /// D-TASKSCOPE1=A: stack of active `taskgroup` scopes (innermost last).
     taskgroup_stack: Vec<TaskGroupCtx>,
-    /// True while inferring the body passed to `g.task { … }` — suppresses L1101
+    /// True while inferring the body passed to `g.task => …` — suppresses L1101
     /// (the taskgroup owns the handle until scope exit or an explicit join).
     in_taskgroup_spawn: bool,
     /// D-METHODMACRO1=A: top-level function names whose bare identifier was

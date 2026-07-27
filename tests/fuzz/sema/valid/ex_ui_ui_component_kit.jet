@@ -1,25 +1,23 @@
 use core.ui as ui
 
 struct Label { text: String }
-fn label(text: String) -> Label { return Label.{text: ~text} }
-fn label_view(value: Label) -> UiNode { return ui.text(value.text) }
-
+fn label(text: String) => Label { return Label.{text: ~text} }
+fn label_view(value: Label) => UiNode = ui.text(value.text)
 struct Input {
     value: String
     placeholder: String
 }
-fn input(placeholder: String) -> Input { return Input.{value: "", placeholder: ~placeholder} }
-fn input_view(value: Input) -> UiNode {
+fn input(placeholder: String) => Input { return Input.{value: "", placeholder: ~placeholder} }
+fn input_view(value: Input) => UiNode {
     shown := ~value.value
     if value.value == "" { shown = ~value.placeholder }
     return ui.node_role(shown, 20.0, 1.0, ui.aria_role_text_input())
 }
 
 struct Button { label: String }
-fn button(label: String) -> Button { return Button.{label: ~label} }
-fn button_view(value: Button) -> UiNode { return ui.button(value.label) }
-fn container(children: [UiNode]) -> UiNode { return ui.box(children) }
-
+fn button(label: String) => Button { return Button.{label: ~label} }
+fn button_view(value: Button) => UiNode = ui.button(value.label)
+fn container(children: [UiNode]) => UiNode = ui.box(children)
 fn run() {
     tree := container([label_view(label("Name")), input_view(input("type")), button_view(button("Save"))])
     backend := ui.null_backend()

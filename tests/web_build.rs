@@ -879,7 +879,7 @@ fn web_build_publishes_maps_and_release_omits_them() {
     );
 
     // Wasm-export body must produce non-empty app.wasm.map mappings.
-    let wasm_src = "#Target(Web)\n#WasmExport\nfn add(a: Int, b: Int) -> Int { return a + b }\nfn run() {}\n";
+    let wasm_src = "#Target(Web)\n#WasmExport\nfn add(a: Int, b: Int) => Int { return a + b }\nfn run() {}\n";
     fs::write(dir.join("wasm.jet"), wasm_src).unwrap();
     let wasm_out = Command::new(&jet)
         .current_dir(&dir)
@@ -964,9 +964,9 @@ fn wasm_void_body_and_internal_helper_are_emitted_from_tir() {
 fn tick() {}
 #WasmExport
 fn ping() { tick() }
-fn twice(n: Int) -> Int { return n * 2 }
+fn twice(n: Int) => Int { return n * 2 }
 #WasmExport
-fn compute(n: Int) -> Int { return twice(n) }
+fn compute(n: Int) => Int { return twice(n) }
 fn run() {}
 "#;
     let out = jet::compile_web_with_path(src, "tests/fixtures/web_wasm_helpers.jet")
@@ -974,7 +974,7 @@ fn run() {}
     let wasm = &out.web.expect("web artifacts").wasm_rust;
     assert!(wasm.contains("fn jet_wasm_tick()"));
     assert!(wasm.contains("jet_wasm_tick();"), "void body side effect was dropped:\n{wasm}");
-    assert!(wasm.contains("fn jet_wasm_twice(user_n: i64) -> i64"));
+    assert!(wasm.contains("fn jet_wasm_twice(user_n: i64) => i64"));
     assert!(wasm.contains("jet_wasm_twice(user_n)"), "export did not call internal helper:\n{wasm}");
 }
 
@@ -982,7 +982,7 @@ fn run() {}
 fn web_backends_traverse_impure_regions() {
     let src = r#"#Target(Web)
 #Target(Js)
-fn js_value() -> Int {
+fn js_value() => Int {
     value := 0
     #Impure("preserve JS body") {
         value = 7
@@ -990,7 +990,7 @@ fn js_value() -> Int {
     return value
 }
 #WasmExport
-fn wasm_value() -> Int {
+fn wasm_value() => Int {
     value := 0
     #Impure("preserve Wasm body") {
         value = 9
@@ -1023,11 +1023,11 @@ fn web_inline_modules_keep_qualified_function_identity() {
     let src = r#"#Target(Web)
 module left {
     #Target(Js)
-    pub fn value() -> Int { return 1 }
+    pub fn value() => Int { return 1 }
 }
 module right {
     #Target(Js)
-    pub fn value() -> Int { return 2 }
+    pub fn value() => Int { return 2 }
 }
 #Target(Js)
 fn run() { print(left.value() + right.value()) }
@@ -1047,17 +1047,17 @@ fn web_wasm_inline_modules_emit_distinct_qualified_calls() {
         return;
     }
     let src = r#"#Target(Web)
-module left { pub fn value() -> Int { return 1 } }
-module right { pub fn value() -> Int { return 2 } }
+module left { pub fn value() => Int { return 1 } }
+module right { pub fn value() => Int { return 2 } }
 #WasmExport
-fn total() -> Int { return left.value() + right.value() }
+fn total() => Int { return left.value() + right.value() }
 #Target(Js)
 fn run() { print(total()) }
 "#;
     let dir = build_web_fixture("wasm_module_identity", src, "tests/fixtures/web_wasm_module_identity.jet");
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
-    assert!(wasm.contains("fn jet_wasm_left__value() -> i64"), "left Wasm identity was dropped:\n{wasm}");
-    assert!(wasm.contains("fn jet_wasm_right__value() -> i64"), "right Wasm identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm_left__value() => i64"), "left Wasm identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm_right__value() => i64"), "right Wasm identity was dropped:\n{wasm}");
     assert!(wasm.contains("jet_wasm_left__value()"), "left qualified call was dropped:\n{wasm}");
     assert!(wasm.contains("jet_wasm_right__value()"), "right qualified call was dropped:\n{wasm}");
     assert_eq!(run_web_app(&dir), "3\n");
@@ -1079,11 +1079,11 @@ fn web_file_modules_keep_qualified_js_function_identity() {
             ),
             (
                 "left.jet",
-                "#Target(Js)\npub fn value() -> Int { return 1 }\n",
+                "#Target(Js)\npub fn value() => Int { return 1 }\n",
             ),
             (
                 "right.jet",
-                "#Target(Js)\npub fn value() -> Int { return 2 }\n",
+                "#Target(Js)\npub fn value() => Int { return 2 }\n",
             ),
         ],
     );
@@ -1105,15 +1105,15 @@ fn web_file_modules_emit_distinct_qualified_wasm_calls() {
         &[
             (
                 "main.jet",
-                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#WasmExport\nfn total() -> Int { return left.value() + right.value() }\n#Target(Js)\nfn run() { print(total()) }\n",
+                "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#WasmExport\nfn total() => Int { return left.value() + right.value() }\n#Target(Js)\nfn run() { print(total()) }\n",
             ),
-            ("left.jet", "pub fn value() -> Int { return 1 }\n"),
-            ("right.jet", "pub fn value() -> Int { return 2 }\n"),
+            ("left.jet", "pub fn value() => Int { return 1 }\n"),
+            ("right.jet", "pub fn value() => Int { return 2 }\n"),
         ],
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
-    assert!(wasm.contains("fn jet_wasm_left__value() -> i64"), "left identity was dropped:\n{wasm}");
-    assert!(wasm.contains("fn jet_wasm_right__value() -> i64"), "right identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm_left__value() => i64"), "left identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm_right__value() => i64"), "right identity was dropped:\n{wasm}");
     assert!(wasm.contains("jet_wasm_left__value()"), "left call was dropped:\n{wasm}");
     assert!(wasm.contains("jet_wasm_right__value()"), "right call was dropped:\n{wasm}");
     assert_eq!(run_web_app(&dir), "3\n");
@@ -1135,7 +1135,7 @@ fn web_file_module_wasm_export_uses_qualified_bridge() {
             ),
             (
                 "math.jet",
-                "#WasmExport\npub fn value() -> Int { return 7 }\n",
+                "#WasmExport\npub fn value() => Int { return 7 }\n",
             ),
         ],
     );
@@ -1146,7 +1146,7 @@ fn web_file_module_wasm_export_uses_qualified_bridge() {
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("pub extern \"C\" fn jet_export_math__value() -> i64"),
+        wasm.contains("pub extern \"C\" fn jet_export_math__value() => i64"),
         "qualified export symbol was dropped:\n{wasm}"
     );
     assert_eq!(run_web_app(&dir), "7\n");
@@ -1178,11 +1178,11 @@ fn web_file_module_same_leaf_partitions_ignore_load_order() {
                 ("main.jet", &main),
                 (
                     "left.jet",
-                    "#Target(Js)\nfn helper() -> Int { return 1 }\n#Target(Js)\npub fn value() -> Int { return helper() }\n",
+                    "#Target(Js)\nfn helper() => Int { return 1 }\n#Target(Js)\npub fn value() => Int { return helper() }\n",
                 ),
                 (
                     "right.jet",
-                    "fn helper() -> Int { return 2 }\n#WasmExport\npub fn value() -> Int { return helper() }\n",
+                    "fn helper() => Int { return 2 }\n#WasmExport\npub fn value() => Int { return helper() }\n",
                 ),
             ],
         );
@@ -1216,7 +1216,7 @@ fn module_local_run_cannot_hijack_web_entrypoint() {
         return;
     }
     let src = r#"#Target(Web)
-module helper { pub fn run() -> Int { return 7 } }
+module helper { pub fn run() => Int { return 7 } }
 #Target(Js)
 fn run() { print("top-level") }
 "#;
@@ -1231,7 +1231,7 @@ fn run() { print("top-level") }
 
 #[test]
 fn web_missing_return_is_a_preflight_diagnostic() {
-    let src = "#Target(Web)\n#Target(Js)\nfn missing() -> Int { n :: 1 }\nfn run() {}\n";
+    let src = "#Target(Web)\n#Target(Js)\nfn missing() => Int { n :: 1 }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_missing_return.jet")
         .expect_err("non-void JS function without return must be rejected");
     assert!(diags.iter().any(|d| d.code == "E0114"), "{diags:?}");
@@ -1240,7 +1240,7 @@ fn web_missing_return_is_a_preflight_diagnostic() {
 #[test]
 fn wasm_unsupported_export_abi_is_a_preflight_diagnostic() {
     let src =
-        "#Target(Web)\n#WasmExport\nfn echo(xs: [Float]) -> [Float] { return ~xs }\nfn run() {}\n";
+        "#Target(Web)\n#WasmExport\nfn echo(xs: [Float]) => [Float] { return ~xs }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_wasm_abi.jet")
         .expect_err("unsupported Wasm ABI must be rejected before emission");
     assert!(
@@ -1251,7 +1251,7 @@ fn wasm_unsupported_export_abi_is_a_preflight_diagnostic() {
 
 #[test]
 fn wasm_unsupported_internal_abi_is_a_preflight_diagnostic() {
-    let src = "#Target(Web)\nfn helper(xs: [Float]) -> [Float] { return ~xs }\nfn run() {}\n";
+    let src = "#Target(Web)\nfn helper(xs: [Float]) => [Float] { return ~xs }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_internal_wasm_abi.jet")
         .expect_err("unsupported internal Wasm ABI must be rejected before emission");
     assert!(
@@ -1262,7 +1262,7 @@ fn wasm_unsupported_internal_abi_is_a_preflight_diagnostic() {
 
 #[test]
 fn wasm_cross_bucket_call_is_a_normal_preflight_diagnostic() {
-    let src = "#Target(Web)\n#Target(Js)\nfn browser_value() -> Int { return 1 }\n#WasmExport\nfn compute() -> Int { return browser_value() }\nfn run() {}\n";
+    let src = "#Target(Web)\n#Target(Js)\nfn browser_value() => Int { return 1 }\n#WasmExport\nfn compute() => Int { return browser_value() }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_cross_bucket_call.jet")
         .expect_err("Wasm must not call a JS-bucket function directly");
     assert!(diags.iter().any(|d| d.code == "E-WEB-CROSS-PARTITION"), "{diags:?}");
@@ -1271,8 +1271,8 @@ fn wasm_cross_bucket_call_is_a_normal_preflight_diagnostic() {
 #[test]
 fn canvas_style_wasm_tir_control_flow_and_print_compile() {
     let src = r#"#Target(Web)
-fn square(n: Int) -> Int { return n * n }
-fn summarize(limit: Int) -> Int {
+fn square(n: Int) => Int { return n * n }
+fn summarize(limit: Int) => Int {
     total := square(limit)
     if total > 10 { return total } else { return total + 1 }
 }
@@ -1301,7 +1301,7 @@ fn dev() {
     server.serve()
 }
 module tools {
-    fn dev() -> Int { return 7 }
+    fn dev() => Int { return 7 }
 }
 fn run() { print("hello, web") }
 "#;
@@ -1310,7 +1310,7 @@ fn run() { print("hello, web") }
     let web = out.web.expect("web artifacts");
     let wasm = &web.wasm_rust;
     assert!(
-        wasm.contains("fn jet_wasm_tools__dev() -> i64"),
+        wasm.contains("fn jet_wasm_tools__dev() => i64"),
         "module tools.dev was not emitted:\n{wasm}"
     );
     assert!(
@@ -1606,7 +1606,7 @@ fn codable_struct_wasm_bridge_reconstructs_typed_argument() {
     let src = include_str!("ui/web_abi_codable.jet");
     let dir = build_web_fixture("codable_struct", src, "tests/ui/web_abi_codable.jet");
     let wasm_rust = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
-    let signature = "fn jet_export_sum_point(user_p_x: i64, user_p_y: i64) -> i64";
+    let signature = "fn jet_export_sum_point(user_p_x: i64, user_p_y: i64) => i64";
     let reconstruction = "let user_p = user_Point { user_x: user_p_x, user_y: user_p_y };";
     let field_read = "((user_p).user_x + (user_p).user_y)";
     assert!(wasm_rust.contains(signature), "flattened ABI drifted:\n{wasm_rust}");
@@ -1789,7 +1789,7 @@ fn web_wasm_string_export_hostile_roundtrip() {
     let dir = build_web_fixture("wasm_string", src, "examples/features/web/web_wasm_string.jet");
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("fn jet_abi_string_ret(s: String) -> u64"),
+        wasm.contains("fn jet_abi_string_ret(s: String) => u64"),
         "string return helper missing:\n{wasm}"
     );
     assert!(
@@ -1843,11 +1843,11 @@ fn web_wasm_string_param_export_hostile_roundtrip() {
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("pub extern \"C\" fn jet_abi_string_alloc(len: u32) -> u32"),
+        wasm.contains("pub extern \"C\" fn jet_abi_string_alloc(len: u32) => u32"),
         "string alloc export missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("fn jet_abi_string_arg(packed: u64) -> String"),
+        wasm.contains("fn jet_abi_string_arg(packed: u64) => String"),
         "string arg helper missing:\n{wasm}"
     );
     assert!(
@@ -1896,15 +1896,15 @@ fn web_wasm_list_int_export_hostile_roundtrip() {
     let dir = build_web_fixture("wasm_list", src, "examples/features/web/web_wasm_list.jet");
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("fn jet_abi_list_i64_ret(v: Vec<i64>) -> u64"),
+        wasm.contains("fn jet_abi_list_i64_ret(v: Vec<i64>) => u64"),
         "list-int return helper missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("fn jet_abi_list_i64_arg(packed: u64) -> Vec<i64>"),
+        wasm.contains("fn jet_abi_list_i64_arg(packed: u64) => Vec<i64>"),
         "list-int arg helper missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("pub extern \"C\" fn jet_abi_list_i64_alloc(len: u32) -> u32"),
+        wasm.contains("pub extern \"C\" fn jet_abi_list_i64_alloc(len: u32) => u32"),
         "list-int alloc export missing:\n{wasm}"
     );
     assert!(
@@ -1972,15 +1972,15 @@ fn web_wasm_list_string_export_hostile_roundtrip() {
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("fn jet_abi_list_string_ret(v: Vec<String>) -> u64"),
+        wasm.contains("fn jet_abi_list_string_ret(v: Vec<String>) => u64"),
         "list-string return helper missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("fn jet_abi_list_string_arg(packed: u64) -> Vec<String>"),
+        wasm.contains("fn jet_abi_list_string_arg(packed: u64) => Vec<String>"),
         "list-string arg helper missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("pub extern \"C\" fn jet_abi_list_string_alloc(byte_len: u32) -> u32"),
+        wasm.contains("pub extern \"C\" fn jet_abi_list_string_alloc(byte_len: u32) => u32"),
         "list-string alloc export missing:\n{wasm}"
     );
     assert!(
@@ -2045,7 +2045,7 @@ fn web_wasm_map_string_int_export_hostile_roundtrip() {
         "map-string-int ABI helpers missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("pub extern \"C\" fn jet_abi_map_string_i64_alloc(byte_len: u32) -> u32")
+        wasm.contains("pub extern \"C\" fn jet_abi_map_string_i64_alloc(byte_len: u32) => u32")
             && wasm.contains(
                 "pub extern \"C\" fn jet_abi_map_string_i64_free(ptr: u32, byte_len: u32)"
             ),

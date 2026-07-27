@@ -344,6 +344,13 @@ impl<'a> Checker<'a> {
             }
             let saved_fixed_constructor = self.allow_fixed_constructor;
             self.allow_fixed_constructor = direct_fixed_constructor(&b.init);
+            if let Expr::CallValue { callee, .. } = &mut b.init {
+                if let Expr::Lambda(lambda) = callee.as_mut() {
+                    if lambda.meta.result_loop || lambda.meta.collecting_loop {
+                        lambda.meta.loop_label = Some((b.name.clone(), b.name_span));
+                    }
+                }
+            }
             let mut it = self.infer(&mut b.init);
             self.allow_fixed_constructor = saved_fixed_constructor;
             if let (
@@ -425,6 +432,9 @@ impl<'a> Checker<'a> {
                             .last_mut()
                             .unwrap()
                             .insert(name.clone());
+                    }
+                    for name in &lam.meta.moved_captures {
+                        self.mark_moved(name.clone(), lam.span);
                     }
                 }
             }

@@ -384,7 +384,7 @@ pub enum TryConvert {
     None,
     /// The source error implements `Fallible`; call `.to_error()` (D-ERR2).
     Fallible,
-    /// Declared `impl Source -> Target { … }` conversion (D-ERR-CONV).
+    /// Declared `impl Source => Target { … }` conversion (D-ERR-CONV).
     /// Holds the mangled Rust function name emitted by codegen.
     Typed(String),
     /// D-UNIONTYPE1=A: source error is one member of the return's anonymous union.
@@ -392,7 +392,7 @@ pub enum TryConvert {
     WidenUnion { enum_name: String, tag: String },
 }
 
-/// D-ERR-CONV (ratified 2026-06-19): `impl Source -> Target { body }` — declares
+/// D-ERR-CONV (ratified 2026-06-19): `impl Source => Target { body }` — declares
 /// how a `Source` error becomes a `Target` error; `?` applies it automatically.
 #[derive(Debug, Clone)]
 pub struct ErrorConvDef {
@@ -446,7 +446,7 @@ pub enum MigrationOp {
     Remove { field: String, field_span: Span },
     /// D-MIGRATE2E: `change f: Old -> New [via { expr }]` — a field type change.
     /// `converter` is the inline `via { … }` body (an expression, usually a
-    /// lambda); `None` falls back to an `impl Old -> New` in scope (D-MIGRATE2B).
+    /// lambda); `None` falls back to an `impl Old => New` in scope (D-MIGRATE2B).
     Change {
         field: String,
         field_span: Span,

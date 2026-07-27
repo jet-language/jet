@@ -369,7 +369,7 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::TypeAlias(a) => a.span.start,
         // D-QUAL3: unit families use their own span.
         Item::UnitFamily(uf) => uf.span.start,
-        // D-ERR-CONV: use the from_span (start of `impl Source -> Target {}`).
+        // D-ERR-CONV: use the from_span (start of `impl Source => Target {}`).
         Item::ErrorConv(ec) => src[..ec.from_span.start]
             .rfind("impl")
             .unwrap_or(ec.from_span.start),
@@ -484,6 +484,7 @@ fn stmt_end(stmt: &Stmt) -> usize {
         Stmt::Break(s) | Stmt::Continue(s) | Stmt::BreakLabel(_, s) | Stmt::ContinueLabel(_, s) => {
             s.end
         }
+        Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => value.span().end,
         Stmt::CountedLoop { body, span, .. } => body.last().map(stmt_end).unwrap_or(span.end),
         Stmt::Loop {
             body: inner,
@@ -967,6 +968,7 @@ fn stmt_start(stmt: &Stmt) -> usize {
         Stmt::Break(s) | Stmt::Continue(s) | Stmt::BreakLabel(_, s) | Stmt::ContinueLabel(_, s) => {
             s.start
         }
+        Stmt::BreakValue(_, span) | Stmt::BreakLabelValue(_, _, _, span) => span.start,
         Stmt::Loop { span: s, .. } | Stmt::CountedLoop { span: s, .. } => s.start,
         Stmt::Unsafe { span, .. } => span.start,
         Stmt::Impure { span, .. } => span.start,

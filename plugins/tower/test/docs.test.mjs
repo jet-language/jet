@@ -23,10 +23,11 @@ test('OPS2: ready-across returns unblocked cards across epochs, drops blocked', 
   st.mutate((s, cfg) => db.addCard(s, { title: 'E3 work', track: 'epoch', epoch: 'e3', phase: 'building' }, cfg));
   st.mutate((s, cfg) => db.addCard(s, { title: 'E4 free', track: 'epoch', epoch: 'e4', phase: 'ready' }, cfg));
   st.mutate((s, cfg) => db.addCard(s, { title: 'E4 blocked', track: 'epoch', epoch: 'e4', phase: 'ready', blockedBy: ['#1'] }, cfg));
+  st.mutate((s, cfg) => db.addCard(s, { title: 'E4 verify', track: 'epoch', epoch: 'e4', phase: 'verify', workOrder: 99 }, cfg));
 
   const s = st.load();
-  const titles = db.nextCards(s, { scope: 'ready-across', limit: 20 }).map(c => c.title).sort();
-  assert.deepEqual(titles, ['E3 work', 'E4 free']);
+  const titles = db.nextCards(s, { scope: 'ready-across', limit: 20 }).map(c => c.title);
+  assert.deepEqual(titles, ['E4 verify', 'E3 work', 'E4 free']);
 });
 
 test('OPS2: blocker-unpopulated flags planning epoch cards with plan + empty blockedBy', () => {

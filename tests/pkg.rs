@@ -293,10 +293,10 @@ fn replacement_surface(
     };
     let mut surface = CompatibilitySurface::new(PackageIdentity::new(provider, name, version));
     surface.public_symbols = vec![
-        PublicSymbol::new("pad_left", "fn(String, Int) -> String")
+        PublicSymbol::new("pad_left", "fn(String, Int) => String")
             .with_effects(&["pure"])
             .with_errors(&["ValueError"]),
-        PublicSymbol::new("trim", "fn(String) -> String").with_effects(&["pure"]),
+        PublicSymbol::new("trim", "fn(String) => String").with_effects(&["pure"]),
     ];
     surface.examples = vec!["examples/replacement/pad.jet".to_string()];
     surface.goldens = vec![GoldenFixture::new("pad_left_basic", "  hi\n")];
@@ -1683,7 +1683,7 @@ fn store_ensure_path_dep_creates_entry() {
     write(
         &src,
         "mylib.jet",
-        "pub fn hello() -> String { return \"hi\"; }\n",
+        "pub fn hello() => String { return \"hi\"; }\n",
     );
     write(&src, "pkg.jet", &min_manifest("mylib", "0.1.0"));
 
@@ -1923,7 +1923,7 @@ fn path_dep_compiles_ok() {
     write(
         &tmp,
         "greeter/greeter.jet",
-        "pub fn greet() -> String { return \"hello!\"; }\n",
+        "pub fn greet() => String { return \"hello!\"; }\n",
     );
 
     // Root project with path dep.
@@ -1989,7 +1989,7 @@ fn stale_lock_emits_e1202() {
     write(
         &tmp,
         "greeter/greeter.jet",
-        "pub fn greet() -> String { return \"hi\"; }\n",
+        "pub fn greet() => String { return \"hi\"; }\n",
     );
 
     write(
@@ -2127,7 +2127,7 @@ fn git_dep_local_bare_repo_fetches_ok() {
 
     // Create a source directory to commit.
     let src = tmp.join("mylib_src");
-    write(&src, "mylib.jet", "pub fn answer() -> Int { return 42; }\n");
+    write(&src, "mylib.jet", "pub fn answer() => Int { return 42; }\n");
     write(&src, "pkg.jet", &min_manifest("mylib", "0.1.0"));
 
     // Init bare repo.
@@ -2222,7 +2222,7 @@ fn git_dep_branch_update_rewrites_lock() {
 
     // Create a source directory to commit.
     let src = tmp.join("mylib_src");
-    write(&src, "mylib.jet", "pub fn answer() -> Int { return 42; }\n");
+    write(&src, "mylib.jet", "pub fn answer() => Int { return 42; }\n");
     write(&src, "pkg.jet", &min_manifest("mylib", "0.1.0"));
 
     // Init a non-bare repo, commit, then mirror to a bare repo (avoids HEAD ambiguity).
@@ -2316,7 +2316,7 @@ fn git_dep_branch_update_rewrites_lock() {
     write(
         &clone,
         "extra.jet",
-        "pub fn extra() -> Int { return 99; }\n",
+        "pub fn extra() => Int { return 99; }\n",
     );
     Command::new("git")
         .args(["add", "."])
@@ -2485,7 +2485,7 @@ fn cli_vendor_dir_flag_relocates() {
     write(
         &tmp,
         "greeter/greeter.jet",
-        "pub fn greet() -> String { return \"hi\"; }\n",
+        "pub fn greet() => String { return \"hi\"; }\n",
     );
     write(
         &tmp,
@@ -2561,7 +2561,7 @@ fn cli_end_to_end_new_then_add_path() {
     // 2. Create a local lib for `jet add --path`.
     let lib = tmp.join("mylib");
     write(&lib, "pkg.jet", &min_manifest("mylib", "0.1.0"));
-    write(&lib, "mylib.jet", "pub fn answer() -> Int { return 42; }\n");
+    write(&lib, "mylib.jet", "pub fn answer() => Int { return 42; }\n");
 
     // 3. jet add mylib --path ../mylib (from inside the project)
     let proj = tmp.join("myapp");
@@ -2594,7 +2594,7 @@ fn semver_break_e2601() {
     let old_api = vec![ApiItem {
         kind: "fn".into(),
         name: "parse".into(),
-        signature: "fn parse(raw: String) -> Int".into(),
+        signature: "fn parse(raw: String) => Int".into(),
     }];
     let new_api: Vec<ApiItem> = vec![]; // removed
 
@@ -2624,7 +2624,7 @@ fn returned_view_source_change_feeds_e1218_and_e2601() {
         kind: "fn".into(),
         name: "pick".into(),
         signature: format!(
-            "fn pick(left: [Int], right: [Int]) -> View<Int> ; view_source = parameter:{source};access:read;path:range"
+            "fn pick(left: [Int], right: [Int]) => View<Int> ; view_source = parameter:{source};access:read;path:range"
         ),
     };
     let changes = diff_public_api(&[item(0)], &[item(1)]);
@@ -2651,7 +2651,7 @@ fn capability_sigil_frozen_in_public_api() {
 
     let write_src = "\
 struct Account { balance: Int }
-pub fn deposit(a: &Account, amount: Int) -> Int {
+pub fn deposit(a: &Account, amount: Int) => Int {
     a.balance = a.balance + amount
     return a.balance
 }
@@ -2672,7 +2672,7 @@ pub fn deposit(a: &Account, amount: Int) -> Int {
     // Same signature, only the capability sigil differs (read instead of write).
     let read_src = "\
 struct Account { balance: Int }
-pub fn deposit(a: Account, amount: Int) -> Int { return a.balance + amount }
+pub fn deposit(a: Account, amount: Int) => Int { return a.balance + amount }
 ";
     let f2 = dir.join("read.jet");
     fs::write(&f2, read_src).unwrap();
@@ -2692,7 +2692,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     use jet::Publish::{diff_public_api, ApiItem};
 
     let dir = tmp_dir("physical_unit_api_freeze");
-    let current = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }\npub fn distance() -> Millimeter { return Millimeter.from_float(1.0)? }\n";
+    let current = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }\npub fn distance() => Millimeter { return Millimeter.from_float(1.0)? }\n";
     let current_path = dir.join("current.jet");
     fs::write(&current_path, current).unwrap();
     let current_api = jet::Publish::extract_public_api_for_package(
@@ -2726,7 +2726,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
         .collect();
     assert!(diff_public_api(&frozen_api, &current_api).is_empty());
 
-    let changed = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/100) }\npub fn distance() -> Millimeter { return Millimeter.from_float(1.0)? }\n";
+    let changed = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/100) }\npub fn distance() => Millimeter { return Millimeter.from_float(1.0)? }\n";
     let changed_path = dir.join("changed.jet");
     fs::write(&changed_path, changed).unwrap();
     let changed_api = jet::Publish::extract_public_api_for_package(
@@ -2742,7 +2742,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     );
     assert_eq!(diff_public_api(&current_api, &foreign_api).len(), 1);
 
-    let affine = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27315/100) }\npub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n";
+    let affine = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27315/100) }\npub fn target() => CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n";
     let affine_path = dir.join("affine.jet");
     fs::write(&affine_path, affine).unwrap();
     let affine_api = jet::Publish::extract_public_api_for_package(
@@ -2750,7 +2750,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
         affine_path.to_str().unwrap(),
         "physics",
     );
-    let shifted = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27415/100) }\npub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n";
+    let shifted = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27415/100) }\npub fn target() => CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n";
     let shifted_path = dir.join("shifted.jet");
     fs::write(&shifted_path, shifted).unwrap();
     let shifted_api = jet::Publish::extract_public_api_for_package(
@@ -2761,9 +2761,9 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     assert_eq!(diff_public_api(&affine_api, &shifted_api).len(), 1);
 
     let length_generic =
-        "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }\n";
+        "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) => Q { return value }\n";
     let time_generic =
-        "pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) -> Q { return value }\n";
+        "pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) => Q { return value }\n";
     let length_path = dir.join("length_generic.jet");
     let time_path = dir.join("time_generic.jet");
     fs::write(&length_path, length_generic).unwrap();
@@ -2780,7 +2780,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     );
     assert_eq!(
         length_api[0].signature,
-        "fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) --[]-> Q"
+        "fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) =[]=> Q"
     );
     assert_eq!(diff_public_api(&length_api, &time_api).len(), 1);
     let _ = fs::remove_dir_all(&dir);
@@ -2813,15 +2813,15 @@ fn inferred_public_effect_drift_is_breaking() {
     let dir = tmp_dir("effect_api_drift");
     let pure_path = dir.join("pure.jet");
     let io_path = dir.join("io.jet");
-    let pure = "pub fn report() -> Int { return 1 }\n";
-    let io = "pub fn report() -> Int { print(\"report\"); return 1 }\n";
+    let pure = "pub fn report() => Int { return 1 }\n";
+    let io = "pub fn report() => Int { print(\"report\"); return 1 }\n";
     fs::write(&pure_path, pure).unwrap();
     fs::write(&io_path, io).unwrap();
 
     let pure_api = extract_public_api(pure, pure_path.to_str().unwrap());
     let io_api = extract_public_api(io, io_path.to_str().unwrap());
-    assert!(pure_api[0].signature.contains("--[]->"));
-    assert!(io_api[0].signature.contains("--[Io]->"));
+    assert!(pure_api[0].signature.contains("=[]=>"));
+    assert!(io_api[0].signature.contains("=[Io]=>"));
     assert_eq!(diff_public_api(&pure_api, &io_api).len(), 1);
 
     let _ = fs::remove_dir_all(&dir);
@@ -2849,7 +2849,7 @@ fn inferred_inline_module_effects_are_published() {
         .iter()
         .find(|item| item.name == "files.report")
         .expect("inline module function is public API");
-    assert!(report.signature.contains("--[Io]->"), "{}", report.signature);
+    assert!(report.signature.contains("=[Io]=>"), "{}", report.signature);
     assert!(old_api.iter().any(|item| item.name == "bench.report"));
     assert_eq!(diff_public_api(&old_api, &new_api).len(), 1);
 
@@ -2905,11 +2905,11 @@ fn public_effect_metadata_preserves_symbolic_rows() {
 
     let dir = tmp_dir("effect_api_open_row");
     let path = dir.join("open.jet");
-    let source = "pub fn invoke<E>(act: fn() --[..E]-> Int) --[..E]-> Int { return act(); }\n";
+    let source = "pub fn invoke<E>(act: fn() =[..E]=> Int) =[..E]=> Int { return act(); }\n";
     fs::write(&path, source).unwrap();
 
     let api = extract_public_api(source, path.to_str().unwrap());
-    assert!(api[0].signature.contains("--[..E]->"), "{}", api[0].signature);
+    assert!(api[0].signature.contains("=[..E]=>"), "{}", api[0].signature);
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -2921,15 +2921,15 @@ fn public_trait_effect_contract_drift_is_breaking() {
     let dir = tmp_dir("trait_effect_api_drift");
     let old_path = dir.join("old.jet");
     let new_path = dir.join("new.jet");
-    let old = "pub trait Render { fn draw(self) --[Io]-> Int; }\n";
-    let new = "pub trait Render { fn draw(self) --[Gpu]-> Int; }\n";
+    let old = "pub trait Render { fn draw(self) =[Io]=> Int; }\n";
+    let new = "pub trait Render { fn draw(self) =[Gpu]=> Int; }\n";
     fs::write(&old_path, old).unwrap();
     fs::write(&new_path, new).unwrap();
 
     let old_api = extract_public_api(old, old_path.to_str().unwrap());
     let new_api = extract_public_api(new, new_path.to_str().unwrap());
-    assert!(old_api[0].signature.contains("--[Io]->"));
-    assert!(new_api[0].signature.contains("--[Gpu]->"));
+    assert!(old_api[0].signature.contains("=[Io]=>"));
+    assert!(new_api[0].signature.contains("=[Gpu]=>"));
     assert!(
         !diff_public_api(&old_api, &new_api).is_empty(),
         "trait method effect drift must be breaking"
@@ -2944,7 +2944,7 @@ fn physical_unit_trait_methods_use_canonical_dimensions() {
 
     let dir = tmp_dir("physical_unit_trait_api");
     let path = dir.join("current.jet");
-    let source = "#UnitFamily(Length) { meter }\npub trait Measure { fn scale(value: Meter) -> Meter; }\n";
+    let source = "#UnitFamily(Length) { meter }\npub trait Measure { fn scale(value: Meter) => Meter; }\n";
     fs::write(&path, source).unwrap();
 
     let api = extract_public_api(source, path.to_str().unwrap());
@@ -2954,7 +2954,7 @@ fn physical_unit_trait_methods_use_canonical_dimensions() {
         .expect("public trait method");
     assert_eq!(
         method.signature,
-        "fn Measure.scale(value: Meter{family=Length; base=Float; dimension=L1T0}) -> Meter{family=Length; base=Float; dimension=L1T0}"
+        "fn Measure.scale(value: Meter{family=Length; base=Float; dimension=L1T0}) => Meter{family=Length; base=Float; dimension=L1T0}"
     );
 
     let mut bundle = jet::Loader::load_entry_with_overlay(path.to_str().unwrap(), None, true)
@@ -3029,7 +3029,7 @@ fn vendored_offline_locked_build() {
     write(
         &tmp,
         "greeter/greeter.jet",
-        "pub fn greet() -> String { return \"hi\"; }\n",
+        "pub fn greet() => String { return \"hi\"; }\n",
     );
 
     // Project that depends on it.
@@ -3245,7 +3245,7 @@ fn e1218_breaking_change_under_minor_bump() {
     let old = vec![ApiItem {
         kind: "fn".into(),
         name: "parse".into(),
-        signature: "fn parse(raw: String) -> Int".into(),
+        signature: "fn parse(raw: String) => Int".into(),
     }];
     let new: Vec<ApiItem> = vec![]; // parse removed
     let breaking = diff_public_api(&old, &new);
@@ -3712,7 +3712,7 @@ fn pub_package_function_is_visible_inside_project_scope() {
     let s = Scratch::new("same");
     fs::write(
         s.join("helper.jet"),
-        "pub(package) fn secret() -> String {\n    return \"ok\"\n}\n",
+        "pub(package) fn secret() => String {\n    return \"ok\"\n}\n",
     )
     .unwrap();
     fs::write(
@@ -3752,7 +3752,7 @@ fn pub_package_function_is_hidden_from_path_dependency_consumer() {
     .unwrap();
     fs::write(
         dep.join("dep.jet"),
-        "pub(package) fn secret() -> String {\n    return \"hidden\"\n}\n",
+        "pub(package) fn secret() => String {\n    return \"hidden\"\n}\n",
     )
     .unwrap();
 
@@ -3768,7 +3768,7 @@ fn pub_package_type_and_field_are_visible_inside_project_scope() {
     let s = Scratch::new("type");
     fs::write(
         s.join("helper.jet"),
-        "pub(package) struct Secret {\n    pub(package) value: String\n}\n\npub fn make() -> Secret {\n    return Secret.{ value: \"ok\" }\n}\n",
+        "pub(package) struct Secret {\n    pub(package) value: String\n}\n\npub fn make() => Secret {\n    return Secret.{ value: \"ok\" }\n}\n",
     )
     .unwrap();
     fs::write(

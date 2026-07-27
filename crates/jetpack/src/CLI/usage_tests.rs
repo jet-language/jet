@@ -341,7 +341,7 @@ mod tests {
         let dir = scratch("phase1_env");
         std::fs::write(
             dir.join(Syntax::ENV_FILE),
-            "use jetpack as pkg;\npub fn shell() -> [JSON] {\n    return [pkg.packages([\"ripgrep\"])];\n}\n",
+            "use jetpack as pkg;\npub fn shell() => [JSON] {\n    return [pkg.packages([\"ripgrep\"])];\n}\n",
         )
         .unwrap();
         assert!(project_declares_env(&dir));

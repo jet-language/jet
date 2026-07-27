@@ -46,10 +46,10 @@ impl<'a> Checker<'a> {
         let Some(active) = self.active_taskgroup_name() else {
             self.diags.push(Diagnostic::error(
                 "E1110",
-                "`.task { … }` only works inside a `taskgroup` block".to_string(),
+                "`.task => …` only works inside a `taskgroup` block".to_string(),
                 "structured task spawning is scoped — a taskgroup owns child tasks and joins them at scope exit"
                     .to_string(),
-                "wrap the spawn in `taskgroup g { … }` and call `g.task { … }`".to_string(),
+                "wrap the spawn in `taskgroup g { … }` and call `g.task => …`".to_string(),
                 Some(span),
             ));
             return false;
@@ -64,7 +64,7 @@ impl<'a> Checker<'a> {
                         active, name
                     ),
                     "each `taskgroup` block owns spawns on its bound handle only".to_string(),
-                    format!("write `{active}.task {{ … }}` inside `taskgroup {active} {{ … }}`"),
+                    format!("write `{active}.task => …` inside `taskgroup {active} {{ … }}`"),
                     Some(*rspan),
                 ));
                 false
@@ -72,10 +72,10 @@ impl<'a> Checker<'a> {
             _ => {
                 self.diags.push(Diagnostic::error(
                     "E1110",
-                    "`.task { … }` must be called on the taskgroup handle".to_string(),
+                    "`.task => …` must be called on the taskgroup handle".to_string(),
                     "structured spawning goes through the handle bound by `taskgroup g { … }`"
                         .to_string(),
-                    "write `g.task { … }` where `g` is the taskgroup name".to_string(),
+                    "write `g.task => …` where `g` is the taskgroup name".to_string(),
                     Some(span),
                 ));
                 false
@@ -212,9 +212,9 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0102",
                     format!("`TaskGroup` has no method `{other}`"),
-                    "structured taskgroups support `.task { … }`, `.all([…])`, `.race([…])`, `.any([…])`, and `.select()`"
+                    "structured taskgroups support `.task => …`, `.all([…])`, `.race([…])`, `.any([…])`, and `.select()`"
                         .to_string(),
-                    "write `g.task { work() }`, `g.all([h1, h2])`, or `g.select().recv(ch).wait()`".to_string(),
+                    "write `g.task => work()`, `g.all([h1, h2])`, or `g.select().recv(ch).wait()`".to_string(),
                     Some(span),
                 ));
                 for a in args.iter_mut() {
@@ -230,12 +230,12 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0104",
                 format!(
-                    "`.task {{ … }}` takes one body, got {} argument{}",
+                    "`.task => …` takes one body, got {} argument{}",
                     args.len(),
                     if args.len() == 1 { "" } else { "s" }
                 ),
                 "a scoped task runs the `{ … }` body on a worker thread".to_string(),
-                "write `g.task { your_work() }`".to_string(),
+                "write `g.task => your_work()`".to_string(),
                 Some(span),
             ));
             for a in args.iter_mut() {
@@ -260,7 +260,7 @@ impl<'a> Checker<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0104",
                         format!(
-                            "`.task {{ … }}` needs a zero-parameter body, got {} parameter{}",
+                            "`.task => …` needs a zero-parameter body, got {} parameter{}",
                             params.len(),
                             if params.len() == 1 { "" } else { "s" }
                         ),
@@ -278,7 +278,7 @@ impl<'a> Checker<'a> {
                     "E0112",
                     format!("`.task` needs a block body, not {}", other.show()),
                     "a scoped task runs a block on a worker thread".to_string(),
-                    "write `g.task { your_work() }`".to_string(),
+                    "write `g.task => your_work()`".to_string(),
                     Some(args[0].expr.span()),
                 ));
                 Type::Named("Unit".to_string())
@@ -334,7 +334,7 @@ impl<'a> Checker<'a> {
                             "`.all()` needs a list of task handles, not `[{}]`",
                             other.show()
                         ),
-                        "each element must be a `Task<T>` handle returned from `g.task { … }`"
+                        "each element must be a `Task<T>` handle returned from `g.task => …`"
                             .to_string(),
                         "write `g.all([h1, h2])` where each handle came from `g.task`".to_string(),
                         Some(args[0].expr.span()),
@@ -349,7 +349,7 @@ impl<'a> Checker<'a> {
                         "`.all()` needs a list of task handles, not {}",
                         other.show()
                     ),
-                    "pass a `[Task<T>]` list of handles from `g.task { … }`".to_string(),
+                    "pass a `[Task<T>]` list of handles from `g.task => …`".to_string(),
                     "write `g.all([h1, h2])`".to_string(),
                     Some(args[0].expr.span()),
                 ));
@@ -416,7 +416,7 @@ impl<'a> Checker<'a> {
                             "{method_label} needs a list of task handles, not `[{}]`",
                             other.show()
                         ),
-                        "each element must be a `Task<T>` handle returned from `g.task { … }`"
+                        "each element must be a `Task<T>` handle returned from `g.task => …`"
                             .to_string(),
                         "write `g.race([h1, h2])` where each handle came from `g.task`".to_string(),
                         Some(args[0].expr.span()),
@@ -431,7 +431,7 @@ impl<'a> Checker<'a> {
                         "{method_label} needs a list of task handles, not {}",
                         other.show()
                     ),
-                    "pass a `[Task<T>]` list of handles from `g.task { … }`".to_string(),
+                    "pass a `[Task<T>]` list of handles from `g.task => …`".to_string(),
                     "write `g.race([h1, h2])`".to_string(),
                     Some(args[0].expr.span()),
                 ));

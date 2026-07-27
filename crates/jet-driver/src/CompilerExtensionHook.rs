@@ -355,7 +355,7 @@ fn fn_type_repr(func: &Func) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     match &func.return_type {
-        Some(ret) => format!("fn({params}) -> {}", ret.name()),
+        Some(ret) => format!("fn({params}) => {}", ret.name()),
         None => format!("fn({params})"),
     }
 }

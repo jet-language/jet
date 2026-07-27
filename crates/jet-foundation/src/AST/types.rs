@@ -165,17 +165,17 @@ pub enum Type {
         ok: Box<Type>,
         err: Box<Type>,
     },
-    /// S47 (M8): function type `fn(T1, T2) -> R` (`ret` omitted = no return value).
+    /// S47 (M8): function type `fn(T1, T2) => R` (`ret` omitted = no return value).
     ///
     /// D-EFF2 / D-SHAPE8: an optional effect row lives inside the function
-    /// type's return arrow — `fn(T) --[]-> U` requires purity and
-    /// `fn(T) --[Net]-> U` permits at most the listed effects. `effect_bound`
-    /// is `None` when unannotated, `Some(empty)` for `--[]->`, and
+    /// type's callable arrow — `fn(T) =[]=> U` requires purity and
+    /// `fn(T) =[Net]=> U` permits at most the listed effects. `effect_bound`
+    /// is `None` when unannotated, `Some(empty)` for `=[]=>`, and
     /// `Some([(name, span), …])` for a nonempty row. Names are validated
     /// against the effect vocabulary in sema, not the parser. The bound is a
     /// call-site obligation on whatever callback is passed (E0747) — it is **not**
     /// part of structural type identity (see the manual `PartialEq for Type`,
-    /// which ignores it in the `Fn` arm), so `fn(Int) --[]->` and `fn(Int)` are the
+    /// which ignores it in the `Fn` arm), so `fn(Int) =[]=>` and `fn(Int)` are the
     /// same type for assignability; the bound is an *extra* check, not a subtype.
     Fn {
         params: Vec<Type>,
@@ -239,7 +239,7 @@ pub enum Type {
 /// Manual structural equality (D-EFF2). Identical to a derived `PartialEq`
 /// except the `Fn` arm ignores `effect_bound`: a callback effect bound is a
 /// call-site obligation, not part of a function type's identity, so a
-/// `fn(Int) --[]->` value is assignable wherever a `fn(Int)` is expected. The
+/// `fn(Int) =[]=>` value is assignable wherever a `fn(Int)` is expected. The
 /// bound is enforced separately at the call site (E0747).
 impl PartialEq for Type {
     fn eq(&self, other: &Self) -> bool {
@@ -519,9 +519,9 @@ impl Type {
                     .collect::<Vec<_>>()
                     .join(", ");
                 match (effect_bound, ret) {
-                    (Some(row), Some(r)) => format!("fn({}) --[{}]-> {}", ps, effect_names(row), r.name()),
-                    (Some(row), None) => format!("fn({}) --[{}]->", ps, effect_names(row)),
-                    (None, Some(r)) => format!("fn({}) -> {}", ps, r.name()),
+                    (Some(row), Some(r)) => format!("fn({}) =[{}]=> {}", ps, effect_names(row), r.name()),
+                    (Some(row), None) => format!("fn({}) =[{}]=>", ps, effect_names(row)),
+                    (None, Some(r)) => format!("fn({}) => {}", ps, r.name()),
                     (None, None) => format!("fn({})", ps),
                 }
             }
@@ -601,9 +601,9 @@ impl Type {
                     .collect::<Vec<_>>()
                     .join(", ");
                 match (effect_bound, ret) {
-                    (Some(row), Some(r)) => format!("fn({}) --[{}]-> {}", ps, effect_names(row), r.name()),
-                    (Some(row), None) => format!("fn({}) --[{}]->", ps, effect_names(row)),
-                    (None, Some(r)) => format!("fn({}) -> {}", ps, r.name()),
+                    (Some(row), Some(r)) => format!("fn({}) =[{}]=> {}", ps, effect_names(row), r.name()),
+                    (Some(row), None) => format!("fn({}) =[{}]=>", ps, effect_names(row)),
+                    (None, Some(r)) => format!("fn({}) => {}", ps, r.name()),
                     (None, None) => format!("fn({})", ps),
                 }
             }

@@ -42,20 +42,11 @@
 // ============================================================================
 // VALUES, BINDINGS & TYPES
 // ============================================================================
-// `::` binds immutable (D-BIND4); `:=` binds mutable; `=` reassigns a `:=`
-// binding (S17). Optional type annotation before the sigil (S4).
-
-//<<< Owner Bindings: Incorrect explicit binding syntax.
-// HAVE:
-nameImmut :: "Jet" // Immutable binding with explicit type annotation.
-nameMut := "Jet" // Mutable binding with explicit type annotation.
-// WANT:
-nameImmut :: "Jet" // Immutable binding with explicit type annotation.
-nameMut := "Jet" // Mutable binding with explicit type annotation.
-//>>> tracked: #29 D-BINDEXPLICIT1
+// `::` binds immutable (D-BIND-BARE1); `:=` binds mutable; `=` reassigns a
+// `:=` binding (S17). Local binding names never carry type annotations.
 
 fn values() {
-name :: "Jet" // annotated immutable (S4 + D-BIND2)
+name :: "Jet" // inferred immutable binding
     year :: 2026                   // inferred Int (S11/S42)
     version :: 0.1                 // inferred Float; always prints with `.0` (S21)
 ready :: true // Bool (S11)
@@ -86,34 +77,25 @@ wide :: I64.{ 9_000_000_000 } // `_` digit separators (S67)
 // fn overflow_surface() {
 //     a :: wrapping(255 + 1)
 //     b :: saturating(big_int + 1)
-//     c :: checked(x + y)            // -> T?
+//     c :: checked(x + y)            // result: T?
 // }
 
 
 // ============================================================================
 // FUNCTIONS & GENERICS
 // ============================================================================
-// `fn name(params) -> Ret { }` (S1/S12). Private by default; `pub` exports
+// `fn name(params) => Ret = value` or `fn name(params) => Ret { … }` (S1/S12).
+// Private by default; `pub` exports
 // to every consumer; `pub(package)` exports only inside the package boundary.
 
-fn greet(who: String) -> String {
-    return "hello, {who}"
-}
-
-// Generics: angle brackets, inline bounds, no `where`, no turbofish (S45/S33).
-fn id<T>(x: ^T) -> T {
-    return x
-}
-
-fn largest<T: Comparable>(xs: [T]) -> T {
+fn greet(who: String) => String = "hello, {who}"
+fn id<T>(x: ^T) => T = x
+fn largest<T: Comparable>(xs: [T]) => T {
     // ...
 }
 
 // Argument labels + trailing defaults; labels never reorder (S61, D-NARG1).
-fn schedule(task: String, delay: Int  = 0, urgent: Bool  = false) -> Bool {
-    return urgent
-}
-
+fn schedule(task: String, delay: Int  = 0, urgent: Bool  = false) => Bool = urgent
 fn call_with_labels() {
     schedule("backup", delay: 30, urgent: true)   // labels are checked docs
     schedule("ping")                               // trailing defaults fill
@@ -122,8 +104,8 @@ fn call_with_labels() {
 // # RATIFIED, NOT YET IMPLEMENTED (S83)
 // Multi-head functions — same name, different parameter patterns, dispatched by
 // argument shape; heads must be exhaustive (S83).
-// fn area(Circle(r: Float)) -> Float { return 3.14 * r * r }
-// fn area(Rect(w: Float, h: Float)) -> Float { return w * h }
+// fn area(Circle(r: Float)) => Float = 3.14 * r * r
+// fn area(Rect(w: Float, h: Float)) => Float = w * h
 
 
 // ============================================================================
@@ -169,22 +151,23 @@ fn control() {
         retries += 1                 // afterthought omitted; advance in body
     }
 
-    // labels use suffix `@` on declarations and control targets (D-LOOPLABEL2)
+    // a compile-time loop name precedes `::`; exits take that name as an argument
     outer :: loop row; [1, 2, 3] {
         loop col; [1, 2, 3] {
-            if col == 2 { outer.next() }
-            outer.break()
+            if col == 2 { next(outer) }
+            break(outer)
         }
     }
 }
 
 // `if` is the universal branching keyword (D-IF1).
-fn branch(a: Int, b: Int) -> Int {
+fn branch(a: Int, b: Int) => Int {
     // expression form — `else` required, both branches share a type (S68)
-    m :: if a > b { a } else { b }
+    m :: if a > b -> a else -> b
 
-    // subjectless guards are ordered and run only their first matching arm.
-    if a < 0 -> print("negative")
+    // Arm tables are ordered. Each head is evaluated as written; only the
+    // first matching or true arm runs.
+    if a < 0 print("negative")
     if {
         a == 0 -> print("zero")
         a < b -> print("smaller")
@@ -194,25 +177,13 @@ fn branch(a: Int, b: Int) -> Int {
         else -> "high"
     }
 
-    // multi-arm dispatch; bare-value arms compare against the subject (D-IF1/D-IF2)
-    //<<< Owner Multi-Arm Dispatch: Modify syntax for consistency.
-    // HAVE:
-    label :: if m {
-        200 -> "ok"
-        400 || 404 -> "client error"
+    // An arm table may evaluate unrelated Boolean expressions in order.
+    label :: if {
+        m == 200 -> "ok"
+        m == 400 || m == 404 -> "client error"
         else -> "other"
     }
     return m
-    // WANT:
-    label :: if m {
-        200 -> "ok"
-        400 | 404 -> "client error"
-        500 | 501 || n == false -> "server error" // Better pattern matching expressiveness, support joining boolean expressions. If no "left hand" value is provided, the subject is used.
-        (600 | 601) && (n != false) -> "other" // Optional parenthesis grouping for visual clarity
-        else -> "other"
-    }
-    return m
-    //>>> tracked: #31 D-MATCHARM1
 }
 
 
@@ -226,14 +197,11 @@ struct Point {
     x: Float
     y: Float
 
-    fn dist_sq(self) -> Float {           // `self` receiver (S27)
-        return (self.x * self.x) + (self.y * self.y)
-    }
-
-    fn origin() -> Point {                // no `self` => static/constructor (D-CTOR1)
+    fn dist_sq(self) => Float = (self.x * self.x) + (self.y * self.y)
+    fn origin() => Point {                // no `self` => static/constructor (D-CTOR1)
         return Point.{x: 0.0, y: 0.0}
     }
-    fn polar(r: Float, theta: Float) -> Point { return Point.{x: r, y: theta} }
+    fn polar(r: Float, theta: Float) => Point { return Point.{x: r, y: theta} }
 }
 
 // Field punning: a bare name is shorthand for `name: name` when in scope (S77).
@@ -263,7 +231,7 @@ enum Shape {
 
 //<<< Owner Enum Dispatch: Enum variants syntax cleanup
 // HAVE:
-fn describe(s: Shape) -> String {
+fn describe(s: Shape) => String {
     return if s {
         Circle(r) -> "circle {r}"             // binds `r`
         Rect(w, h) -> "rect {w}x{h}"
@@ -271,7 +239,7 @@ fn describe(s: Shape) -> String {
     }
 }
 // WANT:
-fn describe(s: Shape) -> String {
+fn describe(s: Shape) => String {
     return if s {
         .Circle(r) -> "circle {r}"             // binds `r`
         .Rect(w, h) -> "rect {w}x{h}"
@@ -281,7 +249,7 @@ fn describe(s: Shape) -> String {
 //>>> tracked: #32 D-ENUMDOT1
 
 // Nested patterns + guards via `&&` on freshly-bound names (D-PAT1/D-PAT2).
-fn nested(r: Shape ? Error) -> Bool {
+fn nested(r: Shape ? Error) => Bool {
     return if r {
         Ok(Rect(w, h)) && w > h -> true
         else -> false
@@ -296,22 +264,22 @@ fn nested(r: Shape ? Error) -> Bool {
 
 enum ParseError { Empty }
 
-fn parse_age(raw: String) -> Int ? ParseError {
+fn parse_age(raw: String) => Int ? ParseError {
     if raw == "" {
         return Err(ParseError.Empty)          // Err(...) constructor (S35)
     }
     return Ok(7)                              // Ok(...) constructor
 }
 
-fn use_errors(raw: String) -> Int ? ParseError {
+fn use_errors(raw: String) => Int ? ParseError {
     n :: parse_age(raw)?                       // `?` propagates (S7)
     fallback :: parse_age("0") ?? 0            // `??` fallback (S35/S71)
     return Ok(n * 2)
 }
 
 // Optionals: Val(x) present, bare None absent (S32/D-OPT-SPELL1). `?.` chains, `??` defaults.
-fn optionals(user: User?) -> String {
-    city :: user?.address?.city               // optional chaining -> T? (S71)
+fn optionals(user: User?) => String {
+    city :: user?.address?.city               // optional chaining produces T? (S71)
     name :: user?.display_name()              // `?.` through methods (D-SUGAR6)
     return city ?? "unknown"
 }
@@ -320,21 +288,21 @@ fn optionals(user: User?) -> String {
 //<<< Owner Trait Implementation Syntax: Update trait implementation syntax
 // HAVE:
 impl FileErr.Fallible {
-    fn to_error(self) -> Error { return Error }
+    fn to_error(self) => Error = Error
 }
 // WANT:
 impl FileErr.Fallible {
-    fn to_error(self) -> Error { return Error }
+    fn to_error(self) => Error = Error
 }
 //>>> tracked: #33 D-IMPLDOT1
 // # RATIFIED, NOT YET IMPLEMENTED (S80)
 // Rich default `Error` carrier (message + optional code + optional source) and a
-// fallible `fn run() -> Void ?`. (The `Fallible` conversion above ships; the
+// fallible `fn run() => Void ?`. (The `Fallible` conversion above ships; the
 // structured carrier is still pending.)
-// fn load() -> Config ? {
+// fn load() => Config ? {
 //     return Err(Error.message("bad config").code(2).with_source(io_err))
 // }
-// fn run() -> Void ? {
+// fn run() => Void ? {
 //     cfg :: load()?
 // }
 
@@ -354,17 +322,17 @@ fn skip_bad(lines: [String]) {
 // Named capabilities, not Go-structural (S28). Two equivalent impl spellings.
 
 trait Shape2 {
-    fn area(self) -> Float
+    fn area(self) => Float
 }
 
 struct Square { side: Float }
 
 impl Square.Shape2 {                          // top-level impl (S28)
-    fn area(self) -> Float { return self.side * self.side }
+    fn area(self) => Float = self.side * self.side
 }
 
 // Trait name in type position => dynamic dispatch; `<T: Trait>` => monomorphize (S48).
-fn total_area(shapes: [Shape2]) -> Float {     // boxed dynamic dispatch
+fn total_area(shapes: [Shape2]) => Float {     // boxed dynamic dispatch
     // ...
 }
 
@@ -404,7 +372,7 @@ fn collections() {
 
      fruits := [String: Float].{ "limes": 4.2 } // map shorthand (S64)
     fruits["pears"] = 9.9                        // insert (S39)
-    got :: fruits.get("limes")                  // safe access -> V? (S39)
+    got :: fruits.get("limes")                  // safe access produces V? (S39)
 
     // map entry iteration yields a named entry value (S66)
     loop e; fruits {
@@ -420,10 +388,7 @@ fn collections() {
 }
 
 // Fixed-size list type `[T#N]` — `#` introduces a pinned count (S76/D-FIXARR1).
-fn fixed() -> [Int#3] {
-    return [1, 2, 3]                            // `.len` is a compile-time const
-}
-
+fn fixed() => [Int#3] = [1, 2, 3]                            // `.len` is a compile-time const
 fn strings() {
     parts :: "a,b,c".split(",").to_list()
     trimmed :: "  hi  ".trim()
@@ -438,7 +403,8 @@ fn strings() {
 // ============================================================================
 // CLOSURES
 // ============================================================================
-// `(params) => expr` or `(params) => { ... }` (S46). `=>` lambda, `->` returns.
+// `(params) => expr` or `(params) => { ... }` (S46). `=>` defines a callable
+// result; `->` selects an arm or yields a finite-loop item.
 
 fn closures() {
     nums :: [3, 1, 2]
@@ -446,16 +412,12 @@ fn closures() {
     big :: squares.filter((n: Int) => n > 5).to_list()
     total :: nums.reduce(0, (acc: Int, n: Int) => acc + n)
 
-    // escaping closures must own captures; explicit `take(name)` when needed (S47)
-    make :: take(total) () => total
+    // captures are implicit: copyable values copy; other owned values move
+    make :: () => total
 }
 
-// Function types: `fn(T1, T2) -> R` (S47). Named fns coerce to function values.
-fn apply(f: fn(Int) -> Int, x: Int) -> Int {
-    return f(x)
-}
-
-// Fan-out (S75): `f.[a, b, c]` == `[f(a), f(b), f(c)]`; result is `[T#N]` (S76).
+// Function types: `fn(T1, T2) => R` (S47). Named fns coerce to function values.
+fn apply(f: fn(Int) => Int, x: Int) => Int = f(x)
 fn fanout() {
     tripled :: triple.[1, 2, 3]
     [t0, t1, t2] :: tripled
@@ -467,7 +429,7 @@ fn fanout() {
 // ============================================================================
 // `use "path"` = file; `use name` = module (S16). Core stdlib is `core.*` (S51).
 
-use "./lib"                          // file path -> namespace lib
+use "./lib"                          // file path imports namespace lib
 use "grades/scoring" as g            // file path, aliased
 use core.files as fs                 // core submodule (S51)
 use core.encoding.json as json       // unified encoding library (D-ENC1)
@@ -476,7 +438,7 @@ use core.regex as re                  // std-only linear regex (D-REGEXENGINE1)
 
 // Inline module; `pub` controls cross-file access (S18).
 module math {
-    pub fn double(n: Int) -> Int { return n * 2 }
+    pub fn double(n: Int) => Int = n * 2
 }
 
 // Kebab-case allowed in name positions only (package/module/system/image/env) (S84).
@@ -484,40 +446,28 @@ module web-app { }
 
 
 // ============================================================================
-// EFFECTS  (-> / --[Io]->)
+// EFFECTS  (=> / =[Io]=>)
 // ============================================================================
-// Every fn carries an inferred, erased effect set; a `--[…]->` list bounds it (D-EFF1).
+// Every fn carries an inferred, erased effect set; an `=[…]=>` row bounds it (D-EFF1).
 // Effect tags are PascalCase (D-CASING1). Effects flow through calls (D-EFF2).
 // D-SHAPE8 puts every explicit effect row inside the arrow.
 
-fn square(n: Int) --[]-> Int {              // explicit empty effect bound
-    return n * n
-}
-
-fn announce(label: String, n: Int) --[Io]-> {    // upper bound: may use Io
+fn square(n: Int) =[]=> Int = n * n
+fn announce(label: String, n: Int) =[Io]=> {    // upper bound: may use Io
     print("{label} {n}")
 }
 
 // Expert levers (D-EFF2): demand/bound a callback, or publish a pass-through.
 // The same arrow-row spelling applies to function types.
-fn run_all(cb: fn(Int) --[]-> Int) { }      // lever 1: param-type effect bound
-fn map_each(f: fn(Int) -> Int) --[via f]-> { }   // lever 2: `--[via f]->` pass-through
+fn run_all(cb: fn(Int) =[]=> Int) { }      // lever 1: param-type effect bound
+fn map_each(f: fn(Int) => Int) =[via f]=> { }   // lever 2: callback pass-through
 
 // Scoped capability: granted into a lexical scope, revoked at scope end (D-SCAP1).
-//<<< Owner Scoped Capability: Update scoped capability syntax
-// HAVE:
 fn with_fs() {
-    #Grant(Fs) { caps ->
+    #Grant(caps: Fs) {
         // Fs effect authorized only inside this block
     }
 }
-// WANT:
-fn with_fs() {
-    #Grant(Fs) { caps ->
-        // Fs effect authorized only inside this block
-    }
-}
-//>>> tracked: #34 D-MARKERCASE1
 
 
 // ============================================================================
@@ -545,7 +495,7 @@ fn call_sites(player: Player, file: File) {
 
 // Raw pointers (D-CAP9): `*T` type, prefix `*x` raw-pointer-of, postfix `p.*` deref.
 #Unsafe("reads through a raw pointer; addr must be live and valid")
-fn deref_cell(cell: Int) -> Int {
+fn deref_cell(cell: Int) => Int {
     addr :: mem.address_of(cell)               // address-of is a call, not a sigil
     #Unsafe("addr is the address of a live Int on this frame") {
         p :: *addr                             // raw-pointer-of
@@ -617,22 +567,22 @@ fn tasks_demo() {
 // TAGS, TYPESTATE, LINEAR & TAINT  (the value-fact tier)
 // ============================================================================
 // Two qualifier kinds: `trait` (has methods, dispatches) vs `tag` (no methods,
-// erases). Beginner rule: methods -> trait, no methods -> tag (D-QUAL2).
+// erases). Beginner rule: methods need a trait; no methods need a tag (D-QUAL2).
 
 tag Reviewed                                   // marker tag, erases at runtime
 tag Internal { }
-trait Greeter { fn greet(self) -> String }
+trait Greeter { fn greet(self) => String }
 
 // Typestate via transitioning tags (D-STATE1): require a state, or transition states.
 #State(Open) fn write_line(self, s: String) { }       // valid only when Open
-#Transition(Closed, Open) fn open(self) -> File { }  // consume Closed, yield Open
+#Transition(Closed, Open) fn open(self) => File { }  // consume Closed, yield Open
 
 // Taint tracking (D-TAINT1): `#Tainted` value-fact spreads; `#Sanitizer fn` strips it.
 fn taint(raw: String) {
     user :: #Tainted raw                        // marks untrusted input
     clean :: sanitize(user)                     // strip via sanitizer
 }
-#Sanitizer fn sanitize(s: String) -> String { return s }
+#Sanitizer fn sanitize(s: String) => String { return s }
 
 // Single-use / linear values (D-LIN1): must be consumed exactly once on every path.
 #SingleUse
@@ -640,23 +590,12 @@ struct Ticket { id: Int }
 
 // Must-use results (D-MUSTUSE1): cannot be silently ignored as a bare
 // statement (E0419). D-MARKERMOVE1: `#MustUse` is a contract marker.
-#MustUse fn ack() -> Int { return 1 }
+#MustUse fn ack() => Int { return 1 }
 #MustUse struct Receipt { id: Int }
 
 // Units of measure as a tag family (D-QUAL3, supersedes D-UNIT1 spelling).
 #UnitFamily(Currency) { usd, eur }
-fn price() -> Usd {
-    return Usd.from_float(9.99)                 // destination conversion; `.raw()` strips the unit
-}
-
-
-// ============================================================================
-// MEMORY LAYOUT & SIMD
-// ============================================================================
-
-// Layout control (D-SOA1/D-SOA2): whole-struct columnar (struct-of-arrays).
-//<<< Owner Layout Control: Update layout control syntax
-// HAVE:
+fn price() => Usd = Usd.from_float(9.99)                 // destination conversion; `.raw()` strips the unit
 #Layout(columnar)
 struct Particle { x: Float, y: Float, vx: Float, vy: Float }
 // WANT:
@@ -680,7 +619,7 @@ fn simd() {
 // Rust FFI: explicit `extern rust` blocks, each entry a Jet signature + path (S50).
 
 extern rust "base64@0.22" {
-    fn b64encode(s: String) -> String  = "base64::encode"
+    fn b64encode(s: String) => String  = "base64::encode"
 }
 
 // C FFI: auto-generated bindings, consumed with `use c.<lib> as alias` (S59).
@@ -714,9 +653,7 @@ fn c_ffi() {
 /// ```jet
 /// double(21) // => 42
 /// ```
-fn double(n: Int) -> Int { return n * 2 }
-
-// Bug stops: panic / require (S36). Typed holes: #Todo (D-CASING1).
+fn double(n: Int) => Int = n * 2
 fn invariants(n: Int) {
     require(n > 0, "n must be positive")
     panic("unreachable")
@@ -730,7 +667,7 @@ struct UserRecord {
     age: Int
 }
 migration UserRecord {
-    rename name -> display_name
+    rename name => display_name
 }
 
 // # RATIFIED, NOT YET IMPLEMENTED (D-MIGRATE2A / D-MIGRATE2D / D-MIGRATE2E)
@@ -740,5 +677,5 @@ migration UserRecord {
 // migration UserRecord {
 //     add verified: Bool =  false
 //     remove legacy_id
-//     change price: Int -> Usd via { (cents) => Usd.from_int(cents) }
+//     change price: Int => Usd via { cents => Usd.from_int(cents) }
 // }

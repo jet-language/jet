@@ -460,7 +460,7 @@ impl<'a> Parser<'a> {
                         Syntax::KW_RUST
                     ),
                     format!(
-                        "write: {} {} \"std\" {{ fn name() -> Int = \"std::path\"; }}",
+                        "write: {} {} \"std\" {{ fn name() => Int = \"std::path\"; }}",
                         Syntax::KW_EXTERN,
                         Syntax::KW_RUST
                     ),
@@ -544,8 +544,11 @@ impl<'a> Parser<'a> {
     
             let mut return_type = None;
             let mut return_type_span = None;
-            if matches!(self.peek().kind, TokKind::Arrow) {
-                self.bump();
+            if matches!(self.peek().kind, TokKind::LambdaArrow | TokKind::Arrow) {
+                let arrow = self.bump();
+                if matches!(arrow.kind, TokKind::Arrow) {
+                    self.diags.push(Self::retired_callable_arrow(arrow.span));
+                }
                 let (ty, span) = self.return_type()?;
                 return_type = Some(ty);
                 return_type_span = Some(span);

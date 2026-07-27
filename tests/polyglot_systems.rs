@@ -129,8 +129,8 @@ int64_t apply(int64_t (*callback)(int64_t), int64_t input) {
     let main = root.join("main.jet");
     let source = r#"use cpp.counter as cpp
 
-fn increment(value: Int) --[]-> Int { return value + 1 }
-fn reject(value: Int) --[]-> Int { return -value }
+fn increment(value: Int) =[]=> Int { return value + 1 }
+fn reject(value: Int) =[]=> Int { return -value }
 
 fn run() {
     counter := cpp.new_counter(10) ?? panic("constructor")

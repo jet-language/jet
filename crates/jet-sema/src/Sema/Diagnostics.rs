@@ -133,7 +133,7 @@ pub(crate) fn loop_control_outside(kw: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// D-LOOPLABEL3 (E0987): `name.break()` / `name.next()` targets a loop name that
+/// D-ARROW-CONTROL1 (E0987): `break(name)` / `next(name)` targets a loop name that
 /// is not in scope. The fix lists the names that *are* reachable here.
 pub(crate) fn undefined_loop_label(name: &str, in_scope: &[String], span: Span) -> Diagnostic {
     let fix = if in_scope.is_empty() {
@@ -141,7 +141,7 @@ pub(crate) fn undefined_loop_label(name: &str, in_scope: &[String], span: Span) 
     } else {
         let labels = in_scope
             .iter()
-            .map(|l| format!("`{l}.break()` or `{l}.next()`"))
+            .map(|l| format!("`break({l})` or `next({l})`"))
             .collect::<Vec<_>>()
             .join(", ");
         format!("use a label in scope: {labels}")
@@ -1075,12 +1075,12 @@ pub(crate) fn describe_sendability_problem(problem: &SendabilityProblem) -> Stri
         SendProblemKind::ClosureNeedsTake => {
             if let (Some(root), false) = (problem.root.as_deref(), problem.path.is_empty()) {
                 format!(
-                    "`{}` contains `{}`, which is a closure that was not handed over with `take`",
+                    "`{}` contains `{}`, whose captures cannot cross this boundary",
                     root,
                     problem.path.join(".")
                 )
             } else {
-                "a closure may hold outside state, so it must be handed over with `take` before it crosses this boundary".to_string()
+                "the closure holds state that cannot cross this boundary".to_string()
             }
         }
         SendProblemKind::ClosureCaptures => {

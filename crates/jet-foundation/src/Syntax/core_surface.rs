@@ -209,9 +209,9 @@ pub const KW_COPY: &str = "copy";
 /// teaching error that points at the `&` sigil.
 pub const KW_MUTATE: &str = "mut";
 
-/// S10 (M2) → D-CAP7: the retired move keyword. Recognized only for the E0057
-/// teaching error that points at the `^` sigil. (`.take(n)` stays a valid method
-/// name in dot position; `take(names)` stays the lambda capture prefix.)
+/// S10 (M2) → D-CAP7: the retired move keyword. Bare `take value` is recognized
+/// only for the paused capability teaching path. `.take(n)` stays a valid method
+/// name, while `take(names) () =>` is recognized only to report E0057.
 pub const KW_MOVE: &str = "take";
 
 /// M2: struct definition keyword (construction spelling: S29).
@@ -520,7 +520,8 @@ pub const CORE_EMAIL_SMTP_FROM_ENV_FN: &str = "smtp_from_env";
 /// writes `region`.
 pub const ATTR_REGION: &str = "Region"; // D-BLOCKPLANE1
 
-/// D-TASKSCOPE1=A: structured task group scope — owns child tasks until scope exit.
+/// D-TASKSCOPE1=A + D-ARROW-CONTROL1=A: structured task group scope. The
+/// keyword remains `taskgroup`; child callable bodies use `=>`.
 pub const KW_TASKGROUP: &str = "taskgroup";
 
 /// D-CTX1 (ratified 2026-06-22, G2): smart-context block marker.

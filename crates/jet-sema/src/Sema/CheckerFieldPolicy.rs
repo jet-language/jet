@@ -12,7 +12,7 @@
 //!      (read-only) to `self.<field>`" scoping, made real by substitution
 //!      instead of a synthetic scope, so both sema and codegen resolve it
 //!      through the ordinary `self.field` path (no new lowering path, I3);
-//!   3. synthesize a `fn <field>(self) -> T { return <rewritten expr>; }`
+//!   3. synthesize a `fn <field>(self) => T { return <rewritten expr>; }`
 //!      method per computed field and append it to `s.methods`, so it flows
 //!      through the *exact* same registration / body-checking / TIR codegen
 //!      pipeline as a hand-written method (S62 delegation-method precedent).
@@ -338,7 +338,7 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
     }
 }
 
-/// Step 3: `fn <field>(self) -> T { return <rewritten expr>; }`, built the
+/// Step 3: `fn <field>(self) => T { return <rewritten expr>; }`, built the
 /// same way `Registration::synthesize_delegation_method` builds an S62
 /// forwarding method — a full `Func` with a placeholder self type (`S27`:
 /// sema fills in the owner type from `owner_type` when it checks the body),

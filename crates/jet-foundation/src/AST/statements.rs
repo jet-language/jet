@@ -24,8 +24,8 @@ pub struct SwitchArm {
     pub span: Span,
 }
 
-/// D-IFGUARD1=A: subjectless guard tables reuse `Stmt::Switch` with a
-/// compiler-private `true` subject located at the `if` keyword span.
+/// D-IFGUARD1=A: ordered arm tables without a named subject reuse
+/// `Stmt::Switch` with a compiler-private `true` subject at the `if` span.
 pub fn is_subjectless_guard(subject: &Expr, span: Span) -> bool {
     matches!(subject, Expr::Bool(true, subject_span) if *subject_span == span)
 }
@@ -70,9 +70,13 @@ pub enum Stmt {
         span: Span,
     },
     Break(Span),
+    /// D-LOOPSTATE1: `break value` returns one final ordinary-loop value.
+    BreakValue(Expr, Span),
     Continue(Span),
-    /// D-LOOPLABEL3: `name.break()` / `name.next()` targeting a named loop.
+    /// D-LOOPLABEL3 + D-ARROW-CONTROL1: `break(name)` / `next(name)`.
     BreakLabel(String, Span),
+    /// D-LOOPSTATE1: `break(name, value)` returns from a named ordinary loop.
+    BreakLabelValue(String, Span, Expr, Span),
     ContinueLabel(String, Span),
     Loop {
         body: Vec<Stmt>,
@@ -159,7 +163,7 @@ pub enum Stmt {
         span: Span,
     },
     /// D-TASKSCOPE1=A / D-NURSERY1=A: `taskgroup g { … }` — a lexical scope that
-    /// owns child tasks. `g.task { … }` spawns; scope exit joins/cancels children.
+    /// owns child tasks. `g.task => …` spawns; scope exit joins/cancels children.
     /// Emitted as a plain block at codegen; lifetime is enforced in sema (I3).
     TaskGroup {
         name: String,
@@ -272,7 +276,7 @@ pub enum Stmt {
     /// D-TERM1 (ratified 2026-06-22): `live { … }` — enter un-buffered/no-echo
     /// terminal input mode for the body, restore on every exit (normal, `return`,
     /// `?`, and panic) via the D-DEFER1 scope-guard mechanism.
-    /// `use core.term as term` makes `term.read_key() -> Key` available.
+    /// `use core.term as term` makes `term.read_key() => Key` available.
     Live {
         body: Vec<Stmt>,
         span: Span,
@@ -348,8 +352,10 @@ impl Stmt {
             Stmt::Assign { target, .. } => target.span(),
             Stmt::Return(_, span)
             | Stmt::Break(span)
+            | Stmt::BreakValue(_, span)
             | Stmt::Continue(span)
             | Stmt::BreakLabel(_, span)
+            | Stmt::BreakLabelValue(_, _, _, span)
             | Stmt::ContinueLabel(_, span)
             | Stmt::While { span, .. }
             | Stmt::For { span, .. }

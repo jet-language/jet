@@ -465,7 +465,7 @@ mod tests {
         let old = vec![ApiItem {
             kind: "fn".into(),
             name: "parse".into(),
-            signature: "fn parse(raw: String) -> Int".into(),
+            signature: "fn parse(raw: String) => Int".into(),
         }];
         let new = vec![];
         let changes = diff_public_api(&old, &new);
@@ -478,12 +478,12 @@ mod tests {
         let old = vec![ApiItem {
             kind: "fn".into(),
             name: "parse".into(),
-            signature: "fn parse(raw: String) -> Int".into(),
+            signature: "fn parse(raw: String) => Int".into(),
         }];
         let new = vec![ApiItem {
             kind: "fn".into(),
             name: "parse".into(),
-            signature: "fn parse(raw: String) -> Float".into(),
+            signature: "fn parse(raw: String) => Float".into(),
         }];
         let changes = diff_public_api(&old, &new);
         assert!(!changes.is_empty());

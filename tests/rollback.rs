@@ -32,7 +32,7 @@ struct CounterSnap {
 }
 impl Counter.Rollback {
     type Snapshot = CounterSnap
-    fn snapshot(self) -> CounterSnap {
+    fn snapshot(self) => CounterSnap {
         return CounterSnap.{ value: self.value, ops: self.ops }
     }
     fn restore(&self, snap: ^CounterSnap) {
@@ -41,7 +41,7 @@ impl Counter.Rollback {
     }
 }
 enum Fail { Bad }
-fn bump(c: &Counter) -> Int ? Fail {
+fn bump(c: &Counter) => Int ? Fail {
     #Transact {
         c.value += 1
         c.ops += 1
@@ -79,7 +79,7 @@ struct CounterSnap {
 }
 impl Counter.Rollback {
     type Snapshot = CounterSnap
-    fn snapshot(self) -> CounterSnap {
+    fn snapshot(self) => CounterSnap {
         return CounterSnap.{ value: self.value, ops: self.ops }
     }
     fn restore(&self, snap: ^CounterSnap) {
@@ -88,7 +88,7 @@ impl Counter.Rollback {
     }
 }
 enum Fail { Bad }
-fn bump(c: &Counter) -> Int ? Fail {
+fn bump(c: &Counter) => Int ? Fail {
     #Transact {
         c.value += 1
         c.ops += 1
@@ -119,7 +119,7 @@ struct Counter {
 struct CounterSnap { value: Int }
 impl Counter.Rollback {
     type Snapshot = CounterSnap
-    fn snapshot(self) -> CounterSnap {
+    fn snapshot(self) => CounterSnap {
         return CounterSnap.{ value: self.value }
     }
     fn restore(&self, snap: ^CounterSnap) {
@@ -127,7 +127,7 @@ impl Counter.Rollback {
     }
 }
 enum Fail { Bad }
-fn bump(c: &Counter) -> Int ? Fail {
+fn bump(c: &Counter) => Int ? Fail {
     #Transact {
         c.value += 1
         return Err(Fail.Bad)

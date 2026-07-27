@@ -1,5 +1,6 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
+use crate::Sema::Diagnostics::is_cloneable;
 use crate::Generics::{is_type_var_name, substitute_type};
 use crate::Collections;
 use crate::Syntax;
@@ -745,6 +746,11 @@ impl<'a> Checker<'a> {
             .cloned_captures
             .iter()
             .collect::<HashSet<_>>();
+        let moved = lambda
+            .meta
+            .moved_captures
+            .iter()
+            .collect::<HashSet<_>>();
         let has_capture_write = events
             .iter()
             .any(|event| event.access == ViewAccess::Write);
@@ -756,7 +762,8 @@ impl<'a> Checker<'a> {
                 // the move closure; body projections and writes target the clone.
                 event.place.projections.clear();
                 event.access = ViewAccess::Read;
-            } else if (!lambda.meta.needs_fn_mut || lambda.meta.escapes)
+            } else if (moved.contains(name)
+                || (!lambda.meta.needs_fn_mut || lambda.meta.escapes))
                 && !event.capture_is_view
                 && !event.capture_ty.as_ref().is_some_and(type_is_copy)
                 && self
@@ -863,6 +870,34 @@ impl<'a> Checker<'a> {
                             out,
                         );
                     }
+                }
+            }
+            Expr::CallValue { callee, args, .. }
+                if matches!(
+                    callee.as_ref(),
+                    Expr::Lambda(lambda)
+                        if lambda.meta.collecting_loop || lambda.meta.result_loop
+                ) =>
+            {
+                let Expr::Lambda(lambda) = callee.as_ref() else {
+                    unreachable!("collecting loop guard requires a lambda")
+                };
+                match &lambda.body {
+                    LambdaBody::Expr(body) => {
+                        self.collect_evaluated_expr_accesses(body, mode, bound, out);
+                    }
+                    LambdaBody::Block(body) => {
+                        let mut body_bound = bound.clone();
+                        self.collect_evaluated_stmt_accesses(
+                            body,
+                            mode,
+                            &mut body_bound,
+                            out,
+                        );
+                    }
+                }
+                for arg in args {
+                    self.collect_evaluated_expr_accesses(&arg.expr, mode, bound, out);
                 }
             }
             Expr::CallValue { callee, args, .. } => {
@@ -1174,6 +1209,9 @@ impl<'a> Checker<'a> {
                     self.collect_evaluated_expr_accesses(value, mode, bound, out);
                 }
                 Stmt::Return(Some(expr), _) => {
+                    self.collect_evaluated_expr_accesses(expr, mode, bound, out);
+                }
+                Stmt::BreakValue(expr, _) | Stmt::BreakLabelValue(_, _, expr, _) => {
                     self.collect_evaluated_expr_accesses(expr, mode, bound, out);
                 }
                 Stmt::If(branch) => {
@@ -2901,10 +2939,6 @@ impl<'a> Checker<'a> {
             if param_names.contains(name) {
                 continue;
             }
-            let taken = take_set.contains(name);
-            if mut_caps.contains(name) && !taken {
-                return false;
-            }
             let cap = self
                 .lookup(name)
                 .map(|i| (i.ty.clone(), i.sendable))
@@ -2912,7 +2946,12 @@ impl<'a> Checker<'a> {
             let Some((cap_ty, cap_sendable)) = cap else {
                 continue;
             };
-            if !cap_sendable || self.sendability_problem(&cap_ty, taken).is_some() {
+            let moves_capture = take_set.contains(name) || !is_cloneable(&cap_ty, self.registry);
+            if !cap_sendable
+                || self
+                    .sendability_problem(&cap_ty, moves_capture)
+                    .is_some()
+            {
                 return false;
             }
         }

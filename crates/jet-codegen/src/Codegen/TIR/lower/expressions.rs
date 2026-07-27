@@ -344,6 +344,36 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             ty: Type::Int,
             kind: TExprKind::DefaultLit,
         },
+        // D-LOOPEVAL1: the parser carries a yielding loop through sema as an
+        // immediately-called private lambda. Lower it as a block in the current
+        // function, not as a closure call: captures, effects, `return`, and cleanup
+        // must keep ordinary loop behavior.
+        Expr::CallValue { callee, args, .. }
+            if args.is_empty()
+                && matches!(
+                    callee.as_ref(),
+                    Expr::Lambda(lam) if lam.meta.collecting_loop || lam.meta.result_loop
+                ) =>
+        {
+            let Expr::Lambda(lam) = callee.as_ref() else {
+                unreachable!("collecting loop guard requires a lambda")
+            };
+            let crate::AST::LambdaBody::Block(body) = &lam.body else {
+                unreachable!("collecting loops always carry a block")
+            };
+            let ty = if lam.meta.collecting_loop {
+                Type::List(Box::new(
+                    lam.meta.collect_item_type.clone().unwrap_or(Type::Int),
+                ))
+            } else {
+                lam.meta.loop_result_type.clone().unwrap_or(Type::Int)
+            };
+            let mut block_env = clone_env(env);
+            TExpr {
+                ty,
+                kind: TExprKind::InlineBlock(lower_stmts(body, cx, &mut block_env)),
+            }
+        }
         // c109 Phase 13: a call THROUGH a fn-value `(f)(args)` (`Expr::CallValue`). The
         // Function-type parameters are unmarked, therefore Read under D-MEM-PARAM1.
         Expr::CallValue { callee, args, .. } => {

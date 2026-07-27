@@ -1,9 +1,9 @@
-// D-EFF3: a trait method may declare an effect upper bound. `fn … --[]-> area`
+// D-EFF3: a trait method may declare an effect upper bound. `fn … =[]=> area`
 // means every implementation must be pure — its inferred effects must fit
 // inside the empty set, or it is E0742. The bound holds for all impls, so a
-// caller can rely on it. (A `fn render(self) --[Gpu]->` form bounds to a set.)
+// caller can rely on it. (A `fn render(self) =[Gpu]=>` form bounds to a set.)
 trait Shape {
-    fn area(self) --[]-> Int
+    fn area(self) =[]=> Int
 }
 
 struct Square {
@@ -11,10 +11,7 @@ struct Square {
 }
 
 impl Square.Shape {
-    fn area(self) -> Int {
-        // No annotation needed: the impl's inferred effects (empty) fit the bound.
-        return self.side * self.side
-    }
+    fn area(self) => Int = self.side * self.side
 }
 
 fn run() {

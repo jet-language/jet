@@ -1,11 +1,12 @@
 // if_universal — D-IF3/D-IFGUARD1. `if` is the one branching keyword. Beyond the familiar
-// two-arm form, `if subject == { arm -> body }` is multi-arm dispatch:
+// two-arm form, an ordered pattern-arm table is the preferred multi-arm form:
 //   - the `==` marker enters value/pattern dispatch;
 //   - a bare value arm compares against the subject (`subject == value`);
-//   - a range arm `lo..hi ->` matches a band (Q4: no free predicates here);
+//   - a range arm `lo..hi ->` matches a band;
+//   - any Boolean expression is evaluated as written;
 //   - an arm body is a braceless single statement OR a `{ … }` block;
 //   - `else -> …` is the catch-all.
-fn classify(code: Int) -> String {
+fn classify(code: Int) => String {
     // Bare-value arms (inferred `code == …`), a range arm, braceless and block
     // bodies, and an `else` catch-all — mixed freely.
     if code == {
@@ -31,8 +32,8 @@ fn run() {
     } else {
         print("small")
     }
-    // Ordered guards need no repeated subject. Statement tables may omit else.
-    if n > 10 -> print("too big")
+    // A subject is optional. Arbitrary Boolean heads run in order, first true wins.
+    if n > 10 print("too big")
     if {
         n < 0 -> { print("negative") }
         n < 10 -> { print("single digit") }

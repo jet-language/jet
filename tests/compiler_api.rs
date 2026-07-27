@@ -91,7 +91,7 @@ fn single_bar_is_alternatives_only_and_flow_pipe_has_no_foreign_guess() {
 fn check_file_api_includes_semindex_for_clean_program() {
     let path = fixture_file(
         "compiler_api_clean.jet",
-        "fn helper() -> Int {\n    return 41\n}\n\nfn run() {\n    print(helper() + 1)\n}\n",
+        "fn helper() => Int {\n    return 41\n}\n\nfn run() {\n    print(helper() + 1)\n}\n",
     );
     let checked = jet::Compiler::check_file(&path);
     assert!(

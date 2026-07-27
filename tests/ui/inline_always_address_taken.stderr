@@ -1,7 +1,7 @@
 Error [E0918]: `triple` cannot be inlined: its address is taken
   --> tests/ui/inline_always_address_taken.jet:4:1
     |
-  4 | #Inline(Always) fn triple(x: Int) -> Int {
+  4 | #Inline(Always) fn triple(x: Int) => Int {
     | ^^^^^^^^^^^^^^^
  Why: `#Inline(Always)` promises every call to `triple` expands in place — but `triple` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at.
  Fix: drop `#Inline(Always)`, or call `triple` directly instead of through a value.

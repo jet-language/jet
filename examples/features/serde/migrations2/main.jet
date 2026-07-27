@@ -6,8 +6,8 @@
 // so the compiler can prove old data still reads:
 //
 //   remove legacy_id          (D-MIGRATE2D) — a field is gone
-//   rename name -> title      (D-MIGRATE1)  — a field changed name
-//   change score: Int -> Rank (D-MIGRATE2E) — a field changed type, with an
+//   rename name => title      (D-MIGRATE1)  — a field changed name
+//   change score: Int => Rank (D-MIGRATE2E) — a field changed type, with an
 //                                             inline `via` converter
 //   add active: Bool = true   (D-MIGRATE2A) — a new field, with a default for
 //                                             records written before it existed
@@ -28,8 +28,8 @@ struct Rank {
 
 migration Profile {
     remove legacy_id
-    rename name -> title
-    change score: Int -> Rank via { n => Rank.{ value: n } }
+    rename name => title
+    change score: Int => Rank via { n => Rank.{ value: n } }
     add active: Bool = true
 }
 

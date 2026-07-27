@@ -645,6 +645,13 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         }
         TExprKind::Clone(inner) => resident_safe_expr(inner, callees),
         TExprKind::Borrow { place, .. } => resident_safe_expr(place, callees),
+        TExprKind::InlineBlock(stmts) => {
+            (jit_value_type(&expr.ty)
+                || jit_list_native_type(&expr.ty)
+                || jit_struct_type(&expr.ty)
+                || jit_tuple_type(&expr.ty))
+                && stmts.iter().all(|stmt| resident_safe_stmt(stmt, callees))
+        }
         TExprKind::OptionLift2 { f, a, b } => {
             matches!(
                 &f.kind,
@@ -1247,6 +1254,13 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 && body.iter().all(|s| resident_safe_stmt(s, callees))
         }
         TStmt::Break(_) | TStmt::Continue(_) => true,
+        TStmt::BreakValue { value, .. } => {
+            (jit_value_type(&value.ty)
+                || jit_list_native_type(&value.ty)
+                || jit_struct_type(&value.ty)
+                || jit_tuple_type(&value.ty))
+                && resident_safe_expr(value, callees)
+        }
         TStmt::IndexAssign {
             base,
             index,

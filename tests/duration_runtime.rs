@@ -30,10 +30,10 @@ fn run() {
 
     if jet_jit::cranelift_host_supported() {
         let bundle = checked_bundle(r#"
-fn make() -> Duration ? RangeError {
+fn make() => Duration ? RangeError {
     return Duration.seconds(1.5)
 }
-fn read(d: Duration) -> Int ? RangeError {
+fn read(d: Duration) => Int ? RangeError {
     return d.in(.Milliseconds)
 }
 fn run() {}

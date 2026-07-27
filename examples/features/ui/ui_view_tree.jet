@@ -3,7 +3,7 @@
 use core.ui as ui
 use core.reactive as reactive
 
-fn repaint(old: [UiNode], updated: [UiNode]) -> Int {
+fn repaint(old: [UiNode], updated: [UiNode]) => Int {
     backend := ui.null_backend()
     n := 0
     i := 0
@@ -30,7 +30,7 @@ fn run() {
     leaves := reactive.signal(initial)
     backend := ui.tui_backend()
     render_backend := ~backend
-    ui.reactive_render(take(render_backend) () => {
+    ui.reactive_render(() => {
         tree :: ui.box(leaves.get())
         size :: render_backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
         render_backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))

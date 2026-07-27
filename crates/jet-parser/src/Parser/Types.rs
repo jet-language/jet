@@ -36,10 +36,10 @@ impl<'a> Parser<'a> {
             self.peek().kind,
             TokKind::KwFn | TokKind::Ident(_) | TokKind::LParen | TokKind::LBracket
         )
-        // D-EFF2/D-MARKERMOVE2: `fn(…) --[]->` — a pure-bounded function type
+        // D-EFF2/D-MARKERMOVE2: `fn(…) =[]=>` — a pure-bounded function type
         // (G1: the one carve-out where a contract marker prefixes a TYPE, not a
-        // declaration). Retired `fn(…) --[]->` still recognized here so the
-        // callback-bound parser can teach E0062. `fn(…) --[E]->` — the general
+        // declaration). Retired `fn(…) --[]->` remains recognized here so the
+        // callback-bound parser can teach E0062. `fn(…) --[E]->` — the retired general
         // effect-bound list — stays on `#`.
         || (matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE)
             && matches!(self.peek().kind, TokKind::Hash))
@@ -728,7 +728,7 @@ impl<'a> Parser<'a> {
         Ok((member, start))
     }
 
-    /// Parse a function type `fn(T1, …) --[E]-> R`, the cursor at `fn`.
+    /// Parse a function type `fn(T1, …) =[E]=> R`, the cursor at `fn`.
     /// `effect_bound` is non-None only while recovering retired prefix syntax.
     fn fn_type(&mut self, mut effect_bound: Option<Vec<(String, Span)>>) -> Result<Type, Diagnostic> {
         self.expect(TokKind::KwFn, "to start a function type")?;
@@ -745,18 +745,28 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(TokKind::RParen, "after parameter types in `fn(...)`")?;
-        let decorated = matches!(self.peek().kind, TokKind::MinusMinus);
+        let decorated = matches!(self.peek().kind, TokKind::Eq)
+            && matches!(self.peek2().kind, TokKind::LBracket);
+        let retired_double = matches!(self.peek().kind, TokKind::MinusMinus);
         let retired_ballot = matches!(self.peek().kind, TokKind::Minus)
             && matches!(self.peek2().kind, TokKind::LBracket);
-        if decorated || retired_ballot {
-            if retired_ballot {
+        if decorated || retired_double || retired_ballot {
+            if retired_double || retired_ballot {
                 self.diags.push(Self::retired_effect_syntax(self.peek().span));
             }
-            effect_bound = Some(self.parse_effect_arrow_row(retired_ballot)?);
+            effect_bound =
+                Some(self.parse_effect_arrow_row(decorated, retired_ballot)?);
         }
-        let ret = if decorated || retired_ballot || matches!(self.peek().kind, TokKind::Arrow) {
-            if !decorated && !retired_ballot {
-                self.bump();
+        let ret = if decorated
+            || retired_double
+            || retired_ballot
+            || matches!(self.peek().kind, TokKind::LambdaArrow | TokKind::Arrow)
+        {
+            if !decorated && !retired_double && !retired_ballot {
+                let arrow = self.bump();
+                if matches!(arrow.kind, TokKind::Arrow) {
+                    self.diags.push(Self::retired_callable_arrow(arrow.span));
+                }
             }
             if self.type_starts_here() {
                 let (r, _) = self.type_()?;
@@ -774,12 +784,22 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_effect_arrow_row(&mut self, retired_ballot: bool) -> Result<Vec<(String, Span)>, Diagnostic> {
+    fn parse_effect_arrow_row(
+        &mut self,
+        canonical: bool,
+        retired_ballot: bool,
+    ) -> Result<Vec<(String, Span)>, Diagnostic> {
         self.expect(
-            if retired_ballot { TokKind::Minus } else { TokKind::MinusMinus },
+            if canonical {
+                TokKind::Eq
+            } else if retired_ballot {
+                TokKind::Minus
+            } else {
+                TokKind::MinusMinus
+            },
             "to start an effect arrow",
         )?;
-        self.expect(TokKind::LBracket, "after `--` to start an effect row")?;
+        self.expect(TokKind::LBracket, "to start an effect row")?;
         let mut effects = Vec::new();
         while !matches!(self.peek().kind, TokKind::RBracket) {
             if matches!(self.peek().kind, TokKind::DotDot) {
@@ -804,7 +824,14 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::Comma, "between effects in the row")?;
         }
         self.expect(TokKind::RBracket, "to close the effect row")?;
-        self.expect(TokKind::Arrow, "after the effect row")?;
+        self.expect(
+            if canonical {
+                TokKind::LambdaArrow
+            } else {
+                TokKind::Arrow
+            },
+            "after the effect row",
+        )?;
         Ok(effects)
     }
 
@@ -812,11 +839,11 @@ impl<'a> Parser<'a> {
     /// at `#`. `#Pure` yields the empty set (`Some([])`); `#(E1, E2, …)` yields the
     /// listed names (validated against the effect vocabulary in sema, not here).
     /// The caller has confirmed via lookahead that a `fn` follows.
-    /// D-EFF2/D-MARKERMOVE2 (G1): parse a callback effect bound. `fn(…) --[]->`
+    /// D-EFF2/D-MARKERMOVE2 (G1): parse a callback effect bound. `fn(…) =[]=>`
     /// is the one carve-out where a contract marker prefixes a function TYPE
     /// instead of a declaration — the retired `fn(…) --[]->` spelling still
     /// parses here so it can teach E0062. The general effect-list form,
-    /// `fn(…) --[Net]->`, is a directive and stays on `#` only.
+    /// `fn(…) --[Net]->`, is retained only for a migration diagnostic.
     fn parse_fn_type_effect_bound(&mut self) -> Result<Vec<(String, Span)>, Diagnostic> {
         if matches!(self.peek().kind, TokKind::Hash) {
             self.bump();

@@ -1,5 +1,5 @@
 // 72 — Typed error families + error conversion (D-ERR-CONV, ratified 2026-06-19).
-// Demonstrates `impl Source -> Target { … }` and `?` auto-applying it.
+// Demonstrates `impl Source => Target { … }` and `?` auto-applying it.
 enum FileErr {
     NotFound(String)
     PermDenied
@@ -17,23 +17,23 @@ enum AppErr {
 }
 
 // D-ERR-CONV: declare how each lower-level error becomes an AppErr.
-impl FileErr -> AppErr { return AppErr.File(self) }
+impl FileErr => AppErr { return AppErr.File(self) }
 
-impl ParseErr -> AppErr { return AppErr.Parse(self) }
+impl ParseErr => AppErr { return AppErr.Parse(self) }
 
-fn read_file(path: String) -> String ? FileErr {
+fn read_file(path: String) => String ? FileErr {
     if path == "" { return Err(FileErr.NotFound("(empty path)")) }
     return Ok("42")
 }
 
-fn parse_int(s: String) -> Int ? ParseErr {
+fn parse_int(s: String) => Int ? ParseErr {
     if s == "" { return Err(ParseErr.Empty) }
     if s == "x" { return Err(ParseErr.BadInt(~s)) }
     return Ok(42)
 }
 
 // Both `?` calls cross error-type boundaries via the declared conversions.
-fn load(path: String) -> Int ? AppErr {
+fn load(path: String) => Int ? AppErr {
     raw :: read_file(path)?  // FileErr  -> AppErr.File  (declared)
     port :: parse_int(raw)?  // ParseErr -> AppErr.Parse (declared)
     return Ok(port)

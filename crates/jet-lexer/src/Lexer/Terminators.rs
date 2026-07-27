@@ -237,21 +237,31 @@ fn insert_terminators(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnost
             let prev = &toks[prev_idx];
             let crossed_line = has_newline_between(prev.span.end, cur.span.start);
             if crossed_line && ends_statement(&prev.kind) {
-                // E0986: `->` or `{` split onto the next line from a `)`.
-                if matches!(cur.kind, TokKind::Arrow | TokKind::MinusMinus | TokKind::LBrace)
+                // E0986: a callable/control arrow, effect row, or `{` split
+                // onto the next line from a `)`.
+                if matches!(
+                    cur.kind,
+                    TokKind::Arrow
+                        | TokKind::LambdaArrow
+                        | TokKind::Eq
+                        | TokKind::MinusMinus
+                        | TokKind::LBrace
+                )
                     && matches!(prev.kind, TokKind::RParen)
                 {
+                    let spelling = match &cur.kind {
+                        TokKind::Arrow => "->",
+                        TokKind::LambdaArrow => "=>",
+                        TokKind::Eq => "=[…]=>",
+                        TokKind::MinusMinus => "=[…]=>",
+                        _ => "{",
+                    };
                     diags.push(Diagnostic::error(
                         "E0986",
-                        format!(
-                            "`{}` must stay on the same line as the closing `)`",
-                            if matches!(cur.kind, TokKind::Arrow) { "->" } else if matches!(cur.kind, TokKind::MinusMinus) { "--[…]->" } else { "{" }
-                        ),
-                        "a return type `-> Type` and an opening `{` follow the parameter list on its line (S44)".to_string(),
-                        format!(
-                            "move the `{}` up to the `)` line",
-                            if matches!(cur.kind, TokKind::Arrow) { "->" } else if matches!(cur.kind, TokKind::MinusMinus) { "--[…]->" } else { "{" }
-                        ),
+                        format!("`{spelling}` must stay on the same line as the closing `)`"),
+                        "an arrow, effect row, or opening block continues the header on its line"
+                            .to_string(),
+                        format!("move `{spelling}` up to the `)` line"),
                         Some(cur.span),
                     ));
                     // Do not insert a terminator; let the parser keep going.

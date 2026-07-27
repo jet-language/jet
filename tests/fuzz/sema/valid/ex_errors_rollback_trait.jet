@@ -13,7 +13,7 @@ struct LedgerSnap {
 impl Ledger.Rollback {
     type Snapshot = LedgerSnap
 
-    fn snapshot(self) -> LedgerSnap {
+    fn snapshot(self) => LedgerSnap {
         return LedgerSnap.{balance: self.balance}
     }
 
@@ -26,7 +26,7 @@ enum TxnErr {
     Overdraft
 }
 
-fn transfer(from: &Ledger, to: &Ledger, amount: Int) -> Int ? TxnErr {
+fn transfer(from: &Ledger, to: &Ledger, amount: Int) => Int ? TxnErr {
     #Transact(tx) {
         from.balance -= amount
         to.balance += amount

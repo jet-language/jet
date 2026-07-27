@@ -1,23 +1,23 @@
 // D-CONCCOMB1/A: race/any use task completion order, not task-list order.
 use core.time as time
 
-fn slow_one() -> Int {
+fn slow_one() => Int {
     time.sleep(100)
     return 1
 }
 
-fn fast_seven() -> Int { return 7 }
+fn fast_seven() => Int = 7
 
 fn run() {
     taskgroup race_group {
-        fast :: race_group.task(() => fast_seven())
-        slow :: race_group.task(() => slow_one())
+        fast :: race_group.task => fast_seven()
+        slow :: race_group.task => slow_one()
         time.sleep(200)
         print(race_group.race([slow, fast]))
     }
     taskgroup any_group {
-        fast :: any_group.task(() => fast_seven())
-        slow :: any_group.task(() => slow_one())
+        fast :: any_group.task => fast_seven()
+        slow :: any_group.task => slow_one()
         time.sleep(200)
         print(any_group.any([slow, fast]))
     }

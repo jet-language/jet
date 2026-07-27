@@ -209,7 +209,7 @@ fn collect_func(graph: &mut PolicyFactGraph, func: &Func) {
                 PolicyDomain::Budget,
                 func.name.clone(),
                 format!(
-                    "declared effect bound --[{}]-> feeds D-EFFBUDGET1",
+                    "declared effect bound =[{}]=> feeds D-EFFBUDGET1",
                     names.join(", ")
                 ),
             );

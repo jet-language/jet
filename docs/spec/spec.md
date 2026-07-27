@@ -57,17 +57,20 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
 
 ```
 program  = { func | struct | const } ;
-func     = [ "pub" ] "fn" ident "(" [ params ] ")" [ "->" type ] block ;
+func     = [ "pub" ] "fn" ident "(" [ params ] ")"
+           [ "=>" [ type ] | "=[" [ effect-row ] "]=>" type ]
+           ( block | "=" expr NL ) ;
 params   = param { "," param } ;
 param    = ident ":" [ "^" | "&" ] type ;
-block    = "{" { stmt } "}" ;            // S3: curly braces
+effect-row = effect { "," effect } | ".." ident ;
+block    = "{" { stmt } [ expr ] "}" ;   // S3: multiline grouping
 // S6-R: no visible `;` — the lexer inserts a synthetic terminator (NL below)
 // at each line end after a statement-ending token; the grammar stays
 // terminator-based. A leading `.` or binary/logical operator on the next line
-// suppresses insertion (continuation). `-> Type` / `{` must stay on the `)`
-// line (E0986). `NL` below denotes that synthetic terminator.
+// suppresses insertion (continuation). A callable arrow, `=`, or `{` stays
+// attached to the declaration head. `NL` denotes that synthetic terminator.
 stmt     = binding | assign | if | loop
-         | "break" NL | next | "return" [ expr ] NL
+         | break | next | "return" [ expr ] NL
          | expr NL ;
 binding  = [ "#Track" ] ( ident "::" expr     // immutable
          | ident ":=" expr ) NL               // mutable
@@ -78,27 +81,32 @@ destructure = ".{" ident { "," ident } [ ", .." ] "}"   // S74: struct fields
             | "[" [ ident { "," ident } ] "]" ;    // S74: list elements
 assign   = ident ( "=" | "+=" | "-=" | "*=" | "/=" | "%="
                  | "&=" | "|=" | "^=" | "<<=" | ">>=" ) expr NL ;
-// D-IF1: `if` is the one branching keyword. Two forms by body shape:
-if       = "if" cond block { "else" "if" cond block } [ "else" block ]   // two-arm
-         | "if" subject "==" "{" { arm } [ "else" "->" arm-body ] "}"    // multi-arm dispatch
-         | "if" cond "->" guard-stmt-body                                  // inline guard
-         | "if" "{" guard-arm { guard-arm } [ "else" "->" guard-stmt-body ] "}" ; // subjectless guards
+// D-IF1/D-ARROW-CONTROL1: `if` is the one branching keyword.
+if       = "if" cond effect-body
+           { "else" "if" cond effect-body } [ "else" effect-body ]
+         | "if" subject "==" "{" { arm } [ "else" "->" arm-body ] "}"    // ordered arm table with named subject
+         | "if" "{" guard-arm { guard-arm } [ "else" "->" guard-stmt-body ] "}" ; // ordered arm table
 arm      = arm-head "->" arm-body NL ;
 guard-arm = cond "->" guard-stmt-body NL ;
-guard-stmt-body = block | non-if-stmt ; // direct nesting requires braces (E0329)
+effect-body = block | non-if-stmt ;
+guard-stmt-body = block | non-if-stmt ;
 arm-head = value | range | condition ; // bare value ⇒ `subject == value`; range `lo..hi` ⇒ membership (D-PATR/D-RANGE1); else a Bool condition (D-IF2 Q3)
 range    = expr ".." expr ;            // inclusive (S22); no `..=` (E0318), no `step` in arm head (E0319)
 arm-body = block | stmt ;        // `{ … }` block or one braceless statement (D-IF2 Q2)
 loop     = [ ident "::" ] loop-body ;            // D-LOOPLABEL3: optional ordinary-name label
-loop-body= "loop" block
-         | "loop" cond block
-         | "loop" ident [ "," ident ] ";" source [ ";" expr ] block
-         | "loop" ident ":=" expr ";" cond [ ";" expr ] block ;
+loop-body= "loop" effect-body
+         | "loop" cond effect-body
+         | "loop" source-clauses [ "if" cond ] loop-result-body
+         | "loop" ident ":=" expr ";" cond [ ";" expr ] loop-result-body ;
+source-clauses = source-clause { "," source-clause } ;
+source-clause = ident [ "," ident ] ";" source [ ";" expr ] ;
+loop-result-body = effect-body | "->" value-arm-body ;
 source   = expr [ ".." expr ] ;
-break    = "break" NL | ident "." "break" "(" ")" NL ;
-next     = "next" NL | ident "." "next" "(" ")" NL ;
+break    = "break" [ expr | "(" ident [ "," expr ] ")" ] NL ;
+next     = "next" [ "(" ident ")" ] NL ;
 cond     = expr | "(" expr ")" ;                     // S68/D-SG2: optional parens, fmt strips them
-if-expr  = "if" cond value-block "else" ( if-expr | value-block )
+if-expr  = "if" cond "->" value-arm-body
+           "else" ( "->" value-arm-body | if-expr )
          | "if" "{" value-guard-arm { value-guard-arm } "else" "->" value-arm-body "}" ;
 value-guard-arm = cond "->" value-arm-body NL ;
 value-arm-body = expr | value-block ;
@@ -116,7 +124,7 @@ expr     = precedence climbing over:
   value (`Type.{ … }`) when needed; mismatched headed literals are ordinary
   type errors.
 - A program must define `fn run` with no parameters and no return type,
-  `fn run() -> Void ?` for top-level error propagation, or a single typed CLI
+  `fn run() => Void ?` for top-level error propagation, or a single typed CLI
   parameter as described by D-CLIFLAG1 (E0101, E0122, E1308). Execution starts
   there. `run` never takes `pub` (S12).
 - `name :: value` is immutable; `name := value` is mutable (D-BIND-BARE1).
@@ -125,7 +133,7 @@ expr     = precedence climbing over:
   Types never annotate the binding name — use `Type.{ … }` or a signature/field.
 - `#Track name :: value` / `#Track name := value` opt a binding into
   D-PROVENANCE1 provenance. Today this records Float binding origins for
-  `value.origin() -> String`; untracked Floats return `"untracked"`.
+  `value.origin() => String`; untracked Floats return `"untracked"`.
 - Arithmetic: `+ - * /` on `Int` and `Float` (never mixed — E0109);
   `% & | ^ << >>` on `Int` only. `+` on `String` is a teaching error
   pointing at interpolation. Compound assignment (S17) mirrors the binary
@@ -134,16 +142,27 @@ expr     = precedence climbing over:
   `Bool`; `&& || !` operate on `Bool` (E0110).
 - `&&` and `||` combine `Bool` expressions only (D-S25-RETIRE1). Value
   alternatives in arm heads use single `|`.
-- `if`/`else if`/`else` (conditions must be `Bool`); `loop` has infinite,
+- `if` is Jet's one branching form. Its preferred multi-branch surface is an
+  ordered arm table: `if subject == { head -> body }` when naming a subject
+  improves clarity, or `if { head -> body }` without one. A head may be a value
+  or structural pattern against the subject, or any `Bool` expression evaluated
+  as written; unrelated expressions may appear in the same table. The first
+  matching or true head wins. Chained `else if` remains legal, but there should
+  rarely be a reason to prefer it and it is not a canonical teaching form.
+  Conventional effect-only branches have no arrow. Arm-table arrows select an
+  arm, including a Void arm. Value branches require `else` unless a closed
+  subject is exhaustive; result types unify. Braces group multiline bodies.
+- `loop` has infinite,
   conditional, source (`loop x; source [; stride]`), map-pair, and explicit-state
   (`loop i := init; cond [; afterthought]`) headers. Range sources are inclusive.
   Source/bounds/stride evaluate once left-to-right; stride must be positive `Int`
   and is checked before the first pull. `break`/`next`
   inside loops only (E0115, S23). A loop may carry an ordinary-name label
-  (D-LOOPLABEL3) — `outer :: loop … { }` — and `outer.break()` /
-  `outer.next()` target it from a nested loop. E0987 names an out-of-scope
-  label; E0988 teaches the retired `@` forms, rejects `outer := loop`, and
-  explains that a loop name is not a runtime value.
+  (D-LOOPLABEL3) — `outer :: loop … { }`. `break(outer)`,
+  `break(outer, value)`, and `next(outer)` target it from a nested loop.
+  E0987 names an out-of-scope label. E0988 teaches retired dot and `@` forms,
+  rejects `outer := loop`, and explains that a loop name is not a runtime
+  value.
   Normal explicit-state fallthrough and targeted `next` run the afterthought
   exactly once, then retest; normal source fallthrough and targeted `next` pull
   stride items and use the final pull. `break`, `return`, propagated failure,
@@ -151,6 +170,16 @@ expr     = precedence climbing over:
   Bare `next` is control only as a complete statement or `??` fallback;
   `next()`, `.next()`, and `fn next` are ordinary identifier uses, while a value
   named `next` after `??` needs parentheses: `value ?? (next)`.
+- A finite source or C-style loop may use `-> expression` or `-> { ... }`.
+  Each accepted iteration yields one non-Void value. The result is an eager
+  List in iteration order. A header guard or `next` omits items. Multiple
+  source clauses yield one flat List; an explicitly nested yielding loop
+  preserves nesting. Maps and Sets use explicit terminals. Lazy work uses the
+  existing iterator adapters.
+- A bare or condition-only loop does not accept `->`. It returns one final
+  value only through `break value` or `break(name, value)`. All payload exits
+  unify. In a yielding loop, `break` returns the partial List and payload
+  breaks are rejected.
 - `if subject == { head -> { ... } else -> { ... } }` (D-IF1/D-IF3) tests arm
   heads top to bottom. Bare values and ranges compare against the subject;
   predicate heads are `Bool`; `else` is mandatory unless enum/option
@@ -229,7 +258,7 @@ mirror the parameter's sigil:
 
 ```jet
 fn bump(n: &Int) { n += 1 }
-fn archive(name: ^String) -> String { return name }
+fn archive(name: ^String) => String { return name }
 
 fn run() {
     score: Int := 41
@@ -244,7 +273,7 @@ site:
 
 ```jet
 impl Player {
-    fn show(self) -> Int { return self.hp }                     // read receiver
+    fn show(self) => Int { return self.hp }                     // read receiver
     fn heal(&self, amount: Int) { self.hp = self.hp + amount }  // write receiver
 }
 ```
@@ -568,13 +597,13 @@ answer; otherwise write `Type<Args>.new(…)` explicitly.
 struct Circle {
     radius: Float;
 
-    fn area(self) -> Float {
+    fn area(self) => Float {
         return 3.14159 * radius * radius;
     }
 }
 
 impl Circle {
-    fn unit() -> Circle {
+    fn unit() => Circle {
         return Circle.{ radius: 1.0 };
     }
 }
@@ -598,7 +627,7 @@ impl Circle {
   `Point.polar`). Overloading is rejected; a duplicate name is E0105 with
   a teaching message pointing at constructor naming.
 - Enum `if subject == { … }` arms must be exhaustive; missing cases are a compile error.
-- **Traits (S28, M9):** `trait Name { fn sig(self) -> T; … }` — signatures
+- **Traits (S28, M9):** `trait Name { fn sig(self) => T; … }` — signatures
   only. Implement inside a type (`impl Trait { … }`) or outside as
   `impl Type.Trait { … }` (qualify foreign types: `impl other.Point.Shape`).
   A trait name in type position (`[Shape]`, `fn f(s: Shape)`) means
@@ -608,8 +637,8 @@ impl Circle {
   whenever every field qualifies — no `#Debug` needed; a hand-written impl
   overrides); explicit `#Comparable`, `#Codable`,
   `#Encode`, `#Decode`.
-- **Encoding traits (D-SERDE2/D-SERDE16):** `Encode.encode(self) -> DataTree`
-  and `Decode.decode(tree: DataTree) -> Self ? DecodeError` are ordinary Jet
+- **Encoding traits (D-SERDE2/D-SERDE16):** `Encode.encode(self) => DataTree`
+  and `Decode.decode(tree: DataTree) => Self ? DecodeError` are ordinary Jet
   trait methods. `DataTree.decode<T>()` is the one public typed-dispatch path;
   primitive, container, generated, and hand-written implementations all use it.
   Built-in derives generate Jet source fragments beside the marked type, then
@@ -640,7 +669,7 @@ impl Circle {
   (D-CASING1).
 - **Applied rules (D-SHAPE2/D-ATTR2):** `#Rule` or `#[A, B]` on the
   line before a declaration. Block markers use PascalCase and parenthesized
-  arguments when arguments exist. An explicit empty effect row is `--[]->`; `comptime`
+  arguments when arguments exist. An explicit empty effect row is `=[]=>`; `comptime`
   stays a prefix keyword.
 - **Statement switch attributes (D-CANVASSTATE1):** `#Off <stmt>` parses and
   type-checks one statement, including block-shaped statements, then emits no
@@ -665,9 +694,9 @@ impl Circle {
   (**E-OSTARGET-DISPATCH-ARM**). See syntax-decisions.md → D-OSTARGET2 for the
   full rules.
 - **Build-time embedding (D-CTIO1/D-CTFIND1/2):** inside a `comptime` binding,
-  **`embed_file("path") -> String`** bakes a file's UTF-8 text into the binary
-  and **`embed_bytes("path") -> [U8]`** bakes its raw bytes (binary-safe, no
-  UTF-8 requirement — images, fonts, any blob). **`find("glob") -> [String]`**
+  **`embed_file("path") => String`** bakes a file's UTF-8 text into the binary
+  and **`embed_bytes("path") => [U8]`** bakes its raw bytes (binary-safe, no
+  UTF-8 requirement — images, fonts, any blob). **`find("glob") => [String]`**
   returns sorted relative file paths for a std-only glob (`*`, `**`, `?`,
   `{a,b}`, `[a-z]`). These are the *only* sanctioned build-time I/O; comptime is
   otherwise pure (**E0951**). Paths/globs must be string literals resolved
@@ -685,18 +714,18 @@ impl Circle {
 
   ```jet
   migration UserRecord {
-      rename name -> display_name              // D-MIGRATE1: field renamed (same type)
+      rename name => display_name              // D-MIGRATE1: field renamed (same type)
       remove legacy_id                         // D-MIGRATE2D: field deleted
       add verified: Bool =  false               // D-MIGRATE2A: new field + default for old data
-      change price: Int -> Usd via { (c) => Usd.from_int(c) } // D-MIGRATE2E: type change + converter
+      change price: Int => Usd via { c => Usd.from_int(c) } // D-MIGRATE2E: type change + converter
   }
   ```
 
   - `rename` must target an existing field with the same type.
-  - `change f: Old -> New` resolves its converter in order (D-MIGRATE2B): the inline
-    `via { … }`, else an `impl Old -> New` in scope (the D-ERR-CONV surface), else
+  - `change f: Old => New` resolves its converter in order (D-MIGRATE2B): the inline
+    `via { … }`, else an `impl Old => New` in scope (the D-ERR-CONV surface), else
     E0910 asking for one. The `via` body is single- or multi-line and reuses the
-    `->` arrow and lambda grammar.
+    callable arrow and lambda grammar.
   - `add f: T =  default` supplies the value old records (written before the field
     existed) are read with. A field is only "added" if absent from the snapshot.
   - There is **no `reorder` verb** (D-MIGRATE2F): reordering is never a breaking
@@ -722,7 +751,7 @@ impl Circle {
   check` verb** — `jet build`'s E0910 is already the CI gate.
 
   **Decode-time migration transparency (D-MIGRATE3=A):** `decode_traced<T>(raw)
-  -> DecodeResult<T> ?` sits beside `decode<T>` on every codec that shares this
+  => DecodeResult<T> ?` sits beside `decode<T>` on every codec that shares this
   decode machinery (json/csv/toml/yaml, D-ENC1). `DecodeResult<T>` is `{ value:
   T, migration: MigrationStatus }`; `MigrationStatus` carries `.migrated: Bool`,
   `.from` (the source shape's version label), and `.steps` (one entry per
@@ -745,7 +774,7 @@ impl Circle {
   the historical shapes are `v1` (oldest) … `vK`, and the current struct is
   `v(K+1)`; each historical shape's field set is derived at compile time by
   inverting the ops (`add` ⇒ absent before, `remove` ⇒ present before,
-  `rename a -> b` ⇒ `a` before, `change` ⇒ no field-set difference). At decode
+  `rename a => b` means `a` before, while `change` means no field-set difference). At decode
   time:
 
   1. **Current shape first** — the ordinary decode is tried as-is. Success is
@@ -760,7 +789,7 @@ impl Circle {
      oldest-matching → current: `rename` moves a key, `remove` drops one,
      `add` evaluates its default expression and fills the field, `change`
      decodes the old field type, runs the `via { … }` converter (or the
-     `impl Old -> New` conversion, D-MIGRATE2B), and re-encodes the result.
+     `impl Old => New` conversion, D-MIGRATE2B), and re-encodes the result.
      Converter bodies and `add` defaults are ordinary Jet expressions,
      type-checked and lowered through the normal pipeline. The rewritten data
      then decodes as the current shape.
@@ -790,15 +819,15 @@ the error side in a function return — **`T ?`** — means **`T ? Error`**.
 Build outcomes with **`Ok(v)`** and **`Err(e)`**; test them with
 **`== .Ok(n)`** / **`== .Err(e)`** (same pattern machinery as M3 optionals).
 Cross-type **`?`** conversion supports two forms:
-- **`Fallible`** trait (D-ERR2): `impl MyFail.Fallible { fn to_error(self) -> Error { … } }` — converts any typed error to the universal `Error`. Prelude types implement `Fallible` by default.
-- **Declared typed conversion** (D-ERR-CONV): `impl Source -> Target { return Target.Variant(self) }` — converts a `Source` error into a typed `Target` error; `?` applies it automatically. Declared once per (Source, Target) pair; rejected unless declared (orphan rule S28 applies). `E2404` fires when `?` would need an undeclared conversion; `E2405` fires on duplicate declarations; `E2406` fires on orphan-rule violations.
+- **`Fallible`** trait (D-ERR2): `impl MyFail.Fallible { fn to_error(self) => Error { Error.from(self) } }` — converts any typed error to the universal `Error`. Prelude types implement `Fallible` by default.
+- **Declared typed conversion** (D-ERR-CONV): `impl Source => Target { Target.Variant(self) }` — converts a `Source` error into a typed `Target` error; `?` applies it automatically. Declared once per (Source, Target) pair; rejected unless declared (orphan rule S28 applies). `E2404` fires when `?` would need an undeclared conversion; `E2405` fires on duplicate declarations; `E2406` fires on orphan-rule violations.
 
 - Postfix **`?`** (S7) propagates: unwraps `ok`, early-returns `err`. The
   enclosing function must return a compatible fallible type. On **`T?`**,
   `?` propagates `None` when the function returns an optional.
 - In a function return type, **`T?`** parses as **`T ?`** and the formatter
   writes the space. A function that returns an optional writes
-  **`-> (T?)`**.
+  **`=> (T?)`**.
 - **`?? <expr>`** (S35/S71) is the fallback operator on a fallible value or
   optional: yields the success payload or evaluates the right side. Precedence is
   looser than **`&&`** / **`||`**, so `a? ?? b` and `x == 1 || y ?? 0`
@@ -810,7 +839,7 @@ Cross-type **`?`** conversion supports two forms:
 - In **`if <fallible-expr> { … }`**, when the subject is not a plain
   name, **`it`** names the subject for pattern arms like **`it == .Ok(n)`**.
 - **`fn run()`** may stay bare for beginner programs. Use
-  **`fn run() -> Void ?`** only when the entry itself propagates errors with
+  **`fn run() => Void ?`** only when the entry itself propagates errors with
   **`?`**; returned errors print and exit non-zero.
 
 Unchecked fallible values (**E0401**), ignored fallible calls (**E0402**),
@@ -1458,9 +1487,9 @@ needs outside the retained `core.ui` paint surface:
 
 - `web.on(selector, event, handler)` binds a DOM event listener. The handler gets
   a `WebEvent` value; handlers that do not need the event may ignore it.
-- `web.value(selector) -> String` reads an input value or element text.
-- `web.storage.local.get(key) -> String?` and
-  `web.storage.session.get(key) -> String?` read browser storage. Missing keys
+- `web.value(selector) => String` reads an input value or element text.
+- `web.storage.local.get(key) => String?` and
+  `web.storage.session.get(key) => String?` read browser storage. Missing keys
   compose with the normal `??` fallback: `web.storage.local.get("tasks") ?? "[]"`.
 - `set(key, value)`, `remove(key)`, and `clear()` mutate local/session storage.
 
@@ -1474,19 +1503,19 @@ becomes the browser API checker.
 `use core.event as event` exposes the first compiler-known event family as
 ordinary Core values. There is no `event` declaration syntax in this slice.
 
-- `event.new<T>() -> Event<T>` creates a typed many-subscriber occurrence stream.
-- `event.async_result<T, E>(policy, failures) -> AsyncEvent<T, E> ? String`
+- `event.new<T>() => Event<T>` creates a typed many-subscriber occurrence stream.
+- `event.async_result<T, E>(policy, failures) => AsyncEvent<T, E> ? String`
   creates one scheduler-backed bounded queue. `emit_async` returns
   `Task<DispatchReport<E>>`; queue, running, blocked, failure, cancellation,
   deadline, close, and overflow outcomes are explicit.
-- `event.hook<T, R>(fallback) -> Hook<T, R>` creates an ordered intervention
+- `event.hook<T, R>(fallback) => Hook<T, R>` creates an ordered intervention
   point. `.run(payload, fallback)` returns the last active handler result, or
   the call-site fallback when no handler is active.
 - `event.decision_hook<T, E>(HookPolicy.FirstCancelElseTransform)` creates a
   typed fold. Handlers return `HookDecision.Continue`, `.Transform(value)`,
   `.Cancel`, or `.Fail(error)`; `run` returns `HookOutcome.Continue(final)`,
   `.Cancel`, or `.Fail(error)`.
-- `event.scope() -> EventScope` owns subscriptions. `scope.cancel()` unsubscribes
+- `event.scope() => EventScope` owns subscriptions. `scope.cancel()` unsubscribes
   all owned subscriptions and permanently closes that owner. Cancellation is
   idempotent; a later subscription attempt through the cancelled scope returns
   an inactive `Subscription` and installs no listener. `scope.active_count()`
@@ -1706,7 +1735,7 @@ values. Instantiating it produces a specialized ordinary module.
 
 ```jet
 module cache<K> {
-    pub fn key_of(k: K) -> String { … }
+    pub fn key_of(k: K) => String { … }
 }
 ```
 
@@ -1784,11 +1813,11 @@ invokes rustc, so the cargo debug binary is sufficient.
 
 **Lambdas (S46):** `(params) => expr` or `(params) => { … }`. Parameter types
 may be omitted when the expected function type is known (**E0801** when not).
-The lambda arrow is **`=>`**; **`->`** stays for return types and
-`if subject == { … }` dispatch arms.
+The lambda arrow is **`=>`**. **`->`** selects dispatch-arm values and finite-loop
+items.
 
-**Function types (S47):** `fn(T1, T2) -> R` (no parameter names; `-> R` may be
-omitted for no-return callbacks). Their unmarked parameters always have plain
+**Function types (S47):** `fn(T1, T2) => R` (no parameter names; the result may be
+omitted for `Void` callbacks). Their unmarked parameters always have plain
 read access (D-MEM-PARAM1). Named `fn`s coerce to function values when referenced
 without a call only if every parameter also has plain read access. Functions with
 write (`&`) or move (`^`) parameters remain direct-call-only; coercion cannot erase
@@ -1797,9 +1826,11 @@ those requirements.
 **Capture rules (S47):** shared read for names only read; mutable borrow for
 names written (a `:=` binding required, else **E0111**). Escaping lambdas (stored in a
 binding, returned, in a struct field, or passed to a `^T` parameter) must own
-captures: clonable values are copied (**L0801**); non-clonable values need an
-explicit prefix **`take(name)`** on the lambda (**E0802**). Self-recursion through
-the binding is rejected (**E0804**). Calling a non-function → **E0803**.
+captures. Copy values copy at closure creation. Other clonable values clone at
+closure creation. Owned non-clonable values move. A borrowed non-clonable
+parameter cannot escape (**E0120**). The retired `take(...)` prefix is **E0057**.
+Self-recursion through the binding is rejected (**E0804**). Calling a
+non-function → **E0803**.
 
 **Collection methods:** `map`, `filter`, `each`, `find`, `any`, `all`,
 `sort_by`, `reduce` on `[T]`; `each` on `[K: V]` (two parameters).
@@ -1822,9 +1853,8 @@ alias.
 Examples: `examples/features/basics/closures.jet`, `examples/features/basics/callbacks.jet`,
 `examples/features/collections/iter_adapters.jet`. Ui:
 `tests/ui/lambda_*.jet` (E0801–E0804, E0204 mut-capture conflict,
-E0507 collection change inside a `for` loop), `tests/ui/not_a_function.jet`,
-lint: `tests/ui_lint/lambda_escape_clone.jet`
-(L0801). Integration: `tests/closures.rs`.
+E0507 collection change inside a `for` loop), `tests/ui/not_a_function.jet`.
+Integration: `tests/closures.rs`.
 
 ## M10 — Core library (done)
 
@@ -1881,14 +1911,14 @@ core module:
 use core.tasks as tasks;
 ```
 
-`tasks.spawn(() => work()) -> Task<T>` starts a task from a zero-parameter
-lambda. The lambda must own every captured value: shared mutable captures are
-**E1101**; use `take(name)` to hand a value to the task, or use a channel to
-send results back. Values crossing the task boundary must be sendable
-(**E1102**): no `view` borrows, no structs that contain `ref` fields, no trait
-values, and no closures unless handed over with `take`.
+`tasks.spawn(() => work()) => Task<T>` starts a task from a zero-parameter
+lambda. Copyable captures are copied at closure creation. Owned non-copyable
+captures move. Shared mutable captures are **E1101**; use task-local state or a
+channel to send results back. Values crossing the task boundary must be
+sendable (**E1102**): no `view` borrows, no structs that contain `ref` fields,
+no trait values, and no closures with non-sendable captures.
 
-`task.join() -> T` waits for the task and consumes the `Task<T>` handle. Calling
+`task.join() => T` waits for the task and consumes the `Task<T>` handle. Calling
 `.join()` twice is ordinary use-after-move (**E0121**). Dropping a `Task`
 without joining or detaching emits **L1101** because the program may end before
 the task finishes. A panic inside a task is reported when joined and exits with
@@ -1908,7 +1938,7 @@ data. Two detach-site diagnostics guard unsound cases:
 D-COROUTINE1 keeps coroutine machinery internal and exposes expert control via
 task handles instead of new `coroutine` syntax. `task.wait()` aliases
 `task.join()`. `task.pause()`, `task.resume()`, and `task.cancel()` set
-control-plane state on the handle; `task.trace() -> String` reports
+control-plane state on the handle; `task.trace() => String` reports
 `paused=...,cancel=...`. Pause holds a running task at its next wait point until
 `resume()`; these are enforced by the M:N scheduler, not mere flags.
 
@@ -1931,12 +1961,12 @@ in the shielded state. At the outermost normal exit, an expired deadline lands
 before a pending cancellation. Outside a task, the region is a transparent
 block; at comptime it has no scheduler effect.
 
-`tasks.channel<T>() -> (Sender<T>, Receiver<T>)` (D-TUPLE-DESTRUCT1) creates a
+`tasks.channel<T>() => (Sender<T>, Receiver<T>)` (D-TUPLE-DESTRUCT1) creates a
 linked send/receive pair, destructured at the call site: `(tx, rx) :=
 tasks.channel<T>()`. A second sender is `~tx` — there's no combined
 "channel" value to fetch one off of. `sender.send(value)` moves a `T` into the
 channel (ownership semantics for non-copy values), and
-`receiver.receive() -> T ? Closed` blocks until a value arrives or all senders
+`receiver.receive() => T ? Closed` blocks until a value arrives or all senders
 are gone. Channel payloads
 must be sendable (**E1102**).
 
@@ -1986,17 +2016,18 @@ state.
 ### Taskgroups and structured combinators (D-TASKSCOPE1, D-CONCCOMB1, D-RACEWIN1, D-CONCSELECT1; verified 2026-06-30)
 
 Structured concurrency uses a scoped `taskgroup` (D-TASKSCOPE1=A). Inside
-`taskgroup g { … }`, `g.task { … } -> Task<T>` spawns a child owned by the
+`taskgroup g { … }`, `g.task => expression` or `g.task => { … }` spawns a
+child owned by the
 group. Unjoined handles at scope exit are cancelled and joined before the block
 returns.
 
 Combinators are methods on the group handle only (no detached work):
 
-- `g.all([t1, t2, …]) -> [Task]` — every task must succeed; fail-fast cancels
+- `g.all([t1, t2, …]) => [Task]` — every task must succeed; fail-fast cancels
   siblings and exits with `panic: a task panicked` (example `169_all_failfast.jet`).
-- `g.race([t1, t2, …]) -> T` — first **successful** result wins; losers are
+- `g.race([t1, t2, …]) => T` — first **successful** result wins; losers are
   cancelled (D-RACEWIN1; example `167_race_cancel.jet`).
-- `g.any([t1, t2, …]) -> T` — first **completion** wins, including errors.
+- `g.any([t1, t2, …]) => T` — first **completion** wins, including errors.
 - `g.select()` — fluent scoped multiplex (D-CONCSELECT1=A):
 
 ```jet
@@ -2392,7 +2423,7 @@ fan_out = expr ".[" [ expr { "," expr } [ "," ] ] "]" ;
 ```
 
 ```jet
-fn double(n: Int) -> Int { return n * 2; }
+fn double(n: Int) => Int { return n * 2; }
 
 doubled :: double.[1, 2, 3];  // : [Int#3]  →  [2, 4, 6]
 ```
@@ -2430,7 +2461,7 @@ body exercises — touching the network, the filesystem, the clock, and so on.
 The set is **inferred**, never declared by default, **propagated along calls**
 (a caller's set includes every callee's set), and **fully erased in codegen**
 (I3) — effects are a compile-time proof, with no runtime value, handler, or
-monad. A `fn … --[]->` is exactly the function whose inferred set is empty.
+monad. A `fn … =[]=>` is exactly the function whose inferred set is empty.
 
 ### The effect vocabulary
 
@@ -2536,20 +2567,20 @@ audio, editor, or file-backend dependencies.
 ### Declaring a boundary — effects inside the arrow
 
 A function may omit an effect row. Sema still infers its complete transitive
-row; ordinary `->` is only the return arrow and never claims purity. Public API
+row. Ordinary `=>` defines the callable result and never claims purity. Public API
 metadata stores that normalized inferred row, so publishing rejects effect drift.
 
 A function may pin an **upper bound** on its effects by writing
-`--[E1, E2, …]->` between its parameter list and return type:
+`=[E1, E2, …]=>` between its parameter list and return type:
 
 ```ebnf
 fn_effects = "fn" ident "(" params ")"
-             [ ( "--[" [ effect { "," effect } ] "]->" | "->" ) [ type ] ] block ;
+             [ ( "=[" [ effect { "," effect } ] "]=>" | "=>" ) [ type ] ] block ;
 ```
 
 ```jet
-fn load(path: String) --[Fs]-> String {
-    return core.files.read(path)?;     // OK: Fs ⊆ {Fs}
+fn load(path: String) =[Fs]=> String {
+    core.files.read(path)?     // OK: Fs ⊆ {Fs}
 }
 ```
 
@@ -2559,15 +2590,15 @@ naming the effect, the call that introduced it, and the declared set. The row is
 an assertion the author makes a contract — the inferred set may be *smaller*
 than the bound (the bound is a ceiling, not an exact set), but never larger.
 
-`--[]->` is the same contract with an empty bound: any effect at all is a
+`=[]=>` is the same contract with an empty bound: any effect at all is a
 purity violation (reported as **E3401**, the established purity diagnostic).
 
-Effects are erased: `--[Fs]->`, `--[]->`, and an unannotated function with the same
+Effects are erased: `=[Fs]=>`, `=[]=>`, and an unannotated function with the same
 body all generate byte-identical Rust.
 
 ### Restricting a region — `#Caps(…) { … }`
 
-Where `--[…]->` bounds a whole function, `#Caps(…) { … }` restricts a **block**.
+Where `=[…]=>` bounds a whole function, `#Caps(…) { … }` restricts a **block**.
 Inside the region, the only effects allowed — directly or through any call it
 reaches — are the ones listed; anything else is **E0741**. It is a hard local
 ceiling, not a grant: the effects still happen and still count toward the
@@ -2598,9 +2629,9 @@ at the *call site*, not buried inside the higher-order callee. This is the
 zero-syntax default:
 
 ```jet
-fn apply(f: fn(Int) -> Int, x: Int) -> Int { return f(x); }
+fn apply(f: fn(Int) => Int, x: Int) => Int { return f(x); }
 
-fn run() --[Io]-> {
+fn run() =[Io]=> {
     apply(log_it, 1);   // if `log_it` uses Net, this line is E0740 — Net ⊄ {Io}
 }
 ```
@@ -2613,16 +2644,16 @@ fn run() --[Io]-> {
   call, so it defaults to the **maximal** effect set — sound, conservative.
 
 Two expert levers refine this (ratified D-EFF2, additive to the default above):
-`fn(…) --[]->` / `fn(…) --[Net]->` **parameter types** demand/bound a callback
-(passing one with effects outside the bound is **E0747**), and `--[via f]->` on a
+`fn(…) =[]=>` / `fn(…) =[Net]=>` **parameter types** demand/bound a callback
+(passing one with effects outside the bound is **E0747**), and `=[via f]=>` on a
 signature publishes a tight pass-through that holds even when the value escapes.
 The conservative default is correct without them; they trade syntax for
 precision.
 
 ### Effects on trait methods (D-EFF3)
 
-A trait method may declare an effect upper bound — `fn hash(self) --[]->` (the
-empty set) or `fn render(self) --[Gpu]->`. The bound is two things at once:
+A trait method may declare an effect upper bound — `fn hash(self) =[]=>` (the
+empty set) or `fn render(self) =[Gpu]=>`. The bound is two things at once:
 
 - **The impl obligation.** Every implementation's inferred effects must fit
   inside the bound, or it is **E0742**. So a trait can promise "all `hash`
@@ -2633,10 +2664,10 @@ empty set) or `fn render(self) --[Gpu]->`. The bound is two things at once:
 
 ```jet
 trait Shape {
-    fn area(self) --[]-> Int;   // every impl must be pure
+    fn area(self) =[]=> Int;   // every impl must be pure
 }
 impl Square.Shape {
-    fn area(self) -> Int { return self.side * self.side; }   // OK — pure
+    fn area(self) => Int { return self.side * self.side; }   // OK — pure
 }
 ```
 
@@ -2660,7 +2691,7 @@ use core.term as term
 }
 ```
 
-`use core.term as term` is required for `term.read_key() -> Key`. The `live`
+`use core.term as term` is required for `term.read_key() => Key`. The `live`
 keyword itself does not require the import — the block's syntactic gate is
 sufficient.
 
@@ -2690,7 +2721,7 @@ if k == F(n)    { print("F{n}") }
 Enum literals use the qualified form: `Key.Char('a')`, `Key.Enter`, etc.
 
 **Restrictions:**
-- E3401: `live { … }` is impure — rejected in a `fn … --[]->`.
+- E3401: `live { … }` is impure — rejected in a `fn … =[]=>`.
 - E3301: rejected in `--freestanding` builds (no OS terminal device).
 - REPL: rejected in interactive mode.
 
@@ -2948,8 +2979,8 @@ api: Output :: .Service.{ name: "todo-api", entry: serve };
 release: Output :: .Check.{ name: "release", entry: verify_release };
 
 fn launch() {}
-fn serve() -> Void ? {}
-fn verify_release() -> Void ? {}
+fn serve() => Void ? {}
+fn verify_release() => Void ? {}
 ```
 
 `Output` is a closed sum with exactly `Library`, `Executable`, `Service`,
@@ -3349,7 +3380,7 @@ payload: { name: "mathkit", version: "0.1.0" }
 
 ```jet
 // main.jet — the plugin's own source, no `fn run()` (it's loaded, not run)
-pub fn scale(a: Float, b: Float) -> Float {
+pub fn scale(a: Float, b: Float) => Float {
     return a * b
 }
 ```
@@ -3373,9 +3404,9 @@ fn run() {
 }
 ```
 
-`Plugin.load(path) -> Plugin` produces a handle (mirrors `core.db`'s
-`open`/`open_memory`); `.call(name, [Float]) -> Float ? String` and
-`.call_int(name, [Int]) -> Int ? String` are the only instance methods (v1
+`Plugin.load(path) => Plugin` produces a handle (mirrors `core.db`'s
+`open`/`open_memory`); `.call(name, [Float]) => Float ? String` and
+`.call_int(name, [Int]) => Int ? String` are the only instance methods (v1
 scope — every parameter and the return type must be all-`Int` or all-`Float`,
 E1260; Bool is a trivial follow-on, Text needs the Component Model's
 memory-based string ABI, a real future increment). The wasmtime host embedded
@@ -3404,7 +3435,7 @@ shape) — see docs/spec/diagnostics.md.
 ## Programmable builds as Jet (D-BUILDENTRY1 and build-graph decisions)
 
 `jet build` checks the root program, then runs one optional root
-`fn build(b: BuildContext) -> BuildPlan ?` through the same interpreter used by
+`fn build(b: BuildContext) => BuildPlan ?` through the same interpreter used by
 comptime. Imported `fn build` declarations are checked but never run. With no
 root entry, the existing zero-configuration pipeline is unchanged.
 
@@ -3420,7 +3451,7 @@ target_triple)` records the target identity; `b.probe(name, kind, value)`
 supports `find_program`, `pkg_config`, and `header` probe kinds.
 
 ```jet
-fn build(b: BuildContext) --[Exec, Fs]-> BuildPlan ? {
+fn build(b: BuildContext) =[Exec, Fs]=> BuildPlan ? {
     #Impure("run declared toolchain probe and action") {
     shell :: b.probe("shell", "find_program", "sh")?
     native :: b.toolchain("native", "x86_64-linux")?

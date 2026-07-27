@@ -1,7 +1,8 @@
 use super::super::{Diagnostic, Parser, Span, Syntax, TokKind, describe};
 
 impl<'a> Parser<'a> {
-        /// D-MIGRATE1 (ratified 2026-06-22): parse `migration TypeName { rename a -> b; … }`.
+        /// D-MIGRATE1 as respelled by D-ARROW-CONTROL1: parse
+        /// `migration TypeName { rename a => b; … }`.
         pub(super) fn migration_decl(&mut self) -> Result<crate::AST::MigrationDecl, Diagnostic> {
             let start = self.peek().span;
             self.bump(); // consume `migration` ident
@@ -16,11 +17,11 @@ impl<'a> Parser<'a> {
                 }
                 let op_tok = self.bump();
                 match &op_tok.kind {
-                    // D-MIGRATE1: `rename old -> new`.
+                    // D-MIGRATE1: `rename old => new`.
                     TokKind::Ident(kw) if kw == Syntax::KW_RENAME => {
                         let (from, from_span) = self.expect_ident("as the field to rename")?;
                         self.expect(
-                            TokKind::Arrow,
+                            TokKind::LambdaArrow,
                             "between the old and new field names in `rename`",
                         )?;
                         let (to, to_span) = self.expect_ident("as the new field name")?;
@@ -54,14 +55,14 @@ impl<'a> Parser<'a> {
                         let (field, field_span) = self.expect_ident("as the field to remove")?;
                         ops.push(crate::AST::MigrationOp::Remove { field, field_span });
                     }
-                    // D-MIGRATE2E: `change field: Old -> New [via { expr }]`.
+                    // D-MIGRATE2E: `change field: Old => New [via { expr }]`.
                     TokKind::Ident(kw) if kw == Syntax::KW_CHANGE => {
                         let (field, field_span) =
                             self.expect_ident("as the field whose type changes")?;
                         self.expect(TokKind::Colon, "after the changed field name")?;
                         let (from_ty, from_span) = self.type_()?;
                         self.expect(
-                            TokKind::Arrow,
+                            TokKind::LambdaArrow,
                             "between the old and new field types in `change`",
                         )?;
                         let (to_ty, to_span) = self.type_()?;
@@ -134,7 +135,7 @@ impl<'a> Parser<'a> {
                             "E0911",
                             format!("`{}` isn't a known migration verb", other),
                             "a migration block contains `rename`, `add`, `remove`, or `change` operations".to_string(),
-                            "use `rename old -> new`, `add f: T = default`, `remove f`, or `change f: Old -> New via { … }`".to_string(),
+                            "use `rename old => new`, `add f: T = default`, `remove f`, or `change f: Old => New via { … }`".to_string(),
                             Some(op_tok.span),
                         ));
                         while !matches!(
@@ -150,7 +151,7 @@ impl<'a> Parser<'a> {
                             "E0003",
                             format!("expected a migration operation, found {}", desc),
                             "a migration block contains `rename`, `add`, `remove`, or `change` operations".to_string(),
-                            "write `rename fieldA -> fieldB` (or `add` / `remove` / `change`)".to_string(),
+                            "write `rename fieldA => fieldB` (or `add` / `remove` / `change`)".to_string(),
                             Some(op_tok.span),
                         ));
                         while !matches!(
@@ -298,53 +299,14 @@ impl<'a> Parser<'a> {
             })
         }
     
-        /// D-PROTO2: parse one message line — `client -> server: Hello(version: Int)`.
+        /// D-PROTO2 as cleaned up by D-ARROW-CONTROL1: parse one sender line —
+        /// `client: Hello(version: Int)` or `server: Hello(version: Int)`.
         fn protocol_message(&mut self) -> Result<crate::AST::ProtocolMessage, Diagnostic> {
             let start = self.peek().span;
-            let (from, _) = self.expect_ident("the sender in `client -> server: Msg(…)`")?;
+            let (from, _) = self.expect_ident("the sender in `client: Msg(…)`")?;
             let direction = match from.as_str() {
-                Syntax::PROTO_CLIENT => {
-                    self.expect(
-                        TokKind::Arrow,
-                        "between the endpoints in a protocol message",
-                    )?;
-                    let (to, _) = self.expect_ident("the receiver in `client -> server: Msg(…)`")?;
-                    if to != Syntax::PROTO_SERVER {
-                        return Err(Diagnostic::error(
-                            "E0154",
-                            format!(
-                                "after `{from} ->` expected `{}`, found `{to}`",
-                                Syntax::PROTO_SERVER
-                            ),
-                            "a client-to-server message is written `client -> server: Name(…)`"
-                                .to_string(),
-                            format!("write `client -> {}: …`", Syntax::PROTO_SERVER),
-                            Some(self.peek().span),
-                        ));
-                    }
-                    crate::AST::ProtocolDirection::ClientToServer
-                }
-                Syntax::PROTO_SERVER => {
-                    self.expect(
-                        TokKind::Arrow,
-                        "between the endpoints in a protocol message",
-                    )?;
-                    let (to, _) = self.expect_ident("the receiver in `server -> client: Msg(…)`")?;
-                    if to != Syntax::PROTO_CLIENT {
-                        return Err(Diagnostic::error(
-                            "E0154",
-                            format!(
-                                "after `{from} ->` expected `{}`, found `{to}`",
-                                Syntax::PROTO_CLIENT
-                            ),
-                            "a server-to-client message is written `server -> client: Name(…)`"
-                                .to_string(),
-                            format!("write `server -> {}: …`", Syntax::PROTO_CLIENT),
-                            Some(self.peek().span),
-                        ));
-                    }
-                    crate::AST::ProtocolDirection::ServerToClient
-                }
+                Syntax::PROTO_CLIENT => crate::AST::ProtocolDirection::ClientToServer,
+                Syntax::PROTO_SERVER => crate::AST::ProtocolDirection::ServerToClient,
                 other => {
                     return Err(Diagnostic::error(
                         "E0154",
@@ -353,19 +315,46 @@ impl<'a> Parser<'a> {
                             Syntax::PROTO_CLIENT,
                             Syntax::PROTO_SERVER
                         ),
-                        "each line names who sends and who receives before the message".to_string(),
+                        "each line names the sender; the other endpoint is the receiver".to_string(),
                         format!(
-                            "write `client -> {}: …` or `server -> {}: …`",
-                            Syntax::PROTO_SERVER,
-                            Syntax::PROTO_CLIENT
+                            "write `{}: …` or `{}: …`",
+                            Syntax::PROTO_CLIENT,
+                            Syntax::PROTO_SERVER
                         ),
                         Some(start),
                     ));
                 }
             };
+            if matches!(self.peek().kind, TokKind::Arrow) {
+                let arrow = self.bump();
+                let expected = match direction {
+                    crate::AST::ProtocolDirection::ClientToServer => Syntax::PROTO_SERVER,
+                    crate::AST::ProtocolDirection::ServerToClient => Syntax::PROTO_CLIENT,
+                };
+                let (receiver, receiver_span) =
+                    self.expect_ident("the receiver in the retired protocol spelling")?;
+                if receiver != expected {
+                    return Err(Diagnostic::error(
+                        "E0154",
+                        format!("expected receiver `{expected}`, found `{receiver}`"),
+                        "the retired endpoint-pair spelling still had to name the opposite endpoint"
+                            .to_string(),
+                        format!("write `{from}: …`"),
+                        Some(receiver_span),
+                    ));
+                }
+                self.diags.push(Diagnostic::error(
+                    "E0154",
+                    "protocol lines no longer repeat the receiver".to_string(),
+                    "the sender determines the direction, so the transport arrow adds no information"
+                        .to_string(),
+                    format!("write `{from}: …`; remove `-> {expected}`"),
+                    Some(arrow.span),
+                ));
+            }
             self.expect(
                 TokKind::Colon,
-                "after the endpoint pair in a protocol message",
+                "after the sender in a protocol message",
             )?;
             let (msg_name, name_span) = self.expect_ident("the message name in a protocol line")?;
             self.expect(TokKind::LParen, "to open the message payload")?;

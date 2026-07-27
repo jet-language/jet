@@ -7,7 +7,7 @@ enum Link {
     Next(Link)
 }
 
-fn promoted_cycle() -> Link {
+fn promoted_cycle() => Link {
     // The payloads remain finite value snapshots. Their promoted identities
     // form the cycle: second -> first at construction, then first -> second.
     first := Link.End(1)
@@ -16,7 +16,7 @@ fn promoted_cycle() -> Link {
     return first
 }
 
-fn promoted_replacement() -> Link {
+fn promoted_replacement() => Link {
     stale :: Link.End(2)
     current := Link.Next(~stale)
     fresh :: Link.End(3)

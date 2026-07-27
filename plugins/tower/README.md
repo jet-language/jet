@@ -44,8 +44,9 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   progress is computed from their done-ratio (`milestone add/update`).
 - **Cards** — the work. Stages: deciding → planning → ready → building →
   verify → done (+ frozen). A fresh card lands in `planning` — no owner
-  greenlight step. Fields include `workOrder` (canonical
-  pick order), `blockedBy`, an internal renewable work lease, `plan`, `log`, `refs`
+  greenlight step. Tower picks verify, building, implement, then plan cards.
+  Fields include `workOrder` (pick order inside each lane), `blockedBy`, an
+  internal renewable work lease, `plan`, `log`, and `refs`
   (explicit doc-path pointers, merged with auto-harvested ones in `tower brief`).
 - **Exit criteria** — a card's `criteria[]` checklist (open → met → verified)
   gates `--phase done` for anyone but the owner, and the verifier must differ
@@ -115,8 +116,8 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
 - **Git linking** — `tower githook` installs a post-commit hook: commits
   mentioning `#12` append themselves to that card's log.
 - **⌘K** — jump to any card, ballot, or view; `j/k` walk the Now queue.
-- **Digest** — "since you were away" summary at the top of Now with a
-  Caught-up button.
+- **Catch up** — one current status row per card changed by agents at the top
+  of Now, with a Dismiss button. Done rows show only the card number and title.
 - **Recently decided** — a quiet, collapsed strip on Now lists every ratified
   decision still on the live board ("reversible for N days") with a one-tap
   Reopen — the walk-back buffer, surfaced.

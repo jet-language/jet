@@ -13,15 +13,15 @@ use core.files as fs
 use core.io as io
 use core.env as env
 
-fn count_lines(text: String) -> Int { return text.lines().len() }
+fn count_lines(text: String) => Int = text.lines().len()
 
-fn scan_one(path: String) -> String {
+fn scan_one(path: String) => String {
     text :: fs.read(~path) ?? return "{path}: unreadable"
     lines :: count_lines(text)
     return "{path}: {lines} lines, {text.len()} chars"
 }
 
-fn default_paths() -> [String] {
+fn default_paths() => [String] {
     return [
         "examples/features/concurrency/tasks.jet",
         "examples/features/concurrency/pipeline.jet",
@@ -30,9 +30,9 @@ fn default_paths() -> [String] {
     ]
 }
 
-fn paths_from_args() -> [String] { return io.args().skip(1).to_list() }
+fn paths_from_args() => [String] = io.args().skip(1).to_list()
 
-fn paths_from_prompt() -> [String] {
+fn paths_from_prompt() => [String] {
     print("Enter file paths (blank line when done):")
     out := [String].{}
     loop true {
@@ -43,21 +43,21 @@ fn paths_from_prompt() -> [String] {
     return out
 }
 
-fn gather_paths() -> [String] {
+fn gather_paths() => [String] {
     from_args :: paths_from_args()
     if from_args.len() > 0 { return from_args }
     if (env.get("INTERACTIVE") ?? "") == "1" { return paths_from_prompt() }
     return default_paths()
 }
 
-fn scan_parallel(paths: [String]) -> [String] {
+fn scan_parallel(paths: [String]) => [String] {
     expected :: paths.len()
     (sender, ch) :: tasks.channel<String>()
     workers := [Task<Unit>].{}
     loop path; paths {
         tx :: ~sender
         file :: ~path
-        workers.push(tasks.spawn(take(tx, file) () => {
+        workers.push(tasks.spawn(() => {
             tx.send(scan_one(file))
         }))
     }
@@ -75,7 +75,7 @@ fn scan_parallel(paths: [String]) -> [String] {
     return results
 }
 
-fn copy_paths(paths: [String]) -> [String] { return paths.map(path => ~path).to_list() }
+fn copy_paths(paths: [String]) => [String] = paths.map(path => ~path).to_list()
 
 fn run() {
     paths :: gather_paths()

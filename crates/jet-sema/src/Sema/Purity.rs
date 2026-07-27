@@ -3,7 +3,7 @@ use crate::Diagnostics::Diagnostic;
 use crate::AST::Func;
 use std::collections::{HashMap, HashSet};
 
-/// Return E3401 if `fn_name` (which declares `--[]->`) calls an impure function.
+/// Return E3401 if `fn_name` (which declares `=[]=>`) calls an impure function.
 /// `funcs` is the full function-signature map; `call_name` is the callee;
 /// `path` is the chain of calls that led here (for the trace message).
 pub fn e3401(
@@ -14,7 +14,7 @@ pub fn e3401(
 ) -> Diagnostic {
     let why = if path.is_empty() {
         format!(
-            "`{}` is impure, but `{}` declares `--[]->`",
+            "`{}` is impure, but `{}` declares `=[]=>`",
             call_name,
             pure_fn_name
         )
@@ -34,7 +34,7 @@ pub fn e3401(
         ),
         why,
         format!(
-            "give `{}` an explicit `--[]->` bound, or remove the call from `{}`",
+            "give `{}` an explicit `=[]=>` bound, or remove the call from `{}`",
             call_name,
             pure_fn_name
         ),
@@ -65,7 +65,7 @@ pub fn e3403(what: &str, span: Option<crate::Diagnostics::Span>) -> Diagnostic {
             what
         ),
         "pure evaluation must produce the same result on every machine (D-PURE2)".to_string(),
-        "remove this call, or remove the enclosing function's explicit `--[]->` bound"
+        "remove this call, or remove the enclosing function's explicit `=[]=>` bound"
             .to_string(),
         span,
     )
@@ -133,6 +133,9 @@ pub(crate) fn check_pure_stmt(
         Stmt::Val(b) => check_pure_expr(&b.init, pure_fn, funcs),
         Stmt::Assign { value, .. } => check_pure_expr(value, pure_fn, funcs),
         Stmt::Return(Some(e), _) => check_pure_expr(e, pure_fn, funcs),
+        Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
+            check_pure_expr(e, pure_fn, funcs)
+        }
         Stmt::Return(None, _) => None,
         Stmt::Expr(e) | Stmt::Yield(e, _) => check_pure_expr(e, pure_fn, funcs),
         Stmt::If(if_stmt) => check_pure_if(if_stmt, pure_fn, funcs),
@@ -579,6 +582,7 @@ fn check_pure_stmt_with_path(
         Stmt::Val(b) => rec!(&b.init),
         Stmt::Assign { value, .. } => rec!(value),
         Stmt::Return(Some(e), _) => rec!(e),
+        Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => rec!(e),
         Stmt::Return(None, _) => None,
         Stmt::Expr(e) | Stmt::Yield(e, _) => rec!(e),
         Stmt::If(if_stmt) => check_pure_if_with_path(if_stmt, pure_fn, funcs, path, visited),
@@ -1122,6 +1126,9 @@ fn walk_stmt_for_calls(
             walk_expr_for_calls(value, root_fn, funcs_sig, ast_funcs, path, visited, diags)
         }
         Stmt::Return(Some(e), _) => {
+            walk_expr_for_calls(e, root_fn, funcs_sig, ast_funcs, path, visited, diags)
+        }
+        Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
             walk_expr_for_calls(e, root_fn, funcs_sig, ast_funcs, path, visited, diags)
         }
         Stmt::Return(None, _) => {}

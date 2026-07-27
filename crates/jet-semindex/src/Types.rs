@@ -592,7 +592,7 @@ fn structural_signature(def: &SymbolDef) -> String {
                 .collect::<Vec<_>>()
                 .join(",");
             format!(
-                "fn({params})->{};view_source={}",
+                "fn({params})=>{};view_source={}",
                 ret.as_deref().unwrap_or("Void"),
                 def.view_provenance
                     .iter()

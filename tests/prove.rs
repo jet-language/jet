@@ -51,8 +51,8 @@ fn prove_projects_compatible_canonical_budget_identity_without_measuring() {
 #[test]
 fn prove_json_is_derived_from_real_front_end_and_sorted_target() {
     let root = workspace("report");
-    fs::write(root.join("b.jet"), "fn b() -> Int { return 2 }\n").unwrap();
-    fs::write(root.join("a.jet"), "fn a() -> Int { return 1 }\n").unwrap();
+    fs::write(root.join("b.jet"), "fn b() => Int { return 2 }\n").unwrap();
+    fs::write(root.join("a.jet"), "fn a() => Int { return 1 }\n").unwrap();
     let out = Command::new(jet()).current_dir(&root).args(["prove", ".", "--json"]).output().unwrap();
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
     let report = String::from_utf8(out.stdout).unwrap();
@@ -115,11 +115,11 @@ fn prove_captures_contract_results_and_runtime_panics_structurally() {
     let root = workspace("contract_runtime");
     fs::write(
         root.join("a_contract_pass.jet"),
-        "#Pre(value > 0, \"positive\") fn checked(value: Int) -> Int { return value }\n#Test(\"contract pass\") { require_eq(checked(1), 1) }\n",
+        "#Pre(value > 0, \"positive\") fn checked(value: Int) => Int { return value }\n#Test(\"contract pass\") { require_eq(checked(1), 1) }\n",
     ).unwrap();
     fs::write(
         root.join("b_contract_fail.jet"),
-        "#Pre(value > 0, \"positive\") fn checked(value: Int) -> Int { return value }\n#Test(\"contract fail\") { checked(0) }\n",
+        "#Pre(value > 0, \"positive\") fn checked(value: Int) => Int { return value }\n#Test(\"contract fail\") { checked(0) }\n",
     ).unwrap();
     fs::write(
         root.join("c_panic.jet"),
@@ -163,8 +163,8 @@ fn prove_reports_real_property_cases_shrinks_and_continues() {
 #[test]
 fn prove_reports_real_doctests_and_continues() {
     let root = workspace("doctests");
-    fs::write(root.join("a_pass.jet"), "/// ```jet\n/// 2 + 2 // => 4\n/// ```\nfn value() -> Int { return 4 }\n").unwrap();
-    fs::write(root.join("b_fail.jet"), "/// ```jet\n/// 2 + 2 // => 5\n/// ```\nfn value() -> Int { return 4 }\n").unwrap();
+    fs::write(root.join("a_pass.jet"), "/// ```jet\n/// 2 + 2 // => 4\n/// ```\nfn value() => Int { return 4 }\n").unwrap();
+    fs::write(root.join("b_fail.jet"), "/// ```jet\n/// 2 + 2 // => 5\n/// ```\nfn value() => Int { return 4 }\n").unwrap();
     fs::write(root.join("c_later.jet"), "#Test(\"later unit\") { require(true) }\n").unwrap();
     let out = Command::new(jet()).current_dir(&root).args(["prove", ".", "--json"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1), "stderr={} stdout={}", String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));

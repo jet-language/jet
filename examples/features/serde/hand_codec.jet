@@ -7,11 +7,11 @@ struct Email {
 }
 
 impl Email.Encode {
-    fn encode(self) -> DataTree { return DataTree.Text(~self.address) }
+    fn encode(self) => DataTree = DataTree.Text(~self.address)
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) -> Email ? DecodeError {
+    fn decode(tree: DataTree) => Email ? DecodeError {
         address :: tree.text()?
         if !address.contains("@") {
             return Err(DecodeError.{path: "", reason: "not a valid email: {address}"})

@@ -149,6 +149,7 @@ impl<'a> InlineAlwaysScan<'a> {
                     self.scan_expr(e);
                 }
             }
+            Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => self.scan_expr(e),
             Stmt::If(ifs) => {
                 self.scan_expr(&ifs.cond);
                 self.scan_stmts(&ifs.then_body);

@@ -1,6 +1,7 @@
 const DEFAULT_PRIORITIES = ['P0', 'P1', 'P2', 'P3'];
+const AGENT_LANE_RANK = { verify: 0, building: 1, implement: 2, plan: 3 };
 
-// Default board sort: in-progress first, then ready, then plan, then blocked.
+// Default board sort: verify, building, ready, plan, then blocked.
 export const workflowRank = (card) => {
   const lane = card.lane?.lane;
   if (lane === 'building' || lane === 'verify') return 0;
@@ -49,7 +50,11 @@ export function sortCards(cards, { col = 'workflow', dir = 'asc' } = {}, priorit
   const direction = dir === 'asc' ? 1 : -1;
   return [...cards].sort((a, b) => {
     const rank = workflowRank(a) - workflowRank(b);
-    if (col === 'workflow' && rank) return rank * direction;
+    if (col === 'workflow') {
+      if (rank) return rank * direction;
+      const laneRank = (AGENT_LANE_RANK[a.lane?.lane] ?? 4) - (AGENT_LANE_RANK[b.lane?.lane] ?? 4);
+      if (laneRank) return laneRank * direction;
+    }
     const av = value(a, col, priorities), bv = value(b, col, priorities);
     if (av < bv) return -direction;
     if (av > bv) return direction;
@@ -68,15 +73,20 @@ export function boardEpochs(radar, epochs, cards, milestones, showClosed) {
     const done = linked.filter(c => c.phase === 'done').length;
     if (!done) return [];
     const active = linked.filter(c => !['done', 'frozen'].includes(c.phase)).length;
+    const epochMilestones = milestones.filter(m => m.epochId === epoch.id);
+    const milestonesMet = epochMilestones.filter(m => m.progress?.met ?? m.status === 'met').length;
+    const milestoneTotal = epochMilestones.length;
     return [{
       id: epoch.id,
       name: epoch.name,
       goal: epoch.goal,
       active,
       done,
-      pct: linked.length ? Math.round(done / linked.length * 100) : 0,
+      milestoneTotal,
+      milestonesMet,
+      pct: milestoneTotal ? Math.round(milestonesMet / milestoneTotal * 100) : 0,
       burndown: [],
-      milestones: milestones.filter(m => m.epochId === epoch.id).map(m => ({
+      milestones: epochMilestones.map(m => ({
         ...m,
         done: m.progress?.done ?? 0,
         total: m.progress?.total ?? 0,

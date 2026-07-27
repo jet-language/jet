@@ -38,7 +38,7 @@ fn run() {
 
     thread_key := crypto.SigningKey.new_random() ?? panic("thread key")
     threaded := vault.ExpiringSecret.new(^thread_key, ttl, clock)
-    task := tasks.spawn(take(threaded) () => {
+    task := tasks.spawn(() => {
         if threaded.with((borrowed) => borrowed.public_key()) == Ok(_) {
             print("threaded")
         }
@@ -97,7 +97,7 @@ use core.crypto as crypto
 use core.time as time
 use core.vault as vault
 
-fn inspect_key(key: crypto.SigningKey) -> VerifyKey {
+fn inspect_key(key: crypto.SigningKey) => VerifyKey {
     return key.public_key()
 }
 
@@ -143,7 +143,7 @@ fn expiring_secret_loan_can_call_cross_file_read_helpers() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("helper.jet"),
-        "use core.crypto as crypto\npub fn inspect_key(key: crypto.SigningKey) -> crypto.VerifyKey { return key.public_key() }\n",
+        "use core.crypto as crypto\npub fn inspect_key(key: crypto.SigningKey) => crypto.VerifyKey { return key.public_key() }\n",
     )
     .unwrap();
     let src = r#"
@@ -171,7 +171,7 @@ fn run() {
 
     std::fs::write(
         dir.join("fake.jet"),
-        "pub struct SigningKey {}\npub fn inspect_key(key: SigningKey) -> Bool { return true }\n",
+        "pub struct SigningKey {}\npub fn inspect_key(key: SigningKey) => Bool { return true }\n",
     )
     .unwrap();
     let hostile = r#"
@@ -251,7 +251,7 @@ fn expiring_secret_system_observation_is_not_pure() {
 use core.crypto as crypto
 use core.vault as vault
 
-fn inspect(secret: &ExpiringSecret<crypto.SigningKey>) --[]-> Bool {
+fn inspect(secret: &ExpiringSecret<crypto.SigningKey>) =[]=> Bool {
     return secret.with((borrowed) => borrowed.public_key()) == Ok(_)
 }
 fn run() {

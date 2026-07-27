@@ -281,7 +281,7 @@ fn semantic_symbols_carry_shared_docs_and_provenance() {
     let src = r#"
 /// Scores one name.
 /// Example: score("Ada")
-fn score(name: String) -> Int {
+fn score(name: String) => Int {
     return 1
 }
 
@@ -295,7 +295,7 @@ fn run() {
     let score = symbols
         .lookup_identity(&format!("fn:module:{}::score", path.display()))
         .expect("score identity");
-    assert_eq!(score.signature, "fn score(name: String) --[]-> Int");
+    assert_eq!(score.signature, "fn score(name: String) =[]=> Int");
     assert_eq!(score.summary, "Scores one name.");
     assert_eq!(score.examples, vec!["score(\"Ada\")"]);
     assert!(matches!(score.provenance, SemanticProvenance::Source { .. }));
@@ -355,7 +355,7 @@ fn semantic_symbols_include_language_builtins() {
     let path = temp_fixture("semantic_builtins.jet", "fn run() {}\n");
     let symbols = open_symbols(&path).expect("semantic symbols");
     let filter = symbols.lookup_qualified("List.filter").expect("List.filter");
-    assert_eq!(filter.signature, "List.filter(f: fn(T) -> Bool) -> List<T>");
+    assert_eq!(filter.signature, "List.filter(f: fn(T) => Bool) => List<T>");
     assert_eq!(filter.summary, "Keeps items where f(item) is true.");
     assert!(matches!(filter.provenance, SemanticProvenance::Builtin { .. }));
     assert!(symbols.complete("fil", Some("List")).iter().any(|s| s.name == "filter"));
@@ -368,7 +368,7 @@ fn semantic_symbols_include_module_and_selected_imports() {
     fs::create_dir_all(&root).unwrap();
     fs::write(
         root.join("library.jet"),
-        "pub fn score(name: String) -> Int { return 1 }\n",
+        "pub fn score(name: String) => Int { return 1 }\n",
     )
     .unwrap();
     let main = root.join("main.jet");
@@ -384,7 +384,7 @@ fn semantic_symbols_include_module_and_selected_imports() {
     assert!(imported[0].identity.starts_with("import:"));
     assert!(imported[0]
         .signature
-        .contains("score(name: String) --[]-> Int"));
+        .contains("score(name: String) =[]=> Int"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -407,7 +407,7 @@ fn semindex_hello_json_shape() {
 fn semindex_identity_stable_across_reorder() {
     let a = r#"
 module math {
-    pub fn double(n: Int) -> Int {
+    pub fn double(n: Int) => Int {
         return n * 2
     }
 }
@@ -416,13 +416,13 @@ struct Point {
     x: Int
     y: Int
 
-    fn sum(self) -> Int {
+    fn sum(self) => Int {
         return self.x + self.y
     }
 }
 
 impl Point {
-    fn origin() -> Point {
+    fn origin() => Point {
         return Point.{x: 0, y: 0}
     }
 }
@@ -432,7 +432,7 @@ enum Light {
     Green
 }
 
-fn helper(p: Point) -> Int {
+fn helper(p: Point) => Int {
     return p.sum()
 }
 
@@ -447,7 +447,7 @@ enum Light {
     Green
 }
 
-fn helper(p: Point) -> Int {
+fn helper(p: Point) => Int {
     return p.sum()
 }
 
@@ -455,19 +455,19 @@ struct Point {
     x: Int
     y: Int
 
-    fn sum(self) -> Int {
+    fn sum(self) => Int {
         return self.x + self.y
     }
 }
 
 module math {
-    pub fn double(n: Int) -> Int {
+    pub fn double(n: Int) => Int {
         return n * 2
     }
 }
 
 impl Point {
-    fn origin() -> Point {
+    fn origin() => Point {
         return Point.{x: 0, y: 0}
     }
 }
@@ -516,7 +516,7 @@ fn run() {
 fn returned_view_provenance_is_structured_and_changes_signature_id() {
     let path = temp_fixture(
         "view_provenance.jet",
-        "fn pick(left: [Int], right: [Int]) -> View<Int> { return left[0..1] }\nfn run() {}\n",
+        "fn pick(left: [Int], right: [Int]) => View<Int> { return left[0..1] }\nfn run() {}\n",
     );
     let left = open(&path).expect("parameter-0 view provenance indexes");
     let pick = left.lookup("pick").expect("pick definition");
@@ -540,7 +540,7 @@ fn returned_view_provenance_is_structured_and_changes_signature_id() {
 
     fs::write(
         &path,
-        "fn pick(left: [Int], right: [Int]) -> View<Int> { return right[0..1] }\nfn run() {}\n",
+        "fn pick(left: [Int], right: [Int]) => View<Int> { return right[0..1] }\nfn run() {}\n",
     )
     .unwrap();
     let right = open(&path).expect("parameter-1 view provenance indexes");
@@ -558,7 +558,7 @@ fn aggregate_view_provenance_preserves_slots_and_changes_signature_id() {
     let source = |right_owner: &str| format!(r#"
 struct Pair {{ left: View<Int>, right: View<Int> }}
 
-fn pair(left: [Int], right: [Int]) -> Pair {{
+fn pair(left: [Int], right: [Int]) => Pair {{
     left_view :: left[0..1]
     right_view :: {right_owner}[0..1]
     return Pair.{{ left: left_view, right: right_view }}
@@ -626,14 +626,14 @@ fn run() {}
 #[test]
 fn semindex_structural_audit_tracks_callable_signature_changes() {
     let a = r#"
-fn score(name: String) -> Int {
+fn score(name: String) => Int {
     return 1
 }
 
 fn run() {}
 "#;
     let b = r#"
-fn score(name: String, bonus: Int) -> Float {
+fn score(name: String, bonus: Int) => Float {
     return 1.0
 }
 
@@ -715,12 +715,12 @@ fn semindex_unified_loop_slots_and_state_scope_are_structural() {
 fn definition_ancestry_identity_ignores_signature_and_body_shape() {
     let path = temp_fixture(
         "ancestry_identity.jet",
-        "fn score(n: Int) -> Int { return n + 1 }\nfn run() { print(score(1)) }\n",
+        "fn score(n: Int) => Int { return n + 1 }\nfn run() { print(score(1)) }\n",
     );
     let before = open(&path).expect("first fixture indexes");
     fs::write(
         &path,
-        "fn score(n: Float, bonus: Float) -> Float { return n * bonus }\nfn run() { print(score(1.0, 2.0)) }\n",
+        "fn score(n: Float, bonus: Float) => Float { return n * bonus }\nfn run() { print(score(1.0, 2.0)) }\n",
     )
     .unwrap();
     let after = open(&path).expect("changed fixture indexes");
@@ -779,14 +779,14 @@ fn semindex_projects_inline_module_inferred_effects() {
     let symbols = open_symbols(&path).expect("inline inferred effects index");
     let announce = symbols.lookup("announce");
     assert_eq!(announce.len(), 1);
-    assert!(announce[0].signature.contains("--[Io]->"), "{}", announce[0].signature);
+    assert!(announce[0].signature.contains("=[Io]=>"), "{}", announce[0].signature);
 }
 
 #[test]
 fn semindex_effect_provenance_covers_open_and_trait_dispatch() {
     let path = temp_fixture(
         "effect_provenance_origins.jet",
-        "trait Shape { fn area(self) --[Io]-> Int; }\nfn dynamic(shape: Shape) -> Int { return shape.area(); }\nfn apply(f: fn() -> Int) -> Int { return f(); }\nfn stored(f: ^fn() -> Int) -> Int { g :: f; return g(); }\nfn run() {}\n",
+        "trait Shape { fn area(self) =[Io]=> Int; }\nfn dynamic(shape: Shape) => Int { return shape.area(); }\nfn apply(f: fn() => Int) => Int { return f(); }\nfn stored(f: ^fn() => Int) => Int { g :: f; return g(); }\nfn run() {}\n",
     );
     let index = open(&path).expect("effect provenance index");
 
@@ -814,7 +814,7 @@ fn semindex_effect_provenance_covers_open_and_trait_dispatch() {
 fn semindex_via_contracts_have_provenance_without_invocation() {
     let path = temp_fixture(
         "effect_via_provenance.jet",
-        "fn bounded(act: fn() --[Io]->) --[via act]-> {}\nfn open(act: fn()) --[via act]-> {}\nfn run() {}\n",
+        "fn bounded(act: fn() =[Io]=>) =[via act]=> {}\nfn open(act: fn()) =[via act]=> {}\nfn run() {}\n",
     );
     let index = open(&path).expect("via provenance index");
 
@@ -833,7 +833,7 @@ fn semindex_via_contracts_have_provenance_without_invocation() {
 fn semindex_preserves_via_effect_row_in_signatures() {
     let path = temp_fixture(
         "effect_via.jet",
-        "fn invoke(act: fn() --[Io]->) --[via act]-> { act() }\nfn run() {}\n",
+        "fn invoke(act: fn() =[Io]=>) =[via act]=> { act() }\nfn run() {}\n",
     );
     let symbols = open_symbols(&path).expect("via function indexes");
     let invoke = symbols
@@ -843,7 +843,7 @@ fn semindex_preserves_via_effect_row_in_signatures() {
         .expect("invoke symbol");
     assert_eq!(
         invoke.signature,
-        "fn invoke(act: fn() --[Io]->) --[via act]->"
+        "fn invoke(act: fn() =[Io]=>) =[via act]=>"
     );
 }
 
@@ -857,7 +857,7 @@ fn semindex_references() {
 fn semindex_indexes_loop_label_definition_and_dot_exit_references() {
     let path = temp_fixture(
         "loop_label_refs.jet",
-        "fn run() {\n    outer :: loop {\n        if true { outer.next() }\n        outer.break()\n    }\n}\n",
+        "fn run() {\n    outer :: loop {\n        if true { next(outer) }\n        break(outer)\n    }\n}\n",
     );
     let idx = open(&path).expect("loop label fixture indexes");
     let outer = idx.lookup("outer").expect("loop label definition");
@@ -875,25 +875,25 @@ fn semindex_indexes_loop_label_definition_and_dot_exit_references() {
 fn semindex_dossier_stitches_scattered_members() {
     let src = r#"
 trait DrawThing {
-    fn render(self) -> String
+    fn render(self) => String
 }
 
 struct Widget {
     title: String
 
-    fn label(self) -> String {
+    fn label(self) => String {
         return self.title
     }
 }
 
 impl Widget {
-    fn size(self) -> Int {
+    fn size(self) => Int {
         return 1
     }
 }
 
 impl Widget.DrawThing {
-    fn render(self) -> String {
+    fn render(self) => String {
         return self.label()
     }
 }
@@ -914,13 +914,13 @@ fn run() {
     assert!(signatures.iter().any(|s| s == "title:title: String"));
     assert!(signatures
         .iter()
-        .any(|s| s.contains("label:fn label() -> String")));
+        .any(|s| s.contains("label:fn label() => String")));
     assert!(signatures
         .iter()
-        .any(|s| s.contains("size:fn size() -> Int")));
+        .any(|s| s.contains("size:fn size() => Int")));
     assert!(signatures
         .iter()
-        .any(|s| s.contains("render:fn render() -> String")));
+        .any(|s| s.contains("render:fn render() => String")));
     let json = dossier.to_json();
     assert!(json.contains("\"target\":\"Widget\""));
     assert!(json.contains("\"trait_impl\""));
@@ -952,7 +952,7 @@ fn run() {
     fetch_it().drop("telemetry only")
 }
 
-fn fetch_it() -> Int {
+fn fetch_it() => Int {
     return 1
 }
 "#;

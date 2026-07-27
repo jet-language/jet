@@ -267,7 +267,7 @@ pub(super) fn apply_project_create_package(
     jet_driver::PackageManifest::parse(&manifest)
         .map_err(|e| project_edit_error("diagnostic", &format!("{:?}", e)))?;
     let entry = if target == "library" {
-        format!("pub fn {}_ready() -> Bool {{\n    return true\n}}\n", name)
+        format!("pub fn {}_ready() => Bool {{\n    return true\n}}\n", name)
     } else {
         format!("fn run() {{\n    print(\"{}\")\n}}\n", name)
     };

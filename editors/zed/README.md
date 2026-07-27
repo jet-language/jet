@@ -96,9 +96,9 @@ nix develop -c cargo run --bin jet -- devtools grammars
 nix develop -c cargo test --test grammar
 ```
 
-The LSP semantic overlay refines live editor coloring for ownership (`copy`,
-`^`, `&`), rules (`#Test`, `#Unsafe`), and effect rows (`--[]->`,
-`--[Io]->`). Retired/foreign spellings are not colored as live syntax.
+The LSP semantic overlay refines live editor coloring for ownership (`~`, `^`,
+`&`), rules (`#Test`, `#Unsafe`), and effect rows (`=[]=>`, `=[Io]=>`).
+Retired or foreign spellings are not colored as live syntax.
 
 ## Reinstall after changes
 

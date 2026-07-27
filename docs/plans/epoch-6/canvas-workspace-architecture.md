@@ -337,7 +337,7 @@ NodeDescriptor {
   header: (…colors…),
   hover: "Chooses which path runs next.",
   palette: PaletteMeta { category: Flow, insertable: true, rank_terms: [...] },
-  projection: fn(&Stmt) -> Option<Node>,   // how source becomes this node
+  projection: fn(&Stmt) => Option<Node>,   // how source becomes this node
   transaction: "insert_branch",            // which edit op creates it
   default_editors: [...],                  // per-input default-value widgets
 }

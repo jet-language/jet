@@ -116,7 +116,7 @@ impl<'a> Parser<'a> {
             false
         }
 
-        /// D-FFI-INLINE1=A (card #501): parse `#FFI(<lang>) fn name(sig) -> T {
+        /// D-FFI-INLINE1=A (card #501): parse `#FFI(<lang>) fn name(sig) => T {
         /// """<foreign source>""" }` (the inline foreign tier), optionally
         /// preceded by an `#Unsafe("reason")` gate. The Jet signature is parsed
         /// as an ordinary function signature; the body must be a single
@@ -166,7 +166,7 @@ impl<'a> Parser<'a> {
             self.expect_kw(TokKind::KwFn, "after `#FFI(<lang>)`")?;
 
             // Ordinary Jet signature: name, type params, parameter list, optional
-            // `--[effects]-> T` or plain `-> T`. Reuses the same sub-parsers as a
+            // `=[effects]=> T` or plain `=> T`. Reuses the same sub-parsers as a
             // normal `fn` so the checked contract is identical.
             let (name, name_span) = self.expect_ident("after `fn`")?;
             let type_params = self.parse_opt_type_params()?;
@@ -187,9 +187,14 @@ impl<'a> Parser<'a> {
             let decorated_arrow = declared_effects.is_some() || effect_via.is_some();
             let mut return_type = None;
             let mut return_type_span = None;
-            if decorated_arrow || matches!(self.peek().kind, TokKind::Arrow) {
+            if decorated_arrow
+                || matches!(self.peek().kind, TokKind::LambdaArrow | TokKind::Arrow)
+            {
                 if !decorated_arrow {
-                    self.bump();
+                    let arrow = self.bump();
+                    if matches!(arrow.kind, TokKind::Arrow) {
+                        self.diags.push(Self::retired_callable_arrow(arrow.span));
+                    }
                 }
                 if self.type_starts_here() {
                     let (ty, span) = self.return_type()?;
@@ -400,7 +405,7 @@ impl<'a> Parser<'a> {
     
         /// S59 (E2-M14): parse `#Extern module c.<lib> { … }` (overlay) or
         /// `#Bindgen module c.<lib>.__bindgen__ { … }` (generated cache). Body
-        /// declarations share the `extern_fn` shape (`fn name(args) -> T = "Sym";`).
+        /// declarations share the `extern_fn` shape (`fn name(args) => T = "Sym";`).
         pub(super) fn c_module(&mut self) -> Result<crate::AST::CModule, Diagnostic> {
             use crate::AST::CModuleKind;
             let start = self.bump().span; // `#`

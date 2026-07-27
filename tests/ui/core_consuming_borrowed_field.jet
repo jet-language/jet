@@ -8,42 +8,18 @@ struct Email {
     items: [Address]
 }
 
-fn shallow(e: Email) -> DataTree {
-    return DataTree.Text(e.addr)
+fn shallow(e: Email) => DataTree = DataTree.Text(e.addr)
+fn nested(e: Email) => DataTree = DataTree.Text(e.nested.text)
+fn indexed(e: Email) => DataTree = DataTree.Text(e.items[0].text)
+fn computed_index(e: Email, i: Int) => DataTree = DataTree.Text(e.items[i + 1].text)
+fn pick() => Int = 0
+fn call_index(e: Email) => DataTree = DataTree.Text(e.items[pick()].text)
+fn unary_parenthesized_index(e: Email, i: Int) => DataTree = DataTree.Text(e.items[-(-i)].text)
+fn if_index(e: Email, choose_first: Bool) => DataTree {
+    return DataTree.Text(e.items[if choose_first -> 0 else -> 1].text)
 }
 
-fn nested(e: Email) -> DataTree {
-    return DataTree.Text(e.nested.text)
-}
-
-fn indexed(e: Email) -> DataTree {
-    return DataTree.Text(e.items[0].text)
-}
-
-fn computed_index(e: Email, i: Int) -> DataTree {
-    return DataTree.Text(e.items[i + 1].text)
-}
-
-fn pick() -> Int {
-    return 0
-}
-
-fn call_index(e: Email) -> DataTree {
-    return DataTree.Text(e.items[pick()].text)
-}
-
-fn unary_parenthesized_index(e: Email, i: Int) -> DataTree {
-    return DataTree.Text(e.items[-(-i)].text)
-}
-
-fn if_index(e: Email, choose_first: Bool) -> DataTree {
-    return DataTree.Text(e.items[if choose_first { 0 } else { 1 }].text)
-}
-
-fn owned_slice(xs: [DataTree]) -> DataTree {
-    return DataTree.Array(xs[0..1])
-}
-
+fn owned_slice(xs: [DataTree]) => DataTree = DataTree.Array(xs[0..1])
 fn run() {
 
 }

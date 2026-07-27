@@ -97,7 +97,7 @@ impl<'a> Fmt<'a> {
         self.fmt_stmt(stmt);
     }
 
-    fn fmt_stmt(&mut self, stmt: &Stmt) {
+    pub(super) fn fmt_stmt(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::Expr(Expr::Call(call)) if call.name == Syntax::INTERNAL_DEFER_CLOSE => {
                 self.write("defer ");
@@ -143,8 +143,8 @@ impl<'a> Fmt<'a> {
                 self.fmt_expr(e, Prec::OrFallback);
             }
             Stmt::If(i) => {
-                if self.is_inline_guard(i) {
-                    self.fmt_inline_guard(i);
+                if self.is_adjacent_effect_if(i) {
+                    self.fmt_adjacent_effect_if(i);
                 } else {
                     self.fmt_if(i);
                 }
@@ -158,8 +158,7 @@ impl<'a> Fmt<'a> {
                 }
                 self.write("loop ");
                 self.fmt_cond(cond);
-                self.write(" {");
-                self.fmt_body(body);
+                self.fmt_effect_loop_body(body, cond.span().end);
             }
             Stmt::For {
                 var,
@@ -215,8 +214,15 @@ impl<'a> Fmt<'a> {
                         }
                     }
                 }
-                self.write(" {");
-                self.fmt_body(body);
+                let header_end = match kind {
+                    ForKind::Range { end, step, .. } => {
+                        step.as_ref().map_or(end.span().end, |value| value.span().end)
+                    }
+                    ForKind::In { collection, step } => step
+                        .as_ref()
+                        .map_or(collection.span().end, |value| value.span().end),
+                };
+                self.fmt_effect_loop_body(body, header_end);
             }
             // D-IF3: multi-arm dispatch renders as `if subject == { head -> body }`
             // (the `Stmt::Switch` IR is shared with the retired `when`). The `==`
@@ -236,9 +242,27 @@ impl<'a> Fmt<'a> {
                 }
             }
             Stmt::Break(_) => self.write("break"),
+            Stmt::BreakValue(value, _) => {
+                self.write("break ");
+                self.fmt_expr(value, Prec::OrFallback);
+            }
             Stmt::Continue(_) => self.write(Syntax::KW_NEXT),
-            Stmt::BreakLabel(name, _) => self.write(&format!("{}.break()", name)),
-            Stmt::ContinueLabel(name, _) => self.write(&format!("{}.next()", name)),
+            Stmt::BreakLabel(name, _) if name.starts_with("__jet_collect_loop_") => {
+                self.write("break")
+            }
+            Stmt::BreakLabel(name, _) => self.write(&format!("break({})", name)),
+            Stmt::BreakLabelValue(name, _, value, _)
+                if name.starts_with("__jet_collect_loop_") =>
+            {
+                self.write("break ");
+                self.fmt_expr(value, Prec::OrFallback);
+            }
+            Stmt::BreakLabelValue(name, _, value, _) => {
+                self.write(&format!("break({}, ", name));
+                self.fmt_expr(value, Prec::OrFallback);
+                self.write(")");
+            }
+            Stmt::ContinueLabel(name, _) => self.write(&format!("next({})", name)),
             // D-LOOP-SEMICOLON1=A: `loop init; cond; step { body }` — emit verbatim.
             Stmt::CountedLoop {
                 init,
@@ -264,8 +288,10 @@ impl<'a> Fmt<'a> {
                     self.loop_clause_separator(step.span().start, wrap);
                     self.fmt_stmt(step);
                 }
-                self.write(" {");
-                self.fmt_body(body);
+                let header_end = step
+                    .as_ref()
+                    .map_or(cond.span().end, |statement| statement.span().end);
+                self.fmt_effect_loop_body(body, header_end);
             }
             Stmt::Loop {
                 body: inner, label, ..
@@ -394,7 +420,8 @@ impl<'a> Fmt<'a> {
                 self.with_indent(|f| f.fmt_block_stmts(body));
                 self.end_block();
             }
-            // D-SCAP1: `#Grant(Fs) { caps -> … }` scoped-capability grant region.
+            // D-SCAP1 / D-ARROW-CONTROL1:
+            // `#Grant(caps: Fs, Net) { … }` scoped-capability grant region.
             Stmt::Grant {
                 caps,
                 binding,
@@ -407,11 +434,10 @@ impl<'a> Fmt<'a> {
                     .collect::<Vec<_>>()
                     .join(", ");
                 self.write(&format!(
-                    "#{}({}) {{ {} {}",
+                    "#{}({}: {}) {{",
                     Syntax::KW_GRANT,
-                    list,
                     binding,
-                    Syntax::GRANT_ARROW
+                    list
                 ));
                 self.newline();
                 self.with_indent(|f| f.fmt_block_stmts(body));
@@ -579,24 +605,51 @@ impl<'a> Fmt<'a> {
         self.fmt_if_chain(i, inline);
     }
 
-    fn is_inline_guard(&self, i: &IfStmt) -> bool {
-        i.else_branch.is_none()
-            && i.then_body.len() == 1
-            && self
-                .source_toks
-                .iter()
-                .find(|token| {
-                    token.span.start >= i.cond.span().end
-                        && token.span.start < i.then_body[0].span().start
-                        && !matches!(
-                            &token.kind,
-                            TokKind::LineComment(_) | TokKind::BlockComment(_) | TokKind::Semi
-                        )
-                })
-                .is_some_and(|token| matches!(&token.kind, TokKind::Arrow))
+    fn fmt_effect_loop_body(&mut self, body: &[Stmt], header_end: usize) {
+        if let [statement] = body {
+            if self
+                .src
+                .get(header_end..statement.span().start)
+                .is_some_and(|gap| !gap.contains('\n') && !gap.contains('{'))
+            {
+                self.write(" ");
+                self.fmt_stmt(statement);
+                return;
+            }
+        }
+        self.write(" {");
+        self.fmt_body(body);
     }
 
-    fn fmt_inline_guard(&mut self, i: &IfStmt) {
+    fn is_adjacent_effect_if(&self, i: &IfStmt) -> bool {
+        if i.then_body.len() != 1
+            || !self
+                .src
+                .get(i.cond.span().end..i.then_body[0].span().start)
+                .is_some_and(|gap| !gap.contains('\n') && !gap.contains('{'))
+        {
+            return false;
+        }
+        match &i.else_branch {
+            None => true,
+            Some(ElseBranch::ElseIf(inner)) => {
+                !self
+                    .src
+                    .get(i.then_body[0].span().end..inner.cond.span().start)
+                    .is_some_and(|gap| gap.contains('\n') || gap.contains('{'))
+                    && self.is_adjacent_effect_if(inner)
+            }
+            Some(ElseBranch::Else(body)) => {
+                body.len() == 1
+                    && self
+                        .src
+                        .get(i.then_body[0].span().end..body[0].span().start)
+                        .is_some_and(|gap| !gap.contains('\n') && !gap.contains('{'))
+            }
+        }
+    }
+
+    fn fmt_adjacent_effect_if(&mut self, i: &IfStmt) {
         let saved_out = self.out.len();
         let saved_col = self.col;
         let saved_line_start = self.at_line_start;
@@ -606,9 +659,14 @@ impl<'a> Fmt<'a> {
         self.write(" ");
         self.fmt_cond(&i.cond);
         self.write(" ");
-        self.write(Syntax::OP_ARM_ARROW);
-        self.write(" ");
         self.fmt_stmt(&i.then_body[0]);
+        if let Some(branch) = &i.else_branch {
+            self.write(" else ");
+            match branch {
+                ElseBranch::ElseIf(inner) => self.fmt_adjacent_effect_if(inner),
+                ElseBranch::Else(body) => self.fmt_stmt(&body[0]),
+            }
+        }
         if self.col <= MAX_WIDTH {
             return;
         }
@@ -617,14 +675,7 @@ impl<'a> Fmt<'a> {
         self.at_line_start = saved_line_start;
         self.pending_blank = saved_pending_blank;
         self.comment_i = saved_comment_i;
-        self.write("if {");
-        self.newline();
-        self.with_indent(|f| {
-            f.fmt_cond(&i.cond);
-            f.write(" -> {");
-            f.fmt_body(&i.then_body);
-        });
-        self.end_block();
+        self.fmt_if(i);
     }
 
     /// True when every branch of the if/else chain is eligible to render inline
@@ -935,7 +986,7 @@ impl<'a> Fmt<'a> {
         matches!((a_src, subj_src), (Some(x), Some(y)) if x == y)
     }
 
-    fn fmt_binding(&mut self, b: &Binding) {
+    pub(super) fn fmt_binding(&mut self, b: &Binding) {
         if let Some(meta) = &b.meta {
             self.fmt_meta_attr(meta);
             self.write(" ");

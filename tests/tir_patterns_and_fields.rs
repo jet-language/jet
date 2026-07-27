@@ -22,10 +22,10 @@ fn user_method_shadowing_builtin_name() {
 struct Crate {
     items: [Int]
 
-    fn get(self) -> Int {
+    fn get(self) => Int {
         return 42
     }
-    fn len(self) -> Int {
+    fn len(self) => Int {
         return 7
     }
 }
@@ -118,7 +118,7 @@ struct Tree {
     value: Int
     child: Tree?
 }
-fn sum(t: Tree) -> Int {
+fn sum(t: Tree) => Int {
     total := t.value
 kid ::  t.child 
     if kid == {
@@ -160,7 +160,7 @@ fn borrowed_struct_lit_field_value_cloned() {
 struct Person {
     name: String
 }
-fn make(n: String) -> Person {
+fn make(n: String) => Person {
     return Person.{ name: n }
 }
 fn run() {
@@ -207,7 +207,7 @@ struct Incident {
     title: String
     retries: Int
 }
-fn route(i: Incident) -> String {
+fn route(i: Incident) => String {
     if i == {
         .{ kind: \"page\", title, .. } -> { return title }
         .{ kind: \"ticket\", title, .. } -> { return title }
@@ -237,7 +237,7 @@ fn user_enum_variant_if_let_condition() {
     }
     let src = "\
 enum Msg { Ping(Int) Pong }
-fn f(m: Msg) -> Int {
+fn f(m: Msg) => Int {
     if m == Ping(n) {
         return n
     } else {
@@ -262,11 +262,11 @@ fn fixed_size_list_param_and_field() {
         return;
     }
     let src = "\
-fn double(n: Int) -> Int {
+fn double(n: Int) => Int {
     return (n * 2)
 }
 struct Grid { row: [Int#3] }
-fn firstof(xs: [Int#3]) -> Int {
+fn firstof(xs: [Int#3]) => Int {
     return xs[0]
 }
 fn run() {
@@ -314,7 +314,7 @@ fn mixed_switch_non_ident_subject_binds_payload() {
     }
     let src = "\
 struct Holder { val: Int? }
-fn f(h: Holder) -> Int {
+fn f(h: Holder) => Int {
     if h.val == {
         Val(c) -> { return c }
         else -> { return 0 }
@@ -343,10 +343,10 @@ fn mixed_switch_non_ident_subject_qualifies_variants() {
     }
     let src = "\
 enum Light { Red Green Yellow }
-fn pick() -> Light {
+fn pick() => Light {
     return Light.Red
 }
-fn classify() -> Int {
+fn classify() => Int {
     if pick() == {
         Red -> { return 1 }
         Green -> { return 2 }
@@ -373,7 +373,7 @@ fn comptime_local_is_literal_data() {
         return;
     }
     let src = "\
-fn build() -> [Int] {
+fn build() => [Int] {
     xs := [Int].{}
     loop i; 1..3 {
         xs.push(i * 10)
@@ -759,7 +759,7 @@ struct Holder {
 }
 
 impl Vec2.Add {
-    fn add(self, rhs: Vec2) -> Vec2 {
+    fn add(self, rhs: Vec2) => Vec2 {
         return Vec2.{ x: self.x + rhs.x, y: self.y + rhs.y }
     }
 }

@@ -9,22 +9,22 @@ struct Token {
     rest: View<str>
 }
 
-fn first(values: [Int]) -> View<Int> { return values[0..1] }
+fn first(values: [Int]) => View<Int> = values[0..1]
 
-fn domain(email: String) -> Domain {
+fn domain(email: String) => Domain {
     value :: email.after("@")
     return Domain.{value: value}
 }
 
 // Both parser outputs borrow one caller-owned input. `parse` proves that
 // provenance composes through an ordinary wrapper call.
-fn scan(source: String) -> Token {
+fn scan(source: String) => Token {
     text :: source.before(":")
     rest :: source.after(":")
     return Token.{text: text, rest: rest}
 }
 
-fn parse(source: String) -> Token { return scan(source) }
+fn parse(source: String) => Token = scan(source)
 
 fn run() {
     values :: [7, 8]

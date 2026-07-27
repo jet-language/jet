@@ -1,19 +1,18 @@
 // Effect system (D-EFF1): every function carries an inferred effect set — the
-// ambient powers its body reaches. A `--[…]->` list on the signature declares an
-// optional upper bound the inferred set must fit inside; `--[]->` explicitly
+// ambient powers its body reaches. A `=[…]=>` list on the signature declares an
+// optional upper bound the inferred set must fit inside; `=[]=>` explicitly
 // proves the empty set. Omitting the row keeps full inference.
 // Effects are erased in codegen: this program generates the same Rust with or
 // without the annotations.
 // Pure by inference: no annotation needed.
-fn square(n: Int) -> Int { return n * n }
+fn square(n: Int) => Int = n * n
 
-// Effectful by inference: `print` contributes `Io`.
 fn announce(label: String, n: Int) {
     print("{label} is {n}")
 }
 
 // Effects flow along calls: `run` reaches `Io` only through `announce`, and
 // `square` adds nothing (it is pure). Expert-written bound proves `{Io} ⊆ {Io}`.
-fn report(n: Int) --[Io]-> { announce("square", square(n)) }
+fn report(n: Int) =[Io]=> { announce("square", square(n)) }
 
 fn run() { report(7) }

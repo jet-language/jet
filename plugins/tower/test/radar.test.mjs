@@ -22,9 +22,10 @@ function fixture() {
       { id: 'm1', epochId: 'e1', title: 'Stalled milestone', goal: '', status: 'open' },
       { id: 'm2', epochId: 'e1', title: 'Untouched milestone', goal: '', status: 'open' },
       { id: 'm3', epochId: 'e2', title: 'No linked cards', goal: '', status: 'open' },
+      { id: 'm4', epochId: 'e1', title: 'Finished milestone', goal: '', status: 'open' },
     ],
     cards: [
-      { id: 'c1', num: 1, epoch: 'e1', track: 'epoch', phase: 'done' },
+      { id: 'c1', num: 1, epoch: 'e1', track: 'epoch', phase: 'done', milestoneId: 'm4' },
       { id: 'c2', num: 2, epoch: 'e1', track: 'epoch', phase: 'building' },
       { id: 'c_ms', num: 3, epoch: 'e1', track: 'epoch', phase: 'ready', milestoneId: 'm1' },
       { id: 'c_none', num: 4, epoch: 'e1', track: 'epoch', phase: 'ready', milestoneId: 'm2' },
@@ -50,16 +51,20 @@ test('radar: excludes arrived/done epochs, active epoch sorts first', () => {
   assert.deepEqual(r.map(x => x.id), ['e2', 'e1']); // e2 is the active epoch, bumped ahead of e1 despite order 1 < 2; e3 (arrived) dropped
 });
 
-test('radar: epoch grouping excludes sidequests from active/done/pct', () => {
+test('radar: epoch grouping excludes sidequests and progress counts milestones', () => {
   const r = radarData(fixture());
   const e1 = r.find(x => x.id === 'e1');
   const e2 = r.find(x => x.id === 'e2');
   assert.equal(e1.done, 1);   // c1
   assert.equal(e1.active, 3); // c2, c_ms, c_none
-  assert.equal(e1.pct, 25);   // 1/4
+  assert.equal(e1.milestonesMet, 1);
+  assert.equal(e1.milestoneTotal, 3);
+  assert.equal(e1.pct, 33);
   assert.equal(e2.done, 1);   // c3 (c5 sidequest excluded)
   assert.equal(e2.active, 1); // c4 (c5 sidequest excluded)
-  assert.equal(e2.pct, 50);   // 1/2
+  assert.equal(e2.milestonesMet, 0);
+  assert.equal(e2.milestoneTotal, 1);
+  assert.equal(e2.pct, 0);
   assert.equal(e1.doneArchivedHint, null);
   assert.equal(e2.doneArchivedHint, null);
 });

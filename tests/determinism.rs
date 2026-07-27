@@ -17,7 +17,7 @@ mod common;
 #[test]
 fn pure_fn_injected_clock_ok() {
     let src = r#"
-fn at(clock: Clock) --[]-> Int {
+fn at(clock: Clock) =[]=> Int {
     return clock.now()
 }
 fn run() {
@@ -39,7 +39,7 @@ use core.time as time;
 fn pure_fn_injected_rng_ok() {
     let src = r#"
 use core.random as random;
-fn draw(rng: &Rng) --[]-> Int {
+fn draw(rng: &Rng) =[]=> Int {
     return rng.int(1, 6)
 }
 fn run() {
@@ -58,7 +58,7 @@ fn pure_fn_constructs_caps_ok() {
     let src = r#"
 use core.time as time;
 use core.random as random;
-fn seeded() --[]-> Int {
+fn seeded() =[]=> Int {
     c :: Clock.new(10)
     r := random.rng(1)
     return c.now() + r.int(0, 0)
@@ -76,7 +76,7 @@ fn run() { print("{seeded()}") }
 #[test]
 fn system_clock_is_monotonic_and_effectful() {
     let pure = r#"
-fn bad() --[]-> Int {
+fn bad() =[]=> Int {
     clock := Clock.system()
     return clock.now()
 }
@@ -86,10 +86,10 @@ fn run() { print(bad()) }
     assert!(diags.iter().any(|diag| diag.code == "E3403"));
 
     let launder = r#"
-fn read(clock: Clock) --[]-> Int {
+fn read(clock: Clock) =[]=> Int {
     return clock.now()
 }
-fn make_system_clock() -> Clock {
+fn make_system_clock() => Clock {
     return Clock.system()
 }
 fn run() {
@@ -163,7 +163,7 @@ fn pure_code_rejects_clock_provenance_laundered_through_a_struct() {
 struct Holder {
     clock: Clock
 }
-fn read(holder: Holder) --[]-> Int {
+fn read(holder: Holder) =[]=> Int {
     return holder.clock.now()
 }
 fn run() {
@@ -182,7 +182,7 @@ fn run() {
 struct Holder {
     clock: Clock
 }
-fn same(holder: Holder) --[]-> Bool {
+fn same(holder: Holder) =[]=> Bool {
     return holder.clock == holder.clock
 }
 fn run() {
@@ -201,7 +201,7 @@ fn run() {
 struct Holder {
     clock: Clock
 }
-fn copy_clock(holder: Holder) --[]-> Clock {
+fn copy_clock(holder: Holder) =[]=> Clock {
     return ~holder.clock
 }
 fn run() {
@@ -221,7 +221,7 @@ fn run() {
 struct Holder {
     clock: Clock
 }
-fn copy_holder(holder: Holder) --[]-> Holder {
+fn copy_holder(holder: Holder) =[]=> Holder {
     return ~holder
 }
 fn run() {
@@ -241,10 +241,10 @@ fn run() {
 enum BoxedClock {
     Held(Clock)
 }
-fn copy_box(value: BoxedClock) --[]-> BoxedClock {
+fn copy_box(value: BoxedClock) =[]=> BoxedClock {
     return ~value
 }
-fn show_box(value: BoxedClock) --[]-> String {
+fn show_box(value: BoxedClock) =[]=> String {
     return "{value#Debug}"
 }
 fn run() {}
@@ -260,7 +260,7 @@ fn run() {}
 struct Holder {
     clock: Clock
 }
-fn show(holder: Holder) --[]-> String {
+fn show(holder: Holder) =[]=> String {
     return "{holder.clock} {holder.clock#Debug}"
 }
 fn run() {
@@ -279,7 +279,7 @@ fn run() {
 struct Holder {
     clock: Clock
 }
-fn show(holder: Holder) --[]-> String {
+fn show(holder: Holder) =[]=> String {
     return "{holder#Debug}"
 }
 fn run() {
@@ -307,7 +307,7 @@ fn pure_code_rejects_clock_observation_through_an_imported_nominal_type() {
     let main = dir.join("main.jet");
     std::fs::write(
         &main,
-        "use \"clock_box\"\nfn copy_box(value: clock_box.BoxedClock) --[]-> clock_box.BoxedClock {\n    return ~value\n}\nfn show_box(value: clock_box.BoxedClock) --[]-> String {\n    return \"{value#Debug}\"\n}\nfn run() {}\n",
+        "use \"clock_box\"\nfn copy_box(value: clock_box.BoxedClock) =[]=> clock_box.BoxedClock {\n    return ~value\n}\nfn show_box(value: clock_box.BoxedClock) =[]=> String {\n    return \"{value#Debug}\"\n}\nfn run() {}\n",
     )
     .unwrap();
 
@@ -324,7 +324,7 @@ fn pure_code_rejects_clock_observation_through_an_imported_nominal_type() {
 fn pure_fn_ambient_time_still_e3403() {
     let src = r#"
 use core.time as time;
-fn bad() --[]-> Int {
+fn bad() =[]=> Int {
     return time.now()
 }
 fn run() { print("{bad()}") }
@@ -344,7 +344,7 @@ fn run() { print("{bad()}") }
 fn pure_fn_ambient_random_still_e3403() {
     let src = r#"
 use core.random as random;
-fn bad() --[]-> Int {
+fn bad() =[]=> Int {
     return random.int(1, 6)
 }
 fn run() { print("{bad()}") }
@@ -366,7 +366,7 @@ fn run() { print("{bad()}") }
 fn assume_deterministic_suppresses_e3403() {
     let src = r#"
 use core.time as time;
-fn risky() --[]-> Int {
+fn risky() =[]=> Int {
     t := 0
     #Nondeterministic("ambient clock is explicit test input") {
         t = time.now()
@@ -387,7 +387,7 @@ fn run() { print("{risky()}") }
 #[test]
 fn assume_deterministic_suppresses_e3401() {
     let src = r#"
-fn risky() --[]-> Int {
+fn risky() =[]=> Int {
     #Nondeterministic("ambient print is deliberate") {
         print("side effect")
     }
@@ -408,7 +408,7 @@ fn run() { print("{risky()}") }
 fn assume_deterministic_is_scoped() {
     let src = r#"
 use core.time as time;
-fn risky() --[]-> Int {
+fn risky() =[]=> Int {
     #Nondeterministic("ambient clock is deliberate") {
         a := time.now()
     }
@@ -458,7 +458,7 @@ fn run() {
 fn pure_fn_widened_rng_ok() {
     let src = r#"
 use core.random as random;
-fn draws(rng: &Rng) --[]-> Bool {
+fn draws(rng: &Rng) =[]=> Bool {
     flip := rng.bool()
     xs := [1, 2, 3]
     chosen := rng.pick(xs) ?? 0
@@ -484,7 +484,7 @@ fn run() {
 fn rng_pick_returns_element_option() {
     let src = r#"
 use core.random as random;
-fn choose(rng: &Rng) --[]-> String {
+fn choose(rng: &Rng) =[]=> String {
     cards := ["A", "K", "Q"]
     return rng.pick(cards) ?? "none"
 }
@@ -552,7 +552,7 @@ fn run() {
 fn pure_fn_widened_clock_ok() {
     let src = r#"
 use core.time as time;
-fn drive_clock(clock: &Clock) --[]-> Int {
+fn drive_clock(clock: &Clock) =[]=> Int {
     base := clock.advance(5000)
     span := Duration.seconds(1) ?? panic("duration")
     return base + clock.wait(span)
@@ -596,7 +596,7 @@ fn run() {
 fn pure_fn_duration_ok() {
     let src = r#"
 use core.time as time;
-fn span_ms() --[]-> Int {
+fn span_ms() =[]=> Int {
     d := Duration.seconds(3) ?? panic("duration")
     return d.in(.Milliseconds) ?? panic("duration read")
 }

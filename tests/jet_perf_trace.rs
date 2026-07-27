@@ -585,7 +585,7 @@ use core.time as time
 fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
     address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
-    server :: tasks.spawn(take(listener) () => {
+    server :: tasks.spawn(() => {
         stream :: listener.accept() ?? panic("accept")
         message :: stream.read_text(16) ?? panic("read")
         stream.write_all("echo:{message}".bytes()) ?? panic("write")
@@ -913,14 +913,14 @@ fn run() {
     // Channel setup before arena so spawn panic cannot capture the arena view.
     (ready_sender, ready) :: tasks.channel<Int>()
     (hold_sender, blocked) :: tasks.channel<Int>(1)
-    child :: tasks.spawn(take(ready_sender, blocked) () => {
+    child :: tasks.spawn(() => {
         ready_sender.send(1)
         blocked.receive() ?? panic("closed")
     })
     child.detach()
     // Second child blocks on accept with no client — real observe I/O wait.
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
-    io_child :: tasks.spawn(take(listener) () => {
+    io_child :: tasks.spawn(() => {
         _ :: listener.accept() ?? panic("accept")
     })
     io_child.detach()
@@ -1025,14 +1025,14 @@ fn run() {
     // Channel setup before arena so spawn panic cannot capture the arena view.
     (ready_sender, ready) :: tasks.channel<Int>()
     (hold_sender, blocked) :: tasks.channel<Int>(1)
-    child :: tasks.spawn(take(ready_sender, blocked) () => {
+    child :: tasks.spawn(() => {
         ready_sender.send(1)
         blocked.receive() ?? panic("closed")
     })
     child.detach()
     // Second child blocks on accept with no client — real observe I/O wait.
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind")
-    io_child :: tasks.spawn(take(listener) () => {
+    io_child :: tasks.spawn(() => {
         _ :: listener.accept() ?? panic("accept")
     })
     io_child.detach()

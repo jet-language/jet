@@ -1,47 +1,47 @@
-Error [E1111]: parallel item cannot use `fn(Int) -> Int` across workers
-  --> tests/ui/parallel_function_worker_type.jet:11:27
+Error [E1111]: parallel item cannot use `fn(Int) => Int` across workers
+  --> tests/ui/parallel_function_worker_type.jet:10:27
     |
- 11 |     bad_item :: callbacks.para_filter((callback: fn(Int) -> Int) => true)
+ 10 |     bad_item :: callbacks.para_filter((callback: fn(Int) => Int) => true)
     |                           ^^^^^^^^^^^
  Why: parallel collection workers may only share or transfer thread-safe owned values
  Fix: copy the data into a plain owned value, or keep this operation sequential
 
-Error [E1111]: parallel result cannot use `[fn(Int) -> Int]` across workers
-  --> tests/ui/parallel_function_worker_type.jet:11:27
+Error [E1111]: parallel result cannot use `[fn(Int) => Int]` across workers
+  --> tests/ui/parallel_function_worker_type.jet:10:27
     |
- 11 |     bad_item :: callbacks.para_filter((callback: fn(Int) -> Int) => true)
+ 10 |     bad_item :: callbacks.para_filter((callback: fn(Int) => Int) => true)
     |                           ^^^^^^^^^^^
  Why: parallel collection workers may only share or transfer thread-safe owned values
  Fix: copy the data into a plain owned value, or keep this operation sequential
 
-Error [E1111]: parallel result cannot use `[fn(Int) -> Int]` across workers
-  --> tests/ui/parallel_function_worker_type.jet:12:23
+Error [E1111]: parallel result cannot use `[fn(Int) => Int]` across workers
+  --> tests/ui/parallel_function_worker_type.jet:11:23
     |
- 12 |     bad_result :: [1].para_map((n: Int) => (x: Int) => x + n)
+ 11 |     bad_result :: [1].para_map((n: Int) => (x: Int) => x + n)
     |                       ^^^^^^^^
  Why: parallel collection workers may only share or transfer thread-safe owned values
  Fix: copy the data into a plain owned value, or keep this operation sequential
 
-Error [E1111]: parallel result cannot use `fn(Int) -> Int` across workers
-  --> tests/ui/parallel_function_worker_type.jet:13:20
+Error [E1111]: parallel result cannot use `fn(Int) => Int` across workers
+  --> tests/ui/parallel_function_worker_type.jet:12:20
     |
- 13 |     bad_acc :: [1].para_fold(() => (x: Int) => x, (callback: fn(Int) -> Int, n: Int) => callback, (left: fn(Int) -> Int, right: fn(Int) -> Int) => left)
+ 12 |     bad_acc :: [1].para_fold(() => (x: Int) => x, (callback: fn(Int) => Int, n: Int) => callback, (left: fn(Int) => Int, right: fn(Int) => Int) => left)
     |                    ^^^^^^^^^
  Why: parallel collection workers may only share or transfer thread-safe owned values
  Fix: copy the data into a plain owned value, or keep this operation sequential
 
 Error [E1111]: parallel item cannot use `CallbackPayload` across workers
-  --> tests/ui/parallel_function_worker_type.jet:15:26
+  --> tests/ui/parallel_function_worker_type.jet:14:26
     |
- 15 |     bad_enum :: payloads.para_map((payload: CallbackPayload) => 1)
+ 14 |     bad_enum :: payloads.para_map((payload: CallbackPayload) => 1)
     |                          ^^^^^^^^
  Why: parallel collection workers may only share or transfer thread-safe owned values
  Fix: copy the data into a plain owned value, or keep this operation sequential
 
 Error [E1111]: parallel callback cannot share captured `stored`
-  --> tests/ui/parallel_function_worker_type.jet:17:33
+  --> tests/ui/parallel_function_worker_type.jet:16:33
     |
- 17 |     bad_capture :: [1].para_map((n: Int) => stored(n))
+ 16 |     bad_capture :: [1].para_map((n: Int) => stored(n))
     |                                 ^^^^^^^^^^^^^^^^^^
  Why: this capture is not safe to read from several worker threads
  Fix: copy plain owned data into the callback, or keep this operation sequential

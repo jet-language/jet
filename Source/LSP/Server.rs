@@ -1088,15 +1088,15 @@ fn signature_help_response(
                 .collect();
             let mut label = format!("fn {}({})", def.name, parts.join(", "));
             if let Some((param, _)) = effect_via {
-                label.push_str(" --[via ");
+                label.push_str(" =[via ");
                 label.push_str(param);
-                label.push_str("]->");
+                label.push_str("]=>");
             } else if let Some(effects) = effects {
-                label.push_str(" --[");
+                label.push_str(" =[");
                 label.push_str(&effects.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
-                label.push_str("]->");
+                label.push_str("]=>");
             } else if ret.is_some() {
-                label.push_str(" ->");
+                label.push_str(" =>");
             }
             if let Some(ret) = ret {
                 label.push_str(&format!(" {}", ret.name()));
@@ -2314,7 +2314,7 @@ mod project_part_tests {
 
     #[test]
     fn code_actions_reject_effects_reordering_and_possible_traps() {
-        let effectful = "fn next() -> Int { print(\"effect\"); return 1 }\nfn run() {\n    value :: next()\n    print(\"between\")\n    print(value)\n}\n";
+        let effectful = "fn next() => Int { print(\"effect\"); return 1 }\nfn run() {\n    value :: next()\n    print(\"between\")\n    print(value)\n}\n";
         let effect_root = std::env::temp_dir().join(format!(
             "jet-lsp-effect-refactor-{}",
             std::process::id()
@@ -2549,7 +2549,7 @@ mod project_part_tests {
         );
         assert!(extracted.contains("\"title\":\"Extract binding\""), "{extracted}");
         assert!(extracted.contains("\"title\":\"Extract function\""), "{extracted}");
-        assert!(extracted.contains("-> Bool"), "{extracted}");
+        assert!(extracted.contains("=> Bool"), "{extracted}");
         let use_site = int_src.rfind("same").unwrap();
         let inlined = code_actions_for(
             &int_server,
@@ -2696,7 +2696,7 @@ mod project_part_tests {
         let helper = root.join("helper.jet");
         let src = "fn run() { print(answer()) }\n";
         std::fs::write(&main, src).unwrap();
-        std::fs::write(&helper, "pub fn answer() -> Int { return 42 }\n").unwrap();
+        std::fs::write(&helper, "pub fn answer() => Int { return 42 }\n").unwrap();
 
         let path = main.to_string_lossy().into_owned();
         let uri = path_to_uri(&path);
@@ -2733,8 +2733,8 @@ mod project_part_tests {
         let main = root.join("main.jet");
         let helper = root.join("helper.jet");
         let src = "fn run() { print(answer()) }\n";
-        let saved_helper = "pub fn answer() -> Int { return 42 }\n";
-        let unsaved_helper = "fn answer() -> Int { return 42 }\n";
+        let saved_helper = "pub fn answer() => Int { return 42 }\n";
+        let unsaved_helper = "fn answer() => Int { return 42 }\n";
         std::fs::write(&main, src).unwrap();
         std::fs::write(&helper, saved_helper).unwrap();
 
@@ -2881,7 +2881,7 @@ mod project_part_tests {
     #[test]
     fn incremental_lsp_query_diagnostics_match_fresh_check_bytes() {
         let path = "/tmp/lsp_incremental_diagnostic_parity.jet";
-        let before = "fn alpha() -> Int { return 1 }\nfn beta() -> Int { return 2 }\n";
+        let before = "fn alpha() => Int { return 1 }\nfn beta() => Int { return 2 }\n";
         let mut doc = Document::new(path.to_string(), before.to_string(), 1);
         let server = Server::new();
         assert!(server.check(&doc).is_empty());
@@ -3036,8 +3036,8 @@ mod project_part_tests {
         std::fs::create_dir_all(&root).unwrap();
         let main_path = root.join("main.jet");
         let dependency_path = root.join("b.jet");
-        let main_source = "module b;\nfn run() -> Int { return b.value() }\n";
-        std::fs::write(&dependency_path, "pub fn value() -> Int { return 1 }\n").unwrap();
+        let main_source = "module b;\nfn run() => Int { return b.value() }\n";
+        std::fs::write(&dependency_path, "pub fn value() => Int { return 1 }\n").unwrap();
         let main_uri = path_to_uri(&main_path.to_string_lossy());
         let dependency_uri = path_to_uri(&dependency_path.to_string_lossy());
         let mut server = Server::new();
@@ -3049,7 +3049,7 @@ mod project_part_tests {
             dependency_uri.clone(),
             Document::new(
                 dependency_path.to_string_lossy().into_owned(),
-                "pub fn value() -> String { return \"unsaved\" }\n".into(),
+                "pub fn value() => String { return \"unsaved\" }\n".into(),
                 1,
             ),
         );
@@ -3060,7 +3060,7 @@ mod project_part_tests {
             .docs
             .get_mut(&dependency_uri)
             .unwrap()
-            .replace_text("pub fn value() -> Int { return 2 }\n".into());
+            .replace_text("pub fn value() => Int { return 2 }\n".into());
         let repaired = server.check(server.docs.get(&main_uri).unwrap());
 
         assert!(repaired.is_empty(), "{repaired:#?}");

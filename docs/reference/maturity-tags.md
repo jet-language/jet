@@ -5,13 +5,13 @@ compiler behavior.
 
 ```jet
 #Meta(maturity: .Experimental)
-pub fn parse_streaming(src: Stream) -> Doc ? ParseError { ... }
+pub fn parse_streaming(src: Stream) => Doc ? ParseError { ... }
 
 #Meta(maturity: .Tested)
-pub fn parse(src: String) -> Doc ? ParseError { ... }
+pub fn parse(src: String) => Doc ? ParseError { ... }
 
 #Meta(maturity: .Hardened)
-pub fn parse_strict(src: String) -> Doc ? ParseError { ... }
+pub fn parse_strict(src: String) => Doc ? ParseError { ... }
 ```
 
 Current contract (D-MARK-META1=B):

@@ -201,7 +201,7 @@ $ echo $?
 0
 
 # src/bad_fee.jet
-#Pre(cents > 0, "positive input") #Post(result > cents, "fee grows total") fn add_fee(cents: Int) -> Int {
+#Pre(cents > 0, "positive input") #Post(result > cents, "fee grows total") fn add_fee(cents: Int) => Int {
     return cents
 }
 

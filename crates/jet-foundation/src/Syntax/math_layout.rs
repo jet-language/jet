@@ -56,7 +56,7 @@ pub const LAYOUT_HANDLE_TYPE: &str = "LayoutHandle";
 /// contextual block keyword (D-CASING1), recognized only when followed by
 /// `name {`.
 pub const KW_LAYOUT: &str = "layout";
-/// `use core.term as term` — exposes `term.read_key() -> Key`.
+/// `use core.term as term` — exposes `term.read_key() => Key`.
 pub const CORE_TERM_MODULE: &str = "core.term";
 
 /// D-TERM1 (ratified 2026-06-22): the key-event type returned by `term.read_key()`.
@@ -232,7 +232,8 @@ pub const OP_RANGE_EXCLUSIVE: &str = "..<";
 /// retained only so the range-arm porting diagnostic can recognize it.
 pub const RETIRED_LOOP_STEP: &str = "step";
 
-/// S23 (ratified): loop control.
+/// S23 + D-LOOPSTATE1=A: loop control. Bare payloads return from the innermost
+/// loop; `break(name[, value])` and `next(name)` select named loop targets.
 pub const KW_BREAK: &str = "break";
 /// D-LOOP-CONTROLWORD1=B: contextual statement/fallback control.
 pub const KW_NEXT: &str = "next";
@@ -243,12 +244,16 @@ pub const FOREIGN_CONTINUE: &str = "continue";
 /// S24 / D-IF1 (ratified 2026-06-18): `if` is the one branching keyword.
 pub const KW_SWITCH: &str = "if";
 
-/// S24 / D-IF1 / D-IFGUARD1=A (ratified): arm arrow inside subject dispatch or
-/// a subjectless guard table (same spelling as return types).
+/// D-ARROW-CONTROL1=A: selected-value arrow inside ordered arm tables,
+/// value if, and finite yielding loops.
 pub const OP_ARM_ARROW: &str = "->";
 
-/// S46 (ratified M8): lambda arrow — distinct from `->` return/arm arrow.
-pub const OP_LAMBDA_ARROW: &str = "=>";
+/// S46 + D-ARROW-CONTROL1=A: callable-result arrow for named functions,
+/// function types, lambdas, computed fields, conversions, and task bodies.
+pub const OP_CALLABLE_ARROW: &str = "=>";
+/// Transitional internal name. Remove after every parser/formatter consumer
+/// migrates under #1209; it is not a second source spelling.
+pub const OP_LAMBDA_ARROW: &str = OP_CALLABLE_ARROW;
 
 /// S11 (ratified): the two `Bool` literals.
 pub const LIT_TRUE: &str = "true";
@@ -452,7 +457,7 @@ pub const ASM_LANG: &str = "asm"; // D-FFI-ASM1
 /// only to emit the E0055 teaching error.
 pub const ATTR_AUDIT: &str = "Audit"; // retired, D-UNSAFE2
                                       // D-LOOPLABEL3=A: named loops use `outer :: loop { … }`;
-                                      // `outer.break()` / `outer.next()` target them. Retired `@`
+                                      // `break(outer)` / `next(outer)` target them. Retired `@`
                                       // prefix and suffix forms emit E0988.
                                       // D-ATTR3 = B (ratified 2026-06-19): `@` stays for labels; attributes use `#`.
                                       // D-QUAL4=A (ratified 2026-06-26): `#TagName T` is a value-tag qualifier in type
@@ -551,7 +556,7 @@ pub const FOREIGN_OR_FALLBACK: &str = "or";
 pub const BUILTIN_PANIC: &str = "panic";
 /// D-NUMOPS1 (ratified 2026-06-22): per-op overflow opt-ins. Each wraps a single
 /// integer `+`/`-`/`*`/`/`: `wrapping(…)` wraps around, `saturating(…)` clamps to
-/// the type's range, `checked(…) -> T?` returns `null` on overflow.
+/// the type's range, `checked(…) => T?` returns `null` on overflow.
 pub const BUILTIN_WRAPPING: &str = "wrapping";
 pub const BUILTIN_SATURATING: &str = "saturating";
 pub const BUILTIN_CHECKED: &str = "checked";

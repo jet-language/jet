@@ -280,7 +280,7 @@ only via explicit checked transaction regions.
 - Failure & control flow guide / glossary / tracker reset example / speculative execution — https://dev.epicgames.com/documentation/en-us/fortnite/basics-of-writing-code-9-failure-and-control-flow-in-verse · https://dev.epicgames.com/documentation/en-us/fortnite/verse-glossary · https://dev.epicgames.com/documentation/fortnite/verse-api/fortnitedotcom/devices/tracker_device/reset · https://dev.epicgames.com/documentation/fortnite/speculative-execution
 
 **Koka** — inferred effect rows, handlers, research-backed effect semantics
-(direct lineage of Jet's `--[E]->` inferred effect rows). Watch: dense rows and
+(direct lineage of Jet's `=[E]=>` inferred effect rows). Watch: dense rows and
 handler calculus must not dominate beginner code.
 - Effect rows (arXiv 1406.2061) / scoped effects (arXiv 2304.09697) / effect handlers evidently (ICFP 2020) — https://arxiv.org/abs/1406.2061 · https://arxiv.org/abs/2304.09697 · https://www.dhil.net/research/papers/effect_handlers_evidently-extended-icfp2020.pdf
 - Koka book / repo — https://koka-lang.github.io/koka/doc/book.html · https://github.com/koka-lang/koka

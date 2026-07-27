@@ -1,0 +1,33 @@
+fn first_over(limit: Int, values: [Int]) => Int {
+    found :: loop {
+        loop value; values {
+            if value > limit break(found, value)
+        }
+        break -1
+    }
+    found
+}
+
+fn run() {
+    values :: [Int].{ 1, 2, 3, 4 }
+    doubled :: loop value; values -> value * 2
+    prefix :: loop value; values -> {
+        if value > 3 break
+        value
+    }
+    nested :: loop left; [1, 2] ->
+        loop right; [10, 20] -> left + right
+
+    by_value := [Int: Int].{}
+    loop value; values by_value.add(value, value * 10).drop("keys are unique")
+    unique :: Set.from(loop value; [1, 2, 2, 3] -> value)
+    lazy :: values.map(value => value + 10)
+
+    print(doubled)
+    print(prefix)
+    print(nested)
+    print(by_value[3])
+    print(unique.len())
+    print(lazy.to_list())
+    print(first_over(2, values))
+}

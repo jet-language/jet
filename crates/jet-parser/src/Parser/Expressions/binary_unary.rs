@@ -107,30 +107,30 @@ impl<'a> Parser<'a> {
             // D-LOOP-CONTROLWORD1=B: bare `?? next` is contextual control;
             // `?? (next)` remains an ordinary value fallback.
             if matches!(self.peek().kind, TokKind::KwBreak) {
+                if matches!(self.peek2().kind, TokKind::LParen) {
+                    let start = self.bump().span;
+                    self.bump(); // `(`
+                    let (name, _) = self.expect_ident("as the loop name in `break(name)`")?;
+                    let end = self.peek().span.end;
+                    self.expect(TokKind::RParen, "after the named break target")?;
+                    return Ok(OrFallback::BreakLabel(name, Span::new(start.start, end)));
+                }
                 return Ok(OrFallback::Break(self.bump().span));
             }
-            if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_NEXT) {
-                return Ok(OrFallback::Continue(self.bump().span));
-            }
-            // D-LOOPLABEL3=A: a named dot exit composes with `??`.
-            if matches!(self.peek().kind, TokKind::Ident(_))
-                && matches!(self.peek2().kind, TokKind::Dot)
-                && (matches!(self.peek3().kind, TokKind::KwBreak)
-                    || matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::KW_NEXT))
-                && matches!(self.peek4().kind, TokKind::LParen)
-                && matches!(self.peek5().kind, TokKind::RParen)
+            if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_NEXT)
+                && (!matches!(self.peek2().kind, TokKind::LParen)
+                    || matches!(self.peek3().kind, TokKind::Ident(_))
+                        && matches!(self.peek4().kind, TokKind::RParen))
             {
-                let (name, name_span) = self.expect_ident("for the loop name")?;
-                self.bump(); // `.`
-                let method = self.bump();
-                self.bump(); // `(`
-                let end = self.bump().span.end; // `)`
-                let span = Span::new(name_span.start, end);
-                return Ok(if matches!(method.kind, TokKind::KwBreak) {
-                    OrFallback::BreakLabel(name, span)
-                } else {
-                    OrFallback::ContinueLabel(name, span)
-                });
+                if matches!(self.peek2().kind, TokKind::LParen) {
+                    let start = self.bump().span;
+                    self.bump(); // `(`
+                    let (name, _) = self.expect_ident("as the loop name in `next(name)`")?;
+                    let end = self.peek().span.end;
+                    self.expect(TokKind::RParen, "after the named next target")?;
+                    return Ok(OrFallback::ContinueLabel(name, Span::new(start.start, end)));
+                }
+                return Ok(OrFallback::Continue(self.bump().span));
             }
             let e = self.expr_or(allow_struct_lit)?;
             if let Expr::Call(call) = &e {

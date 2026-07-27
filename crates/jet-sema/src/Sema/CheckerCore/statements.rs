@@ -9,13 +9,144 @@ use crate::Sema::Diagnostics::{
 };
 use crate::Sema::Effects::{grant_handle_escape, unknown_effect};
 use crate::Sema::Registration::already_defined;
-use crate::Sema::{type_is_copy, Checker, LocalInfo};
+use crate::Sema::{type_is_copy, Checker, LocalInfo, LoopValueFrame, LoopValueKind};
 use crate::Syntax;
 use crate::Generics::substitute_type;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use super::helpers::layout_constraint_fingerprint;
 impl<'a> Checker<'a> {
+        fn push_loop_value_frame(&mut self, label: Option<&(String, crate::Diagnostics::Span)>) {
+            let (kind, pending_label) = self
+                .pending_loop_value
+                .take()
+                .unwrap_or((LoopValueKind::Effect, None));
+            self.loop_value_frames.push(LoopValueFrame {
+                label: pending_label.or_else(|| label.map(|(name, _)| name.clone())),
+                kind,
+                ty: None,
+            });
+        }
+
+        fn pop_loop_value_frame(&mut self) {
+            if let Some(frame) = self.loop_value_frames.pop() {
+                if frame.kind == LoopValueKind::Result {
+                    self.last_loop_result_type = frame.ty;
+                }
+            }
+        }
+
+        fn check_break_value(
+            &mut self,
+            target: Option<(&str, crate::Diagnostics::Span)>,
+            value: &mut Expr,
+            span: crate::Diagnostics::Span,
+        ) {
+            let frame_index = match target {
+                Some((name, name_span)) => {
+                    let found = self
+                        .loop_value_frames
+                        .iter()
+                        .rposition(|frame| frame.label.as_deref() == Some(name));
+                    if found.is_none() {
+                        self.diags.push(undefined_loop_label(
+                            name,
+                            &self.loop_labels,
+                            name_span,
+                        ));
+                    }
+                    found
+                }
+                None => self.loop_value_frames.len().checked_sub(1),
+            };
+            let Some(frame_index) = frame_index else {
+                self.diags
+                    .push(loop_control_outside(Syntax::KW_BREAK, span));
+                self.infer(value);
+                return;
+            };
+            let kind = self.loop_value_frames[frame_index].kind;
+            let got = self.infer(value).map(|ty| self.resolve_type(ty));
+            self.note_move_if_direct_ident(value);
+            match kind {
+                LoopValueKind::Collecting => self.diags.push(Diagnostic::error(
+                    "E0075",
+                    "this yielding loop cannot use a break payload".to_string(),
+                    "its result is already the accumulated List, so a second payload would give one exit two result channels".to_string(),
+                    "write `break` to return the accumulated list".to_string(),
+                    Some(span),
+                )),
+                LoopValueKind::Effect => self.diags.push(Diagnostic::error(
+                    "E0071",
+                    "this effect-only loop uses a result exit".to_string(),
+                    "a break payload makes the loop a value expression".to_string(),
+                    "bind the loop result, or remove the payload".to_string(),
+                    Some(span),
+                )),
+                LoopValueKind::Result => {
+                    if let Some(got) = got {
+                        let frame = &mut self.loop_value_frames[frame_index];
+                        if let Some(expected) = &frame.ty {
+                            if expected != &got {
+                                self.diags.push(Diagnostic::error(
+                                    "E0076",
+                                    format!(
+                                        "this loop breaks with {}, but another exit uses {}",
+                                        got.show(),
+                                        expected.show()
+                                    ),
+                                    "an ordinary loop has one final result type".to_string(),
+                                    "make every break payload use the same type".to_string(),
+                                    Some(value.span()),
+                                ));
+                            }
+                        } else {
+                            frame.ty = Some(got);
+                        }
+                    }
+                }
+            }
+        }
+
+        fn check_break_without_value(
+            &mut self,
+            target: Option<(&str, crate::Diagnostics::Span)>,
+            span: crate::Diagnostics::Span,
+        ) {
+            let frame = match target {
+                Some((name, name_span)) => {
+                    let found = self
+                        .loop_value_frames
+                        .iter()
+                        .rfind(|frame| frame.label.as_deref() == Some(name));
+                    if found.is_none() {
+                        self.diags.push(undefined_loop_label(
+                            name,
+                            &self.loop_labels,
+                            name_span,
+                        ));
+                    }
+                    found
+                }
+                None => self.loop_value_frames.last(),
+            };
+            let Some(frame) = frame else {
+                self.diags
+                    .push(loop_control_outside(Syntax::KW_BREAK, span));
+                return;
+            };
+            if frame.kind == LoopValueKind::Result {
+                self.diags.push(Diagnostic::error(
+                    "E0076",
+                    "this result loop exits without a value".to_string(),
+                    "every exit from a loop used as a value must provide the same result type"
+                        .to_string(),
+                    "add a break payload, or target an inner effect-only loop".to_string(),
+                    Some(span),
+                ));
+            }
+        }
+
         fn compound_owner_field_type(&self, owner: &Type, field: &str) -> Option<Type> {
             let (owner_name, subst) = match owner {
                 Type::Named(name) => (name.as_str(), HashMap::new()),
@@ -1007,7 +1138,7 @@ impl<'a> Checker<'a> {
                     // D-ENC-DYN1=A+: the declared return type may be a `Data` alias
                     // (`Json`/`Toml`/…); canonicalize it so it unifies with the returned value.
                     let resolved_ret = self.ret.clone().map(|t| self.resolve_type(t));
-                    // D-STREAMYIELD1: a generator (`-> Stream<T>`) yields values; `return`
+                    // D-STREAMYIELD1: a generator (`=> Stream<T>`) yields values; `return`
                     // only ever ends the stream early — bare `return;` is fine, `return
                     // value;` is E0806 (a generator body yields, it doesn't return a value).
                     if let Some(Type::Apply { name, args }) = &resolved_ret {
@@ -1203,7 +1334,7 @@ impl<'a> Checker<'a> {
                                             rt.show(),
                                             et.show()
                                         ),
-                                        "the value handed back must match the type after `->`"
+                                        "the value handed back must match the type after `=>`"
                                             .to_string(),
                                         type_fix_hint(&rt, &et),
                                         Some(e.span()),
@@ -1216,10 +1347,10 @@ impl<'a> Checker<'a> {
                             self.diags.push(Diagnostic::error(
                                 "E0113",
                                 format!("`{}` doesn't return a value", self.fn_name),
-                                "a function only hands back a value if it declares one with `-> Type`"
+                                "a function only hands back a value if it declares one with `=> Type`"
                                     .to_string(),
                                 format!(
-                                    "remove the value (`return;`), or declare `-> {}` on the function",
+                                    "remove the value (`return;`), or declare `=> {}` on the function",
                                     ty_name
                                 ),
                                 Some(e.span()),
@@ -1233,7 +1364,7 @@ impl<'a> Checker<'a> {
                                     self.fn_name,
                                     rt.show()
                                 ),
-                                "the value handed back must match the type after `->`".to_string(),
+                                "the value handed back must match the type after `=>`".to_string(),
                                 "add the value: `return ...;`".to_string(),
                                 Some(*span),
                             ));
@@ -1244,6 +1375,41 @@ impl<'a> Checker<'a> {
                 // D-STREAMYIELD1: `yield expr` — legal only in a function whose return
                 // type is `Stream<T>` (E0805 otherwise); `expr: T` (E0807 on mismatch).
                 Stmt::Yield(e, span) => {
+                    // Yielding-loop collection uses a compiler-private zero-width
+                    // marker. A real `yield` nested in that loop still belongs to
+                    // an enclosing Stream generator.
+                    if span.start == span.end && !self.collect_item_types.is_empty() {
+                        let saved_expected = self.expected_type.clone();
+                        let expected = self.collect_item_types.last().and_then(Clone::clone);
+                        self.expected_type = expected.clone();
+                        let got = self.infer(e).map(|ty| self.resolve_type(ty));
+                        self.expected_type = saved_expected;
+                        if let Some(got) = got {
+                            if matches!(&got, Type::Named(name) if name == Syntax::TYPE_VOID) {
+                                self.diags.push(Diagnostic::error(
+                                    "E0073",
+                                    "this yielding loop path produces no item".to_string(),
+                                    "every accepted iteration must contribute one non-Void value unless `next` omits it".to_string(),
+                                    "return a value on this path, or remove `->`".to_string(),
+                                    Some(e.span()),
+                                ));
+                            } else if let Some(want) = expected {
+                                if got != want {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0074",
+                                        "this yielding loop produces incompatible item types".to_string(),
+                                        format!("one yielding loop builds one `[{}]`, but this item is {}", want.show(), got.show()),
+                                        "convert every item to one type, or split the loops".to_string(),
+                                        Some(e.span()),
+                                    ));
+                                }
+                            } else {
+                                *self.collect_item_types.last_mut().expect("checked above") =
+                                    Some(got);
+                            }
+                        }
+                        return;
+                    }
                     let resolved_ret = self.ret.clone().map(|t| self.resolve_type(t));
                     let elem_ty = match &resolved_ret {
                         Some(Type::Apply { name, args })
@@ -1257,8 +1423,8 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0805",
                             format!("`{}` outside a generator", Syntax::KW_YIELD),
-                            "`yield` hands a value to a `Stream<T>` consumer — only a function declared `-> Stream<T>` may use it".to_string(),
-                            format!("declare `-> {}<T>` on this function, or remove the `{}`", Syntax::TYPE_STREAM, Syntax::KW_YIELD),
+                            "`yield` hands a value to a `Stream<T>` consumer — only a function declared `=> Stream<T>` may use it".to_string(),
+                            format!("declare `=> {}<T>` on this function, or remove the `{}`", Syntax::TYPE_STREAM, Syntax::KW_YIELD),
                             Some(*span),
                         ));
                         self.infer(e);
@@ -1304,6 +1470,7 @@ impl<'a> Checker<'a> {
                     if let Some((n, label_span)) = label {
                         self.declare_loop_label(n, *label_span);
                     }
+                    self.push_loop_value_frame(label.as_ref());
                     self.loop_depth += 1;
                     // D-UNINIT1: a loop body may run 0 times, so writes inside it don't
                     // count as initializing after the loop.
@@ -1311,6 +1478,7 @@ impl<'a> Checker<'a> {
                     self.check_block(body, true);
                     self.uninit = saved_u;
                     self.loop_depth -= 1;
+                    self.pop_loop_value_frame();
                     if label.is_some() {
                         self.loop_labels.pop();
                     }
@@ -1337,6 +1505,7 @@ impl<'a> Checker<'a> {
                     // D-UNINIT1: a loop body may run 0 times; writes inside it don't
                     // count as initializing after the loop.
                     let saved_u = self.uninit.clone();
+                    self.push_loop_value_frame(label.as_ref());
                     match kind {
                         ForKind::Range { start, end, step, exclusive } => {
                             for (e, which) in [(&mut *start, "start"), (&mut *end, "end")] {
@@ -1605,6 +1774,7 @@ impl<'a> Checker<'a> {
                             self.loop_depth -= 1;
                         }
                     }
+                    self.pop_loop_value_frame();
                     self.uninit = saved_u;
                     if label.is_some() {
                         self.loop_labels.pop();
@@ -1624,10 +1794,10 @@ impl<'a> Checker<'a> {
                     span,
                 } => self.check_switch(subject, arms, else_body, *span),
                 Stmt::Break(span) => {
-                    if self.loop_depth == 0 {
-                        self.diags
-                            .push(loop_control_outside(Syntax::KW_BREAK, *span));
-                    }
+                    self.check_break_without_value(None, *span);
+                }
+                Stmt::BreakValue(value, span) => {
+                    self.check_break_value(None, value, *span);
                 }
                 Stmt::Continue(span) => {
                     if self.loop_depth == 0 {
@@ -1635,15 +1805,12 @@ impl<'a> Checker<'a> {
                             .push(loop_control_outside(Syntax::KW_NEXT, *span));
                     }
                 }
-                // D-LOOPLABEL3=A: `name.break()` / `name.next()`.
+                // D-ARROW-CONTROL1: `break(name)` / `next(name)`.
                 Stmt::BreakLabel(name, span) => {
-                    if self.loop_depth == 0 {
-                        self.diags
-                            .push(loop_control_outside(Syntax::KW_BREAK, *span));
-                    } else if !self.loop_labels.iter().any(|l| l == name) {
-                        self.diags
-                            .push(undefined_loop_label(name, &self.loop_labels, *span));
-                    }
+                    self.check_break_without_value(Some((name, *span)), *span);
+                }
+                Stmt::BreakLabelValue(name, name_span, value, span) => {
+                    self.check_break_value(Some((name, *name_span)), value, *span);
                 }
                 Stmt::ContinueLabel(name, span) => {
                     if self.loop_depth == 0 {
@@ -1670,6 +1837,7 @@ impl<'a> Checker<'a> {
                     self.push_scope();
                     self.check_binding(init);
                     self.require_bool(cond, "a counted loop condition");
+                    self.push_loop_value_frame(label.as_ref());
                     self.loop_depth += 1;
                     let saved_u = self.uninit.clone();
                     self.check_block(body, true);
@@ -1678,6 +1846,7 @@ impl<'a> Checker<'a> {
                     }
                     self.uninit = saved_u;
                     self.loop_depth -= 1;
+                    self.pop_loop_value_frame();
                     self.pop_scope();
                     if label.is_some() {
                         self.loop_labels.pop();
@@ -1692,11 +1861,13 @@ impl<'a> Checker<'a> {
                     if let Some((n, label_span)) = label {
                         self.declare_loop_label(n, *label_span);
                     }
+                    self.push_loop_value_frame(label.as_ref());
                     self.loop_depth += 1;
                     let saved_u = self.uninit.clone();
                     self.check_block(inner, true);
                     self.uninit = saved_u;
                     self.loop_depth -= 1;
+                    self.pop_loop_value_frame();
                     if label.is_some() {
                         self.loop_labels.pop();
                     }

@@ -12,7 +12,7 @@ const LOCK: &str = r#"
 #SingleUse struct Lock {
     resource: String,
 }
-fn acquire(resource: String) -> Lock {
+fn acquire(resource: String) => Lock {
     return Lock.{ resource: resource }
 }
 fn release(lock: ^Lock) {
@@ -51,7 +51,7 @@ fn run() {
 fn returned_value_is_consumed() {
     let codes = err_codes(
         r#"
-fn make() -> Lock {
+fn make() => Lock {
     db :: acquire("db")
     return db
 }
@@ -64,12 +64,12 @@ fn run() {
     assert!(codes.is_empty(), "return should consume, got {:?}", codes);
 }
 
-/// The consume duty travels through a `^`-in / `-> T`-out pass-through.
+/// The consume duty travels through a `^`-in / `=> T`-out pass-through.
 #[test]
 fn passthrough_moves_the_duty() {
     let codes = err_codes(
         r#"
-fn hold(lock: ^Lock) -> Lock {
+fn hold(lock: ^Lock) => Lock {
     return lock
 }
 fn run() {
@@ -293,7 +293,7 @@ fn run() {
 fn user_drop_fn_shadows_builtin() {
     let codes = err_codes(
         r#"
-fn drop(n: Int) -> Int {
+fn drop(n: Int) => Int {
     return n + 1
 }
 fn run() {
@@ -333,7 +333,7 @@ fn single_use_enum_dropped_is_e0140() {
     Open
     Closed
 }
-fn make() -> Ticket {
+fn make() => Ticket {
     return Ticket.Open
 }
 fn close(t: ^Ticket) {

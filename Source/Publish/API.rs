@@ -215,7 +215,7 @@ fn format_fn_sig(
         Some(row) => {
             let row = crate::Sema::ApiFreeze::normalized_public_effect_row(f, row);
             format!(
-                " --[{}]->{}",
+                " =[{}]=>{}",
                 row.iter().cloned().collect::<Vec<_>>().join(", "),
                 f.return_type
                     .as_ref()
@@ -226,7 +226,7 @@ fn format_fn_sig(
         None => f
             .return_type
             .as_ref()
-            .map(|t| format!(" -> {}", format_type(t, dimensions)))
+            .map(|t| format!(" => {}", format_type(t, dimensions)))
             .unwrap_or_default(),
     };
     format!("fn {}{}({}){}", f.name, type_params, params.join(", "), ret)

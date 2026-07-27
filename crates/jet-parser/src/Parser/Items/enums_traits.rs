@@ -246,7 +246,7 @@ impl<'a> Parser<'a> {
         }
     
         /// D-ERR-CONV (ratified 2026-06-19): dispatch `impl …` to either the normal
-        /// `ImplDef` path or the `impl Source -> Target { body }` error-conversion path.
+        /// `ImplDef` path or the `impl Source => Target { body }` error-conversion path.
         pub(in crate::Parser) fn impl_or_error_conv(&mut self) -> Result<Item, Diagnostic> {
             let item_start = self.peek().span.start;
             self.expect_kw(TokKind::KwImpl, "to start an `impl` block")?;
@@ -259,7 +259,8 @@ impl<'a> Parser<'a> {
                     self.bump();
                     parts.push(self.expect_ident("after `.` in `impl`")?);
                 }
-                let is_error_conversion = matches!(self.peek().kind, TokKind::Arrow);
+                let is_error_conversion =
+                    matches!(self.peek().kind, TokKind::LambdaArrow | TokKind::Arrow);
                 let is_protocol_impl = parts.len() == 2
                     && matches!(parts[1].0.as_str(), "Client" | "Server")
                     && matches!(self.peek().kind, TokKind::LBrace);
@@ -287,16 +288,20 @@ impl<'a> Parser<'a> {
                     )
                 }
             };
-            // Detect `impl Source -> Target { body }` — D-ERR-CONV.
-            if matches!(self.peek().kind, TokKind::Arrow) {
-                let _arrow = self.bump(); // consume `->`
-                let (to_ty, to_span) = self.parse_type_path("after `->` in error conversion")?;
+            // Detect `impl Source => Target { body }` — D-ERR-CONV as respelled
+            // by D-ARROW-CONTROL1. Accept `->` only to emit its migration error.
+            if matches!(self.peek().kind, TokKind::LambdaArrow | TokKind::Arrow) {
+                let arrow = self.bump();
+                if matches!(arrow.kind, TokKind::Arrow) {
+                    self.diags.push(Self::retired_callable_arrow(arrow.span));
+                }
+                let (to_ty, to_span) = self.parse_type_path("after `=>` in error conversion")?;
                 // Peek the `{` span before consuming.
                 if !matches!(self.peek().kind, TokKind::LBrace) {
                     return Err(Diagnostic::error(
                         "E0003",
                         "expected `{` to open the error-conversion body".to_string(),
-                        "an error conversion body is a block: `impl Source -> Target { … }`"
+                        "an error conversion body is a block: `impl Source => Target { … }`"
                             .to_string(),
                         "add `{` after the target type".to_string(),
                         Some(self.peek().span),
@@ -428,7 +433,7 @@ impl<'a> Parser<'a> {
                 Item::ErrorConv(ec) => Err(Diagnostic::error(
                     "E0003",
                     format!("`#Target(Os.{})` isn't valid on an error-conversion `impl`", os.name()),
-                    "`impl Source -> Target { … }` error conversions run on every platform; OS gating only makes sense for a real trait/inherent impl".to_string(),
+                    "`impl Source => Target { … }` error conversions run on every platform; OS gating only makes sense for a real trait/inherent impl".to_string(),
                     format!("remove the `#Target(Os.{})` marker", os.name()),
                     Some(ec.from_span),
                 )),

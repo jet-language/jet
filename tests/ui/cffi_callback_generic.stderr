@@ -1,15 +1,15 @@
-Error [E3203]: `fn(I32) --[]-> I32` is not a C-compatible type for a foreign function parameter or return.
-  --> tests/ui/cffi_callback_generic.jet:9:25
+Error [E3203]: `fn(I32) =[]=> I32` is not a C-compatible type for a foreign function parameter or return.
+  --> tests/ui/cffi_callback_generic.jet:8:25
     |
-  9 | fn run() { print(c.call(identity, 1)) }
+  8 | fn run() { print(c.call(identity, 1)) }
     |                         ^^^^^^^^
  Why: `#Extern` / `#Bindgen` functions must use types with a stable C ABI at the edge.
  Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
 
-Error [E0112]: `call` wants fn(I32) --[]-> I32 here, but this is fn(T) -> T
-  --> tests/ui/cffi_callback_generic.jet:9:25
+Error [E0112]: `call` wants fn(I32) =[]=> I32 here, but this is fn(T) => T
+  --> tests/ui/cffi_callback_generic.jet:8:25
     |
-  9 | fn run() { print(c.call(identity, 1)) }
+  8 | fn run() { print(c.call(identity, 1)) }
     |                         ^^^^^^^^
  Why: every argument must match its parameter's type
- Fix: use fn(I32) --[]-> I32 here
+ Fix: use fn(I32) =[]=> I32 here

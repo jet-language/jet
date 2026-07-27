@@ -5,7 +5,7 @@ Error [E2710]: built-in codec derive generated invalid Jet for `Order`
     |  ^^^^^^^
  Why: generated source did not pass the ordinary lexer and parser: expected `::` or `:=` in a binding, found `:` at Some(Span { start: 53, end: 54 }); generated source:
 impl Order.Encode {
-fn encode(self) -> DataTree {
+fn encode(self) => DataTree {
 out: [String: DataTree] := []
 nested :: self.count.encode()
 if nested == .Object(entries) { loop key, value; entries { out[key] = value } }
@@ -13,7 +13,7 @@ return DataTree.Object(out)
 }
 }
 impl Order.Decode {
-fn decode(tree: DataTree) -> Order ? DecodeError {
+fn decode(tree: DataTree) => Order ? DecodeError {
 return Ok(Order.{
 count: tree.decode<Int>()?,
 })

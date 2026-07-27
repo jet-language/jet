@@ -257,9 +257,9 @@ pub enum OrFallback {
     Break(Span),
     /// D-ORRETURN-ERG1=B: `expr ?? next` — loop-only, sema-gated.
     Continue(Span),
-    /// D-LOOPLABEL3=A: `expr ?? label.break()` exits a named loop.
+    /// D-LOOPLABEL3=A + D-ARROW-CONTROL1: `expr ?? break(label)`.
     BreakLabel(String, Span),
-    /// D-LOOPLABEL3=A: `expr ?? label.next()` advances a named loop.
+    /// D-LOOPLABEL3=A + D-ARROW-CONTROL1: `expr ?? next(label)`.
     ContinueLabel(String, Span),
 }
 

@@ -125,15 +125,15 @@ distinct-type arithmetic gating like `#Numeric`).
 
 | Method | Type | What it does |
 | --- | --- | --- |
-| `.map(f)` | `(T?, fn(T) -> R) -> R?` | Applies `f` to the payload if present; `None` stays `None` |
-| `.zip(other)` | `(T?, U?) -> (a: T, b: U)?` | Pairs two optionals: present only when **both** are present |
-| `Option.lift2(f, a, b)` | `(fn(T, U) -> R, T?, U?) -> R?` | Applies a two-argument function to `a`/`b` only when both are present |
+| `.map(f)` | `(T?, fn(T) => R) => R?` | Applies `f` to the payload if present; `None` stays `None` |
+| `.zip(other)` | `(T?, U?) => (a: T, b: U)?` | Pairs two optionals: present only when **both** are present |
+| `Option.lift2(f, a, b)` | `(fn(T, U) => R, T?, U?) => R?` | Applies a two-argument function to `a`/`b` only when both are present |
 
 ```jet
 price: Float? :: lookup_price(id)
 qty: Float? :: lookup_qty(id)
 
-// zip: both present -> present pair; either None -> None
+// zip: both present produces a pair; either None produces None
 total1 :: price.zip(qty).map((pair) => pair.a * pair.b)
 
 // lift2: same idea, no explicit pair
@@ -153,6 +153,11 @@ default ordered map, and named types for specialized behavior. Adapter methods
 return a lazy `Iter<T>` view; call `to_list()`, `collect()`, or a reducer
 (`sum`, `fold`, …) to materialize. String `.split` returns `Iter<String>` on
 the same model.
+
+Under D-COMPREHENSION1, a finite `loop ... -> value` executes immediately and
+returns `[T]`. Build maps with ordinary map operations, build sets with
+`Set.from(...)`, and use the existing iterator adapters when work must stay
+lazy. An expected type never changes the collector or evaluation time.
 
 | Type | Constructors | Main methods |
 | --- | --- | --- |
@@ -247,7 +252,7 @@ loading the whole file:
 ```jet
 use core.files as files
 
-fn count_lines(path: String) -> Int ? IOError {
+fn count_lines(path: String) => Int ? IOError {
     handle :: files.open(~path)?
     n := 0
     loop line; handle.lines() {
@@ -286,7 +291,7 @@ hand) and `entry.name` for filename checks (`entry.name.ends_with(".txt")`).
 `is_dir`, `is_symlink`, and `kind` (`"file"`, `"dir"`, `"symlink"`, or
 `"other"`). `WalkEntry` fields are `path`, `relative`, `is_dir`, and `depth`.
 `TempDir`, `TempFile`, and `FileLock` expose `.path`; cleanup is RAII on the
-last handle drop. `core.path` provides `path.join(dir, name) -> String` plus
+last handle drop. `core.path` provides `path.join(dir, name) => String` plus
 `.parent()`, `.extension()`, and `.normalize()` for composing paths
 independently of `DirEntry`. Examples: `examples/features/io/dir_entry.jet`
 and `examples/features/io/files_depth.jet`.
@@ -463,7 +468,7 @@ Server surface:
 | Function / method | Returns | What it does |
 |-------------------|---------|--------------|
 | `server.mux()` | `HttpMux` | Create a function-first router |
-| `mux.get/post/put/delete/patch(path, handler)` | nothing | Register `fn(HttpSrvReq) -> HttpSrvResp` handlers |
+| `mux.get/post/put/delete/patch(path, handler)` | nothing | Register `fn(HttpSrvReq) => HttpSrvResp` handlers |
 | `server.bind(addr, mux)` / `server.bind(addr, mux, tls: server.tls(cert, key))` | `HttpServer ? String` | Bind plaintext or HTTPS; pair with `serve`/`shutdown` |
 | `server.serve(addr, mux)` | `() ? String` | Serve HTTP/1.1 forever |
 | `server.serve(addr, mux, tls: server.tls(cert, key))` | `() ? String` | Serve HTTPS with explicit TLS material |
@@ -588,7 +593,7 @@ Examples: `examples/features/crypto/crypto_suite.jet`,
 
 ### `core.vault` — repository secrets and typed key generations
 
-`core.vault` keeps the existing `get(name) -> String?` API and adds persistent
+`core.vault` keeps the existing `get(name) => String?` API and adds persistent
 typed `SigningKey` and `X25519SecretKey` generations. Every call below requires
 the `Secret` effect. `KeyRef<T>` is safe to clone, compare, hash, display, and
 persist; it contains public identity metadata, never key bytes.
@@ -597,7 +602,7 @@ persist; it contains public identity metadata, never key bytes.
 use core.crypto as crypto
 use core.vault as vault
 
-fn provision() --[Secret]-> Void ? vault.VaultError {
+fn provision() =[Secret]=> Void ? vault.VaultError {
     plan :: vault.prepare_generate<crypto.SigningKey>("release")?
     write :: vault.authorize_write(&plan, reason: "create release signer")?
     key_ref :: vault.commit_generate<crypto.SigningKey>(take(write), take(plan))?
@@ -681,8 +686,8 @@ Examples: `examples/features/crypto/vault_keys.jet` and
 `core.auth` exports two standalone verifiers:
 
 ```jet
-verify_jwt(token, key:, audience:, issuer:, clock_skew:) -> Claims ? AuthError
-verify_paseto(token, key:, audience:, issuer:, clock_skew:, footer:, implicit:) -> Claims ? AuthError
+verify_jwt(token, key:, audience:, issuer:, clock_skew:) => Claims ? AuthError
+verify_paseto(token, key:, audience:, issuer:, clock_skew:, footer:, implicit:) => Claims ? AuthError
 ```
 
 `issuer` and `clock_skew` are optional for both functions; `footer` and
@@ -878,7 +883,7 @@ struct Point {
     y: Int
 
     impl Display {
-        fn display(self) -> String {
+        fn display(self) => String {
             return "({self.x}, {self.y})"
         }
     }
@@ -956,7 +961,7 @@ decoded losslessly; it never skips or replaces an entry.
 
 `EnvError` has `InvalidName`, `InvalidValue`, and `NonUnicode`. Names must be
 nonempty and contain neither NUL nor `=`; values cannot contain NUL. Current
-editions retain the source-compatible `set -> Void` signature and report an
+editions retain the source-compatible `set => Void` signature and report an
 invalid call as E3001. A future major release and edition opt-in changes `set`
 to `Void ? EnvError`.
 
@@ -1231,12 +1236,12 @@ nonces, tokens, salts, and anything security-sensitive.
 | `bytes(n)` | `[U8]` | PRNG bytes for fixtures/simulation; not cryptographic |
 
 The ambient calls above (`int`/`float`/…) read a process-global generator, so a
-`fn … --[]->` cannot call them (E3403 — they break reproducibility). To use
-randomness inside a `fn … --[]->`, take a seeded `Rng` **as a parameter** and draw
+`fn … =[]=>` cannot call them (E3403 — they break reproducibility). To use
+randomness inside a `fn … =[]=>`, take a seeded `Rng` **as a parameter** and draw
 through it — the seed makes the stream reproducible on every machine:
 
 ```jet
-fn roll(rng: &Rng) --[]-> Int {
+fn roll(rng: &Rng) =[]=> Int {
     return rng.int(1, 6)            // inclusive; advances the stream (needs &Rng)
 }
 fn run() {
@@ -1348,7 +1353,7 @@ signal and chooses behavior.
 ```jet
 use core.perf as perf
 
-fn run() -> Void ? {
+fn run() => Void ? {
     if perf.fidelity() < 0.5 {
         print("low quality mode")
     }
@@ -1490,18 +1495,18 @@ data reaches Jet.
 integer, `time.now()` returns that value instead of the real clock. Tests use
 this to pin output; normal programs ignore it.
 
-A `fn … --[]->` cannot call ambient `time.now()` or construct `Clock.system()`
+A `fn … =[]=>` cannot call ambient `time.now()` or construct `Clock.system()`
 (E3403 — the system clock is not reproducible). `Clock.system()` is the explicit
 production-clock constructor; `time.clock(seed)` remains the manual clock for
 deterministic tests. Copying either clock creates an independent timeline at the
 same observed instant.
 
-To use time inside a `fn … --[]->`, take a seeded `Clock` **as a parameter** and
+To use time inside a `fn … =[]=>`, take a seeded `Clock` **as a parameter** and
 read through it; the clock only moves when you `tick` it, so the result is
 reproducible:
 
 ```jet
-fn at(clock: Clock) --[]-> Int {
+fn at(clock: Clock) =[]=> Int {
     return clock.now()             // current value in ms; pure read
 }
 fn run() {
@@ -1531,7 +1536,7 @@ literals such as `5s` remain unchanged.
 |-------------------|---------|--------------|
 | `in(unit)` | `Int ? RangeError` | Whole milliseconds, seconds, minutes, or hours; truncates toward zero |
 
-**Expert escape — `assume_deterministic { … }`.** Inside a `fn … --[]->`, a block
+**Expert escape — `assume_deterministic { … }`.** Inside a `fn … =[]=>`, a block
 written `assume_deterministic { … }` suspends the determinism check (E3401/E3403)
 for its body — the "I know this is deterministic" hatch. It is a semantic
 footgun: nothing verifies the claim, so use it only when you can guarantee
@@ -1586,12 +1591,12 @@ fractional to `.Float`; objects keep field order.
 
 **`JSONError`** — `line` and `message` pointing at the parse failure.
 
-**`core.encoding.csv`** — `parse(text) -> [[String]] ? String` (rows of fields),
-`to_string(rows) -> String`, plus bounded `reader` / `writer` handles over
+**`core.encoding.csv`** — `parse(text) => [[String]] ? String` (rows of fields),
+`to_string(rows) => String`, plus bounded `reader` / `writer` handles over
 RFC-4180 records. Quoted fields preserve commas, escaped quotes, and embedded
 newlines; malformed quote closure is an error rather than a partial row.
 **`core.encoding.toml`** / **`core.encoding.yaml`**
-— `parse(text) -> TOML ? JSONError` / `YAML ? JSONError` (full adapters over
+— `parse(text) => TOML ? JSONError` / `YAML ? JSONError` (full adapters over
 `DataTree`, not a flat map), `to_string(value)`.
 
 **Ratified Epoch 3 breadth (D-ENCSTREAM1 and follow-ups).** The same `DataTree`
@@ -1603,7 +1608,7 @@ test vectors, and edition migrations are normative in
 
 | Module | Surface | What it does |
 |--------|---------|--------------|
-| `core.encoding.json` | `canonical(data, limits)`, `reader`, `writer` | Edition-2027 RFC 8785 JCS; pull `DataEvent` streaming; shipped `events(DataTree)->String` remains separate until migration |
+| `core.encoding.json` | `canonical(data, limits)`, `reader`, `writer` | Edition-2027 RFC 8785 JCS; pull `DataEvent` streaming; shipped `events(DataTree) => String` remains separate until migration |
 | `core.encoding.jsonl` | `parse(text)`, `to_string(rows)` | JSON Lines over `[DataTree]` |
 | `core.encoding.csv` | `parse(text)`, `decode<T>`, `to_string(rows)`, `reader`, `writer` | Whole-value and bounded pull records over the same CSV quoting and validation law |
 | `core.encoding.xml` | `parse`, `parse_bytes`, `decode<T>`, `decode_bytes<T>`, `root`, `expanded_name`, `attribute`, `content`, `to_string`, `to_bytes`, `canonical`, `reader`, `writer` | Exact tagged ordinary-`DataTree` tree/events with namespaces, token-local lexical evidence, safe entities/limits, W3C C14N, and D-ENCXML-PROJECTION1=A typed helpers |
@@ -1851,8 +1856,8 @@ print(json.to_string(sales))   // [{"item":"pen","qty":3},{"item":"ink","qty":5}
 ```
 
 **Hand codecs and subtree dispatch** (D-SERDE2, D-SERDE13–16) use the same
-protocol as built-in derives. Write `impl T.Encode` with `encode(self) ->
-DataTree` and `impl T.Decode` with `decode(tree: DataTree) -> T ? DecodeError`.
+protocol as built-in derives. Write `impl T.Encode` with `encode(self) =>
+DataTree` and `impl T.Decode` with `decode(tree: DataTree) => T ? DecodeError`.
 Tree accessors add their field/index path and return `DecodeError`, so `?`
 chains without manual mapping. `tree.decode<T>()` dispatches any subtree
 through `T`'s ordinary `Decode` implementation, including primitives, user
@@ -1862,7 +1867,7 @@ one mechanism.
 
 ```jet
 impl Email.Decode {
-    fn decode(tree: DataTree) -> Email ? DecodeError {
+    fn decode(tree: DataTree) => Email ? DecodeError {
         address := tree.text()?
         return Ok(Email.{ address })
     }
@@ -1965,8 +1970,8 @@ the user never spells them. A phantom or `#Skip`-only param carries no serde
 bound (only structural `Clone`), so `Id<Kind>` serializes for any `Kind`. A
 non-codable type argument fails at the use site (E2411), not the definition.
 
-The expert hand-impl path is live: `impl T.Encode { fn encode(self) -> DataTree
-{ … } }` and `impl T.Decode { fn decode(tree: DataTree) -> T ? DecodeError {
+The expert hand-impl path is live: `impl T.Encode { fn encode(self) => DataTree
+{ … } }` and `impl T.Decode { fn decode(tree: DataTree) => T ? DecodeError {
 … } }`. Generated and hand-written codecs use the same protocol dispatch.
 
 ---
@@ -1979,7 +1984,7 @@ Blocking tasks and typed channels are Jet's concurrency model. There is no
 ```jet
 use core.tasks as tasks
 
-fn sum_range(first: Int, last: Int) -> Int {
+fn sum_range(first: Int, last: Int) => Int {
     total := 0
     loop n; first..last {
         total += n
@@ -2003,7 +2008,7 @@ use core.tasks as tasks
 
 fn run() {
 (sender, ch) :: tasks.channel<Int>()
-    task :: tasks.spawn(take(sender) () => {
+    task :: tasks.spawn(() => {
         sender.send(42)
     })
     task.join()
@@ -2037,8 +2042,9 @@ there's no combined channel value).
 | `receiver.receive()` | `T ? Closed` | Block for a value, or return `Closed` when senders are gone |
 
 Values crossing `spawn` or `send` must be sendable: no `View<T>` or string-view
-windows, no trait values, and no closure values unless they are handed over
-with `take`. A `Task` that goes out of scope without
+windows, no trait values, and no closure values with non-sendable captures.
+Copyable captures copy automatically; owned non-copyable captures move. A
+`Task` that goes out of scope without
 `.join()` emits warning **L1101**.
 With `#Context(deadline: <Int epoch_ms>)`, blocking waits (`task.join()` /
 `task.wait()` / `ch.receive()` / `sender.send()` / `time.sleep`, TCP read/write,
@@ -2194,7 +2200,7 @@ fn run() {
 | `rx.is_match(text)` | `Bool` | reuse a compiled regex |
 | `rx.match(text)` | `Match?` | first match with captures/spans |
 | `rx.matches(text)` | `[Match]` | all matches with captures/spans |
-| `rx.replace_all_with(text, fn(Match) -> String)` | `String` | replace every match with callback output |
+| `rx.replace_all_with(text, fn(Match) => String)` | `String` | replace every match with callback output |
 | `mat.group(n)` | `String?` | capture group `n` of a `Match` |
 | `mat.name(name)` | `String?` | capture group by name |
 | `mat.start()` / `mat.end()` | `Int` | byte span of the whole match |
@@ -2637,7 +2643,7 @@ hi: U8 :: 200
 lo: U8 :: 100
     print(wrapping(hi + lo))            // 44   — wraps around (C behaviour)
     print(saturating(hi + lo))          // 255  — clamps to the type's range
-    print(checked(hi + lo) ?? 0)        // 0    — checked(…) -> T?, None on overflow
+    print(checked(hi + lo) ?? 0)        // 0    — checked(…) => T?, None on overflow
 }
 ```
 
@@ -2819,8 +2825,8 @@ D-CORE-COMPRESS1=A assigns each operation one public home:
 
 | Module | Job | API |
 |--------|-----|-----|
-| `core.compress.gzip` | gzip byte streams | `compress([U8]) -> [U8]`, `decompress([U8]) -> [U8] ? String` |
-| `core.compress.zstd` | zstd byte streams | `compress([U8]) -> [U8]`, `decompress([U8]) -> [U8] ? String` |
+| `core.compress.gzip` | gzip byte streams | `compress([U8]) => [U8]`, `decompress([U8]) => [U8] ? String` |
+| `core.compress.zstd` | zstd byte streams | `compress([U8]) => [U8]`, `decompress([U8]) => [U8] ? String` |
 | `core.archive` | zip/tar containers | `zip_compress`, `zip_decompress`, `tar_add`, `tar_get`, `tar_names_json` |
 
 `core.archive` has no standalone gzip helpers. Compose formats explicitly for

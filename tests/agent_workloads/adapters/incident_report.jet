@@ -21,19 +21,22 @@ fn run() {
         line_number += 1
         if line_number != 1 && line != "" {
             fields :: line.split("\t").to_list()
-            if fields.len() != 3 {
-                rejects.push("reject|{line_number}|field-count")
-            } else if fields.get(0) == .Val(service) {
-                if fields.get(1) == .Val(status) {
-                    if status != "ok" && status != "error" {
-                        rejects.push("reject|{line_number}|status")
-                    } else if service == "" {
-                        rejects.push("reject|{line_number}|service")
-                    } else {
-                        if !services.contains(service) {
-                            services.push(~service)
+            if {
+                fields.len() != 3 -> rejects.push("reject|{line_number}|field-count")
+                fields.get(0) == .Val(service) -> {
+                    if fields.get(1) == .Val(status) {
+                        if {
+                            status != "ok" && status != "error" -> {
+                                rejects.push("reject|{line_number}|status")
+                            }
+                            service == "" -> rejects.push("reject|{line_number}|service")
+                            else -> {
+                                if !services.contains(service) {
+                                    services.push(~service)
+                                }
+                                incidents.push(Incident.{service: service, status: status})
+                            }
                         }
-                        incidents.push(Incident.{ service: service, status: status })
                     }
                 }
             }

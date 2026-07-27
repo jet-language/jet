@@ -93,6 +93,7 @@ export function openStore(dataDir) {
     const result = fn(s, config);
     // #461: single chokepoint — every write gets a chance to retire aged-out
     // cards/decisions/events to history.json before tower.json is persisted.
+    syncMilestones(s, undefined, loadHistoryRaw(dataDir).cards);
     retire(s, config, dataDir);
     s.meta.rev += 1;
     backup(file, config.backups);
@@ -124,6 +125,7 @@ export function openStore(dataDir) {
     const s = loadRaw();
     const h = loadHistoryRaw(dataDir);
     const result = restoreFromHistory(s, h, ref, by);
+    syncMilestones(s, undefined, h.cards);
     s.meta.rev += 1;
     backup(file, config.backups);
     writeJSON(file, s);
@@ -131,7 +133,10 @@ export function openStore(dataDir) {
     return { result, state: s };
   });
 
-  return { file, dataDir, config, load, mutate, restore, restoreArchived, loadHistory, project: () => project(load(), config) };
+  return {
+    file, dataDir, config, load, mutate, restore, restoreArchived, loadHistory,
+    project: () => project(load(), config, loadHistory()),
+  };
 }
 
 // ---- history: split live/archive store (#461) ------------------------------
@@ -237,7 +242,7 @@ export function restoreFromHistory(s, h, ref, by) {
     const questions = archived.questions || [];
     const card = { ...archived };
     delete card.retiredAt; delete card.questions;
-    card.updated = today();
+    touchCard(card, by || 'owner');
     card.log = [{ at: today(), by: by || 'owner', text: 'Restored from archive.' }, ...(card.log || [])];
     s.cards.push(card);
     // Reset each decision's clock too — otherwise a still-'done' card's
@@ -260,6 +265,7 @@ export function restoreFromHistory(s, h, ref, by) {
     delete d.retiredAt; d.ratifiedAt = today();
     s.decisions.push(d);
     h.decisions.splice(decIdx, 1);
+    touchCard(liveCard, by || 'owner');
     logEvent(s, { by, action: 'archive.restore', ref: d.id, note: 'decision' });
     return { kind: 'decision', id: d.id };
   }
@@ -352,10 +358,36 @@ export function laneOf(card, decisions, cards) {
   return { lane: 'blocked', who: null, label: '' };
 }
 
-export function milestoneProgress(m, cards) {
-  const linked = cards.filter(c => c.milestoneId === m.id);
+function milestoneCards(id, cards, historyCards = []) {
+  const linked = new Map();
+  for (const c of historyCards) if (c.milestoneId === id) linked.set(c.id, c);
+  for (const c of cards) if (c.milestoneId === id) linked.set(c.id, c);
+  return [...linked.values()];
+}
+
+export function milestoneProgress(m, cards, historyCards = []) {
+  const linked = milestoneCards(m.id, cards, historyCards);
   const done = linked.filter(c => c.phase === 'done').length;
-  return { total: linked.length, done, met: m.status === 'met' };
+  return { total: linked.length, done, met: linked.length > 0 && done === linked.length };
+}
+
+function syncMilestone(s, id, historyCards = []) {
+  const m = s.milestones.find(x => x.id === id);
+  if (!m) return;
+  const linked = milestoneCards(id, s.cards, historyCards);
+  if (!linked.length) {
+    m.status = 'open';
+    delete m.metAt;
+    return;
+  }
+  const met = linked.every(c => c.phase === 'done');
+  m.status = met ? 'met' : 'open';
+  if (met) m.metAt ||= today();
+  else delete m.metAt;
+}
+
+function syncMilestones(s, ids = s.milestones.map(m => m.id), historyCards = []) {
+  for (const id of new Set(ids.filter(Boolean))) syncMilestone(s, id, historyCards);
 }
 
 // ---- radar: roadmap-ledger + ops-table hybrid (#464, D-TWR-BOARD1=A) ------
@@ -407,7 +439,7 @@ function milestoneStallDays(m, cards, events) {
   return Math.floor((Date.now() - new Date(hit.at).getTime()) / DAY_MS);
 }
 
-export function radarData(s) {
+export function radarData(s, historyCards = []) {
   const activeEpochs = s.epochs.filter(e => !['arrived', 'done'].includes(e.status));
   const cur = activeEpoch(s);
   const sorted = [...activeEpochs].sort((a, b) => {
@@ -419,22 +451,23 @@ export function radarData(s) {
     const all = s.cards.filter(c => c.epoch === e.id && c.track !== 'sidequest');
     const active = all.filter(c => !['done', 'frozen'].includes(c.phase));
     const done = all.filter(c => c.phase === 'done');
-    const pct = all.length ? Math.round(done.length / all.length * 100) : 0;
     const milestones = s.milestones.filter(m => m.epochId === e.id).map(m => {
-      const linked = s.cards.filter(c => c.milestoneId === m.id);
-      const doneLinked = linked.filter(c => c.phase === 'done').length;
+      const progress = milestoneProgress(m, s.cards, historyCards);
       return { id: m.id, title: m.title, goal: m.goal, met: m.status === 'met',
-        done: doneLinked, total: linked.length, stalledDays: milestoneStallDays(m, s.cards, s.events) };
+        ...progress, stalledDays: milestoneStallDays(m, s.cards, s.events) };
     });
+    const milestonesMet = milestones.filter(m => m.met).length;
+    const milestoneTotal = milestones.length;
+    const pct = milestoneTotal ? Math.round(milestonesMet / milestoneTotal * 100) : 0;
     return {
       id: e.id, name: e.name, goal: e.goal,
       active: active.length, done: done.length, doneArchivedHint: null,
-      pct, burndown: burndown30(s, e.id), milestones,
+      milestoneTotal, milestonesMet, pct, burndown: burndown30(s, e.id), milestones,
     };
   });
 }
 
-export function project(s, config = null) {
+export function project(s, config = null, history = null) {
   const cards = s.cards.map(c => {
     const clearance = clearanceOf(c, s.decisions);
     const decisions = s.decisions.filter(d => d.cardId === c.id);
@@ -442,7 +475,8 @@ export function project(s, config = null) {
     const openQ = questions.filter(q => q.status === 'open').length;
     return { ...c, clearance, decisions, questions, openQ, lane: laneOf(c, s.decisions, s.cards) };
   });
-  const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards) }));
+  const historyCards = history?.cards || [];
+  const milestones = s.milestones.map(m => ({ ...m, progress: milestoneProgress(m, s.cards, historyCards) }));
   const inLane = (l) => cards.filter(c => c.lane.lane === l);
   // Acceptance ballots are a distinct owner duty (verify queue), not a
   // generic decision — keep the decide/push-notification counts to the
@@ -468,7 +502,7 @@ export function project(s, config = null) {
   };
   return { meta: s.meta, config: publicConfig(config) || undefined, epochs: s.epochs, milestones, phases: PHASES, lanes: LANES,
     cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas,
-    events: s.events.slice(0, 300), counts, recentlyDecided, radar: radarData(s) };
+    events: s.events.slice(0, 300), counts, recentlyDecided, radar: radarData(s, historyCards) };
 }
 
 // ---- resolution helpers ----------------------------------------------------
@@ -489,6 +523,13 @@ const checkEnum = (val, list, what) => {
 };
 const checkEpoch = (s, id) => { if (id != null && !s.epochs.find(e => e.id === id)) fail('E_NOT_FOUND', `no epoch ${id}`); };
 const checkMilestone = (s, id) => { if (id != null && !s.milestones.find(m => m.id === id)) fail('E_NOT_FOUND', `no milestone ${id}`); };
+function checkCardMilestone(s, { epoch, track, milestoneId }) {
+  if (milestoneId == null) return;
+  const milestone = s.milestones.find(m => m.id === milestoneId);
+  if (track === 'sidequest') fail('E_INVALID', 'sidequest cards cannot link to milestones');
+  if (milestone.epochId !== epoch)
+    fail('E_INVALID', `milestone ${milestone.id} belongs to epoch ${milestone.epochId}, not ${epoch || 'no epoch'}`);
+}
 // #462: refs — free-form doc-path pointers a card carries explicitly (in
 // addition to whatever `tower brief` harvests out of body/plan).
 const checkRefs = (val) => {
@@ -517,13 +558,21 @@ function normalizeCriterion(it, i) {
   };
 }
 
+function touchCard(card, by) {
+  card.updated = now();
+  card.updatedBy = by || 'agent';
+}
+
 export function addCard(s, p, config) {
   if (!p.title || !String(p.title).trim()) fail('E_INVALID', 'card needs a title');
   checkEnum(p.kind, config.kinds, 'kind');
   checkEnum(p.track, config.tracks, 'track');
   checkEnum(p.priority, config.priorities, 'priority');
   checkEnum(p.phase, PHASE_IDS, 'phase');
-  checkEpoch(s, p.epoch); checkMilestone(s, p.milestoneId);
+  const epoch = p.epoch ?? activeEpoch(s);
+  const track = p.track || config.tracks[0];
+  checkEpoch(s, epoch); checkMilestone(s, p.milestoneId);
+  checkCardMilestone(s, { epoch, track, milestoneId: p.milestoneId });
   checkRefs(p.refs);
   const card = {
     id: p.id || newId('c'),
@@ -531,8 +580,8 @@ export function addCard(s, p, config) {
     title: String(p.title).trim(),
     body: p.body || '',
     kind: p.kind || config.kinds[0],
-    track: p.track || config.tracks[0],
-    epoch: p.epoch ?? activeEpoch(s),
+    track,
+    epoch,
     milestoneId: p.milestoneId || null,
     phase: p.phase || 'planning',
     priority: p.priority || config.priorities[2] || config.priorities.at(-1),
@@ -544,9 +593,10 @@ export function addCard(s, p, config) {
     criteria: Array.isArray(p.criteria) ? p.criteria.map((it, i) => normalizeCriterion(it, i)) : [],
     refs: Array.isArray(p.refs) ? p.refs : [],
     needsAcceptance: !!p.needsAcceptance,
-    created: now(), updated: today(),
+    created: now(), updated: now(), updatedBy: p.by || 'agent',
   };
   s.cards.push(card);
+  syncMilestones(s, [card.milestoneId]);
   logEvent(s, { by: p.by, action: 'card.add', ref: card.id, note: card.title });
   return card;
 }
@@ -646,6 +696,7 @@ function assertOwnerLane(c, patch, by) {
 
 export function updateCard(s, ref, patch, config) {
   const c = mustCard(s, ref);
+  const oldMilestoneId = c.milestoneId;
   // Basic shape validation runs before the owner-lane authorization check, so
   // a malformed request always reports E_INVALID/E_NOT_FOUND regardless of
   // who sent it or what lane the card is in.
@@ -655,6 +706,11 @@ export function updateCard(s, ref, patch, config) {
   checkEnum(patch.phase, PHASE_IDS, 'phase');
   if ('epoch' in patch) checkEpoch(s, patch.epoch);
   if ('milestoneId' in patch) checkMilestone(s, patch.milestoneId);
+  checkCardMilestone(s, {
+    epoch: 'epoch' in patch ? patch.epoch : c.epoch,
+    track: 'track' in patch ? patch.track : c.track,
+    milestoneId: 'milestoneId' in patch ? patch.milestoneId : c.milestoneId,
+  });
   // blockedBy accepts a card ref OR a decision id (D-TWRGUARD1=C #458).
   if ('blockedBy' in patch) for (const id of patch.blockedBy || []) {
     if (!findCard(s, id) && !s.decisions.find(d => d.id === id))
@@ -681,7 +737,8 @@ export function updateCard(s, ref, patch, config) {
     delete c.claimedAt;
   }
   if (patch.logEntry) c.log.unshift({ at: today(), by: patch.by || 'agent', text: patch.logEntry });
-  c.updated = today();
+  touchCard(c, patch.by);
+  syncMilestones(s, [oldMilestoneId, c.milestoneId]);
   logEvent(s, { by: patch.by, action: 'card.update', ref: c.id, note: Object.keys(patch).filter(k => k !== 'id' && k !== 'by').join(',') });
   return c;
 }
@@ -695,7 +752,7 @@ export function addCriterion(s, ref, text, by) {
   const n = (c.criteria.length ? Math.max(...c.criteria.map(i => i.n)) : 0) + 1;
   const item = { n, text: String(text).trim(), status: 'open', metBy: null, verifiedBy: null, evidence: '', at: now() };
   c.criteria.push(item);
-  c.updated = today();
+  touchCard(c, by);
   logEvent(s, { by, action: 'card.criteria-add', ref: c.id, note: `#${n} ${item.text.slice(0, 60)}` });
   return { ...item, cardId: c.id, cardNum: c.num };
 }
@@ -714,7 +771,7 @@ export function meetCriterion(s, ref, n, { evidence, by } = {}) {
   item.metBy = by;
   if (evidence != null) item.evidence = evidence;
   item.at = now();
-  c.updated = today();
+  touchCard(c, by);
   logEvent(s, { by, action: 'card.criteria-meet', ref: c.id, note: `#${item.n}` });
   return { ...item, cardId: c.id, cardNum: c.num };
 }
@@ -729,7 +786,7 @@ export function verifyCriterion(s, ref, n, { evidence, by } = {}) {
   item.verifiedBy = by;
   if (evidence != null) item.evidence = evidence;
   item.at = now();
-  c.updated = today();
+  touchCard(c, by);
   logEvent(s, { by, action: 'card.criteria-verify', ref: c.id, note: `#${item.n}` });
   return { ...item, cardId: c.id, cardNum: c.num };
 }
@@ -742,6 +799,7 @@ export function verifyCriterion(s, ref, n, { evidence, by } = {}) {
 // either way, delete only once none are live on the card.
 export function deleteCard(s, ref, p = {}) {
   const c = mustCard(s, ref);
+  const oldMilestoneId = c.milestoneId;
   const ratified = s.decisions.filter(d => d.cardId === c.id && d.status === 'ratified');
   if (ratified.length)
     fail('E_HAS_RATIFIED', `card #${c.num} has ${ratified.length} ratified decision${ratified.length > 1 ? 's' : ''} (${ratified.map(d => d.id).join(', ')}) — they retire to \`tower archive\` on their own once the buffer window passes; delete once none are live on the card`);
@@ -749,6 +807,7 @@ export function deleteCard(s, ref, p = {}) {
   s.decisions = s.decisions.filter(d => d.cardId !== c.id);
   s.questions = s.questions.filter(q => q.cardId !== c.id);
   for (const x of s.cards) x.blockedBy = (x.blockedBy || []).filter(id => id !== c.id);
+  syncMilestones(s, [oldMilestoneId]);
   logEvent(s, { by: p.by, action: 'card.delete', ref: c.id, note: c.title });
   return { ok: true, id: c.id, num: c.num };
 }
@@ -778,7 +837,7 @@ export function claimCard(s, ref, by) {
     fail('E_OWNER_LANE', `card #${c.num} is frozen — owner-only until the owner moves it out (\`tower card update --phase ... --by owner\`)`);
   if (hasActiveClaim(c) && c.assignee !== by)
     fail('E_CLAIMED', `card #${c.num} has an active work lease held by ${c.assignee} — pick another or release it first`);
-  c.assignee = by; c.claimedAt = now(); c.updated = today();
+  c.assignee = by; c.claimedAt = now(); touchCard(c, by);
   logEvent(s, { by, action: 'card.claim', ref: c.id });
   return c;
 }
@@ -791,7 +850,7 @@ export function releaseCard(s, ref, by, handoff) {
       fail('E_HANDOFF', `releasing #${c.num} while building needs --handoff "what's done, what's left, gotchas" so the next agent doesn't restart from zero`);
     c.log.unshift({ at: today(), by, text: `[handoff] ${handoff}` });
   }
-  c.assignee = null; delete c.claimedAt; c.updated = today();
+  c.assignee = null; delete c.claimedAt; touchCard(c, by);
   logEvent(s, { by, action: 'card.release', ref: c.id, note: handoff ? '[handoff] logged' : '' });
   return c;
 }
@@ -896,6 +955,7 @@ export function addDecision(s, p) {
     rec: p.rec || null, recommendation: p.recommendation || null, hybrid: p.hybrid || null,
     checkInstructions: p.checkInstructions || null, draft, status: 'open', created: now() };
   s.decisions.push(d);
+  touchCard(card, p.by);
   logEvent(s, { by: p.by, action: 'decision.add', ref: d.id, note: draft ? `${d.title} (draft)` : d.title });
   return { ...d, cardNum: card.num };
 }
@@ -925,6 +985,7 @@ export function ratify(s, decisionId, outcome, comment, by, quote) {
   const c = s.cards.find(x => x.id === d.cardId);
   if (d.group === 'syntax') appendSyntaxChores(s, c, by);
   advanceClearedCard(s, d.cardId);
+  if (c) touchCard(c, by || 'owner');
   logEvent(s, { by: by || 'owner', action: 'decision.ratify', ref: d.id, note: quoteNote ? `${outcome} (${quoteNote})` : outcome });
   return d;
 }
@@ -957,7 +1018,7 @@ export function createAcceptanceResolver() {
       c.phase = 'building';
       c.log.unshift({ at: today(), by: 'owner', text: `Bounced back to building: ${comment || '(no comment)'}` });
     }
-    c.updated = today();
+    touchCard(c, 'owner');
     logEvent(s, { by: 'owner', action: 'acceptance.resolve', ref: d.id,
       note: `owner-ui session=${provenance.session} challenge=${provenance.challenge} outcome=${outcome}` });
     return d;
@@ -972,6 +1033,8 @@ export function auditAcceptanceRejection(s, decisionId, route, reason, by) {
 export function reopenDecision(s, decisionId, by) {
   const d = s.decisions.find(x => x.id === decisionId) || fail('E_NOT_FOUND', `no decision ${decisionId}`);
   d.status = 'open'; delete d.outcome; delete d.ratifiedAt;
+  const card = s.cards.find(c => c.id === d.cardId);
+  if (card) touchCard(card, by || 'owner');
   logEvent(s, { by: by || 'owner', action: 'decision.reopen', ref: d.id });
   return d;
 }
@@ -988,6 +1051,8 @@ export function updateDecision(s, id, patch, by) {
     }
     d.draft = false;
   }
+  const card = s.cards.find(c => c.id === d.cardId);
+  if (card) touchCard(card, by);
   logEvent(s, { by, action: 'decision.update', ref: d.id, note: patch.ready ? 'marked ready' : '' });
   return d;
 }
@@ -1009,7 +1074,7 @@ export function mintVerdict(s, ref, outcome, title, by) {
     created: now(), ratifiedAt: today() };
   s.decisions.push(d);
   c.log.unshift({ at: today(), by, text: `Verdict recorded (${id}): ${outcome}` });
-  c.updated = today();
+  touchCard(c, by);
   logEvent(s, { by, action: 'decision.verdict', ref: id, note: outcome });
   return { ...d, cardNum: c.num };
 }
@@ -1017,6 +1082,8 @@ export function mintVerdict(s, ref, outcome, title, by) {
 export function deleteDecision(s, id, by) {
   const d = s.decisions.find(x => x.id === id) || fail('E_NOT_FOUND', `no decision ${id}`);
   s.decisions = s.decisions.filter(x => x.id !== id);
+  const card = s.cards.find(c => c.id === d.cardId);
+  if (card) touchCard(card, by);
   logEvent(s, { by, action: 'decision.delete', ref: id, note: d.title });
   return { ok: true, id };
 }
@@ -1027,7 +1094,6 @@ function advanceClearedCard(s, cardId) {
   const stillOpen = s.decisions.some(d => d.cardId === cardId && isBlocking(d));
   if (stillOpen) return;
   c.phase = c.plan ? 'ready' : 'planning';
-  c.updated = today();
   c.log.unshift({ at: today(), text: 'All decisions ratified; advanced out of deciding.' });
 }
 
@@ -1040,6 +1106,7 @@ export function addQuestion(s, p) {
     by: p.by || 'owner', kind: p.kind || 'question',
     text: String(p.text).trim(), status: 'open', answer: '', created: now() };
   s.questions.push(q);
+  touchCard(card, p.by || 'owner');
   logEvent(s, { by: p.by || 'owner', action: 'question.add', ref: q.id });
   return { ...q, cardNum: card.num };
 }
@@ -1047,11 +1114,16 @@ export function answerQuestion(s, id, answer, by) {
   const q = s.questions.find(x => x.id === id) || fail('E_NOT_FOUND', `no question ${id}`);
   if (!answer || !String(answer).trim()) fail('E_INVALID', 'answer needs text');
   q.answer = answer; q.status = 'answered'; q.answeredAt = today(); q.answeredBy = by || 'agent';
+  const card = s.cards.find(c => c.id === q.cardId);
+  if (card) touchCard(card, by || 'agent');
   logEvent(s, { by: by || 'agent', action: 'question.answer', ref: q.id });
   return q;
 }
 export function deleteQuestion(s, id, by) {
+  const q = s.questions.find(x => x.id === id);
   s.questions = s.questions.filter(q => q.id !== id);
+  const card = q && s.cards.find(c => c.id === q.cardId);
+  if (card) touchCard(card, by);
   logEvent(s, { by, action: 'question.delete', ref: id });
   return { ok: true, id };
 }
@@ -1136,7 +1208,8 @@ export function addMilestone(s, p) {
 }
 export function updateMilestone(s, id, patch, by) {
   const m = s.milestones.find(x => x.id === id) || fail('E_NOT_FOUND', `no milestone ${id}`);
-  if ('epochId' in patch) checkEpoch(s, patch.epochId);
+  if ('epochId' in patch && patch.epochId !== m.epochId)
+    fail('E_INVALID', 'milestone epoch is fixed after creation — create a new milestone and relink cards');
   if ('status' in patch) checkEnum(patch.status, ['open', 'met'], 'milestone status');
   for (const k of ['title', 'goal', 'criteria', 'status', 'epochId']) if (k in patch) m[k] = patch[k];
   if (patch.status === 'met') m.metAt = today();
@@ -1153,7 +1226,7 @@ export function deleteMilestone(s, id, by) {
 
 // ---- next: the canonical "what should an agent work on" picker -------------
 
-const LANE_PREF = { building: 0, verify: 1, implement: 2, plan: 3 };
+const LANE_PREF = { verify: 0, building: 1, implement: 2, plan: 3 };
 
 // #457 — `scope: 'burndown'` narrows the pool to exactly the current
 // epoch's epoch-track cards plus all sidequests (agent lanes only) — the
@@ -1177,18 +1250,19 @@ export function nextCards(s, { epoch, track, agent, limit = 5, scope } = {}) {
     }
     return true;
   });
-  // ready-across groups by epoch so cross-epoch parallel candidates read as a
-  // plan; every other scope keeps the single global workOrder march.
+  // Verification always closes before more work continues. Within each lane,
+  // ready-across groups by epoch; every other scope follows workOrder.
   if (scope === 'ready-across') {
     pool.sort((a, b) =>
-      (a.epoch || '').localeCompare(b.epoch || '')
+      LANE_PREF[a.lane.lane] - LANE_PREF[b.lane.lane]
+      || (a.epoch || '').localeCompare(b.epoch || '')
       || (a.priority || '').localeCompare(b.priority || '')
       || (a.workOrder ?? Infinity) - (b.workOrder ?? Infinity)
       || a.num - b.num);
   } else {
     pool.sort((a, b) =>
-      (a.workOrder ?? Infinity) - (b.workOrder ?? Infinity)
-      || LANE_PREF[a.lane.lane] - LANE_PREF[b.lane.lane]
+      LANE_PREF[a.lane.lane] - LANE_PREF[b.lane.lane]
+      || (a.workOrder ?? Infinity) - (b.workOrder ?? Infinity)
       || (a.priority || '').localeCompare(b.priority || '')
       || a.num - b.num);
   }

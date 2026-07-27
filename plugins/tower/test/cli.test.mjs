@@ -55,7 +55,7 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
   // milestone progress reflects done cards
   run(cwd, ['card', 'update', '#1', '--phase', 'done', '--by', 'tester']);
   const ms = JSON.parse(run(cwd, ['milestone', 'list', '--json']).out);
-  assert.deepEqual(ms[0].progress, { total: 1, done: 1, met: false });
+  assert.deepEqual(ms[0].progress, { total: 1, done: 1, met: true });
 });
 
 test('cli without init fails with a helpful hint', () => {
@@ -63,6 +63,17 @@ test('cli without init fails with a helpful hint', () => {
   const r = run(cwd, ['status'], false);
   assert.equal(r.code, 1);
   assert.match(r.out, /tower init/);
+});
+
+test('status lists verification before building work', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-status-'));
+  run(cwd, ['init', '--name', 'CLI Status']);
+  run(cwd, ['card', 'add', '--title', 'Build']);
+  run(cwd, ['card', 'update', '#1', '--phase', 'building', '--by', 'owner']);
+  run(cwd, ['card', 'add', '--title', 'Verify']);
+  run(cwd, ['card', 'update', '#2', '--phase', 'verify', '--by', 'owner']);
+  const out = run(cwd, ['status', '--color=never']).out;
+  assert.ok(out.indexOf('AGENT — verify') < out.indexOf('AGENT — building'));
 });
 
 test('CLI --by owner and --quote cannot resolve acceptance; rejection is audited', () => {

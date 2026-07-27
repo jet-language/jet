@@ -11,7 +11,7 @@
 //!      `value.<field>` — reuses `CheckerFieldPolicy::rewrite_field_refs`,
 //!      the exact substitution D-FIELDPOL1 computed fields use for
 //!      `self.<field>`, with the receiver renamed to `value`;
-//!   3. synthesize `fn validate(value: Self) -> Self ? [FieldError] { … }`
+//!   3. synthesize `fn validate(value: Self) => Self ? [FieldError] { … }`
 //!      as a plain (non-trait) `impl Type { }` block appended to the
 //!      module, `is_pure: true` — the existing `pure fn` purity pass
 //!      (S60/E3401) then enforces "a rule may reference only fields and
@@ -173,7 +173,7 @@ fn method_call(receiver: Expr, method: &str, args: Vec<CallArg>, span: Span) -> 
 const ERRORS_VAR: &str = "__errors";
 const VALUE_VAR: &str = "value";
 
-/// `fn validate(value: Self) -> Self ? [FieldError] { … }`.
+/// `fn validate(value: Self) => Self ? [FieldError] { … }`.
 fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> ImplDef {
     let field_names: HashSet<String> = s.fields.iter().map(|f| f.name.clone()).collect();
 

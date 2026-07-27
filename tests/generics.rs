@@ -17,7 +17,7 @@ fn generic_modules_complete_instantiation() {
     let nested = r#"
 module outer<T, count: Int> {
     module inner<U, extra: Int> {
-        pub fn total(first: T, second: U) -> Int { return count + extra }
+        pub fn total(first: T, second: U) => Int { return count + extra }
     }
     module closed = inner<T, count>
 }
@@ -33,20 +33,20 @@ module complete<T, count: Int, label: String> {
     const value = count
     comptime comptime_value = count + 1
     tag Marked;
-    trait Reveal { fn reveal(self) -> T }
+    trait Reveal { fn reveal(self) => T }
     struct Wrapped { value: T }
     enum Maybe { Empty Value(T) }
-    impl Wrapped.Reveal { fn reveal(self) -> T { return self.value } }
+    impl Wrapped.Reveal { fn reveal(self) => T { return self.value } }
     enum SourceErr { Bad(T) }
     enum TargetErr { Wrapped(SourceErr) }
-    impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
+    impl SourceErr => TargetErr { return TargetErr.Wrapped(self) }
     #Target(Os.Linux)
-    impl Wrapped { fn linux_value(self) -> T { return self.value } }
-    module plain { pub fn value() -> Int { return count } }
-    module nested<U> { pub fn keep(value: U) -> U { return ~value } }
+    impl Wrapped { fn linux_value(self) => T { return self.value } }
+    module plain { pub fn value() => Int { return count } }
+    module nested<U> { pub fn keep(value: U) => U { return ~value } }
     module nested_use = nested<T>
     #Meta(category: label)
-    pub fn marked(value: #Marked T) -> #Marked T {
+    pub fn marked(value: #Marked T) => #Marked T {
         #Meta(category: label)
         local := T.{ value }
         return ~local
@@ -82,12 +82,12 @@ fn run() {
     std::fs::create_dir_all(&root).expect("create generic-module acceptance directory");
     std::fs::write(
         root.join("left.jet"),
-        "pub module boxed<T, n: Int> { pub fn value() -> Int { return n } }\n",
+        "pub module boxed<T, n: Int> { pub fn value() => Int { return n } }\n",
     )
     .expect("write left template");
     std::fs::write(
         root.join("right.jet"),
-        "pub module boxed<T, n: Int> { pub fn value() -> Int { return n } }\n",
+        "pub module boxed<T, n: Int> { pub fn value() => Int { return n } }\n",
     )
     .expect("write right template");
     let main = root.join("main.jet");
@@ -152,15 +152,15 @@ fn assert_nested_generic_module_execution() {
 module outer<T, count: Int> {
     module plain {
         module inner<U> {
-            pub fn total(value: U) -> Int { return count }
+            pub fn total(value: U) => Int { return count }
         }
         module closed = inner<T>
         module forwarded = closed
-        pub fn result(value: T) -> Int {
+        pub fn result(value: T) => Int {
             return closed.total(value) + forwarded.total(value)
         }
     }
-    pub fn result(value: T) -> Int {
+    pub fn result(value: T) => Int {
         return plain.result(value)
     }
 }
@@ -226,7 +226,7 @@ fn assert_closed_value_identity() {
     let source = r#"
 enum Mode { Fast Safe }
 module keyed<flag: Bool, count: Int, letter: Char, label: String, mode: Mode> {
-    pub fn value() -> Int { return count }
+    pub fn value() => Int { return count }
 }
 module same = keyed<true, 3, 'a', "x", Mode.Fast>
 module equivalent = keyed<1 < 2, 1 + 2, 'a', "x", Mode.Fast>
@@ -299,7 +299,7 @@ fn generic_scalar_matrix() {
     for lit in types {
         let src = format!(
             r#"
-fn twice<T>(x: T) -> Pair<T> {{
+fn twice<T>(x: T) => Pair<T> {{
     return Pair<T>.{{ first: x, second: x }}
 }}
 
@@ -322,7 +322,7 @@ fn run() {{
 #[test]
 fn generic_fn_with_scalar_types() {
     let src = r#"
-fn twice<T>(x: T) -> Pair<T> {
+fn twice<T>(x: T) => Pair<T> {
     return Pair<T>.{ first: x, second: x }
 }
 
@@ -352,7 +352,7 @@ struct Wrap<Kind> {
     val: Kind
 }
 
-fn wrap<Kind>(x: Kind) -> Wrap<Kind> {
+fn wrap<Kind>(x: Kind) => Wrap<Kind> {
     return Wrap<Kind>.{ val: x }
 }
 
@@ -373,7 +373,7 @@ fn run() {
 #[test]
 fn multi_char_type_param_fn_only() {
     let src = r#"
-fn identity<Elem>(x: Elem) -> Elem {
+fn identity<Elem>(x: Elem) => Elem {
     return x
 }
 
@@ -397,7 +397,7 @@ fn run() {
 fn multi_char_matches_single_char() {
     // identical to generic_scalar_matrix but using `Elem` instead of `T`
     let src = r#"
-fn twice<Elem>(x: Elem) -> Pair<Elem> {
+fn twice<Elem>(x: Elem) => Pair<Elem> {
     return Pair<Elem>.{ first: x, second: x }
 }
 

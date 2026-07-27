@@ -4,13 +4,13 @@ fn run() {
     (s1, ch) :: tasks.channel<Int>()
     s2 :: ~s1
     s3 :: ~s1
-    t1 :: tasks.spawn(take(s1) () => {
+    t1 :: tasks.spawn(() => {
         s1.send(30)
     })
-    t2 :: tasks.spawn(take(s2) () => {
+    t2 :: tasks.spawn(() => {
         s2.send(10)
     })
-    t3 :: tasks.spawn(take(s3) () => {
+    t3 :: tasks.spawn(() => {
         s3.send(20)
     })
     t1.join()

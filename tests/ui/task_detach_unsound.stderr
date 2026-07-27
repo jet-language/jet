@@ -4,14 +4,14 @@ Error [E0120]: `greet` was not moved here, so it cannot be captured by a spawned
   7 |     t :: tasks.spawn(() => greet)
     |                      ^^^^^^^^^^^
  Why: this function can access the parameter, but it does not own the value
- Fix: copy it into an owned local first: `owned :: ~greet`
+ Fix: make the parameter owned: `greet: ^fn()`
 
 Error [E1102]: this task returns `fn()`, which isn't sendable
   --> tests/ui/task_detach_unsound.jet:7:22
     |
   7 |     t :: tasks.spawn(() => greet)
     |                      ^^^^^^^^^^^
- Why: a closure may hold outside state, so it must be handed over with `take` before it crosses this boundary; tasks and channels move owned values between threads
+ Why: the closure holds state that cannot cross this boundary; tasks and channels move owned values between threads
  Fix: give the task plain owned data, or rebuild the value as an owned copy before spawning
 
 Error [E1103]: can't detach task `t` — it captured a value that can't cross a thread boundary

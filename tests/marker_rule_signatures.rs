@@ -299,7 +299,7 @@ fn contract_messages_use_function_parameter_types() {
     let valid = codes(
         r#"
 #[Pre(value > 0, message), Post(result > 0, message)]
-fn positive(value: Int, message: String) -> Int {
+fn positive(value: Int, message: String) => Int {
     return value
 }
 fn run() {}
@@ -310,7 +310,7 @@ fn run() {}
     let wrong = codes(
         r#"
 #[Pre(value > 0, message), Post(result > 0, message)]
-fn positive(value: Int, message: Int) -> Int {
+fn positive(value: Int, message: Int) => Int {
     return value
 }
 fn run() {}

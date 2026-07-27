@@ -8,7 +8,7 @@ enum Conn {
     Closed
 }
 
-fn describe_conn(c: Conn) -> String {
+fn describe_conn(c: Conn) => String {
     if c == {
         .Active(id) | .Reconnecting(id) -> {
             // D-PATO: or-pattern — Active and Reconnecting share the same body.
@@ -29,7 +29,7 @@ enum Http {
     Fail(Int)
 }
 
-fn classify(r: Http) -> String {
+fn classify(r: Http) => String {
     if r == {
         .Good(200..299) -> { return "success" }
         .Good(300..399) -> { return "redirect" }
@@ -43,7 +43,7 @@ fn classify(r: Http) -> String {
     return "unknown"
 }
 
-fn score_grade(score: Int) -> String {
+fn score_grade(score: Int) => String {
     // D-PATR: range pattern at arm-head level.
     if score == {
         0..59 -> { return "F" }

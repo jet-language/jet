@@ -8,7 +8,7 @@ fn run() {
     addr :: listener.local_addr() ?? panic("address")
     mux :: http_server.mux()
     mux.post("/", (req: HttpRequest) => Ok(http_server.response(200, "handler ran")))
-    server :: tasks.spawn(take(listener, mux) () => {
+    server :: tasks.spawn(() => {
         http_server.serve_once_listener(listener, mux) ?? panic("serve smuggling")
         http_server.serve_once_listener(listener, mux) ?? panic("serve body limit")
     })

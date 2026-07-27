@@ -4,7 +4,7 @@
 use core.tasks as tasks
 use core.time as time
 
-fn shielded_commit() -> Int {
+fn shielded_commit() => Int {
     #Shield {
         time.sleep(20)
         print("committed")
@@ -13,16 +13,16 @@ fn shielded_commit() -> Int {
     return 1
 }
 
-fn fast_seven() -> Int { return 7 }
+fn fast_seven() => Int = 7
 
 fn run() {
     taskgroup g {
-        slow :: g.task(() => {
+        slow :: g.task => {
             shielded_commit()
-        })
-        fast :: g.task(() => {
+        }
+        fast :: g.task => {
             fast_seven()
-        })
+        }
         winner :: g.race([slow, fast])
         print(winner)
     }

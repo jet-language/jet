@@ -7,18 +7,15 @@ struct Button {
     clicks: Int
 }
 
-fn button(label: String) -> Button {
+fn button(label: String) => Button {
     return Button.{label: ~label, clicks: 0}
 }
 
-fn press(b: Button) -> Button {
+fn press(b: Button) => Button {
     return Button.{label: ~b.label, clicks: b.clicks + 1}
 }
 
-fn to_view(b: Button) -> UiNode {
-    return ui.button("[{b.label}] clicks={b.clicks}")
-}
-
+fn to_view(b: Button) => UiNode = ui.button("[{b.label}] clicks={b.clicks}")
 fn run() {
     b := button("Save")
     backend := ui.null_backend()

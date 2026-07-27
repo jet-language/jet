@@ -504,21 +504,21 @@ use core.encoding.xml as xml
 use core.encoding.cbor as cbor
 use core.files as files
 
-fn keep_error(v: ^encoding.EncodingError) -> encoding.EncodingError {{ return v }}
-fn keep_cause(v: ^encoding.EncodingCause) -> encoding.EncodingCause {{ return v }}
-fn keep_event(v: ^encoding.DataEvent) -> encoding.DataEvent {{ return v }}
-fn keep_format(v: ^encoding.EncodingFormat) -> encoding.EncodingFormat {{ return v }}
-fn keep_kind(v: ^encoding.EncodingErrorKind) -> encoding.EncodingErrorKind {{ return v }}
-fn keep_json_reader(v: ^json.JSONReader) -> json.JSONReader {{ return v }}
-fn keep_json_writer(v: ^json.JSONWriter) -> json.JSONWriter {{ return v }}
-fn keep_jsonl_reader(v: ^jsonl.JSONLReader) -> jsonl.JSONLReader {{ return v }}
-fn keep_jsonl_writer(v: ^jsonl.JSONLWriter) -> jsonl.JSONLWriter {{ return v }}
-fn keep_csv_reader(v: ^csv.CSVReader) -> csv.CSVReader {{ return v }}
-fn keep_csv_writer(v: ^csv.CSVWriter) -> csv.CSVWriter {{ return v }}
-fn keep_xml_reader(v: ^xml.XMLReader) -> xml.XMLReader {{ return v }}
-fn keep_xml_writer(v: ^xml.XMLWriter) -> xml.XMLWriter {{ return v }}
-fn keep_cbor_reader(v: ^cbor.CBORReader) -> cbor.CBORReader {{ return v }}
-fn keep_cbor_writer(v: ^cbor.CBORWriter) -> cbor.CBORWriter {{ return v }}
+fn keep_error(v: ^encoding.EncodingError) => encoding.EncodingError {{ return v }}
+fn keep_cause(v: ^encoding.EncodingCause) => encoding.EncodingCause {{ return v }}
+fn keep_event(v: ^encoding.DataEvent) => encoding.DataEvent {{ return v }}
+fn keep_format(v: ^encoding.EncodingFormat) => encoding.EncodingFormat {{ return v }}
+fn keep_kind(v: ^encoding.EncodingErrorKind) => encoding.EncodingErrorKind {{ return v }}
+fn keep_json_reader(v: ^json.JSONReader) => json.JSONReader {{ return v }}
+fn keep_json_writer(v: ^json.JSONWriter) => json.JSONWriter {{ return v }}
+fn keep_jsonl_reader(v: ^jsonl.JSONLReader) => jsonl.JSONLReader {{ return v }}
+fn keep_jsonl_writer(v: ^jsonl.JSONLWriter) => jsonl.JSONLWriter {{ return v }}
+fn keep_csv_reader(v: ^csv.CSVReader) => csv.CSVReader {{ return v }}
+fn keep_csv_writer(v: ^csv.CSVWriter) => csv.CSVWriter {{ return v }}
+fn keep_xml_reader(v: ^xml.XMLReader) => xml.XMLReader {{ return v }}
+fn keep_xml_writer(v: ^xml.XMLWriter) => xml.XMLWriter {{ return v }}
+fn keep_cbor_reader(v: ^cbor.CBORReader) => cbor.CBORReader {{ return v }}
+fn keep_cbor_writer(v: ^cbor.CBORWriter) => cbor.CBORWriter {{ return v }}
 
 fn run() {{
     limits := encoding.EncodingLimits.safe()
@@ -1813,7 +1813,7 @@ use core.encoding as encoding
 use core.encoding.xml as xml
 use core.files as files
 
-fn xml_name(local: String) -> DataTree {{
+fn xml_name(local: String) => DataTree {{
     return DataTree.Object([
         "raw": DataTree.Text(~local),
         "prefix": DataTree.Null,
@@ -1822,7 +1822,7 @@ fn xml_name(local: String) -> DataTree {{
     ])
 }}
 
-fn document_start() -> DataTree {{
+fn document_start() => DataTree {{
     return DataTree.Object([
         "$xml_event": DataTree.Text("document_start"),
         "encoding": DataTree.Null,
@@ -1830,11 +1830,11 @@ fn document_start() -> DataTree {{
     ])
 }}
 
-fn document_end() -> DataTree {{
+fn document_end() => DataTree {{
     return DataTree.Object(["$xml_event": DataTree.Text("document_end")])
 }}
 
-fn element_start(empty_style: String) -> DataTree {{
+fn element_start(empty_style: String) => DataTree {{
     return DataTree.Object([
         "$xml_event": DataTree.Text("element_start"),
         "name": xml_name("r"),
@@ -2423,7 +2423,7 @@ use core.encoding as encoding
 use core.encoding.cbor as cbor
 use core.files as files
 
-fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {{
+fn reader_terminal(reader: &cbor.CBORReader, reason: String) => Bool {{
     repeated :: reader.next()
     if repeated == {{
         Err(error) -> return error.reason == reason
@@ -2432,7 +2432,7 @@ fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {{
     return false
 }}
 
-fn writer_terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
+fn writer_terminal(writer: &cbor.CBORWriter, reason: String) => Bool {{
     repeated :: writer.flush()
     if repeated == {{
         Err(error) -> return error.reason == reason
@@ -2653,7 +2653,7 @@ use core.encoding as encoding
 use core.encoding.cbor as cbor
 use core.files as files
 
-fn terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
+fn terminal(writer: &cbor.CBORWriter, reason: String) => Bool {{
     repeated :: writer.finish()
     if repeated == {{
         Err(error) -> return error.reason == reason
@@ -2714,7 +2714,7 @@ use core.encoding as encoding
 use core.encoding.cbor as cbor
 use core.files as files
 
-fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {{
+fn reader_terminal(reader: &cbor.CBORReader, reason: String) => Bool {{
     repeated :: reader.next()
     if repeated == {{
         Err(error) -> return error.reason == reason
@@ -2723,7 +2723,7 @@ fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {{
     return false
 }}
 
-fn writer_terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {{
+fn writer_terminal(writer: &cbor.CBORWriter, reason: String) => Bool {{
     repeated :: writer.flush()
     if repeated == {{
         Err(error) -> return error.reason == reason
@@ -2951,7 +2951,7 @@ fn cbor_whole_hostile_byte_corpus_matches_aot_and_default_dev() {
     let source = r#"
 use core.encoding.cbor as cbor
 
-fn wire(values: [Int]) -> [U8] {
+fn wire(values: [Int]) => [U8] {
     bytes := [U8].{}
     loop value; values {
         bytes.push(U8.from_int(value) ?? panic("corpus byte outside U8"))
@@ -2959,7 +2959,7 @@ fn wire(values: [Int]) -> [U8] {
     return bytes
 }
 
-fn accepted(values: [Int]) -> Bool {
+fn accepted(values: [Int]) => Bool {
     if cbor.parse(wire(values)) == {
         Ok(_) -> return true
         Err(_) -> return false
@@ -2967,7 +2967,7 @@ fn accepted(values: [Int]) -> Bool {
     return false
 }
 
-fn rejected(values: [Int], offset: Int, path: String, reason: String) -> Bool {
+fn rejected(values: [Int], offset: Int, path: String, reason: String) => Bool {
     if cbor.parse(wire(values)) == {
         Ok(_) -> return false
         Err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
@@ -2975,7 +2975,7 @@ fn rejected(values: [Int], offset: Int, path: String, reason: String) -> Bool {
     return false
 }
 
-fn canonical_rejected(values: [Int], offset: Int, path: String, reason: String) -> Bool {
+fn canonical_rejected(values: [Int], offset: Int, path: String, reason: String) => Bool {
     strict := cbor.CBOROptions.{
         max_depth: 256,
         max_items: 1000000,
@@ -3199,7 +3199,7 @@ fn invariant_refinement_proves_fixed_array_index() {
 #Invariant("value >= 0 && value < 4")
 Index4 :: distinct Int
 
-fn pick(xs: [String#4], i: Index4) -> String {
+fn pick(xs: [String#4], i: Index4) => String {
     return xs[i]
 }
 
@@ -4251,7 +4251,7 @@ use core.time as time
 
 fn run() {{
     (ready_tx, ready_rx) :: tasks.channel<Int>()
-    lookup :: tasks.spawn(take(ready_tx) () => {{
+    lookup :: tasks.spawn(() => {{
         ready_tx.send(1)
         if net.dns_a_at("{}", "service.example.test", 5000) == {{
             Ok(_) -> print("unexpected DNS response")
@@ -4375,7 +4375,7 @@ fn run() {
     typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
     address :: net.socket_to_string(typed_address)
     (ready_tx, ready_rx) :: tasks.channel<Int>()
-    server :: tasks.spawn(take(listener, ready_tx) () => {
+    server :: tasks.spawn(() => {
         stream := net.tcp_accept(listener) ?? panic("accept")
         ready_tx.send(1)
         if stream.read(1) == {
@@ -4418,7 +4418,7 @@ fn run() {
     cancelled_listener :: net.tcp_listen("127.0.0.1:0") ?? panic("cancel listen")
     cancelled_address :: net.socket_to_string(net.listener_local_socket_addr(cancelled_listener) ?? panic("cancel address"))
     (accept_tx, accept_rx) :: tasks.channel<Int>()
-    cancelled_accept :: tasks.spawn(take(cancelled_listener, accept_tx) () => {
+    cancelled_accept :: tasks.spawn(() => {
         accept_tx.send(1)
         if cancelled_listener.accept() == {
             Ok(_) -> print("accept unexpectedly succeeded")
@@ -4443,7 +4443,7 @@ fn run() {
     print(net.ready_writable(write_ready))
     interest :: NetReadyInterest.Read
     (wait_tx, wait_rx) :: tasks.channel<Int>()
-    ready_wait :: tasks.spawn(take(ready_server, wait_tx) () => {
+    ready_wait :: tasks.spawn(() => {
         wait_tx.send(1)
         if ready_server.ready(interest, deadline: Duration.milliseconds(1000) ?? panic("ready deadline")) == {
             Ok(_) -> print("ready unexpectedly succeeded")
@@ -4518,7 +4518,7 @@ fn run() {
     socket :: net.udp_bind("127.0.0.1:0") ?? panic("bind")
     interest :: NetReadyInterest.Read
     (ready_tx, ready_rx) :: tasks.channel<Int>()
-    waiter :: tasks.spawn(take(socket, ready_tx) () => {
+    waiter :: tasks.spawn(() => {
         ready_tx.send(1)
         if socket.ready(interest, deadline: Duration.seconds(1) ?? panic("deadline")) == {
             Ok(_) -> panic("udp unexpectedly ready")
@@ -4640,11 +4640,11 @@ fn core_net_tcp_implements_nominal_io_reader_writer() {
 use core.net as net
 use core.tasks as tasks
 
-fn receive<T: Reader>(&stream: T, limit: Int) -> [U8] ? IOError {
+fn receive<T: Reader>(&stream: T, limit: Int) => [U8] ? IOError {
     return stream.read(limit)
 }
 
-fn send_four<T: Writer>(&stream: T) -> Int ? IOError {
+fn send_four<T: Writer>(&stream: T) => Int ? IOError {
     stream.write_all([1, 2, 3, 4])?
     return Ok(4)
 }
@@ -4653,7 +4653,7 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
     address :: net.socket_to_string(typed_address)
-    server :: tasks.spawn(take(listener) () => {
+    server :: tasks.spawn(() => {
         stream := net.tcp_accept(listener) ?? panic("accept")
         if receive(&stream, 0) == {
             Ok(_) -> panic("zero limit looked like EOF")
@@ -4693,11 +4693,11 @@ fn core_net_unix_stream_implements_nominal_io_reader_writer() {
 use core.net as net
 use core.tasks as tasks
 
-fn receive<T: Reader>(&stream: T, limit: Int) -> [U8] ? IOError {{
+fn receive<T: Reader>(&stream: T, limit: Int) => [U8] ? IOError {{
     return stream.read(limit)
 }}
 
-fn send_four<T: Writer>(&stream: T) -> Int ? IOError {{
+fn send_four<T: Writer>(&stream: T) => Int ? IOError {{
     first :: stream.write([1, 2])?
     stream.write_all([3, 4])?
     return Ok(first)
@@ -4705,7 +4705,7 @@ fn send_four<T: Writer>(&stream: T) -> Int ? IOError {{
 
 fn run() {{
     listener :: net.unix_listen("{socket}") ?? panic("listen")
-    server :: tasks.spawn(take(listener) () => {{
+    server :: tasks.spawn(() => {{
         stream := net.unix_accept(listener) ?? panic("accept")
         if receive(&stream, 0) == {{
             Ok(_) -> panic("zero limit looked like EOF")
@@ -4826,7 +4826,7 @@ fn run() {{
 
     udp :: net.udp_bind("127.0.0.1:0") ?? panic("udp bind")
     (udp_ready_tx, udp_ready_rx) :: tasks.channel<Int>()
-    udp_wait :: tasks.spawn(take(udp, udp_ready_tx) () => {{
+    udp_wait :: tasks.spawn(() => {{
         udp_ready_tx.send(1)
         if net.udp_receive(udp, 8) == {{
             Ok(_) -> panic("udp cancel returned data")
@@ -4839,7 +4839,7 @@ fn run() {{
 
     listener :: net.unix_listen("{socket}") ?? panic("unix listen")
     (unix_ready_tx, unix_ready_rx) :: tasks.channel<Int>()
-    unix_wait :: tasks.spawn(take(listener, unix_ready_tx) () => {{
+    unix_wait :: tasks.spawn(() => {{
         unix_ready_tx.send(1)
         if net.unix_accept(listener) == {{
             Ok(_) -> panic("unix cancel accepted stream")
@@ -4877,7 +4877,7 @@ use core.files as fs
 use core.net as net
 use core.process as process
 
-fn receive<T: Reader>(&stream: T, limit: Int) -> [U8] ? IOError {
+fn receive<T: Reader>(&stream: T, limit: Int) => [U8] ? IOError {
     return stream.read(limit)
 }
 
@@ -5019,7 +5019,7 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
     address :: net.socket_to_string(typed_address)
-    client :: tasks.spawn(take(address) () => {
+    client :: tasks.spawn(() => {
         stream := net.tcp_connect(address) ?? panic("connect")
         time.sleep(100)
         stream.close() ?? panic("close")
@@ -5061,7 +5061,7 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
     address :: net.socket_to_string(typed_address)
-    server :: tasks.spawn(take(listener) () => {
+    server :: tasks.spawn(() => {
         first := net.tcp_accept(listener) ?? return
         time.sleep(100)
         first.close() ?? return
@@ -5121,7 +5121,7 @@ fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     typed_address :: net.listener_local_socket_addr(listener) ?? panic("address")
     address :: net.socket_to_string(typed_address)
-    server :: tasks.spawn(take(listener) () => {
+    server :: tasks.spawn(() => {
         stream := net.tcp_accept(listener) ?? return
         loop {
             chunk := stream.read(65536) ?? return
@@ -5188,18 +5188,18 @@ fn core_tls_byte_stream_runs_real_local_handshake_and_close_notify() {
 use core.net as net
 use core.tls as tls
 
-fn receive<T: Reader>(&stream: T, limit: Int) -> [U8] ? IOError {
+fn receive<T: Reader>(&stream: T, limit: Int) => [U8] ? IOError {
     return stream.read(limit)
 }
 
 
-fn send<T: Writer>(&stream: T, bytes: [U8]) -> Int ? IOError {
+fn send<T: Writer>(&stream: T, bytes: [U8]) => Int ? IOError {
     empty_count :: stream.write([])?
     stream.write_all(bytes)?
     return Ok(empty_count)
 }
 
-fn zero_rejected<T: Reader>(&stream: T) -> Bool {
+fn zero_rejected<T: Reader>(&stream: T) => Bool {
     if stream.read(0) == {
         Ok(_) -> return false
         Err(error) -> {
@@ -5319,7 +5319,7 @@ fn core_tls_expert_config_peer_identity_and_directional_close_are_real() {
 use core.net as net
 use core.tls as tls
 
-fn invalid_alpn() -> [String] {{
+fn invalid_alpn() => [String] {{
     return [""]
 }}
 
@@ -5501,7 +5501,7 @@ fn run() {{
     }}
 
     (ready_tx, ready_rx) :: tasks.channel<Int>()
-    blocked :: tasks.spawn(take(ready_tx) () => {{
+    blocked :: tasks.spawn(() => {{
         tcp := net.tcp_connect("{address}") ?? panic("cancel tcp")
         ready_tx.send(1)
         if tls.client(^tcp, "localhost") == {{
@@ -5563,7 +5563,7 @@ struct Plain {
     value: String
 }
 
-fn identity(value: ^Plain) -> Plain {
+fn identity(value: ^Plain) => Plain {
     return value
 }
 
@@ -5910,7 +5910,7 @@ fn core_email_policy_envelope_and_reports_are_real_jet_values() {
     let src = r#"
 use core.email as email
 
-fn error_text(problem: email.EmailError) -> String {
+fn error_text(problem: email.EmailError) => String {
     if problem == {
         .Configuration(_, _, _, _) -> { return "matched" }
         .Tls(_, _, _, _) -> { return "tls-error" }
@@ -6862,7 +6862,7 @@ fn run() {
             .header("Set-Cookie", "a=1")
             .header("Set-Cookie", "b=2"))
     )
-    serving :: tasks.spawn(take(listener, mux) () =>
+    serving :: tasks.spawn(() =>
         server.serve_once_listener(listener, mux) ?? panic("serve")
     )
     response :: client.get("http://{addr}/") ?? panic("get")
@@ -6907,7 +6907,7 @@ struct Budget {
     owner: String
 }
 
-fn must_stay_deferred(ticket: Ticket) -> Bool {
+fn must_stay_deferred(ticket: Ticket) => Bool {
     panic("lazy filter ran before collect")
     return false
 }
@@ -7584,7 +7584,7 @@ fn xml_whole_byte_verbs_match_comptime_aot_and_dev() {
     let source = r#"
 use core.encoding.xml as xml
 
-fn same_bytes(left: [U8], right: [U8]) -> Bool {
+fn same_bytes(left: [U8], right: [U8]) => Bool {
     if left.len() != right.len() { return false }
     loop index := 0; index < left.len(); index++ {
         if left[index] != right[index] { return false }
@@ -7592,7 +7592,7 @@ fn same_bytes(left: [U8], right: [U8]) -> Bool {
     return true
 }
 
-fn summarize() -> String {
+fn summarize() => String {
     plain :: [U8].{ 60, 114, 62, 111, 107, 60, 47, 114, 62 }
     utf8_bom :: [U8].{ 239, 187, 191, 60, 63, 120, 109, 108, 32, 118, 101, 114, 115, 105, 111, 110, 61, 39, 49, 46, 48, 39, 32, 101, 110, 99, 111, 100, 105, 110, 103, 61, 39, 85, 84, 70, 45, 56, 39, 63, 62, 60, 114, 62, 195, 169, 240, 159, 153, 130, 60, 47, 114, 62 }
     utf16 :: [U8].{ 255, 254, 60, 0, 63, 0, 120, 0, 109, 0, 108, 0, 32, 0, 118, 0, 101, 0, 114, 0, 115, 0, 105, 0, 111, 0, 110, 0, 61, 0, 39, 0, 49, 0, 46, 0, 48, 0, 39, 0, 32, 0, 101, 0, 110, 0, 99, 0, 111, 0, 100, 0, 105, 0, 110, 0, 103, 0, 61, 0, 39, 0, 85, 0, 84, 0, 70, 0, 45, 0, 49, 0, 54, 0, 39, 0, 63, 0, 62, 0, 60, 0, 114, 0, 62, 0, 233, 0, 61, 216, 66, 222, 60, 0, 47, 0, 114, 0, 62, 0 }
@@ -7656,7 +7656,7 @@ fn xml_10_fifth_edition_char_errors_match_comptime_aot_and_dev() {
     let source = r#"
 use core.encoding.xml as xml
 
-fn show(result: DataTree ? XMLError) -> String {
+fn show(result: DataTree ? XMLError) => String {
     if result == {
         Ok(_) -> { return "accepted" }
         Err(error) -> {
@@ -7716,7 +7716,7 @@ fn xml_attribute_whitespace_normalization_matches_comptime_aot_and_dev() {
     let source = r#"
 use core.encoding.xml as xml
 
-fn summarize(source: String) -> String {
+fn summarize(source: String) => String {
     doc := xml.parse(source) ?? panic("xml")
     root := (doc.field("children") ?? panic("document children")).at(0) ?? panic("root")
     namespace := ((root.field("namespaces") ?? panic("namespaces")).at(0) ?? panic("namespace")).field("namespace_uri") ?? panic("namespace URI")
@@ -7780,7 +7780,7 @@ fn base_decoders_preserve_2026_union_with_comptime_aot_and_dev_parity() {
 use core.encoding.base64 as base64
 use core.encoding.base32 as base32
 
-fn show64(text: String) -> String {
+fn show64(text: String) => String {
     if base64.decode(text) == {
         Ok(bytes) -> { return "OK:{bytes}" }
         Err(reason) -> { return "ERR:{reason}" }
@@ -7788,7 +7788,7 @@ fn show64(text: String) -> String {
     return "unreachable"
 }
 
-fn show64url(text: String) -> String {
+fn show64url(text: String) => String {
     if base64.decode_url(text) == {
         Ok(bytes) -> { return "OK:{bytes}" }
         Err(reason) -> { return "ERR:{reason}" }
@@ -7796,7 +7796,7 @@ fn show64url(text: String) -> String {
     return "unreachable"
 }
 
-fn show32(text: String) -> String {
+fn show32(text: String) => String {
     if base32.decode(text) == {
         Ok(bytes) -> { return "OK:{bytes}" }
         Err(reason) -> { return "ERR:{reason}" }
@@ -8823,7 +8823,7 @@ use core.tasks as tasks
 
 fn run() {
 (sender, ch) : tasks.channel<Int>()
-    producer :: tasks.spawn(take(sender) () => {
+    producer :: tasks.spawn(() => {
         loop i; 1..1000 {
             sender.send(i)
         }
@@ -8864,7 +8864,7 @@ fn run() {
 (sender, ch) :: tasks.channel<Int>()
     loop i; 1..1000 {
         dup :: ~sender
-        tasks.spawn(take(dup) () => {
+        tasks.spawn(() => {
             dup.send(1)
         })
     }
@@ -8903,7 +8903,7 @@ fn run() {
 (sender, ch) :: tasks.channel<Int>()
     loop i; 1..10000 {
         dup :: ~sender
-        tasks.spawn(take(dup) () => {
+        tasks.spawn(() => {
             dup.send(1)
         })
     }
@@ -8943,7 +8943,7 @@ fn run() {
 (sender, ch) :: tasks.channel<Int>()
     loop i; 1..100000 {
         dup :: ~sender
-        tasks.spawn(take(dup) () => {
+        tasks.spawn(() => {
             dup.send(1)
         })
     }
@@ -8979,19 +8979,19 @@ fn race_cancels_losing_task() {
 use core.tasks as tasks
 use core.time as time
 
-fn fast_nine() -> Int {
+fn fast_nine() => Int {
     return 9
 }
 
-fn slow_one() -> Int {
+fn slow_one() => Int {
     time.sleep(300)
     return 1
 }
 
 fn run() {
     taskgroup g {
-        slow :: g.task { slow_one() }
-        fast :: g.task { fast_nine() }
+        slow :: g.task => slow_one()
+        fast :: g.task => fast_nine()
         winner :: g.race([slow, fast])
         print(winner)
     }
@@ -9310,14 +9310,14 @@ use core.encoding.json as json
 struct Email { addr: String }
 
 impl Email.Encode {
-    fn encode(self) -> DataTree {
+    fn encode(self) => DataTree {
         m :: [String: DataTree].{ "email": DataTree.Text(~self.addr) }
         return DataTree.Object(m)
     }
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) -> Email ? DecodeError {
+    fn decode(tree: DataTree) => Email ? DecodeError {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
         return Ok(Email.{addr: s})
@@ -9355,7 +9355,7 @@ fn datatree_decode_dispatches_all_decode_impl_kinds() {
 struct Point { x: Int }
 struct Email { addr: String }
 impl Email.Decode {
-    fn decode(tree: DataTree) -> Email ? DecodeError {
+    fn decode(tree: DataTree) => Email ? DecodeError {
         value := tree.field("address") ?? DataTree.Text("")
         return Ok(Email.{ addr: value.text() ?? "" })
     }
@@ -9535,12 +9535,12 @@ struct Inner { note: String? }
 struct Envelope {
     inner: Inner
 
-    fn borrowed(self) -> String {
+    fn borrowed(self) => String {
         if self.inner.note == Val(value) { return value }
         return "none"
     }
 
-    fn owned(^self) -> String {
+    fn owned(^self) => String {
         if self.inner.note == Val(value) { return value }
         return "none"
     }
@@ -9720,13 +9720,13 @@ fn user_derive_orphan_rule_allows_either_local_side() {
 derive T.RemoteLabel {
     info :: T.reflect()
     name :: info.name
-    emit("impl $name {{ fn remote_label(self) -> String {{ return \"remote:$name\" }} }}")
+    emit("impl $name {{ fn remote_label(self) => String {{ return \"remote:$name\" }} }}")
 }
 
 #LocalLabel
 pub struct RemoteType { pub value: Int }
 
-pub fn remote_type_label() -> String {
+pub fn remote_type_label() => String {
     value := RemoteType.{ value: 2 }
     return value.local_label()
 }
@@ -9737,7 +9737,7 @@ use labels
 derive T.LocalLabel {
     info :: T.reflect()
     name :: info.name
-    emit("impl $name {{ pub fn local_label(self) -> String {{ return \"local:$name\" }} }}")
+    emit("impl $name {{ pub fn local_label(self) => String {{ return \"local:$name\" }} }}")
 }
 
 #RemoteLabel
@@ -9812,7 +9812,7 @@ derive T.TypeName {
     info :: T.reflect()
     name :: info.name
     param :: info.type_params[0].name
-    emit("impl $name {{ fn get_value(self) -> $param {{ return ~self.value }} fn type_name(self) -> String {{ return \"$name\" }} }}")
+    emit("impl $name {{ fn get_value(self) => $param {{ return ~self.value }} fn type_name(self) => String {{ return \"$name\" }} }}")
 }
 
 #TypeName
@@ -9853,11 +9853,11 @@ fn user_derive_generated_non_clonable_copy_is_rejected_in_sema() {
 derive T.CopyCallback {
     info :: T.reflect()
     name :: info.name
-    emit("impl $name {{ fn duplicate(self) -> fn(Int) -> Int {{ return ~self.callback }} }}")
+    emit("impl $name {{ fn duplicate(self) => fn(Int) => Int {{ return ~self.callback }} }}")
 }
 
 #CopyCallback
-struct Handler { callback: fn(Int) -> Int }
+struct Handler { callback: fn(Int) => Int }
 
 fn run() { print(0) }
 "#;
@@ -9890,11 +9890,11 @@ use core.encoding.json as json
 struct Address { text: String }
 struct Email { addr: String, nested: Address, items: [Address] }
 
-fn pick() -> Int {
+fn pick() => Int {
     return 0
 }
 
-fn encoded(e: Email, i: Int) -> String {
+fn encoded(e: Email, i: Int) => String {
     shallow := DataTree.Text(~e.addr)
     nested := DataTree.Text(~e.nested.text)
     indexed := DataTree.Text(~e.items[0].text)
@@ -9905,7 +9905,7 @@ fn encoded(e: Email, i: Int) -> String {
     return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}|{json.to_string(called)}|{json.to_string(parenthesized)}|{json.to_string(conditional)}"
 }
 
-fn slice_data(xs: [DataTree]) -> DataTree {
+fn slice_data(xs: [DataTree]) => DataTree {
     return DataTree.Array(xs[0..1])
 }
 
@@ -10296,7 +10296,7 @@ fn perf_static_api_lowers_to_core_helpers() {
     let out = compile_temp(
         "perf_static.jet",
         r#"
-fn run() -> Void ? {
+fn run() => Void ? {
     print(Perf.default_fidelity())
     Perf.override_fidelity(0.25)?
     print(Perf.fidelity())
@@ -10315,7 +10315,7 @@ fn perf_set_fidelity_alias_is_not_exported() {
     let src = r#"
 use core.perf as perf
 
-fn run() -> Void ? {
+fn run() => Void ? {
     perf.set_fidelity(0.25)?
 }
 "#;
@@ -10354,7 +10354,7 @@ fn perf_override_is_range_checked_and_resettable() {
         r#"
 use core.perf as perf
 
-fn run() -> Void ? {
+fn run() => Void ? {
     print(perf.default_fidelity())
     perf.override_fidelity(0.25)?
     print(perf.fidelity())
@@ -10538,12 +10538,12 @@ fn async_event_overflow_and_failure_policies() {
 use core.event as event
 use core.tasks as tasks
 
-fn panic_log_handler(n: Int) -> Void ? String {
+fn panic_log_handler(n: Int) => Void ? String {
     panic("log boom")
     return Err("unreachable")
 }
 
-fn panic_ignore_handler(n: Int) -> Void ? String {
+fn panic_ignore_handler(n: Int) => Void ? String {
     panic("ignore boom")
     return Err("unreachable")
 }
@@ -10673,7 +10673,7 @@ use core.event as event
 use core.tasks as tasks
 use core.time as time
 
-fn owner_teardown_task() -> Task<DispatchReport<String>> {
+fn owner_teardown_task() => Task<DispatchReport<String>> {
     owner_scope :: event.scope()
     ev :: event.async_result<Int, String>(AsyncPolicy.{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
     (started_tx, started_rx) :: tasks.channel<Int>()
@@ -10808,7 +10808,7 @@ use core.time as time
 fn run() {
     (cancel_gate_started_tx, cancel_gate_started_rx) :: tasks.channel<Int>()
     (cancel_gate_release_tx, cancel_gate_release_rx) :: tasks.channel<Int>()
-    cancel_gate :: tasks.spawn(take(cancel_gate_started_tx, cancel_gate_release_rx) () => {
+    cancel_gate :: tasks.spawn(() => {
         cancel_gate_started_tx.send(1)
         released :: cancel_gate_release_rx.receive() ?? panic("cancel gate")
     })
@@ -10831,7 +10831,7 @@ fn run() {
 
     (close_gate_started_tx, close_gate_started_rx) :: tasks.channel<Int>()
     (close_gate_release_tx, close_gate_release_rx) :: tasks.channel<Int>()
-    close_gate :: tasks.spawn(take(close_gate_started_tx, close_gate_release_rx) () => {
+    close_gate :: tasks.spawn(() => {
         close_gate_started_tx.send(1)
         released :: close_gate_release_rx.receive() ?? panic("close gate")
     })
@@ -11347,7 +11347,7 @@ fn tracked_float_origin_reports_binding_site_and_plain_float_is_untracked() {
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let name = "float_binding_origin";
-    let src = "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    print(speed.origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() -> Float {\n    print(\"evaluated\")\n    return 3.5\n}\n";
+    let src = "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    print(speed.origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() => Float {\n    print(\"evaluated\")\n    return 3.5\n}\n";
     let (code, stdout, stderr) = build_and_run(&dir, name, src, &[], None);
     let source_path = dir.join(name);
 

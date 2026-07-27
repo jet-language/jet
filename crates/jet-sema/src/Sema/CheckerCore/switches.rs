@@ -654,8 +654,8 @@ impl<'a> Checker<'a> {
                         let first = &subject_paths[0];
                         self.diags.push(Diagnostic::lint(
                             "L0302",
-                            format!("these guards all dispatch on `{enum_name}`"),
-                            "subject dispatch makes one closed enum's cases explicit and exhaustively checked"
+                            format!("these arm heads all dispatch on `{enum_name}`"),
+                            "naming the subject makes one closed enum's cases explicit and exhaustively checked"
                                 .to_string(),
                             format!(
                                 "write `if {first} == {{ ... }}` and put each variant pattern in an arm"

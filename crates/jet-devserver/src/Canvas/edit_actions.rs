@@ -66,7 +66,7 @@ pub(super) fn apply_create_function(
     let ret = if ret_type == "Void" {
         String::new()
     } else {
-        format!(" -> {ret_type}")
+        format!(" => {ret_type}")
     };
     let function = format!("fn {name}({params}){ret} {{\n{body}}}\n\n");
     let changed = FixEngine::apply_edits(src, &[edit(SourceSpan { start: 0, end: 0 }, &function)])
@@ -643,7 +643,7 @@ pub(super) fn apply_insert_structural(
             if !anchor.fallible {
                 return Err(edit_error("unavailable", "needs a fallible function"));
             }
-            "    fallible_value: Int ? String :: Ok(1)\n    unwrapped :: fallible_value?\n".to_string()
+            "    fallible_value :: Int.parse(\"1\")\n    unwrapped :: fallible_value ?? 0\n".to_string()
         }
         _ => return Err(edit_error("unsupported", "unknown Canvas structural operation")),
     };
@@ -923,7 +923,7 @@ pub(super) fn extract_inline_candidate(
         .map(|(name, _)| name.clone())
         .collect::<Vec<_>>()
         .join(", ");
-    let helper = format!("fn {function}({signature}) -> {ret_type} {{\n    return {expr}\n}}\n\n");
+    let helper = format!("fn {function}({signature}) => {ret_type} {{\n    return {expr}\n}}\n\n");
     let replacement = format!("{function}({args})");
     FixEngine::apply_edits(
         src,
@@ -1707,7 +1707,9 @@ fn find_multi_input_in_stmt(stmt: &Stmt, node_span: SourceSpan, out: &mut Option
             find_multi_input_in_lvalue(target, node_span, out);
             find_multi_input_in_expr(value, node_span, out);
         }
-        Stmt::Expr(e) => find_multi_input_in_expr(e, node_span, out),
+        Stmt::Expr(e) | Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
+            find_multi_input_in_expr(e, node_span, out)
+        }
         Stmt::Return(Some(e), _) => find_multi_input_in_expr(e, node_span, out),
         Stmt::Yield(e, _) => find_multi_input_in_expr(e, node_span, out),
         Stmt::If(ifs) => {
@@ -1979,7 +1981,11 @@ fn find_multi_input_element_in_stmt(
 ) {
     match stmt {
         Stmt::Val(b) => find_multi_input_element_in_expr(&b.init, node_span, element_span, found),
-        Stmt::Expr(e) | Stmt::Return(Some(e), _) | Stmt::Yield(e, _) => {
+        Stmt::Expr(e)
+        | Stmt::Return(Some(e), _)
+        | Stmt::Yield(e, _)
+        | Stmt::BreakValue(e, _)
+        | Stmt::BreakLabelValue(_, _, e, _) => {
             find_multi_input_element_in_expr(e, node_span, element_span, found)
         }
         Stmt::Assign { value, .. } => {
@@ -2369,6 +2375,7 @@ fn stmt_canvas_anchor(stmt: &Stmt) -> Span {
         | Stmt::Continue(span)
         | Stmt::BreakLabel(_, span)
         | Stmt::ContinueLabel(_, span) => *span,
+        Stmt::BreakValue(_, span) | Stmt::BreakLabelValue(_, _, _, span) => *span,
         _ => stmt.span(),
     }
 }
@@ -2393,6 +2400,10 @@ fn stmt_source_span(stmt: &Stmt) -> SourceSpan {
         },
         Stmt::Expr(e) => e.span().into(),
         Stmt::Return(Some(e), span) => SourceSpan {
+            start: span.start,
+            end: e.span().end,
+        },
+        Stmt::BreakValue(e, span) | Stmt::BreakLabelValue(_, _, e, span) => SourceSpan {
             start: span.start,
             end: e.span().end,
         },

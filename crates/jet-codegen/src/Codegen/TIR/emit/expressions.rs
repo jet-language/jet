@@ -10,6 +10,7 @@ use crate::Codegen::TIR::emit::emit_field_rust;
 use crate::Codegen::TIR::emit::emit_require_stop;
 use crate::Codegen::TIR::emit_tir_call_args;
 use crate::Codegen::TIR::emit_tir_core_call;
+use crate::Codegen::TIR::emit_tir_lambda_block;
 use crate::Codegen::TIR::emit_static_owner;
 use crate::Codegen::TIR::emit_tir_orfallback_rhs;
 use crate::Codegen::TIR::emit_tir_pattern;
@@ -1660,7 +1661,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "jet_trace_err({}.map_err(|e| e.to_error()), {}, {}, {})?",
                     v, file, line, fn_name
                 ),
-                // D-ERR-CONV: declared `impl Source -> Target` → `.map_err(<fn>)`.
+                // D-ERR-CONV: declared `impl Source => Target` → `.map_err(<fn>)`.
                 TTryConvert::Typed(conv_fn) => format!(
                     "jet_trace_err({}.map_err({}), {}, {}, {})?",
                     v, conv_fn, file, line, fn_name
@@ -1730,6 +1731,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             } else {
                 format!("{{ {} {} }}", lam.prep, wrapped)
             }
+        }
+        TExprKind::InlineBlock(stmts) => {
+            let mut rendered = String::from("{\n");
+            emit_tir_lambda_block(stmts, cx, &mut rendered, 1);
+            rendered.push('}');
+            rendered
         }
         TExprKind::HostBorrowCallback { callable, params } => {
             let callable = emit_tir_expr(callable, cx);

@@ -885,7 +885,7 @@ fn parse_pattern_tree(template: &Template, class: &str) -> PatternTree {
         "expr" => (format!("fn __codemod() {{ print({fragment}) }}\n"), 26),
         "stmt" => (format!("fn __codemod() {{ {fragment} }}\n"), 19),
         "item" => (format!("{fragment}\n"), 0),
-        "type" => (format!("fn __codemod() -> {fragment} {{}}\n"), 19),
+        "type" => (format!("fn __codemod() => {fragment} {{}}\n"), 19),
         _ => unreachable!(),
     };
     let actual_start = wrapped.find(&fragment).unwrap_or(start);
@@ -1188,7 +1188,7 @@ fn validate_typed_template(id: &str, node: &str, template: &Template, side: &str
         "expr" => format!("fn run() {{ print({source}) }}\n"),
         "stmt" => format!("fn run() {{ {source} }}\n"),
         "item" => format!("{source}\n"),
-        "type" => format!("fn __codemod() -> {source} {{}}\nfn run() {{}}\n"),
+        "type" => format!("fn __codemod() => {source} {{}}\nfn run() {{}}\n"),
         _ => unreachable!(),
     };
     let (tokens, diagnostics) = jet::Lexer::lex_generated(&wrapped);

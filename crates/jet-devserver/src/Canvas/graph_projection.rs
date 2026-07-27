@@ -291,7 +291,7 @@ pub(super) fn trait_method_signature(m: &AST::TraitMethodSig) -> String {
     let ret = m
         .return_type
         .as_ref()
-        .map(|t| format!(" -> {}", t.name()))
+        .map(|t| format!(" => {}", t.name()))
         .unwrap_or_default();
     format!("fn {}({}){}", m.name, params, ret)
 }
@@ -301,7 +301,7 @@ fn task_flow_facts(src: &str) -> Vec<String> {
     for (needle, kind) in [
         ("taskgroup", "structured_task_scope"),
         ("tasks.spawn", "spawn_task"),
-        (".task(", "taskgroup_spawn"),
+        (".task =>", "taskgroup_spawn"),
         (".join(", "join_task"),
         ("tasks.channel", "channel_create"),
         (".send(", "channel_send"),
@@ -849,6 +849,34 @@ fn project_stmt(
                 y,
                 vec!["control"],
                 vec!["source_jump"],
+            );
+        }
+        Stmt::BreakValue(value, span) | Stmt::BreakLabelValue(_, _, value, span) => {
+            let node_id = format!("{}:stmt:{ordinal}:flow", g.graph_id);
+            add_node(
+                g,
+                &node_id,
+                "flow",
+                "break",
+                (*span).into(),
+                x,
+                y,
+                vec!["control"],
+                vec!["source_jump"],
+            );
+            let ty = expr_type(g, index, value);
+            let input = add_pin(g, &node_id, "value", "input", &ty, "", false);
+            connect_expr_to_input(
+                g,
+                index,
+                src,
+                value,
+                ordinal,
+                "value",
+                &node_id,
+                &input,
+                x - 220,
+                y,
             );
         }
         Stmt::Unsafe {

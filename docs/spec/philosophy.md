@@ -157,7 +157,7 @@ loved by experts.
 - **C FFI is a needed future addition** (S59 ships in **Epoch 2**,
   E2-M14). Rust FFI (M7) ships first; the C ABI story follows in v2.
 - **Purity is a product feature, not just a comptime detail.** An explicit
-  `--[]->` effect row marks a function as pure (S60, as respelled by
+  `=[]=>` effect row marks a function as pure (S60, as respelled by
   D-SHAPE8=A). This can eventually let Jet replace Nix for declarative
   configuration through `jet eval --pure` (layer 3 post-v1).
 - **Go's territory (networking etc.) is standard-library scope**, built

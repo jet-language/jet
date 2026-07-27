@@ -17,6 +17,9 @@ pub(crate) fn walk_stmts_for_const_refs(
             Stmt::Val(b) => walk_expr_for_const_refs(&b.init, const_names, taken),
             Stmt::Assign { value, .. } => walk_expr_for_const_refs(value, const_names, taken),
             Stmt::Return(Some(e), _) => walk_expr_for_const_refs(e, const_names, taken),
+            Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
+                walk_expr_for_const_refs(e, const_names, taken)
+            }
             Stmt::Return(None, _) => {}
             Stmt::If(ifs) => walk_if_for_const_refs(ifs, const_names, taken),
             Stmt::While { cond, body, .. } => {
@@ -443,6 +446,9 @@ pub(crate) fn stmt_refs_name(stmt: &Stmt, name: &str) -> bool {
             lvalue_refs_name(target, name) || expr_refs_name(value, name)
         }
         Stmt::Return(Some(e), _) => expr_refs_name(e, name),
+        Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
+            expr_refs_name(e, name)
+        }
         Stmt::If(i) => {
             expr_refs_name(&i.cond, name)
                 || i.then_body.iter().any(|s| stmt_refs_name(s, name))
@@ -800,6 +806,9 @@ pub(crate) fn stmt_collect_captures(
             expr_collect_captures(value, bound, read, mut_cap);
         }
         Stmt::Return(Some(e), _) => expr_collect_captures(e, bound, read, mut_cap),
+        Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
+            expr_collect_captures(e, bound, read, mut_cap)
+        }
         Stmt::If(i) => {
             expr_collect_captures(&i.cond, bound, read, mut_cap);
             let mut then_bound = bound.clone();

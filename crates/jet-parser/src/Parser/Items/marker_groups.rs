@@ -1241,7 +1241,8 @@ impl<'a> Parser<'a> {
             self.attach_type_markers(markers, item)
         }
     
-        /// S28: top-level `trait Name { fn sig(self) -> T; … }`.
+        /// S28 + D-ARROW-CONTROL1: top-level
+        /// `trait Name { fn sig(self) => T; … }`.
         pub(in crate::Parser) fn trait_def(&mut self, nested: bool) -> Result<TraitDef, Diagnostic> {
             let item_start = self.peek().span.start;
             let (is_pub, is_package_pub) = if nested {

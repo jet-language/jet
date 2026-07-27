@@ -1217,7 +1217,7 @@ fn run() {
     C(Int)
 }
 
-fn choose(x: Choice) -> Int {
+fn choose(x: Choice) => Int {
     if x == {
         A(n) -> { return n }
         else -> { return 0 }
@@ -1268,7 +1268,7 @@ fn run() {
     B(Int)
 }
 
-fn choose(x: Choice) -> Int {
+fn choose(x: Choice) => Int {
     if x == {
         A(n) -> { return n }
         else -> { return 0 }
@@ -1293,11 +1293,11 @@ fn run() {
 
   "multi-input-append-remove": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn to_int(n: Int) -> Int {
+    await ctx.replaceSource(`fn to_int(n: Int) => Int {
     return n
 }
 
-fn demo() -> Int {
+fn demo() => Int {
     xs :: [1, 2, 3]
     ys :: to_int.[1, 2]
     return xs[0] + ys[0]
@@ -1397,7 +1397,7 @@ fn run() {
 
   "conversion-keyboard-gesture": async (ctx) => {
     await ctx.openCanvas();
-    await ctx.replaceSource(`fn to_int(n: Int) -> Int {
+    await ctx.replaceSource(`fn to_int(n: Int) => Int {
     return n
 }
 
@@ -1587,7 +1587,7 @@ fn run() {
       mobile: false,
     }, ctx.driver.pageSession);
     await sleep(120);
-    await ctx.replaceSource(`fn child(n: Int) -> Int {
+    await ctx.replaceSource(`fn child(n: Int) => Int {
     return n * 2
 }
 

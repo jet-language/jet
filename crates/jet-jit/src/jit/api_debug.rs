@@ -263,6 +263,7 @@ fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
             | TStmt::DeferClose { close: value, .. } => {
                 collect_expr_ops(value, out)
             }
+            TStmt::BreakValue { value, .. } => collect_expr_ops(value, out),
             TStmt::GcEdit {
                 index_temp, stmt, ..
             } => {
@@ -608,7 +609,7 @@ pub fn jit_stmt_tag(stmt: &TStmt) -> &'static str {
         TStmt::CountedLoop { .. } => "CountedLoop",
         TStmt::Range { .. } => "Range",
         TStmt::ForIn { .. } => "ForIn",
-        TStmt::Break(_) => "Break",
+        TStmt::Break(_) | TStmt::BreakValue { .. } => "Break",
         TStmt::Continue(_) => "Continue",
         _ => "Other",
     }

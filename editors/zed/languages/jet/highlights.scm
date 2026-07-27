@@ -37,7 +37,7 @@
 (effect_arrow (effect_path (type_identifier) @attribute))
 (marker_decl (attribute (marker_name) @attribute))
 
-; Loop labels (@outer)
+; Named loop targets
 (loop_label) @label
 (next_stmt "next" @keyword.control)
 

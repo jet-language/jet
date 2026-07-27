@@ -3277,7 +3277,7 @@ mod tests {
         assert!(raw_input_is_complete("answer :: = 42"));
         assert!(!raw_input_is_complete("40 +"));
         assert!(!raw_input_is_complete("answer ::"));
-        assert!(!raw_input_is_complete("fn total(xs: [Int]) -> Int {"));
+        assert!(!raw_input_is_complete("fn total(xs: [Int]) => Int {"));
         assert!(!raw_input_is_complete("if true {\n    1"));
         assert!(!raw_input_is_complete("/* unfinished"));
         assert!(!raw_input_is_complete("\"\"\"\nunfinished"));

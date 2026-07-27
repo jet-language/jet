@@ -52,7 +52,7 @@ fn dom_fn() {
 }
 
 #Target(Wasm)
-fn compute() -> Int {
+fn compute() => Int {
     return 1
 }
 
@@ -90,7 +90,7 @@ fn ordinary_wasm_struct_field_does_not_gain_export_boundary_support() {
     let src = r#"struct Point { x: Int, y: Int }
 
 #Target(Wasm)
-fn read_x(p: Point) -> Int { return p.x }
+fn read_x(p: Point) => Int { return p.x }
 
 fn run() {}
 "#;
@@ -106,7 +106,7 @@ fn run() {}
 fn recursive_map_export_remains_an_honest_unsupported_error() {
     let src = r#"
 #WasmExport
-fn echo(values: [String: [Int]]) -> [String: [Int]] { return ~values }
+fn echo(values: [String: [Int]]) => [String: [Int]] { return ~values }
 
 #Target(Js)
 fn run() {}
@@ -123,7 +123,7 @@ fn run() {}
 fn unsigned_sized_map_export_remains_an_honest_unsupported_error() {
     let src = r#"
 #WasmExport
-fn echo(values: [String: U64]) -> [String: U64] { return ~values }
+fn echo(values: [String: U64]) => [String: U64] { return ~values }
 
 #Target(Js)
 fn run() {}
@@ -140,7 +140,7 @@ fn run() {}
 fn narrow_sized_map_export_remains_an_honest_unsupported_error() {
     let src = r#"
 #WasmExport
-fn echo(values: [String: I32]) -> [String: I32] { return ~values }
+fn echo(values: [String: I32]) => [String: I32] { return ~values }
 
 #Target(Js)
 fn run() {}
@@ -261,11 +261,11 @@ fn imported_same_leaf_helpers_keep_distinct_buckets() {
             ),
             (
                 "left.jet",
-                "#Target(Js)\nfn helper() -> Int { return 1 }\n#Target(Js)\npub fn value() -> Int { return helper() }\n",
+                "#Target(Js)\nfn helper() => Int { return 1 }\n#Target(Js)\npub fn value() => Int { return helper() }\n",
             ),
             (
                 "right.jet",
-                "fn helper() -> Int { return 2 }\n#WasmExport\npub fn value() -> Int { return helper() }\n",
+                "fn helper() => Int { return 2 }\n#WasmExport\npub fn value() => Int { return helper() }\n",
             ),
         ],
     );
@@ -290,10 +290,10 @@ fn imported_same_leaf_helpers_keep_distinct_buckets() {
 fn wasm_export_and_target_pins_are_deterministic() {
     let src = r#"#Target(Web)
 #WasmExport
-fn exported() -> Int { return 3 }
+fn exported() => Int { return 3 }
 
 #Target(Wasm)
-fn pinned() -> Int { return 4 }
+fn pinned() => Int { return 4 }
 
 #Target(Js)
 fn run() { print(exported()) }

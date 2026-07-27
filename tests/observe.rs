@@ -309,7 +309,7 @@ fn panic_context_uses_only_lexically_live_locals() {
         ),
         (
             "grant",
-            "#Grant(Io) { caps -> grant_only :: 7; print(grant_only) }",
+            "#Grant(caps: Io) { grant_only :: 7; print(grant_only) }",
             &["grant_only"],
         ),
         // `assume_deterministic { … }` was renamed to `#Nondeterministic("reason") { … }`
@@ -335,7 +335,7 @@ fn panic_context_uses_only_lexically_live_locals() {
 
     for (name, scoped_stmt, dead_names) in cases {
         let src = format!(r#"
-fn missing() -> (Int?) {{
+fn missing() => (Int?) {{
     return None
 }}
 fn capture(live: Int) {{
@@ -441,17 +441,17 @@ enum ParseError {
     Empty
     BadDigit(String)
 }
-fn parse_age(raw: String) -> Int ? ParseError {
+fn parse_age(raw: String) => Int ? ParseError {
     if raw == "" {
         return Err(ParseError.Empty)
     }
     return Ok(42)
 }
-fn load(raw: String) -> Int ? ParseError {
+fn load(raw: String) => Int ? ParseError {
     n :: parse_age(raw)?
     return Ok((n * 2))
 }
-fn double(raw: String) -> Int ? ParseError {
+fn double(raw: String) => Int ? ParseError {
     n :: load(raw)?
     return Ok((n * 2))
 }
@@ -484,21 +484,21 @@ fn uncaught_err_prints_propagation_chain() {
         return;
     }
 
-    // D-ERRCTX1=D criterion 1: uncaught Err at `fn run() -> Void ?` prints the
+    // D-ERRCTX1=D criterion 1: uncaught Err at `fn run() => Void ?` prints the
     // `?` chain (file:line per frame) then the error text, exit 1.
     let src = r#"
-fn read_raw() -> String ? {
+fn read_raw() => String ? {
     return Err("file not found")
 }
-fn parse_config() -> String ? {
+fn parse_config() => String ? {
     raw :: read_raw()?
     return Ok(raw)
 }
-fn load_config() -> String ? {
+fn load_config() => String ? {
     cfg :: parse_config().context("loading config")?
     return Ok(cfg)
 }
-fn run() -> Void ? {
+fn run() => Void ? {
     _ :: load_config()?
 }
 "#;
@@ -531,7 +531,7 @@ fn propagation_trace_collapses_repeated_frames() {
 
     // Same `?` site hit repeatedly via recursion → one frame, not N copies.
     let src = r#"
-fn dive(n: Int) -> Int ? {
+fn dive(n: Int) => Int ? {
     if n <= 0 {
         return Err("bottom")
     }

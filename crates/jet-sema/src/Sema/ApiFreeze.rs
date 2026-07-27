@@ -13,7 +13,7 @@
 //! package = mathkit
 //! published_version = 1.2.0
 //! fn scale(v: &Vec3, factor: Float)
-//! fn length(v: Vec3) -> Float
+//! fn length(v: Vec3) => Float
 //! ```
 //!
 //! Each `fn` line is the canonical signature: every public function's
@@ -187,9 +187,9 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
             let params = params.iter().map(|ty| canonical_api_type_name(ty, dimensions)).collect::<Vec<_>>().join(", ");
             let effects = effect_bound.as_ref().map(|row| row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", "));
             match (effects, ret) {
-                (Some(row), Some(ret)) => format!("fn({params}) --[{row}]-> {}", canonical_api_type_name(ret, dimensions)),
-                (Some(row), None) => format!("fn({params}) --[{row}]->"),
-                (None, Some(ret)) => format!("fn({params}) -> {}", canonical_api_type_name(ret, dimensions)),
+                (Some(row), Some(ret)) => format!("fn({params}) =[{row}]=> {}", canonical_api_type_name(ret, dimensions)),
+                (Some(row), None) => format!("fn({params}) =[{row}]=>"),
+                (None, Some(ret)) => format!("fn({params}) => {}", canonical_api_type_name(ret, dimensions)),
                 (None, None) => format!("fn({params})"),
             }
         }
@@ -226,7 +226,7 @@ pub fn canonical_fn_signature_with_effects(
         .collect();
     let ret = match inferred {
         Some(row) => format!(
-            " --[{}]->{}",
+            " =[{}]=>{}",
             normalized_public_effect_row(f, row)
                 .iter()
                 .cloned()
@@ -240,7 +240,7 @@ pub fn canonical_fn_signature_with_effects(
         None => f
             .return_type
             .as_ref()
-            .map(|t| format!(" -> {}", canonical_api_type_name(t, dimensions)))
+            .map(|t| format!(" => {}", canonical_api_type_name(t, dimensions)))
             .unwrap_or_default(),
     };
     let provenance = f.return_view_provenance.as_ref().map_or_else(String::new, |map| {
@@ -298,12 +298,12 @@ pub fn trait_method_signature(
             method
                 .return_type
                 .as_ref()
-                .map(|_| " ->".to_string())
+                .map(|_| " =>".to_string())
                 .unwrap_or_default()
         },
         |row| {
             format!(
-                " --[{}]->",
+                " =[{}]=>",
                 row.iter()
                     .map(|(name, _)| name.as_str())
                     .collect::<Vec<_>>()
@@ -322,13 +322,17 @@ pub fn trait_method_signature(
 /// Compare a new effect-bearing signature to a pre-v3 snapshot without
 /// treating the metadata-format upgrade itself as an API break.
 pub fn signature_without_effect_row(signature: &str) -> String {
-    let Some(start) = signature.find(" --[") else {
+    let (start, marker_len, close_marker) = if let Some(start) = signature.find(" =[") {
+        (start, 3, "]=>")
+    } else if let Some(start) = signature.find(" --[") {
+        (start, 4, "]->")
+    } else {
         return signature.to_string();
     };
-    let Some(close) = signature[start + 4..].find("]->") else {
+    let Some(close) = signature[start + marker_len..].find(close_marker) else {
         return signature.to_string();
     };
-    let end = start + 4 + close + 3;
+    let end = start + marker_len + close + close_marker.len();
     let suffix = &signature[end..];
     let arrow = if suffix.starts_with(' ') { " ->" } else { "" };
     format!("{}{}{}", &signature[..start], arrow, suffix)
@@ -723,11 +727,11 @@ mod tests {
         let effects = EffectSet::from(["Fs.Read".to_string(), "Io".to_string()]);
         assert_eq!(
             fn_signature_with_effects(&f, Some(&effects)),
-            "fn load() --[Fs.Read, Io]-> String"
+            "fn load() =[Fs.Read, Io]=> String"
         );
         assert_eq!(
             fn_signature_with_effects(&f, Some(&EffectSet::new())),
-            "fn load() --[]-> String"
+            "fn load() =[]=> String"
         );
     }
 
@@ -763,7 +767,7 @@ mod tests {
         assert_eq!(snapshot.api_version, API_SNAPSHOT_VERSION);
         assert_eq!(
             snapshot.funcs[0].signature,
-            "fn files.load() --[Fs.Read]-> String"
+            "fn files.load() =[Fs.Read]=> String"
         );
         let parsed = ApiSnapshot::parse(&snapshot.write()).expect("v3 snapshot round trip");
         assert_eq!(parsed.funcs[0].name, "files.load");
@@ -772,11 +776,11 @@ mod tests {
     #[test]
     fn pre_v3_comparison_normalizes_added_metadata_and_type_glosses() {
         assert_eq!(
-            signature_without_effect_row("fn load(path: String) --[Fs.Read, Io]-> String"),
+            signature_without_effect_row("fn load(path: String) =[Fs.Read, Io]=> String"),
             "fn load(path: String) -> String"
         );
         assert_eq!(
-            signature_without_effect_row("fn flush() --[]->"),
+            signature_without_effect_row("fn flush() =[]=>"),
             "fn flush()"
         );
         assert_eq!(
@@ -785,7 +789,7 @@ mod tests {
         );
         assert_eq!(legacy_api_name("files.load"), "load");
         assert_eq!(
-            legacy_api_signature("fn files.load() --[Fs.Read]-> String"),
+            legacy_api_signature("fn files.load() =[Fs.Read]=> String"),
             "fn load() -> String"
         );
         assert_eq!(
@@ -809,7 +813,7 @@ mod tests {
         );
         assert_eq!(
             fn_signature(&f),
-            "fn pace(value: Quantity<Speed, Float; L1T-1>) -> Quantity<Speed, Float; L1T-1>"
+            "fn pace(value: Quantity<Speed, Float; L1T-1>) => Quantity<Speed, Float; L1T-1>"
         );
     }
 
@@ -839,7 +843,7 @@ mod tests {
         );
         assert_eq!(
             api.funcs[0].signature,
-            "fn distance() -> Meter{family=Length; base=Float; dimension=L1T0}"
+            "fn distance() => Meter{family=Length; base=Float; dimension=L1T0}"
         );
         assert_eq!(api.api_version, API_SNAPSHOT_VERSION - 1);
     }

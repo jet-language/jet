@@ -663,6 +663,10 @@ pub(crate) fn run_devtools(args: &[&String]) {
                 &jet::Syntax::render_vscode_generated_highlights(),
             );
             write_generated_section(
+                "editors/jet.tmGrammar",
+                &jet::Syntax::render_vscode_generated_highlights(),
+            );
+            write_generated_section(
                 "editors/tree-sitter/grammar.js",
                 &jet::Syntax::render_tree_sitter_generated_highlights(),
             );
@@ -2309,7 +2313,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
     }
 
     // Full sema type-check with CompileMode::Eval — runs all type/ownership
-    // checks but relaxes E0122 (run return type) so `pure fn run() -> T`
+    // checks but relaxes E0122 (run return type) so `pure fn run() => T`
     // is accepted. This ensures type errors (e.g. `"string" + 5`) surface with
     // their precise diagnostics rather than falling through to E0956.
     {

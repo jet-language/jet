@@ -686,7 +686,7 @@ pub(super) fn parse_lints_policy(body: &str) -> Result<Option<Vec<String>>, Mani
     Ok(Some(deny))
 }
 
-/// A `[L0504, L0801]`-shaped list of lint codes (D-LINTPOLICY1). Each entry
+/// A `[L0504, L2401]`-shaped list of lint codes (D-LINTPOLICY1). Each entry
 /// must be shaped like a lint code (`L` followed by 4 digits, the same code
 /// shown in `Warning [L0504]: …`); existence in the diagnostic registry is
 /// not checked here — an unknown-but-well-shaped code simply never fires,
@@ -694,7 +694,7 @@ pub(super) fn parse_lints_policy(body: &str) -> Result<Option<Vec<String>>, Mani
 fn parse_lint_code_list(value: &str) -> Result<Vec<String>, ManifestError> {
     let names = parse_string_list(value).map_err(|_| ManifestError::BadLintsPolicy {
         detail: format!(
-            "`{}:` must be a list like `[L0504, L0801]`",
+            "`{}:` must be a list like `[L0504, L2401]`",
             Syntax::LINTS_FIELD_DENY
         ),
     })?;

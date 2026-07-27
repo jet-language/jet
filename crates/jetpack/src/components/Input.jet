@@ -6,15 +6,15 @@ struct Input {
     placeholder: String
 }
 
-fn input(placeholder: String) -> Input {
+fn input(placeholder: String) => Input {
     return Input.{value: "", placeholder: ~placeholder}
 }
 
-fn type_char(i: Input, ch: String) -> Input {
+fn type_char(i: Input, ch: String) => Input {
     return Input.{value: "{i.value}{ch}", placeholder: ~i.placeholder}
 }
 
-fn to_view(i: Input) -> UiNode {
+fn to_view(i: Input) => UiNode {
     shown := ~i.value
     if i.value == "" { shown = ~i.placeholder }
     return ui.node_role("[{shown}]", 20.0, 1.0, ui.aria_role_text_input())

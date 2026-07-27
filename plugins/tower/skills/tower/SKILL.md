@@ -49,8 +49,8 @@ everything as JSON; `tower status` is the human summary.
    (`tower question list --open`).
 2. `tower brief --agent <me>` — one call replaces reading
    `status`/`next`/`card show`/`decision show`/`question list` separately:
-   picks the top card by the canonical order (lowest `workOrder`, then
-   building > verify > implement > plan; respects `blockedBy` — never route
+   picks the top card by the canonical order (verify > building > implement >
+   plan, then lowest `workOrder`; respects `blockedBy` — never route
    around a gate) and takes a renewable 24-hour work lease in the same step
    (someone else holds an active lease → `E_CLAIMED`, pick another with
    `tower brief '#N' --agent <me>`). Normal card writes by the holder renew
@@ -99,7 +99,7 @@ Board semantics live here. Campaign roles split across sibling skills:
 
 `tower next --burndown` narrows the pool to `track:"epoch"` cards in
 `meta.currentEpoch` plus every `track:"sidequest"` card, agent lanes only, in
-the same `workOrder` order as plain `tower next`. Default **tower-burndown**
+the same lane-first order as plain `tower next`. Default **tower-burndown**
 execution order is sidequests first, then the current epoch, unless the owner
 names a different grouping.
 

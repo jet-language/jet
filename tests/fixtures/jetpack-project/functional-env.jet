@@ -22,19 +22,19 @@ struct Pack {
     overlays: [Overlay]
     prompt: String
 }
-fn nix_source(name: ^String, upstream: ^String) -> Source {
+fn nix_source(name: ^String, upstream: ^String) => Source {
     return Source.{name: name, upstream: upstream, via: "nix"}
 }
-fn core_source(name: ^String, upstream: ^String) -> Source {
+fn core_source(name: ^String, upstream: ^String) => Source {
     return Source.{name: name, upstream: upstream, via: "core"}
 }
-fn overlay(source: ^String, packages: ^[String]) -> Overlay {
+fn overlay(source: ^String, packages: ^[String]) => Overlay {
     return Overlay.{source: source, packages: packages}
 }
-fn pack_item(source: ^String, name: ^String) -> Package {
+fn pack_item(source: ^String, name: ^String) => Package {
     return Package.{source: source, name: name}
 }
-fn flatten_overlay(o: ^Overlay) -> [Package] {
+fn flatten_overlay(o: ^Overlay) => [Package] {
     out: [Package] = []
     names :: o.packages
     source :: o.source
@@ -43,7 +43,7 @@ fn flatten_overlay(o: ^Overlay) -> [Package] {
     }
     return out
 }
-fn packages(pack: ^Pack) -> [Package] {
+fn packages(pack: ^Pack) => [Package] {
     out: [Package] = []
     overlays :: pack.overlays
     loop o; overlays {
@@ -54,31 +54,29 @@ fn packages(pack: ^Pack) -> [Package] {
     }
     return out
 }
-fn source_ref(p: ^Package) -> String {
-    return "{p.source}:{p.name}"
-}
-fn package_refs(pack: ^Pack) -> [String] {
+fn source_ref(p: ^Package) => String = "{p.source}:{p.name}"
+fn package_refs(pack: ^Pack) => [String] {
     out: [String] = []
     loop p; packages(^pack) {
         out.push(source_ref(^p))
     }
     return out
 }
-fn source_directives(sources: ^[Source]) -> [Json] {
+fn source_directives(sources: ^[Source]) => [Json] {
     out: [Json] = []
     loop s; sources {
         out.push(source_json(^s))
     }
     return out
 }
-fn text_array(items: ^[String]) -> [Json] {
+fn text_array(items: ^[String]) => [Json] {
     out: [Json] = []
     loop item; items {
         out.push(Json.Text(item))
     }
     return out
 }
-fn source_json(s: ^Source) -> Json {
+fn source_json(s: ^Source) => Json {
     m: [String: Json] = []
     m["kind"] = Json.Text("source")
     m["name"] = Json.Text(s.name)
@@ -86,19 +84,19 @@ fn source_json(s: ^Source) -> Json {
     m["via"] = Json.Text(s.via)
     return Json.Object(m)
 }
-fn packages_json(pack: ^Pack) -> Json {
+fn packages_json(pack: ^Pack) => Json {
     m: [String: Json] = []
     m["kind"] = Json.Text("packages")
     m["items"] = Json.Array(text_array(package_refs(^pack)))
     return Json.Object(m)
 }
-fn prompt_json(label: ^String) -> Json {
+fn prompt_json(label: ^String) => Json {
     m: [String: Json] = []
     m["kind"] = Json.Text("prompt")
     m["label"] = Json.Text(label)
     return Json.Object(m)
 }
-pub fn shell() -> [Json] {
+pub fn shell() => [Json] {
     pack :: Pack.{sources: [nix_source("stable", "NixOS/nixpkgs/nixos-24.05@github"), nix_source("unstable", "NixOS/nixpkgs/nixpkgs-unstable@github"), core_source("mine", "./jet-pkgs")], overlays: [overlay("stable", ["ripgrep", "fd"]), overlay("unstable", ["neovim"]), overlay("mine", ["hello"])], prompt: "jetpack-fp"}
     directives := source_directives(~pack.sources)
     directives.push(packages_json(~pack))

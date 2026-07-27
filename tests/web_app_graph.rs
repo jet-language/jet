@@ -53,8 +53,8 @@ fn routes_from_expands_convention_files() {
     fs::write(
         root.join("app.jet"),
         r#"use core.web as web
-fn about_page() -> WebPage { return web.page("About", "us") }
-fn app() -> WebApp { return web.app().routes(from: "routes").ssr() }
+fn about_page() => WebPage { return web.page("About", "us") }
+fn app() => WebApp { return web.app().routes(from: "routes").ssr() }
 fn run() {}
 "#,
     )
@@ -88,8 +88,8 @@ fn collision_and_stray_and_dynamic_diagnose() {
     fs::write(
         root.join("collision.jet"),
         r#"use core.web as web
-fn home() -> WebPage { return web.page("h", "b") }
-fn app() -> WebApp { return web.app().route("/", home).routes(from: "routes").csr() }
+fn home() => WebPage { return web.page("h", "b") }
+fn app() => WebApp { return web.app().route("/", home).routes(from: "routes").csr() }
 fn run() {}
 "#,
     )
@@ -100,7 +100,7 @@ fn run() {}
     fs::write(
         root.join("stray.jet"),
         r#"use core.web as web
-fn app() -> WebApp { return web.app().routes(from: "routes").csr() }
+fn app() => WebApp { return web.app().routes(from: "routes").csr() }
 fn run() {}
 "#,
     )
@@ -111,8 +111,8 @@ fn run() {}
     fs::write(
         root.join("dynamic.jet"),
         r#"use core.web as web
-fn pick() -> Int { return 1 }
-fn app() -> WebApp {
+fn pick() => Int { return 1 }
+fn app() => WebApp {
     return web.app().route("/", pick()).csr()
 }
 fn run() {}
@@ -130,10 +130,10 @@ fn render_modes_mount_island_and_shared_tir() {
     fs::write(
         root.join("app.jet"),
         r#"use core.web as web
-fn home() -> WebPage { return web.page("H", "b") }
-fn dash() -> WebPage { return web.page("D", "b") }
+fn home() => WebPage { return web.page("H", "b") }
+fn dash() => WebPage { return web.page("D", "b") }
 fn plugins(prefix: String) {}
-fn app() -> WebApp {
+fn app() => WebApp {
     return web.app()
         .route("/", home)
         .ssg()

@@ -88,7 +88,7 @@ runtime `main`, mapping cleanly to `jet build`. One per unit. It is the
 stays pure and value-level, so there is exactly one place to audit.
 
 ```jet
-fn build(b: BuildContext) --[Fs]-> BuildPlan ? {
+fn build(b: BuildContext) =[Fs]=> BuildPlan ? {
     migrations :: b.find("schema/*.sql")
     b.generate("db_client", gen_db(migrations))?
     return b.plan(sources: ["src/main.jet"], generated: ["db_client"])
@@ -148,7 +148,7 @@ spelling open as **D-BUILDSCOPE1** / **D-BUILDPOLICY1**):
 
 | Layer | Lives | Job |
 |---|---|---|
-| **Declare** | on the code: `#Impure("why") --[Fs, Net]->` | what this build fn needs; travels with the file; statically readable |
+| **Declare** | on the code: `#Impure("why") =[Fs, Net]=>` | what this build fn needs; travels with the file; statically readable |
 | **Permit** | pkg.jet `build:` block, or a flag/prompt for a lone file | whether this project grants it |
 | **Cap** | workspace.jet policy block | org ceiling no member grant can exceed |
 
@@ -215,7 +215,7 @@ for ty in b.program.types() {
         b.error(ty.span, code: "ORG01",
             what: "entity type {ty.name} has no archive method",
             why:  "company policy: every entity must be archivable for GDPR export",
-            fix:  "add `fn archive(self) -> Archived` to {ty.name}")
+            fix:  "add `fn archive(self) => Archived` to {ty.name}")
     }
 }
 ```
@@ -364,7 +364,7 @@ ballots ratified the graph shape:
 Build files must feel like Jet programs, not manifest data. Simple generation:
 
 ```jet
-fn build(b: BuildContext) --[Fs]-> BuildPlan ? {
+fn build(b: BuildContext) =[Fs]=> BuildPlan ? {
     schema :: b.embed("schema/app.sql")?
     b.generate("db_client", make_db_client(schema))?
 
@@ -375,7 +375,7 @@ fn build(b: BuildContext) --[Fs]-> BuildPlan ? {
     return b.plan(default: app)
 }
 
-fn make_db_client(schema: String) -> String {
+fn make_db_client(schema: String) => String {
     tables :: parse_tables(schema)
     out := "module db_client {\n"
 
@@ -390,7 +390,7 @@ fn make_db_client(schema: String) -> String {
 Asset pipeline plus tests:
 
 ```jet
-fn build(b: BuildContext) --[Fs, Exec]-> BuildPlan ? {
+fn build(b: BuildContext) =[Fs, Exec]=> BuildPlan ? {
     atlas :: b.action("pack-sprites",
         inputs: b.find("assets/sprites/*.png")?,
         outputs: ["build/sprites.atlas"],
@@ -415,7 +415,7 @@ fn build(b: BuildContext) --[Fs, Exec]-> BuildPlan ? {
 Org policy as code:
 
 ```jet
-fn build(b: BuildContext) -> BuildPlan ? {
+fn build(b: BuildContext) => BuildPlan ? {
     require_timeouts(b.program)
     require_archival(b.program)
 
@@ -440,7 +440,7 @@ Public front-end toolkit use, outside the compiler:
 ```jet
 use core.compiler as jc
 
-fn run() -> Unit ? {
+fn run() => Unit ? {
     source :: files.read("src/run.jet")?
     parsed :: jc.parse(source)?
     checked :: jc.check(parsed)?
@@ -510,7 +510,7 @@ D-WORKSPACE1/2 + D-MONOREF1 workspace · U10 `pkg.jet`.
 
 | Ballot | Outcome | Decides |
 |---|---|---|
-| D-BUILDENTRY1 | B | `fn build(b: BuildContext) -> BuildPlan ?`, run by `jet build` when root defines one, else default pipeline |
+| D-BUILDENTRY1 | B | `fn build(b: BuildContext) => BuildPlan ?`, run by `jet build` when root defines one, else default pipeline |
 | D-BUILDPOLICY1 | A | tiered authority, `BuildContext`-only; Tier 2 needs `#Impure` + permission; deps denied Tier 2 by default |
 | D-BUILDSCOPE1 | A | entry lives in the unit's own file at every rung; grant chain flag → pkg.jet `build:` → workspace `policy:` |
 | D-BUILDGEN1 | A | generated modules materialize under `.jet/generated/<package>/`, never committed, additive-only, lock-hashed |
@@ -584,7 +584,7 @@ D-BUILDACTION1=A; implementation lives on #219/#220.
 ### 15.2 D-BUILDENTRY1=B — the build entry
 
 **Ratified semantics.** `jet build` runs a root-defined
-`fn build(b: BuildContext) -> BuildPlan ?` when present, otherwise the
+`fn build(b: BuildContext) => BuildPlan ?` when present, otherwise the
 batteries default pipeline runs (opt-in, zero-config forever). No marker, no
 name magic beyond the reserved function name; the typed `BuildContext`
 parameter is the visible authority boundary. Only the selected **root** unit's
@@ -595,15 +595,15 @@ what the plan names.
 
 **API surface (Jet).**
 ```jet
-fn build(b: BuildContext) -> BuildPlan ? {   // optional; --[effects]-> added by POLICY1
+fn build(b: BuildContext) => BuildPlan ? {   // optional; =[effects]=> added by POLICY1
     return b.plan(sources: ["src/main.jet"])
 }
 
 // BuildContext (Tier-0/1 methods; all already-ratified value ops)
-b.find(glob: String)            -> [String] ?     // D-CTFIND1, Tier 1
-b.embed(path: String)           -> String ?       // D-CTIO1,  Tier 1
-b.fetch(url: String, sha256: String) -> Bytes ?   // D-NETDEP1, Tier 1 (backend shipped)
-b.plan(sources: [String], generated: [String], assets: [String]) -> BuildPlan
+b.find(glob: String) => [String] ?     // D-CTFIND1, Tier 1
+b.embed(path: String) => String ?       // D-CTIO1,  Tier 1
+b.fetch(url: String, sha256: String) => Bytes ?   // D-NETDEP1, Tier 1 (backend shipped)
+b.plan(sources: [String], generated: [String], assets: [String]) => BuildPlan
 ```
 `BuildPlan` is an opaque `CtValue::Struct`. The foundation can prove
 entry/run/materialization with `sources`/`generated`/`assets`, but the shipped
@@ -629,7 +629,7 @@ D-BUILDTARGET1=A and D-BUILDACTION1=A.
   what: "`fn build` must take one `BuildContext` and return `BuildPlan ?`"
   why: "the build entry is a typed contract: its parameter is the only
   authority it gets, and its result is the plan the compiler builds"
-  fix: "write `fn build(b: BuildContext) -> BuildPlan ?`"
+  fix: "write `fn build(b: BuildContext) => BuildPlan ?`"
   fixture: `tests/ui/build_entry_bad_sig.{jet,stderr}`
 - **E3520** — two build entries for one unit (file `fn build` **and** a
   `pkg.jet`/`workspace.jet` entry). (Shared with SCOPE1, §15.5.)
@@ -664,7 +664,7 @@ hashes are recorded in `.jet/lock`; `--locked` verifies or rejects drift;
 
 **API surface (Jet).**
 ```jet
-b.generate(name: String, source: String) -> Unit ?   // adds .jet/generated/<pkg>/<name>.jet
+b.generate(name: String, source: String) => Unit ?   // adds .jet/generated/<pkg>/<name>.jet
 return b.plan(sources: ["src/main.jet"], generated: ["api_client"])
 ```
 
@@ -724,7 +724,7 @@ that dependency. Every granted capability is recorded in lock/provenance.
 
 **API surface (Jet).**
 ```jet
-fn build(b: BuildContext) --[Fs]-> BuildPlan ? {        // Tier-1 effect declaration
+fn build(b: BuildContext) =[Fs]=> BuildPlan ? {        // Tier-1 effect declaration
     migrations :: b.find("schema/*.sql")                 // Tier 1: locked, ambient-free
     #Impure("probe local openssl for a legacy C dep") {  // Tier 2: gated + permitted
         b.exec(["pkg-config", "--libs", "openssl"])?
@@ -804,7 +804,7 @@ payload: .{ name: "atlasgen", version: "1.2.0" }
 packages: .{ atlasgen: library }
 build: .{ allow: #(Fs) }                    // standing grant for this package's fn build
 
-fn build(b: BuildContext) --[Fs]-> BuildPlan ? { ... }
+fn build(b: BuildContext) =[Fs]=> BuildPlan ? { ... }
 
 // workspace.jet
 module workspace {
@@ -835,7 +835,7 @@ module workspace {
   grant exceeding the workspace `policy:` cap reuses E3504's message shape.
 
 **Example (I5).** `metaprogramming/build_workspace.jet` (+ a `workspace.jet`
-fixture) — a member `fn build` requesting `--[Fs]->` under a workspace `policy:`
+fixture) — a member `fn build` requesting `=[Fs]=>` under a workspace `policy:`
 that denies `#(Net, Exec)`; expected: member builds run in order, the cap
 holds. Reuse `metaprogramming/build_entry.jet` for the single-file rung.
 
@@ -884,13 +884,13 @@ these two from sema results into the snapshot; do not recompute in comptime.
 
 **API surface (Jet).**
 ```jet
-fn build(b: BuildContext) -> BuildPlan ? {
+fn build(b: BuildContext) => BuildPlan ? {
     for ty in b.program.types() {
         if ty.implements("Entity") and not ty.has_method("archive") {
             b.error(ty.span, code: "ORG01",
                 what: "entity type {ty.name} has no archive method",
                 why:  "company policy: every entity must be archivable for GDPR export",
-                fix:  "add `fn archive(self) -> Archived` to {ty.name}")
+                fix:  "add `fn archive(self) => Archived` to {ty.name}")
         }
     }
     for f in b.program.functions() {
@@ -902,11 +902,11 @@ fn build(b: BuildContext) -> BuildPlan ? {
 }
 
 // snapshot surface
-b.program.types()      -> [TypeInfo]
-b.program.functions()  -> [FunctionInfo]
+b.program.types() => [TypeInfo]
+b.program.functions() => [FunctionInfo]
 TypeInfo:     .name .fields .methods .markers .span .implements(String) .has_method(String)
 FunctionInfo: .name .params .span .effects (.has(String)) .reaches_panic()
-b.error(span, code: String, what: String, why: String, fix: String) -> Unit
+b.error(span, code: String, what: String, why: String, fix: String) => Unit
 ```
 
 **Lands in.**

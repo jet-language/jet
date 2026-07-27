@@ -473,21 +473,37 @@ impl<'a> Checker<'a> {
                             }
                             Some(b)
                         } else {
-                            self.diags.push(Diagnostic::error(
-                                "E0124",
-                                format!(
-                                    "this `if`'s branches produce different types: {} and {}",
-                                    a.show(),
-                                    b.show()
-                                ),
-                                "an `if` used as a value must give the same type on every path (S68)"
-                                    .to_string(),
-                                format!(
-                                    "make both branches produce {} (or the same type)",
-                                    a.show()
-                                ),
-                                Some(span),
-                            ));
+                            if self.collect_item_types.is_empty() {
+                                self.diags.push(Diagnostic::error(
+                                    "E0124",
+                                    format!(
+                                        "this `if`'s branches produce different types: {} and {}",
+                                        a.show(),
+                                        b.show()
+                                    ),
+                                    "an `if` used as a value must give the same type on every path (S68)"
+                                        .to_string(),
+                                    format!(
+                                        "make both branches produce {} (or the same type)",
+                                        a.show()
+                                    ),
+                                    Some(span),
+                                ));
+                            } else {
+                                self.diags.push(Diagnostic::error(
+                                    "E0074",
+                                    "this yielding loop produces incompatible item types"
+                                        .to_string(),
+                                    format!(
+                                        "one yielding loop builds one List, but these paths produce {} and {}",
+                                        a.show(),
+                                        b.show()
+                                    ),
+                                    "convert every item to one type, or split the loops"
+                                        .to_string(),
+                                    Some(span),
+                                ));
+                            }
                             Some(a)
                         }
                     }
@@ -669,7 +685,7 @@ impl<'a> Checker<'a> {
                                                     "Display is the user-facing interpolation hook; Debug is for `{value#Debug}`"
                                                         .to_string(),
                                                     format!(
-                                                        "add `impl {n}.Display {{ fn display(self) -> String {{ … }} }}`"
+                                                        "add `impl {n}.Display {{ fn display(self) => String {{ … }} }}`"
                                                     ),
                                                     Some(inner.span()),
                                                 ));
@@ -760,7 +776,7 @@ impl<'a> Checker<'a> {
                         format!("loop label `{name}` is not a runtime value"),
                         "a loop label names a control-flow destination, so it cannot be read, passed, or stored"
                             .to_string(),
-                        format!("use `{name}.break()` or `{name}.next()` to control the loop"),
+                        format!("use `break({name})` or `next({name})` to control the loop"),
                         Some(*span),
                     ));
                     return None;
@@ -928,7 +944,7 @@ impl<'a> Checker<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0116",
                             format!("`{}` doesn't hand back a value", call.name),
-                            "only calls that declare `-> Type` can be used as a value".to_string(),
+                            "only calls that declare `=> Type` can be used as a value".to_string(),
                             format!(
                                 "call `{}` on its own line, or give it a return type",
                                 call.name

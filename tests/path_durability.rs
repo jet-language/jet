@@ -259,21 +259,21 @@ fn concurrent_atomic_writers_leave_one_whole_payload() {
         r#"
 use core.files as fs
 
-fn write_a() -> Int {{
+fn write_a() => Int {{
     bytes :: [U8].{{ {} }}
     loop _; 1..25 {{
         fs.write_atomic("{}", bytes) ?? panic("writer a failed")
     }}
     return 1
 }}
-fn write_b() -> Int {{
+fn write_b() => Int {{
     bytes :: [U8].{{ {} }}
     loop _; 1..25 {{
         fs.write_atomic("{}", bytes) ?? panic("writer b failed")
     }}
     return 2
 }}
-fn observe() -> Int {{
+fn observe() => Int {{
     loop _; 1..100 {{
         value :: fs.read("{}") ?? panic("observer read failed")
         if value != "old" && value != "{}" && value != "{}" {{
@@ -284,9 +284,9 @@ fn observe() -> Int {{
 }}
 fn run() {{
     taskgroup g {{
-        a :: g.task(() => write_a())
-        b :: g.task(() => write_b())
-        observer :: g.task(() => observe())
+        a :: g.task => write_a()
+        b :: g.task => write_b()
+        observer :: g.task => observe()
         g.all([a, b, observer])
     }}
 }}

@@ -13,7 +13,7 @@ fn arithmetic_and_helper_call() {
         return;
     }
     let src = "\
-fn double(n: Int) -> Int {
+fn double(n: Int) => Int {
     return (n * 2)
 }
 fn run() {
@@ -34,7 +34,7 @@ fn if_expression_and_string_param() {
         return;
     }
     let src = "\
-fn shout(s: String) -> String {
+fn shout(s: String) => String {
     return \"{s}!\"
 }
 fn run() {
@@ -56,7 +56,7 @@ fn if_else_chain_and_return() {
         return;
     }
     let src = "\
-fn label(n: Int) -> String {
+fn label(n: Int) => String {
     if ((n % 15) == 0) {
         return \"FizzBuzz\"
     } else if ((n % 3) == 0) {
@@ -87,7 +87,7 @@ fn subjectless_guards_order_totality_and_nested_forms() {
         return;
     }
     let src = r#"
-fn check(note: String, answer: Bool) -> Bool {
+fn check(note: String, answer: Bool) => Bool {
     print(note)
     return answer
 }
@@ -128,7 +128,7 @@ enum Choice {
     B(Int)
 }
 
-fn choose(note: String, value: Int) -> Choice {
+fn choose(note: String, value: Int) => Choice {
     print(note)
     return Choice.A(value)
 }
@@ -168,11 +168,11 @@ struct Counter {
     n: Int
 }
 impl Counter {
-    fn bumped(self) -> Int {
+    fn bumped(self) => Int {
         return (self.n + 1)
     }
 }
-fn add(a: Int, b: Int) -> Int {
+fn add(a: Int, b: Int) => Int {
     return (a + b)
 }
 fn run() {
@@ -213,7 +213,7 @@ struct Raw {
     value: Int
 }
 
-fn hold(value: Int | Raw) -> Int | Raw {
+fn hold(value: Int | Raw) => Int | Raw {
     return ~value
 }
 
@@ -246,7 +246,7 @@ struct WriteOnly {
 }
 
 impl WriteOnly.Encode {
-    fn encode(self) -> DataTree {
+    fn encode(self) => DataTree {
         return DataTree.Text("write")
     }
 }
@@ -431,7 +431,7 @@ fn run() {
     assert_eq!(stdout, "10\n0\n");
 }
 
-/// Labeled loops: `outer.next()` and `outer.break()` driving a nested
+/// Named loops: `next(outer)` and `break(outer)` driving a nested
 /// range loop. The `'jet_<name>:` labels are resolved at lowering.
 #[test]
 fn labeled_break_and_continue() {
@@ -443,11 +443,11 @@ fn run() {
     outer :: loop i; 1..3 {
         loop j; 1..3 {
             if (j == 2) {
-                outer.next()
+                next(outer)
             }
             print(\"{i}-{j}\")
             if (i == 2) {
-                outer.break()
+                break(outer)
             }
         }
     }
@@ -456,12 +456,12 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_labeled", src);
     assert_eq!(code, 0);
-    // i=1: j=1 prints 1-1, i!=2 so j=2 -> outer.next().
-    // i=2: j=1 prints 2-1, i==2 -> outer.break().
+    // i=1: j=1 prints 1-1, i!=2 so j=2 -> next(outer).
+    // i=2: j=1 prints 2-1, i==2 -> break(outer).
     assert_eq!(stdout, "1-1\n2-1\ndone\n");
 }
 
-/// D-LOOPLABEL3 / D-ORRETURN-CANON1: named dot exits are also valid `??`
+/// D-LOOPLABEL3 / D-ORRETURN-CANON1: named exits are also valid `??`
 /// fallbacks and target the named loop's normal continuation/break edges.
 #[test]
 fn labeled_break_and_continue_fallbacks() {
@@ -472,9 +472,9 @@ fn labeled_break_and_continue_fallbacks() {
 fn run() {
     outer :: loop text; ["skip", "7"] {
         loop {
-            value :: Int.parse(text) ?? outer.next()
+            value :: Int.parse(text) ?? next(outer)
             print(value)
-            Int.parse("stop") ?? outer.break()
+            Int.parse("stop") ?? break(outer)
         }
     }
     print("done")
@@ -483,6 +483,140 @@ fn run() {
     let (code, stdout) = build_and_run("tir_labeled_fallbacks", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "7\ndone\n");
+}
+
+#[test]
+fn yielding_and_result_loops_compile_and_run() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+fn find(xs: [Int]) => Int {
+    found :: loop {
+        loop x; xs {
+            if x > 2 break(found, x)
+        }
+        break -1
+    }
+    found
+}
+
+fn outer_result() => Int {
+    result :: loop {
+        ignored :: loop {
+            break(result, 9)
+        }
+        break 0
+    }
+    result
+}
+
+fn identity(value: Int) => Int = value
+
+fn nested_binary_exit() => Int {
+    result :: loop {
+        ignored :: (loop {
+            break(result, 11)
+            break 1
+        }) + 2
+        break 0
+    }
+    result
+}
+
+fn nested_call_exit() => Int {
+    result :: loop {
+        ignored :: identity(loop {
+            break(result, 12)
+            break 1
+        })
+        break 0
+    }
+    result
+}
+
+fn nested_condition_exit() => Int {
+    result :: loop {
+        if (loop {
+            break(result, 13)
+            break 1
+        }) > 0 {
+            break 0
+        }
+        break -1
+    }
+    result
+}
+
+fn counted_init_exit() => Int {
+    result :: loop {
+        loop i := (loop {
+            break(result, 14)
+            break 0
+        }); i < 1; i++ {}
+        break 0
+    }
+    result
+}
+
+fn counted_step_exit() => Int {
+    result :: loop {
+        loop i := 0; i < 2; i = (loop {
+            break(result, 15)
+            break 0
+        }) {}
+        break 0
+    }
+    result
+}
+
+fn value_if_exit() => Int {
+    result :: loop {
+        ignored :: if true -> {
+            break(result, 16)
+            0
+        } else -> 0
+        break 0
+    }
+    result
+}
+
+fn run() {
+    xs :: [Int].{ 1, 2, 3, 4 }
+    prefix :: loop x; xs -> {
+        if x > 3 break
+        x * 2
+    }
+    rows :: loop x; xs, y; [10, 20] -> {
+        if x == 2 && y == 20 break
+        x + y
+    }
+    outer :: loop x; xs {
+        ignored :: loop {
+            if x == 1 next(outer)
+            if x == 2 break(outer)
+            break 0
+        }
+        print(ignored)
+    }
+    print(prefix)
+    print(rows)
+    print(find(xs))
+    print(outer_result())
+    print(nested_binary_exit())
+    print(nested_call_exit())
+    print(nested_condition_exit())
+    print(counted_init_exit())
+    print(counted_step_exit())
+    print(value_if_exit())
+}
+"#;
+    let (code, stdout) = build_and_run("tir_loop_values", src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "[2, 4, 6]\n[11, 21, 12]\n3\n9\n11\n12\n13\n14\n15\n16\n"
+    );
 }
 
 /// D-LOOP-HEADER2/D-LOOP-ADVANCE2/D-LOOP-CONTROLWORD1: every loop header uses
@@ -494,12 +628,12 @@ fn unified_loop_headers_stride_and_next_edges() {
         return;
     }
     let src = r#"
-fn source() -> [Int] {
+fn source() => [Int] {
     print("source")
     return [0, 1, 2, 3, 4, 5, 6]
 }
 
-fn stride() -> Int {
+fn stride() => Int {
     print("stride")
     return 3
 }
@@ -512,7 +646,7 @@ fn run() {
 
     outer := : loop i.{ 0; i < 3; i += 1 { }
         loop {
-            if i < 2 { outer.next() }
+            if i < 2 { next(outer) }
             break
         }
         print("state {i}")
@@ -524,11 +658,11 @@ fn run() {
     assert_eq!(stdout, "source\nstride\n0\n3\n6\nstate 2\n");
 
     let invalid = r#"
-fn source() -> [Int] {
+fn source() => [Int] {
     print("source")
     return [1]
 }
-fn stride() -> Int {
+fn stride() => Int {
     print("stride")
     return 0
 }
@@ -566,10 +700,10 @@ struct Point {
     x: Int
     y: Int
 }
-fn sum_pt(p: Point) -> Int {
+fn sum_pt(p: Point) => Int {
     return (p.x + p.y)
 }
-fn origin() -> Point {
+fn origin() => Point {
     return Point.{ x: 0, y: 0 }
 }
 fn run() {
@@ -629,7 +763,7 @@ struct Outer {
     inner: Inner
     label: Int
 }
-fn deep(o: Outer) -> Int {
+fn deep(o: Outer) => Int {
     return (o.inner.v + o.label)
 }
 fn run() {
@@ -660,14 +794,14 @@ enum Light {
     Yellow
     Green
 }
-fn next(light: Light) -> Light {
+fn next(light: Light) => Light {
     if light == {
         Red -> { return Light.Yellow }
         Yellow -> { return Light.Green }
         Green -> { return Light.Red }
     }
 }
-fn label(light: Light) -> String {
+fn label(light: Light) => String {
     if light == {
         Red -> { return \"stop\" }
         Yellow -> { return \"caution\" }
@@ -700,7 +834,7 @@ enum Conn {
     Idle(Int)
     Closed
 }
-fn describe(c: Conn) -> String {
+fn describe(c: Conn) => String {
     if c == {
         Active(id) | Reconnecting(id) -> { return \"live:{id}\" }
         Idle(_) -> { return \"idle\" }
@@ -732,7 +866,7 @@ enum Http {
     Good(Int)
     Fail(Int)
 }
-fn classify(r: Http) -> String {
+fn classify(r: Http) => String {
     if r == {
         Good(200..299) -> { return \"success\" }
         Good(400..499) -> { return \"client error\" }
@@ -762,7 +896,7 @@ fn arm_head_range_dispatch() {
         return;
     }
     let src = "\
-fn grade(score: Int) -> String {
+fn grade(score: Int) => String {
     if score == {
         0..59 -> { return \"F\" }
         60..69 -> { return \"D\" }

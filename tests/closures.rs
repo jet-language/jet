@@ -5,7 +5,7 @@ mod common;
 #[test]
 fn lambdas_compile_to_rust() {
     let src = r#"
-fn apply(f: fn(Int) -> Int, x: Int) -> Int {
+fn apply(f: fn(Int) => Int, x: Int) => Int {
     return f(f(x))
 }
 
@@ -68,10 +68,10 @@ fn run() {
     for (role, source) in [
         (
             "item",
-            r#"fn bump(n: Int) -> Int { return n + 1 }
+            r#"fn bump(n: Int) => Int { return n + 1 }
 fn run() {
-    callbacks :: [fn(Int) -> Int].{ bump }
-    ignored :: callbacks.para_filter((callback: fn(Int) -> Int) => true)
+    callbacks :: [fn(Int) => Int].{ bump }
+    ignored :: callbacks.para_filter((callback: fn(Int) => Int) => true)
 }
 "#,
         ),
@@ -87,8 +87,8 @@ fn run() {
             r#"fn run() {
     ignored :: [1].para_fold(
         () => (x: Int) => x,
-        (callback: fn(Int) -> Int, n: Int) => callback,
-        (left: fn(Int) -> Int, right: fn(Int) -> Int) => left
+        (callback: fn(Int) => Int, n: Int) => callback,
+        (left: fn(Int) => Int, right: fn(Int) => Int) => left
     )
 }
 "#,
@@ -96,8 +96,8 @@ fn run() {
         (
             "enum payload",
             r#"alias Boxed<T> = T
-enum CallbackPayload { Callback(Boxed<fn(Int) -> Int>) }
-fn bump(n: Int) -> Int { return n + 1 }
+enum CallbackPayload { Callback(Boxed<fn(Int) => Int>) }
+fn bump(n: Int) => Int { return n + 1 }
 fn run() {
     payloads :: [CallbackPayload].{ CallbackPayload.Callback(bump) }
     ignored :: payloads.para_map((payload: CallbackPayload) => 1)
@@ -165,7 +165,7 @@ fn run() {
 #[test]
 fn stored_callback_boxes() {
     let src = r#"
-fn twice(f: fn(Int) -> Int, x: Int) -> Int {
+fn twice(f: fn(Int) => Int, x: Int) => Int {
     return f(f(x))
 }
 
@@ -179,22 +179,47 @@ fn run() {
 }
 
 #[test]
-fn take_prefix_moves_non_clone_capture() {
+fn multiline_callable_tail_returns_the_declared_result() {
+    let src = r#"
+fn double(value: Int) => Int {
+    adjusted :: value + 1
+    adjusted * 2
+}
+
+fn run() {
+    print(double(4))
+}
+"#;
+    let out = jet::compile(src).expect("multiline callable tail should return");
+    assert!(
+        out.rust.contains("return (user_adjusted).jet_mul"),
+        "the final expression must lower as the function result:\n{}",
+        out.rust
+    );
+}
+
+#[test]
+fn implicit_capture_copies_cloneable_and_moves_non_cloneable_values() {
     let src = r#"
 struct NoClone { label: Int }
 fn run() {
     item :: NoClone.{ label: 7 }
-    f :: take(item) (n: Int) => n + item.label
+    f :: (n: Int) => n + item.label
+    values :: [1, 2, 3]
+    g :: () => values.len()
+    print(values.len())
     print(f(1))
+    print(g())
 }
 "#;
-    jet::compile(src).expect("take-prefixed lambda should compile");
+    jet::compile(src)
+        .expect("captures should copy cloneable values and move non-cloneable values");
 }
 
 #[test]
 fn fn_field_callback() {
     let src = r#"
-struct Worker { step: fn(Int) -> Int }
+struct Worker { step: fn(Int) => Int }
 fn run() {
     w :: Worker.{ step: (n: Int) => n + 1 }
     print(w.step(4))

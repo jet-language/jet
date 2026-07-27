@@ -1216,7 +1216,7 @@ fn lsp_execute_command_impact_returns_report() {
     if !jet.exists() {
         return;
     }
-    let source = "fn add(a: Int, b: Int) -> Int {\n    return a + b\n}\nfn run() {\n    print(add(1, 2))\n}\n";
+    let source = "fn add(a: Int, b: Int) => Int {\n    return a + b\n}\nfn run() {\n    print(add(1, 2))\n}\n";
     let uri = "file:///tmp/lsp_execute_impact_test.jet";
 
     run_transcript(
@@ -1482,7 +1482,7 @@ fn lsp_completion_returns_snippets_and_auto_imports() {
     std::fs::create_dir_all(root.join("src")).expect("create LSP source dirs");
     std::fs::write(
         root.join("app/store.jet"),
-        "fn ImportedHelper() -> Int {\n    return 1\n}\nfn run() {}\n",
+        "fn ImportedHelper() => Int {\n    return 1\n}\nfn run() {}\n",
     )
     .expect("write imported module");
     let path = root.join("src/main.jet");
@@ -1726,7 +1726,7 @@ fn lsp_signature_help_returns_active_parameter() {
     if !jet.exists() {
         return;
     }
-    let source = "fn add(a: Int, b: Int) -> Int {\n    return a + b;\n}\nfn run() {\n    r :: add(1, 2)\n}\n";
+    let source = "fn add(a: Int, b: Int) => Int {\n    return a + b;\n}\nfn run() {\n    r :: add(1, 2)\n}\n";
     let uri = "file:///tmp/lsp_signature_help_test.jet";
 
     run_transcript(
@@ -1752,7 +1752,7 @@ fn lsp_signature_help_returns_active_parameter() {
                     uri
                 ),
                 expect_contains: Some(vec![
-                    "fn add(a: Int, b: Int) --[]-> Int".to_string(),
+                    "fn add(a: Int, b: Int) =[]=> Int".to_string(),
                     "\"activeParameter\":1".to_string(),
                     "b: Int".to_string(),
                 ]),
@@ -1771,7 +1771,7 @@ fn lsp_document_symbol_returns_checked_outline() {
     if !jet.exists() {
         return;
     }
-    let source = "struct Point { x: Int }\nenum Color { Red Green }\nfn add(a: Int, b: Int) -> Int {\n    return a + b;\n}\n";
+    let source = "struct Point { x: Int }\nenum Color { Red Green }\nfn add(a: Int, b: Int) => Int {\n    return a + b;\n}\n";
     let uri = "file:///tmp/lsp_document_symbol_test.jet";
 
     run_transcript(
@@ -1819,7 +1819,7 @@ fn lsp_wave2_navigation_features() {
     if !jet.exists() {
         return;
     }
-    let source = "// file note one\n// file note two\n\nfn add(a: Int, b: Int) -> Int {\n    total :: a + b\n    return total\n}\n\nfn run() {\n    value :: add(1, 2)\n    print(value)\n}\n";
+    let source = "// file note one\n// file note two\n\nfn add(a: Int, b: Int) => Int {\n    total :: a + b\n    return total\n}\n\nfn run() {\n    value :: add(1, 2)\n    print(value)\n}\n";
     let uri = "file:///tmp/lsp_wave2_nav_test.jet";
 
     run_transcript(
@@ -1903,7 +1903,7 @@ fn lsp_wave3_prepare_rename_semantic_range_and_call_hierarchy() {
     if !jet.exists() {
         return;
     }
-    let source = "fn add(a: Int, b: Int) -> Int {\n    return a + b\n}\n\nfn caller() {\n    result :: add(1, 2)\n    print(result)\n}\n\nfn run() {\n    caller()\n}\n";
+    let source = "fn add(a: Int, b: Int) => Int {\n    return a + b\n}\n\nfn caller() {\n    result :: add(1, 2)\n    print(result)\n}\n\nfn run() {\n    caller()\n}\n";
     let uri = "file:///tmp/lsp_wave3_power_test.jet";
     let add_item = format!(
         r#"{{"name":"add","kind":12,"uri":"{}","range":{{"start":{{"line":0,"character":3}},"end":{{"line":0,"character":6}}}},"selectionRange":{{"start":{{"line":0,"character":3}},"end":{{"line":0,"character":6}}}}}}"#,
@@ -2009,7 +2009,7 @@ fn lsp_type_hierarchy_trait_impls() {
     if !jet.exists() {
         return;
     }
-    let source = "trait Renderable {\n    fn render(self) -> String\n}\n\nstruct Button {\n    label: String\n    impl Renderable {\n        fn render(self) -> String {\n            return self.label\n        }\n    }\n}\n\nfn run() {\n    b :: Button.{label: \"ok\"}\n    print(b.render())\n}\n";
+    let source = "trait Renderable {\n    fn render(self) => String\n}\n\nstruct Button {\n    label: String\n    impl Renderable {\n        fn render(self) => String {\n            return self.label\n        }\n    }\n}\n\nfn run() {\n    b :: Button.{label: \"ok\"}\n    print(b.render())\n}\n";
     let uri = "file:///tmp/lsp_type_hierarchy_test.jet";
     let button_item = format!(r#"{{"name":"Button","kind":23,"uri":"{}"}}"#, uri);
     let trait_item = format!(r#"{{"name":"Renderable","kind":11,"uri":"{}"}}"#, uri);
@@ -2160,7 +2160,7 @@ fn lsp_hover_returns_signature() {
     if !jet.exists() {
         return;
     }
-    let source = "fn add(a: Int, b: Int) -> Int {\n    return a + b;\n}\nfn run() {\n    r :: add(1, 2)\n}\n";
+    let source = "fn add(a: Int, b: Int) => Int {\n    return a + b;\n}\nfn run() {\n    r :: add(1, 2)\n}\n";
     let uri = "file:///tmp/lsp_hover_test.jet";
 
     run_transcript(
@@ -2197,7 +2197,7 @@ fn lsp_hover_returns_signature() {
 
 #[test]
 fn lsp_late_cancel_does_not_poison_a_reused_request_id() {
-    let source = "fn add(a: Int, b: Int) -> Int { return a + b; }\n";
+    let source = "fn add(a: Int, b: Int) => Int { return a + b; }\n";
     let uri = "file:///tmp/lsp_cancel_test.jet";
     run_transcript(
         source,
@@ -2240,7 +2240,7 @@ fn lsp_late_cancel_does_not_poison_a_reused_request_id() {
 
 #[test]
 fn lsp_accepts_hidden_generic_constructor_arguments() {
-    let source = "struct Box<T> {\n    value: T\n}\nimpl Box {\n    fn new(value: ^T) -> Box<T> { return Box<T>.{ value: value } }\n}\nfn run() {\n    inferred :: Box.new(1)\n    explicit :: Box<Int>.new(2)\n}\n";
+    let source = "struct Box<T> {\n    value: T\n}\nimpl Box {\n    fn new(value: ^T) => Box<T> { return Box<T>.{ value: value } }\n}\nfn run() {\n    inferred :: Box.new(1)\n    explicit :: Box<Int>.new(2)\n}\n";
     let uri = "file:///tmp/lsp_generic_constructor_infer.jet";
 
     run_transcript(
@@ -2276,7 +2276,7 @@ fn lsp_accepts_hidden_generic_constructor_arguments() {
 
 #[test]
 fn lsp_hover_preserves_via_effect_row() {
-    let source = "fn invoke(act: fn() --[Io]->) --[via act]-> { act() }\nfn run() {}\n";
+    let source = "fn invoke(act: fn() =[Io]=>) =[via act]=> { act() }\nfn run() {}\n";
     let uri = "file:///tmp/lsp_hover_effect_via.jet";
 
     run_transcript(
@@ -2300,7 +2300,7 @@ fn lsp_hover_preserves_via_effect_row() {
                     r#"{{"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":0,"character":3}}}}}}"#,
                     uri
                 ),
-                expect_contains: Some(vec!["--[via act]->".to_string()]),
+                expect_contains: Some(vec!["=[via act]=>".to_string()]),
             },
             TranscriptStep::Send {
                 msg: r#"{"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}}"#.to_string(),
@@ -2398,8 +2398,8 @@ fn lsp_definition_uses_build_graph_generated_source() {
     if !jet.exists() {
         return;
     }
-    let source = r#"fn build(b: BuildContext) -> BuildPlan ? {
-    b.generate("made", "fn generated_value() -> String {{ return \"hi\" }}")?
+    let source = r#"fn build(b: BuildContext) => BuildPlan ? {
+    b.generate("made", "fn generated_value() => String {{ return \"hi\" }}")?
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/made.jet"], [])?
     return b.plan(app)
 }
@@ -2492,12 +2492,12 @@ fn lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words() {
 
     let source = r#"#Test("semantic") {
 }
-#Unsafe("audit") fn archive(name: ^String, slot: &Int) -> String {
+#Unsafe("audit") fn archive(name: ^String, slot: &Int) => String {
     saved :: copy name
     return saved
 }
-fn clean(x: Int) --[]-> Int { return x }
-fn retain(window: View<Int>) -> View<Int> { return window }
+fn clean(x: Int) =[]=> Int { return x }
+fn retain(window: View<Int>) => View<Int> { return window }
 fn run() {
     old :: 1
     while :: 2
@@ -2517,9 +2517,9 @@ fn run() {
         escaped :: maybe() ?? (next)
         next
     }
-    outer :: loop { outer.next() }
+    outer :: loop { next(outer) }
 }
-fn next() -> Int { return 1 }
+fn next() => Int { return 1 }
 "#;
     let uri = "file:///tmp/lsp_semantic_highlight_stage4.jet";
 
@@ -2715,7 +2715,7 @@ fn lsp_inlay_hints_include_scattered_method_breadcrumbs() {
     if !jet.exists() {
         return;
     }
-    let source = "trait DrawThing {\n    fn render(self) -> String\n}\n\nstruct Widget {\n    title: String\n}\n\nimpl Widget {\n    fn size(self) -> Int {\n        return 1\n    }\n}\n\nimpl Widget.DrawThing {\n    fn render(self) -> String {\n        return self.title\n    }\n}\n\nfn run() {\n    w :: Widget.{title: \"ok\"}\n    print(w.render())\n}\n";
+    let source = "trait DrawThing {\n    fn render(self) => String\n}\n\nstruct Widget {\n    title: String\n}\n\nimpl Widget {\n    fn size(self) => Int {\n        return 1\n    }\n}\n\nimpl Widget.DrawThing {\n    fn render(self) => String {\n        return self.title\n    }\n}\n\nfn run() {\n    w :: Widget.{title: \"ok\"}\n    print(w.render())\n}\n";
     let uri = "file:///tmp/lsp_breadcrumb_hint_test.jet";
 
     run_transcript(
@@ -2741,8 +2741,8 @@ fn lsp_inlay_hints_include_scattered_method_breadcrumbs() {
                     uri
                 ),
                 expect_contains: Some(vec![
-                    "+ fn size() --[]-> Int".to_string(),
-                    "+ fn render() --[]-> String".to_string(),
+                    "+ fn size() =[]=> Int".to_string(),
+                    "+ fn render() =[]=> String".to_string(),
                 ]),
             },
             TranscriptStep::Send {
@@ -3077,7 +3077,6 @@ fn c44_lsp_keywords_derive_from_syntax() {
         Syntax::KW_IMPL,
         Syntax::KW_UNSAFE,
         Syntax::KW_TEST,
-        Syntax::KW_PURE,
         Syntax::KW_TODO,
         Syntax::LIT_TRUE,
         Syntax::LIT_FALSE,

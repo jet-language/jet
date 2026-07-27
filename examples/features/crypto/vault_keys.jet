@@ -4,7 +4,7 @@ use core.crypto as crypto
 use core.vault as vault
 use core.vault.expert as vault_expert
 
-fn provision() --[Secret, Io]-> {
+fn provision() =[Secret, Io]=> {
     plan :: vault.prepare_generate<crypto.SigningKey>("release") ?? return
     write :: vault.authorize_write(&plan, "create release signer") ?? return
     key_ref :: vault.commit_generate(^write, ^plan) ?? return
@@ -13,7 +13,7 @@ fn provision() --[Secret, Io]-> {
 
 // Compile-time surface proof for the full safe lifecycle. The example's run
 // path remains read-only; applications call a mutation flow only when needed.
-fn lifecycle_surface() --[Secret]-> {
+fn lifecycle_surface() =[Secret]=> {
     key :: crypto.SigningKey.new_random() ?? return
     store_plan :: vault.prepare_store<crypto.SigningKey>("staged", ^key) ?? return
     store_write :: vault.authorize_write(&store_plan, "store generated signer") ?? return
@@ -32,7 +32,7 @@ fn lifecycle_surface() --[Secret]-> {
     vault.commit_revoke(^revoke_write, ^revoke_plan) ?? return
 }
 
-fn expert_import_surface() --[Secret]-> {
+fn expert_import_surface() =[Secret]=> {
     #Unsafe("restore audited raw signing-key material") {
         bytes :: [U8].{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
         plan :: vault_expert.prepare_import_signing("restored", ^bytes) ?? return
@@ -41,7 +41,7 @@ fn expert_import_surface() --[Secret]-> {
     }
 }
 
-fn run() --[Secret, Io]-> {
+fn run() =[Secret, Io]=> {
     current :: vault.current<crypto.SigningKey>("release") ?? panic("vault unavailable")
     if current == .Val(key_ref) {
         print("current release key: {key_ref}")

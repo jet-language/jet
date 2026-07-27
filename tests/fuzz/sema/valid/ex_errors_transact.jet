@@ -12,7 +12,7 @@ enum Fail {
 }
 
 // A clean transaction: both commit hooks fire LIFO after the block commits.
-fn place_order(items: Int) -> Int ? Fail {
+fn place_order(items: Int) => Int ? Fail {
     #Transact(order) {
         print("reserving stock")
         order.on_commit(() => {
@@ -34,7 +34,7 @@ fn place_order(items: Int) -> Int ? Fail {
 // then a `?`-failure while crediting `to`. The auto-snapshot restores `from` (and `to`)
 // to their pre-block values — so the caller observes the balances unchanged after a
 // failed transfer, with zero rollback annotation.
-fn transfer(from: &Int, to: &Int, amount: Int) -> Int ? Fail {
+fn transfer(from: &Int, to: &Int, amount: Int) => Int ? Fail {
     #Transact(tx) {
         from -= amount  // debit — `from` auto-snapshotted on entry
         to += amount  // credit — `to` auto-snapshotted on entry
@@ -47,7 +47,7 @@ fn transfer(from: &Int, to: &Int, amount: Int) -> Int ? Fail {
 }
 
 // Layer 3 (explicit on_rollback): the author writes the undo by hand.
-fn reserve_seat(ok_path: Bool) -> Int ? Fail {
+fn reserve_seat(ok_path: Bool) => Int ? Fail {
     #Transact(booking) {
         print("seat held")
         booking.on_rollback(() => {

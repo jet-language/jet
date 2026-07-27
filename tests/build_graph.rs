@@ -1173,7 +1173,7 @@ fn wasm_build_plugins_handshake_grants_policy_and_return_plan_contributions() {
         .with_generated_module(GeneratedModuleSpec::new(
             "shaders",
             ".jet/generated/shaders.jet",
-            "fn shader_count() -> Int { return 1 }",
+            "fn shader_count() => Int { return 1 }",
         ));
 
     let applied = b

@@ -3,7 +3,7 @@
 use core.crypto as crypto
 use core.vault as vault
 
-fn recipient_surface() --[Secret]-> {
+fn recipient_surface() =[Secret]=> {
     create :: vault.prepare_generate<crypto.SigningKey>("release") ?? return
     create_write :: vault.authorize_write(&create, "create release signer") ?? return
     key_ref :: vault.commit_generate(^create_write, ^create) ?? return
@@ -18,7 +18,7 @@ fn recipient_surface() --[Secret]-> {
     _ :: vault.commit_import_wrapped(^write, ^plan) ?? return
 }
 
-fn passphrase_surface() --[Secret]-> {
+fn passphrase_surface() =[Secret]=> {
     create :: vault.prepare_generate<crypto.X25519SecretKey>("transport") ?? return
     create_write :: vault.authorize_write(&create, "create transport key") ?? return
     key_ref :: vault.commit_generate(^create_write, ^create) ?? return

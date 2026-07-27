@@ -918,7 +918,7 @@ fn function_signature_from_parts(
         .collect::<Vec<_>>()
         .join(", ");
     let ret = ret
-        .map(|ty| format!(" -> {ty}"))
+        .map(|ty| format!(" => {ty}"))
         .unwrap_or_default();
     format!("fn {name}({params}){ret}")
 }

@@ -51,11 +51,9 @@ use core.reactive as reactive
 // The native entry point paints the canonical tree through the null backend.
 // Browser-only reactive entry points are exercised by the fake-DOM harness and
 // by ui_showcase.html.
-fn stat_line(label: String, value: String) -> UiNode {
-    return ui.text("{label}: {value}")
-}
+fn stat_line(label: String, value: String) => UiNode = ui.text("{label}: {value}")
 
-fn dashboard_view(cards: [UiNode]) -> UiNode { return ui.box(cards) }
+fn dashboard_view(cards: [UiNode]) => UiNode = ui.box(cards)
 
 struct Color {
     r: Int
@@ -72,7 +70,7 @@ struct StatCard {
 }
 
 #Target(Js)
-fn hex_digit(n: Int) -> String {
+fn hex_digit(n: Int) => String {
     if n == 0 { return "0" }
     if n == 1 { return "1" }
     if n == 2 { return "2" }
@@ -92,7 +90,7 @@ fn hex_digit(n: Int) -> String {
 }
 
 #Target(Js)
-fn hi_nibble(n: Int) -> Int {
+fn hi_nibble(n: Int) => Int {
     if n < 16 { return 0 }
     if n < 32 { return 1 }
     if n < 48 { return 2 }
@@ -112,31 +110,29 @@ fn hi_nibble(n: Int) -> Int {
 }
 
 #Target(Js)
-fn hex_byte(n: Int) -> String {
+fn hex_byte(n: Int) => String {
     hi :: hi_nibble(n)
     lo :: n - (hi * 16)
     return "{hex_digit(hi)}{hex_digit(lo)}"
 }
 
 #Target(Js)
-fn to_hex(c: Color) -> String {
-    return "#{hex_byte(c.r)}{hex_byte(c.g)}{hex_byte(c.b)}"
-}
+fn to_hex(c: Color) => String = "#{hex_byte(c.r)}{hex_byte(c.g)}{hex_byte(c.b)}"
 
 #Target(Js)
-fn altitude_color() -> Color { return Color.{r: 51, g: 102, b: 255} }
+fn altitude_color() => Color { return Color.{r: 51, g: 102, b: 255} }
 
 #Target(Js)
-fn airspeed_color() -> Color { return Color.{r: 18, g: 184, b: 134} }
+fn airspeed_color() => Color { return Color.{r: 18, g: 184, b: 134} }
 
 #Target(Js)
-fn fuel_color() -> Color { return Color.{r: 232, g: 121, b: 12} }
+fn fuel_color() => Color { return Color.{r: 232, g: 121, b: 12} }
 
 #Target(Js)
-fn boost_color() -> Color { return Color.{r: 136, g: 85, b: 238} }
+fn boost_color() => Color { return Color.{r: 136, g: 85, b: 238} }
 
 #Target(Js)
-fn stat_card(label: String, value: String, color: Color, x: Float, y: Float) -> StatCard {
+fn stat_card(label: String, value: String, color: Color, x: Float, y: Float) => StatCard {
     return StatCard.{label: ~label, value: ~value, color: ~color, x: x, y: y}
 }
 
@@ -152,7 +148,7 @@ fn paint_stat_card(card: StatCard) {
 }
 
 #Target(Js)
-fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) -> Float {
+fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) => Float {
     if elapsed_ms <= 0 { return from }
     if elapsed_ms >= duration_ms { return to }
     t :: Float.from_int(elapsed_ms) / Float.from_int(duration_ms)
@@ -160,12 +156,12 @@ fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) -> Float {
     return from + (to - from) * eased
 }
 
-fn init_app() -> Signal<Int> {
+fn init_app() => Signal<Int> {
     boosts :: reactive.signal(0)
     paint_stat_card(stat_card("Altitude", "12,400 ft", altitude_color(), 0.0, 0.0))
     paint_stat_card(stat_card("Airspeed", "410 kt", airspeed_color(), 190.0, 0.0))
     counter_backend :: ui.null_backend()
-    ui.reactive_render(take(counter_backend) () => {
+    ui.reactive_render(() => {
         hex :: to_hex(boost_color())
         node :: ui.node_color("Boosts: {boosts.get()}", 170.0, 74.0, hex)
         constraint :: ui.constraint(0.0, 0.0, 400.0, 200.0)
@@ -177,10 +173,10 @@ fn init_app() -> Signal<Int> {
     return boosts
 }
 
-fn init_fuel() -> Signal<Int> {
+fn init_fuel() => Signal<Int> {
     elapsed :: reactive.signal(0)
     backend :: ui.null_backend()
-    ui.reactive_render(take(backend) () => {
+    ui.reactive_render(() => {
         hex :: to_hex(fuel_color())
         value :: tween(40.0, 95.0, elapsed.get(), 600)
         pct :: Int.from_float(value) ?? 0

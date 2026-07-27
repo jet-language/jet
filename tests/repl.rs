@@ -489,7 +489,7 @@ fn repl_reset_clears_bindings() {
 
 #[test]
 fn repl_function_declare_and_call() {
-    let inputs = &["fn double(n: Int) -> Int { return n * 2 }", "double(5)"];
+    let inputs = &["fn double(n: Int) => Int { return n * 2 }", "double(5)"];
     let out = run_transcript(inputs, None);
     assert!(
         out.contains("ok"),
@@ -874,7 +874,7 @@ fn repl_probe_exact_outputs() {
     std::fs::create_dir_all(&fixture).ok();
     std::fs::write(
         fixture.join("helper.jet"),
-        "fn add_three(x: Int) -> Int { return x + 3; }\n",
+        "fn add_three(x: Int) => Int { return x + 3; }\n",
     )
     .ok();
     let project_dir = fixture.to_string_lossy().to_string();
@@ -892,7 +892,7 @@ fn repl_project_loads_items() {
     std::fs::create_dir_all(&fixture).ok();
     std::fs::write(
         fixture.join("helper.jet"),
-        "fn add_three(x: Int) -> Int { return x + 3; }\n",
+        "fn add_three(x: Int) => Int { return x + 3; }\n",
     )
     .expect("write fixture");
 
@@ -1149,7 +1149,7 @@ fn repl_all_complex_binding_shapes_survive_across_turns() {
     let out = run_transcript(
         &[
             "enum State { Ready(Int) }",
-            "fn state_value(s: State) -> Int { if s == { .Ready(value) -> { return value } } return 0 }",
+            "fn state_value(s: State) => Int { if s == { .Ready(value) -> { return value } } return 0 }",
             "items: [String] :: [\"jet\", \"repl\"]",
             "items[0]",
             "counts: [String: Int] :: [\"jet\": 2]",
@@ -1833,7 +1833,7 @@ fn docs_lookup_builtin_list_filter_matches_ratified_mock() {
     let session = Session::new();
     let doc = Docs::lookup(&session, "List.filter").expect("List.filter has builtin docs");
     assert!(
-        doc.starts_with("List.filter(f: fn(T) -> Bool) -> List<T>"),
+        doc.starts_with("List.filter(f: fn(T) => Bool) -> List<T>"),
         "got: {doc:?}"
     );
     assert!(doc.contains("Keeps items where f(item) is true."), "got: {doc:?}");
@@ -1847,7 +1847,7 @@ fn shared_semantic_symbol_has_complete_identity_and_docs() {
     assert_eq!(symbol.module, "core.collections");
     assert_eq!(symbol.owner, Some("List"));
     assert_eq!(symbol.member, "filter");
-    assert!(symbol.signature.contains("fn(T) -> Bool"));
+    assert!(symbol.signature.contains("fn(T) => Bool"));
     assert!(!symbol.summary.is_empty());
     assert!(!symbol.example.is_empty());
     assert_eq!(symbol.provenance, "builtin");
@@ -1941,7 +1941,7 @@ fn bare_question_name_is_the_primary_docs_spelling() {
 #[test]
 fn live_binding_shadows_same_name_session_item_in_docs_and_completion() {
     let out = run_transcript(
-        &["fn answer() -> Int { return 1 }", "answer :: 42", "?answer"],
+        &["fn answer() => Int { return 1 }", "answer :: 42", "?answer"],
         None,
     );
     assert!(out.contains("answer: Int :: 42"), "got: {out:?}");
@@ -2100,7 +2100,7 @@ fn repl_raw_project_baseline_survives_downstream_replay() {
     let root = std::env::temp_dir().join(format!("jet_repl_rerun_project_{}", std::process::id()));
     std::fs::remove_dir_all(&root).ok();
     std::fs::create_dir_all(&root).unwrap();
-    std::fs::write(root.join("helper.jet"), "fn add_three(x: Int) -> Int { return x + 3; }\n").unwrap();
+    std::fs::write(root.join("helper.jet"), "fn add_three(x: Int) => Int { return x + 3; }\n").unwrap();
     let shell = r#"
 {
   sleep 0.2

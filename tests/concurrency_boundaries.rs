@@ -204,9 +204,9 @@ fn run() {
 fn run() {
     count := 0
     taskgroup group {
-        task :: group.task(() => {
+        task :: group.task => {
             count += 1
-        })
+        }
         task.join()
     }
 }

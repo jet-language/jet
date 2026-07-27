@@ -20,7 +20,7 @@ struct Event {
     latency_ms: Float
 }
 
-fn no_float() -> (Float?) { return None }
+fn no_float() => (Float?) = None
 
 fn run() {
     // Empty analytics → typed Empty errors.
@@ -46,11 +46,7 @@ fn run() {
     print("dup_join_count: {data.count(joined)}")
 
     // Delimiter-like pivot keys stay distinct row/column fields (no "|" collision).
-    pivots :: data.pivot_sum(tickets, t => if t.team == "Core" { "a|b" } else { "a" }, t => if t.team == "Core" {
-        "c"
-    } else {
-        "b|c"
-    }, t => t.minutes) ?? panic("pivot")
+    pivots :: data.pivot_sum(tickets, t => if t.team == "Core" -> "a|b" else -> "a", t => if t.team == "Core" -> "c" else -> "b|c", t => t.minutes) ?? panic("pivot")
     print("pivot_cells: {data.count(pivots)}")
     loop cell; pivots {
         print("pivot: row={cell.row_key} col={cell.column_key} sum={cell.sum}")

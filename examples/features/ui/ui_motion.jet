@@ -19,7 +19,7 @@ use core.ui as ui
 // Smoothstep ease: 3t^2 - 2t^3, clamped at the ends. A correct, simple,
 // deterministic interpolation — not a physics spring-damper model, which
 // this phase's acceptance bar does not require.
-fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) -> Float {
+fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) => Float {
     if elapsed_ms <= 0 { return from }
     if elapsed_ms >= duration_ms { return to }
     t :: Float.from_int(elapsed_ms) / Float.from_int(duration_ms)
@@ -27,9 +27,7 @@ fn tween(from: Float, to: Float, elapsed_ms: Int, duration_ms: Int) -> Float {
     return from + (to - from) * eased
 }
 
-fn motion_node(x: Float) -> UiNode {
-    return ui.node_color("x={x}", 100.0, 1.0, "#3366ff")
-}
+fn motion_node(x: Float) => UiNode = ui.node_color("x={x}", 100.0, 1.0, "#3366ff")
 
 fn run() {
     // D-DET1 injectable Clock, seeded at 0 — no wall-clock read, reproducible

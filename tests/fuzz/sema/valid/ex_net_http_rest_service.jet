@@ -19,7 +19,7 @@ fn run() {
         http_server.static_file_range(req, "/tmp/jet_http_static.txt", "text/plain") ?? http_server.response(500, "range")
     )
 
-    t :: tasks.spawn(take(listener, mux) () => {
+    t :: tasks.spawn(() => {
         http_server.serve_once_listener(listener, mux) ?? panic("serve1")
         http_server.serve_once_listener(listener, mux) ?? panic("serve2")
         http_server.serve_once_listener(listener, mux) ?? panic("serve3")

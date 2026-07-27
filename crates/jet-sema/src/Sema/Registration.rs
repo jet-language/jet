@@ -162,6 +162,17 @@ impl<'a> Checker<'a> {
     /// Shared tail of `check_func_body` / `check_func_body_bundle`:
     /// declare parameters, check the body, enforce definite return.
     pub(crate) fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
+        // D-ARROW-CONTROL1=A: an explicit callable result contract makes the
+        // final expression of a multiline body its normal result. Lower this
+        // after parsing so source-preserving formatter paths keep the written
+        // expression instead of printing an explicit `return`.
+        if f.return_type.is_some() {
+            if let Some(Stmt::Expr(expr)) = f.body.last().cloned() {
+                let span = expr.span();
+                *f.body.last_mut().expect("body has a final expression") =
+                    Stmt::Return(Some(expr), span);
+            }
+        }
         for param in &f.type_params {
             self.warn_soft_public_declared_type(
                 &Type::TraitObject(param.bounds.clone()),
@@ -306,10 +317,10 @@ impl<'a> Checker<'a> {
             if f.is_pure {
                 self.diags.push(Diagnostic::error(
                     "E2914",
-                    "`#Reactive fn` can't also declare `--[]->`".to_string(),
+                    "`#Reactive fn` can't also declare `=[]=>`".to_string(),
                     "a reactive effect re-runs when signals change, so it is not a pure function"
                         .to_string(),
-                    "drop the `--[]->` bound or use `reactive.effect` inside a plain `fn`".to_string(),
+                    "drop the `=[]=>` bound or use `reactive.effect` inside a plain `fn`".to_string(),
                     Some(f.name_span),
                 ));
             }
@@ -388,7 +399,7 @@ impl<'a> Checker<'a> {
         // D-LIN1: the function body's own scope (parameters + top-level locals) is
         // never `pop_scope`d, so check its `#SingleUse` locals here (E0140).
         self.check_single_use_consumed_in_current_scope();
-        // D-STREAMYIELD1: a generator (`-> Stream<T>`) falling off the end is
+        // D-STREAMYIELD1: a generator (`=> Stream<T>`) falling off the end is
         // exactly a bare `return;` — it just ends the stream. Never E0114.
         let is_generator =
             matches!(&f.return_type, Some(Type::Apply { name, .. }) if name == "Stream");
@@ -1005,7 +1016,7 @@ pub fn effect_key(owner_type: Option<&str>, name: &str) -> String {
 }
 
 
-/// D-ERR-CONV: canonical Rust function name for the `impl From -> To` conversion.
+/// D-ERR-CONV: canonical Rust function name for the `impl From => To` conversion.
 /// Used by sema (to stamp into `TryConvert::Typed`) and codegen (to define + call it).
 pub fn error_conv_fn_name(from: &str, to: &str) -> String {
     let f = from.replace('.', "_");

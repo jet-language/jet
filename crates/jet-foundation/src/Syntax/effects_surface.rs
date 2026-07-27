@@ -5,21 +5,22 @@
 pub const KW_TODO: &str = "Todo";
 
 /// S60's former `#Pure fn` marker, retained only so D-SHAPE8=A can reject it
-/// with E0066. Explicit purity is the empty effect arrow `--[]->`; the same row
-/// on a callback type (`f: fn(T) --[]-> U`) demands a pure callback, with E0747
+/// with E0066. Explicit purity is the empty effect arrow `=[]=>`; the same row
+/// on a callback type (`f: fn(T) =[]=> U`) demands a pure callback, with E0747
 /// for an argument whose effects exceed it. Bare lowercase `pure`
 /// (FOREIGN_PURE) remains the older E0053 teaching form.
 pub const KW_PURE: &str = "Pure";
 
-/// D-SHAPE8=A + D-EFFECT-OMIT1=A (ratified 2026-07-14/16): an explicit function
-/// effect row lives inside the return arrow: `--[Fs.Read, ..E]->`. The empty
-/// row `--[]->` is an explicit purity bound; an omitted row leaves ordinary
-/// `->` unchanged while sema still infers its complete row. Public metadata and
-/// tooling project the normalized inferred row whether source spells it or not.
+/// D-SHAPE8=A + D-EFFECT-OMIT1=A, amended by D-ARROW-CONTROL1=A on
+/// 2026-07-26: an explicit function effect row lives inside the callable arrow:
+/// `=[Fs.Read, ..E]=>`. The empty row `=[]=>` is an explicit purity bound; an
+/// omitted row leaves ordinary `=>` unchanged while sema still infers its
+/// complete row. Public metadata and tooling project the normalized inferred
+/// row whether source spells it or not.
 /// These two fragments are the canonical punctuation used by the parser,
 /// formatter, editor grammars, and generated documentation.
-pub const EFFECT_ARROW_OPEN: &str = "--[";
-pub const EFFECT_ARROW_CLOSE: &str = "]->";
+pub const EFFECT_ARROW_OPEN: &str = "=[";
+pub const EFFECT_ARROW_CLOSE: &str = "]=>";
 
 /// D-TAINT1 (ratified 2026-06-21, option A; gated on D-EFF1): the value-fact tag
 /// that marks an untrusted value at its source — `#Tainted input`. The taint
@@ -62,13 +63,13 @@ pub const KW_SANITIZER: &str = "Sanitizer";
 pub const KW_STATE: &str = "State";
 
 /// D-STATE1 (ratified 2026-06-22, option A): the typestate **transition** fn
-/// modifier — `#Transition(Pending, Confirmed) fn confirm(self) -> Reservation`.
+/// modifier — `#Transition(Pending, Confirmed) fn confirm(self) => Reservation`.
 /// Declares a function that consumes a value in state `Pending` and yields one in
 /// state `Confirmed` (the ratified mechanism: "a fn takes the old state tag and
 /// returns the next"). The from-state may be `_` for an **entry** transition (a
 /// constructor that produces the initial state from nothing). Wrong from-state at a
 /// call site is E0150; the call advances the receiver/result to the to-state. The
-/// `->` inside reuses the return arrow. Tags erase (I3). Implemented default queued
+/// `=>` inside reuses the callable arrow. Tags erase (I3). Implemented default queued
 /// for owner confirmation as D-STATE-TRANS.
 pub const KW_TRANSITION: &str = "Transition";
 
@@ -82,8 +83,8 @@ pub const KW_TRANSITION: &str = "Transition";
 /// position (like `migration`). Declaration family sibling of `tag`/`struct`/`enum`.
 pub const KW_STATE_DECL: &str = "state"; // D-STATE-DECL
 
-/// D-PROTO1 / D-PROTO2 (ratified 2026-06-27, options A+A): the session/protocol
-/// declaration contextual keyword — `protocol Name { client -> server: Msg(…) }`.
+/// D-PROTO1 / D-PROTO2, amended by D-ARROW-CONTROL1=A: the session/protocol
+/// declaration contextual keyword — `protocol Name { client: Msg(…) }`.
 /// Declares an ordered request/response exchange once; sema expands it into
 /// `#SingleUse` `.Client`/`.Server` handle types with typestate-checked send/recv
 /// methods (out-of-order use = E0150). Contextual like `state`/`migration`.
@@ -103,20 +104,20 @@ pub const STATE_ENTRY: &str = "_";
 /// E0741. PascalCase per D-CASING1. Erased in codegen (I3).
 pub const KW_CAPS: &str = "Caps";
 
-/// D-SCAP1 (ratified 2026-06-21): the scoped-capability grant marker, written
-/// `#Grant(Fs) { caps -> … }`. Grants (authorizes) the listed effect(s) inside
-/// the block through the first-class handle bound after `{` (here `caps`), and
+/// D-SCAP1, amended by D-ARROW-CONTROL1=A: the scoped-capability grant marker,
+/// written `#Grant(caps: Fs) { … }`. Grants the listed effects inside the
+/// block through the first-class handle bound in the marker head, and
 /// **revokes** the capability at scope end (RAII, S63) — the handle is bound only
 /// for the block. The dual of `#Caps` (which restricts): an effect used inside
 /// that the grant doesn't cover has no capability (E0712); letting the handle
 /// escape is E0711. Erased in codegen (I3). PascalCase per D-MARKERCASE1=A.
 pub const KW_GRANT: &str = "Grant";
 
-/// D-SCAP1: the `->` token between the grant handle and the block body —
-/// `#Grant(Fs) { caps -> … }`.
-pub const GRANT_ARROW: &str = "->";
-
-/// D-SCAP1: the type of a capability handle bound by `#Grant(…) { caps -> … }`.
+/// D-SCAP1 + D-ARROW-CONTROL1=A: the existing field separator binds a grant
+/// handle in the marker head — `#Grant(caps: Fs) { … }`.
+pub const GRANT_BIND_SEPARATOR: &str = ":";
+/// D-SCAP1: the type of a capability handle bound by
+/// `#Grant(caps: Fs, Net) { … }`.
 /// An opaque sema-only handle (authority to perform the granted effects); erased
 /// in codegen (I3). Mirrors `TXN_HANDLE_TYPE`.
 pub const CAP_HANDLE_TYPE: &str = "Capability";
@@ -125,7 +126,8 @@ pub const CAP_HANDLE_TYPE: &str = "Capability";
 /// `taskgroup g { … }`. Erased in codegen (I3); routes `g.task` / `g.all`.
 pub const TYPE_TASKGROUP: &str = "TaskGroup";
 
-/// D-TASKSCOPE1=A: scoped spawn method on a taskgroup handle — `g.task { … }`.
+/// D-TASKSCOPE1=A + D-ARROW-CONTROL1=A: scoped spawn method on a taskgroup
+/// handle — `g.task => expression` or `g.task => { … }`.
 pub const TASKGROUP_SPAWN_METHOD: &str = "task";
 
 /// D-NURSERY1=A: join every task handle in a list — `g.all([h1, h2])`.
@@ -234,7 +236,7 @@ pub const TXN_HANDLE_TYPE: &str = "Transaction";
 /// S14 / D-CASING1 follow-on (2026-06-21): retired lowercase spellings retained
 /// only for targeted diagnostics. `test` and `todo` teach their marker forms;
 /// both `pure` and the former `#Pure` marker are retired by D-SHAPE8=A, whose
-/// canonical explicit-purity spelling is `--[]->`.
+/// canonical explicit-purity spelling is `=[]=>`.
 pub const FOREIGN_TEST: &str = "test";
 pub const FOREIGN_PURE: &str = "pure";
 pub const FOREIGN_TODO: &str = "todo";

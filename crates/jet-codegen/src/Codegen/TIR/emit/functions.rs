@@ -175,7 +175,7 @@ fn is_fallible_void_return(ret: &Option<Type>, cx: &Cx) -> bool {
     )
 }
 
-/// D-STREAMYIELD1: a generator (`-> Stream<T>`) spawns its body on its own
+/// D-STREAMYIELD1: a generator (`=> Stream<T>`) spawns its body on its own
 /// thread and hands the caller the channel receiver immediately — `yield`
 /// (lowered to `__jet_yield_tx.send(...)`) blocks on the rendezvous channel
 /// until the consumer's `loop x; stream { }` pulls the next value. No
@@ -415,10 +415,10 @@ pub(crate) fn emit_tir_trait_method(
 /// return) is the trait's, not the user's Jet-facing spelling.
 ///
 /// - `Encode`: `fn jet_encode(&self) -> jet_std::DataTree { <body> }`. The user wrote
-///   `fn encode(self) -> Data`; bare `self` already lowers to `&self` and `Data` to
+///   `fn encode(self) => Data`; bare `self` already lowers to `&self` and `Data` to
 ///   `jet_std::DataTree`, so only the method NAME is bridged.
 /// - `Decode`: `fn jet_decode(<tree>: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError>`.
-///   The user wrote a STATIC `fn decode(tree: Data) -> T ? DecodeError`; the by-value
+///   The user wrote a STATIC `fn decode(tree: Data) => T ? DecodeError`; the by-value
 ///   `Data` param becomes a borrow with an owned clone re-bound at the head (`let <tree> =
 ///   <tree>.clone();`), so the body reads an owned `Data` local exactly as written.
 pub(crate) fn emit_tir_serde_method(tir: &TFunc, codec: SerdeCodec, cx: &Cx, out: &mut String) {

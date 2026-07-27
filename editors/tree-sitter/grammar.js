@@ -33,6 +33,10 @@ module.exports = grammar({
     [$._expr, $.lambda_param],
     [$._expr, $.list_pattern],
     [$._type, $._expr],
+    [$.capability_type, $.union_type],
+    [$.option_type, $.fallible_type],
+    [$.loop_stmt, $._loop_head],
+    [$._expr, $.if_expr],
     [$.named_type_field, $.lambda_param],
     // Inside a struct/enum/trait body, leading markers can precede either a
     // field/method-sig or a method — fork until `fn`/name disambiguates.
@@ -43,7 +47,7 @@ module.exports = grammar({
     [$.tuple_pattern, $._expr, $.lambda_param],
     // In a bindings module body, `fn name(…)` may be an extern fn (`= "path"`)
     // or a normal fn (with a block); fork until the `=`/`{` appears.
-    [$.extern_fn, $.function_def],
+    [$.extern_fn, $._expr],
   ],
 
   // S6-R: source has no visible semicolons (the lexer inserts synthetic ones).
@@ -71,14 +75,12 @@ module.exports = grammar({
         "]",
       ),
 
-    // D-SHAPE8=A: one effect-row spelling for declarations, traits, and types.
+    // D-SHAPE8/D-ARROW-CONTROL1: one callable effect-row spelling.
     effect_arrow: ($) =>
       seq(
-        "--",
-        "[",
+        "=[",
         commaSep(choice(seq("via", $.identifier), seq("..", $.type_identifier), seq(optional("!"), $.effect_path))),
-        "]",
-        "->",
+        "]=>",
       ),
 
     effect_path: ($) => seq($.type_identifier, repeat(seq(".", choice($.type_identifier, $.identifier)))),
@@ -219,7 +221,7 @@ module.exports = grammar({
       ),
 
     // ── Extern (S50) ───────────────────────────────────────────────────────
-    // `extern rust "crate@ver" { fn name(…) -> T = "rust::path" }`.
+    // `extern rust "crate@ver" { fn name(…) => T = "rust::path" }`.
     extern_block: ($) =>
       seq("extern", "rust", $.string_literal, "{", repeat($.extern_fn), "}"),
 
@@ -229,7 +231,7 @@ module.exports = grammar({
         "fn",
         field("name", choice($.identifier, $.type_identifier)),
         $.param_list,
-        optional(seq("->", field("return_type", $._type))),
+        optional(seq("=>", field("return_type", $._type))),
         optional(seq("=", field("rust_path", $.string_literal))),
       ),
 
@@ -245,9 +247,9 @@ module.exports = grammar({
         $.param_list,
         optional(choice(
           seq($.effect_arrow, optional(field("return_type", $._type))),
-          seq("->", field("return_type", $._type)),
+          seq("=>", field("return_type", $._type)),
         )),
-        $.block,
+        choice($.block, seq("=", field("body", $._expr))),
       ),
 
     // ── Struct definition ──────────────────────────────────────────────────
@@ -278,7 +280,7 @@ module.exports = grammar({
         field("name", $.identifier),
         ":",
         field("type", $._type),
-        optional(","),
+        choice(seq("=>", field("body", choice($.block, $._expr))), optional(",")),
       ),
 
     derive_stmt: ($) => seq("derive", commaSep1($.type_identifier)),
@@ -326,14 +328,14 @@ module.exports = grammar({
     // ── Impl block (S27) ───────────────────────────────────────────────────
     // `impl Type { … }`, `impl Type.Trait { … }`, delegation
     // `impl Type.Trait using field` (S62), and error-conversion
-    // `impl FromErr -> ToErr { … }` (D-ERR-CONV).
+    // `impl FromErr => ToErr { … }` (D-ERR-CONV/D-ARROW-CONTROL1).
     impl_block: ($) =>
       choice(
-        // Conversion impl `impl FromErr -> ToErr { return … }` — body is a block.
+        // Conversion impl `impl FromErr => ToErr { return … }` — body is a block.
         seq(
           "impl",
           field("type", choice($.type_identifier, $.generic_type)),
-          "->",
+          "=>",
           field("into", choice($.type_identifier, $.generic_type)),
           $.block,
         ),
@@ -373,8 +375,8 @@ module.exports = grammar({
         "}",
       ),
 
-    // A method signature with no body: `fn greet(self) -> String;`, optionally
-    // marked (`fn area(self) --[]-> Int`).
+    // A method signature with no body: `fn greet(self) => String`, optionally
+    // marked (`fn area(self) =[]=> Int`).
     trait_method_sig: ($) =>
       prec.right(seq(
         repeat($._marker),
@@ -384,7 +386,7 @@ module.exports = grammar({
         $.param_list,
         optional(choice(
           seq($.effect_arrow, optional(field("return_type", $._type))),
-          seq("->", field("return_type", $._type)),
+          seq("=>", field("return_type", $._type)),
         )),
       )),
 
@@ -548,14 +550,14 @@ module.exports = grammar({
     map_type: ($) =>
       seq("[", $._type, ":", $._type, "]"),
 
-    // `fn(T) --[]-> U` or `fn(T) --[Io]-> U` callback type (D-EFF2).
+    // `fn(T) =[]=> U` or `fn(T) =[Io]=> U` callback type (D-EFF2).
     fn_type: ($) =>
       prec.right(seq(
         "fn",
         "(",
         commaSep($._type),
         ")",
-        optional(choice(seq($.effect_arrow, optional($._type)), seq("->", $._type))),
+        optional(choice(seq($.effect_arrow, optional($._type)), seq("=>", $._type))),
       )),
 
     paren_type: ($) => seq("(", $._type, ")"),
@@ -580,15 +582,14 @@ module.exports = grammar({
         $.expr_stmt,
       ),
 
-    // A rule-introduced block: `#Caps(Io) { … }` (D-EFF1), `#Grant(Fs) { caps
-    // -> … }` (D-SCAP1), `#Transact(order) { … }` (D-TXN4), `#context(…) { … }`.
+    // A rule-introduced block: `#Caps(Io) { … }` (D-EFF1),
+    // `#Grant(caps: Fs) { … }` (D-SCAP1), `#Transact(order) { … }` (D-TXN4).
     marker_block_stmt: ($) =>
       seq(choice($.attribute, $._lower_marker), $.scoped_block),
 
     scoped_block: ($) =>
       seq(
         "{",
-        optional(seq(field("handle", $.identifier), "->")),
         repeat($._stmt),
         "}",
       ),
@@ -646,19 +647,34 @@ module.exports = grammar({
     dispatch_else: ($) => seq("else", "->", choice($.block, seq($._expr))),
 
     break_stmt: ($) =>
-      prec(3, choice(
-        "break",
-        seq(field("label", $.identifier), ".", "break", "(", ")"),
-      )),
+      choice(
+        prec(4, seq(
+          "break",
+          "(",
+          field("label", $.identifier),
+          optional(seq(",", field("value", $._expr))),
+          ")",
+        )),
+        prec.right(3, seq("break", optional(field("value", $._expr)))),
+      ),
     next_stmt: ($) =>
-      prec(3, choice(
-        "next",
-        seq(field("label", $.identifier), ".", "next", "(", ")"),
-      )),
+      choice(
+        prec(4, seq("next", "(", field("label", $.identifier), ")")),
+        prec(3, "next"),
+      ),
 
-    // `loop { }`, `loop cond { }`, or the canonical semicolon headers.
+    // Effect loops use no arrow. Finite yielding loops use `->`.
     loop_stmt: ($) =>
-      seq(optional($.loop_label), "loop", optional($._loop_head), $.block),
+      seq(
+        optional($.loop_label),
+        "loop",
+        optional($._loop_head),
+        choice(
+          $.block,
+          seq("->", choice($.block, $._expr)),
+          $._expr,
+        ),
+      ),
 
     _loop_head: ($) =>
       choice(
@@ -789,16 +805,31 @@ module.exports = grammar({
     generic_access: ($) =>
       prec.left(4, seq($._expr, token.immediate("<"), commaSep1($._type), ">")),
 
-    // `if` as a value (S/D-IF): `x :: if c { a } else { b }`. Both the plain and
-    // the `== { … }` dispatch forms can produce a value.
+    // D-ARROW-CONTROL1: effect branches use no arrow; value branches use `->`.
     if_expr: ($) =>
       prec.right(
         choice(
           seq(
             "if",
             field("cond", $._expr),
-            field("then", $.block),
-            optional(seq("else", choice($.if_expr, $.block))),
+            choice(
+              seq(
+                "->",
+                field("then", choice($.block, $._expr)),
+                optional(seq(
+                  "else",
+                  "->",
+                  field("else", choice($.if_expr, $.block, $._expr)),
+                )),
+              ),
+              seq(
+                field("then", choice($.block, $._expr)),
+                optional(seq(
+                  "else",
+                  field("else", choice($.if_expr, $.block, $._expr)),
+                )),
+              ),
+            ),
           ),
           seq(
             "if",
@@ -998,7 +1029,6 @@ module.exports = grammar({
     lambda_expr: ($) =>
       prec.right(
         seq(
-          optional($.capture_clause),
           "(",
           commaSep($.lambda_param),
           ")",
@@ -1006,9 +1036,6 @@ module.exports = grammar({
           choice($.block, $._expr),
         ),
       ),
-
-    // Move-capture prefix on a lambda: `take(sender, router) () => { … }`.
-    capture_clause: ($) => seq("take", "(", commaSep($.identifier), ")"),
 
     lambda_param: ($) =>
       seq(field("name", $.identifier), optional(seq(":", $._type))),

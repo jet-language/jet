@@ -16,13 +16,13 @@ fn run(args: &[&str]) -> Output { Command::new(jet()).args(args).output().unwrap
 fn run_in(dir: &Path, args: &[&str]) -> Output { Command::new(jet()).current_dir(dir).args(args).output().unwrap() }
 fn git(dir: &Path, args: &[&str]) -> Output { Command::new("git").current_dir(dir).args(args).output().unwrap() }
 
-const BASE: &str = "fn left() -> Int {\n    return 1\n}\n\nfn right() -> Int {\n    return 2\n}\n\nfn run() {\n    print(left() + right())\n}\n";
+const BASE: &str = "fn left() => Int {\n    return 1\n}\n\nfn right() => Int {\n    return 2\n}\n\nfn run() {\n    print(left() + right())\n}\n";
 
 #[test]
 fn structural_diff_classifies_body_and_rename_with_stable_ids() {
     let root = dir("diff");
     let before = write(&root, "before.jet", BASE);
-    let after = write(&root, "after.jet", "fn first() -> Int { return 1 }\nfn right() -> Int { return 3 }\nfn run() { print(first() + right()) }\n");
+    let after = write(&root, "after.jet", "fn first() => Int { return 1 }\nfn right() => Int { return 3 }\nfn run() { print(first() + right()) }\n");
     let output = run(&["diff", "--structural", before.to_str().unwrap(), after.to_str().unwrap(), "--report", "json"]);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let report = String::from_utf8_lossy(&output.stdout);
@@ -38,15 +38,15 @@ fn structural_diff_ignores_format_comments_and_reports_signature_and_move() {
     let new_dir = root.join("new");
     fs::create_dir_all(&old_dir).unwrap();
     fs::create_dir_all(&new_dir).unwrap();
-    let before = write(&old_dir, "same.jet", "// old comment\nfn score(n: Int) -> Int { return n }\nfn run() { print(score(1)) }\n");
-    let after = write(&new_dir, "same.jet", "// new comment\nfn score(n: Int, bonus: Int) -> Int {\n    return n + bonus\n}\nfn run() { print(score(1, 2)) }\n");
+    let before = write(&old_dir, "same.jet", "// old comment\nfn score(n: Int) => Int { return n }\nfn run() { print(score(1)) }\n");
+    let after = write(&new_dir, "same.jet", "// new comment\nfn score(n: Int, bonus: Int) => Int {\n    return n + bonus\n}\nfn run() { print(score(1, 2)) }\n");
     let output = run(&["diff", "--structural", before.to_str().unwrap(), after.to_str().unwrap(), "--report", "json"]);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let report = String::from_utf8_lossy(&output.stdout);
     assert!(report.contains("\"kind\":\"signature_changed\""), "{report}");
     assert!(report.contains("\"kind\":\"moved\""), "{report}");
 
-    let same = write(&root, "format.jet", "fn score(n: Int) -> Int {\n    // only comment\n    return n\n}\nfn run() { print(score(1)) }\n");
+    let same = write(&root, "format.jet", "fn score(n: Int) => Int {\n    // only comment\n    return n\n}\nfn run() { print(score(1)) }\n");
     let no_churn = run(&["diff", "--structural", before.to_str().unwrap(), same.to_str().unwrap()]);
     assert!(no_churn.status.success());
     assert_eq!(String::from_utf8_lossy(&no_churn.stdout), "no structural changes\n");
@@ -55,8 +55,8 @@ fn structural_diff_ignores_format_comments_and_reports_signature_and_move() {
 #[test]
 fn structural_diff_add_remove_reorder_rename_edit_is_deterministic() {
     let root = dir("diff_matrix");
-    let before = write(&root, "before.jet", "fn only(value: Int) -> Int { return value }\nfn gone() -> Int { return 1 }\nfn run() { print(only(7)) }\n");
-    let after = write(&root, "after.jet", "fn run() { print(renamed(7)) }\nfn added() -> Bool { return true }\nfn renamed(value: Int) -> Int { return 9 }\n");
+    let before = write(&root, "before.jet", "fn only(value: Int) => Int { return value }\nfn gone() => Int { return 1 }\nfn run() { print(only(7)) }\n");
+    let after = write(&root, "after.jet", "fn run() { print(renamed(7)) }\nfn added() => Bool { return true }\nfn renamed(value: Int) => Int { return 9 }\n");
     let args = ["diff", "--structural", before.to_str().unwrap(), after.to_str().unwrap(), "--report", "json"];
     let first = run(&args);
     let second = run(&args);
@@ -72,8 +72,8 @@ fn structural_diff_add_remove_reorder_rename_edit_is_deterministic() {
 fn structural_merge_composes_disjoint_edits_and_rechecks_output() {
     let root = dir("disjoint");
     let base = write(&root, "base.jet", BASE);
-    let ours = write(&root, "ours.jet", "// retained file header\nfn left() -> Int { return 10 }\nfn right() -> Int { return 2 }\nfn run() { print(left() + right()) }\n");
-    let theirs = write(&root, "theirs.jet", "fn left() -> Int { return 1 }\nfn right() -> Int { return 20 }\nfn run() { print(left() + right()) }\n");
+    let ours = write(&root, "ours.jet", "// retained file header\nfn left() => Int { return 10 }\nfn right() => Int { return 2 }\nfn run() { print(left() + right()) }\n");
+    let theirs = write(&root, "theirs.jet", "fn left() => Int { return 1 }\nfn right() => Int { return 20 }\nfn run() { print(left() + right()) }\n");
     let merged = root.join("merged.jet");
     let output = run(&["merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(), theirs.to_str().unwrap(), "--out", merged.to_str().unwrap()]);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -88,8 +88,8 @@ fn structural_merge_composes_disjoint_edits_and_rechecks_output() {
 fn overlapping_edit_conflicts_without_writing_success_output() {
     let root = dir("conflict");
     let base = write(&root, "base.jet", BASE);
-    let ours = write(&root, "ours.jet", "fn left() -> Int { return 10 }\nfn right() -> Int { return 2 }\nfn run() { print(left() + right()) }\n");
-    let theirs = write(&root, "theirs.jet", "fn left() -> Int { return 11 }\nfn right() -> Int { return 2 }\nfn run() { print(left() + right()) }\n");
+    let ours = write(&root, "ours.jet", "fn left() => Int { return 10 }\nfn right() => Int { return 2 }\nfn run() { print(left() + right()) }\n");
+    let theirs = write(&root, "theirs.jet", "fn left() => Int { return 11 }\nfn right() => Int { return 2 }\nfn run() { print(left() + right()) }\n");
     let merged = root.join("must-not-exist.jet");
     let output = run(&["merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(), theirs.to_str().unwrap(), "--out", merged.to_str().unwrap(), "--report", "editor"]);
     assert_eq!(output.status.code(), Some(1));
@@ -102,9 +102,9 @@ fn overlapping_edit_conflicts_without_writing_success_output() {
 #[test]
 fn delete_edit_and_duplicate_stable_identity_never_auto_merge() {
     let root = dir("identity_collision");
-    let base = write(&root, "base.jet", "fn a() -> Int { return 1 }\nfn b() -> Int { return 1 }\nfn run() { print(a() + b()) }\n");
-    let ours = write(&root, "ours.jet", "fn c() -> Int { return 1 }\nfn b() -> Int { return 1 }\nfn run() { print(c() + b()) }\n");
-    let theirs = write(&root, "theirs.jet", "fn a() -> Int { return 2 }\nfn b() -> Int { return 1 }\nfn run() { print(a() + b()) }\n");
+    let base = write(&root, "base.jet", "fn a() => Int { return 1 }\nfn b() => Int { return 1 }\nfn run() { print(a() + b()) }\n");
+    let ours = write(&root, "ours.jet", "fn c() => Int { return 1 }\nfn b() => Int { return 1 }\nfn run() { print(c() + b()) }\n");
+    let theirs = write(&root, "theirs.jet", "fn a() => Int { return 2 }\nfn b() => Int { return 1 }\nfn run() { print(a() + b()) }\n");
     let merged = root.join("must-not-exist.jet");
     let output = run(&["merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(), theirs.to_str().unwrap(), "--out", merged.to_str().unwrap(), "--report", "json"]);
     assert_eq!(output.status.code(), Some(1));
@@ -144,8 +144,8 @@ fn git_driver_install_is_idempotent_and_preserves_config() {
 fn identical_bilateral_additions_merge_trivia_once() {
     let root = dir("bilateral_additions");
     let base = write(&root, "base.jet", "fn run() {}\n");
-    let ours = write(&root, "ours.jet", "// ours note\nfn helper() -> Int { return 1 }\nfn run() {}\n");
-    let theirs = write(&root, "theirs.jet", "fn helper() -> Int { return 1 }\nfn run() {}\n");
+    let ours = write(&root, "ours.jet", "// ours note\nfn helper() => Int { return 1 }\nfn run() {}\n");
+    let theirs = write(&root, "theirs.jet", "fn helper() => Int { return 1 }\nfn run() {}\n");
     let merged = root.join("merged.jet");
     let output = run(&[
         "merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(),
@@ -156,8 +156,8 @@ fn identical_bilateral_additions_merge_trivia_once() {
     assert_eq!(source.matches("fn helper").count(), 1, "{source}");
     assert_eq!(source.matches("ours note").count(), 1, "{source}");
 
-    let ours = write(&root, "ours_distinct.jet", "// ours note\nfn helper() -> Int { return 1 }\nfn run() {}\n");
-    let theirs = write(&root, "theirs_distinct.jet", "// theirs note\nfn helper() -> Int { return 1 }\nfn run() {}\n");
+    let ours = write(&root, "ours_distinct.jet", "// ours note\nfn helper() => Int { return 1 }\nfn run() {}\n");
+    let theirs = write(&root, "theirs_distinct.jet", "// theirs note\nfn helper() => Int { return 1 }\nfn run() {}\n");
     let conflict_out = root.join("must-not-exist.jet");
     let conflict = run(&[
         "merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(),
@@ -175,12 +175,12 @@ fn inter_item_trivia_three_way_merges_and_conflicts_honestly() {
     let ours = write(
         &root,
         "ours.jet",
-        "fn left() -> Int { return 10 }\n\n// ownership note\nfn right() -> Int { return 2 }\n\nfn run() { print(left() + right()) }\n",
+        "fn left() => Int { return 10 }\n\n// ownership note\nfn right() => Int { return 2 }\n\nfn run() { print(left() + right()) }\n",
     );
     let theirs = write(
         &root,
         "theirs.jet",
-        "fn left() -> Int { return 1 }\n\nfn right() -> Int { return 20 }\n\nfn run() { print(left() + right()) }\n",
+        "fn left() => Int { return 1 }\n\nfn right() => Int { return 20 }\n\nfn run() { print(left() + right()) }\n",
     );
     let merged = root.join("merged.jet");
     let output = run(&[
@@ -196,7 +196,7 @@ fn inter_item_trivia_three_way_merges_and_conflicts_honestly() {
     let theirs_trivia = write(
         &root,
         "theirs_trivia.jet",
-        "fn left() -> Int { return 1 }\n\n// conflicting note\nfn right() -> Int { return 2 }\n\nfn run() { print(left() + right()) }\n",
+        "fn left() => Int { return 1 }\n\n// conflicting note\nfn right() => Int { return 2 }\n\nfn run() { print(left() + right()) }\n",
     );
     let conflict_out = root.join("trivia-conflict.jet");
     let conflict = run(&[
@@ -213,7 +213,7 @@ fn nonexistent_relative_out_uses_its_real_import_root() {
     let root = dir("relative_out_imports");
     let project = root.join("project");
     fs::create_dir_all(&project).unwrap();
-    write(&project, "support.jet", "pub fn value() -> Int { return 7 }\n");
+    write(&project, "support.jet", "pub fn value() => Int { return 7 }\n");
     let source = "use support.value\nfn run() { print(value()) }\n";
     let base = write(&project, "base.jet", source);
     let ours = write(&project, "ours.jet", source);
@@ -233,8 +233,8 @@ fn signature_classification_and_move_do_not_depend_on_body_or_basename() {
     let new = root.join("new");
     fs::create_dir_all(&old).unwrap();
     fs::create_dir_all(&new).unwrap();
-    let before = write(&old, "alpha.jet", "fn score(n: Int) -> Int { return n + 1 }\nfn run() { print(score(1)) }\n");
-    let after = write(&new, "omega.jet", "fn score(n: Float) -> Float { return n + 2.0 }\nfn run() { print(score(1.0)) }\n");
+    let before = write(&old, "alpha.jet", "fn score(n: Int) => Int { return n + 1 }\nfn run() { print(score(1)) }\n");
+    let after = write(&new, "omega.jet", "fn score(n: Float) => Float { return n + 2.0 }\nfn run() { print(score(1.0)) }\n");
     let output = run(&["diff", "--structural", before.to_str().unwrap(), after.to_str().unwrap(), "--report", "json"]);
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let report = String::from_utf8_lossy(&output.stdout);
@@ -245,9 +245,9 @@ fn signature_classification_and_move_do_not_depend_on_body_or_basename() {
 #[test]
 fn ambiguous_same_shape_and_cross_delete_rename_edit_never_guess() {
     let root = dir("ambiguous_cross_edits");
-    let base = write(&root, "base.jet", "fn a() -> Int { return 1 }\nfn b() -> Int { return 1 }\nfn run() { print(a() + b()) }\n");
-    let ours = write(&root, "ours.jet", "fn c() -> Int { return 1 }\nfn d() -> Int { return 1 }\nfn run() { print(c() + d()) }\n");
-    let theirs = write(&root, "theirs.jet", "fn a() -> Int { return 2 }\nfn run() { print(a()) }\n");
+    let base = write(&root, "base.jet", "fn a() => Int { return 1 }\nfn b() => Int { return 1 }\nfn run() { print(a() + b()) }\n");
+    let ours = write(&root, "ours.jet", "fn c() => Int { return 1 }\nfn d() => Int { return 1 }\nfn run() { print(c() + d()) }\n");
+    let theirs = write(&root, "theirs.jet", "fn a() => Int { return 2 }\nfn run() { print(a()) }\n");
     let merged = root.join("must-not-exist.jet");
     let output = run(&[
         "merge", "--structural", base.to_str().unwrap(), ours.to_str().unwrap(),
@@ -258,9 +258,9 @@ fn ambiguous_same_shape_and_cross_delete_rename_edit_never_guess() {
     let report = String::from_utf8_lossy(&output.stderr);
     assert!(report.contains("ambiguous_identity"), "{report}");
 
-    let delete_base = write(&root, "delete_base.jet", "fn a() -> Int { return 1 }\nfn b() -> Int { return 1 }\nfn run() { print(b()) }\n");
-    let deleted = write(&root, "deleted.jet", "fn b() -> Int { return 1 }\nfn run() { print(b()) }\n");
-    let edited = write(&root, "edited.jet", "fn a() -> Int { return 9 }\nfn b() -> Int { return 1 }\nfn run() { print(b()) }\n");
+    let delete_base = write(&root, "delete_base.jet", "fn a() => Int { return 1 }\nfn b() => Int { return 1 }\nfn run() { print(b()) }\n");
+    let deleted = write(&root, "deleted.jet", "fn b() => Int { return 1 }\nfn run() { print(b()) }\n");
+    let edited = write(&root, "edited.jet", "fn a() => Int { return 9 }\nfn b() => Int { return 1 }\nfn run() { print(b()) }\n");
     let delete_out = root.join("delete-edit-must-not-exist.jet");
     let delete_edit = run(&[
         "merge", "--structural", delete_base.to_str().unwrap(), deleted.to_str().unwrap(),

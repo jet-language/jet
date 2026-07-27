@@ -10,7 +10,7 @@ fn run() {
     local :: net.listener_local_socket_addr(listener) ?? panic("tcp local addr")
     print("tcp-listen:{net.socket_host(local)}")
     (ready_tx, ready_rx) :: tasks.channel<String>()
-    tcp_task :: tasks.spawn(take(listener, ready_tx) () => {
+    tcp_task :: tasks.spawn(() => {
         ready_tx.send(net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("tcp local addr")))
         stream :: listener.accept() ?? panic("tcp accept")
         msg :: stream.read_text(8192) ?? panic("tcp read")
@@ -34,7 +34,7 @@ fn run() {
     path :: "/tmp/jet-socket-echo-{time.now()}.sock"
     unix_listener :: net.unix_listen(path) ?? panic("unix bind")
     (unix_tx, unix_rx) :: tasks.channel<String>()
-    unix_task :: tasks.spawn(take(unix_listener, unix_tx) () => {
+    unix_task :: tasks.spawn(() => {
         unix_tx.send("ready")
         s :: net.unix_accept(unix_listener) ?? panic("unix accept")
         msg :: net.unix_read(&s) ?? panic("unix read")

@@ -7,13 +7,45 @@ use crate::Diagnostics::Diagnostic;
 use super::{unsupported, EvalCtx, Flow};
 
 impl EvalCtx<'_> {
+    pub(super) fn exec_loop_value(
+        &mut self,
+        label: Option<&str>,
+        body: &[TStmt],
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        loop {
+            self.burn()?;
+            match self.exec_stmts(body, scope)? {
+                Flow::Normal | Flow::Continue => {}
+                Flow::ContinueLabel(ref name) if label == Some(name.as_str()) => {}
+                Flow::BreakValue(target, value)
+                    if target.is_none() || target.as_deref() == label =>
+                {
+                    return Ok(value);
+                }
+                Flow::Return(value) => {
+                    self.pending_return = Some(value);
+                    return Ok(CtValue::Unit);
+                }
+                other => {
+                    self.pending_flow = Some(other);
+                    return Err(unsupported("pending loop control", self.span()));
+                }
+            }
+        }
+    }
+
     pub(crate) fn exec_stmts(
         &mut self,
         stmts: &[TStmt],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
         for stmt in stmts {
-            match self.exec_stmt(stmt, scope)? {
+            let flow = self.exec_stmt(stmt, scope)?;
+            if let Some(flow) = self.pending_flow.take() {
+                return Ok(flow);
+            }
+            match flow {
                 Flow::Normal => {}
                 other => return Ok(other),
             }
@@ -22,6 +54,19 @@ impl EvalCtx<'_> {
     }
 
     pub(super) fn exec_stmt(
+        &mut self,
+        stmt: &TStmt,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<Flow, Diagnostic> {
+        match self.exec_stmt_inner(stmt, scope) {
+            Err(_) if self.pending_flow.is_some() => {
+                Ok(self.pending_flow.take().expect("checked pending loop control"))
+            }
+            result => result,
+        }
+    }
+
+    fn exec_stmt_inner(
         &mut self,
         stmt: &TStmt,
         scope: &mut HashMap<String, CtValue>,
@@ -121,7 +166,10 @@ impl EvalCtx<'_> {
                 body,
                 label,
             } => {
-                self.exec_stmt(init, scope)?;
+                match self.exec_stmt(init, scope)? {
+                    Flow::Normal => {}
+                    other => return Ok(other),
+                }
                 loop {
                     self.burn()?;
                     if !as_bool(&self.eval_expr(cond, scope)?, self.span())? {
@@ -135,7 +183,10 @@ impl EvalCtx<'_> {
                         other => return Ok(other),
                     }
                     if let Some(step) = step {
-                        self.exec_stmt(step, scope)?;
+                        match self.exec_stmt(step, scope)? {
+                            Flow::Normal => {}
+                            other => return Ok(other),
+                        }
                     }
                 }
                 Ok(Flow::Normal)
@@ -186,6 +237,10 @@ impl EvalCtx<'_> {
                 Some(name) => Flow::BreakLabel(name.clone()),
                 None => Flow::Break,
             }),
+            TStmt::BreakValue { label, value } => Ok(Flow::BreakValue(
+                label.clone(),
+                self.eval_expr(value, scope)?,
+            )),
             TStmt::Continue(label) => Ok(match label {
                 Some(name) => Flow::ContinueLabel(name.clone()),
                 None => Flow::Continue,

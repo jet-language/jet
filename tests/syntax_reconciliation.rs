@@ -406,14 +406,12 @@ fn marker_plane_matrix_covers_current_marker_families() {
         "#",
         "the applied-rule registry must stay on the canonical `#` plane"
     );
-    assert_eq!(jet::Syntax::EFFECT_ARROW_OPEN, "--[");
-    assert_eq!(jet::Syntax::EFFECT_ARROW_CLOSE, "]->");
+    assert_eq!(jet::Syntax::EFFECT_ARROW_OPEN, "=[");
+    assert_eq!(jet::Syntax::EFFECT_ARROW_CLOSE, "]=>");
     assert!(
-        decisions.contains(
-            "**D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,\n\
-             owner-amended; implemented 2026-07-17, card #543)*:"
-        ),
-        "syntax decisions must keep D-SHAPE8=A ratified and implemented"
+        decisions.contains("**D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,")
+            && decisions.contains("owner-amended by D-ARROW-CONTROL1 on 2026-07-26; card #543)*:"),
+        "syntax decisions must keep D-SHAPE8=A ratified, amended, and implemented"
     );
 
     let mut unique = std::collections::BTreeSet::new();

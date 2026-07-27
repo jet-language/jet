@@ -1,22 +1,22 @@
 // labeled_loops — D-LOOPLABEL3. A loop can carry a compile-time name;
-// `name.break()` and `name.next()` target it from inside a nested loop.
+// `break(name)` and `next(name)` target it from inside a nested loop.
 fn run() {
-    // `outer.break()` leaves both loops at once on the first match.
+    // `break(outer)` leaves both loops at once on the first match.
     found := ""
     outer :: loop row; [1, 2, 3] {
         loop col; [1, 2, 3] {
             if (row * col) == 6 {
                 found = "{row}x{col}"
-                outer.break()
+                break(outer)
             }
         }
     }
     print("first product 6 at {found}")
-    // `rows.next()` skips to the next outer iteration.
+    // `next(rows)` skips to the next outer iteration.
     count := 0
     rows :: loop r; [1, 2, 3] {
         loop c; [1, 2, 3] {
-            if c == 2 { rows.next() }
+            if c == 2 { next(rows) }
             count += 1
         }
     }

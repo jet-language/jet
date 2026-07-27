@@ -1510,7 +1510,7 @@ fn emit_migration_chain_walker(cx: &Cx, s: &StructDef, style: Option<&str>, out:
 /// v<i> to shape v<i+1>. `rename` moves a key, `remove` drops one, `add`
 /// evaluates the sema-lowered default function and encodes it in, `change`
 /// decodes the old field type, runs the sema-lowered converter (or the
-/// `impl Old -> New` conversion, D-MIGRATE2B), and encodes the result back.
+/// `impl Old => New` conversion, D-MIGRATE2B), and encodes the result back.
 fn emit_migration_step_fns(cx: &Cx, s: &StructDef, style: Option<&str>, out: &mut String) {
     use crate::AST::MigrationOp;
     let blocks = migration_blocks(cx, s).expect("caller checked");
@@ -1565,7 +1565,7 @@ fn emit_migration_step_fns(cx: &Cx, s: &StructDef, style: Option<&str>, out: &mu
                     let key = migration_wire_key(style, s, field);
                     let old_rust = cx.rust_type(from_ty);
                     // Inline `via { … }` → the sema-lowered converter fn;
-                    // no `via` → the `impl Old -> New` conversion fn (D-MIGRATE2B).
+                    // no `via` → the `impl Old => New` conversion fn (D-MIGRATE2B).
                     let conv = match conv_fn {
                         Some(f) => mangle(f),
                         None => crate::Sema::error_conv_fn_name(&from_ty.name(), &to_ty.name()),
@@ -2145,7 +2145,7 @@ fn emit_func_with_contracts(cx: &Cx, f: &Func, tir: &TIR::TFunc, out: &mut Strin
     out.push_str("}\n\n");
 }
 
-/// D-ERR-CONV: emit a standalone Rust function for `impl Source -> Target { body }`.
+/// D-ERR-CONV: emit a standalone Rust function for `impl Source => Target { body }`.
 /// The function is called by the `map_err` closure emitted in `Expression.rs`
 /// when a `TryConvert::Typed` node is encountered.
 pub(crate) fn emit_error_conv(cx: &Cx, ec: &crate::AST::ErrorConvDef, out: &mut String) {

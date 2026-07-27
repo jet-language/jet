@@ -83,7 +83,7 @@ pub(crate) fn tir_covers_test_body(body: &[Stmt], cx: &Cx) -> bool {
     body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
 }
 
-/// c109: is an error-conversion `impl Old -> New { … }` body fully inside the TIR subset?
+/// c109: is an error-conversion `impl Old => New { … }` body fully inside the TIR subset?
 /// The body has the Old value bound as `self`, returns the New type, and is emitted at
 /// indent 1 inside the `pub fn <conv>(user_self: Old) -> New` `emit_error_conv` opens.
 /// The signature/braces are fixed by `emit_error_conv`; only the body statements gate.

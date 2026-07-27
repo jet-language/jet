@@ -109,7 +109,7 @@ pub(crate) struct Cx {
     pub(crate) partial_ord: HashSet<String>,
     pub(crate) patchable: HashSet<String>,
     /// D-FIELDPOL1: struct name -> computed field names. Sema already
-    /// synthesized a `fn <field>(self) -> T` getter for each on `s.methods`
+    /// synthesized a `fn <field>(self) => T` getter for each on `s.methods`
     /// (`Sema::CheckerFieldPolicy`); this set is consulted at every
     /// `Expr::Field`/`LValue::Field` lowering site so a read of the field
     /// emits a call to that getter instead of a struct member access — the

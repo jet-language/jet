@@ -5,9 +5,9 @@ fn run() {
     taskgroup g {
         (sender, ch) :: tasks.channel<Int>(1)
         sender.send(1)
-        blocked :: g.task(take(sender) () => {
+        blocked :: g.task => {
             sender.send(2)
-        })
+        }
         print(ch.receive() ?? panic("channel closed"))
         print(ch.receive() ?? panic("channel closed"))
         blocked.join()

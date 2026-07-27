@@ -18,7 +18,7 @@ fn list_literal_index_slice_and_iteration() {
         return;
     }
     let src = "\
-fn total(xs: [Int]) -> Int {
+fn total(xs: [Int]) => Int {
     sum := 0
     loop x; xs {
         sum = (sum + x)
@@ -134,7 +134,7 @@ struct Person {
     name: String
     age: Int
 }
-fn name_of(p: Person) -> String {
+fn name_of(p: Person) => String {
     return ~p.name
 }
 fn run() {
@@ -160,11 +160,11 @@ fn user_method_with_scalar_args() {
 struct Calc {
     base: Int
 
-    fn add(self, x: Int, y: Int) -> Int {
+    fn add(self, x: Int, y: Int) => Int {
         return ((self.base + x) + y)
     }
 }
-fn calc(c: Calc) -> Int {
+fn calc(c: Calc) => Int {
     return c.add(10, 20)
 }
 fn run() {
@@ -189,11 +189,11 @@ fn user_method_with_string_arg_implicit_clone() {
 struct Crate {
     label: String
 
-    fn combine(self, other: String) -> String {
+    fn combine(self, other: String) => String {
         return \"{self.label}-{other}\"
     }
 }
-fn calc(b: Crate) -> String {
+fn calc(b: Crate) => String {
     name :: \"x\"
     return b.combine(name)
 }
@@ -217,17 +217,17 @@ fn trait_impl_method_call_no_mangle() {
     }
     let src = "\
 trait Named {
-    fn label(self) -> String
+    fn label(self) => String
 }
 struct Dog {
     sound: String
 }
 impl Dog.Named {
-    fn label(self) -> String {
+    fn label(self) => String {
         return \"dog\"
     }
 }
-fn describe(d: Dog) -> String {
+fn describe(d: Dog) => String {
     return d.label()
 }
 fn run() {
@@ -252,14 +252,14 @@ enum Light {
     Red
     Green
 
-    fn code(self) -> Int {
+    fn code(self) => Int {
         if self == {
             Red -> { return 1 }
             Green -> { return 2 }
         }
     }
 }
-fn calc(l: Light) -> Int {
+fn calc(l: Light) => Int {
     return l.code()
 }
 fn run() {
@@ -279,7 +279,7 @@ fn map_literal_with_entries() {
         return;
     }
     let src = "\
-fn scores() -> [String: Int] {
+fn scores() => [String: Int] {
     return [\"a\": 1, \"b\": 2]
 }
 fn run() {
@@ -311,10 +311,10 @@ fn static_constructor_and_self_getter() {
 struct Counter {
     n: Int
 
-    fn make(v: Int) -> Counter {
+    fn make(v: Int) => Counter {
         return Counter.{ n: v }
     }
-    fn value(self) -> Int {
+    fn value(self) => Int {
         return self.n
     }
 }
@@ -339,7 +339,7 @@ fn mut_self_method_body() {
 struct Acc {
     total: Int
 
-    fn doubled(&self) -> Int {
+    fn doubled(&self) => Int {
         return (self.total + self.total)
     }
 }
@@ -366,10 +366,10 @@ enum Sign {
     Neg
     Zero
 
-    fn make_pos() -> Sign {
+    fn make_pos() => Sign {
         return Sign.Pos
     }
-    fn to_num(self) -> Int {
+    fn to_num(self) => Int {
         if self == {
             Pos -> { return 1 }
             Neg -> { return 0 }
@@ -400,13 +400,13 @@ struct Vec2 {
     x: Int
     y: Int
 
-    fn make(x: Int, y: Int) -> Vec2 {
+    fn make(x: Int, y: Int) => Vec2 {
         return Vec2.{ x: x, y: y }
     }
-    fn sum(self) -> Int {
+    fn sum(self) => Int {
         return (self.x + self.y)
     }
-    fn shifted(self, dx: Int) -> Vec2 {
+    fn shifted(self, dx: Int) => Vec2 {
         return Vec2.{ x: (self.x + dx), y: self.y }
     }
 }
@@ -436,7 +436,7 @@ enum ParseError {
     Empty
     BadDigit(Int)
 }
-fn parse_age(raw: Int) -> Int ? ParseError {
+fn parse_age(raw: Int) => Int ? ParseError {
     if raw == 0 {
         return Err(ParseError.Empty)
     }
@@ -445,7 +445,7 @@ fn parse_age(raw: Int) -> Int ? ParseError {
     }
     return Ok((raw * 2))
 }
-fn load(raw: Int) -> Int ? ParseError {
+fn load(raw: Int) => Int ? ParseError {
     n :: parse_age(raw)?
     return Ok((n + 1))
 }
@@ -470,13 +470,13 @@ fn or_fallback_return_form() {
         return;
     }
     let src = "\
-fn checked(x: Int) -> Int ? Error {
+fn checked(x: Int) => Int ? Error {
     if x == 0 {
         return Err(\"zero\")
     }
     return Ok((100 / x))
 }
-fn safe(x: Int) -> Int {
+fn safe(x: Int) => Int {
     return checked(x) ?? return -1
 }
 fn run() {
@@ -497,7 +497,7 @@ fn optional_val_none_and_fallback() {
         return;
     }
     let src = "\
-fn first_even(limit: Int) -> (Int?) {
+fn first_even(limit: Int) => (Int?) {
     loop i; 1..limit {
         if (i % 2) == 0 {
             return Val(i)
@@ -530,7 +530,7 @@ struct Profile {
 struct Account {
     profile: Profile
 }
-fn handle_of(a: (Account?)) -> (String?) {
+fn handle_of(a: (Account?)) => (String?) {
     return a?.profile?.handle
 }
 fn run() {
@@ -559,7 +559,7 @@ fn list_builtin_methods() {
         return;
     }
     let src = "\
-fn build() -> [Int] {
+fn build() => [Int] {
     xs := [3, 1, 2]
     xs.push(5)
     xs.insert(0, 0)
@@ -677,12 +677,12 @@ fn list_and_map_remove() {
         return;
     }
     let src = "\
-fn drop_first(xs: [Int]) -> Int {
+fn drop_first(xs: [Int]) => Int {
     ys := ~xs
     r := ys.remove(0)
     return ys.len()
 }
-fn drop_key(m: [String: Int]) -> Int {
+fn drop_key(m: [String: Int]) => Int {
     m2 := ~m
     r := m2.remove(\"a\")
     return m2.len()
@@ -761,7 +761,7 @@ fn fallible_when_match() {
         return;
     }
     let src = "\
-fn classify(x: Int) -> Int ? Error {
+fn classify(x: Int) => Int ? Error {
     if x == 0 {
         return Err(\"bad\")
     }

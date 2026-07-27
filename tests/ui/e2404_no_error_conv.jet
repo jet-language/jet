@@ -1,5 +1,5 @@
 // E2404: `?` propagates a typed error into a function that returns a different
-// typed error, but no `impl Source -> Target` conversion has been declared.
+// typed error, but no `impl Source => Target` conversion has been declared.
 enum FileErr {
     NotFound
 }
@@ -8,12 +8,8 @@ enum AppErr {
     File(FileErr)
 }
 
-fn inner() -> String ? FileErr {
-    return Ok("hi")
-}
-
-// No `impl FileErr -> AppErr` declared — E2404 fires here.
-fn outer() -> String ? AppErr {
+fn inner() => String ? FileErr = Ok("hi")
+fn outer() => String ? AppErr {
     inner()?
     return Ok("done")
 }

@@ -36,7 +36,7 @@ pub(in super::super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags:
         let target = format!("{}{}", s.name, serde_type_arg_names(&s.type_params));
         let mut source = String::new();
         if enc {
-            source.push_str(&format!("impl {}.Encode {{\nfn encode{params}(self) -> DataTree {{\n", s.name));
+            source.push_str(&format!("impl {}.Encode {{\nfn encode{params}(self) => DataTree {{\n", s.name));
             let active: Vec<_> = s.fields.iter().filter(|f|
                 !f.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_SKIP)
             ).collect();
@@ -71,7 +71,7 @@ pub(in super::super) fn expand_builtin_serde_items(items: &mut Vec<Item>, diags:
         }
         if dec {
             source.push_str(&format!("impl {}.Decode {{\n", s.name));
-            source.push_str(&format!("fn decode{params}(tree: DataTree) -> {target} ? DecodeError {{\n"));
+            source.push_str(&format!("fn decode{params}(tree: DataTree) => {target} ? DecodeError {{\n"));
             let deny_unknown = s.serde_markers.iter().any(|m|
                 m.name == crate::Syntax::ATTR_DENY_UNKNOWN_FIELDS
             );
@@ -159,7 +159,7 @@ fn expand_builtin_enum_serde(
     let untagged = e.serde_markers.iter().any(|m| m.name == crate::Syntax::ATTR_UNTAGGED);
     let mut source = String::new();
     if enc {
-        source.push_str(&format!("impl {}.Encode {{\nfn encode{params}(self) -> DataTree {{\nif self == {{\n", e.name));
+        source.push_str(&format!("impl {}.Encode {{\nfn encode{params}(self) => DataTree {{\nif self == {{\n", e.name));
         for v in &e.variants {
             let wire = serde_enum_variant_key(v);
             let (pattern, payload) = serde_enum_pattern_and_value(v);
@@ -192,7 +192,7 @@ fn expand_builtin_enum_serde(
         source.push_str("}\n}\n}\n");
     }
     if dec {
-        source.push_str(&format!("impl {}.Decode {{\nfn decode{params}(tree: DataTree) -> {target} ? DecodeError {{\n", e.name));
+        source.push_str(&format!("impl {}.Decode {{\nfn decode{params}(tree: DataTree) => {target} ? DecodeError {{\n", e.name));
         if untagged {
             for v in &e.variants {
                 source.push_str(&serde_enum_decode_attempt(&target, v, "tree", true));
@@ -329,7 +329,7 @@ mod serde_source_tests {
         let trigger = Span::new(17, 26);
         let mut diags = Vec::new();
         assert!(parse_builtin_serde_fragment(
-            "impl Broken.Encode { fn encode(self) -> DataTree {",
+            "impl Broken.Encode { fn encode(self) => DataTree {",
             "Broken",
             trigger,
             &mut diags,

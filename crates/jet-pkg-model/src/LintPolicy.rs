@@ -98,7 +98,7 @@ policy: { lints: { deny: [L0504] } }
         let manifest = PackageManifest::parse(
             r#"
 payload: { name: "x", version: "1" }
-policy: { lints: { deny: [L0801] } }
+policy: { lints: { deny: [L0504] } }
 "#,
         )
         .unwrap();

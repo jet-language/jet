@@ -1,6 +1,6 @@
 // 37 — `if` as a value, and optional condition parens (S68, D-SG2).
-fn classify(n: Int) -> String {
-    // Ordered guards produce one value; `else` makes the result exhaustive.
+fn classify(n: Int) => String {
+    // An ordered arm table produces one value; `else` makes it exhaustive.
     return if {
         n > 0 -> "positive"
         n < 0 -> "negative"
@@ -12,19 +12,13 @@ fn run() {
     // The whole `if` is the value bound to `m` — no ternary needed.
     a :: 10
     b :: 3
-    m :: if a > b {
-        a
-    } else {
-        b
-    }
+    m :: if a > b -> a else -> b
     print("max is {m}")
     // A branch may run statements before its trailing value.
-    note :: if a > b {
+    note :: if a > b -> {
         diff :: (a - b)
         "a leads by {diff}"
-    } else {
-        "b leads"
-    }
+    } else -> "b leads"
     print(note)
     print(classify(7))
     print(classify((-4)))

@@ -308,11 +308,11 @@ fn fn_signature(
         .collect::<Vec<_>>()
         .join(", ");
     let arrow = if let Some((param, _)) = effect_via {
-        format!(" --[via {param}]->")
+        format!(" =[via {param}]=>")
     } else {
         effects.map_or_else(
-            || ret.as_ref().map(|_| " ->".to_string()).unwrap_or_default(),
-            |row| format!(" --[{}]->", row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")),
+            || ret.as_ref().map(|_| " =>".to_string()).unwrap_or_default(),
+            |row| format!(" =[{}]=>", row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")),
         )
     };
     let result = ret.as_ref().map(|ty| format!(" {}", ty.name())).unwrap_or_default();
@@ -1561,11 +1561,11 @@ fn hover_for_fn(f: &AST::Func) -> String {
         .map(|p| format!("{}: {}", p.name, p.ty.name()))
         .collect();
     let arrow = if let Some((param, _)) = &f.effect_via {
-        format!(" --[via {param}]->")
+        format!(" =[via {param}]=>")
     } else {
         f.declared_effects.as_ref().map_or_else(
-            || f.return_type.as_ref().map(|_| " ->".to_string()).unwrap_or_default(),
-            |row| format!(" --[{}]->", row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")),
+            || f.return_type.as_ref().map(|_| " =>".to_string()).unwrap_or_default(),
+            |row| format!(" =[{}]=>", row.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>().join(", ")),
         )
     };
     let ret = f.return_type.as_ref().map(|t| format!(" {}", t.name())).unwrap_or_default();
@@ -1623,6 +1623,17 @@ fn collect_stmt(stmt: &AST::Stmt, mp: &str, module: &LoadedModule, ctx: &mut Wal
             if let Some(e) = e {
                 structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| collect_expr(e, mp, ctx));
             }
+        }
+        AST::Stmt::BreakValue(value, _) => {
+            structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| {
+                collect_expr(value, mp, ctx)
+            });
+        }
+        AST::Stmt::BreakLabelValue(name, name_span, value, _) => {
+            collect_loop_label_ref(name, *name_span, mp, ctx);
+            structural_slot(ctx, "value", StructuralSlotKind::Scalar, |ctx| {
+                collect_expr(value, mp, ctx)
+            });
         }
         AST::Stmt::If(if_stmt) => {
             collect_if(if_stmt, mp, module, ctx);

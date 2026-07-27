@@ -6,6 +6,7 @@
     { "include": "#doc-comments" },
     { "include": "#strings" },
     { "include": "#chars" },
+    { "include": "#contextual-keywords" },
     { "include": "#keywords" },
     { "include": "#types" },
     { "include": "#constants" },
@@ -14,6 +15,14 @@
     { "include": "#operators" }
   ],
   "repository": {
+    "contextual-keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.jet",
+          "match": "(?<![.A-Za-z0-9_])next(?=\\s*(?:\\(\\s*[A-Za-z_][A-Za-z0-9_]*\\s*\\))?\\s*(?:[;}\\n]|$))"
+        }
+      ]
+    },
     "doc-comments": {
       "patterns": [
         {
@@ -63,40 +72,56 @@
       ]
     },
     "keywords": {
-      "comment": "Keyword lists track Source/Syntax.rs (I7). FOREIGN_* teaching-error words are NOT listed here.",
+      "comment": "BEGIN GENERATED JET SYNTAX HIGHLIGHTS",
       "patterns": [
         {
-          "comment": "Control flow: real Jet keywords only. `while`/`for`/`switch`/`or` are FOREIGN_* teaching errors.",
           "name": "keyword.control.jet",
-          "match": "\\b(if|else|break|return|loop)\\b|(?<![.A-Za-z0-9_])next(?=\\s+(?:[A-Za-z_][A-Za-z0-9_]*@\\s*)?(?:[;}\\n]|$))"
+          "match": "\\b(break|defer|else|if|loop|return)\\b"
         },
         {
-          "comment": "Declarations: `module` (U3), `pure` (S60), `distinct` (D-DIST1) added.",
           "name": "keyword.declaration.jet",
-          "match": "\\b(fn|pub|struct|enum|impl|trait|derive|extern|use|const|comptime|test|unsafe|module|pure|distinct)\\b"
+          "match": "\\b(Bench|Context|Impure|Reactive|Sanitizer|State|Tainted|Test|Todo|Transact|Transition|Unsafe|add|alias|as|change|client|comptime|const|derive|distinct|enum|extern|fn|impl|migration|module|priv|protocol|pub|remove|rename|rust|server|state|struct|tag|taskgroup|trait|use|validate|via)\\b"
         },
         {
-          "comment": "Ownership/borrow keywords. `val`/`var` retired (D-BIND1); `todo` (D-TOOL2) added.",
+          "name": "keyword.other.ownership.jet",
+          "match": "\\b(uninit)\\b"
+        },
+        {
           "name": "keyword.other.jet",
-          "match": "\\b(mut|take|view|ref|self|todo)\\b"
+          "match": "\\b(it|self)\\b"
         },
         {
-          "comment": "Literals: `Val` is LIT_VALUE (like true/false/None), highlighted as constant not keyword.",
-          "name": "keyword.control.jet",
-          "match": "\\b(ok|err|None|it)\\b"
-        },
-        {
-          "comment": "Boolean and option literals.",
           "name": "constant.language.jet",
-          "match": "\\b(true|false|Val)\\b"
+          "match": "\\b(None|Val|false|true)\\b"
+        },
+        {
+          "name": "storage.type.builtin.jet",
+          "match": "\\b(BTreeMap|BigInt|BitSet|Bool|Budget|BudgetApplies|ByteBuffer|Char|Computed|Csv|DataTree|DbValue|Decimal|Deque|Derived|Effect|Error|Event|EventPolicy|EventScope|EventTrace|F32|F64|Float|HashMap|Hook|I16|I32|I64|I8|IOError|Int|Iter|JSON|JSONError|Json|Key|Lru|Measurement|PriorityQueue|Ptr|SelectBuilder|Set|Shared|Signal|SortedSet|Stream|String|Subscription|TaskGroup|Toml|U16|U32|U64|U8|UTF8Error|Void|WatchEvent|WatchHandle|WatchSet|Yaml)\\b"
+        },
+        {
+          "name": "support.function.builtin.jet",
+          "match": "\\b(check|input|print)\\b"
+        },
+        {
+          "name": "entity.name.tag.rule.jet",
+          "match": "\\b(Abi|Authority|Bench|Bindgen|Caps|Cli|Codable|CodableAsBase|Comparable|Context|DebugOnly|Decode|Default|DenyUnknownFields|Doc|Encode|Every|Extern|FFI|Flag|Flatten|Grant|Html|Impure|Inline|Invariant|Layout|Live|Local|Meta|MustUse|NoPrelude|Nondeterministic|Numeric|Off|Patchable|Persist|Policy|Post|Pre|Printable|PubFile|PublishedSchema|Reactive|Redact|Region|Rename|RenameAll|Replayable|Sanitizer|Shared|Shield|SingleUse|Skip|Sql|State|Static|Summarize|Tag|Tainted|Target|Task|Test|Todo|Track|Transact|Transition|UnitFamily|Unsafe|Untagged|WasmExport|allow|wire)\\b"
+        },
+        {
+          "name": "keyword.operator.sigil.jet",
+          "match": "(#|&|\\.\\.\\.|::|:=|\\^|~)"
+        },
+        {
+          "name": "keyword.operator.jet",
+          "match": "(!|!=|%|%=|&&|&=|\\*|\\*=|\\+|\\+\\+|\\+=|\\-|\\-\\-|\\-=|\\->|\\.\\.|\\.\\.<|\\.\\[|\\.\\{|\\/|\\/=|<|<<|<<=|<=|==|=>|>|>=|>>|>>=|\\?|\\?\\.|\\?\\?|\\^=|\\||\\|=|\\|\\|)"
         }
-      ]
+      ],
+      "endComment": "END GENERATED JET SYNTAX HIGHLIGHTS"
     },
     "types": {
       "patterns": [
         {
           "name": "storage.type.builtin.jet",
-          "match": "\\b(Int|Float|Bool|String|Char|Error|Shared)\\b"
+          "match": "\\b(Int|Float|Bool|String|Char|Error|Shared|I8|I16|I32|I64|U8|U16|U32|U64|F32|F64)\\b"
         },
         {
           "name": "storage.type.collection.jet",
@@ -149,6 +174,11 @@
     },
     "operators": {
       "patterns": [
+        {
+          "comment": "Binding sigils (D-BIND4)",
+          "name": "keyword.operator.binding.jet",
+          "match": "::|:="
+        },
         {
           "name": "keyword.operator.jet",
           "match": "\\?|->|=>|&&|\\|\\||==|!=|<=|>=|[-+*/%]=|\\.{2}|[+\\-*/%<>&|^!]"

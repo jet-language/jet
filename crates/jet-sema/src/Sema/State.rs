@@ -6,11 +6,11 @@
 //!   - `#State(S) fn m(self, …)` — a **require-state** guard: `m` is valid only
 //!     when its receiver is currently in state `S`. Calling it in any other state
 //!     is **E0150**. The state is unchanged by the call.
-//!   - `#Transition(From, To) fn m(self, …) -> T` — a **transition**: it consumes
+//!   - `#Transition(From, To) fn m(self, …) => T` — a **transition**: it consumes
 //!     a value in state `From` and yields one in state `To`. A call requires the
 //!     receiver be in `From` (E0150 otherwise) and **advances** it to `To`. The
 //!     from-state may be `_` (an *entry* transition: a constructor that produces the
-//!     initial state from nothing — e.g. `#Transition(_, Pending) fn new() -> R`).
+//!     initial state from nothing — e.g. `#Transition(_, Pending) fn new() => R`).
 //!
 //! D-STATE-DECL (ratified 2026-06-25, option B): states are declared in a dedicated
 //! block `state TypeName { Pending, Confirmed, CheckedIn }`. When present:
@@ -264,6 +264,9 @@ impl<'a> StateCtx<'a> {
     fn check_stmt(&mut self, s: &Stmt) {
         match s {
             Stmt::Expr(e) | Stmt::Yield(e, _) => {
+                self.check_expr(e);
+            }
+            Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
                 self.check_expr(e);
             }
             Stmt::Val(b) => {

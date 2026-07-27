@@ -137,7 +137,7 @@ module env.dev {
     }
 }
 
-fn charge() --[Net, Secret]-> Receipt ? Error {
+fn charge() =[Net, Secret]=> Receipt ? Error {
     key :: secrets.get("stripe-dev")?
     ...
 }

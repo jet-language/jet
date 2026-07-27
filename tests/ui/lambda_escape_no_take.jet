@@ -1,15 +1,16 @@
-struct NoClone {
-    mark: Int
+struct Resource {
+    handler: fn(Int) => Bool
 }
 
-fn sink(item: NoClone) {
-    print(item.mark)
+fn sink(item: Resource) {
+    print(item.handler(1))
 }
 
 fn run() {
-    item :: NoClone.{ mark: 1 }
-    f :: (n: Int) => {
+    item :: Resource.{ handler: (value: Int) => value > 0 }
+    f :: () => {
         sink(item)
-        0
     }
+    sink(item)
+    f()
 }

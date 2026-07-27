@@ -31,7 +31,7 @@ fn run() {
 fn sanitized_value_reaches_sink_ok() {
     let src = r#"
 use core.process as process
-#Sanitizer fn clean(raw: String) -> String { return raw.split(" ")[0] }
+#Sanitizer fn clean(raw: String) => String { return raw.split(" ")[0] }
 fn run() {
     name :: #Tainted "world; rm -rf /"
     safe := clean(name)
@@ -160,7 +160,7 @@ fn run() {
 #[test]
 fn sanitizer_fn_is_a_normal_function() {
     let src = r#"
-#Sanitizer fn clean(raw: String) -> String { return raw.split(" ")[0] }
+#Sanitizer fn clean(raw: String) => String { return raw.split(" ")[0] }
 fn run() {
     print(clean("a b c"))
 }
@@ -179,7 +179,7 @@ fn run() {
 #[test]
 fn bare_sanitizer_fn_is_e0059() {
     let src = r#"
-sanitizer fn clean(raw: String) -> String { return raw.split(" ")[0] }
+sanitizer fn clean(raw: String) => String { return raw.split(" ")[0] }
 fn run() {
     print(clean("a b c"))
 }
@@ -196,7 +196,7 @@ fn run() {
 #[test]
 fn bare_sanitizer_pub_fn_is_e0059() {
     let src = r#"
-sanitizer pub fn clean(raw: String) -> String { return raw.split(" ")[0] }
+sanitizer pub fn clean(raw: String) => String { return raw.split(" ")[0] }
 fn run() {
     print(clean("a b c"))
 }

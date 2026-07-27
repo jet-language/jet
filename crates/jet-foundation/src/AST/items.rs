@@ -20,7 +20,7 @@ pub enum Item {
     /// (`usd` → `Usd`) erasing to `Float`. Lowers to a `DistinctDef` per member
     /// in sema registration and codegen — it rides the D-DIST1/D-DIST3 machinery.
     UnitFamily(UnitFamilyDef),
-    /// S28 (M9): `trait Name { fn sig(self) -> T; … }`.
+    /// S28 (M9): `trait Name { fn sig(self) => T; … }`.
     Trait(TraitDef),
     /// D-QUAL2 (ratified 2026-06-21): `tag Name;` or `tag Name { }` — a marker
     /// qualifier with no methods. It erases at runtime (codegen emits nothing).
@@ -46,10 +46,11 @@ pub enum Item {
     /// `module name { … }` (inline body). `body = None` means the items live in
     /// a separate file found by the loader. NOT a JetOS module (see `ModuleDecl`).
     CodeModule(CodeModule),
-    /// D-ERR-CONV (ratified 2026-06-19): `impl Source -> Target { … }` — typed
+    /// D-ERR-CONV (ratified 2026-06-19): `impl Source => Target { … }` — typed
     /// error conversion; `?` applies it when propagating Source into a Target context.
     ErrorConv(ErrorConvDef),
-    /// D-MIGRATE1 (ratified 2026-06-22): `migration TypeName { rename a -> b }`
+    /// D-MIGRATE1, amended by D-ARROW-CONTROL1:
+    /// `migration TypeName { rename a => b }`
     /// block — declares field renames on a `#PublishedSchema` struct.
     Migration(MigrationDecl),
     /// D-STATE-DECL (ratified 2026-06-25, option B): `state TypeName { A, B, C }` —
@@ -60,8 +61,8 @@ pub enum Item {
     /// no outgoing `#Transition` is a dead-end warning (L0151). Declaration family sibling
     /// of `tag`/`struct`/`enum`.
     StateDecl(StateDecl),
-    /// D-PROTO1 / D-PROTO2 (ratified 2026-06-27): `protocol Name { client -> server:
-    /// Msg(…) }` — declares an ordered request/response exchange and expands (R11) into
+    /// D-PROTO1 / D-PROTO2, amended by D-ARROW-CONTROL1:
+    /// `protocol Name { client: Msg(…) }` declares an ordered exchange and expands (R11) into
     /// `#SingleUse` `.Client`/`.Server` handle types with typestate-checked send/recv
     /// methods. Erases as generated items; the declaration itself never reaches codegen.
     ProtocolDecl(ProtocolDecl),
@@ -606,8 +607,8 @@ pub struct TagDef {
     pub span: Span,
 }
 
-/// D-PROTO1 / D-PROTO2: one message line inside a `protocol` block —
-/// `client -> server: Hello(version: Int)`.
+/// D-PROTO1 / D-PROTO2, amended by D-ARROW-CONTROL1: one sender line inside a
+/// `protocol` block — `client: Hello(version: Int)`.
 #[derive(Debug, Clone)]
 pub enum ProtocolDirection {
     ClientToServer,
@@ -673,11 +674,11 @@ pub struct TraitMethodSig {
     pub span: Span,
     /// D-LIB2: optional default body for a trait method.
     pub default_body: Option<Vec<Stmt>>,
-    /// D-EFF3: `fn hash(self) --[]->` — the method declares the empty effect set
+    /// D-EFF3: `fn hash(self) =[]=>` — the method declares the empty effect set
     /// as its upper bound. Every impl's inferred effects must be empty (E0742),
     /// and a dynamic-dispatch call sees the empty set.
     pub is_pure: bool,
-    /// D-EFF3: `fn render(self) --[Gpu]->` — an effect upper bound on the method.
+    /// D-EFF3: `fn render(self) =[Gpu]=>` — an effect upper bound on the method.
     /// `None` = un-annotated (per-impl effects under static dispatch; a
     /// trait-object call under an effect ceiling is E0743). `Some(list)` is BOTH
     /// the impl obligation (inferred ⊆ bound, else E0742) AND the dispatch
@@ -937,7 +938,7 @@ pub struct ContractClause {
 }
 
 /// D-STATE1: the parsed `#Transition(From, To)` declaration on a function. `from`
-/// is `None` for an entry transition (`_ -> To`).
+/// is `None` for an entry transition (`#Transition(_, To)`).
 #[derive(Debug, Clone)]
 pub struct StateTransition {
     pub from: Option<String>,

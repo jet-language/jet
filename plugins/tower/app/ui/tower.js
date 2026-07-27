@@ -341,20 +341,22 @@ function digestBlock() {
     events: S.events || [],
     cards: S.cards || [],
     decisions: S.decisions || [],
+    questions: S.questions || [],
   });
   if (!items.length) return null;
   const since = new Date(cursor).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   const shown = digestShowAll ? items : items.slice(0, 20);
   const rows = shown.map(it => {
     const t = new Date(it.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    return `<div class="digest__row digest__row--${esc(it.kind)}"><time>${esc(t)}</time><span>${esc(it.text)}</span></div>`;
+    const time = it.kind === 'done' ? '' : `<time>${esc(t)}</time>`;
+    return `<div class="digest__row digest__row--${esc(it.kind)}">${time}<span>${esc(it.text)}</span></div>`;
   }).join('');
   const more = !digestShowAll && items.length > 20
     ? `<button class="btn btn--ghost btn--sm" data-more>Show all ${items.length}</button>` : '';
   const node = el(`<div class="digest digest--timeline">
       <div class="digest__head">
-        <div class="digest__h">Since ${esc(since)}</div>
-        <span class="digest__count">${items.length} update${items.length === 1 ? '' : 's'}</span>
+        <div class="digest__h">Catch up</div>
+        <span class="digest__count">${items.length} card${items.length === 1 ? '' : 's'} changed since ${esc(since)}</span>
         <button class="btn btn--sm" data-seen>Dismiss</button>
       </div>
       <div class="digest__list">${rows}</div>
@@ -510,11 +512,6 @@ function dutyVerify(card, ballot) {
 
 // ---- BOARD ---------------------------------------------------------------------
 const isOpen = (key, def) => { const t = (S.meta.ui.toggled || []).includes(key); return def ? !t : t; };
-const PR = { P0: 0, P1: 1, P2: 2, P3: 3 };
-const byPrio = (a, b) => (PR[a.priority] ?? 9) - (PR[b.priority] ?? 9) || (a.num ?? 0) - (b.num ?? 0);
-const PHO = { deciding: 0, planning: 1, ready: 2, building: 3, verify: 4, triage: 5, done: 6, frozen: 7 };
-const orderOf = (c) => c.workOrder == null ? Infinity : c.workOrder;
-const bySched = (a, b) => (orderOf(a) - orderOf(b)) || (PHO[a.phase] - PHO[b.phase]) || byPrio(a, b);
 
 function cardTile(c) {
   const who = c.lane.who === 'owner' ? 'lane-owner' : c.lane.who === 'agent' ? 'lane-agent' : 'lane-none';
@@ -699,7 +696,7 @@ function radarEpochSection(r, needle, cardsMode) {
   const e = S.epochs.find(x => x.id === r.id);
   return collapsible('radar:' + r.id, true,
     `<span class="epoch__tag">${esc(e ? epochTag(e) : r.id)}</span><span class="epoch__name">${esc(r.name)}</span>
-     <span class="epoch__count">${r.done}/${r.done + r.active} done · ${r.pct}%</span>`,
+     <span class="epoch__count">${r.milestonesMet}/${r.milestoneTotal} milestones · ${r.pct}%</span>`,
     '', (body) => {
       if (r.goal) body.appendChild(el(`<p class="epoch__goal">${esc(r.goal)}</p>`));
       body.appendChild(radarHead(r));
@@ -718,7 +715,7 @@ function radarEpochSection(r, needle, cardsMode) {
 
 function radarHead(r) {
   const wrap = el(`<div class="radar__head"></div>`);
-  wrap.appendChild(el(`<div class="epoch__prog"><div class="epoch__bar"><i style="width:${r.pct}%"></i></div><span class="epoch__pct">${r.active} active · ${r.pct}%</span></div>`));
+  wrap.appendChild(el(`<div class="epoch__prog"><div class="epoch__bar"><i style="width:${r.pct}%"></i></div><span class="epoch__pct">${r.milestonesMet}/${r.milestoneTotal} milestones</span></div>`));
   wrap.appendChild(radarSparkline(r.burndown));
   return wrap;
 }
@@ -1098,7 +1095,12 @@ let docsDirty = false;
 let docsMode = 'compose'; // 'compose' | 'source'
 let docsOpen = {};      // section id → bool (default true for named except other; spec defaults collapsed)
 let docsDraft = null;   // { key, body } preserved across mode toggles
+let docsBrowse = false; // mobile: file browser and reader are separate views
 const docsKey = (sel) => sel?.kind === 'scratch' ? 'scratch' : (sel?.path || '');
+const setDocsBrowse = (open) => {
+  docsBrowse = open;
+  $('.docs')?.classList.toggle('docs--browse', open);
+};
 
 const docsGet = async (qs = '') => {
   const r = await fetch('/api/docs' + qs);
@@ -1127,7 +1129,7 @@ async function viewDocs() {
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Docs</h1>
       <span class="viewhead__sub">scratchpad + durable markdown under docs/</span>
     </div>
-    <div class="docs">
+    <div class="docs${docsBrowse ? ' docs--browse' : ''}">
       <aside class="docs__side" id="docs-side"></aside>
       <section class="docs__main" id="docs-main"><div class="empty"><div class="empty__glyph">✎</div><div>Pick a file to edit.</div></div></section>
     </div>`;
@@ -1178,12 +1180,12 @@ async function viewDocs() {
     side.appendChild(wrap);
   }
 
-  if (docsSel?.kind === 'scratch') await openDocsFile(docsSel);
-  else if (docsSel?.kind === 'doc') await openDocsFile(docsSel);
+  if (docsSel?.kind === 'scratch') await openDocsFile(docsSel, { keepBrowse: docsBrowse });
+  else if (docsSel?.kind === 'doc') await openDocsFile(docsSel, { keepBrowse: docsBrowse });
   else await openDocsFile({ kind: 'scratch' });
 }
 
-async function openDocsFile(sel, { keepDraft = false } = {}) {
+async function openDocsFile(sel, { keepDraft = false, keepBrowse = false } = {}) {
   docsSel = sel;
   let n;
   try {
@@ -1204,6 +1206,7 @@ async function openDocsFile(sel, { keepDraft = false } = {}) {
   const canDelete = sel.kind === 'doc';
   const canArchive = canDelete && !String(sel.path || '').startsWith('docs/spec/') && !String(sel.path || '').startsWith('docs/archive/');
   main.innerHTML = `<div class="docs__toolbar">
+      <button class="btn btn--sm docs__files-btn" id="docs-files">Files</button>
       <div class="docs__title">${esc(n.title)}</div>
       <span class="docs__meta">${esc(pathLabel)} · ${esc((n.updated || '').slice(0, 19).replace('T', ' '))}</span>
       <button class="btn btn--sm" id="docs-mode">${docsMode === 'compose' ? 'Source' : 'Compose'}</button>
@@ -1213,6 +1216,7 @@ async function openDocsFile(sel, { keepDraft = false } = {}) {
     </div>
     <textarea class="docs__edit" id="docs-body" spellcheck="true" ${docsMode === 'compose' ? 'hidden' : ''}></textarea>
     <div class="docs__compose prose" id="docs-compose" ${docsMode === 'source' ? 'hidden' : ''}></div>`;
+  setDocsBrowse(keepBrowse);
 
   const body = $('#docs-body');
   body.value = n.body;
@@ -1272,6 +1276,7 @@ async function openDocsFile(sel, { keepDraft = false } = {}) {
   body.addEventListener('input', mark);
   if (docsMode === 'compose') renderCompose();
 
+  $('#docs-files').addEventListener('click', () => setDocsBrowse(true));
   $('#docs-mode').addEventListener('click', () => {
     docsDraft = { key: docsKey(sel), body: body.value };
     docsMode = docsMode === 'compose' ? 'source' : 'compose';

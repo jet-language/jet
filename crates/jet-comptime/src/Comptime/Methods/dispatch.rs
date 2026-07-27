@@ -1115,7 +1115,7 @@ impl<'a> Interp<'a> {
 
     /// c139 (D-DISPLAYDBG1/2): render `v` as `{value}` interpolation / `print`
     /// would in the compiled program. When `v`'s type has a user-written
-    /// `impl Type.Display { fn display(self) -> String }`, run that exact Jet
+    /// `impl Type.Display { fn display(self) => String }`, run that exact Jet
     /// function body (byte-identical to what the real build does); otherwise
     /// fall back to the built-in `jet_show()` rendering (every primitive, and
     /// any struct/enum with no such impl — sema only accepts those in
@@ -1457,7 +1457,8 @@ impl<'a> Interp<'a> {
         }
     }
 
-    /// D-CTIO1: `embed_bytes("path") -> [U8]` — the binary-safe sibling of
+    /// D-CTIO1 + D-ARROW-CONTROL1: `embed_bytes("path") => [U8]` — the
+    /// binary-safe sibling of
     /// `embed_file`. Same path-safety (E0957) and missing/unreadable (E0955)
     /// checks, but no UTF-8 requirement: any file embeds as raw bytes.
     fn eval_embed_bytes(&mut self, args: &[CallArg], span: Span) -> Result<CtValue, Diagnostic> {
@@ -1466,7 +1467,8 @@ impl<'a> Interp<'a> {
         Ok(CtValue::Bytes(bytes))
     }
 
-    /// D-CTFIND1/2: `find(glob) -> [String]` walks inside the source file's
+    /// D-CTFIND1/2 + D-ARROW-CONTROL1: `find(glob) => [String]` walks inside
+    /// the source file's
     /// directory, returns sorted relative file paths, and records each match's
     /// hash as Tier-1 lock evidence.
     fn eval_find(&mut self, args: &[CallArg], span: Span) -> Result<CtValue, Diagnostic> {

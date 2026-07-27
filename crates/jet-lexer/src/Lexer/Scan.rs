@@ -623,7 +623,7 @@ mod tests {
 
     #[test]
     fn raw_foreign_body_marker_does_not_capture_a_later_function() {
-        let source = r#"#FFI(c) fn foreign() -> Int {
+        let source = r#"#FFI(c) fn foreign() => Int {
     """int64_t foreign(void) { return 1; }"""
 }
 
@@ -651,7 +651,7 @@ value={value}
     #[test]
     fn grouped_ffi_marker_keeps_foreign_body_raw() {
         let source = r#"#[Unsafe("scalar registers"), FFI(asm)]
-fn add(a: Int, b: Int) -> Int {
+fn add(a: Int, b: Int) => Int {
     """add {a}, {b} ; -> return"""
 }"#;
         let (tokens, diagnostics) = lex_raw(source);

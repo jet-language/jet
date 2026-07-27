@@ -323,7 +323,7 @@ mod tests {
     #[test]
     fn check_and_lsp_share_one_authoritative_query() {
         let mut service = CompilerQueries::new();
-        let source = "fn beta() -> Int { return 1 }\nfn alpha() -> String { return beta() }\n";
+        let source = "fn beta() => Int { return 1 }\nfn alpha() => String { return beta() }\n";
 
         let check = service.check_text("shared.jet", source, true);
         let lsp = service.check_text("shared.jet", source, true);
@@ -349,9 +349,9 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let main = root.join("main.jet");
         let dependency = root.join("b.jet");
-        let main_source = "module b;\nfn run() -> Int { return b.value() }\n";
-        let first_dependency = "pub fn value() -> Int { return 1 }\n";
-        let second_dependency = "pub fn value() -> String { return \"changed\" }\n";
+        let main_source = "module b;\nfn run() => Int { return b.value() }\n";
+        let first_dependency = "pub fn value() => Int { return 1 }\n";
+        let second_dependency = "pub fn value() => String { return \"changed\" }\n";
         std::fs::write(&main, main_source).unwrap();
         std::fs::write(&dependency, first_dependency).unwrap();
 
@@ -376,8 +376,8 @@ mod tests {
     #[test]
     fn local_body_edit_rechecks_only_changed_item() {
         let mut service = CompilerQueries::new();
-        let before = "fn alpha() -> Int { return 1 }\nfn beta() -> Int { return 2 }\n";
-        let after = "fn alpha() -> Int { return 1 }\nfn beta() -> Int { return 3 }\n";
+        let before = "fn alpha() => Int { return 1 }\nfn beta() => Int { return 2 }\n";
+        let after = "fn alpha() => Int { return 1 }\nfn beta() => Int { return 3 }\n";
 
         assert!(service.check_text("items.jet", before, true).diagnostics.is_empty());
         let cold = service.stats();
@@ -395,8 +395,8 @@ mod tests {
 
     #[test]
     fn cached_caller_observes_changed_callee_effects() {
-        let before = "fn alpha() --[]-> Int { return beta() }\nfn beta() -> Int { return 2 }\n";
-        let after = "fn alpha() --[]-> Int { return beta() }\nfn beta() -> Int { print(\"x\"); return 2 }\n";
+        let before = "fn alpha() =[]=> Int { return beta() }\nfn beta() => Int { return 2 }\n";
+        let after = "fn alpha() =[]=> Int { return beta() }\nfn beta() => Int { print(\"x\"); return 2 }\n";
         let mut incremental = CompilerQueries::new();
         assert!(incremental
             .check_text("effects.jet", before, true)
@@ -422,7 +422,7 @@ mod tests {
             format!(
                 r#"use core.crypto.expert as expert
 
-fn protect() --[]-> {{
+fn protect() =[]=> {{
     #Unsafe("fixed interop vector") {{
         _ :: expert.xchacha20poly1305_seal(
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -433,12 +433,12 @@ fn protect() --[]-> {{
     }}
 }}
 
-fn next_byte() -> U8 {{
+fn next_byte() => U8 {{
     {next_body}
     return 0
 }}
 
-fn marker() -> Int {{ return {marker} }}
+fn marker() => Int {{ return {marker} }}
 fn run() {{}}
 "#
             )
@@ -497,8 +497,8 @@ fn run() {{}}
 
     #[test]
     fn whitespace_edit_recomputes_span_bearing_diagnostics() {
-        let before = "fn beta() -> Int { return \"x\" }\n";
-        let after = "fn beta() -> Int {  return \"x\" }\n";
+        let before = "fn beta() => Int { return \"x\" }\n";
+        let after = "fn beta() => Int {  return \"x\" }\n";
         let mut incremental = CompilerQueries::new();
         let _ = incremental.check_text("spans.jet", before, true);
 
@@ -521,9 +521,9 @@ fn run() {{}}
         std::fs::create_dir_all(left.parent().unwrap()).unwrap();
         std::fs::create_dir_all(right.parent().unwrap()).unwrap();
         let mut service = CompilerQueries::new();
-        let left_before = "fn left() -> Int { return 1 }\n";
-        let left_after = "fn left() -> Int { return 2 }\n";
-        let right_source = "fn right() -> Int { return 3 }\n";
+        let left_before = "fn left() => Int { return 1 }\n";
+        let left_after = "fn left() => Int { return 2 }\n";
+        let right_source = "fn right() => Int { return 3 }\n";
 
         let _ = service.check_text(&left.to_string_lossy(), left_before, true);
         let _ = service.check_text(&right.to_string_lossy(), right_source, true);
@@ -544,8 +544,8 @@ fn run() {{}}
         std::fs::create_dir_all(&root).unwrap();
         let main = root.join("main.jet");
         let dependency = root.join("b.jet");
-        let source = "module b;\nfn run() -> Int { return b.value() }\n";
-        std::fs::write(&dependency, "pub fn value() -> Int { return 1 }\n").unwrap();
+        let source = "module b;\nfn run() => Int { return b.value() }\n";
+        std::fs::write(&dependency, "pub fn value() => Int { return 1 }\n").unwrap();
         let mut service = CompilerQueries::new();
         assert!(service
             .check_text(&main.to_string_lossy(), source, true)
@@ -554,7 +554,7 @@ fn run() {{}}
 
         std::fs::write(
             &dependency,
-            "pub fn value() -> String { return \"changed\" }\n",
+            "pub fn value() => String { return \"changed\" }\n",
         )
         .unwrap();
         assert!(!service
@@ -572,8 +572,8 @@ fn run() {{}}
         std::fs::create_dir_all(&root).unwrap();
         let main = root.join("main.jet");
         let dependency = root.join("b.jet");
-        let source = "module b;\nfn run() -> Int { return b.value() }\n";
-        let dependency_source = "pub fn value() -> Int { return 1 }\n";
+        let source = "module b;\nfn run() => Int { return b.value() }\n";
+        let dependency_source = "pub fn value() => Int { return 1 }\n";
         std::fs::write(&dependency, dependency_source).unwrap();
         let mut service = CompilerQueries::new();
         assert!(service
@@ -583,7 +583,7 @@ fn run() {{}}
 
         std::fs::write(
             &dependency,
-            "pub fn value() -> Int { return 1 }\n::\n",
+            "pub fn value() => Int { return 1 }\n::\n",
         )
         .unwrap();
         let broken = service.check_text(&main.to_string_lossy(), source, true);
@@ -624,11 +624,11 @@ fn run() {{}}
         std::fs::create_dir_all(&root).unwrap();
         let main = root.join("main.jet");
         let dependency = root.join("b.jet");
-        let source = "module b;\nfn run() -> Int { return b.value() }\n";
-        let dependency_source = "pub fn value() -> Int { return 1 }\n";
+        let source = "module b;\nfn run() => Int { return b.value() }\n";
+        let dependency_source = "pub fn value() => Int { return 1 }\n";
         std::fs::write(
             &dependency,
-            "pub fn value() -> Int { return 1 }\n::\n",
+            "pub fn value() => Int { return 1 }\n::\n",
         )
         .unwrap();
         let mut service = CompilerQueries::new();
@@ -659,7 +659,7 @@ fn run() {{}}
             let _ = std::fs::remove_dir_all(&root);
             std::fs::create_dir_all(&root).unwrap();
             let main = root.join("main.jet");
-            let source = "module b;\nfn run() -> Int { return b.value() }\n";
+            let source = "module b;\nfn run() => Int { return b.value() }\n";
             let mut service = CompilerQueries::new();
             let missing = service.check_text(&main.to_string_lossy(), source, true);
             assert!(missing
@@ -674,7 +674,7 @@ fn run() {{}}
             } else {
                 root.join("b.jet")
             };
-            std::fs::write(&dependency, "pub fn value() -> Int { return 1 }\n").unwrap();
+            std::fs::write(&dependency, "pub fn value() => Int { return 1 }\n").unwrap();
             let repaired = service.check_text(&main.to_string_lossy(), source, true);
             let fresh = CompilerQueries::new().check_text(&main.to_string_lossy(), source, true);
             assert_eq!(
@@ -706,7 +706,7 @@ fn run() {{}}
         let asset = root.join("message.txt");
         let source = concat!(
             "comptime message = embed_file(\"message.txt\")\n",
-            "fn read() -> String { return message }\n"
+            "fn read() => String { return message }\n"
         );
         std::fs::write(&asset, "first").unwrap();
         let mut service = CompilerQueries::new();
@@ -725,10 +725,10 @@ fn run() {{}}
     #[test]
     fn retained_item_bytes_grow_with_retained_payloads() {
         let mut service = CompilerQueries::new();
-        let one = "fn alpha() -> Int { return 1 }\n";
+        let one = "fn alpha() => Int { return 1 }\n";
         let two = concat!(
-            "fn alpha() -> Int { return 1 }\n",
-            "fn beta() -> Int { return \"a deliberately long wrong value\" }\n"
+            "fn alpha() => Int { return 1 }\n",
+            "fn beta() => Int { return \"a deliberately long wrong value\" }\n"
         );
         let _ = service.check_text("memory.jet", one, true);
         let before = service.stats();

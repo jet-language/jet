@@ -508,7 +508,7 @@ impl<'a> Parser<'a> {
                 ),
                 "write `module name;` to load a file, or `module name { … }` for an inline module"
                     .to_string(),
-                "example: `module math;` or `module math { pub fn double(n: Int) -> Int { … } }`"
+                "example: `module math;` or `module math { pub fn double(n: Int) => Int { … } }`"
                     .to_string(),
                 Some(self.peek().span),
             )),
@@ -788,7 +788,7 @@ impl<'a> Parser<'a> {
                     describe(other)
                 ),
                 "an inline code module body may only contain top-level items".to_string(),
-                "example: `pub fn double(n: Int) -> Int { return n * 2; }`".to_string(),
+                "example: `pub fn double(n: Int) => Int { return n * 2; }`".to_string(),
                 Some(self.peek().span),
             )),
         }

@@ -302,6 +302,9 @@ fn collect_tuple_shapes_from_stmt(stmt: &Stmt, out: &mut CollectedTypeShapes) {
         }
         Stmt::Assign { value, .. } => collect_tuple_shapes_from_expr(value, out),
         Stmt::Return(Some(e), _) => collect_tuple_shapes_from_expr(e, out),
+        Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
+            collect_tuple_shapes_from_expr(e, out)
+        }
         Stmt::Return(None, _) => {}
         Stmt::If(i) => collect_tuple_shapes_from_if(i, out),
         Stmt::While { cond, body, .. } | Stmt::CountedLoop { cond, body, .. } => {

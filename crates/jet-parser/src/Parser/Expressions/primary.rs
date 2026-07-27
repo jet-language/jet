@@ -6,6 +6,7 @@ use super::super::{
 impl<'a> Parser<'a> {
         pub(super) fn expr_primary(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
             match self.peek().kind.clone() {
+                TokKind::KwLoop => self.yielding_loop_expr(),
                 TokKind::KwIt => {
                     let span = self.bump().span;
                     Ok(Expr::Ident(Syntax::KW_IT.to_string(), span))
@@ -606,6 +607,9 @@ impl<'a> Parser<'a> {
                             type_generic_truncated: false,
                             pub_file_default: false,
                             in_layout_body: self.in_layout_body,
+                            adjacent_if_body_depth: 0,
+                            block_depth: 0,
+                            callable_tail_block_depth: None,
                             module_arg_expr_depth: None,
                             policy_declarations: Vec::new(),
                             applied_rules: Vec::new(),

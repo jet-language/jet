@@ -55,6 +55,7 @@ const CASES: &[&str] = &[
     "[3, 1, 2]",
     "[10, 20, 30][1]",
     "[\"x\", \"y\", \"z\"]",
+    "loop value; [1, 2, 3] -> value * 2",
     // Map ordering via derived lists (BTreeMap is sorted by key)
     "[\"b\": 2, \"a\": 1, \"c\": 3].keys()",
     "[\"b\": 2, \"a\": 1, \"c\": 3].values()",
@@ -71,15 +72,15 @@ const CASES: &[&str] = &[
 ];
 
 const F32_VALUE_FLOW: &str = r#"
-fn pass_f32(value: F32) -> F32 {
+fn pass_f32(value: F32) => F32 {
     return value
 }
 
-fn apply_f32(transform: fn(F32) -> F32, value: F32) -> F32 {
+fn apply_f32(transform: fn(F32) => F32, value: F32) => F32 {
     return transform(value)
 }
 
-fn f32_value_flow() -> String {
+fn f32_value_flow() => String {
     literal :: F32.{ 16777217.0 }
     one :: F32.{ 1.0 }
     two :: F32.{ 2.0 }
@@ -91,7 +92,7 @@ fn f32_value_flow() -> String {
     mutable -= two
     mutable *= three
     mutable /= two
-    transform :: fn(F32) -> F32.{ (value: F32) => value + one }
+    transform :: (value: F32) => value + one
     same :: pass_f32(literal)
     wide :: Float.from_f32(literal)
     narrowed :: F32.from_float(wide) ?? one
@@ -275,6 +276,18 @@ fn comptime_matches_runtime() {
 }
 
 #[test]
+fn yielding_loop_matches_comptime_and_runtime() {
+    if !have_rustc() {
+        return;
+    }
+    check_comptime_case(0, "loop value; [1, 2, 3] -> value * 2");
+    check_comptime_case(
+        1,
+        "loop value; [1, 2, 3, 4] -> { if value > 2 break; value * 2 }",
+    );
+}
+
+#[test]
 fn comptime_f32_width_survives_value_flow_and_matches_aot() {
     if !have_rustc() {
         eprintln!("note: rustc not found; skipping F32 differential battery");
@@ -291,7 +304,7 @@ fn gzip_golden_and_hostile_inputs_match_comptime_and_aot() {
     }
     let src = r#"use core.compress.gzip as gzip
 
-fn codec_probe() -> String {
+fn codec_probe() => String {
     bytes :: [U8].{ 72, 101, 108, 108, 111 }
     gz :: [U8].{ gzip.decompress(gzip.compress(bytes)) ?? [] }
     golden :: [U8].{ gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? [] }
@@ -610,7 +623,7 @@ fn xml_hostile_error_matches_comptime_and_runtime() {
     }
     let src = r#"use core.encoding.xml as xml
 
-fn show(result: DataTree ? XMLError) -> String {
+fn show(result: DataTree ? XMLError) => String {
     if result == {
         Ok(_) -> return "ok"
         Err(e) -> {
@@ -697,11 +710,11 @@ fn cbor_options_and_hostile_errors_match_comptime_and_aot() {
     }
     let src = r#"use core.encoding.cbor as cbor
 
-fn safe() -> cbor.CBOROptions {
+fn safe() => cbor.CBOROptions {
     return cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }
 }
 
-fn show(bytes: [U8]) -> String {
+fn show(bytes: [U8]) => String {
     if cbor.parse(bytes, safe()) == {
         Ok(_) -> return "ok"
         Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
@@ -709,35 +722,35 @@ fn show(bytes: [U8]) -> String {
     return "unreachable"
 }
 
-fn show_strict(bytes: [U8]) -> String {
+fn show_strict(bytes: [U8]) => String {
     if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }) == {
         Ok(_) -> return "ok"
         Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
-fn show_depth(bytes: [U8]) -> String {
+fn show_depth(bytes: [U8]) => String {
     if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 1, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }) == {
         Ok(_) -> return "ok"
         Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
-fn show_items(bytes: [U8]) -> String {
+fn show_items(bytes: [U8]) => String {
     if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 2, max_bytes: 1073741824, require_canonical: false }) == {
         Ok(_) -> return "ok"
         Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
-fn show_bytes(bytes: [U8]) -> String {
+fn show_bytes(bytes: [U8]) => String {
     if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 2, require_canonical: false }) == {
         Ok(_) -> return "ok"
         Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
-fn show_alloc(bytes: [U8]) -> String {
+fn show_alloc(bytes: [U8]) => String {
     if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }) == {
         Ok(_) -> return "ok"
         Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
@@ -745,7 +758,7 @@ fn show_alloc(bytes: [U8]) -> String {
     return "unreachable"
 }
 
-fn show_ints(bytes: [U8]) -> String {
+fn show_ints(bytes: [U8]) => String {
     if cbor.decode<[Int]>(bytes, safe()) == {
         Ok(_) -> return "ok"
         Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
@@ -790,7 +803,7 @@ fn run() {
 fn local_comptime_is_literal_data() {
     let stdout = compile_and_run(
         r#"
-fn build() -> [Int] {
+fn build() => [Int] {
     xs := [Int].{}
     loop i; 1..5; 2 {
         if i == 3 { next }
@@ -879,7 +892,7 @@ fn run() {
 fn fan_out_comptime_matches_runtime() {
     let stdout = compile_and_run(
         r#"
-fn double(x: Int) -> Int {
+fn double(x: Int) => Int {
     return x * 2
 }
 
@@ -933,4 +946,3 @@ fn compile_and_run(src: &str) -> String {
     assert!(run.status.success(), "fixture panicked at runtime");
     String::from_utf8(run.stdout).unwrap()
 }
-

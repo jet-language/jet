@@ -736,6 +736,18 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // a lambda) and every arg is in-subset. The AST path emits `({callee})({args})`
         // with args lowered plainly (`emit_call_args(.., None, ..)`), so no convention
         // facts are needed — any in-subset arg works; labels are still excluded.
+        Expr::CallValue { callee, args, .. }
+            if args.is_empty()
+                && matches!(
+                    callee.as_ref(),
+                    Expr::Lambda(lam) if lam.meta.collecting_loop || lam.meta.result_loop
+                ) =>
+        {
+            let Expr::Lambda(lam) = callee.as_ref() else {
+                unreachable!("inline-loop guard requires a lambda")
+            };
+            lambda_in_subset(lam, cx, locals)
+        }
         Expr::CallValue { callee, args, .. } => {
             expr_in_subset(callee, cx, locals)
                 && args

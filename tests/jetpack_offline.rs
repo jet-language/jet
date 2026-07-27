@@ -212,7 +212,7 @@ fn selected_workspace_run_propagates_unsafe_metadata_failure_before_command() {
     .unwrap();
     fs::write(
         member.join("hello.jet"),
-        "module hello { pub fn greeting() -> String { return \"hello\" } }\n",
+        "module hello { pub fn greeting() => String { return \"hello\" } }\n",
     )
     .unwrap();
     fs::write(

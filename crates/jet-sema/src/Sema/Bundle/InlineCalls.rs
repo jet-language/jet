@@ -38,6 +38,9 @@ pub(crate) fn rewrite_inline_calls_stmts(
             Stmt::Val(b) => rewrite_inline_calls_expr(&mut b.init, siblings, modname),
             Stmt::Assign { value, .. } => rewrite_inline_calls_expr(value, siblings, modname),
             Stmt::Return(Some(e), _) => rewrite_inline_calls_expr(e, siblings, modname),
+            Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
+                rewrite_inline_calls_expr(e, siblings, modname)
+            }
             Stmt::Return(None, _)
             | Stmt::Break(_)
             | Stmt::Continue(_)

@@ -26,8 +26,10 @@ impl<'a> Parser<'a> {
             false
         }
     
-        /// S47: `take(a, b)` prefix on a lambda.
+        /// Retired S47 spelling. Consume `take(a, b)` so the parser can teach
+        /// the implicit-capture law without cascading errors.
         pub(super) fn parse_lambda_takes(&mut self) -> Result<Vec<(String, Span)>, Diagnostic> {
+            let start = self.peek().span;
             self.expect(TokKind::KwMove, "before the capture list")?;
             self.expect(TokKind::LParen, "after `take` in a capture list")?;
             let mut names = Vec::new();
@@ -42,6 +44,14 @@ impl<'a> Parser<'a> {
                 }
             }
             self.expect(TokKind::RParen, "after the capture list")?;
+            self.diags.push(Diagnostic::error(
+                "E0057",
+                "this closure uses the retired `take(...)` capture prefix".to_string(),
+                "closures infer captures: Copy values copy at creation and owned non-Copy values move"
+                    .to_string(),
+                "remove `take(...)` and use the captured names directly".to_string(),
+                Some(start),
+            ));
             Ok(names)
         }
     
@@ -88,8 +98,7 @@ impl<'a> Parser<'a> {
         /// no parens and no type — `m => m.hp > 0`. Legal wherever the expected
         /// closure/fn type fixes the param type (sema rejects it elsewhere, same
         /// as the existing omitted-type `(m) => …` form under S46/D-LAMBDAINFER1).
-        /// No `take` prefix on the bare form — write `(take x) (x) => …` when a
-        /// capture list is needed.
+        /// D-ARROW-CONTROL1: captures are always inferred.
         pub(super) fn parse_bare_lambda(&mut self) -> Result<Lambda, Diagnostic> {
             let (name, name_span) = self.expect_ident("as a lambda parameter")?;
             self.expect(TokKind::LambdaArrow, "after a bare lambda parameter")?;
@@ -131,10 +140,25 @@ impl<'a> Parser<'a> {
             }
         }
     
-        /// D-TASKSCOPE1=A: `{ stmts }` after `.task` → `() => { stmts }`.
+        /// D-TASKSCOPE1=A as respelled by D-ARROW-CONTROL1:
+        /// `=> expr-or-block` after `.task` becomes a zero-parameter lambda.
         pub(super) fn parse_task_body_lambda(&mut self) -> Result<Lambda, Diagnostic> {
             let open = self.peek().span;
-            self.expect(TokKind::LBrace, "to open the task body")?;
+            self.expect(TokKind::LambdaArrow, "before the task body")?;
+            let (body, end) = self.lambda_arrow_body(open.end)?;
+            Ok(Lambda {
+                take_names: Vec::new(),
+                params: Vec::new(),
+                body,
+                span: Span::new(open.start, end),
+                meta: LambdaMeta::default(),
+            })
+        }
+
+        /// Existing trailing-block call sugar: `call(args) { stmts }`.
+        pub(super) fn parse_trailing_block_lambda(&mut self) -> Result<Lambda, Diagnostic> {
+            let open = self.peek().span;
+            self.expect(TokKind::LBrace, "to open the trailing block")?;
             let stmts = self.block_stmts();
             let end = self.toks[self.pos - 1].span.end;
             Ok(Lambda {

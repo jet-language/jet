@@ -17,20 +17,18 @@ module cache<K, capacity: Int> {
         Value(K)
     }
 
-    pub fn entry(k: K) -> Entry {
+    pub fn entry(k: K) => Entry {
         return Entry.{ key: k }
     }
 
-    pub fn slot(k: K) -> Slot { return Slot.Value(k) }
-
-    pub fn key_of(k: K) -> String {
+    pub fn slot(k: K) => Slot = Slot.Value(k)
+    pub fn key_of(k: K) => String {
         value :: K.{ k }
         return "key"
     }
 
-    pub fn describe() -> String { return "generic cache" }
-
-    pub fn size() -> Int { return computed_size }
+    pub fn describe() => String = "generic cache"
+    pub fn size() => Int = computed_size
 }
 
 // Forward alias chain: declaration order does not affect resolution.
@@ -70,7 +68,7 @@ impl GoodToken.Token {
 // The annotation decides the kind: `Item` is a type slot because `Token` is a
 // trait, while `count` is an `Int` value slot. Their spelling follows that kind.
 module annotation_kinds<Item: Token, count: Int> {
-    pub fn count() -> Int { return count }
+    pub fn count() => Int = count
 }
 
 module kinds = annotation_kinds<GoodToken, 8>
@@ -80,7 +78,7 @@ module fixed_buffer<T, capacity: Int> {
         items: [T#capacity]
     }
 
-    pub fn echo(values: [T#capacity]) -> [T#capacity] {
+    pub fn echo(values: [T#capacity]) => [T#capacity] {
         result :: [T#capacity].{ ~values }
         return result
     }
@@ -91,7 +89,7 @@ module three_ints = fixed_buffer<Int, 3>
 module local_laws<T> {
     pub trait Reveal {
         type Output
-        fn reveal(self) -> T
+        fn reveal(self) => T
     }
 
     pub struct Wrapped {
@@ -100,12 +98,12 @@ module local_laws<T> {
 
     impl Wrapped.Reveal {
         type Output = T
-        fn reveal(self) -> T { return self.value }
+        fn reveal(self) => T = self.value
     }
 
     pub enum SourceErr { Bad(T) }
     pub enum TargetErr { Wrapped(SourceErr) }
-    impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
+    impl SourceErr => TargetErr { return TargetErr.Wrapped(self) }
 }
 
 module int_laws = local_laws<Int>

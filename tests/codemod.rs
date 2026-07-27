@@ -166,10 +166,10 @@ fn batch_rules_reindex_across_clean_and_fixture_roots_then_undo_exactly() {
     fs::create_dir_all(fixture.parent().unwrap()).unwrap();
     fs::create_dir_all(&migrations).unwrap();
 
-    let clean_before = "fn legacy_parse(text: String) -> Int { return 42 }\nfn parse_int(text: String, base: Int) -> Int { return 42 }\nfn report(value: Int) { print(value) }\nfn run() { report(legacy_parse(\"42\")) }\n";
-    let clean_after = "fn legacy_parse(text: String) -> Int { return 42 }\nfn parse_int(text: String, base: Int) -> Int { return 42 }\nfn summarize(value: Int) { print(value) }\nfn run() { summarize(parse_int(\"42\", base: 10)) }\n";
-    let fixture_before = "fn legacy_parse(text: String) -> Int { return 42 }\nfn parse_int(text: String, base: Int) -> Int { return 42 }\nfn report(value: Int) {}\nfn run() { report(legacy_parse(true)) }\n";
-    let fixture_after = "fn legacy_parse(text: String) -> Int { return 42 }\nfn parse_int(text: String, base: Int) -> Int { return 42 }\nfn summarize(value: Int) {}\nfn run() { summarize(parse_int(true, base: 10)) }\n";
+    let clean_before = "fn legacy_parse(text: String) => Int { return 42 }\nfn parse_int(text: String, base: Int) => Int { return 42 }\nfn report(value: Int) { print(value) }\nfn run() { report(legacy_parse(\"42\")) }\n";
+    let clean_after = "fn legacy_parse(text: String) => Int { return 42 }\nfn parse_int(text: String, base: Int) => Int { return 42 }\nfn summarize(value: Int) { print(value) }\nfn run() { summarize(parse_int(\"42\", base: 10)) }\n";
+    let fixture_before = "fn legacy_parse(text: String) => Int { return 42 }\nfn parse_int(text: String, base: Int) => Int { return 42 }\nfn report(value: Int) {}\nfn run() { report(legacy_parse(true)) }\n";
+    let fixture_after = "fn legacy_parse(text: String) => Int { return 42 }\nfn parse_int(text: String, base: Int) => Int { return 42 }\nfn summarize(value: Int) {}\nfn run() { summarize(parse_int(true, base: 10)) }\n";
     fs::write(&example, clean_before).unwrap();
     fs::write(&fixture, fixture_before).unwrap();
     let stderr_before = check_stderr(&fixture);
@@ -516,7 +516,7 @@ fn typed_ast_type_nodes_cover_params_returns_fields_distincts_and_alias_targets(
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     fs::write(
         &source,
-        "struct Box { value: Int }\nCount :: distinct Int;\nalias ResultOf<T> = Int ? Int\nfn convert(value: Int) -> Int { return value }\nfn run() {}\n",
+        "struct Box { value: Int }\nCount :: distinct Int;\nalias ResultOf<T> = Int ? Int\nfn convert(value: Int) => Int { return value }\nfn run() {}\n",
     )
     .unwrap();
     let object = project.join("types.codemod.json");
@@ -538,7 +538,7 @@ fn typed_ast_repeated_capture_backtracking_keeps_original_binding() {
     fs::create_dir_all(source.parent().unwrap()).unwrap();
     fs::write(
         &source,
-        "fn pair(a: Int, b: Int) -> Int { return a + b }\nfn same(value: Int) -> Int { return value }\nfn run() { print(pair(1, 2))\nprint(pair(3, 3)) }\n",
+        "fn pair(a: Int, b: Int) => Int { return a + b }\nfn same(value: Int) => Int { return value }\nfn run() { print(pair(1, 2))\nprint(pair(3, 3)) }\n",
     )
     .unwrap();
     let object = project.join("repeat.codemod.json");

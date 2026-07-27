@@ -5,30 +5,30 @@ enum Payload {
     Count(Int)
 }
 
-fn describe(value: Int | String) -> String {
+fn describe(value: Int | String) => String {
     if value == {
         .Int(n) -> { return "n={n}" }
         .String(s) -> { return "s={s}" }
     }
 }
 
-fn take_number(n: Int | String) -> String { return describe(n) }
+fn take_number(n: Int | String) => String = describe(n)
 
-fn as_named(value: Int | String) -> Payload {
+fn as_named(value: Int | String) => Payload {
     if value == {
         .Int(n) -> { return Payload.Count(n) }
         .String(s) -> { return Payload.Name(s) }
     }
 }
 
-fn from_named(payload: Payload) -> Int | String {
+fn from_named(payload: Payload) => Int | String {
     if payload == {
         .Count(n) -> { return n }
         .Name(s) -> { return s }
     }
 }
 
-fn hold(v: Int | String) -> Int | String { return ~v }
+fn hold(v: Int | String) => Int | String = ~v
 
 #Codable
 struct Box {

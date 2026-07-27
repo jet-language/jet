@@ -6,12 +6,15 @@ use crate::Sema::Diagnostics::{is_cloneable, type_fix_hint};
 use crate::Sema::{Checker, LocalInfo, SendCrossing, SendProblemKind, SendabilityProblem};
 use crate::Syntax;
 use std::collections::HashSet;
-impl<'a> Checker<'a> {
+    impl<'a> Checker<'a> {
         pub(crate) fn check_lambda(
             &mut self,
             lam: &mut Lambda,
             expected: Option<&Type>,
         ) -> Option<Type> {
+            let collecting_loop = lam.meta.collecting_loop;
+            let result_loop = lam.meta.result_loop;
+            let inline_loop = collecting_loop || result_loop;
             let (exp_params, exp_ret) = match expected {
                 Some(Type::Fn { params, ret, .. }) => (Some(params.as_slice()), ret.as_ref()),
                 _ => (None, None),
@@ -79,7 +82,14 @@ impl<'a> Checker<'a> {
     
             let mut read_caps = HashSet::new();
             let mut mut_caps = HashSet::new();
-            lambda_collect_captures(&lam.body, &param_names, &mut read_caps, &mut mut_caps);
+            if !inline_loop {
+                lambda_collect_captures(
+                    &lam.body,
+                    &param_names,
+                    &mut read_caps,
+                    &mut mut_caps,
+                );
+            }
     
             for name in read_caps.iter().chain(mut_caps.iter()) {
                 if take_set.contains(name) || param_names.contains(name) {
@@ -141,7 +151,9 @@ impl<'a> Checker<'a> {
                         continue;
                     };
                     let taken = take_set.contains(name);
+                    let cloneable = is_cloneable(&cap_ty, self.registry);
                     if !cap_ty.is_scalar()
+                        && !cloneable
                         && matches!(
                             cap_conv,
                             Some(AccessConvention::Read) | Some(AccessConvention::Write)
@@ -161,10 +173,10 @@ impl<'a> Checker<'a> {
                             "this function can access the parameter, but it does not own the value"
                                 .to_string(),
                             format!(
-                                "copy it into an owned local first: `owned {} {}{}`",
-                                Syntax::SIGIL_BIND_IMMUT,
-                                Syntax::SIGIL_COPY,
-                                name
+                                "make the parameter owned: `{}: {}{}`",
+                                name,
+                                Syntax::SIGIL_MOVE,
+                                cap_ty.name()
                             ),
                             Some(lam.span),
                         ));
@@ -188,6 +200,21 @@ impl<'a> Checker<'a> {
                         }
                         continue;
                     }
+                    if self.is_task_spawn && mut_caps.contains(name) {
+                        self.diags.push(Diagnostic::error(
+                            "E1101",
+                            format!(
+                                "`{}` is a mutable value — the new task might outlive this scope",
+                                name
+                            ),
+                            "tasks run concurrently; changing an outer binding inside a task would make ownership unclear"
+                                .to_string(),
+                            "create task-local state inside the task, or send updates through a channel"
+                                .to_string(),
+                            Some(lam.span),
+                        ));
+                        continue;
+                    }
                     if self.is_task_spawn {
                         // D-MEM1 stage S5: a string view (`Binding.string_view`)
                         // is `Type::String` at the type level — the general
@@ -198,8 +225,9 @@ impl<'a> Checker<'a> {
                         // can't cross into a spawned task's `'static` closure any
                         // more than a `View<T>` can (I2: this must be caught here,
                         // never surface as a real rustc lifetime rejection).
+                        let moves_capture = taken || !cloneable;
                         let problem = if !cap_sendable {
-                            self.sendability_problem(&cap_ty, taken).or_else(|| {
+                            self.sendability_problem(&cap_ty, moves_capture).or_else(|| {
                                 Some(SendabilityProblem {
                                     root: None,
                                     path: Vec::new(),
@@ -207,7 +235,7 @@ impl<'a> Checker<'a> {
                                 })
                             })
                         } else {
-                            self.sendability_problem(&cap_ty, taken)
+                            self.sendability_problem(&cap_ty, moves_capture)
                         };
                         if let Some(problem) = problem {
                             self.report_unsendable(
@@ -220,62 +248,16 @@ impl<'a> Checker<'a> {
                             continue;
                         }
                     }
-                    if mut_caps.contains(name) && !taken {
-                        if self.is_task_spawn {
-                            self.diags.push(Diagnostic::error(
-                                "E1101",
-                                format!(
-                                    "`{}` is a mutable value — the new task might outlive this scope",
-                                    name
-                                ),
-                                "tasks run concurrently; a `var` binding can't be shared between tasks".to_string(),
-                                format!(
-                                    "give the task its own copy (`{}{}`) or hand it over with `take({})`",
-                                    Syntax::SIGIL_COPY, name, name
-                                ),
-                                Some(lam.span),
-                            ));
-                        }
-                        continue; // taken by move into closure via mut borrow path
-                    }
-                    if mut_caps.contains(name) {
-                        continue;
-                    }
-                    if self.is_resource_type(&cap_ty) || !is_cloneable(&cap_ty, self.registry) {
+                    if self.is_resource_type(&cap_ty) || !cloneable {
+                        // D-ARROW-CONTROL1: escaping closures infer ownership.
+                        // Owned non-Copy captures move at closure creation.
                         if !taken {
-                            if self.is_task_spawn {
-                                self.diags.push(Diagnostic::error(
-                                    "E1101",
-                                    format!(
-                                        "`{}` can't be copied into a task — the task might outlive this scope",
-                                        name
-                                    ),
-                                    "a spawned task must own everything it captures".to_string(),
-                                    format!(
-                                        "use `take({})` on the lambda to move `{}` into the task",
-                                        name, name
-                                    ),
-                                    Some(lam.span),
-                                ));
-                            } else {
-                                self.diags.push(Diagnostic::error(
-                                    "E0802",
-                                    format!("`{}` can't be copied into a stored lambda", name),
-                                    "a lambda that outlives this line must own its captures"
-                                        .to_string(),
-                                    format!(
-                                        "prefix the lambda with `take({})` to move `{}` in",
-                                        name, name
-                                    ),
-                                    Some(lam.span),
-                                ));
-                            }
+                            lam.meta.moved_captures.push(name.clone());
                         }
                     } else if is_reactive_handle_ty(&cap_ty) || matches!(cap_ty, Type::Shared(_)) {
                         // D-REACT1=B / D-DATARACE1=C: a reactive handle is an Arc-backed
                         // shared cell — capturing a "copy" shares the same reactive cell.
-                        // No silent-data-copy to warn about, so L0801 is suppressed. The
-                        // capture is still recorded as a clone so codegen moves an Arc
+                        // The capture is recorded as a clone so codegen moves an Arc
                         // clone into the closure. Lock-ordered storage makes the clone
                         // Send without leaning on rustc.
                         // D-MEM1 S6 (D-SHARED-API1=A): `Shared<T>` is the same shape — an
@@ -316,20 +298,6 @@ impl<'a> Checker<'a> {
                         lam.meta.cloned_captures.push(name.clone());
                     } else if !taken {
                         lam.meta.cloned_captures.push(name.clone());
-                        self.diags.push(Diagnostic::lint(
-                            "L0801",
-                            format!(
-                                "lambda stored a copy of `{}`; write `take({})` on the lambda to move it instead",
-                                name, name
-                            ),
-                            "a stored lambda owns its captures — clonable values are copied silently"
-                                .to_string(),
-                            format!(
-                                "use `take({}) (…) => …` to move `{}`, or `{}{}` at the call site to copy on purpose",
-                                name, name, Syntax::SIGIL_COPY, name
-                            ),
-                            Some(lam.span),
-                        ));
                     }
                 }
             }
@@ -366,7 +334,9 @@ impl<'a> Checker<'a> {
             // { fs.write(…) })` is the D-TXN2 fix-it: the irreversible work moves into
             // a lambda, off the block's direct path.
             let saved_txn_depth = self.txn_depth;
-            self.txn_depth = 0;
+            if !inline_loop {
+                self.txn_depth = 0;
+            }
             let saved_expected = self.expected_type.clone();
             self.expected_type = exp_ret.map(|ret| (**ret).clone());
             // A block-bodied lambda's `return` belongs to the lambda, not to the
@@ -380,7 +350,24 @@ impl<'a> Checker<'a> {
             let saved_inferred_mut_captures =
                 std::mem::take(&mut self.inferred_lambda_mut_captures);
             self.in_lambda_body = true;
-            let body_ret = match &mut lam.body {
+            if inline_loop {
+                if let Some((label, span)) = lam.meta.loop_label.clone() {
+                    install_inline_loop_label(&mut lam.body, &label, span);
+                }
+            }
+            if collecting_loop {
+                self.collect_item_types.push(None);
+                self.pending_loop_value = Some((
+                    crate::Sema::LoopValueKind::Collecting,
+                    lam.meta.loop_label.as_ref().map(|(name, _)| name.clone()),
+                ));
+            } else if result_loop {
+                self.pending_loop_value = Some((
+                    crate::Sema::LoopValueKind::Result,
+                    lam.meta.loop_label.as_ref().map(|(name, _)| name.clone()),
+                ));
+            }
+            let mut body_ret = match &mut lam.body {
                 LambdaBody::Expr(e) => {
                     if self.is_task_spawn {
                         self.borrow_ctx = true;
@@ -406,6 +393,43 @@ impl<'a> Checker<'a> {
                     last_ret
                 }
             };
+            if collecting_loop {
+                let item_ty = self.collect_item_types.pop().flatten();
+                let item_ty = item_ty.unwrap_or_else(|| {
+                    self.diags.push(Diagnostic::error(
+                        "E0073",
+                        "this yielding loop path produces no item".to_string(),
+                        "every accepted iteration must contribute one non-Void value unless `next` omits it".to_string(),
+                        "add a yielded value, or remove `->`".to_string(),
+                        Some(lam.span),
+                    ));
+                    Type::Int
+                });
+                if let LambdaBody::Block(stmts) = &mut lam.body {
+                    lower_collecting_loop(stmts, &item_ty, lam.span);
+                }
+                lam.meta.collect_item_type = Some(item_ty.clone());
+                // The compiler invokes this closure immediately. It does not
+                // create an escape or ownership boundary, so reads stay in
+                // the current lexical environment.
+                lam.meta.cloned_captures.clear();
+                lam.meta.moved_captures.clear();
+                body_ret = Some(Type::List(Box::new(item_ty)));
+            } else if result_loop {
+                let result_ty = self.last_loop_result_type.take().unwrap_or_else(|| {
+                    self.diags.push(Diagnostic::error(
+                        "E0073",
+                        "this loop has no final break value".to_string(),
+                        "a loop used as a value must return one value through `break value`"
+                            .to_string(),
+                        "add `break value`, or use the loop only for effects".to_string(),
+                        Some(lam.span),
+                    ));
+                    Type::Int
+                });
+                lam.meta.loop_result_type = Some(result_ty.clone());
+                body_ret = Some(result_ty);
+            }
 
             let inferred_mut_caps = std::mem::replace(
                 &mut self.inferred_lambda_mut_captures,
@@ -506,4 +530,220 @@ impl<'a> Checker<'a> {
             })
         }
     
+}
+
+fn install_inline_loop_label(
+    body: &mut LambdaBody,
+    label: &str,
+    span: crate::Diagnostics::Span,
+) {
+    let LambdaBody::Block(stmts) = body else {
+        return;
+    };
+    let Some(root) = stmts.first_mut() else {
+        return;
+    };
+    let old = match root {
+        Stmt::Loop {
+            label: root_label, ..
+        }
+        | Stmt::While {
+            label: root_label, ..
+        }
+        | Stmt::For {
+            label: root_label, ..
+        }
+        | Stmt::CountedLoop {
+            label: root_label, ..
+        } => root_label
+            .replace((label.to_string(), span))
+            .map(|(name, _)| name),
+        _ => None,
+    };
+    if let Some(old) = old {
+        rewrite_inline_loop_target(stmts, &old, label);
+    }
+}
+
+fn rewrite_inline_loop_target(stmts: &mut [Stmt], old: &str, new: &str) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::BreakLabel(name, _)
+            | Stmt::ContinueLabel(name, _)
+            | Stmt::BreakLabelValue(name, _, _, _)
+                if name == old =>
+            {
+                *name = new.to_string();
+            }
+            Stmt::If(branch) => {
+                rewrite_inline_loop_target(&mut branch.then_body, old, new);
+                match &mut branch.else_branch {
+                    Some(crate::AST::ElseBranch::ElseIf(next)) => {
+                        rewrite_inline_if_target(next, old, new)
+                    }
+                    Some(crate::AST::ElseBranch::Else(body)) => {
+                        rewrite_inline_loop_target(body, old, new)
+                    }
+                    None => {}
+                }
+            }
+            Stmt::Switch {
+                arms, else_body, ..
+            }
+            | Stmt::ComptimeSwitch {
+                arms, else_body, ..
+            } => {
+                for arm in arms {
+                    rewrite_inline_loop_target(&mut arm.body, old, new);
+                }
+                if let Some(body) = else_body {
+                    rewrite_inline_loop_target(body, old, new);
+                }
+            }
+            Stmt::Loop { body, .. }
+            | Stmt::While { body, .. }
+            | Stmt::For { body, .. }
+            | Stmt::CountedLoop { body, .. }
+            | Stmt::Unsafe { body, .. }
+            | Stmt::Impure { body, .. }
+            | Stmt::Reactive { body, .. }
+            | Stmt::Shield { body, .. }
+            | Stmt::Off { body, .. }
+            | Stmt::DebugOnly { body, .. }
+            | Stmt::Region { body, .. }
+            | Stmt::Policy { body, .. }
+            | Stmt::TaskGroup { body, .. }
+            | Stmt::Layout { body, .. }
+            | Stmt::Caps { body, .. }
+            | Stmt::Grant { body, .. }
+            | Stmt::ComptimeBlock { body, .. }
+            | Stmt::ContextBlock { body, .. }
+            | Stmt::Live { body, .. }
+            | Stmt::AssumeDet { body, .. }
+            | Stmt::Transact { body, .. }
+            | Stmt::ScopeMember { body, .. } => rewrite_inline_loop_target(body, old, new),
+            Stmt::ComptimeIf {
+                then_body,
+                else_body,
+                ..
+            } => {
+                rewrite_inline_loop_target(then_body, old, new);
+                if let Some(body) = else_body {
+                    rewrite_inline_loop_target(body, old, new);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn rewrite_inline_if_target(branch: &mut crate::AST::IfStmt, old: &str, new: &str) {
+    rewrite_inline_loop_target(&mut branch.then_body, old, new);
+    match &mut branch.else_branch {
+        Some(crate::AST::ElseBranch::ElseIf(next)) => rewrite_inline_if_target(next, old, new),
+        Some(crate::AST::ElseBranch::Else(body)) => rewrite_inline_loop_target(body, old, new),
+        None => {}
+    }
+}
+
+fn lower_collecting_loop(stmts: &mut Vec<Stmt>, item_ty: &Type, span: crate::Diagnostics::Span) {
+    let target = format!("__jet_collect_{}", span.start);
+    rewrite_collect_yields(stmts, &target);
+    stmts.insert(
+        0,
+        Stmt::Val(crate::AST::Binding {
+            mutable: true,
+            track: false,
+            track_span: None,
+            reactive_local: false,
+            reactive_local_span: None,
+            reactive_shared: false,
+            reactive_shared_span: None,
+            reactive_upgrade: false,
+            meta: None,
+            name: target.clone(),
+            name_span: span,
+            pattern: None,
+            ty: Some(Type::List(Box::new(item_ty.clone()))),
+            ty_span: Some(span),
+            init: crate::AST::Expr::ListLit(Vec::new(), span),
+            is_comptime: false,
+            ct: None,
+            uninit: false,
+            arena_view: false,
+            string_view: false,
+            gc_promotion: None,
+            gc_transferred: false,
+        }),
+    );
+    stmts.push(Stmt::Expr(crate::AST::Expr::Ident(target, span)));
+}
+
+fn rewrite_collect_yields(stmts: &mut [Stmt], target: &str) {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Yield(value, span) if span.start == span.end => {
+                let value = std::mem::replace(
+                    value,
+                    crate::AST::Expr::Int(0, *span, None, None),
+                );
+                *stmt = Stmt::Expr(crate::AST::Expr::MethodCall {
+                    receiver: Box::new(crate::AST::Expr::Ident(target.to_string(), *span)),
+                    method: "push".to_string(),
+                    method_span: *span,
+                    type_args: Vec::new(),
+                    args: vec![crate::AST::CallArg {
+                        convention: AccessConvention::Read,
+                        expr: value,
+                        span: *span,
+                        flags: crate::AST::CallArgFlags::default(),
+                        label: None,
+                        spread: false,
+                    }],
+                    recv_type: None,
+                    resolved_ret: Some(Type::Named(Syntax::TYPE_VOID.to_string())),
+                });
+            }
+            Stmt::If(branch) => rewrite_collect_if(branch, target),
+            Stmt::Loop { body, .. }
+            | Stmt::While { body, .. }
+            | Stmt::For { body, .. }
+            | Stmt::CountedLoop { body, .. }
+            | Stmt::Unsafe { body, .. }
+            | Stmt::Impure { body, .. }
+            | Stmt::Reactive { body, .. }
+            | Stmt::Shield { body, .. }
+            | Stmt::Off { body, .. }
+            | Stmt::DebugOnly { body, .. }
+            | Stmt::Region { body, .. }
+            | Stmt::Policy { body, .. }
+            | Stmt::TaskGroup { body, .. }
+            | Stmt::Layout { body, .. }
+            | Stmt::Caps { body, .. }
+            | Stmt::Grant { body, .. }
+            | Stmt::ComptimeBlock { body, .. }
+            | Stmt::AssumeDet { body, .. }
+            | Stmt::ScopeMember { body, .. } => rewrite_collect_yields(body, target),
+            Stmt::Switch {
+                arms, else_body, ..
+            } => {
+                for arm in arms {
+                    rewrite_collect_yields(&mut arm.body, target);
+                }
+                if let Some(body) = else_body {
+                    rewrite_collect_yields(body, target);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn rewrite_collect_if(branch: &mut crate::AST::IfStmt, target: &str) {
+    rewrite_collect_yields(&mut branch.then_body, target);
+    match &mut branch.else_branch {
+        Some(crate::AST::ElseBranch::ElseIf(next)) => rewrite_collect_if(next, target),
+        Some(crate::AST::ElseBranch::Else(body)) => rewrite_collect_yields(body, target),
+        None => {}
+    }
 }

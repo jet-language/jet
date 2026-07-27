@@ -40,7 +40,7 @@ fn run() {
 ";
 
 const CALLS: &str = "\
-fn double(x: Int) -> Int {
+fn double(x: Int) => Int {
     y := x * 2
     return y
 }
@@ -247,7 +247,7 @@ fn run() {
     outer := : loop i.{ 0; i < 3; i += 1 { }
         loop j := 0; j < 3; j += 1 {
             if j == 1 {
-                outer.next()
+                next(outer)
             }
             inner_hits += 1
         }
@@ -279,7 +279,7 @@ fn run() {
         &["break 14", "c", "n", "p i", "n", "p i", "c"],
     );
     let next_stop = labeled
-        .find("14 |                 outer.next()        <- here")
+        .find("14 |                 next(outer)        <- here")
         .expect("labeled next stop");
     let outer_step = labeled[next_stop..]
         .find("11 |     outer :: loop i := 0; i < 3; i += 1 {        <- here")

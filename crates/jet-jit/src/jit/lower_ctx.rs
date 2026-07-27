@@ -27,6 +27,7 @@ pub(crate) struct LoopTargets {
     label: Option<String>,
     continue_block: Block,
     break_block: Block,
+    break_value_ty: Option<Type>,
     shield_depth: u32,
 }
 
@@ -1448,6 +1449,66 @@ impl LowerCtx<'_, '_> {
         self.lower_stmts(stmts)
     }
 
+    fn lower_inline_block(&mut self, stmts: &[TStmt], ty: &Type) -> Result<Value, String> {
+        let saved_vars = self.vars.clone();
+        let saved_var_tys = self.var_tys.clone();
+        let result = (|| {
+            let (tail, prefix) = stmts
+                .split_last()
+                .ok_or("jit inline loop block has no result")?;
+            self.lower_stmts(prefix)?;
+            match tail {
+                TStmt::ExprStmt(value) => self.lower_expr(value),
+                TStmt::Loop { label, body } => self.lower_result_loop(label, body, ty),
+                _ => Err("jit inline loop block has unsupported result statement".to_string()),
+            }
+        })();
+        *self.vars = saved_vars;
+        *self.var_tys = saved_var_tys;
+        result
+    }
+
+    fn lower_result_loop(
+        &mut self,
+        label: &Option<String>,
+        body: &[TStmt],
+        ty: &Type,
+    ) -> Result<Value, String> {
+        let result_ty = self
+            .meta
+            .clif_ty(ty)
+            .ok_or_else(|| format!("jit result-loop type unsupported: {ty:?}"))?;
+        let header = self.b.create_block();
+        let body_block = self.b.create_block();
+        let exit = self.b.create_block();
+        self.b.append_block_param(exit, result_ty);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        self.b.ins().jump(body_block, &[]);
+
+        self.loop_stack.push(LoopTargets {
+            label: label.clone(),
+            continue_block: header,
+            break_block: exit,
+            break_value_ty: Some(ty.clone()),
+            shield_depth: self.shield_depth,
+        });
+        self.b.switch_to_block(body_block);
+        self.b.seal_block(body_block);
+        self.lower_stmts_scoped(body)?;
+        self.loop_stack.pop();
+        if !self.dead {
+            self.b.ins().jump(header, &[]);
+        }
+        self.b.seal_block(header);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(exit);
+        self.dead = false;
+        Ok(self.b.block_params(exit)[0])
+    }
+
     /// Exhaustive match on every `TStmt` variant (`TIR/mod.rs`) — the JIT half
     /// of the R12 two-consumer contract; `TIR/emit/statements.rs::emit_tir_stmt`
     /// is the AOT half. Control-flow variants (`If`/`Loop`/`While`/`CountedLoop`/
@@ -2032,6 +2093,7 @@ impl LowerCtx<'_, '_> {
                     label: label.clone(),
                     continue_block: header,
                     break_block: exit,
+                    break_value_ty: None,
                     shield_depth: self.shield_depth,
                 });
                 self.b.switch_to_block(body_block);
@@ -2063,6 +2125,7 @@ impl LowerCtx<'_, '_> {
                     label: label.clone(),
                     continue_block: header,
                     break_block: exit,
+                    break_value_ty: None,
                     shield_depth: self.shield_depth,
                 });
                 self.b.switch_to_block(body_block);
@@ -2101,6 +2164,7 @@ impl LowerCtx<'_, '_> {
                     label: label.clone(),
                     continue_block: step_block,
                     break_block: exit,
+                    break_value_ty: None,
                     shield_depth: self.shield_depth,
                 });
                 self.b.switch_to_block(body_block);
@@ -2163,6 +2227,7 @@ impl LowerCtx<'_, '_> {
                     label: label.clone(),
                     continue_block: step_block,
                     break_block: exit,
+                    break_value_ty: None,
                     shield_depth: self.shield_depth,
                 });
                 self.b.switch_to_block(body_block);
@@ -2208,6 +2273,38 @@ impl LowerCtx<'_, '_> {
                     self.emit_dummy_return();
                 } else {
                     self.b.ins().jump(targets.break_block, &[]);
+                }
+                self.dead = true;
+            }
+            TStmt::BreakValue { label, value } => {
+                let targets = self.loop_targets(label.as_deref(), "break")?;
+                let expected = targets
+                    .break_value_ty
+                    .as_ref()
+                    .ok_or("jit break value targets an effect-only loop")?;
+                if expected != &value.ty {
+                    return Err(format!(
+                        "jit break value type mismatch: expected {expected:?}, got {:?}",
+                        value.ty
+                    ));
+                }
+                let value = self.lower_expr(value)?;
+                if let Some(status) = self.emit_shield_leaves_to(targets.shield_depth) {
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    let pending = self.b.ins().icmp(IntCC::NotEqual, status, zero);
+                    let interrupted = self.b.create_block();
+                    self.b.ins().brif(
+                        pending,
+                        interrupted,
+                        &[],
+                        targets.break_block,
+                        &[value],
+                    );
+                    self.b.switch_to_block(interrupted);
+                    self.b.seal_block(interrupted);
+                    self.emit_dummy_return();
+                } else {
+                    self.b.ins().jump(targets.break_block, &[value]);
                 }
                 self.dead = true;
             }
@@ -2377,6 +2474,7 @@ impl LowerCtx<'_, '_> {
                         label: label.clone(),
                         continue_block: step_block,
                         break_block: exit,
+                        break_value_ty: None,
                         shield_depth: self.shield_depth,
                     });
                     self.b.switch_to_block(body_block);
@@ -2556,6 +2654,7 @@ impl LowerCtx<'_, '_> {
                         label: label.clone(),
                         continue_block: step_block,
                         break_block: exit,
+                        break_value_ty: None,
                         shield_depth: self.shield_depth,
                     });
                     self.b.switch_to_block(body_block);
@@ -3781,6 +3880,7 @@ impl LowerCtx<'_, '_> {
             TExprKind::CharLit(v) => Ok(self.b.ins().iconst(types::I32, *v as i64)),
             TExprKind::StrLit(parts) => self.lower_string_lit(parts),
             TExprKind::Local(local) => self.load_local(local),
+            TExprKind::InlineBlock(stmts) => self.lower_inline_block(stmts, &expr.ty),
             TExprKind::Borrow { place, .. } => {
                 // JIT has no borrow ABI — materialize the place value (scalar /
                 // field / already-materialized view handle).
@@ -3874,18 +3974,29 @@ impl LowerCtx<'_, '_> {
 
                 self.b.switch_to_block(then_block);
                 self.b.seal_block(then_block);
-                self.lower_stmts(then_body)?;
-                let then_val = self.lower_expr(then_value)?;
-                self.b.ins().jump(merge_block, &[then_val]);
+                self.lower_stmts_scoped(then_body)?;
+                if !self.dead {
+                    let then_val = self.lower_expr(then_value)?;
+                    if !self.dead {
+                        self.b.ins().jump(merge_block, &[then_val]);
+                    }
+                }
+                let then_reaches_merge = !self.dead;
 
                 self.b.switch_to_block(else_block);
                 self.b.seal_block(else_block);
-                self.lower_stmts(else_body)?;
-                let else_val = self.lower_expr(else_value)?;
-                self.b.ins().jump(merge_block, &[else_val]);
+                self.lower_stmts_scoped(else_body)?;
+                if !self.dead {
+                    let else_val = self.lower_expr(else_value)?;
+                    if !self.dead {
+                        self.b.ins().jump(merge_block, &[else_val]);
+                    }
+                }
+                let else_reaches_merge = !self.dead;
 
                 self.b.switch_to_block(merge_block);
                 self.b.seal_block(merge_block);
+                self.dead = !(then_reaches_merge || else_reaches_merge);
                 let phi = self.b.block_params(merge_block)[0];
                 Ok(phi)
             }

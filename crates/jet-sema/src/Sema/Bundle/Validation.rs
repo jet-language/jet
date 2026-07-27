@@ -466,6 +466,9 @@ pub(crate) fn collect_core_stmts(
                 collect_core_expr(value, imports, used, spans, ffi_cb);
             }
             Stmt::Return(Some(e), _) => collect_core_expr(e, imports, used, spans, ffi_cb),
+            Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => {
+                collect_core_expr(e, imports, used, spans, ffi_cb)
+            }
             Stmt::Return(None, _) => {}
             Stmt::If(ifs) => collect_core_if(ifs, imports, used, spans, ffi_cb),
             Stmt::While { cond, body, .. } => {
@@ -1957,6 +1960,10 @@ pub(crate) fn check_func_body_bundle(
         suppress_partial_move_root_read: false,
         loop_depth: 0,
         loop_labels: Vec::new(),
+        collect_item_types: Vec::new(),
+        loop_value_frames: Vec::new(),
+        pending_loop_value: None,
+        last_loop_result_type: None,
         fx_direct: std::collections::BTreeSet::new(),
         fx_direct_spans: HashMap::new(),
         fx_edges: std::collections::BTreeSet::new(),
@@ -2070,7 +2077,7 @@ pub(crate) fn check_func_body_bundle(
     }
     // Direct ambient/foreign operations keep their precise body diagnostic.
     // User callees are checked after the whole-program effect fixpoint so an
-    // inferred-pure callee need not repeat `--[]->`.
+    // inferred-pure callee need not repeat `=[]=>`.
     if f.is_pure {
         ck.diags.extend(check_pure_fn(f, &st.funcs));
     }

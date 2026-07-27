@@ -81,6 +81,7 @@ pub(super) enum Flow {
     Break,
     Continue,
     BreakLabel(String),
+    BreakValue(Option<String>, CtValue),
     ContinueLabel(String),
     Return(CtValue),
 }
@@ -107,6 +108,12 @@ pub(super) struct EvalCtx<'a> {
     pub(super) runtime_execution: bool,
     pub(super) repl_mode: bool,
     pub(super) pending_return: Option<CtValue>,
+    /// Control emitted by an inline loop expression that targets an enclosing
+    /// loop. The containing statement list consumes and propagates it.
+    pub(super) pending_flow: Option<Flow>,
+    /// Compiler-private eager List sinks for raw comptime yielding-loop
+    /// fragments. Fully checked programs rewrite these sends to `List.push`.
+    pub(super) collecting_items: Vec<Vec<CtValue>>,
     pub(super) call_depth: usize,
     pub(super) emitted_fragments: Option<&'a mut Vec<String>>,
     pub(super) embed_inputs: Option<&'a mut Vec<crate::AST::ComptimeInput>>,
@@ -362,6 +369,8 @@ pub fn run_program_with_structs(
         runtime_execution: true,
         repl_mode: false,
         pending_return: None,
+        pending_flow: None,
+        collecting_items: Vec::new(),
         call_depth: 0,
         emitted_fragments: None,
         embed_inputs: None,
@@ -405,6 +414,8 @@ pub fn run_named_func(
         runtime_execution: true,
         repl_mode: false,
         pending_return: None,
+        pending_flow: None,
+        collecting_items: Vec::new(),
         call_depth: 0,
         emitted_fragments: None,
         embed_inputs: None,
@@ -517,6 +528,8 @@ fn eval_expr_hook(
         runtime_execution: false,
         repl_mode,
         pending_return: None,
+        pending_flow: None,
+        collecting_items: Vec::new(),
         call_depth: 0,
         emitted_fragments,
         embed_inputs,
@@ -573,6 +586,8 @@ fn eval_block_hook(
         runtime_execution: false,
         repl_mode,
         pending_return: None,
+        pending_flow: None,
+        collecting_items: Vec::new(),
         call_depth: 0,
         emitted_fragments,
         embed_inputs,

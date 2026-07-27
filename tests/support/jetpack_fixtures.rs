@@ -648,7 +648,7 @@ pub fn core_hello_project(tag: &str) -> (Scratch, PathBuf, PathBuf) {
     fs::write(
         proj.join("env.jet"),
         format!(
-            "use jetpack as pkg;\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"{}\", \"core\");\n        pkg.packages([\"hello@mine\"]);\n    ];\n}}\n",
+            "use jetpack as pkg;\npub fn shell() => [JSON] {{\n    return [\n        pkg.source(\"mine\", \"{}\", \"core\");\n        pkg.packages([\"hello@mine\"]);\n    ];\n}}\n",
             repo.to_string_lossy()
         ),
     )

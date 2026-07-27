@@ -460,7 +460,7 @@ impl<'a> Parser<'a> {
                             "foreign Rust functions live in whole `extern rust` blocks — callers never write `unsafe`"
                                 .to_string(),
                             format!(
-                                "write: {} {} \"crate@version\" {{ fn name(...) -> T = \"rust::path\"; }}",
+                                "write: {} {} \"crate@version\" {{ fn name(...) => T = \"rust::path\"; }}",
                                 Syntax::KW_EXTERN,
                                 Syntax::KW_RUST
                             ),
@@ -803,7 +803,7 @@ impl<'a> Parser<'a> {
                             self.func().map(Item::Func)
                         }
                     }
-                    // S60 (D-CASING1 follow-on) / D-MARKERMOVE2: `fn name(…) --[]->`
+                    // S60 (D-CASING1 follow-on) / D-ARROW-CONTROL1: `fn name(…) =[]=>`
                     // purity modifier (old `#Pure` spelling is E0062, taught in `func()`).
                     TokKind::Hash if self.at_pure_fn() => self.func().map(Item::Func),
                     // D-TAINT1: `#Sanitizer fn name(…)` taint-strip modifier.
@@ -1121,7 +1121,8 @@ impl<'a> Parser<'a> {
                     TokKind::Hash if self.at_must_use_type() => {
                         self.must_use_type_def(false)
                     }
-                    // D-MIGRATE1: `migration TypeName { rename a -> b }`
+                    // D-MIGRATE1 + D-ARROW-CONTROL1:
+                    // `migration TypeName { rename a => b }`
                     TokKind::Ident(n) if n == Syntax::KW_MIGRATION && self.at_migration_block() => {
                         self.migration_decl().map(Item::Migration)
                     }
@@ -1131,7 +1132,8 @@ impl<'a> Parser<'a> {
                         self.state_decl_with_pkg(is_pub, is_package_pub)
                             .map(Item::StateDecl)
                     }
-                    // D-PROTO1/D-PROTO2: `protocol Name { client -> server: Msg(…) }`
+                    // D-PROTO1/D-PROTO2 + D-ARROW-CONTROL1:
+                    // `protocol Name { client: Msg(…) }`
                     TokKind::Ident(n) if n == Syntax::KW_PROTOCOL && self.at_protocol_block() => {
                         let (is_pub, is_package_pub) = self.parse_item_visibility();
                         self.protocol_decl_with_pkg(is_pub, is_package_pub)

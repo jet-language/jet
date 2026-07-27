@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn hover_returns_function_signature() {
-        let src = "fn add(a: Int, b: Int) -> Int { return a + b; }\nfn run() { r :: add(1, 2) }\n";
+        let src = "fn add(a: Int, b: Int) => Int { return a + b; }\nfn run() { r :: add(1, 2) }\n";
         let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);
@@ -218,7 +218,7 @@ mod tests {
 alias Count = Int
 #UnitFamily(Length) { meter }
 state Door { Open }
-protocol Wire { client -> server: Send(value: Int) }
+protocol Wire { client: Send(value: Int) }
 module holder<T> { pub struct Box { value: T } }
 module cache = holder<Int>
 fn run() {}
@@ -320,7 +320,7 @@ fn run() {}
 
     #[test]
     fn hover_and_completion_use_same_semantic_fact() {
-        let src = "/// Adds two values.\n/// Example: add(1, 2)\nfn add(a: Int, b: Int) -> Int { return a + b }\nfn run() {\n    \n}\n";
+        let src = "/// Adds two values.\n/// Example: add(1, 2)\nfn add(a: Int, b: Int) => Int { return a + b }\nfn run() {\n    \n}\n";
         let (project, _, bundle, facts) = check_test_document(src);
         let bundle = bundle.expect("bundle");
         let db = build_symbol_db(&bundle, &facts);

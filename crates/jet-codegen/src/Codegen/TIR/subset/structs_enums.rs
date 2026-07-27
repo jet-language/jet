@@ -358,7 +358,7 @@ pub(crate) fn field_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<String>) -
     if is_covered_fallible_ty(ty, cx) {
         return true;
     }
-    // c109 Phase 27: a FUNCTION-typed field (`step: fn(Int) -> Int` on a `Worker`
+    // c109 Phase 27: a FUNCTION-typed field (`step: fn(Int) => Int` on a `Worker`
     // struct). It renders via `cx.rust_type` to `Box<dyn Fn(...) -> ...>` exactly as
     // the AST `struct_field_rust` does; a struct-lit field value (a lambda / a bare
     // fn-name) lowers in-subset and is emitted as-is (NO ` as <fn-type>` coercion at

@@ -52,6 +52,13 @@
 // ordinary resolution and access rules.
 // D-SHAPE-CASE1=C owns the identifier category table and its two enforced
 // shapes. D-SHAPE-CASE2=A exempts foreign names inside FFI binding modules.
+// D-ARROW-CONTROL1=A (ratified 2026-07-26, card #1209) splits callable and
+// control syntax. OP_CALLABLE_ARROW (`=>`) defines callable results.
+// EFFECT_ARROW_OPEN/CLOSE (`=[` / `]=>`) add effect ceilings. OP_ARM_ARROW
+// (`->`) selects dispatch/guard values and D-LOOPEVAL1 yields finite-loop
+// items. Effect-only `if` and `loop` bodies use no arrow. Braces only group
+// multiline bodies. D-LOOPSTATE1 owns break/next target arguments, and
+// D-COMPREHENSION1 fixes yielding-loop results to eager List.
 // D-IFGUARD1=A adds no spelling: subjectless statement/value guard tables
 // reuse KW_IF, KW_ELSE, OP_ARM_ARROW, braces, and ordinary Bool expressions.
 // D-SHAPE-CONVERT1=A adds no punctuation: explicit conversion is always a

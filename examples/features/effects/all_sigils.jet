@@ -6,9 +6,8 @@ struct Account {
 }
 
 // plain read — no sigil
-fn check(a: Account) -> Bool { return a.balance > 0 }
+fn check(a: Account) => Bool = a.balance > 0
 
-// plain Account = shared read at a call boundary — no sigil needed
 fn print_balance(a: Account) {
     print("{a.owner}: {a.balance}")
 }
@@ -17,9 +16,7 @@ fn print_balance(a: Account) {
 fn deposit(a: &Account, amount: Int) { a.balance = a.balance + amount }
 
 // ^Account = consume; return a log string
-fn finish_account(a: ^Account) -> String {
-    return "closed {a.owner} (final balance: {a.balance})"
-}
+fn finish_account(a: ^Account) => String = "closed {a.owner} (final balance: {a.balance})"
 
 fn run() {
     acc := Account.{owner: "Alice", balance: 100}

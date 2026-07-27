@@ -76,7 +76,7 @@ Simple functions and control-flow bodies now stay on one line when the complete
 operation fits the formatter's width limit. For example:
 
 ```jet
-fn double(n: Int) -> Int { return n * 2 }
+fn double(n: Int) => Int { return n * 2 }
 
 loop item; items { print(item) }
 ```

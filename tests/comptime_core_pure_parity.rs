@@ -12,26 +12,26 @@ mod common;
 
 static SEQ: AtomicU64 = AtomicU64::new(0);
 
-const PIVOT_DECLS: &str = "use core.data as data\nstruct PivotRow { team: String; bucket: String; score: Float }\nfn pivot_view() -> String {\n    prefix :: \"p\"\n    rows :: [PivotRow.{ team: \"B\", bucket: \"y\", score: 5.0 }, PivotRow.{ team: \"A\", bucket: \"x\", score: 1.5 }, PivotRow.{ team: \"A\", bucket: \"x\", score: 2.5 }]\n    groups :: data.pivot_sum(rows, (row) => \"{prefix}{row.team}\", (row) => row.bucket, (row) => row.score) ?? panic(\"pivot\")\n    return \"{groups[0].row_key}|{groups[0].column_key}:{groups[0].count}:{groups[0].sum}:{groups[0].mean}|{groups[1].row_key}|{groups[1].column_key}:{groups[1].count}:{groups[1].sum}:{groups[1].mean}\"\n}";
+const PIVOT_DECLS: &str = "use core.data as data\nstruct PivotRow { team: String; bucket: String; score: Float }\nfn pivot_view() => String {\n    prefix :: \"p\"\n    rows :: [PivotRow.{ team: \"B\", bucket: \"y\", score: 5.0 }, PivotRow.{ team: \"A\", bucket: \"x\", score: 1.5 }, PivotRow.{ team: \"A\", bucket: \"x\", score: 2.5 }]\n    groups :: data.pivot_sum(rows, (row) => \"{prefix}{row.team}\", (row) => row.bucket, (row) => row.score) ?? panic(\"pivot\")\n    return \"{groups[0].row_key}|{groups[0].column_key}:{groups[0].count}:{groups[0].sum}:{groups[0].mean}|{groups[1].row_key}|{groups[1].column_key}:{groups[1].count}:{groups[1].sum}:{groups[1].mean}\"\n}";
 const PIVOT_EXPR: &str = "pivot_view()";
-const CIVIL_FN: &str = "fn civil_view() -> String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
-const CIVIL_DECLS: &str = "use core.time as time\nuse core.time.date as date\nuse core.time.datetime as datetime\nfn civil_view() -> String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
+const CIVIL_FN: &str = "fn civil_view() => String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
+const CIVIL_DECLS: &str = "use core.time as time\nuse core.time.date as date\nuse core.time.datetime as datetime\nfn civil_view() => String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    p :: time.period(0, 1, 2)\n    dt :: datetime.from_timestamp(-1)\n    span :: Duration.milliseconds(1500) ?? panic(\"duration\")\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.add_period(p).to_string()}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.plus_duration(span).to_timestamp()}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
 const CIVIL_EXPR: &str = "civil_view()";
-const CIVIL_DEV_DECLS: &str = "use core.time.date as date\nuse core.time.datetime as datetime\nfn civil_dev_view() -> String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    dt :: datetime.from_timestamp(-1)\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
-const MEASUREMENT_FN: &str = "fn measurement_math() -> String {\n    a :: measurement.from(3.0, 4.0)\n    b :: measurement.from(0.0, 3.0)\n    q :: measurement.from(8.0, 0.0).div(measurement.from(2.0, 0.0))\n    return \"{a.add(b).value()}|{a.add(b).uncertainty()}|{a.sub(b).value()}|{a.sub(b).uncertainty()}|{a.mul(b).value()}|{a.mul(b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
-const MEASUREMENT_DECLS: &str = "use core.science.measurement as measurement\nfn measurement_math() -> String {\n    a :: measurement.from(3.0, 4.0)\n    b :: measurement.from(0.0, 3.0)\n    q :: measurement.from(8.0, 0.0).div(measurement.from(2.0, 0.0))\n    return \"{a.add(b).value()}|{a.add(b).uncertainty()}|{a.sub(b).value()}|{a.sub(b).uncertainty()}|{a.mul(b).value()}|{a.mul(b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
+const CIVIL_DEV_DECLS: &str = "use core.time.date as date\nuse core.time.datetime as datetime\nfn civil_dev_view() => String {\n    d :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    other :: date.new(2024, 2, 1)\n    dt :: datetime.from_timestamp(-1)\n    return \"{d.weekday()}|{d.iso_weekday()}|{d.day_of_year()}|{d.iso_week()}|{d.add_days(1).to_string()}|{d.add_months(12).to_string()}|{d.diff_days(other)}|{d.truncate(\"month\").to_string()}|{d.format(\"EEE yyyy-DDD\")}|{dt.date().to_string()}|{dt.time().to_string()}|{dt.hour()}:{dt.minute()}:{dt.second()}|{dt.format_rfc3339()}|{dt.format(\"yyyy-MM-dd HH:mm:ss\")}|{dt.truncate(\"minute\").to_timestamp()}|{dt.round(\"minute\").to_timestamp()}\"\n}";
+const MEASUREMENT_FN: &str = "fn measurement_math() => String {\n    a :: measurement.from(3.0, 4.0)\n    b :: measurement.from(0.0, 3.0)\n    q :: measurement.from(8.0, 0.0).div(measurement.from(2.0, 0.0))\n    return \"{a.add(b).value()}|{a.add(b).uncertainty()}|{a.sub(b).value()}|{a.sub(b).uncertainty()}|{a.mul(b).value()}|{a.mul(b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
+const MEASUREMENT_DECLS: &str = "use core.science.measurement as measurement\nfn measurement_math() => String {\n    a :: measurement.from(3.0, 4.0)\n    b :: measurement.from(0.0, 3.0)\n    q :: measurement.from(8.0, 0.0).div(measurement.from(2.0, 0.0))\n    return \"{a.add(b).value()}|{a.add(b).uncertainty()}|{a.sub(b).value()}|{a.sub(b).uncertainty()}|{a.mul(b).value()}|{a.mul(b).uncertainty()}|{q.value()}|{q.uncertainty()}\"\n}";
 const MEASUREMENT_EXPR: &str = "measurement_math()";
-const ADD_ARGUMENT_ONCE_DECLS: &str = r#"fn counted_measurement(hits: &Int) -> Measurement<Float> {
+const ADD_ARGUMENT_ONCE_DECLS: &str = r#"fn counted_measurement(hits: &Int) => Measurement<Float> {
     hits += 1
     return measurement.from(1.0, 0.0)
 }
-fn add_argument_once_view() -> String {
+fn add_argument_once_view() => String {
     hits := 0
     measured :: measurement.from(2.0, 0.0)
     sum :: measured.add(counted_measurement(&hits))
     return "{sum.value()}|{hits}"
 }"#;
-const SCALAR_DECLS: &str = r#"fn scalar_view() -> String {
+const SCALAR_DECLS: &str = r#"fn scalar_view() => String {
     i8 :: I8.{ -12 }
     i16 :: I16.{ -1234 }
     i32 :: I32.{ -123456 }
@@ -46,7 +46,7 @@ const SCALAR_DECLS: &str = r#"fn scalar_view() -> String {
 const SCALAR_EXPR: &str = "scalar_view()";
 const SCALAR_EXPECTED: &str = "b@c|a|no-sep|no-sep|[195, 169, 240, 159, 153, 130]|é🙂|true|true|true|-12|-1234|-123456|255|1234|123456|123456789";
 const F32_MATH_DECLS: &str = r#"use core.math as math
-fn f32_math_view() -> String {
+fn f32_math_view() => String {
     rounded :: F32.{ 16777217.0 }
     max :: F32.MAX
     positive_overflow :: F32.{ max + max }
@@ -65,21 +65,21 @@ fn f32_math_view() -> String {
     return "{math.to_bits(rounded)}|{math.sqrt(root_input)}|{math.pow(root_input, exponent)}|{math.floor(floor_input)}|{math.ceil(ceil_input)}|{math.sin(root_input)}|{math.atan2(root_input, exponent)}|{math.hypot(root_input, exponent)}|{math.lerp(low, high, t)}|{math.min(low, high)}|{math.max(low, high)}|{math.clamp(exponent, low, root_input)}|{math.abs(-root_input)}|{math.is_inf(positive_overflow)}|{math.is_inf(negative_overflow)}|{math.is_nan(nan)}|{math.is_finite(rounded)}|{math.sign(negative_zero)}|{math.to_bits(negative_zero)}|{wide}|{math.sqrt(wide_root)}"
 }"#;
 const F32_MATH_EXPECTED: &str = "1266679808|1.4142135|8.0|1.0|2.0|0.9092974|0.5880026|3.6055512|1.75|1.0|4.0|2.0|2.0|true|true|true|true|0|2147483648|16777217.0|1.4142135623730951";
-const PRIMITIVE_INSTANCE_DECLS: &str = r#"fn primitive_instance_view() -> String {
+const PRIMITIVE_INSTANCE_DECLS: &str = r#"fn primitive_instance_view() => String {
     return "{true.to_string()}|{false.to_string()}|{'e'.to_string()}|{'é'.to_string()}"
 }"#;
 const PRIMITIVE_INSTANCE_EXPECTED: &str = "true|false|e|é";
-const INTEGER_BIT_QUERIES_DECLS: &str = r#"fn bit_byte(value: Int) -> U8 {
+const INTEGER_BIT_QUERIES_DECLS: &str = r#"fn bit_byte(value: Int) => U8 {
     return U8.from_int(value) ?? 0
 }
-fn bit_parameter(value: U8) -> Int {
+fn bit_parameter(value: U8) => Int {
     return (value).leading_zeros()
 }
-fn bit_inferred_local() -> Int {
+fn bit_inferred_local() => Int {
     value := U8.from_int(13) ?? 0
     return value.leading_zeros()
 }
-fn integer_bit_queries_view() -> String {
+fn integer_bit_queries_view() => String {
     int :: -1
     i8 :: I8.{ -2 }
     i16 :: I16.{ -32768 }
@@ -92,7 +92,7 @@ fn integer_bit_queries_view() -> String {
 }"#;
 const INTEGER_BIT_QUERIES_EXPECTED: &str =
     "64:0:0:0|7:1:0:1|1:15:0:15|0:32:32:32|3:5:4:0|1:15:7:8|1:31:0:31|8:56:56:0|4|4|4";
-const BYTE_BUFFER_DECLS: &str = r#"fn byte_buffer_view() -> String {
+const BYTE_BUFFER_DECLS: &str = r#"fn byte_buffer_view() => String {
     buffer := ByteBuffer.new()
     empty_before :: buffer.is_empty()
     buffer.write_u8(18)
@@ -110,7 +110,7 @@ const BYTE_BUFFER_DECLS: &str = r#"fn byte_buffer_view() -> String {
     return "{empty_before}|{length}|{bytes}|{buffer.is_empty()}|{buffer.len()}|{from.to_bytes()}|{from.len()}"
 }"#;
 const BYTE_BUFFER_EXPECTED: &str = "true|31|[18, 86, 52, 120, 154, 4, 3, 2, 1, 5, 6, 7, 8, 8, 7, 6, 5, 4, 3, 2, 1, 17, 18, 19, 20, 21, 22, 23, 24, 9, 10]|true|0|[255, 0]|2";
-const DEQUE_DECLS: &str = r#"fn deque_view() -> String {
+const DEQUE_DECLS: &str = r#"fn deque_view() => String {
     deque := Deque.new()
     empty_before :: deque.is_empty()
     missing_front :: deque.peek_front() ?? -1
@@ -129,7 +129,7 @@ const DEQUE_DECLS: &str = r#"fn deque_view() -> String {
     return "{empty_before}|{missing_front}|{missing_back}|{length}|{front}|{back}|{popped_front}|{popped_back}|{remaining}|{deque.is_empty()}|{deque.len()}|{empty_pop}"
 }"#;
 const DEQUE_EXPECTED: &str = "true|-1|-1|3|1|3|1|3|2|true|0|-1";
-const LRU_DECLS: &str = r#"fn lru_view() -> String {
+const LRU_DECLS: &str = r#"fn lru_view() => String {
     cache := Lru.new(2)
     empty_before :: cache.is_empty()
     first :: cache.add("a", 1) ?? -1
@@ -149,14 +149,14 @@ const LRU_DECLS: &str = r#"fn lru_view() -> String {
     return "{empty_before}|{cache.capacity()}|{first}|{added_b}|{duplicate_b}|{got_a}|{displaced_a}|{evicted}|{cache.has_key("b")}|{keys}|{removed_a}|{missing}|{length}|{cache.is_empty()}|{zero.capacity()}|{zero_add}|{zero_add_new}|{zero.len()}"
 }"#;
 const LRU_EXPECTED: &str = "true|2|-1|true|false|1|1|-1|false|[c, a]|10|-1|1|true|0|-1|false|0";
-const MAP_DECLS: &str = r#"fn add_map(values: &[String: Int], key: String, value: Int) -> Int {
+const MAP_DECLS: &str = r#"fn add_map(values: &[String: Int], key: String, value: Int) => Int {
     return values.add(key, value) ?? -1
 }
-fn counted_map(hits: &Int) -> [String: Int] {
+fn counted_map(hits: &Int) => [String: Int] {
     hits += 1
     return ["a": 1]
 }
-fn map_view() -> String {
+fn map_view() => String {
     values := [String: Int].{ "b": 2, "a": 1 }
     empty_before :: values.is_empty()
     fresh_c :: values.add("c", 3) ?? -1
@@ -179,7 +179,7 @@ fn map_view() -> String {
     return "{empty_before}|{fresh_c}|{displaced_b}|{added_d}|{duplicate_a}|{seen}|{keys}|{entries}|{got_a}|{has_a}|{has_z}|{removed_c}|{length}|{values.is_empty()}|{values.len()}"
 }"#;
 const MAP_EXPECTED: &str = "false|-1|2|true|false|[a, b, c, d]|[a, b, c, d]|[1, 20, 3, 4]|1|true|false|3|3|true|0";
-const POOL_DECLS: &str = r#"fn pool_view() -> String {
+const POOL_DECLS: &str = r#"fn pool_view() => String {
     pool := Pool<String>.new()
     first :: pool.add("first")
     second :: pool.add("second")
@@ -193,7 +193,7 @@ const POOL_DECLS: &str = r#"fn pool_view() -> String {
     return "{removed}|{stale_remove}|{initial.len()}|{initial[0] == first}|{initial[1] == second}|{replacement == first}|{live.len()}|{live[0] == replacement}|{live[1] == second}|{replacement_value}|{second_value}|{pool.ids().len()}"
 }"#;
 const POOL_EXPECTED: &str = "first|stale|2|true|true|false|2|true|true|third|second|0";
-const INLINE_HOF_DECLS: &str = r#"fn inline_hof_view() -> String {
+const INLINE_HOF_DECLS: &str = r#"fn inline_hof_view() => String {
     values := [1, 2, 3, 4]
     each_seen := [Int].{}
     shadow := 99
@@ -209,13 +209,13 @@ const INLINE_HOF_DECLS: &str = r#"fn inline_hof_view() -> String {
 }"#;
 const INLINE_HOF_EXPECTED: &str =
     "[1, 2, 3, 4]|99|4:true:true:true:false|true|[0, 1, 2, 3, 4]|10|88|5:true:true:true:true|[1, 3]|[2, 4]";
-const MAP_CALL_RECEIVER_DECLS: &str = r#"fn map_call_receiver_view() -> String {
+const MAP_CALL_RECEIVER_DECLS: &str = r#"fn map_call_receiver_view() => String {
     receiver_hits := 0
     found :: counted_map(&receiver_hits).has_key("a")
     return "{found}|{receiver_hits}"
 }"#;
 const RNG_DECLS: &str = r#"use core.random as random
-fn rng_view() -> String {
+fn rng_view() => String {
     rng := random.rng(99)
     items := ["a", "b", "c", "d"]
     weights := [1.0, 2.0, 3.0, 4.0]
@@ -238,13 +238,13 @@ fn rng_view() -> String {
     return "{int_draw}|{float_draw}|{range_draw}|{coin}|{chance}|{normal}|{exponential}|{bytes}|{picked}|{weighted}|{sample}|{deck}|{child_draw}|{after_split}"
 }"#;
 const RNG_EXPECTED: &str = "4|0.0316577610861849|1.3390388981797772|true|true|-0.6237918784672982|0.21210139132324568|[62, 20, 83, 254]|b|c|[c, a]|[1, 2, 5, 3, 4]|71|87";
-const TESTING_FAKE_RNG_FN: &str = r#"fn testing_fake_rng_view() -> String {
+const TESTING_FAKE_RNG_FN: &str = r#"fn testing_fake_rng_view() => String {
     first := testing.fake_rng(99)
     second := testing.fake_rng(99)
     return "{first.int(1, 100)}|{second.int(1, 100)}|{first.float()}|{second.float()}"
 }"#;
 const TESTING_FAKE_RNG_EXPECTED: &str = "4|4|0.0316577610861849|0.0316577610861849";
-const TESTING_FAKE_CLOCK_FN: &str = r#"fn testing_fake_clock_view() -> String {
+const TESTING_FAKE_CLOCK_FN: &str = r#"fn testing_fake_clock_view() => String {
     clock := testing.fake_clock(42)
     canonical := Clock.new(42)
     initial :: clock.now()
@@ -259,18 +259,18 @@ const TESTING_FAKE_CLOCK_FN: &str = r#"fn testing_fake_clock_view() -> String {
 }"#;
 const TESTING_FAKE_CLOCK_EXPECTED: &str = "42|50|50|100|100|125|125|50|50";
 const TESTING_FAKE_CLOCK_WRITEBACK_DECLS: &str = r#"struct ClockHolder { clock: Clock }
-fn drive(clock: &Clock) -> String {
+fn drive(clock: &Clock) => String {
     ticked :: clock.tick(1)
     advanced :: clock.advance(10)
     duration :: Duration.milliseconds(2) ?? panic("duration")
     waited :: clock.wait(duration)
     return "{ticked}|{advanced}|{waited}|{clock.now()}"
 }
-fn counted_clock(hits: &Int) -> Clock {
+fn counted_clock(hits: &Int) => Clock {
     hits += 1
     return testing.fake_clock(7)
 }
-fn testing_fake_clock_writeback_view() -> String {
+fn testing_fake_clock_writeback_view() => String {
     clock := testing.fake_clock(5)
     borrowed :: drive(&clock)
     holder := ClockHolder.{ clock: testing.fake_clock(5) }
@@ -281,10 +281,10 @@ fn testing_fake_clock_writeback_view() -> String {
     return "{borrowed}|{clock.now()};{field_tick}|{field_now}|{counted_now}|{receiver_hits}"
 }"#;
 const TESTING_FAKE_CLOCK_WRITEBACK_EXPECTED: &str = "6|10|12|12|12;7|7|7|1";
-const BIT_SET_DECLS: &str = r#"fn add_bit(values: &BitSet, bit: Int) -> Bool {
+const BIT_SET_DECLS: &str = r#"fn add_bit(values: &BitSet, bit: Int) => Bool {
     return values.add(bit)
 }
-fn bit_set_view() -> String {
+fn bit_set_view() => String {
     bits := BitSet.new()
     empty_before :: bits.is_empty()
     negative_added :: bits.add(-1)
@@ -306,11 +306,11 @@ const BIT_SET_EXPECTED: &str = "true|false|true|true|false|true|[1, 4, 9]|3|10|t
 const PRIORITY_QUEUE_DECLS: &str = r#"fn push_priority(values: &PriorityQueue<Int>, value: Int) {
     values.push(value)
 }
-fn counted_priority(hits: &Int) -> PriorityQueue<Int> {
+fn counted_priority(hits: &Int) => PriorityQueue<Int> {
     hits += 1
     return PriorityQueue.from([2, 6])
 }
-fn priority_queue_view() -> String {
+fn priority_queue_view() => String {
     values := PriorityQueue.from([4, 1, 7, 3, 7])
     initial_len :: values.len()
     initial_empty :: values.is_empty()
@@ -333,12 +333,12 @@ fn priority_queue_view() -> String {
     return "{initial_len}|{initial_empty}|{initial_peek}|{initial_sorted}|{after_push}|{after_push_len}|{popped_nine}|{popped_seven}|{after_pop}|{words.peek() ?? "none"}|{words.to_sorted_list()}|{values.is_empty()}|{values.len()}|{values.peek() ?? -1}|{empty.pop() ?? -1}|{counted_peek}|{counted_values.to_sorted_list()}|{receiver_hits}"
 }"#;
 const PRIORITY_QUEUE_EXPECTED: &str = "5|false|7|[7, 7, 4, 3, 1]|[9, 7, 7, 5, 4, 3, 1]|7|9|7|[7, 5, 4, 3, 1]|z|[z, m, a]|true|0|-1|-1|6|[8, 6, 2]|1";
-const PRIORITY_QUEUE_CALL_RECEIVER_DECLS: &str = r#"fn priority_queue_call_receiver_view() -> String {
+const PRIORITY_QUEUE_CALL_RECEIVER_DECLS: &str = r#"fn priority_queue_call_receiver_view() => String {
     receiver_hits := 0
     value :: counted_priority(&receiver_hits).peek() ?? -1
     return "{value}|{receiver_hits}"
 }"#;
-const SET_DECLS: &str = r#"fn set_view() -> String {
+const SET_DECLS: &str = r#"fn set_view() => String {
     values := Set.from([3, 1, 2, 3])
     initial := values.to_list()
     initial.sort()
@@ -370,14 +370,14 @@ const SET_DECLS: &str = r#"fn set_view() -> String {
     return "{initial}|{initial_len}|{initial_empty}|{had_two}|{added_four}|{duplicate_two}|{has_two}|{current}|{combined}|{after_union}|{word_list}|{additional_added}|{additional_list}|{values.is_empty()}|{values.len()}|{cleared_list}"
 }"#;
 const SET_EXPECTED: &str = "[1, 2, 3]|3|false|true|true|false|false|[1, 3, 4]|[0, 1, 3, 4, 5]|[1, 3, 4]|[a, m, z]|true|[7, 8, 9]|true|0|[]";
-const SET_CALL_RECEIVER_DECLS: &str = r#"fn add_set(values: &Set<Int>, value: Int) -> Bool {
+const SET_CALL_RECEIVER_DECLS: &str = r#"fn add_set(values: &Set<Int>, value: Int) => Bool {
     return values.add(value)
 }
-fn counted_set(hits: &Int) -> Set<Int> {
+fn counted_set(hits: &Int) => Set<Int> {
     hits += 1
     return Set.from([2, 6])
 }
-fn set_call_receiver_view() -> String {
+fn set_call_receiver_view() => String {
     values := Set.from([9, 7])
     added :: add_set(&values, 8)
     receiver_hits := 0
@@ -388,16 +388,16 @@ const BAG_DECLS: &str = r#"enum BagToken {
     Red
     Blue
 }
-fn add_bag(values: &Bag<Int>, value: Int) -> Bool {
+fn add_bag(values: &Bag<Int>, value: Int) => Bool {
     return values.add(value)
 }
-fn counted_bag(hits: &Int) -> Bag<Int> {
+fn counted_bag(hits: &Int) => Bag<Int> {
     hits += 1
     values := Bag<Int>.new()
     values.add(6)
     return values
 }
-fn bag_view() -> String {
+fn bag_view() => String {
     values := Bag<Int>.new()
     empty_before :: values.is_empty()
     added_four :: values.add(4)
@@ -423,15 +423,15 @@ fn bag_view() -> String {
     return "{empty_before}|{added_four}|{duplicate_four}|{added_two}|{length_before}|{count_four_before}|{has_two}|{any_large}|{any_negative}|{count_four_after_one}|{values.has(4)}|{values.len()}|{values.is_empty()}|{words.count("a")}|{words.len()}|{words.any((value) => value == "z")}|{tokens.count(BagToken.Red)}|{tokens.has(BagToken.Blue)}|{empty.any((value) => value == 0)}"
 }"#;
 const BAG_EXPECTED: &str = "true|true|true|true|3|2|true|true|false|1|false|1|false|2|3|true|2|false|false";
-const BAG_CALL_RECEIVER_DECLS: &str = r#"fn bag_call_receiver_view() -> String {
+const BAG_CALL_RECEIVER_DECLS: &str = r#"fn bag_call_receiver_view() => String {
     receiver_hits := 0
     count :: counted_bag(&receiver_hits).count(6)
     return "{count}|{receiver_hits}"
 }"#;
-const SORTED_SET_DECLS: &str = r#"fn add_through_param(values: &SortedSet<Int>, value: Int) -> Bool {
+const SORTED_SET_DECLS: &str = r#"fn add_through_param(values: &SortedSet<Int>, value: Int) => Bool {
     return values.add(value)
 }
-fn sorted_set_view() -> String {
+fn sorted_set_view() => String {
     values := SortedSet.from([3, 1, 2, 3])
     initial :: values.to_list()
     initial_len :: values.len()
@@ -456,7 +456,7 @@ fn sorted_set_view() -> String {
 }"#;
 const SORTED_SET_EXPECTED: &str = "[1, 2, 3]|3|false|1|3|true|true|false|false|[1, 3, 4]|[0, 1, 3, 4, 5]|[1, 3, 4]|[a, m, z]|true|[7, 8, 9]|true|0|-1|true";
 const SORTED_SET_FIELD_DECLS: &str = r#"struct SortedSetHolder { values: SortedSet<Int> }
-fn sorted_set_field_view() -> String {
+fn sorted_set_field_view() => String {
     values := SortedSet.from([9, 7])
     holder := SortedSetHolder.{ values: values }
     added :: holder.values.add(8)
@@ -554,7 +554,7 @@ fn primitive_static_stringification_is_rejected_by_sema() {
 fn public_transcript_keeps_checked_types_in_imported_functions() {
     let values = exact_values(&[
         "use core.math as math",
-        r#"fn imported_g(x: U8) -> Int {
+        r#"fn imported_g(x: U8) => Int {
     y :: math.abs(-1.0)
     return (x).leading_zeros()
 }"#,
@@ -573,7 +573,7 @@ fn public_transcript_composes_email_and_codecs_exactly() {
         "attachment :: email.attachment(\"note.txt\", \"Text/Plain\", [104, 105]) ?? panic(\"attachment\")",
         "message :: email.message(sender, [recipient], [], \"Hello\", \"body\", \"\", [attachment]) ?? panic(\"message\")",
         "email.envelope(sender, [recipient])",
-        "fn serialized(message: Message) -> Bool {\n    if email.serialize(message) == {\n        Ok(_) -> return true\n        Err(_) -> return false\n    }\n    return false\n}",
+        "fn serialized(message: Message) => Bool {\n    if email.serialize(message) == {\n        Ok(_) -> return true\n        Err(_) -> return false\n    }\n    return false\n}",
         "serialized(message)",
         "xml.canonical(xml.parse(\"<r b=\\\"2\\\" a=\\\"1\\\"><x/></r>\") ?? panic(\"xml\"), xml.XMLCanonical.{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) ?? panic(\"canonical\")",
     ]);
@@ -888,49 +888,49 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
             "result/bytes",
             parity_source(
                 "email_wire()",
-                "use core.email as email\nuse core.encoding.hex as hex\nfn email_wire() -> String {\n    message :: email.message(email.address(\"a@example.com\") ?? panic(\"a\"), [email.address(\"b@example.com\") ?? panic(\"b\")], [], \"s\", \"body\", \"\", []) ?? panic(\"m\")\n    return hex.encode(email.serialize(message) ?? panic(\"serialize\"))\n}",
+                "use core.email as email\nuse core.encoding.hex as hex\nfn email_wire() => String {\n    message :: email.message(email.address(\"a@example.com\") ?? panic(\"a\"), [email.address(\"b@example.com\") ?? panic(\"b\")], [], \"s\", \"body\", \"\", []) ?? panic(\"m\")\n    return hex.encode(email.serialize(message) ?? panic(\"serialize\"))\n}",
             ),
         ),
         (
             "result/string",
             parity_source(
                 "xml_canonical()",
-                "use core.encoding.xml as xml\nfn xml_canonical() -> String {\n    tree :: xml.parse(\"<r b=\\\"2\\\" a=\\\"1\\\"><x/></r>\") ?? panic(\"xml\")\n    return xml.canonical(tree, xml.XMLCanonical.{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) ?? panic(\"canonical\")\n}",
+                "use core.encoding.xml as xml\nfn xml_canonical() => String {\n    tree :: xml.parse(\"<r b=\\\"2\\\" a=\\\"1\\\"><x/></r>\") ?? panic(\"xml\")\n    return xml.canonical(tree, xml.XMLCanonical.{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) ?? panic(\"canonical\")\n}",
             ),
         ),
         (
             "xml/float-shape-error",
             parity_source(
                 "xml_shape_reason(DataTree.Float(1.5))",
-                "use core.encoding.xml as xml\nfn xml_shape_reason(tree: DataTree) -> String {\n    if xml.canonical(tree, xml.XMLCanonical.{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) == {\n        Ok(_) -> return \"unexpected success\"\n        Err(error) -> return error.reason\n    }\n    return \"unreachable\"\n}",
+                "use core.encoding.xml as xml\nfn xml_shape_reason(tree: DataTree) => String {\n    if xml.canonical(tree, xml.XMLCanonical.{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) == {\n        Ok(_) -> return \"unexpected success\"\n        Err(error) -> return error.reason\n    }\n    return \"unreachable\"\n}",
             ),
         ),
         (
             "mime/observable-methods",
             parity_source(
                 "mime_view()",
-                "use core.mime as mime\nfn mime_view() -> String {\n    value :: mime.parse(\"Text/HTML; charset=UTF-8\") ?? panic(\"mime\")\n    return \"{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param(\"charset\") ?? \"none\"}|{value.params()}|{value.to_string()}\"\n}",
+                "use core.mime as mime\nfn mime_view() => String {\n    value :: mime.parse(\"Text/HTML; charset=UTF-8\") ?? panic(\"mime\")\n    return \"{value.media_type()}|{value.subtype()}|{value.essence()}|{value.param(\"charset\") ?? \"none\"}|{value.params()}|{value.to_string()}\"\n}",
             ),
         ),
         (
             "date/observable-methods",
             parity_source(
                 "date_view()",
-                "use core.time.date as date\nfn date_view() -> String {\n    parsed :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    clamped :: date.new(2024, 13, 40)\n    return \"{parsed.year()}-{parsed.month()}-{parsed.day()}|{parsed.to_string()}|{clamped.to_string()}\"\n}",
+                "use core.time.date as date\nfn date_view() => String {\n    parsed :: date.parse(\"2024-02-29\") ?? panic(\"date\")\n    clamped :: date.new(2024, 13, 40)\n    return \"{parsed.year()}-{parsed.month()}-{parsed.day()}|{parsed.to_string()}|{clamped.to_string()}\"\n}",
             ),
         ),
         (
             "time/observable-methods",
             parity_source(
                 "time_view()",
-                "use core.time as time\nfn time_view() -> String {\n    local :: time.parse_time(\"23:59:58\") ?? panic(\"time\")\n    datetime :: time.from_unix_ms(-1)\n    period :: time.period(1, 2, 3)\n    return \"{local.hour()}:{local.minute()}:{local.second()}|{local.to_string()}|{datetime.to_timestamp()}|{datetime.to_unix_ms()}|{period.to_string()}\"\n}",
+                "use core.time as time\nfn time_view() => String {\n    local :: time.parse_time(\"23:59:58\") ?? panic(\"time\")\n    datetime :: time.from_unix_ms(-1)\n    period :: time.period(1, 2, 3)\n    return \"{local.hour()}:{local.minute()}:{local.second()}|{local.to_string()}|{datetime.to_timestamp()}|{datetime.to_unix_ms()}|{period.to_string()}\"\n}",
             ),
         ),
         (
             "measurement/observable-methods",
             parity_source(
                 "measurement_view()",
-                "use core.science.measurement as measurement\nfn measurement_view() -> String {\n    value :: measurement.from(12.5, 0.25)\n    return \"{value.value()}|{value.uncertainty()}\"\n}",
+                "use core.science.measurement as measurement\nfn measurement_view() => String {\n    value :: measurement.from(12.5, 0.25)\n    return \"{value.value()}|{value.uncertainty()}\"\n}",
             ),
         ),
     ];
@@ -1225,7 +1225,7 @@ fn rustc_backed_testing_fake_clock_writeback_matches_aot_comptime_forced_interpr
     );
 }
 
-const LINALG_DECLS: &str = r#"fn linalg_view() -> String {
+const LINALG_DECLS: &str = r#"fn linalg_view() => String {
     a :: Vec3(1.0, 2.0, 3.0)
     b :: Vec3(4.0, 5.0, 6.0)
     sum :: Vec3.{ a + b }
@@ -1240,7 +1240,7 @@ const LINALG_DECLS: &str = r#"fn linalg_view() -> String {
 }"#;
 const LINALG_EXPECTED: &str = "[5.0, 7.0, 9.0]|32.0|[-3.0, 6.0, -3.0]|5.0|[0.0, 0.6, 0.8]|[2.0, 4.0, 6.0]|[4.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0, 4.0]|[11.0, 22.0, 33.0, 44.0]|[10.0, 40.0, 90.0, 160.0]|[7.0, 7.0, 7.0, 7.0]|3.0|10.0|24.0|1.0|4.0|4.0|24.0|2.5|[3.0, 5.0]|4.0|3.75|1.5|2.5|2.0";
 
-const OVERFLOW_DECLS: &str = r#"fn overflow_view() -> String {
+const OVERFLOW_DECLS: &str = r#"fn overflow_view() => String {
     hi :: U8.{ 200 }
     lo :: U8.{ 100 }
     fallback :: U8.{ 0 }
@@ -1252,7 +1252,7 @@ const OVERFLOW_DECLS: &str = r#"fn overflow_view() -> String {
     return "{wrapped}|{saturated}|{checked_miss}"
 }"#;
 const OVERFLOW_EXPECTED: &str = "44|255|0";
-const EXPECT_DECLS: &str = r#"fn expect_view() -> String {
+const EXPECT_DECLS: &str = r#"fn expect_view() => String {
     holder :: expect("ok")
     consume(holder)
     return "expect-ok"
@@ -1291,7 +1291,7 @@ fn public_transcript_covers_linalg_overflow_and_expect_exactly() {
     assert_eq!(values, [format!("\"{EXPECT_EXPECTED}\" : String")]);
 }
 
-const SOLVER_FN: &str = r#"fn solver_view() -> String {
+const SOLVER_FN: &str = r#"fn solver_view() => String {
     ok_solver := solve.Solver.new(7)
     ok_solver.require(true)
     ok_solver.require(1 == 1)
@@ -1301,7 +1301,7 @@ const SOLVER_FN: &str = r#"fn solver_view() -> String {
     bad.require(true)
     return "{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}"
 }"#;
-const SOLVER_DECLS: &str = "use core.solve as solve\nfn solver_view() -> String {\n    ok_solver := solve.Solver.new(7)\n    ok_solver.require(true)\n    ok_solver.require(1 == 1)\n    bad := solve.Solver.new(42)\n    bad.require(true)\n    bad.require(false)\n    bad.require(true)\n    return \"{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}\"\n}";
+const SOLVER_DECLS: &str = "use core.solve as solve\nfn solver_view() => String {\n    ok_solver := solve.Solver.new(7)\n    ok_solver.require(true)\n    ok_solver.require(1 == 1)\n    bad := solve.Solver.new(42)\n    bad.require(true)\n    bad.require(false)\n    bad.require(true)\n    return \"{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}\"\n}";
 const SOLVER_EXPECTED: &str = "ok|0|failed|1";
 
 #[test]
@@ -1325,7 +1325,7 @@ fn public_transcript_covers_solver_exactly() {
 }
 
 const ARCHIVE_DECLS: &str = r#"use core.archive as archive
-fn archive_view() -> String {
+fn archive_view() => String {
     bytes :: [U8].{ 72, 101, 108, 108, 111 }
     zipped :: archive.zip_compress("hello.txt", bytes)
     empty :: [U8].{}
@@ -1338,7 +1338,7 @@ fn archive_view() -> String {
 const ARCHIVE_EXPECTED: &str =
     "[72, 101, 108, 108, 111]|[74, 101, 116]|[\"hello.txt\",\"quote\\\"slash\\\\.txt\"]|0";
 const ARCHIVE_INVALID_TAR_NAME_DECLS: &str = r#"use core.archive as archive
-fn invalid_tar_name_view(name: String) -> String {
+fn invalid_tar_name_view(name: String) => String {
     empty :: [U8].{}
     valid :: archive.tar_add(empty, "keep.txt", [1])
     attempted :: archive.tar_add(valid, name, [2])
@@ -1381,7 +1381,7 @@ fn archive_rejects_invalid_tar_names_across_aot_comptime_and_forced_interpreter(
 }
 
 const UI_DECLS: &str = r##"use core.ui as ui
-fn ui_value_view() -> String {
+fn ui_value_view() => String {
     point :: ui.point(1.5, -2.0)
     size :: ui.size(80.0, 24.0)
     rect :: ui.rect(1.0, 2.0, 3.0, 4.0)
@@ -1403,7 +1403,7 @@ fn ui_values_match_aot_comptime_forced_interpreter_and_default_dev() {
 }
 
 const CRYPTO_DECLS: &str = r#"use core.crypto.expert as expert
-fn crypto_value_view() -> String {
+fn crypto_value_view() => String {
     ikm :: [U8].{ 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 11 }
     salt :: [U8].{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 }
     info :: [U8].{ 240, 241, 242, 243, 244, 245, 246, 247, 248, 249 }
@@ -1458,7 +1458,7 @@ fn run() {
 
 const NET_STYLE_DECLS: &str = r#"use core.io as io
 use core.net as net
-fn net_style_view() -> String {
+fn net_style_view() => String {
     ip4 :: net.ip_addr("127.0.0.1") ?? panic("ip4")
     ip6 :: net.ip_addr("2001:0db8:0:0:0:0:0:1") ?? panic("ip6")
     socket :: net.socket_addr_parse("[2001:db8::1]:443") ?? panic("socket")

@@ -2,7 +2,7 @@
 // Demonstrates S61 (labels/defaults), S62 (delegation), S77 (field punning),
 // D-LIB2 (default method bodies), D-LIB3 (Fallible ? conversion).
 // --- S61: argument labels and trailing defaults ---
-fn greet(name: String, loud: Bool = false) -> String {
+fn greet(name: String, loud: Bool = false) => String {
     if loud {
         return "HELLO {name}!"
     }
@@ -11,8 +11,8 @@ fn greet(name: String, loud: Bool = false) -> String {
 
 // --- D-LIB2: trait with a default method body ---
 trait Greetable {
-    fn greeting(self) -> String
-    fn announce(self) -> String {
+    fn greeting(self) => String
+    fn announce(self) => String {
         g :: self.greeting()
         return "[ {g} ]"
     }
@@ -23,7 +23,7 @@ struct Person {
 }
 
 impl Person.Greetable {
-    fn greeting(self) -> String {
+    fn greeting(self) => String {
         n :: self.name
         return "hi, I'm {n}"
     }
@@ -36,7 +36,7 @@ struct Point {
     y: Int
 }
 
-fn make_point(x: Int, y: Int) -> Point {
+fn make_point(x: Int, y: Int) => Point {
     return Point.{x: x, y: y}  // S77 puns: x:x, y:y
 }
 

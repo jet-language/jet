@@ -32,7 +32,7 @@ struct P {
     x: Float
     mass: Float
 }
-fn total(ps: [P]) -> Float {
+fn total(ps: [P]) => Float {
     s := 0.0
     loop p; ps {
         s = s + p.mass

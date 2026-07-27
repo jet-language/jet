@@ -2317,7 +2317,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 // E2-M10: jet.http.serve(addr, handler) — blocking accept loop.
-                // handler: fn(HttpRequest) -> HttpResponse (lambda) or HttpRouter.
+                // handler: fn(HttpRequest) => HttpResponse (lambda) or HttpRouter.
                 ("jet.http", "serve") => {
                     if args.len() != 2 {
                         self.diags

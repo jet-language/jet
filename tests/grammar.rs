@@ -36,6 +36,7 @@ fn generated_section(path: &str) -> String {
 fn editor_grammars_have_generated_sections() {
     for path in [
         "editors/vscode/syntaxes/jet.tmLanguage.json",
+        "editors/jet.tmGrammar",
         "editors/tree-sitter/grammar.js",
         "editors/zed/languages/jet/highlights.scm",
     ] {
@@ -50,6 +51,10 @@ fn editor_grammars_match_generated_sections() {
     let cases = [
         (
             "editors/vscode/syntaxes/jet.tmLanguage.json",
+            jet::Syntax::render_vscode_generated_highlights(),
+        ),
+        (
+            "editors/jet.tmGrammar",
             jet::Syntax::render_vscode_generated_highlights(),
         ),
         (
@@ -69,6 +74,15 @@ fn editor_grammars_match_generated_sections() {
             "{path} generated section drifted; run `jet self devtools grammars`"
         );
     }
+}
+
+#[test]
+fn classic_textmate_grammar_matches_vscode_source() {
+    assert_eq!(
+        fs::read_to_string("editors/jet.tmGrammar").unwrap(),
+        fs::read_to_string("editors/vscode/syntaxes/jet.tmLanguage.json").unwrap(),
+        "editors/jet.tmGrammar must mirror the canonical VS Code TextMate grammar"
+    );
 }
 
 #[test]
@@ -491,7 +505,7 @@ fn dot_zero_in_statement_lexes_as_dot_then_int() {
 #[test]
 fn parse_option_fn() {
     let src = r#"
-fn find_even(limit: Int) -> (Int?) {
+fn find_even(limit: Int) => (Int?) {
     loop i; 1..limit {
         if i % 2 == 0 {
             return Val(i);
@@ -565,7 +579,7 @@ fn run() {
         stale -> "stale"
         else -> "waiting"
     }
-    if ready -> print(label)
+    if ready print(label)
 }
 "#;
     let (toks, lex_diags) = jet::Lexer::lex(src);
@@ -590,7 +604,7 @@ fn run() {
 #[test]
 fn parse_bracket_collection_types_and_semicolon_list_items() {
     let src = r#"
-pub fn shell() -> [JSON] {
+pub fn shell() => [JSON] {
     return [
         JSON.Null;
     ];

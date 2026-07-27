@@ -254,7 +254,7 @@ pub(crate) fn emit_tir_property_test_body(
     emit_tir_stmts(&tbody, cx, out, 1);
 }
 
-/// c109: lower + emit an error-conversion `impl Old -> New { … }` body through the TIR,
+/// c109: lower + emit an error-conversion `impl Old => New { … }` body through the TIR,
 /// reproducing `emit_error_conv`'s `emit_stmts(cx, body, &mut env, out, 1, false)`
 /// byte-for-byte. `emit_error_conv` already emitted the signature + opening brace and set
 /// `cx.current_fn` to the conversion fn name; it binds `self` to `user_self` (Move, the

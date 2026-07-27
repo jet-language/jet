@@ -2,16 +2,16 @@
 // An uncaught Err prints each `?` site as `error propagated from: fn (file:line) via ?`
 // on stderr with zero user annotations; `.context` adds the human boundary message
 // on the same failure. Consecutive identical frames collapse.
-fn read_raw() -> String ? { return Err("file not found") }
+fn read_raw() => String ? = Err("file not found")
 
-fn parse_config(path: String) -> String ? {
+fn parse_config(path: String) => String ? {
     raw :: read_raw()?
     return Ok(raw)
 }
 
-fn load_config(path: String) -> String ? {
+fn load_config(path: String) => String ? {
     cfg :: parse_config(path).context("loading config {path}")?
     return Ok(cfg)
 }
 
-fn run() -> Void ? { _ :: load_config("app.toml")? }
+fn run() => Void ? { _ :: load_config("app.toml")? }

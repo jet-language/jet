@@ -46,6 +46,78 @@ impl EvalCtx<'_> {
                 .cloned()
                 .or_else(|| self.globals.get(&local.name).cloned())
                 .ok_or_else(|| unsupported(&format!("unbound `{}`", local.name), self.span())),
+            TExprKind::InlineBlock(stmts) => {
+                // Raw comptime fragments reach TIR before sema rewrites the
+                // private yielding-loop sends to `List.push`. Collect them
+                // here; checked runtime programs use the ordinary List path.
+                let raw_collecting = matches!(&expr.ty, Type::List(_))
+                    && matches!(
+                        stmts.last(),
+                        Some(
+                            crate::Codegen::TIR::TStmt::ForIn { .. }
+                                | crate::Codegen::TIR::TStmt::Range { .. }
+                                | crate::Codegen::TIR::TStmt::CountedLoop { .. }
+                        )
+                    );
+                if raw_collecting {
+                    self.collecting_items.push(Vec::new());
+                    let flow = self.exec_stmts(stmts, scope);
+                    let items = self
+                        .collecting_items
+                        .pop()
+                        .expect("raw collecting loop installs one item sink");
+                    return match flow? {
+                        Flow::Normal => Ok(CtValue::List(items)),
+                        Flow::Return(value) => {
+                            self.pending_return = Some(value);
+                            Ok(CtValue::Unit)
+                        }
+                        other => {
+                            self.pending_flow = Some(other);
+                            Err(unsupported("pending loop control", self.span()))
+                        }
+                    };
+                }
+                let Some((tail, prefix)) = stmts.split_last() else {
+                    return Ok(CtValue::Unit);
+                };
+                match self.exec_stmts(prefix, scope)? {
+                    Flow::Normal => {}
+                    Flow::Return(value) => {
+                        self.pending_return = Some(value);
+                        return Ok(CtValue::Unit);
+                    }
+                    other => {
+                        self.pending_flow = Some(other);
+                        return Err(unsupported("pending loop control", self.span()));
+                    }
+                }
+                if let crate::Codegen::TIR::TStmt::Loop { label, body } = tail {
+                    return self.exec_loop_value(label.as_deref(), body, scope);
+                }
+                match tail {
+                    crate::Codegen::TIR::TStmt::ExprStmt(value) => self.eval_expr(value, scope),
+                    crate::Codegen::TIR::TStmt::Return(value) => {
+                        let value = match value {
+                            Some(value) => self.eval_expr(value, scope)?,
+                            None => CtValue::Unit,
+                        };
+                        self.pending_return = Some(value);
+                        Ok(CtValue::Unit)
+                    }
+                    _ => match self.exec_stmt(tail, scope)? {
+                        Flow::Normal => Ok(CtValue::Unit),
+                        Flow::Return(value) => {
+                            self.pending_return = Some(value);
+                            Ok(CtValue::Unit)
+                        }
+                        other => {
+                            self.pending_flow = Some(other);
+                            Err(unsupported("pending loop control", self.span()))
+                        }
+                    },
+                }
+            }
             TExprKind::Unit | TExprKind::DefaultLit | TExprKind::Uninit => Ok(CtValue::Unit),
             TExprKind::CtLit(v) => Ok(v.clone()),
             TExprKind::ConstRef(name) => self
@@ -106,10 +178,8 @@ impl EvalCtx<'_> {
                         Flow::Return(v) => return Ok(v),
                         Flow::Normal => {}
                         other => {
-                            return Err(unsupported(
-                                &format!("if-expr then {other:?}"),
-                                self.span(),
-                            ))
+                            self.pending_flow = Some(other);
+                            return Err(unsupported("pending loop control", self.span()));
                         }
                     }
                     self.eval_expr(then_value, scope)
@@ -118,10 +188,8 @@ impl EvalCtx<'_> {
                         Flow::Return(v) => return Ok(v),
                         Flow::Normal => {}
                         other => {
-                            return Err(unsupported(
-                                &format!("if-expr else {other:?}"),
-                                self.span(),
-                            ))
+                            self.pending_flow = Some(other);
+                            return Err(unsupported("pending loop control", self.span()));
                         }
                     }
                     self.eval_expr(else_value, scope)
@@ -800,6 +868,14 @@ impl EvalCtx<'_> {
                     };
                     self.write_back_place(recv, r, scope)?;
                     Ok(result)
+                }
+                crate::Codegen::TIR::THostCall::YieldSend { value } => {
+                    let value = self.eval_expr(value, scope)?;
+                    let Some(items) = self.collecting_items.last_mut() else {
+                        return Err(unsupported("expr `HostCall` YieldSend", self.span()));
+                    };
+                    items.push(value);
+                    Ok(CtValue::Unit)
                 }
                 crate::Codegen::TIR::THostCall::Helper { helper, args } => {
                     let leaf = helper

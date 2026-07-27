@@ -304,6 +304,9 @@ pub(super) fn substitute_stmts(
             Stmt::Assign { value, .. } | Stmt::Return(Some(value), _) => {
                 substitute_expr(value, types, values)
             }
+            Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => {
+                substitute_expr(value, types, values)
+            }
             Stmt::Return(None, _)
             | Stmt::Break(_)
             | Stmt::Continue(_)

@@ -102,8 +102,35 @@ beside S17 (owner-chosen I8 exception).
 
 **S1 — Function keyword**: `fn`.
 
+**D-ARROW-CONTROL1=A — Callable and control arrows** *(ratified 2026-07-26,
+card #1209)*:
+
+- `=>` defines a callable result.
+- `=[Effects]=>` adds an explicit effect ceiling to that callable result.
+- `=[]=>` states an empty effect ceiling. `=[..E]=>` keeps an open row.
+- `->` selects a control-flow arm or yields one finite-loop item.
+- effect-only `if` and `loop` bodies have no arrow.
+- braces group multiline bodies. They do not imply a result.
+
+Named functions, methods, function types, lambdas, computed fields, conversion
+implementations, and migration converters use the callable arrow. A concise
+named callable uses `= expression` after its result type:
+
+```jet
+fn double(value: Int) => Int = value * 2
+
+fn load(path: String) =[Fs]=> String {
+    text :: core.files.read(path)?
+    text.trim()
+}
+```
+
+A returned block uses its final value. `return` remains the explicit early-exit
+form. A Void callable with no explicit effect ceiling needs no arrow.
+`->` is not a general operator.
+
 **S12 — Entry point**: `fn run()`; no `pub` required. May be fallible:
-`fn run() -> Void ?` (S80, D-S80-RUN1). **D-CLIFLAG1** (implemented, c7cliflag): a
+`fn run() => Void ?` (S80, D-S80-RUN1). **D-CLIFLAG1** (implemented, c7cliflag): a
 typed entry parameter optionally opts into CLI parsing — `fn run(args: ServeArgs)`
 derives `--flag` names/defaults/help from the struct's fields
 (`#Cli`/`#Doc("...")` markers, bracket form matching `#Codable`); an
@@ -148,23 +175,26 @@ named statics (`Point.cartesian(…)`, `Point.polar(…)`); duplicate name E0105
 No marker keyword — return-type-is-the-type identifies a constructor (D-CTOR2).
 
 **S46 — Lambda syntax**: `(params) => expr` / `(params) => { … }`. `=>` is
-the lambda arrow; `->` is return types and dispatch arms. **D-LAMBDAINFER1**:
+the callable arrow; `->` is reserved for selected or yielded control values.
+**D-LAMBDAINFER1**:
 a lambda param type may be omitted where the expected type fixes it
 (`xs.filter((i) => i.state == .Open)`); required elsewhere (E0801);
 one-directional inference only. **D-LAMBDA-INFER1** *(ratified 2026-07-04)*:
 a single bare param may ALSO drop the parens — `xs.filter(m => m.hp > 0)` —
 wherever the expected type fixes it (same E0801/one-directional rule); no
-`take` prefix on the bare form (write `(take x) (x) => …`). The
-parenthesized/typed forms stay available for anywhere the type can't be
-inferred.
+explicit capture prefix exists. The parenthesized and typed forms stay
+available where the type cannot be inferred.
 
-**S47 — Function types & captures**: fn type `fn(T1, T2) -> R`; each unmarked
+**S47 — Function types & captures**: fn type `fn(T1, T2) => R`; each unmarked
 parameter has plain read access (D-MEM-PARAM1). Named `fn`s coerce to function
 values only when every parameter also has plain read access. A named function
 with a write (`&`) or move (`^`) parameter stays direct-call-only because S47
 has no function-type spelling that could preserve that requirement. Captures follow M2: shared read for read-only
-names, mutable borrow for written names. Escaping closures own captures:
-clonable auto-clone (L0801); non-clonable need `take(name)` prefix.
+names, mutable borrow for written names. Escaping closures own captures.
+Values accepted by Jet's ordinary copy law are copied at closure creation, so
+the source binding remains available. Owned values that cannot be copied move.
+Mutable and borrowed captures remain subject to sema's ownership checks. No
+`take(...)` capture prefix or preparatory copy binding is required.
 
 **S61 — Argument labels & defaults** *(D-NARG1, D-NARG2)*: optional call-site
 labels, positional order fixed — labels never reorder; wrong label = compile
@@ -176,8 +206,8 @@ fmt never adds nor strips labels.
 head its own body; dispatch by argument shape; heads must be exhaustive.
 
 ```jet
-fn area(Circle(r: Float)) -> Float { return 3.14 * r * r }
-fn area(Rect(w: Float, h: Float)) -> Float { return w * h }
+fn area(Circle(r: Float)) => Float = 3.14 * r * r
+fn area(Rect(w: Float, h: Float)) => Float = w * h
 ```
 
 **D-VARIADIC1 — Variadics & spread**: `...` everywhere — param `name: ...T`
@@ -202,8 +232,9 @@ function type, a bare `{ }` after `)` stands in for that lambda —
 
 **Declined (functions)**: UFCS (D-UFCS1); call-site macro-method expansion —
 inlining via `#Inline`/`#Inline(Always)` contracts instead (D-METHODMACRO1);
-expression-body `fn f() = expr` (D-FP2); the earlier general-pipe proposal
-(D-SUGAR2), superseded by D-SHAPE-PIPE1=C.
+the earlier untyped expression-body `fn f() = expr` (D-FP2), superseded by
+D-ARROW-CONTROL1's typed `fn f() => T = expr`; the earlier general-pipe
+proposal (D-SUGAR2), superseded by D-SHAPE-PIPE1=C.
 
 **D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow** *(ratified
 2026-07-15, card #552)*: single `|` is legal only in alternative-list grammar,
@@ -214,23 +245,37 @@ separately ratified `|=` compound assignment keep their existing meanings.
 
 ### Control flow
 
-**S3 — Blocks**: curly braces `{ }`, always required.
+**S3 — Blocks** *(amended by D-ARROW-CONTROL1)*: curly braces `{ }` group a
+multiline body or provide an explicit parse boundary. One clear statement or
+expression may stay adjacent on one line. Braces do not determine whether a
+construct returns a value.
 
-**S19 — Loops** *(D-LOOP-HEADER2=A, D-LOOP-ADVANCE2=A)*:
+**S19 — Loops** *(D-LOOP-HEADER2=A, D-LOOP-ADVANCE2=A,
+D-LOOPEVAL1=A, D-COMPREHENSION1=A)*:
 
 ```jet
 loop { … }                        // infinite
-loop n > 0 { … }                  // conditional (no `while`)
-loop i; 1..5 { … }                 // source iteration (no `for`)
-loop key, value; map { … }         // map pairs
-loop i; 0..10; 2 { … }             // positive source stride
-loop i := 0; i < n; i++ { … }      // explicit state
+loop n > 0 tick()                  // conditional effect loop (no `while`)
+loop i; 1..5 print(i)              // source effect loop (no `for`)
+loop key, value; map audit(key)    // map-pair effect loop
+loop i; 0..10; 2 audit(i)          // positive source stride
+loop i := 0; i < n; i++ draw(i)    // explicit state
+values :: loop item; items -> item.value
 ```
 
 `while`/`for` are not keywords. A source and optional stride evaluate once,
 left to right; a dynamic nonpositive stride raises E0123 before the first pull.
 Stride N visits source indexes 0, N, 2N; exhaustion while advancing is normal.
 Only loop headers use visible semicolons, and formatters wrap them only after one.
+
+A finite source or C-style loop may use `-> expression` or `-> { ... }`.
+Each accepted iteration yields one non-Void item. The result is an eager
+`List<T>` in iteration order. A header guard filters items. Multiple source
+clauses nest left to right and yield one flat List. An inner yielding loop
+preserves nesting. `next` omits the current item. Maps, Sets, and lazy
+iteration use ordinary Map construction, `Set.from(...)`, and the existing
+iterator adapters.
+Bare infinite and condition-only loops cannot use a yield arrow.
 
 **S22 / S72 — Ranges**: `1..10` is **inclusive**. Source-loop stride is the
 optional third clause (`loop i; 0..10; 2`); `step` has no loop role.
@@ -247,13 +292,18 @@ at `xs.len()` that indexes that same `xs` is E0364 (teach two-binding, `indexes`
 then `0..<xs.len()`). D-ITER1's pipeline adapter is `indexed()` (same named tuple).
 
 **S23 — Loop control** *(D-LOOP-CONTROLWORD1=B, D-LOOP-CONTINUE2=A,
-D-LOOPLABEL3=A)*: `break` and contextual `next`. A named loop uses declaration
-syntax (`outer :: loop`) and dot exits (`outer.break()`, `outer.next()`).
-Bare `break`/`next` still target the innermost loop. Loop names share the
-ordinary namespace but are not runtime values. The retired `outer@ loop`,
-`@outer loop`, `break outer@`, `break @outer`, `next outer@`, and `next @outer`
-spellings produce E0988;
-an unknown dot-exit name produces E0987.
+D-LOOPLABEL3=A, D-LOOPSTATE1=A)*: `break` and contextual `next`. A named loop
+uses declaration syntax (`outer :: loop`). The complete exit family is
+`break`, `break value`, `break(outer)`, `break(outer, value)`, `next`, and
+`next(outer)`. Bare exits target the innermost loop. Parentheses immediately
+after the keyword select a loop target. A bare break operand is the innermost
+loop's payload. Loop names share the ordinary namespace but are not runtime
+values. Dot exits and the older `@` spellings are retired.
+
+An ordinary loop returns one final value only through break payloads. Every
+payload exit must unify. A yielding loop's bare or targeted `break` returns
+the accumulated List, and its `next` omits the current item. Payload breaks
+are rejected in yielding loops because their result is already `[T]`.
 `next` enters the target's continuation edge: explicit state runs its
 afterthought then retests; source advances; condition retests; infinite restarts.
 `next()`, `.next()`, and `fn next` remain ordinary uses. After `??`, bare `next`
@@ -263,12 +313,22 @@ is control; write `?? (next)` for a same-named fallback value.
 `expr ?? next`, `expr ?? break` are the only spellings (`?return` etc.
 removed; E0115).
 
-**S68 — `if`: two-arm, expression, dispatch, and subjectless guards** *(D-IF1 +
-D-IF3 + D-MATCHARM1/2 + D-IFGUARD1=A)*: `if` is the only branching keyword.
+**S68 — `if`: effect, value, and ordered arm tables** *(D-IF1 +
+D-IF3 + D-MATCHARM1/2 + D-IFGUARD1=A + D-ARROW-CONTROL1=A)*: `if` is the only
+branching keyword. The canonical multi-branch surface is one ordered arm-table
+model. Write `if subject == { head -> body }` when a named subject improves
+clarity, or `if { head -> body }` without one. A head may be a value or
+structural pattern against the subject, or any `Bool` expression evaluated as
+written; one table may mix unrelated expressions. The first matching or true
+head wins. Chained `else if` remains legal, but there should rarely be a reason
+to prefer it and docs and diagnostics do not teach it as Jet's normal form.
 
-- Statement form `if cond { } else { }`; parens optional, fmt strips them.
-- Expression form `m :: if a > b { a } else { b }` — `else` required (E0003),
-  branch types must match (E0124).
+- Effect form has no arrow: `if ready run() else wait()`. Braces group
+  multiline bodies. Parentheses around the condition are optional and fmt
+  strips them.
+- Value form marks each selected value: `m :: if a > b -> a else -> b`.
+  `else` is required (E0003), and branch types must match (E0124). A returned
+  multiline arm uses `-> { ... }`.
 - **Dispatch form** — `==` between subject and `{` is required (bare
   `if subject { arm -> … }` is E0992, auto-fixed):
 
@@ -282,29 +342,40 @@ if code == {
 }
 ```
 
-Arms: bare values (compared to the subject), leading-dot enum patterns,
-predicates, guards via `&&`/`||` (booleans only — no comparison
-distribution); `|` binds tighter than `&&`/`||`, mixing without parens is
-E0328. Catch-all is `else ->`. Braceless single-expression bodies allowed.
-Exhaustive pattern arms may omit `else`.
+Arms: bare values (compared to the subject), leading-dot enum patterns, and any
+`Bool` expression evaluated as written. Guards use `&&`/`||` (booleans only —
+no comparison distribution); `|` binds tighter than `&&`/`||`, mixing without
+parens is E0328. Catch-all is `else ->`. Braceless single-expression bodies
+are allowed. Exhaustive pattern arms may omit `else`.
 
 **D-IFGUARD1=A — ordered subjectless guards** *(ratified 2026-07-18, card
-#680)*: `if cond -> statement` is the one-line statement guard. `if { cond ->
-body ... [else -> body] }` is the ordered statement table; it evaluates heads
-once, top to bottom, runs only the first matching body, and does nothing when no
-head matches and no `else` exists. A direct braceless nested `if` is E0329; use
-a block. `if { cond -> value ... else -> value }` is the value table everywhere
-an expression is accepted; its final `else` is mandatory and all result types
-unify. A pattern binding under `&&` reaches the rest of that head and its body;
+#680; amended by D-ARROW-CONTROL1)*: `if cond statement` is the one-line
+effect guard. A direct adjacent nested `if` requires braces when its boundary
+would be ambiguous. The subjectless spelling is the same ordered arm-table
+model without a named subject, not a separate or lesser branching mechanism.
+It keeps `->` because each arrow selects one arm, including a Void arm. Each
+head is an arbitrary `Bool` expression evaluated in order; the first true head
+wins. A value table requires a final `else` and all result types unify. A
+pattern binding under `&&` reaches the rest of that head and its body;
 a binding under `||` never reaches the body. A table whose every head starts
 with a pattern test of the same closed enum emits L0302 recommending exhaustive
 subject dispatch. Fmt keeps a fitting inline guard on one line, widens an
 overlong one once to a one-arm table, and keeps value-table outer braces.
 
-**D-PROTO1 / D-PROTO2 — Protocol blocks**: `protocol Name { client ->
-server: Msg(...) }` generates `.Client`/`.Server` handle types over
-linear+typestate machinery (E0153/E0154). Temporal ordering comes from the
-typestate transition graph itself — no separate surface (D-ROLE1).
+**D-PROTO1 / D-PROTO2 — Protocol blocks** *(amended by
+D-ARROW-CONTROL1)*: a two-endpoint protocol names the sender:
+
+```jet
+protocol Payment {
+    client: Pay(amount: Int)
+    server: Receipt(id: String)
+}
+```
+
+`client:` means the client sends, and `server:` means the server sends. The
+receiver is implied. The block generates `.Client` and `.Server` handle types
+over linear typestate machinery. Temporal ordering comes from the transition
+graph itself. Protocol transport arrows are retired.
 
 ### Patterns & matching
 
@@ -405,11 +476,11 @@ linalg types; user structs use methods.
 **S42 — Numeric types & conversions**: `Int` (i64) / `Float` (f64) are the
 defaults; sized menu `I8 I16 I32 I64 U8 U16 U32 U64 F32 F64` for experts/FFI.
 Conversions are destination-owned named methods only (`Float.from_int(n)`,
-`U8.from_int(n)?` for fallible narrowing, `Int.parse(s) -> Int ? ParseError`);
+`U8.from_int(n)?` for fallible narrowing, `Int.parse(s) => Int ? ParseError`);
 no `as`, cast punctuation, or source-owned `to_*` aliases.
 **D-NUMOPS1/2**: plain integer arithmetic **traps on overflow** at every
 width; opt in per-op with `wrapping(…)` / `saturating(…)` /
-`checked(…) -> T?`. Per-type `MIN`/`MAX`, float `INFINITY`/`NAN`/`EPSILON`,
+`checked(…) => T?`. Per-type `MIN`/`MAX`, float `INFINITY`/`NAN`/`EPSILON`,
 bit ops. **D-FLOATW1**: `core.math` is width-generic; mixing F32 and Float is
 a compile error with a convert fix-it.
 
@@ -612,10 +683,10 @@ dimension, kind, and input/output relations. Every input/output must
 determine one concrete unit and kind; an undetermined result is rejected.
 
 ```jet
-fn mean<Q: Quantity<Length, .Linear>>(xs: [Q]) -> Q { xs.mean() }
-fn shift<P: Quantity<Temperature, .Point>, D: Quantity<Temperature, .Delta>>(p: P, d: D) -> P { p + d }
+fn mean<Q: Quantity<Length, .Linear>>(xs: [Q]) => Q { xs.mean() }
+fn shift<P: Quantity<Temperature, .Point>, D: Quantity<Temperature, .Delta>>(p: P, d: D) => P { p + d }
 
-fn mystery<Q: Quantity<Length, .Linear>>() -> Q { Meter.from_int(1)? }
+fn mystery<Q: Quantity<Length, .Linear>>() => Q { Meter.from_int(1)? }
 // error: return unit is not determined by the signature
 // fix: accept a unit-bearing input or return Meter
 ```
@@ -663,7 +734,7 @@ length :: 3meter
 total :: length + inner_diameter
 // 3042millimeter — finer unit wins, exactly
 
-fn fits(depth: Meter) -> Bool { depth > 0meter }
+fn fits(depth: Meter) => Bool { depth > 0meter }
 fits(3000millimeter)
 // argument converts exactly to 3meter
 
@@ -738,10 +809,10 @@ index then item; one-binding stays item-only. `xs.indexes()` yields every valid
 `Int` index.
 
 **S39 — Indexing**: `xs[i]` / `m[k]` stop with a friendly report on
-OOB/missing key; `xs.get(i) -> (T?)` safe access; `m[k] = v` inserts.
+OOB/missing key; `xs.get(i) => (T?)` safe access; `m[k] = v` inserts.
 
 **S40 — Slicing**: `xs[a..b]` inclusive, copies (no exposed references);
-`s.slice(a..b) -> String` on character positions; L0501 lints slice copies in
+`s.slice(a..b) => String` on character positions; L0501 lints slice copies in
 loops.
 
 **D-ITER1 / D-ITERTOOLS1=A — Iterator adapters**: `map`, `filter`, `each`,
@@ -842,9 +913,9 @@ Rust `Result` (not surface syntax).
 
 **S80 — Error carrier & fallible `run`** *(D-ERR2, D-S80-RUN1)*: default `Error` carries
 message + optional code + optional source (`Error.message("…")`,
-`Error.code(n)`, `Error.with_source(e)`). `fn run() -> Void ?` allowed;
+`Error.code(n)`, `Error.with_source(e)`). `fn run() => Void ?` allowed;
 returned errors print in the diagnostic voice, exit non-zero. Cross-type `?`
-conversion is opt-in via the `Fallible` trait (`fn to_error(self) -> Error`);
+conversion is opt-in via the `Fallible` trait (`fn to_error(self) => Error`);
 prelude types implement it, unrelated enums never convert silently.
 
 **D-ERRCTX1 — Error context**: automatic `?`-propagation trace in dev builds;
@@ -1024,7 +1095,7 @@ ambient `print`/`input`; no library may inject into the no-prefix surface.
 ### Traits, generics & derives
 
 **S28 — Traits** *(D-IMPLDOT1)*: explicit named capabilities, never
-structural. `trait Shape { fn area(self) -> Float }`. Two equivalent impl
+structural. `trait Shape { fn area(self) => Float }`. Two equivalent impl
 spellings — inside the type body (`impl Serialize { … }`) or top-level
 **`impl Type.Trait { … }`** ("Type's Trait"). `.` walks namespaces and
 attaches traits; `::` exists only inside `extern rust` path strings. Orphan
@@ -1052,7 +1123,7 @@ marker leaves the derive list. Explicit opt-in markers for the rest —
 the `#` plane (see Serde under Core library).
 
 **D-DISPLAYDBG1 / D-DISPLAY-SHAPE — Display & Debug**: `Display` is
-user-facing — a single explicit method `fn display(self) -> String`, no
+user-facing — a single explicit method `fn display(self) => String`, no
 default (E0915, L0520); interpolation `{}` calls it. `Debug` is dev-facing and
 auto-derived; `{value#Debug}` selects it; `#Redact` on a field renders
 `"[redacted]"` (D-DEBUG-REDACT).
@@ -1062,7 +1133,7 @@ auto-derived; `{value#Debug}` selects it; `#Redact` on a field renders
 `Iterable`+`Iterator` for `loop x; mytype` and `Index`/`IndexMut` for
 bracket syntax. Built-in `[T]`/`Map` keep native paths.
 
-**D-ROLLBACK-TRAIT**: `trait Rollback { type Snapshot; fn snapshot(self) ->
+**D-ROLLBACK-TRAIT**: `trait Rollback { type Snapshot; fn snapshot(self) =>
 Snapshot; fn restore(&self, snap: Snapshot) }`; restore total;
 `derive Rollback` = field-wise clone impl.
 
@@ -1096,7 +1167,7 @@ D-VERDICT-732-1)*: on `#`: `MustUse`,
 `Codable`, `Encode`, `Decode`,
 `PublishedSchema`, `Redact`, `Numeric`, `Debug`, `Summarize`, `Comparable`
 (user derives of the same names also use `#`). D-SHAPE8 later moved explicit
-purity to the empty function-effect row (`f: fn(Int) --[]-> Int`). Field-level wire markers
+purity to the empty function-effect row (`f: fn(Int) =[]=> Int`). Field-level wire markers
 use `#`: `Rename`, `Skip`, `Default`, `Flatten`, `RenameAll`,
 `DenyUnknownFields`, `Tag`, `Untagged`.
 
@@ -1272,7 +1343,7 @@ a sigil binding:
 ```
 
 The marker records provenance for that binding without changing its type.
-Current implementation records Float local origins; `speed.origin() -> String`
+Current implementation records Float local origins; `speed.origin() => String`
 returns the tracked source note, and untracked Floats return `"untracked"`.
 No `Tracked<T>` wrapper exists and no general value-history type is introduced.
 
@@ -1298,9 +1369,9 @@ help-text carrier (D-CLIFLAG1), not free metadata.
 
 **D-PATCH1 — Typed patches** *(ratified 2026-07-03, card #181)*: `#Patchable`
 on a struct `T` synthesizes `T.Patch` — every field wrapped `T?` (Option),
-absent field = no change. Generated methods: `t.apply(patch) -> T` (apply
-onto a base), `T.diff(new, old) -> T.Patch` (static; fields that changed,
-`None` where equal), `patch.merge(other) -> T.Patch` (`other` wins on
+absent field = no change. Generated methods: `t.apply(patch) => T` (apply
+onto a base), `T.diff(new, old) => T.Patch` (static; fields that changed,
+`None` where equal), `patch.merge(other) => T.Patch` (`other` wins on
 conflicting `Some`s). No type parameters (E0336 — concrete field list only);
 no stored-reference or function-typed fields (E0337 — a patch holds owned
 optional values). `Patch` Encode/Decode is deferred to the prelude serde
@@ -1482,7 +1553,7 @@ ordinary close-call resolution proves that `close(^resource)` is valid, and the
 normal move checker rejects any later use, immediate close, or second defer.
 
 **S53 — Concurrency** *(deferred core; combinators live)*: tasks/channels
-deferred past v1.0 (planned: `tasks.spawn(closure) -> Task<T>`, `t.join()`,
+deferred past v1.0 (planned: `tasks.spawn(closure) => Task<T>`, `t.join()`,
 `tasks.channel<T>()`; no shared mutable state). Already ratified around it:
 **D-CONCCOMB1** structured combinators `g.all` / `g.race` / `g.any`
 (race cancels losers; all fails fast; any takes first Ok, D-RACEWIN1);
@@ -1519,19 +1590,19 @@ exits — deadline first, then cancel.
 ### Effects & safety
 
 **D-EFF1 — Effect system**: inferred per-fn effect sets (Koka-style rows),
-erased in codegen. Assert/restrict via `--[Net, Db]->` on a signature and
+erased in codegen. Assert or restrict via `=[Net, Db]=>` on a signature and
 `#Caps(Net) { … }` regions.
 
 **D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,
-owner-amended; implemented 2026-07-17, card #543)*: every explicit function
-effect row uses exactly `--[Effects]->`, in declarations, trait methods,
-function values, and callback types. Pure functions keep ordinary `->`;
-`--[]->` explicitly bounds the row empty. Open rows stay inside the brackets
-(`--[Log, ..E]->`). The ballot mockup `-[Effects]->`, former `#(Effects)` /
-`#(via f)` rows, and former `#Pure fn` marker are rejected with E0066; no alias.
+owner-amended by D-ARROW-CONTROL1 on 2026-07-26; card #543)*: every explicit
+function effect row uses exactly `=[Effects]=>` in declarations, trait
+methods, function values, and callback types. `=[]=>` explicitly bounds the
+row empty. Open rows stay inside the brackets (`=[Log, ..E]=>`). The older
+`--[Effects]->`, `-[Effects]->`, `#(Effects)`, `#(via f)`, and `#Pure fn`
+spellings are retired; no alias exists.
 
 **S60 — Purity marking** *(surface superseded by D-SHAPE8=A)*: an explicit
-empty effect row `--[]->` is the checked purity signature; violations name the
+empty effect row `=[]=>` is the checked purity signature; violations name the
 impure call path. The same empty row works in function-type bounds.
 
 **D-EFF4 / D-EFF5 — Vocabulary**: closed set of ten tree ROOTS — `Net`, `Fs`,
@@ -1541,53 +1612,54 @@ and ancestor matching is subsumption. `effect <Name>` user declarations
 reserved, unminted.
 
 **D-EFFTREE1 — Effect tree** *(ratified 2026-07-03, card #181)*: the ten
-D-EFF4/5 names are tree roots; a signature/`#Caps`/`#Grant`/`--[!…]->` entry may
+D-EFF4/5 names are tree roots; a signature/`#Caps`/`#Grant`/`=[!…]=>` entry may
 be a dotted path rooted at one (`Fs.Read`, `Net.Http.Get`) — root closed
 (E0119), leaf open/user-chosen, no fixed vocabulary or depth limit. Ancestor
 matching is subsumption, the same rule as D-TAG1's tag-tree subtree matching
-learned once and reused: `--[Fs]->` accepts any `Fs.*` callee; `--[Fs.Read]->`
+learned once and reused: `=[Fs]=>` accepts any `Fs.*` callee; `=[Fs.Read]=>`
 rejects a sibling `Fs.Write` callee; `#Grant(Fs.Read)` doesn't authorize
-`Fs.Write`; `--[!Fs]->` prohibits the whole `Fs.*` subtree. Reverses E0740 for
+`Fs.Write`; `=[!Fs]=>` prohibits the whole `Fs.*` subtree. Reverses E0740 for
 the ancestor case, keeps it for out-of-tree/sibling cases. Flat root names
 stay valid (no migration break) — Core stdlib calls are still tagged with a
 bare root; leaf precision is a user-declared-contract concept.
 
 **D-EFF2 — Polymorphism**: transparent flow-through by default; escaping
 function values assume the maximal set. Expert levers: effect-bound function
-types (`fn(T) --[]-> U`, `fn(T) --[Net]-> U`; call-site check E0747) and
-`--[via f]->` pass-through publication (E0748).
+types (`fn(T) =[]=> U`, `fn(T) =[Net]=> U`; call-site check E0747) and
+`=[via f]=>` pass-through publication (E0748).
 
 **D-EFF3 — Traits**: a trait method may declare an effect upper bound — both
 the impl obligation (E0742) and the dispatch contract for trait objects.
 
 **D-EFFECT-OMIT1=A — inferred effects may stay unwritten** *(ratified
 2026-07-16; implemented 2026-07-17, card #570)*: private and public ordinary
-functions may omit an effect bound; `->` is only the return arrow and never asserts purity — a
-function is pure when its inferred row is empty, or when an explicit
-`--[]->` bounds it empty. Public API snapshots store the inferred normalized
+functions may omit an effect bound. `=>` defines the result and never asserts
+purity. A function is pure when its inferred row is empty, or when `=[]=>`
+bounds it empty. Public API snapshots store the inferred normalized
 row and provenance, and semver rejects row changes; an explicit row is
-always available as an upper bound (`--[Fs.Read]->`). D-EFF3 is unchanged:
+always available as an upper bound (`=[Fs.Read]=>`). D-EFF3 is unchanged:
 static calls use each implementation's inferred row, while a trait method
 used through dynamic dispatch keeps its declared upper-bound contract.
 
 ```jet
-fn twice(n: Int) -> Int { n * 2 }
+fn twice(n: Int) => Int = n * 2
 // inferred []: pure
 
-pub fn load(path: String) -> String { core.files.read(path)? }
-// API snapshot: load --[Fs.Read]-> String
+pub fn load(path: String) => String { core.files.read(path)? }
+// API snapshot: load =[Fs.Read]=> String
 
-pub fn bounded(path: String) --[Fs.Read]-> String { core.files.read(path)? }
-fn hash(text: String) --[]-> Int { text.length() }
+pub fn bounded(path: String) =[Fs.Read]=> String { core.files.read(path)? }
+fn hash(text: String) =[]=> Int { text.length() }
 
-trait Renderer { fn render(self) --[Gpu]-> Image }
+trait Renderer { fn render(self) =[Gpu]=> Image }
 ```
 
-**D-PROP1 / D-PROP2 — Prohibition**: `--[!Net]->` — the fn and every reachable
+**D-PROP1 / D-PROP2 — Prohibition**: `=[!Net]=>` — the fn and every reachable
 callee must not use the effect (E0749).
 
-**D-SCAP1 — Scoped capabilities**: `#Grant(Fs) { caps -> … }` authorizes
-effects into a lexical scope, binding an erased first-class handle; effect
+**D-SCAP1 — Scoped capabilities** *(amended by D-ARROW-CONTROL1)*:
+`#Grant(caps: Fs) { … }` authorizes effects in a lexical scope and binds an
+erased first-class handle in the marker head. An effect
 without backing grant E0712; handle escape E0711.
 
 **D-TAINT1 — Taint** *(D-TAINT-SAN, D-IFC1)*: `#Tainted expr` marks untrusted
@@ -1602,7 +1674,7 @@ taint lattice. Credential taint spreads by dataflow and may not reach
 `print`, `log`, or serialization sinks (E0722); `#Sanitizer fn` is the audited
 strip point. Other taint kinds retain the D-TAINT1 injection-sink rules.
 
-**D-DET1 — Determinism** *(D-DET-CAPAPI)*: an explicit `--[]->` bound implies reproducible —
+**D-DET1 — Determinism** *(D-DET-CAPAPI)*: an explicit `=[]=>` bound implies reproducible —
 wall-clock/OS-rng/fs/net rejected (E3401/E3403); injectable `Clock`
 (`now/tick/advance/wait`) and `Rng` (`int/float/bool/pick/shuffle`) are the
 pure-callable capabilities; `#Nondeterministic("reason") { }` expert escape (respelled by D-BLOCKPLANE1, 2026-07-12).
@@ -1647,7 +1719,7 @@ effect summary and records per-dependency provenance in the lock.
 (E1220 names the dependency); `grants: { "dep": [Effect] }` per-dep escape;
 malformed block E1221.
 
-**D-STREAMYIELD1 — Generators**: `fn f() -> Stream<T>` uses `yield expr` to
+**D-STREAMYIELD1 — Generators**: `fn f() => Stream<T>` uses `yield expr` to
 hand a value to the consumer and suspend until the next pull; falling off
 the end (or a bare `return;`) ends the stream; `return value;` is E0806.
 Consumers are ordinary `loop x; f() { }` loops — one keyword, one type, no
@@ -1675,14 +1747,14 @@ splices into generated code.
 
 **D-CTCORE1 / D-CTIO1 / D-PURE2 — Comptime I/O**: only a curated whitelist of
 pure Core functions evaluates at comptime; the sole I/O escapes are
-`embed_file(path) -> String` and `embed_bytes(path) -> [U8]` (string-literal
+`embed_file(path) => String` and `embed_bytes(path) => [U8]` (string-literal
 path, no escaping the project root). **D-STRPARSE1**: comptime evaluation may
 pass through `Result`/`Option` for pure parse paths.
 
 **D-CTEFFECT1 — Comptime effect tiers**: Tier 0 pure always-on; Tier 1
 hashed-reproducible recorded into `.jet/lock` (`@embed`, `find`,
 `fetch(url, sha256:)`); Tier 2 ambient requires `#Impure("reason")` **and**
-`--allow-impure`. **D-CTFIND1/2**: `find(glob) -> [String]` builtin, sorted,
+`--allow-impure`. **D-CTFIND1/2**: `find(glob) => [String]` builtin, sorted,
 hash-recorded; hand-rolled std-only glob (`*`, `**`, `?`, `{a,b}`, `[a-z]`).
 Shipped by #350.
 
@@ -1936,7 +2008,7 @@ STABILITY test** (idempotence alone misses dropped tokens).
 
 ### FFI & external dependencies
 
-**S50 — Rust FFI**: `extern rust "crate@version" { fn name(args) -> T =
+**S50 — Rust FFI**: `extern rust "crate@version" { fn name(args) => T =
 "rust::path" }`. Version pins required; by-value boundary only — no borrows,
 callbacks, or trait objects across the edge.
 
@@ -1967,7 +2039,7 @@ binds scalars and `char*`↔String; `#define` constants only. Old
 **D-CABI-CALLBACK1=A / D-CABI-RESULT1=C / D-CABI-PLATFORM1=A** *(ratified
 2026-07-11, card #436)*: C callbacks accept only C-convention function values
 whose arguments and return are C-safe. A callback is non-null, monomorphic,
-explicitly bounded `--[]->` or a capture-free lambda with an inferred empty row, and safe for foreign threads:
+explicitly bounded `=[]=>` or a capture-free lambda with an inferred empty row, and safe for foreign threads:
 no heap allocation, mutable static or thread-local state, scheduler access, or
 panic-capable path. Its pointer is stable for the program lifetime and may be
 called concurrently or reentrantly. There is no hidden context pointer,
@@ -2045,7 +2117,7 @@ the D-FFI-PY1 precedent):**
   recorded in the binding (order mismatch is a checked error, never a
   silent transposition).
 - **D-FFI-LUA1=A**: `lua.*` — in-process VM (embedding is Lua's design
-  point); tables ↔ `[K: V]` zero-copy views; effect root `--[Lua]->`.
+  point); tables ↔ `[K: V]` zero-copy views; effect root `=[Lua]=>`.
 - **D-FFI-RUBY1=A**: `ruby.*` — sidecar worker (GVL + interpreter global
   state make embedding hostile); RubyGems as jetpack provider.
 - **D-FFI-PERL1=A**: `perl.*` — sidecar worker; CPAN provider; legacy
@@ -2111,7 +2183,7 @@ binder's declaration format inside `rust.*`; D-NPMTYPE1 stubs are the js
 binder's v1; D-DEP1 vendoring/hash-pinning extends to every language's refs.
 Per-language binder depth, all ratified 2026-07-03:
 **D-FFI-PY1 (=A)**: Python's default host is a supervised sidecar CPython
-worker (typed message boundary, crash-isolated, `--[Py]->` effect added to the
+worker (typed message boundary, crash-isolated, `=[Py]=>` effect added to the
 D-EFF4 set); opt-in `py@embed` switches to in-process libpython for
 zero-copy buffer-protocol arrays. One `use py.X` surface; the tier never
 moves call sites. **D-FFI-JS1 (=A)**: one `use js.X` surface, host chosen by
@@ -2317,7 +2389,7 @@ YAML parser is std-only, YAML 1.2 core incl. anchors.
 
 **D-SERDE2 = A** *(ratified 2026-07-11, card #131)*: the hand-writable codec
 surface is a first-class `Encode`/`Decode` protocol — a type implements
-`encode(self) -> DataTree` and `decode(tree: DataTree) -> Result<T,
+`encode(self) => DataTree` and `decode(tree: DataTree) => Result<T,
 DecodeError>` to own its wire form (e.g. a validated newtype serializing as a
 bare string). The built-in `#Codable`/`#Encode`/`#Decode` derives become
 ordinary derives that *emit that same Jet source* and re-enter
@@ -2368,8 +2440,8 @@ index, not a substitute for that law.
   `fn run(args: T)` derives an `ArgsSpec`; library/tooling code may build the
   same spec dynamically for subcommands, env fallbacks, completions, and tests.
 - **D-ENV-MUTATE1=A**: `core.env` uses one process-global, raw-preserving
-  logical environment. `unset(name) -> Bool ? EnvError` removes a key and
-  `vars() -> [String] ? EnvError` returns a deterministic, owned names-only
+  logical environment. `unset(name) => Bool ? EnvError` removes a key and
+  `vars() => [String] ? EnvError` returns a deterministic, owned names-only
   snapshot. Unix identity and ordering use exact bytes; Windows identity uses
   `CompareStringOrdinal` ignoring case while preserving the last spelling and
   exact UTF-16 value. `get`, `home_dir`, mutations, and child launches share
@@ -2377,7 +2449,7 @@ index, not a substitute for that law.
   and `env_remove`, then passes raw entries to the OS. Jet mutations never
   mutate libc `environ` or the Windows process environment block. Invalid
   names and values fail without revealing inputs; `vars` fails as a whole on
-  any non-Unicode entry. Existing editions keep `set -> Void` and report
+  any non-Unicode entry. Existing editions keep `set => Void` and report
   invalid input through E3001; its fallible `Void ? EnvError` signature waits
   for a major release plus edition opt-in.
 - **D-MATHLIB2=A**: `core.math` is the canonical callable surface for libm and
@@ -2477,7 +2549,7 @@ index, not a substitute for that law.
   `EncodingError` records format, kind, zero-based byte offset, optional
   one-based line/column, DataTree path, reason, and handle-free IO cause. Whole and
   stream paths share parser, value tree, errors, limits, canonical bytes, and
-  bounded-memory law. Shipped `json.events(DataTree) -> String` is unchanged;
+  bounded-memory law. Shipped `json.events(DataTree) => String` is unchanged;
   pull events exist only through `json.reader` until an edition migration.
 
   **D-ENCXML1=A** selects one lossless namespace-aware ordinary-`DataTree` XML
@@ -2501,7 +2573,7 @@ index, not a substitute for that law.
   is lossless. The prior `{name, attrs, children, text}` tree is unratified and
   receives no compatibility alias.
 
-  **D-JSONCANON1=A** makes `json.canonical(data, limits:) -> String ?
+  **D-JSONCANON1=A** makes `json.canonical(data, limits:) => String ?
   EncodingError` strict RFC 8785 JCS in edition 2027. It recursively emits UTF-8
   without BOM/LF/whitespace, preserves array order and Unicode scalars, sorts
   keys by unsigned UTF-16 code units, rejects duplicate keys/Bytes/nonfinite
@@ -2513,7 +2585,7 @@ index, not a substitute for that law.
   and audits hashing/signing fixtures. No 2027 legacy branch exists.
 
   **D-ENCBIN1=A / D-ENC-CBOR-SURFACE1=A** select RFC 8949 CBOR. The only whole
-  surface is `parse([U8], options) -> DataTree`, `decode<T: Codable>`, `to_bytes`,
+  surface is `parse([U8], options) => DataTree`, `decode<T: Codable>`, `to_bytes`,
   and `to_bytes_canonical`, returning closed `CBORError`. `[U8]` uses native
   byte strings through typed Codable; untyped `DataTree` rejects byte strings,
   tags, bignums, non-text/duplicate map keys, and unsupported values rather than
@@ -2729,7 +2801,7 @@ copy tree, symlink/readlink/hardlink, temp handles, advisory lock files,
 canonical/absolute, offset bytes, fsync, and atomic writes (#288). Watch APIs
 follow the owner's D-WATCH-SCOPE1 comment: `core.watcher` owns file, process,
 and port watch handles with `WatchEvent` values plus callback methods through
-`core.event`. `fs.list_dir -> [DirEntry]` (D-LSDIR1). Civil time uses
+`core.event`. `fs.list_dir => [DirEntry]` (D-LSDIR1). Civil time uses
 Instant/DateTime/LocalDate/LocalTime/Duration/Period/Zone/ZonedDateTime over
 IANA TZif zoneinfo, layered on the injectable `Clock` (D-TIMEDEPTH1 +
 D-TIME-CALENDAR1; #295). PRNG
@@ -2810,7 +2882,7 @@ alias, or priority rule.
 
 **D-ARTIFACT-EXT1=A — one artifact-extension family** *(ratified by owner 2026-07-12, card #514)*: every Jet tool artifact is `.jet<kind>`: `.jetmap`, `.jetnb`, `.jetproof`, `.jettrace`, `.jetreplay` (game input replays), and `.jetproof-replay` (proof replays). The former short-prefix family and replay collision are retired without aliases. Closed family; new artifact kinds need a ballot. Amends D-JPROOF1/D-JREPLAY1/D-PERFSESSION1/D-GAME-REPLAY1 spellings.
 
-**D-API-STORE1=A — one storage verb: add / add_new** *(ratified 2026-07-12, card #513; shape set by owner question q2zvcuql)*: `insert` and `put` die. Keyed containers: `add(key, value) -> T?` upserts and returns the displaced old value (`None` = fresh key); `add_new(key, value) -> Bool` stores only if absent — `false` means the key existed and the value is untouched (the race-safe claim). Element containers: `add(value) -> Bool` (`Set`/`SortedSet`: true if newly added; `Bag`: always true). `m[k] = v` index-write stays the literal upsert (S39). Enters Law 1; amends the map/`Lru`/D-COLLBREADTH1 method lists.
+**D-API-STORE1=A — one storage verb: add / add_new** *(ratified 2026-07-12, card #513; shape set by owner question q2zvcuql)*: `insert` and `put` die. Keyed containers: `add(key, value) => T?` upserts and returns the displaced old value (`None` = fresh key); `add_new(key, value) => Bool` stores only if absent — `false` means the key existed and the value is untouched (the race-safe claim). Element containers: `add(value) => Bool` (`Set`/`SortedSet`: true if newly added; `Bag`: always true). `m[k] = v` index-write stays the literal upsert (S39). Enters Law 1; amends the map/`Lru`/D-COLLBREADTH1 method lists.
 
 **D-VALIDATE1=A — validation in the struct definition** *(ratified 2026-07-12, cards #506/#513; shape set by owner direction)*: a `validate { … }` section in the struct body (S82 in-body grammar) declares rules as dot-chains on bare field names (D-FIELDPOL1 sibling access); cross-field rules use `check(cond, at: field, "msg")` in the same block. All rules ACCUMULATE into `[FieldError]` (the DecodeError path shape). `decode<T>()` runs the block automatically; `Type.validate(value)` runs it standalone. `Validate.over(s)` is the sole use-site escape, same rule vocabulary and engine (I8), only for rules needing context the definition cannot see. Type-level constraints (D-RANGETYPE1, D-REFINE1) remain layer zero. `#Pre`/`#Post` stay call-site contracts, outside the validation story.
 
@@ -2867,7 +2939,7 @@ checked `Sql` literals feed `db.params(sql)`, rows stay inspectable maps with
 typed `db.row_*` reads, and `db.transaction`/`db.migrate` provide rollback and
 checksum-recorded migration helpers over the same parameterized path. `core.http`: client+server submodules; client
 supports HTTPS by default via rustls + system roots (D-TLS1=A); server is
-plain `fn(req: Request) -> Response` on a `mux` (`mux.get("/users/:id", handler)`,
+plain `fn(req: Request) => Response` on a `mux` (`mux.get("/users/:id", handler)`,
 `req.params["id"]`, `Server.serve(addr, mux)?`) with HTTPS enabled by the named
 option `Server.serve(addr, mux, tls: Server.tls(cert, key))` (D-TLSSERVE1=A).
 HTTP route parameters use `:name` and final catch-alls use `*name`
@@ -2957,16 +3029,16 @@ being a user-declared-contract concept): the shape is rustc special-casing
 a small closed list of known intrinsics, and it touches only the finite
 table the compiler already keeps for its own stdlib signatures — inference
 through ordinary user calls stays bare-root, exactly as D-EFFTREE1
-decided. A read-only query function can therefore *prove* `--[Db.Read]->` —
+decided. A read-only query function can therefore *prove* `=[Db.Read]=>` —
 the read-footprint qualification `app.live` demands — and a write hiding
 inside such a function is caught by the existing `E0740` check (no new
 diagnostic code). *Reconciliation:* D-LIVEQUERY1's `inWild` stacked
 `#Pure` on top of `#(Db.Read)`; D-SHAPE8 later retired both spellings, so a live
-query now qualifies by its `--[Db.Read]->` bound alone. `DbConnection` (and
+query now qualifies by its `=[Db.Read]=>` bound alone. `DbConnection` (and
 `DbError`) are now nameable types so a query function can annotate its
 connection parameter.
 *Shipped 2026-07-12 (card #505, slice 4 — leaf-inference layer only)*: the
-`Db.Read`/`Db.Write` leaf inference above, the `--[Db.Read]->` qualification
+`Db.Read`/`Db.Write` leaf inference above, the `=[Db.Read]=>` qualification
 proof, the `E0740` hidden-write reject (`tests/ui/db_read_query_hidden_write`),
 and `DbConnection`/`DbError` nameability, with a runnable example
 (`examples/features/io/db_read_footprint.jet`). The remaining `app.live`
@@ -3465,12 +3537,12 @@ $ jet run   --release       hello.jet   # optimized one-off run
 
 **Migrations** *(D-MIGRATE1, D-MIGRATE2A–F)*: `#PublishedSchema` types
 snapshot field layout; a breaking change without a migration is E0910.
-Verbs: `add f: T = val`; `remove f`; `change f: Old -> New via { (old) =>
-expr }` (converter: inline `via` → `impl Old -> New` in scope → E0910); no
+Verbs: `add f: T = val`; `remove f`; `change f: Old => New via { old =>
+expr }` (converter: inline `via` → `impl Old => New` in scope → E0910); no
 `reorder`. CLI: `jet inspect schema squash --before <ver>`, `jet inspect schema status`.
 
 **Decode-time migration transparency** *(D-MIGRATE3=A)*: `decode_traced<T>(raw)
--> DecodeResult<T> ?` beside `decode<T>` on every codec sharing the decode
+=> DecodeResult<T> ?` beside `decode<T>` on every codec sharing the decode
 machinery (json/csv/toml/yaml); `DecodeResult<T> = { value: T, migration:
 MigrationStatus }`, `MigrationStatus = { migrated: Bool, from: String, steps:
 [String] }`. `decode` unchanged (I8, zero cost for callers not asking).
@@ -4925,7 +4997,7 @@ topical sections above; they do not restart a log here.
 **D-OPDEF1 — User-defined operators**: option A. Existing arithmetic and
 comparison symbols may dispatch through ordinary hook traits: `Add.add`,
 `Sub.sub`, `Mul.mul`, `Div.div`, `Equatable.equal`, and
-`Comparable.compare -> Ordering`. Implementations use canonical
+`Comparable.compare => Ordering`. Implementations use canonical
 `impl Type.Trait { ... }` syntax, keep the same operand type, and cannot add
 symbols, precedence, overload sets, or side-effect meanings. `+=` reuses `Add`.
 Beginner `#Numeric`/`#Comparable` and auto equality remain front doors to the

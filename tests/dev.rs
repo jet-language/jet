@@ -1544,6 +1544,172 @@ fn strict_jit_traces_execution_without_fallback() {
     );
 }
 
+#[test]
+fn yielding_and_result_loops_run_in_native_jit_without_fallback() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jet_dev_loop_values");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("loop_values.jet");
+    fs::write(
+        &file,
+        r#"fn find(xs: [Int]) => Int {
+    found :: loop {
+        loop x; xs {
+            if x > 2 break(found, x)
+        }
+        break -1
+    }
+    found
+}
+
+fn outer_result() => Int {
+    result :: loop {
+        ignored :: loop {
+            break(result, 9)
+        }
+        break 0
+    }
+    result
+}
+
+fn identity(value: Int) => Int = value
+
+fn nested_binary_exit() => Int {
+    result :: loop {
+        ignored :: (loop {
+            break(result, 11)
+            break 1
+        }) + 2
+        break 0
+    }
+    result
+}
+
+fn nested_call_exit() => Int {
+    result :: loop {
+        ignored :: identity(loop {
+            break(result, 12)
+            break 1
+        })
+        break 0
+    }
+    result
+}
+
+fn nested_condition_exit() => Int {
+    result :: loop {
+        if (loop {
+            break(result, 13)
+            break 1
+        }) > 0 {
+            break 0
+        }
+        break -1
+    }
+    result
+}
+
+fn counted_init_exit() => Int {
+    result :: loop {
+        loop i := (loop {
+            break(result, 14)
+            break 0
+        }); i < 1; i++ {}
+        break 0
+    }
+    result
+}
+
+fn counted_step_exit() => Int {
+    result :: loop {
+        loop i := 0; i < 2; i = (loop {
+            break(result, 15)
+            break 0
+        }) {}
+        break 0
+    }
+    result
+}
+
+fn value_if_exit() => Int {
+    result :: loop {
+        ignored :: if true -> {
+            break(result, 16)
+            0
+        } else -> 0
+        break 0
+    }
+    result
+}
+
+fn run() {
+    xs :: [Int].{ 1, 2, 3, 4 }
+    doubled :: loop x; xs -> x * 2
+    outer :: loop x; xs {
+        ignored :: loop {
+            if x == 1 next(outer)
+            if x == 2 break(outer)
+            break 0
+        }
+        print(ignored)
+    }
+    print(find(xs))
+    print(doubled)
+    print(outer_result())
+    print(nested_binary_exit())
+    print(nested_call_exit())
+    print(nested_condition_exit())
+    print(counted_init_exit())
+    print(counted_step_exit())
+    print(value_if_exit())
+}
+"#,
+    )
+    .unwrap();
+
+    let mut bundle =
+        jet::Loader::load_entry(file.to_str().unwrap()).expect("loop-value bundle should load");
+    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diag| matches!(diag.severity, jet::Diagnostics::Severity::Error))
+        .collect::<Vec<_>>();
+    assert!(errors.is_empty(), "loop-value bundle must type-check: {errors:?}");
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "loop values must be resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    match dev_iteration(file.to_str().unwrap(), false, true) {
+        RunOutcome::Ran { stdout, .. } => {
+            assert_eq!(
+                stdout,
+                "3\n[2, 4, 6, 8]\n9\n11\n12\n13\n14\n15\n16\n"
+            )
+        }
+        other => panic!("loop values must run in the interpreter: {other:?}"),
+    }
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|error| panic!("loop-value JIT compile failed: {error}"));
+
+    jet_jit::reset_jit_trace_for_test();
+    match dev_iteration(file.to_str().unwrap(), false, false) {
+        RunOutcome::Ran { stdout, .. } => {
+            assert_eq!(
+                stdout,
+                "3\n[2, 4, 6, 8]\n9\n11\n12\n13\n14\n15\n16\n"
+            )
+        }
+        other => panic!("loop values must run via native JIT: {other:?}"),
+    }
+    assert!(jet_jit::jit_executed_for_test(), "loop values must execute JIT");
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "loop values must not use interpreter fallback"
+    );
+}
+
 /// c728 C6: one-shot `jet dev` deopts on a JIT gap and exits 0.
 #[test]
 fn one_shot_dev_deopts_on_jit_gap() {
@@ -1767,7 +1933,7 @@ fn returned_parameter_view_matches_aot_and_default_dev() {
     let file = dir.join("returned_parameter_view.jet");
     fs::write(
         &file,
-        r#"fn first(left: [Int], right: [Int]) -> View<Int> {
+        r#"fn first(left: [Int], right: [Int]) => View<Int> {
     return left[0..1]
 }
 
@@ -1809,7 +1975,7 @@ fn returned_view_field_matches_aot_and_default_dev() {
         &file,
         r#"struct Window { values: View<Int> }
 
-fn window(values: [Int]) -> Window {
+fn window(values: [Int]) => Window {
     selected :: values[0..1]
     return Window.{ values: selected }
 }
@@ -1852,7 +2018,7 @@ fn nested_returned_view_field_matches_aot_and_default_dev() {
         r#"struct Inner { values: View<Int> }
 struct Outer { inner: Inner }
 
-fn outer(values: [Int]) -> Outer {
+fn outer(values: [Int]) => Outer {
     selected :: values[0..1]
     return Outer.{ inner: Inner.{ values: selected } }
 }
@@ -1897,22 +2063,22 @@ struct Holder { maybe: Window? }
 struct GenericHolder<T> { value: T, maybe: Window? }
 struct Node { next: Node?, values: View<Int> }
 
-fn maybe(values: [Int]) -> (Window?) {
+fn maybe(values: [Int]) => (Window?) {
     selected :: values[0..1]
     return Val(Window.{ values: selected })
 }
 
-fn result(values: [Int]) -> Window ? String {
+fn result(values: [Int]) => Window ? String {
     selected :: values[0..1]
     return Ok(Window.{ values: selected })
 }
 
-fn tuple(values: [Int]) -> (window: Window, count: Int) {
+fn tuple(values: [Int]) => (window: Window, count: Int) {
     selected :: values[0..1]
     return (window: Window.{ values: selected }, count: 1)
 }
 
-fn node(values: [Int]) -> Node {
+fn node(values: [Int]) => Node {
     selected :: values[0..1]
     return Node.{ next: None, values: selected }
 }
@@ -1950,7 +2116,7 @@ fn returned_string_view_field_matches_aot_and_default_dev() {
         &file,
         r#"struct Domain { value: View<str> }
 
-fn domain(email: String) -> Domain {
+fn domain(email: String) => Domain {
     result :: email.after("@")
     return Domain.{ value: result }
 }
@@ -1991,17 +2157,17 @@ fn returned_view_trait_method_matches_aot_and_default_dev() {
     fs::write(
         &file,
         r#"trait Select {
-    fn select(self, left: [Int], right: [Int]) -> View<Int>
+    fn select(self, left: [Int], right: [Int]) => View<Int>
 }
 
 struct First { marker: Int }
 impl First.Select {
-    fn select(self, left: [Int], right: [Int]) -> View<Int> {
+    fn select(self, left: [Int], right: [Int]) => View<Int> {
         return left[0..1]
     }
 }
 
-fn wrapper(selector: First, left: [Int], right: [Int]) -> View<Int> {
+fn wrapper(selector: First, left: [Int], right: [Int]) => View<Int> {
     return selector.select(left, right)
 }
 
@@ -2038,14 +2204,14 @@ fn aggregate_trait_returns_match_aot_and_default_dev_in_both_impl_orders() {
 struct Envelope<T> { value: T, marker: Int }
 
 trait Select {
-    fn select(self, left: [Int], right: [Int]) -> Pair
-    fn optional(self, left: [Int], right: [Int]) -> (Pair?)
-    fn fallible(self, left: [Int], right: [Int]) -> Pair ? String
-    fn tupled(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int)
-    fn generic(self, left: [Int], right: [Int]) -> Envelope<Pair>
+    fn select(self, left: [Int], right: [Int]) => Pair
+    fn optional(self, left: [Int], right: [Int]) => (Pair?)
+    fn fallible(self, left: [Int], right: [Int]) => Pair ? String
+    fn tupled(self, left: [Int], right: [Int]) => (pair: Pair, count: Int)
+    fn generic(self, left: [Int], right: [Int]) => Envelope<Pair>
 }
 
-fn wrapper(selector: First, left: [Int], right: [Int]) -> Pair {
+fn wrapper(selector: First, left: [Int], right: [Int]) => Pair {
     return selector.select(left, right)
 }
 
@@ -2062,27 +2228,27 @@ fn run() {
     let implementation = |name: &str| {
         r#"struct $TYPE { marker: Int }
 impl $TYPE.Select {
-    fn select(self, left: [Int], right: [Int]) -> Pair {
+    fn select(self, left: [Int], right: [Int]) => Pair {
         left_view :: left[0..1]
         right_view :: right[0..1]
         return Pair.{ left: left_view, right: right_view }
     }
-    fn optional(self, left: [Int], right: [Int]) -> (Pair?) {
+    fn optional(self, left: [Int], right: [Int]) => (Pair?) {
         left_view :: left[0..1]
         right_view :: right[0..1]
         return Val(Pair.{ left: left_view, right: right_view })
     }
-    fn fallible(self, left: [Int], right: [Int]) -> Pair ? String {
+    fn fallible(self, left: [Int], right: [Int]) => Pair ? String {
         left_view :: left[0..1]
         right_view :: right[0..1]
         return Ok(Pair.{ left: left_view, right: right_view })
     }
-    fn tupled(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int) {
+    fn tupled(self, left: [Int], right: [Int]) => (pair: Pair, count: Int) {
         left_view :: left[0..1]
         right_view :: right[0..1]
         return (pair: Pair.{ left: left_view, right: right_view }, count: 1)
     }
-    fn generic(self, left: [Int], right: [Int]) -> Envelope<Pair> {
+    fn generic(self, left: [Int], right: [Int]) => Envelope<Pair> {
         left_view :: left[0..1]
         right_view :: right[0..1]
         return Envelope<Pair>.{
@@ -2832,7 +2998,7 @@ fn forced_interpreter_preserves_f32_width_like_aot() {
         eprintln!("note: rustc not found; skipping F32 dev differential");
         return;
     }
-    let source = r#"fn pass(value: F32) -> F32 { return value }
+    let source = r#"fn pass(value: F32) => F32 { return value }
 fn run() {
     value :: F32.{ 16777217.0 }
     one :: F32.{ 1.0 }
@@ -2994,7 +3160,7 @@ fn physical_quantities_run_in_resident_jit_without_fallback() {
     thirdish(scale: 2/3)
 }
 #UnitFamily(Time) { second }
-fn run() -> Void ? {
+fn run() => Void ? {
     distance :: 12meter
     elapsed :: 3second
     speed :: distance / elapsed
@@ -3013,7 +3179,7 @@ fn run() -> Void ? {
     meter
     thirdish(scale: 2/3)
 }
-fn run() -> Void ? {
+fn run() => Void ? {
     Meter.from_thirdish(1thirdish)?
 }
 "#, "physical_quantity_inexact");
@@ -3027,7 +3193,7 @@ fn run() -> Void ? {
     meter
     almost(scale: 9007199254740993/9007199254740992)
 }
-fn run() -> Void ? {
+fn run() => Void ? {
     Meter.from_almost(1almost)?
 }
 "#, "physical_quantity_exact_rational_edge");
@@ -3050,7 +3216,7 @@ fn run() -> Void ? {
     above_offset(scale: 1, offset: 9007199254740993/18014398509481984)
     below_offset(scale: 1, offset: -9007199254740993/18014398509481984)
 }
-fn run() -> Void ? {
+fn run() => Void ? {
     tie :: Meter.from_half_rounded(1half, .NearestEven, digits: 0)?
     above :: Meter.from_above_half_rounded(1above_half, .NearestEven, digits: 0)?
     negative_source :: ThreeHalves.from_float(-1.0)
@@ -3071,7 +3237,7 @@ fn run() -> Void ? {
 
     let overflow = r#"
 #UnitFamily(Length, base: meter) { meter double(scale: 2) }
-fn run() -> Void ? {
+fn run() => Void ? {
     source :: Double.from_float(1.7976931348623157e308)
     Meter.from_double_rounded(source, .NearestEven, digits: 0)?
 }
@@ -3102,7 +3268,7 @@ fn rounded_physical_quantities_match_resident_default_dev_and_aot() {
     kelvin
     shifted(scale: 1, offset: 249/1000)
 }
-fn run() -> Void ? {
+fn run() => Void ? {
     positive :: Half.from_float(5.0)
     negative :: Half.from_float(-5.0)
     toward_zero :: Meter.from_half_rounded(positive, .TowardZero, digits: 0)?
@@ -3144,7 +3310,7 @@ fn run() -> Void ? {
 fn generic_module_instance_runs_identically_in_resident_jit_and_aot() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() { return; }
     let src = r#"
-module value<n: Int> { pub fn get() -> Int { return n } }
+module value<n: Int> { pub fn get() => Int { return n } }
 module three = value<3>
 module same = value<3>
 fn run() { print(three.get()); print(same.get()) }
@@ -3175,7 +3341,7 @@ derive T.Access {
     info :: T.reflect()
     name :: info.name
     param :: info.type_params[0].name
-    emit("impl $name {{ fn make(value: ^$param) -> $name<$param> {{ return $name<$param>.{{ value: value }} }} fn marker() -> Int {{ return 17 }} fn get_value(self) -> $param {{ return ~self.value }} fn type_name(self) -> String {{ return \"$name\" }} }}")
+    emit("impl $name {{ fn make(value: ^$param) => $name<$param> {{ return $name<$param>.{{ value: value }} }} fn marker() => Int {{ return 17 }} fn get_value(self) => $param {{ return ~self.value }} fn type_name(self) => String {{ return \"$name\" }} }}")
 }
 
 derive T.NumericAccess {
@@ -3184,12 +3350,12 @@ derive T.NumericAccess {
     param :: info.type_params[0].name
     emit("""
 impl $name {{
-    fn replace(&self, value: ^$param) -> $param {{
+    fn replace(&self, value: ^$param) => $param {{
         self.value = value
         return ~self.value
     }}
-    fn plus(self, rhs: $param) -> $param {{ return self.value + rhs }}
-    fn equal_to(self, rhs: $param) -> Bool {{ return self.value == rhs }}
+    fn plus(self, rhs: $param) => $param {{ return self.value + rhs }}
+    fn equal_to(self, rhs: $param) => Bool {{ return self.value == rhs }}
 }}
 """)
 }
@@ -3304,7 +3470,7 @@ fn run() {
 derive T.GenericMethod {
     info :: T.reflect()
     name :: info.name
-    emit("impl $name {{ fn keep<T>(self, value: ^T) -> T {{ return value }} }}")
+    emit("impl $name {{ fn keep<T>(self, value: ^T) => T {{ return value }} }}")
 }
 #GenericMethod
 struct Shadow<T: Printable> { value: T }
@@ -3358,7 +3524,7 @@ derive T.Access {
     info :: T.reflect()
     name :: info.name
     param :: info.type_params[0].name
-    emit("impl $name {{ fn get_value(self) -> $param {{ return ~self.value }} }}")
+    emit("impl $name {{ fn get_value(self) => $param {{ return ~self.value }} }}")
 }
 
 #Access
@@ -3367,7 +3533,7 @@ struct Inner<T: Printable> { value: T }
 struct Outer<T: Printable> {
     value: T
 
-    fn read(self) -> T {
+    fn read(self) => T {
         inner := Inner<T>.{ value: ~self.value }
         return inner.get_value()
     }
@@ -3391,8 +3557,8 @@ fn unused_expanding_generic_body_does_not_expand_jit_worklist() {
 struct Grow<T: Printable> {
     value: T
 
-    fn read(self) -> T { return ~self.value }
-    fn unused(self) -> Int {
+    fn read(self) => T { return ~self.value }
+    fn unused(self) => Int {
         nested := Grow<[T]>.{ value: [~self.value] }
         return nested.unused()
     }
@@ -3420,11 +3586,11 @@ fn nested_ordinary_module_generic_instance_matches_resident_jit_and_aot() {
     let src = r#"
 module outer<T, n: Int> {
     module plain {
-        module inner<U> { pub fn total(value: U) -> Int { return n } }
+        module inner<U> { pub fn total(value: U) => Int { return n } }
         module closed = inner<T>
-        pub fn result(value: T) -> Int { return closed.total(value) }
+        pub fn result(value: T) => Int { return closed.total(value) }
     }
-    pub fn result(value: T) -> Int { return plain.result(value) }
+    pub fn result(value: T) => Int { return plain.result(value) }
 }
 module selected = outer<Int, 6>
 fn run() { print(selected.result(1)) }
@@ -3497,20 +3663,20 @@ fn resident_jit_result_abi_covers_calls_ok_err_try_and_entry() {
         return;
     }
     let success = r#"
-fn choose_ok() -> Float ? String {
+fn choose_ok() => Float ? String {
     return Ok(0.25)
 }
 
-fn choose_err() -> Float ? String {
+fn choose_err() => Float ? String {
     return Err("typed boom")
 }
 
-fn forward() -> Float ? String {
+fn forward() => Float ? String {
     value :: choose_ok()?
     return Ok(value + 0.25)
 }
 
-fn run() -> Void ? {
+fn run() => Void ? {
     print(forward()?)
 }
 "#;
@@ -3549,11 +3715,11 @@ fn resident_jit_fallible_void_cfg_fallthrough_matches_aot() {
         return;
     }
     let one_arm_fallthrough = r#"
-fn direct_ok() -> Int ? {
+fn direct_ok() => Int ? {
     return Ok(7)
 }
 
-fn run() -> Void ? {
+fn run() => Void ? {
     print(direct_ok()?)
     stop :: false
     if stop {
@@ -3563,11 +3729,11 @@ fn run() -> Void ? {
 }
 "#;
     let nested_fallthrough = r#"
-fn direct_ok() -> Int ? {
+fn direct_ok() => Int ? {
     return Ok(7)
 }
 
-fn run() -> Void ? {
+fn run() => Void ? {
     print(direct_ok()?)
     outer :: true
     inner :: false
@@ -3580,11 +3746,11 @@ fn run() -> Void ? {
 }
 "#;
     let neither_arm_terminates = r#"
-fn direct_ok() -> Int ? {
+fn direct_ok() => Int ? {
     return Ok(7)
 }
 
-fn run() -> Void ? {
+fn run() => Void ? {
     print(direct_ok()?)
     if true {
         print("left continues")
@@ -3595,11 +3761,11 @@ fn run() -> Void ? {
 }
 "#;
     let both_arms_terminate = r#"
-fn direct_ok() -> Int ? {
+fn direct_ok() => Int ? {
     return Ok(7)
 }
 
-fn run() -> Void ? {
+fn run() => Void ? {
     print(direct_ok()?)
     if true {
         return Err("left branch")
@@ -3658,7 +3824,7 @@ fn resident_jit_fidelity_matches_runtime_contract() {
     let valid = r#"
 use core.perf as perf
 
-fn run() -> Void ? {
+fn run() => Void ? {
     perf.reset_fidelity()
     print(perf.default_fidelity())
     perf.override_fidelity(0.25)?
@@ -3693,7 +3859,7 @@ fn run() -> Void ? {
     ] {
         let src = format!(
             r#"use core.perf as perf
-fn run() -> Void ? {{
+fn run() => Void ? {{
     perf.reset_fidelity()
     perf.override_fidelity(0.375)?
     perf.override_fidelity({value})?
@@ -4067,9 +4233,9 @@ fn run() {
     outer :: loop i := 0; i < 2; i += 1 {
         loop {
             if i == 0 {
-                outer.next()
+                next(outer)
             }
-            outer.break()
+            break(outer)
         }
     }
     print("done")
@@ -4091,9 +4257,9 @@ fn run() {
     values := [7]
     outer :: loop i := 0; i < 2; i += 1 {
         loop {
-            value :: values.get(1 - i) ?? outer.next()
+            value :: values.get(1 - i) ?? next(outer)
             print(value)
-            values.get(99) ?? outer.break()
+            values.get(99) ?? break(outer)
         }
     }
     print("done")
@@ -4883,7 +5049,7 @@ fn cranelift_shield_defers_task_cancel_without_unwinding_native_frame() {
 fn run() {
     (sender, ch) :: tasks.channel<Int>()
     (ack_sender, ack) :: tasks.channel<Int>()
-    slow :: tasks.spawn(take(ch, ack_sender) () => {
+    slow :: tasks.spawn(() => {
                #Shield {
                    value :: ch.receive() ?? panic("closed")
                    print(value)
@@ -4909,7 +5075,7 @@ fn cranelift_unshielded_receive_cancel_does_not_unwind_native_frame() {
 fn run() {
     (ready_sender, ready) :: tasks.channel<Int>()
     (sender, ch) :: tasks.channel<Int>()
-    slow :: tasks.spawn(take(ch, ready_sender) () => {
+    slow :: tasks.spawn(() => {
         ready_sender.send(1)
         ch.receive() ?? panic("closed")
         print(99)
@@ -4931,7 +5097,7 @@ fn cranelift_unshielded_sleep_cancel_does_not_unwind_native_frame() {
 use core.time as time
 fn run() {
     (ready_sender, ready) :: tasks.channel<Int>()
-    slow :: tasks.spawn(take(ready_sender) () => {
+    slow :: tasks.spawn(() => {
         ready_sender.send(1)
         time.sleep(200)
         print(99)
@@ -4953,7 +5119,7 @@ fn run() {
     taskgroup g {
         (ready_sender, ready) :: tasks.channel<Int>()
         (_sender, ch) :: tasks.channel<Int>()
-        slow :: tasks.spawn(take(g, ch, ready_sender) () => {
+        slow :: tasks.spawn(() => {
             ready_sender.send(1)
             g.select().recv(ch).wait()
             print(99)
@@ -5018,7 +5184,7 @@ fn cranelift_covers_let_and_if() {
 #[test]
 fn cranelift_covers_function_calls() {
     assert_cranelift_matches_interpreter(
-        "fn double(n: Int) -> Int {\n    return n * 2\n}\nfn run() {\n    print(double(3))\n    print(double(0))\n}\n",
+        "fn double(n: Int) => Int {\n    return n * 2\n}\nfn run() {\n    print(double(3))\n    print(double(0))\n}\n",
         "calls",
     );
 }
@@ -5326,14 +5492,14 @@ fn bundle_of(src: &str, tag: &str) -> jet::AST::ProgramBundle {
     jet::Loader::load_entry(p.to_str().unwrap()).expect("bundle should load")
 }
 
-const STRUCT_OLD: &str = "struct P {\n    x: Int\n}\nfn f(p: P) -> Int {\n    return p.x\n}\nfn run() {\n    print(f(P.{x: 1}))\n}\n";
+const STRUCT_OLD: &str = "struct P {\n    x: Int\n}\nfn f(p: P) => Int {\n    return p.x\n}\nfn run() {\n    print(f(P.{x: 1}))\n}\n";
 
 /// A body-only edit keeps the type surface stable → swap (Ok).
 #[test]
 fn body_only_edit_is_type_stable() {
     let old = bundle_of(STRUCT_OLD, "stable_old");
     let new = bundle_of(
-        "struct P {\n    x: Int\n}\nfn f(p: P) -> Int {\n    return p.x + 1\n}\nfn run() {\n    print(f(P.{x: 2}))\n}\n",
+        "struct P {\n    x: Int\n}\nfn f(p: P) => Int {\n    return p.x + 1\n}\nfn run() {\n    print(f(P.{x: 2}))\n}\n",
         "stable_new",
     );
     assert!(
@@ -5347,7 +5513,7 @@ fn body_only_edit_is_type_stable() {
 fn struct_field_change_emits_e2210() {
     let old = bundle_of(STRUCT_OLD, "field_old");
     let new = bundle_of(
-        "struct P {\n    x: Int\n    y: Int\n}\nfn f(p: P) -> Int {\n    return p.x\n}\nfn run() {\n    print(f(P.{x: 1, y: 2}))\n}\n",
+        "struct P {\n    x: Int\n    y: Int\n}\nfn f(p: P) => Int {\n    return p.x\n}\nfn run() {\n    print(f(P.{x: 1, y: 2}))\n}\n",
         "field_new",
     );
     match jet::Sema::HotSwap::type_stable_check(&old, &new, "run") {
@@ -5368,11 +5534,11 @@ fn struct_field_change_emits_e2210() {
 #[test]
 fn fn_signature_change_emits_e2210() {
     let old = bundle_of(
-        "fn g(a: Int) -> Int {\n    return a\n}\nfn run() {\n    print(g(1))\n}\n",
+        "fn g(a: Int) => Int {\n    return a\n}\nfn run() {\n    print(g(1))\n}\n",
         "sig_old",
     );
     let new = bundle_of(
-        "fn g(a: Int) -> Bool {\n    return a == 0\n}\nfn run() {\n    print(g(1))\n}\n",
+        "fn g(a: Int) => Bool {\n    return a == 0\n}\nfn run() {\n    print(g(1))\n}\n",
         "sig_new",
     );
     match jet::Sema::HotSwap::type_stable_check(&old, &new, "run") {
@@ -5465,14 +5631,14 @@ use core.encoding.json as json
 struct Email { addr: String }
 
 impl Email.Encode {
-    fn encode(self) -> DataTree {
+    fn encode(self) => DataTree {
         m :: [String: DataTree].{ "email": DataTree.Text(~self.addr) }
         return DataTree.Object(m)
     }
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) -> Email ? DecodeError {
+    fn decode(tree: DataTree) => Email ? DecodeError {
         f := tree.field("email") ?? DataTree.Text("")
         s := f.text() ?? ""
         return Ok(Email.{addr: s})
@@ -5761,11 +5927,11 @@ fn tiered_run_selects_per_function_tiers_and_cross_calls() {
     let file = dir.join("mixed.jet");
     fs::write(
         &file,
-        r#"fn add1(n: Int) -> Int {
+        r#"fn add1(n: Int) => Int {
     return n + 1
 }
 
-fn gap() -> Int {
+fn gap() => Int {
     doubled :: add1.[40, 1]
     [a, b] :: doubled
     return a + b
@@ -5829,7 +5995,7 @@ fn tracked_float_origin_matches_aot_in_default_dev() {
     let file = dir.join("float_binding_origin.jet");
     fs::write(
         &file,
-        "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    print(speed.origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() -> Float {\n    print(\"evaluated\")\n    return 3.5\n}\n",
+        "fn run() {\n    #Track speed :: 3.5\n    plain :: 3.5\n    copied :: speed\n    print(speed.origin())\n    print(plain.origin())\n    print(copied.origin())\n    print(next().origin())\n}\nfn next() => Float {\n    print(\"evaluated\")\n    return 3.5\n}\n",
     )
     .unwrap();
     let shown = file.to_string_lossy().to_string();

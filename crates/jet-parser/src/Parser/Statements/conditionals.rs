@@ -101,17 +101,26 @@ impl<'a> Parser<'a> {
                 Some(eq_span),
             ));
         }
-        // D-IFGUARD1=A: the one-line form is statement-only. It lowers through
-        // the ordinary `IfStmt`; only its source shape differs.
+        // D-ARROW-CONTROL1: effect-only one-line bodies are adjacent and
+        // arrow-free. Accept the retired result arrow only to teach its removal.
         if matches!(self.peek().kind, TokKind::Arrow) {
-            self.bump();
-            let then_body = self.guard_arm_body()?;
-            return Ok(Stmt::If(IfStmt {
-                cond,
-                then_body,
-                else_branch: None,
-                span,
-            }));
+            let arrow = self.bump();
+            self.diags.push(Diagnostic::error(
+                "E0071",
+                "this effect-only `if` uses a result arrow".to_string(),
+                "an arrow says that control selects a value; this body only performs work"
+                    .to_string(),
+                "remove `->`; keep the one-line body adjacent or use braces".to_string(),
+                Some(arrow.span),
+            ));
+            let then_body = self.adjacent_effect_body()?;
+            let else_branch = self.adjacent_effect_else()?;
+            return Ok(Stmt::If(IfStmt { cond, then_body, else_branch, span }));
+        }
+        if !matches!(self.peek().kind, TokKind::LBrace | TokKind::Semi) {
+            let then_body = self.adjacent_effect_body()?;
+            let else_branch = self.adjacent_effect_else()?;
+            return Ok(Stmt::If(IfStmt { cond, then_body, else_branch, span }));
         }
         self.expect(TokKind::LBrace, "to open the `if` body")?;
 
@@ -154,6 +163,38 @@ impl<'a> Parser<'a> {
             else_branch,
             span,
         }))
+    }
+
+    fn adjacent_effect_body(&mut self) -> Result<Vec<Stmt>, Diagnostic> {
+        if matches!(self.peek().kind, TokKind::KwIf) {
+            return Err(Diagnostic::error(
+                "E0329",
+                "a nested one-line `if` needs braces".to_string(),
+                "an adjacent body owns one non-`if` statement, so direct nesting is ambiguous"
+                    .to_string(),
+                "wrap the nested `if` in `{ ... }`".to_string(),
+                Some(self.peek().span),
+            ));
+        }
+        self.adjacent_if_body_depth += 1;
+        let statement = self.stmt();
+        self.adjacent_if_body_depth -= 1;
+        Ok(vec![statement?])
+    }
+
+    fn adjacent_effect_else(&mut self) -> Result<Option<ElseBranch>, Diagnostic> {
+        if !matches!(self.peek().kind, TokKind::KwElse) {
+            return Ok(None);
+        }
+        self.bump();
+        if matches!(self.peek().kind, TokKind::KwIf) {
+            return Ok(Some(ElseBranch::ElseIf(Box::new(self.if_stmt()?))));
+        }
+        if matches!(self.peek().kind, TokKind::LBrace) {
+            self.bump();
+            return Ok(Some(ElseBranch::Else(self.block_stmts())));
+        }
+        Ok(Some(ElseBranch::Else(self.adjacent_effect_body()?)))
     }
 
     /// D-IFGUARD1=A: `if { Bool -> body ... [else -> body] }` statement guards.
@@ -301,11 +342,11 @@ impl<'a> Parser<'a> {
     /// D-IF3: parse the arms of an `if subject == { … }` dispatch (cursor just
     /// past `{`), lowering to `Stmt::Switch`. Each arm is `head -> body` where
     /// `head` is a bare value (`200`, `"sat" || "sun"`) compared against the
-    /// subject, a bare range (`400..499`), or a bare pattern (`Active(id)`,
-    /// `value(n)`, `Ok(n)`, `null`) — the leading `subject ==` is dropped (Q4)
-    /// and re-bound here. A predicate/Bool head is rejected with E0993; a leftover
-    /// `subject ==` prefix with E0994. `body` is a braceless single statement or a
-    /// `{ … }` block (D-IF2 Q2). `else -> body` is the catch-all (D-IF2 Q1).
+    /// subject, a bare range (`400..499`), a bare pattern (`Active(id)`,
+    /// `value(n)`, `Ok(n)`, `null`), or a Boolean expression evaluated as
+    /// written. The leading `subject ==` is dropped (Q4) and re-bound here.
+    /// A leftover `subject ==` prefix gets E0994. `body` is a braceless single
+    /// statement or a `{ … }` block (D-IF2 Q2). `else -> body` is the catch-all.
     pub(super) fn if_arms(&mut self, subject: Expr, span: Span) -> Result<Stmt, Diagnostic> {
         let mut arms: Vec<SwitchArm> = Vec::new();
         let mut else_body: Option<Vec<Stmt>> = None;
@@ -689,7 +730,8 @@ impl<'a> Parser<'a> {
 
     /// `switch` body, after the keyword (S24): either legacy condition arms
     /// with `->`, or pipe arms where bare terms mean `subject == term`.
-    /// S68 (D-SG2): parse an `if` expression — `if cond { … value } else { … }`.
+    /// S68 / D-ARROW-CONTROL1: parse an `if` expression —
+    /// `if cond -> value else -> value`.
     /// Each branch is a value block; `else` is required (an `if` with no value
     /// is a statement, parsed elsewhere).
     pub(in super::super) fn parse_if_expr(&mut self) -> Result<Expr, Diagnostic> {
@@ -699,23 +741,24 @@ impl<'a> Parser<'a> {
             return self.parse_guard_expr(start);
         }
         let cond = self.expr_no_struct_lit()?;
-        let (then_body, then_value) = self.parse_value_block()?;
+        self.expect(TokKind::Arrow, "after the condition of a value-producing `if`")?;
+        let (then_body, then_value) = self.parse_selected_value()?;
         if !matches!(self.peek().kind, TokKind::KwElse) {
             return Err(Diagnostic::error(
                 "E0003",
                 "an `if` used as a value needs an `else` branch".to_string(),
                 "when `if` produces a value, both branches must produce one (S68)".to_string(),
-                "add `else { … }` so every path has a value".to_string(),
+                "add `else -> value` so every path has a value".to_string(),
                 Some(self.peek().span),
             ));
         }
         self.bump(); // `else`
-                     // `else if …` nests as the else branch's value.
+        // `else if …` nests directly; a final selected value uses `else ->`.
         let (else_body, else_value) = if matches!(self.peek().kind, TokKind::KwIf) {
-            let e = self.parse_if_expr()?;
-            (Vec::new(), e)
+            (Vec::new(), self.parse_if_expr()?)
         } else {
-            self.parse_value_block()?
+            self.expect(TokKind::Arrow, "after `else` in a value-producing `if`")?;
+            self.parse_selected_value()?
         };
         let span = Span::new(start.start, else_value.span().end);
         Ok(Expr::If {
@@ -726,6 +769,15 @@ impl<'a> Parser<'a> {
             else_value: Box::new(else_value),
             span,
         })
+    }
+
+    fn parse_selected_value(&mut self) -> Result<(Vec<Stmt>, Expr), Diagnostic> {
+        if matches!(self.peek().kind, TokKind::LBrace) {
+            self.parse_value_block()
+        } else {
+            let value = self.expr()?;
+            Ok((Vec::new(), value))
+        }
     }
 
     /// D-IFGUARD1=A: a value guard is a nested ordinary if-expression chain.

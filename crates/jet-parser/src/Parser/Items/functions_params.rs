@@ -76,8 +76,9 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::RParen, "to close the parameter list")?;
             self.validate_variadic_params(&params);
     
-            // D-SHAPE8=A: an optional `--[Net, Db]->` effect arrow. Effect names
-            // are validated in sema. D-EFF2 keeps `via f` in the same row.
+            // D-ARROW-CONTROL1=A: an optional `=[Net, Db]=>` callable effect
+            // arrow. Effect names are validated in sema. D-EFF2 keeps `via f`
+            // in the same row.
             let (declared_effects, effect_via) = self.parse_opt_func_effects()?;
             let decorated_arrow = declared_effects.is_some() || effect_via.is_some();
             let is_pure = is_pure
@@ -85,9 +86,14 @@ impl<'a> Parser<'a> {
     
             let mut return_type = None;
             let mut return_type_span = None;
-            if decorated_arrow || matches!(self.peek().kind, TokKind::Arrow) {
+            if decorated_arrow
+                || matches!(self.peek().kind, TokKind::LambdaArrow | TokKind::Arrow)
+            {
                 if !decorated_arrow {
-                    self.bump();
+                    let arrow = self.bump();
+                    if matches!(arrow.kind, TokKind::Arrow) {
+                        self.diags.push(Self::retired_callable_arrow(arrow.span));
+                    }
                 }
                 if self.type_starts_here() {
                     let (ty, span) = self.return_type()?;
@@ -96,7 +102,7 @@ impl<'a> Parser<'a> {
                 }
             }
     
-            // Single-expression body: `fn name(...) -> T = expr;`
+            // Single-expression body: `fn name(...) => T = expr;`
             // Desugars to `return expr;` so the "path must return" check is satisfied.
             if matches!(self.peek().kind, TokKind::Eq) {
                 let start = self.bump().span.start;
@@ -156,7 +162,12 @@ impl<'a> Parser<'a> {
                 });
             }
             self.expect(TokKind::LBrace, "to open the function body")?;
+            let previous_tail_depth = self.callable_tail_block_depth;
+            if return_type.is_some() {
+                self.callable_tail_block_depth = Some(self.block_depth + 1);
+            }
             let body = self.block_stmts();
+            self.callable_tail_block_depth = previous_tail_depth;
             let declaration_end = self.toks[self.pos.saturating_sub(1)].span.end;
             Ok(Func {
                 span: Span::new(declaration_start, declaration_end),
@@ -247,7 +258,8 @@ impl<'a> Parser<'a> {
             )
         }
     
-        /// D-EFF1 / D-SHAPE8: parse an optional `--[Net, Db]->` effect bound.
+        /// D-EFF1 / D-SHAPE8 / D-ARROW-CONTROL1: parse an optional
+        /// `=[Net, Db]=>` effect bound.
         /// Returns `None` when the cursor is not at the decorated arrow. D-EFFTREE1: an entry may be a
         /// dotted effect path (`Fs.Read`); sema validates the root against the
         /// known effect vocabulary.
@@ -259,38 +271,47 @@ impl<'a> Parser<'a> {
             Ok(self.parse_opt_func_effects()?.0)
         }
     
-        /// D-EFF1 / D-EFF2 / D-SHAPE8: parse the decorated effect arrow, which is
-        /// either a declared bound (`--[Net, Db]->`) or a `--[via f]->` pass-through. Returns
+        /// D-EFF1 / D-EFF2 / D-SHAPE8 / D-ARROW-CONTROL1: parse the decorated
+        /// effect arrow, either a declared bound (`=[Net, Db]=>`) or an
+        /// `=[via f]=>` pass-through. Returns
         /// `(declared_effects, effect_via)` — at most one is `Some`. `None`/`None` when
-        /// the cursor is not at `--[`.
+        /// the cursor is not at `=[`.
         pub(super) fn parse_opt_func_effects(
             &mut self,
         ) -> Result<(Option<Vec<(String, Span)>>, Option<(String, Span)>), Diagnostic> {
+            let canonical = matches!(self.peek().kind, TokKind::Eq)
+                && matches!(self.peek2().kind, TokKind::LBracket);
             let retired_hash = matches!(self.peek().kind, TokKind::Hash)
                 && matches!(self.peek2().kind, TokKind::LParen);
             let retired_ballot = matches!(self.peek().kind, TokKind::Minus)
                 && matches!(self.peek2().kind, TokKind::LBracket);
-            if !matches!(self.peek().kind, TokKind::MinusMinus)
+            let retired_double = matches!(self.peek().kind, TokKind::MinusMinus);
+            if !canonical
+                && !retired_double
                 && !retired_hash
                 && !retired_ballot
             {
                 return Ok((None, None));
             }
             let start = self.peek().span;
-            let (open, close) = if retired_hash {
+            let (open, close, close_arrow) = if canonical {
+                self.bump(); // `=`
+                (TokKind::LBracket, TokKind::RBracket, TokKind::LambdaArrow)
+            } else if retired_hash {
                 self.bump();
                 self.diags.push(Self::retired_effect_syntax(start));
-                (TokKind::LParen, TokKind::RParen)
+                (TokKind::LParen, TokKind::RParen, TokKind::Arrow)
             } else if retired_ballot {
                 self.bump();
                 self.diags.push(Self::retired_effect_syntax(start));
-                (TokKind::LBracket, TokKind::RBracket)
+                (TokKind::LBracket, TokKind::RBracket, TokKind::Arrow)
             } else {
                 self.bump(); // `--`
-                (TokKind::LBracket, TokKind::RBracket)
+                self.diags.push(Self::retired_effect_syntax(start));
+                (TokKind::LBracket, TokKind::RBracket, TokKind::Arrow)
             };
             self.expect(open, "to start an effect row")?;
-            // D-EFF2 `--[via f]->`: tight pass-through publishing param `f`'s effects.
+            // D-EFF2 `=[via f]=>`: tight pass-through publishing param `f`'s effects.
             if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_VIA) {
                 self.bump(); // `via`
                 let (param, span) = self.expect_ident("for the callback parameter name after `via`")?;
@@ -300,7 +321,7 @@ impl<'a> Parser<'a> {
                         self.bump();
                     }
                 } else {
-                    self.expect(TokKind::Arrow, "after the effect row")?;
+                    self.expect(close_arrow.clone(), "after the effect row")?;
                 }
                 return Ok((None, Some((param, span))));
             }
@@ -342,7 +363,7 @@ impl<'a> Parser<'a> {
                     self.bump();
                 }
             } else {
-                self.expect(TokKind::Arrow, "after the effect row")?;
+                self.expect(close_arrow, "after the effect row")?;
             }
             Ok((Some(effects), None))
         }
@@ -350,9 +371,19 @@ impl<'a> Parser<'a> {
         pub(in crate::Parser) fn retired_effect_syntax(span: Span) -> Diagnostic {
             Diagnostic::error(
                 "E0066",
-                "effect bounds live inside the return arrow".to_string(),
-                "D-SHAPE8 gives declarations, traits, and callback types one exact effect-row shape".to_string(),
-                "write `--[Effects]->`; use `--[]->` for an explicit purity bound".to_string(),
+                "this function uses the retired effect-arrow spelling".to_string(),
+                "callable results use `=>`, and an explicit effect ceiling belongs inside that callable arrow".to_string(),
+                "write `=[Effects]=>`; use `=[]=>` for an explicit purity bound".to_string(),
+                Some(span),
+            )
+        }
+
+        pub(in crate::Parser) fn retired_callable_arrow(span: Span) -> Diagnostic {
+            Diagnostic::error(
+                "E0070",
+                "this callable result uses `->`".to_string(),
+                "`=>` defines callable results; `->` is reserved for selected or yielded control values".to_string(),
+                "replace `->` with `=>`".to_string(),
                 Some(span),
             )
         }

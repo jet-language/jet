@@ -1,6 +1,7 @@
 use super::*;
 use crate::AST::{
-    AccessConvention, Call, CallArg, EnumLitArg, Expr, OrFallback, Pattern, StrPart, Type, UnOp,
+    AccessConvention, Call, CallArg, EnumLitArg, Expr, ForKind, OrFallback, Pattern, StrPart, Type,
+    UnOp,
 };
 
 impl<'a> Fmt<'a> {
@@ -20,14 +21,36 @@ impl<'a> Fmt<'a> {
         };
         self.write("if ");
         self.fmt_cond(cond);
-        self.write(" ");
-        self.fmt_value_block(then_body, then_value, inline);
-        self.write(" else ");
-        if else_body.is_empty() && matches!(else_value.as_ref(), Expr::If { .. }) {
-            self.fmt_if_expr(else_value, inline);
+        self.write(" -> ");
+        if then_body.is_empty() && !self.value_was_braced(then_value) {
+            self.fmt_expr(then_value, Prec::OrFallback);
         } else {
+            self.fmt_value_block(then_body, then_value, inline);
+        }
+        if else_body.is_empty() && matches!(else_value.as_ref(), Expr::If { .. }) {
+            self.write(" else ");
+            self.fmt_if_expr(else_value, inline);
+        } else if else_body.is_empty() && !self.value_was_braced(else_value) {
+            self.write(" else -> ");
+            self.fmt_expr(else_value, Prec::OrFallback);
+        } else {
+            self.write(" else -> ");
             self.fmt_value_block(else_body, else_value, inline);
         }
+    }
+
+    fn value_was_braced(&self, value: &Expr) -> bool {
+        self.source_toks
+            .iter()
+            .rev()
+            .find(|token| {
+                token.span.end <= value.span().start
+                    && !matches!(
+                        token.kind,
+                        TokKind::LineComment(_) | TokKind::BlockComment(_) | TokKind::Semi
+                    )
+            })
+            .is_some_and(|token| matches!(token.kind, TokKind::LBrace))
     }
 
     fn is_guard_expr(&self, expr: &Expr) -> bool {
@@ -157,18 +180,18 @@ impl<'a> Fmt<'a> {
                 }
                 self.write(")");
                 if let Some(bound) = effect_bound {
-                    self.write(" --[");
+                    self.write(" =[");
                     for (i, (name, _)) in bound.iter().enumerate() {
                         if i > 0 {
                             self.write(", ");
                         }
                         self.write(name);
                     }
-                    self.write("]->");
+                    self.write("]=>");
                 }
                 if let Some(r) = ret {
                     if effect_bound.is_none() {
-                        self.write(" ->");
+                        self.write(" =>");
                     }
                     self.write(" ");
                     self.fmt_type(r);
@@ -643,7 +666,7 @@ impl<'a> Fmt<'a> {
                         if !receiver_type_args {
                             f.fmt_method_type_args(type_args);
                         }
-                        f.fmt_view_or_call_args(method, args);
+                        f.fmt_method_args(method, args);
                     });
                 } else {
                     self.write(".");
@@ -651,7 +674,7 @@ impl<'a> Fmt<'a> {
                     if !receiver_type_args {
                         self.fmt_method_type_args(type_args);
                     }
-                    self.fmt_view_or_call_args(method, args);
+                    self.fmt_method_args(method, args);
                 }
             }
             Expr::StructLit {
@@ -924,6 +947,30 @@ impl<'a> Fmt<'a> {
                 }
             }
             Expr::Lambda(lam) => self.fmt_lambda(lam),
+            Expr::CallValue { callee, args, .. }
+                if matches!(callee.as_ref(), Expr::Lambda(lam) if lam.meta.collecting_loop) =>
+            {
+                let Expr::Lambda(lam) = callee.as_ref() else { unreachable!() };
+                self.fmt_collecting_loop(lam);
+                debug_assert!(args.is_empty());
+            }
+            Expr::CallValue { callee, args, .. }
+                if matches!(callee.as_ref(), Expr::Lambda(lam) if lam.meta.result_loop) =>
+            {
+                let Expr::Lambda(lam) = callee.as_ref() else { unreachable!() };
+                let crate::AST::LambdaBody::Block(stmts) = &lam.body else {
+                    unreachable!("result loops use a block-backed compiler carrier")
+                };
+                let [Stmt::Loop { body, .. }] = stmts.as_slice() else {
+                    unreachable!("result loop carrier has one bare loop")
+                };
+                self.write("loop {");
+                self.newline();
+                self.with_indent(|formatter| formatter.fmt_block_stmts(body));
+                self.newline();
+                self.write("}");
+                debug_assert!(args.is_empty());
+            }
             Expr::CallValue { callee, args, .. } => {
                 if prec > Prec::Postfix {
                     self.write("(");
@@ -974,17 +1021,123 @@ impl<'a> Fmt<'a> {
         }
     }
 
-    fn fmt_lambda(&mut self, lam: &crate::AST::Lambda) {
-        if !lam.take_names.is_empty() {
-            self.write("take(");
-            for (i, (n, _)) in lam.take_names.iter().enumerate() {
-                if i > 0 {
-                    self.write(", ");
+    fn fmt_collecting_loop(&mut self, lam: &crate::AST::Lambda) {
+        let crate::AST::LambdaBody::Block(stmts) = &lam.body else {
+            unreachable!("collecting loops use block-backed compiler closures")
+        };
+        let mut current = stmts.first().expect("collecting loop has one controller");
+        self.write("loop ");
+        let mut first_clause = true;
+        loop {
+            match current {
+                Stmt::For {
+                    var,
+                    var2,
+                    kind,
+                    body,
+                    ..
+                } => {
+                    if !first_clause {
+                        self.write(", ");
+                    }
+                    first_clause = false;
+                    self.write(var);
+                    if let Some((name, _)) = var2 {
+                        self.write(", ");
+                        self.write(name);
+                    }
+                    self.write("; ");
+                    match kind {
+                        ForKind::Range {
+                            start,
+                            end,
+                            step,
+                            exclusive,
+                        } => {
+                            self.fmt_expr(start, Prec::OrFallback);
+                            self.write(if *exclusive { "..<" } else { ".." });
+                            self.fmt_expr(end, Prec::OrFallback);
+                            if let Some(step) = step {
+                                self.write("; ");
+                                self.fmt_expr(step, Prec::OrFallback);
+                            }
+                        }
+                        ForKind::In { collection, step } => {
+                            self.fmt_expr(collection, Prec::OrFallback);
+                            if let Some(step) = step {
+                                self.write("; ");
+                                self.fmt_expr(step, Prec::OrFallback);
+                            }
+                        }
+                    }
+                    if body.len() == 1 && matches!(body[0], Stmt::For { .. }) {
+                        current = &body[0];
+                        continue;
+                    }
+                    self.fmt_collecting_body(body);
+                    break;
                 }
-                self.write(n);
+                Stmt::CountedLoop {
+                    init,
+                    cond,
+                    step,
+                    body,
+                    ..
+                } => {
+                    self.fmt_binding(init);
+                    self.write("; ");
+                    self.fmt_expr(cond, Prec::OrFallback);
+                    if let Some(step) = step {
+                        self.write("; ");
+                        self.fmt_stmt(step);
+                    }
+                    self.fmt_collecting_body(body);
+                    break;
+                }
+                _ => unreachable!("collecting loop starts with a finite controller"),
             }
-            self.write(") ");
         }
+    }
+
+    fn fmt_collecting_body(&mut self, body: &[Stmt]) {
+        let body = if let [Stmt::If(ifs)] = body {
+            if ifs.else_branch.is_none() {
+                self.write(" if ");
+                self.fmt_expr(&ifs.cond, Prec::OrFallback);
+                ifs.then_body.as_slice()
+            } else {
+                body
+            }
+        } else {
+            body
+        };
+        let Some((tail, prefix)) = body.split_last() else {
+            self.write(" -> {}");
+            return;
+        };
+        let Stmt::Yield(value, _) = tail else {
+            self.write(" -> {}");
+            return;
+        };
+        self.write(" -> ");
+        if prefix.is_empty() {
+            self.fmt_expr(value, Prec::OrFallback);
+            return;
+        }
+        self.write("{");
+        self.newline();
+        self.with_indent(|formatter| {
+            for stmt in prefix {
+                formatter.fmt_stmt(stmt);
+                formatter.newline();
+            }
+            formatter.fmt_expr(value, Prec::OrFallback);
+        });
+        self.newline();
+        self.write("}");
+    }
+
+    fn fmt_lambda(&mut self, lam: &crate::AST::Lambda) {
         // D-LAMBDAINFER1: preserve the bare one-parameter spelling. Its
         // lambda span starts at the parameter name; the parenthesized form
         // starts at the opening `(`.
@@ -1046,8 +1199,8 @@ impl<'a> Fmt<'a> {
             }
             OrFallback::Break(_) => self.write("break"),
             OrFallback::Continue(_) => self.write(Syntax::KW_NEXT),
-            OrFallback::BreakLabel(name, _) => self.write(&format!("{name}.break()")),
-            OrFallback::ContinueLabel(name, _) => self.write(&format!("{name}.next()")),
+            OrFallback::BreakLabel(name, _) => self.write(&format!("break({name})")),
+            OrFallback::ContinueLabel(name, _) => self.write(&format!("next({name})")),
         }
     }
 
@@ -1237,6 +1390,35 @@ impl<'a> Fmt<'a> {
             self.fmt_type(t);
         }
         self.write(">");
+    }
+
+    /// D-TASKSCOPE1=A / D-ARROW-CONTROL1: keep scoped task spawning light:
+    /// `group.task => expression` or `group.task => { … }`.
+    fn fmt_method_args(&mut self, method: &str, args: &[CallArg]) {
+        if method == Syntax::TASKGROUP_SPAWN_METHOD {
+            if let [CallArg {
+                expr: Expr::Lambda(lam),
+                ..
+            }] = args
+            {
+                if lam.params.is_empty() {
+                    self.write(" => ");
+                    match &lam.body {
+                        crate::AST::LambdaBody::Expr(expr) => {
+                            self.fmt_expr(expr, Prec::OrFallback.add_rhs())
+                        }
+                        crate::AST::LambdaBody::Block(stmts) => {
+                            self.write("{");
+                            self.newline();
+                            self.with_indent(|f| f.fmt_block_stmts(stmts));
+                            self.end_block();
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+        self.fmt_view_or_call_args(method, args);
     }
 
     /// D-TRAILBLOCK1: emit `(args) { … }` — or bare `{ … }` when the block is

@@ -352,7 +352,7 @@ use core.tasks as tasks
 
 fn run() {
     arena :: mem.Arena.new()
-    task :: tasks.spawn(take(arena) () => {
+    task :: tasks.spawn(() => {
         value :: arena.alloc(1)
         print(value)
     })

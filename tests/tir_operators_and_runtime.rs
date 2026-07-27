@@ -24,28 +24,28 @@ struct NestedRank<T> {
 struct Cell<T: Add> { value: T }
 
 impl Vec2.Add {
-    fn add(self, rhs: Vec2) -> Vec2 {
+    fn add(self, rhs: Vec2) => Vec2 {
         return Vec2.{ x: self.x + rhs.x, y: self.y + rhs.y }
     }
 }
 
 impl Vec2.Equatable {
-    fn equal(self, rhs: Vec2) -> Bool { return self.x == rhs.x && self.y == rhs.y }
+    fn equal(self, rhs: Vec2) => Bool { return self.x == rhs.x && self.y == rhs.y }
 }
 
 impl Vec2.Comparable {
-    fn compare(self, rhs: Vec2) -> Ordering {
+    fn compare(self, rhs: Vec2) => Ordering {
         if self.x < rhs.x { return Ordering.Less }
         if self.x > rhs.x { return Ordering.Greater }
         return Ordering.Equal
     }
 }
 
-fn add_generic<T: Add>(left: T, right: T) -> T { return left + right }
-fn equal_generic<T: Equatable>(left: T, right: T) -> Bool { return left == right }
-fn less_generic<T: Comparable>(left: T, right: T) -> Bool { return left < right }
+fn add_generic<T: Add>(left: T, right: T) => T { return left + right }
+fn equal_generic<T: Equatable>(left: T, right: T) => Bool { return left == right }
+fn less_generic<T: Comparable>(left: T, right: T) => Bool { return left < right }
 
-fn marked(x: Int) -> Vec2 {
+fn marked(x: Int) => Vec2 {
     print("marked {x}")
     return Vec2.{ x: x, y: 0 }
 }
@@ -91,7 +91,7 @@ fn show(msg: String) {
 fn bump(n: &Int) {
     n += 1
 }
-fn archive(name: ^String) -> String {
+fn archive(name: ^String) => String {
     return name
 }
 fn run() {
@@ -116,7 +116,7 @@ fn list_destructure() {
         return;
     }
     let src = "\
-fn double(n: Int) -> Int {
+fn double(n: Int) => Int {
     return (n * 2)
 }
 fn run() {
@@ -139,19 +139,19 @@ fn fn_value_and_struct_fn_field() {
         return;
     }
     let src = "\
-fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
+fn apply_twice(f: fn(Int) => Int, x: Int) => Int {
     return f(f(x))
 }
-fn double(x: Int) -> Int {
+fn double(x: Int) => Int {
     return (x * 2)
 }
 struct Worker {
-    step: fn(Int) -> Int
+    step: fn(Int) => Int
 }
 struct TextWorker {
-    step: fn(String) -> Int
+    step: fn(String) => Int
 }
-fn text_len(text: String) -> Int {
+fn text_len(text: String) => Int {
     return text.len()
 }
 fn run() {

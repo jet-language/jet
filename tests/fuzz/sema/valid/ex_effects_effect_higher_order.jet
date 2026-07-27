@@ -2,15 +2,8 @@
 // attributed to the caller at the call site — they are not hidden inside the
 // higher-order callee. A pure callback contributes nothing, so a bounded caller
 // stays clean.
-fn apply(f: fn(Int) -> Int, x: Int) -> Int {
-    return f(x)
-}
-
-// A pure callback: its inferred effect set is empty.
-fn inc(n: Int) --[]-> Int {
-    return n + 1
-}
-
+fn apply(f: fn(Int) => Int, x: Int) => Int = f(x)
+fn inc(n: Int) =[]=> Int = n + 1
 fn run() {
     // `inc` is pure, so passing it through `apply` flows no effects.
     print("{apply(inc, 41)}")

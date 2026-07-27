@@ -1,6 +1,6 @@
 // D-DET1/D-SHAPE8: an explicit empty effect bound is reproducible.
 //
-// A `fn … --[]->` rejects ambient wall-clock / OS-RNG (`time.now()`, `random.int()`)
+// A `fn … =[]=>` rejects ambient wall-clock / OS-RNG (`time.now()`, `random.int()`)
 // because they break reproducibility (E3403). To use time or randomness inside a
 // pure function, take a deterministic capability as a PARAMETER — a `Clock` or
 // `Rng` the caller seeds — and read THROUGH it. The nondeterminism becomes the
@@ -13,14 +13,14 @@ use core.random as random
 
 // Pure: reads time + randomness only through the injected capabilities.
 // `clock` is read-only (`now`); `rng` advances its stream, so it is `&Rng`.
-fn roll_at(clock: Clock, rng: &Rng) --[]-> String {
+fn roll_at(clock: Clock, rng: &Rng) =[]=> String {
     ts :: clock.now()
     die :: rng.int(1, 6)
     return "t={ts} rolled {die}"
 }
 
 // Pure: same injected caps, deterministic stream — call it twice, get two draws.
-fn two_rolls(rng: &Rng) --[]-> String {
+fn two_rolls(rng: &Rng) =[]=> String {
     a :: rng.int(1, 6)
     b :: rng.int(1, 6)
     return "{a} then {b}"
@@ -28,7 +28,7 @@ fn two_rolls(rng: &Rng) --[]-> String {
 
 // D-DET-CAPAPI: the widened `Rng` surface — a coin and a uniform choice — read
 // through the same injected, seeded handle, so still pure + reproducible.
-fn coin_and_card(rng: &Rng) --[]-> String {
+fn coin_and_card(rng: &Rng) =[]=> String {
     flip :: rng.bool()
     cards :: ["A", "K", "Q", "J"]
     drawn :: rng.pick(cards) ?? "none"

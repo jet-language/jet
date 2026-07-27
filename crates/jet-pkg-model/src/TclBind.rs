@@ -27,12 +27,12 @@ pub fn bind(source:&str,lib:&str,cache:&Path)->Result<BindResult,BindError>{
 }
 
 fn render_jet(lib:&str)->String{let abi=format!("jet_tcl_{lib}");format!(r#"#Extern module c.{abi} {{
-    fn open() -> Int = "{abi}_open"
-    fn eval(handle: Int, code: String) -> String = "{abi}_eval"
-    fn eval_once(code: String) -> String = "{abi}_eval_once"
-    fn eval_int(handle: Int, code: String) -> Int = "{abi}_eval_int"
-    fn eval_float(handle: Int, code: String) -> Float = "{abi}_eval_float"
-    fn take_error() -> Int = "{abi}_take_error"
+    fn open() => Int = "{abi}_open"
+    fn eval(handle: Int, code: String) => String = "{abi}_eval"
+    fn eval_once(code: String) => String = "{abi}_eval_once"
+    fn eval_int(handle: Int, code: String) => Int = "{abi}_eval_int"
+    fn eval_float(handle: Int, code: String) => Float = "{abi}_eval_float"
+    fn take_error() => Int = "{abi}_take_error"
     fn close(handle: Int) = "{abi}_close"
 }}
 use c.{abi} as abi
@@ -40,31 +40,31 @@ use c.{abi} as abi
 pub struct Session {{ value: Int }}
 pub enum TclError {{ Eval }}
 
-pub fn open() -> Session ? TclError {{
+pub fn open() => Session ? TclError {{
     value :: abi.open()
     if abi.take_error() != 0 {{ return Err(TclError.Eval) }}
     return Ok(Session.{{ value: value }})
 }}
 
-pub fn eval(session: Session, code: String) -> String ? TclError {{
+pub fn eval(session: Session, code: String) => String ? TclError {{
     value :: abi.eval(session.value, code)
     if abi.take_error() != 0 {{ return Err(TclError.Eval) }}
     return Ok(value)
 }}
 
-pub fn eval_once(code: String) -> String ? TclError {{
+pub fn eval_once(code: String) => String ? TclError {{
     value :: abi.eval_once(code)
     if abi.take_error() != 0 {{ return Err(TclError.Eval) }}
     return Ok(value)
 }}
 
-pub fn eval_int(session: Session, code: String) -> Int ? TclError {{
+pub fn eval_int(session: Session, code: String) => Int ? TclError {{
     value :: abi.eval_int(session.value, code)
     if abi.take_error() != 0 {{ return Err(TclError.Eval) }}
     return Ok(value)
 }}
 
-pub fn eval_float(session: Session, code: String) -> Float ? TclError {{
+pub fn eval_float(session: Session, code: String) => Float ? TclError {{
     value :: abi.eval_float(session.value, code)
     if abi.take_error() != 0 {{ return Err(TclError.Eval) }}
     return Ok(value)

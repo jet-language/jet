@@ -29,7 +29,7 @@ Codegen does not read the AST plus side registries; it lowers the checked AST to
 Rust from the TIR with **zero inference** (every type/convention/mangle/overflow decision
 is resolved at lowering — R1/I3). The TIR is the **only** codegen seam (R7) for every emitted
 body: free functions, methods, trait methods, `#Test` block bodies, and error-conversion
-`impl Old -> New` bodies all lower through it. A per-surface gate (`tir_covers*`) decides
+`impl Old => New` bodies all lower through it. A per-surface gate (`tir_covers*`) decides
 coverage, and a construct **outside** the TIR subset is an **internal compiler error** (R5 ICE),
 never an AST fallback or a miscompile. The legacy AST codegen path (`emit_expr`/`emit_stmt`/
 `emit_stmts`/`emit_lambda`) was deleted (c109) once a whole-test-suite byte-parity check proved
@@ -82,8 +82,11 @@ Covered mechanisms (`tests/concurrency_boundaries.rs` and matching UI
 snapshots):
 
 - A task created by `tasks.spawn` or `g.task` owns or copies its captures.
+  Values accepted by Jet's ordinary copy law are copied when the closure is
+  created, so the source binding remains available without a preparatory
+  binding. Owned values that cannot be copied move.
   Sema rejects a mutable capture, a borrowed view, or another value that cannot
-  cross a task boundary.
+  cross a task boundary. No explicit capture prefix changes these laws.
 - A channel moves a sendable owned value. The sender cannot keep an alias that
   permits unsynchronized writes after the send.
 - A task group changes child lifetimes and cancellation only. Its children use

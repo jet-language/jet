@@ -46,11 +46,24 @@ impl<'a> Checker<'a> {
             args: &mut [crate::AST::CallArg],
             span: Span,
         ) -> Option<Type> {
+            let inline_loop = matches!(
+                callee.as_ref(),
+                Expr::Lambda(lam) if lam.meta.collecting_loop || lam.meta.result_loop
+            );
             let mut call_access = self.call_access_frame();
             let Some(callee_ty) = self.with_call_access(&mut call_access, |checker| {
-                checker.check_call_receiver_evaluation(callee, callee.span());
+                if !inline_loop {
+                    checker.check_call_receiver_evaluation(callee, callee.span());
+                }
+                let saved_escapes = checker.lambda_escapes;
+                if inline_loop {
+                    checker.lambda_escapes = false;
+                }
                 let inferred = checker.infer(callee);
-                checker.check_call_argument_captures(callee);
+                checker.lambda_escapes = saved_escapes;
+                if !inline_loop {
+                    checker.check_call_argument_captures(callee);
+                }
                 inferred
             }) else {
                 return None;
@@ -74,6 +87,10 @@ impl<'a> Checker<'a> {
                 return None;
             };
             match effect_bound {
+                // A yielding loop uses a compiler-private immediately evaluated
+                // carrier. Its body already records effects in the enclosing
+                // context; it is not an unknown function-value call.
+                _ if inline_loop => {}
                 None
                     if !matches!(
                         callee.as_ref(),

@@ -515,7 +515,7 @@ module workspace {
     #[test]
     fn members_calls_top_level_fn() {
         // A `members:` expression can call a top-level helper `fn`.
-        let src = "fn member(name: String) -> String { return \"./pkgs/{name}\" }\n\
+        let src = "fn member(name: String) => String { return \"./pkgs/{name}\" }\n\
                    module workspace {\n    members: [member(\"hello\"), member(\"ranker\")]\n}\n";
         let plan = eval(src);
         let paths: Vec<&str> = plan.members.iter().map(|m| m.path.as_str()).collect();

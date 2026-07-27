@@ -1,12 +1,12 @@
 // D-CRYPTO-DIAG1=A: solved effects suppress later crypto-fact diagnostics.
 use core.crypto.expert as expert
 
-fn next_byte() -> U8 {
+fn next_byte() => U8 {
     print("effect")
     return 0
 }
 
-fn protect() --[]-> Int {
+fn protect() =[]=> Int {
     #Unsafe("fixed interop vector") {
         sealed :: expert.xchacha20poly1305_seal([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [next_byte()], [], [])
     }

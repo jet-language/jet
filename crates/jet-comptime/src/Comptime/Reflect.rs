@@ -55,7 +55,7 @@ fn format_method_sig(method: &Func) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     match &method.return_type {
-        Some(ret) => format!("fn {}({}) -> {}", method.name, params, ret.name()),
+        Some(ret) => format!("fn {}({}) => {}", method.name, params, ret.name()),
         None => format!("fn {}({})", method.name, params),
     }
 }

@@ -86,7 +86,7 @@ fn lua_bind_runs_embedded_vm_and_recovers_after_hostile_calls() {
     fs::copy(example.join("ops.lua"),dir.join("ops.lua")).unwrap();fs::copy(example.join("main.jet"),dir.join("main.jet")).unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","lua","ops.lua","--pkg","ops"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(bind.status.success(),"Lua bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
     let cache=dir.join(".jet/bindings/lua");assert!(cache.join("libjet_lua_ops.a").is_file());let provenance=fs::read_to_string(cache.join("ops.provenance")).unwrap();assert!(provenance.contains("state=per-session\ntransport=datatree+table-view\ntable-view=zero-copy\nhook=instructions\n"));
-    let generated=fs::read_to_string(cache.join("ops.jet")).unwrap();assert!(generated.contains("pub struct TableView")&&generated.contains("pub fn counters_view(session: Session, deadline_ms: Int) -> TableView ? LuaError")&&generated.contains("pub fn view_get_int(view: TableView, key: String) -> Int ? LuaError")&&generated.contains("pub fn view_set_int(view: TableView, key: String, value: Int) -> Bool ? LuaError"));
+    let generated=fs::read_to_string(cache.join("ops.jet")).unwrap();assert!(generated.contains("pub struct TableView")&&generated.contains("pub fn counters_view(session: Session, deadline_ms: Int) => TableView ? LuaError")&&generated.contains("pub fn view_get_int(view: TableView, key: String) => Int ? LuaError")&&generated.contains("pub fn view_set_int(view: TableView, key: String, value: Int) => Bool ? LuaError"));
     let run=Command::new(jet()).args(["run","--release","main.jet"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();assert!(run.status.success(),"embedded Lua binding did not run:\n{}",String::from_utf8_lossy(&run.stderr));assert_eq!(String::from_utf8_lossy(&run.stdout),fs::read_to_string(example.join("expected.out")).unwrap());
     fs::copy(root.join("tests/fixtures/lua_lifecycle.c"),dir.join("lifecycle.c")).unwrap();let lua_dir=fs::read_to_string(cache.join("ops.lua-path")).unwrap();let lua_dir=lua_dir.trim();let link_dir=format!("-L{lua_dir}");let rpath=format!("-Wl,-rpath,{lua_dir}");
     let cc=Command::new("cc").arg("lifecycle.c").args(["-L.jet/bindings/lua","-l:libjet_lua_ops.a"]).arg(link_dir).arg(rpath).args(["-llua","-lpthread","-ldl","-lm","-o","lifecycle"]).current_dir(&dir).output().unwrap();assert!(cc.status.success(),"Lua lifecycle probe link failed:\n{}",String::from_utf8_lossy(&cc.stderr));let lifecycle=Command::new(dir.join("lifecycle")).current_dir(&dir).output().unwrap();assert!(lifecycle.status.success(),"Lua lifecycle probe failed: {:?}",lifecycle.status.code());
@@ -2251,7 +2251,7 @@ fn question_mark_language_symbol_uses_shared_semantic_index() {
         .expect("run jet ? List.filter");
     assert!(output.status.success(), "status: {:?}", output.status);
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("List.filter(f: fn(T) -> Bool) -> List<T>"), "signature missing: {stdout}");
+    assert!(stdout.contains("List.filter(f: fn(T) => Bool) -> List<T>"), "signature missing: {stdout}");
     assert!(stdout.contains("Keeps items where f(item) is true."), "summary missing: {stdout}");
     assert!(stdout.contains("Example:"), "example missing: {stdout}");
     assert!(stdout.contains("core.collections"), "provenance missing: {stdout}");
@@ -2553,7 +2553,7 @@ end module matrix_math
     let generated = fs::read_to_string(dir.join(".jet/bindings/fortran/matrix.jet")).unwrap();
     assert!(generated.contains("fortran-layout probe.a: column-major 2x3"));
     assert!(generated.contains("a.len() != 6"));
-    assert!(generated.contains("--[Fortran]->"));
+    assert!(generated.contains("=[Fortran]=>"));
     assert!(String::from_utf8_lossy(&bind.stdout).contains("layout: probe.a column-major 2x3"));
 
     fs::write(
@@ -2700,12 +2700,12 @@ func main() {}
     );
     let generated = fs::read_to_string(dir.join(".jet/bindings/go/handles.jet")).unwrap();
     assert!(generated.contains("pub struct Handle { value: Int }"));
-    assert!(generated.contains("pub fn new_handle(value: Int) -> Handle"));
-    assert!(generated.contains("pub fn consume_handle(handle: Handle) -> Int"));
+    assert!(generated.contains("pub fn new_handle(value: Int) => Handle"));
+    assert!(generated.contains("pub fn consume_handle(handle: Handle) => Int"));
 
     fs::write(
         dir.join("main.jet"),
-        "use go.handles as handles\n\nfn run() --[Go, Io]-> {\n    handle :: handles.new_handle(42)\n    print(handles.consume_handle(handle))\n}\n",
+        "use go.handles as handles\n\nfn run() =[Go, Io]=> {\n    handle :: handles.new_handle(42)\n    print(handles.consume_handle(handle))\n}\n",
     )
     .unwrap();
     let run = Command::new(jet())
@@ -2778,7 +2778,7 @@ fn java_bind_embeds_jvm_handles_methods_and_exceptions() {
     assert!(dir.join(".jet/bindings/java/counter.provenance").is_file());
     fs::write(dir.join("main.jet"),r#"use java.counter as counter
 
-fn run() --[Java, Io]-> {
+fn run() =[Java, Io]=> {
     handle :: counter.new(40) ?? panic("JVM create failed")
     print(counter.add(handle, 2) ?? -1)
     print(counter.twice(2.5) ?? -1.0)
@@ -2817,7 +2817,7 @@ fn dotnet_bind_embeds_coreclr_state_calls_and_errors(){
     assert!(dir.join(".jet/bindings/cs/libjet_cs_counter.a").is_file());assert!(dir.join(".jet/bindings/cs/counter.dotnet/JetBinding.dll").is_file());assert!(dir.join(".jet/bindings/cs/counter.provenance").is_file());
     fs::write(dir.join("main.jet"),r#"use cs.counter as counter
 
-fn run() --[DotNet, Io]-> {
+fn run() =[DotNet, Io]=> {
     handle :: counter.new(40) ?? panic("CoreCLR create failed")
     print(counter.add(handle, 2) ?? -1)
     print(counter.twice(2.5) ?? -1.0)
@@ -2841,7 +2841,7 @@ fn tcl_bind_runs_one_shot_and_persistent_typed_sessions() {
     assert!(dir.join(".jet/bindings/tcl/eda.provenance").is_file());
     fs::write(dir.join("main.jet"),r#"use tcl.eda as tcl
 
-fn run() --[Tcl, Io]-> {
+fn run() =[Tcl, Io]=> {
     session :: tcl.open() ?? panic("Tcl open failed")
     print(tcl.eval_int(session, "incr counter 2") ?? -1)
     print(tcl.eval_int(session, "incr counter 1") ?? -1)
@@ -2892,7 +2892,7 @@ end Geodesy;
     assert!(dir.join(".jet/bindings/ada/geodesy.provenance").is_file());
     fs::write(dir.join("main.jet"),r#"use ada.geodesy as geo
 
-fn run() --[Ada, Io]-> {
+fn run() =[Ada, Io]=> {
     print(geo.double_lat(95.0) ?? -1.0)
     print(geo.calls(0) ?? -1)
     print(geo.double_lat(21.0) ?? -1.0)
@@ -2943,7 +2943,7 @@ end.
     let cache=dir.join(".jet/bindings/pascal");assert!(cache.join("libjet_pascal_inventory.a").is_file());assert!(cache.join("libjet_pascal_inventory_runtime.so").is_file());assert!(cache.join("inventory.provenance").is_file());
     fs::write(dir.join("main.jet"),r#"use pascal.inventory as inv
 
-fn run() --[Pascal, Io]-> {
+fn run() =[Pascal, Io]=> {
     print(inv.add_scalar(20, 22))
     handle :: inv.counter_new(40) ?? panic("Pascal constructor failed")
     print(inv.counter_add(handle, 2) ?? -1)
@@ -2976,7 +2976,7 @@ fn dart_bind_runs_jet_compute_and_dart_callback_in_process() {
     if Command::new("dart").arg("--version").output().is_err(){return}
     let dir=isolated_cwd("dart_bind_round_trip");let contract=dir.join("callbacks.dart");let compute=dir.join("compute.jet");
     fs::write(&contract,"@pragma('vm:entry-point')\nint dartDouble(int value) => value * 2;\n").unwrap();
-    fs::write(&compute,"use dart.callbacks as callbacks\n\npub fn compute(value: Int) --[Dart]-> Int {\n    return callbacks.dart_double(value) ?? -1\n}\n").unwrap();
+    fs::write(&compute,"use dart.callbacks as callbacks\n\npub fn compute(value: Int) =[Dart]=> Int {\n    return callbacks.dart_double(value) ?? -1\n}\n").unwrap();
     let bind=Command::new(jet()).args(["inspect","bind","dart"]).arg(&contract).args(["--jet",compute.to_str().unwrap(),"--pkg","callbacks"]).current_dir(&dir).env("NO_COLOR","1").output().unwrap();
     assert!(bind.status.success(),"Dart bind failed:\n{}",String::from_utf8_lossy(&bind.stderr));
     let cache=dir.join(".jet/bindings/dart");let native=cache.join(if cfg!(target_os="macos"){"libjet_dart_callbacks_compute.dylib"}else if cfg!(target_os="windows"){"libjet_dart_callbacks_compute.dll"}else{"libjet_dart_callbacks_compute.so"});
@@ -3015,7 +3015,7 @@ function Sleep { param($InputObject) Start-Sleep -Seconds 30; return $InputObjec
     fs::write(dir.join("main.jet"),r#"use pwsh.ops as ops
 use core.encoding.json as json
 
-fn run() --[PowerShell, Io]-> {
+fn run() =[PowerShell, Io]=> {
     session :: ops.open() ?? panic("PowerShell open failed")
     input :: DataTree.Object(["nested": DataTree.Object(["ok": DataTree.Bool(true)]), "list": DataTree.Array([DataTree.Int(1), DataTree.Text("two")]), "scalar": DataTree.Float(3.5), "nothing": DataTree.Null])
     first :: ops.get_stateful(session, ~input, 5000) ?? panic("first call failed")
@@ -3533,7 +3533,7 @@ fn check_reports_soft_public_lints_without_failing() {
     let dir = isolated_cwd("check_soft_public");
     fs::write(
         dir.join("library.jet"),
-        "pub fn _legacy() -> Int { return 1 }\n",
+        "pub fn _legacy() => Int { return 1 }\n",
     )
     .unwrap();
     fs::write(
@@ -4044,7 +4044,7 @@ fn plugin_using_an_effect_is_e1258() {
     let dir = isolated_cwd("plugin_effect_denied");
     fs::write(
         dir.join("main.jet"),
-        "use core.env as env\n\npub fn get_secret() -> Int {\n    _ :: env.get(\"SECRET\")\n    return 1\n}\n",
+        "use core.env as env\n\npub fn get_secret() => Int {\n    _ :: env.get(\"SECRET\")\n    return 1\n}\n",
     )
     .unwrap();
     let out = Command::new(jet())
@@ -4089,7 +4089,7 @@ fn plugin_missing_wasm_tools_is_e1259() {
     let dir = isolated_cwd("plugin_no_wasmtools");
     fs::write(
         dir.join("main.jet"),
-        "pub fn scale(a: Float, b: Float) -> Float {\n    return a * b\n}\n",
+        "pub fn scale(a: Float, b: Float) => Float {\n    return a * b\n}\n",
     )
     .unwrap();
 

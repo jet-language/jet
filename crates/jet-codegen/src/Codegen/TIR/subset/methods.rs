@@ -146,7 +146,7 @@ pub(crate) fn method_call_in_subset(
             && matches!(&args[0].expr, Expr::Lambda(_))
             && expr_in_subset(&args[0].expr, cx, locals);
     }
-    // D-TASKSCOPE1=A: `g.task { … }` on a taskgroup handle (scoped spawn).
+    // D-TASKSCOPE1=A: `g.task => …` on a taskgroup handle (scoped spawn).
     if recv_type.as_deref() == Some(Syntax::TYPE_TASKGROUP)
         && method == Syntax::TASKGROUP_SPAWN_METHOD
     {
@@ -227,7 +227,7 @@ pub(crate) fn method_call_in_subset(
             && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals));
     }
     // Shape (m) [c109 Phase 27]: a CALL THROUGH a fn-typed struct field — `w.step(4)`
-    // where `step: fn(Int) -> Int` is a field on a covered struct, NOT a user method.
+    // where `step: fn(Int) => Int` is a field on a covered struct, NOT a user method.
     // Sema (CheckerInfer ~L2329) sets `recv_type == Some(<StructType>)` and re-routes the
     // node through `infer_call_value`, but registers NO `method_sigs` entry (it is a field,
     // not a method). The AST `emit_method_call` (Expression.rs ~L1573) detects this case
@@ -723,7 +723,7 @@ pub(crate) fn method_call_in_subset(
     // / `.post`/`.put`/`.delete` (D-ROUTE1=A). Sema sets `recv_type == Some("HttpRouter")`.
     // The AST `emit_builtin_method` keys these on `rty == Some(HttpRouter)` BEFORE the
     // generic `get`/`post` collection arms, and emits the handler via `emit_router_handler`
-    // (a boxed `Fn(HttpRequest)->HttpResponse` closure). We cover it when the receiver is
+    // (a boxed `Fn(HttpRequest)=>HttpResponse` closure). We cover it when the receiver is
     // in-subset, the path arg is in-subset, and the handler arg is one `emit_router_handler`
     // reproduces byte-for-byte: a bare top-level-fn name (NOT a local → the `Box::new(move
     // |__req| user_<fn>(&__req)) as …` wrapper) or an in-subset literal lambda. Tried BEFORE

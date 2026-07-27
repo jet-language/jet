@@ -1,17 +1,15 @@
-// 04 — Ordered decisions with if / else if / else.
+// 04 — Ordered decisions with Jet's pattern-arm table.
 // Comparison: == != < > <= >=   Logic: && || !   (S13)
 // Parameters carry no access keyword in M1 — plain shared read (S10).
 fn describe(celsius: Float) {
     freezing :: (celsius <= 0.0)
     pleasant :: ((celsius >= 18.0) && (celsius <= 26.0))
-    if freezing {
-        print("{celsius} C: bundle up")
-    } else if pleasant {
-        print("{celsius} C: just right")
-    } else if celsius > 35.0 || celsius < -20.0 {
-        print("{celsius} C: stay inside")
-    } else {
-        print("{celsius} C: fine")
+    // Each head is evaluated as written. The first true arm wins.
+    if {
+        freezing -> print("{celsius} C: bundle up")
+        pleasant -> print("{celsius} C: just right")
+        celsius > 35.0 || celsius < -20.0 -> print("{celsius} C: stay inside")
+        else -> print("{celsius} C: fine")
     }
 }
 

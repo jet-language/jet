@@ -79,9 +79,9 @@ untracked `plugins/tower/.tower/secrets.json`; never put credentials in `config.
 
 Each card has a computed `lane`: `decide` (owner), `plan`/`implement`/
 `building`/`verify` (agent), `blocked`/`frozen`/`done` (inert).
-`tower next` sorts by `workOrder` ascending, then building > verify >
-implement > plan. **Epochs** group the work; **milestones** are goals inside
-an epoch — link cards with `--milestone <id>` and progress computes itself.
+`tower next` sorts by verify > building > implement > plan, then by ascending
+`workOrder` inside each lane. **Epochs** group the work; **milestones** are
+goals inside an epoch — link cards with `--milestone <id>` and progress computes itself.
 
 ## Writing
 

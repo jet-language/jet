@@ -696,6 +696,15 @@ fn emit_tir_stmt(
             Some(name) => out.push_str(&format!("{}break 'jet_{};\n", pad, name)),
             None => out.push_str(&format!("{}break;\n", pad)),
         },
+        TStmt::BreakValue { label, value } => {
+            let value = emit_expr_with_cleanups(value, cx, active_deferred_closes);
+            match label {
+                Some(name) => {
+                    out.push_str(&format!("{}break 'jet_{} {};\n", pad, name, value))
+                }
+                None => out.push_str(&format!("{}break {};\n", pad, value)),
+            }
+        }
         TStmt::Continue(label) => match label {
             Some(name) => out.push_str(&format!("{}continue 'jet_{};\n", pad, name)),
             None => out.push_str(&format!("{}continue;\n", pad)),

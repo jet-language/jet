@@ -217,6 +217,7 @@ fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
         // D-CTEFFECT1: `#Impure` body is allowed to be impure — skip purity
         // walk so its Tier-2 calls don't fire E0951.
         Stmt::Impure { .. } => {}
+        Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => f(value),
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => {}
         // D-WHEN1: walk both arms for purity analysis (conservative).
         Stmt::ComptimeIf {

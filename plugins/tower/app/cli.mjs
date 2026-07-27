@@ -139,7 +139,7 @@ function cmdStatus(store, { flags }) {
     if (n) console.log(`  ${phase(ph.id, ph.label.padEnd(9))} ${bar(n)} ${t.dim(String(n))}`);
   }
   console.log(`\n  ${t.error('BLOCKED ON OWNER')}  ${t.warn(String(s.counts.decide))} decisions`);
-  console.log(`  ${t.success('AGENT-READY')}       ${t.success(String(s.counts.agentReady))}  ${t.dim('(plan / implement / build / verify)')}`);
+  console.log(`  ${t.success('AGENT-READY')}       ${t.success(String(s.counts.agentReady))}  ${t.dim('(verify / build / implement / plan)')}`);
   console.log(`  ${t.dim('open questions')}    ${t.warn(String(s.counts.openQuestions))}   ${t.dim(`sidequests ${s.counts.sidequests}   ideas ${s.counts.ideas}`)}\n`);
   const show = (label, lane) => {
     const cs = s.cards.filter(c => c.lane.lane === lane);
@@ -157,8 +157,8 @@ function cmdStatus(store, { flags }) {
     }
   };
   show('OWNER — decide', 'decide');
-  show('AGENT — plan', 'plan'); show('AGENT — implement', 'implement');
-  show('AGENT — building', 'building'); show('AGENT — verify', 'verify');
+  show('AGENT — verify', 'verify'); show('AGENT — building', 'building');
+  show('AGENT — implement', 'implement'); show('AGENT — plan', 'plan');
   console.log('');
 }
 
@@ -446,7 +446,7 @@ function cmdNext(store, { flags }) {
   if (!rich.length) return console.log('(nothing agent-workable — board is either empty, blocked on the owner, or done)');
   const header = scope === 'ready-across' ? 'ready across all epochs — every card with no unfinished blocker (the parallel-safe set):'
     : scope === 'burndown' ? 'next up — burndown scope (current epoch + sidequests):'
-    : 'next up (workOrder → building > verify > implement > plan):';
+    : 'next up (verify > building > implement > plan → workOrder):';
   console.log(header);
   for (const c of rich) console.log(` · ${cardLine(c, { epoch: scope === 'ready-across' })}`);
 }

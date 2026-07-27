@@ -34,10 +34,10 @@ pub(super) enum Flow {
     Normal,
     Break,
     Continue,
-    /// D-LOOPLABEL3=A: `name.break()` bubbles through enclosing loops until the
+    /// D-LOOPLABEL3=A as amended by D-ARROW-CONTROL1=A: `break(name)` bubbles through enclosing loops until the
     /// matching named loop turns it into an ordinary `Break`.
     BreakLabel(String),
-    /// D-LOOPLABEL3=A: `name.next()` follows the same bubbling rule and becomes
+    /// D-LOOPLABEL3=A as amended by D-ARROW-CONTROL1=A: `next(name)` follows the same bubbling rule and becomes
     /// an ordinary `Continue` at the matching loop.
     ContinueLabel(String),
     Return(CtValue),

@@ -465,7 +465,7 @@ fn run() {
     assert_aot_dev_stream_parity("csv-stream", &stream_fixture("csv", csv));
 
     let xml = r#"
-fn xml_name(local: String) -> DataTree {
+fn xml_name(local: String) => DataTree {
     return DataTree.Object([
         "raw": DataTree.Text(~local),
         "prefix": DataTree.Null,
@@ -673,7 +673,7 @@ use core.encoding as encoding
 use core.encoding.json as json
 use core.files as files
 
-fn terminal_limit_probe() -> String {
+fn terminal_limit_probe() => String {
     bad_path := "bad.json"
     limits := encoding.EncodingLimits.safe()
     limits.max_total_bytes = Val(5)
@@ -694,7 +694,7 @@ fn terminal_limit_probe() -> String {
     return "unreachable"
 }
 
-fn malformed_reader_probe() -> String {
+fn malformed_reader_probe() => String {
     files.write("malformed.json", "{{\"a\":") ?? panic("write malformed")
     input :: files.open("malformed.json") ?? panic("open")
     reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")

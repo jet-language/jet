@@ -1,7 +1,7 @@
 Error [E0919]: `big` is too large for `#Inline(Always)`
   --> tests/ui/inline_always_too_large.jet:3:1
     |
-  3 | #Inline(Always) fn big() -> Int {
+  3 | #Inline(Always) fn big() => Int {
     | ^^^^^^^^^^^^^^^
  Why: its body has 44 statements — over the 40-statement ceiling `#Inline(Always)` enforces so a promised inline doesn't quietly bloat every call site.
  Fix: drop `#Inline(Always)` (use `#Inline` as a hint the compiler is free to ignore), or split the function so the hot part is small enough to inline.

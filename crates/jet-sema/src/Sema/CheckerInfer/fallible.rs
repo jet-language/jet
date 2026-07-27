@@ -133,7 +133,7 @@ impl<'a> Checker<'a> {
                         let err_type_name = err.name();
                         let ret_err_name = ret_err.name();
 
-                        // D-ERR-CONV: check if a declared `impl Source -> Target` conversion exists.
+                        // D-ERR-CONV: check if a declared `impl Source => Target` conversion exists.
                         if self.trait_reg.has_error_conv(&err_type_name, &ret_err_name) {
                             let fn_name = error_conv_fn_name(&err_type_name, &ret_err_name);
                             *convert = TryConvert::Typed(fn_name);
@@ -168,7 +168,7 @@ impl<'a> Checker<'a> {
                                     Syntax::TRAIT_FALLIBLE
                                 ),
                                 format!(
-                                    "add `impl {}: {} {{ fn to_error(self) -> {} {{ … }} }}`, or change the return type",
+                                    "add `impl {}: {} {{ fn to_error(self) => {} {{ … }} }}`, or change the return type",
                                     err_name,
                                     Syntax::TRAIT_FALLIBLE,
                                     Syntax::TYPE_ERROR
@@ -190,7 +190,7 @@ impl<'a> Checker<'a> {
                                 err_type_name, ret_err_name
                             ),
                             format!(
-                                "add `impl {} -> {} {{ … }}` before this function",
+                                "add `impl {} => {} {{ … }}` before this function",
                                 err_type_name, ret_err_name
                             ),
                             Some(span),
@@ -206,7 +206,7 @@ impl<'a> Checker<'a> {
                             ),
                             "propagation early-returns the failure to the caller".to_string(),
                             format!(
-                                "add `-> ... ? {}` to this function, or handle the result with `{}`",
+                                "add `=> ... ? {}` to this function, or handle the result with `{}`",
                                 err.name(),
                                 Syntax::OP_FALLBACK
                             ),
@@ -235,7 +235,7 @@ impl<'a> Checker<'a> {
                         Syntax::LIT_NULL
                     ),
                     format!(
-                        "add `-> {}` to this function, or handle it with `{}`",
+                        "add `=> {}` to this function, or handle it with `{}`",
                         inner_ty.name(),
                         Syntax::OP_FALLBACK
                     ),
@@ -368,7 +368,7 @@ impl<'a> Checker<'a> {
                             format!("`{} return` can't return a value here", Syntax::OP_FALLBACK),
                             "this function returns nothing, so `return` can't carry a value"
                                 .to_string(),
-                            "drop the value, or add `-> Type` to the function".to_string(),
+                            "drop the value, or add `=> Type` to the function".to_string(),
                             Some(e.span()),
                         ));
                     }

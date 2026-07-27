@@ -6,7 +6,7 @@ fn bare_run_stays_valid() {
 #[test]
 fn fallible_void_run_is_the_only_fallible_entrypoint() {
     let src = r#"
-fn run() -> Void ? {
+fn run() => Void ? {
     return Err("boom")
 }
 "#;
@@ -34,7 +34,7 @@ fn crypto_fallible_void_run_uses_the_e3001_runtime_boundary() {
     let src = r#"
 use core.crypto as crypto
 
-fn run() -> Void ? CryptoError {
+fn run() => Void ? CryptoError {
     length :: 0
     _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)?
 }
@@ -63,11 +63,11 @@ fn unhandled_crypto_error_exits_70_with_a_redacted_e3001_frame() {
     let src = r#"
 use core.crypto as crypto
 
-fn dynamic_length(value: Int) -> Int {
+fn dynamic_length(value: Int) => Int {
     return value
 }
 
-fn run() -> Void ? CryptoError {
+fn run() => Void ? CryptoError {
     length :: dynamic_length(8161)
     _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], length)?
 }
@@ -106,7 +106,7 @@ enum CryptoError {
     Internal
 }
 
-fn run() -> Void ? CryptoError {
+fn run() => Void ? CryptoError {
     return Err(.Internal)
 }
 "#;
@@ -122,7 +122,7 @@ fn internal_crypto_error_exits_101_in_the_generated_wrapper() {
     let src = r#"
 use core.crypto as crypto
 
-fn run() -> Void ? CryptoError {
+fn run() => Void ? CryptoError {
     _ :: crypto.hkdf_sha256(crypto.Secret.from_bytes([1]), [], [], 0)?
 }
 "#;
@@ -181,11 +181,11 @@ fn main() {{
 #[test]
 fn fallible_void_run_can_finish_normally_after_try() {
     let src = r#"
-fn step() -> Int ? {
+fn step() => Int ? {
     return Ok(1)
 }
 
-fn run() -> Void ? {
+fn run() => Void ? {
     n :: step()?
     print(n)
 }
@@ -201,7 +201,7 @@ fn run() -> Void ? {
 #[test]
 fn unit_fallible_run_stays_rejected() {
     let src = r#"
-fn run() -> Unit ? {
+fn run() => Unit ? {
     return Err("boom")
 }
 "#;
@@ -215,7 +215,7 @@ fn run() -> Unit ? {
 #[test]
 fn fallible_void_fallthrough_is_entrypoint_only() {
     let src = r#"
-fn helper() -> Void ? {
+fn helper() => Void ? {
 }
 
 fn run() {

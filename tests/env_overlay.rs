@@ -98,7 +98,7 @@ fn codegen_is_raw_locked_and_never_mutates_host_env() {
 use core.env as env
 use core.process as process
 
-fn remove(name: String) -> Bool ? env.EnvError {
+fn remove(name: String) => Bool ? env.EnvError {
     return Ok(env.unset(name)?)
 }
 
@@ -288,8 +288,8 @@ fn main() {
     // snapshot, forcing the writer to commit a new pair during that launch.
     // No hook or synchronization state ships in generated production code.
     let hooked_snapshot = out.rust.replacen(
-        "fn jet_std_env_snapshot_raw() -> JetEnvEntries {\n    jet_env_read().clone()\n}",
-        r#"fn jet_std_env_snapshot_raw() -> JetEnvEntries {
+        "fn jet_std_env_snapshot_raw() => JetEnvEntries {\n    jet_env_read().clone()\n}",
+        r#"fn jet_std_env_snapshot_raw() => JetEnvEntries {
     jet_test_snapshot_entry();
     jet_env_read().clone()
 }

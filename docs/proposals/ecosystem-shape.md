@@ -159,15 +159,15 @@ Runnable outputs link to ordinary functions by checked reference. Renames, visib
 Commands accept typed parameters, which become checked CLI flags. Services and checks take no parameters; their settings live in checked graph values so laptops, CI, images, and JetOS cannot invoke different configurations. Every callable returns `Void` or `Void ?`. A service lives while its function call lives. A check passes on normal return and fails on error.
 
 ```jet
-fn export(path: Path, pretty: Bool = false) -> Void ? {
+fn export(path: Path, pretty: Bool = false) => Void ? {
     write_export(path, pretty)?
 }
 
-fn serve() -> Void ? {
+fn serve() => Void ? {
     api.serve()?
 }
 
-fn verify_release() -> Void ? {
+fn verify_release() => Void ? {
     require(licenses_ok(), "unapproved license")
 }
 ```
@@ -458,15 +458,15 @@ defaults: .{ run: app, check: unit, enter: dev }
 `Source/main.jet`:
 
 ```jet
-fn run() -> Void ? {
+fn run() => Void ? {
     print("pulse ready")
 }
 
-fn test_unit() -> Void ? {
+fn test_unit() => Void ? {
     require(2 + 2 == 4, "arithmetic changed")
 }
 
-fn postgres_ready() -> Void ? {
+fn postgres_ready() => Void ? {
     require(true, "postgres did not answer")
 }
 ```
@@ -608,7 +608,7 @@ use core.mem
     register.* = 1
 }
 
-fn run() -> Void ? {
+fn run() => Void ? {
     print("edge agent ready")
 }
 ```
@@ -694,11 +694,11 @@ outputs: .{
 `packages/api/Source/main.jet`:
 
 ```jet
-fn run() -> Void ? {
+fn run() => Void ? {
     print("api ready")
 }
 
-fn unit() -> Void ? {
+fn unit() => Void ? {
     require(true, "api unit failed")
 }
 ```
@@ -719,7 +719,7 @@ outputs: .{
 `packages/billing/Source/main.jet`:
 
 ```jet
-fn unit() -> Void ? {
+fn unit() => Void ? {
     require(true, "billing unit failed")
 }
 ```
@@ -737,7 +737,7 @@ outputs: .{ app: .Executable.{ name: "acme-web", entry: run } }
 `packages/web/Source/main.jet`:
 
 ```jet
-fn run() -> Void ? {
+fn run() => Void ? {
     print("web ready")
 }
 ```
@@ -1004,7 +1004,7 @@ pub halcyon_hardware :: Config.{        // NEW: D-ECO-SLICENAME1; schema: D-ECO-
 `system/packages.jet`:
 
 ```jet
-fn workstation() -> Config {                   // NEW: D-ECO-SLICENAME1
+fn workstation() => Config {                   // NEW: D-ECO-SLICENAME1
     return .{
         overlays: .{
             browsers: .{ firefox: .{ channel: "stable" } }
@@ -1049,7 +1049,7 @@ pub laptop :: Config.{                  // NEW: D-ECO-SLICENAME1; schema: D-ECO-
 `system/vm.jet`:
 
 ```jet
-fn verify_halcyon_vm() -> Void ? {
+fn verify_halcyon_vm() => Void ? {
     host :: vm.host(systems.halcyon)
     host.install(images.installer)?
     host.reboot()?
@@ -1193,16 +1193,16 @@ The fleet adds two web hosts. Shared Configs carry common packages and health ru
 use core.http as http
 use core.net as net
 
-fn run_api() -> Void ? {
+fn run_api() => Void ? {
     print("api ready")
 }
 
-fn api_ready() -> Void ? {
+fn api_ready() => Void ? {
     stream :: net.tcp_connect("127.0.0.1:8080")?
     stream.close()?
 }
 
-fn api_can_serve() -> Void ? {
+fn api_can_serve() => Void ? {
     response :: http.get("http://127.0.0.1:8080/health")?
     require(response.status() == 200, "api could not serve a request")
 }

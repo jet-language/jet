@@ -277,6 +277,17 @@ test('cli: no ref picks the top card via next\'s picker (workOrder respected)', 
   assert.equal(p.card.num, 2, 'lowest workOrder wins');
 });
 
+test('cli: no ref picks verification before lower-order building work', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'tower-brief-cli-'));
+  run(cwd, ['init', '--name', 'CLI']);
+  run(cwd, ['card', 'add', '--title', 'Build', '--json']);
+  run(cwd, ['card', 'update', '#1', '--phase', 'building', '--work-order', '1', '--by', 'owner']);
+  run(cwd, ['card', 'add', '--title', 'Verify', '--json']);
+  run(cwd, ['card', 'update', '#2', '--phase', 'verify', '--work-order', '99', '--by', 'owner']);
+  const p = JSON.parse(run(cwd, ['brief', '--json']).out);
+  assert.equal(p.card.num, 2);
+});
+
 test('cli: --json shape is {card, blockers, criteria, decisions, questions, refs, log, rules}', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-brief-cli-'));
   run(cwd, ['init', '--name', 'CLI']);

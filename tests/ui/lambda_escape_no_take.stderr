@@ -1,7 +1,7 @@
-Error [E0003]: expected a call, binding, assignment, or `return`, found a number
-  --> tests/ui/lambda_escape_no_take.jet:13:9
+Error [E0121]: `item` was given away earlier, so it can't be used here
+  --> tests/ui/lambda_escape_no_take.jet:14:10
     |
- 13 |         0
-    |         ^
- Why: inside a function body, write a call, binding, assignment, or `return`
- Fix: e.g. print("hello") or x :: 1
+ 14 |     sink(item)
+    |          ^^^^
+ Why: after a value moves somewhere else, the old name no longer holds it
+ Fix: give away a copy instead (`~item`) where it moved

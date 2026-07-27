@@ -103,7 +103,7 @@ fn equivalent_instances_are_interned_and_project_one_nominal_identity() {
     let src = r#"
 module boxed<T, size: Int> {
     struct Box { value: T }
-    fn identity(value: Box) -> Box { return ~value }
+    fn identity(value: Box) => Box { return ~value }
 }
 module other<T, size: Int> { struct Box { value: T } }
 module first = boxed<Int, 3>
@@ -112,9 +112,9 @@ module forward = equivalent
 module different_type = boxed<String, 3>
 module different_value = boxed<Int, 4>
 module different_template = other<Int, 3>
-fn accepts_first(value: M5FirstBox) -> M5FirstBox { return ~value }
-fn accepts_projection(value: M10EquivalentBox) -> M5FirstBox { return ~value }
-fn accepts_chain(value: M7ForwardBox) -> M5FirstBox { return ~value }
+fn accepts_first(value: M5FirstBox) => M5FirstBox { return ~value }
+fn accepts_projection(value: M10EquivalentBox) => M5FirstBox { return ~value }
+fn accepts_chain(value: M7ForwardBox) => M5FirstBox { return ~value }
 fn run() {}
 "#;
     let (bundle, diagnostics) = check(src);
@@ -173,7 +173,7 @@ use templates.{boxed, other}
 module second = boxed<Int, 3>
 module different_arg = boxed<Int, 4>
 module different_template = other<Int, 3>
-fn accepts_projection(value: M6SecondBox) -> M5FirstBox { return ~value }
+fn accepts_projection(value: M6SecondBox) => M5FirstBox { return ~value }
 fn run() {}
 "#;
     let (bundle, diagnostics) = check_modules(&[
@@ -190,10 +190,10 @@ fn run() {}
 
 #[test]
 fn instance_fingerprint_is_nominal_and_ignores_body_shape() {
-    let base = "module boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule instance = boxed<Int, 3>\nfn run() {}";
-    let shifted = "\n\nmodule boxed<T, n: Int> {   fn value() -> Int { return n } }\nmodule renamed = boxed<Int, 3>\nfn run() {}";
-    let body = "module boxed<T, n: Int> { fn value() -> Int { return n + 1 } }\nmodule instance = boxed<Int, 3>\nfn run() {}";
-    let arg = "module boxed<T, n: Int> { fn value() -> Int { return n } }\nmodule instance = boxed<Int, 4>\nfn run() {}";
+    let base = "module boxed<T, n: Int> { fn value() => Int { return n } }\nmodule instance = boxed<Int, 3>\nfn run() {}";
+    let shifted = "\n\nmodule boxed<T, n: Int> {   fn value() => Int { return n } }\nmodule renamed = boxed<Int, 3>\nfn run() {}";
+    let body = "module boxed<T, n: Int> { fn value() => Int { return n + 1 } }\nmodule instance = boxed<Int, 3>\nfn run() {}";
+    let arg = "module boxed<T, n: Int> { fn value() => Int { return n } }\nmodule instance = boxed<Int, 4>\nfn run() {}";
     let fp = only_instance_fingerprint(base, "pkg-a");
     assert_eq!(fp, only_instance_fingerprint(shifted, "pkg-a"));
     assert_eq!(fp, only_instance_fingerprint(body, "pkg-a"));
@@ -226,7 +226,7 @@ fn instance_definition_identity_tracks_manifest_semver_not_formatting_or_workspa
     std::fs::write(b.join("pkg.jet"), "payload: {\n name: \"demo\",\n version: \"2.0.0\"\n}").unwrap();
     std::fs::write(a.join(".jet/lock"), "source = a").unwrap();
     std::fs::write(b.join(".jet/lock"), "source = b").unwrap();
-    let src = "module boxed<T> { fn value(v: T) -> T { return v } }\nmodule instance = boxed<Int>\nfn run() {}";
+    let src = "module boxed<T> { fn value(v: T) => T { return v } }\nmodule instance = boxed<Int>\nfn run() {}";
     assert_ne!(only_instance_fingerprint(src, a.to_str().unwrap()), only_instance_fingerprint(src, b.to_str().unwrap()));
     std::fs::write(b.join("pkg.jet"), "payload: { name: \"demo\", version: \"1.0.0\" }").unwrap();
     assert_eq!(only_instance_fingerprint(src, a.to_str().unwrap()), only_instance_fingerprint(src, b.to_str().unwrap()));
@@ -240,13 +240,13 @@ fn trait_impl_and_error_conversion_are_specialized_as_one_local_identity_graph()
     let src = r#"
 module laws<T> {
     tag Audited;
-    fn audited(value: #Audited T) -> #Audited T { return ~value }
-    trait Reveal { type Output; fn reveal(self) -> T }
+    fn audited(value: #Audited T) => #Audited T { return ~value }
+    trait Reveal { type Output; fn reveal(self) => T }
     struct Wrapped { value: T }
-    impl Wrapped.Reveal { type Output = T; fn reveal(self) -> T { return self.value } }
+    impl Wrapped.Reveal { type Output = T; fn reveal(self) => T { return self.value } }
     enum SourceErr { Bad(T) }
     enum TargetErr { Wrapped(SourceErr) }
-    impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
+    impl SourceErr => TargetErr { return TargetErr.Wrapped(self) }
 }
 module int_laws = laws<Int>
 fn run() {}
@@ -266,7 +266,7 @@ fn run() {}
 #[test]
 fn tag_method_inside_instance_keeps_e0732() {
     let (_, diagnostics) = check(r#"
-module bad<T> { tag Marker { fn forbidden(self) -> T; } }
+module bad<T> { tag Marker { fn forbidden(self) => T; } }
 module instance = bad<Int>
 fn run() {}
 "#);
@@ -292,8 +292,8 @@ fn duplicate_error_conversion_inside_instance_keeps_coherence_diagnostic() {
 module bad<T> {
     enum Source { Bad(T) }
     enum Target { Wrapped(Source) }
-    impl Source -> Target { return Target.Wrapped(self) }
-    impl Source -> Target { return Target.Wrapped(self) }
+    impl Source => Target { return Target.Wrapped(self) }
+    impl Source => Target { return Target.Wrapped(self) }
 }
 module instance = bad<Int>
 fn run() {}
@@ -304,7 +304,7 @@ fn run() {}
 #[test]
 fn generic_module_does_not_launder_error_conversion_orphans() {
     let (_, diagnostics) = check(r#"
-module bad<T> { impl Int -> String { return "number" } }
+module bad<T> { impl Int => String { return "number" } }
 module instance = bad<Int>
 fn run() {}
 "#);
@@ -315,7 +315,7 @@ fn run() {}
 fn nested_generic_alias_closes_over_outer_type_and_value_arguments() {
     let (bundle, diagnostics) = check(r#"
 module outer<T, count: Int> {
-    module inner<U> { pub fn keep(value: T, other: U) -> T { return ~value } }
+    module inner<U> { pub fn keep(value: T, other: U) => T { return ~value } }
     module fixed = inner<Int>
     module forward = fixed
 }
@@ -352,11 +352,11 @@ fn ordinary_nested_module_recursively_expands_generic_aliases() {
     let (bundle, diagnostics) = check(r#"
 module outer<T, count: Int> {
     module plain {
-        module inner<U> { pub fn total(value: U) -> Int { return count } }
+        module inner<U> { pub fn total(value: U) => Int { return count } }
         module closed = inner<T>
-        pub fn result(value: T) -> Int { return closed.total(value) }
+        pub fn result(value: T) => Int { return closed.total(value) }
     }
-    pub fn result(value: T) -> Int { return plain.result(value) }
+    pub fn result(value: T) => Int { return plain.result(value) }
 }
 module selected = outer<Int, 6>
 fn run() { print(selected.result(1)) }

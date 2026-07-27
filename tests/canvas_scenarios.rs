@@ -259,15 +259,15 @@ impl Drop for CanvasBrowserPermit {
     }
 }
 
-const DEMO: &str = r#"fn helper() -> Int {
+const DEMO: &str = r#"fn helper() => Int {
     return 1
 }
 
-fn square(n: Int) -> Int {
+fn square(n: Int) => Int {
     return n * n
 }
 
-fn summarize(limit: Int) -> Int {
+fn summarize(limit: Int) => Int {
     total := square(limit)
     if total > 10 {
         return total

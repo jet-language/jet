@@ -68,10 +68,10 @@ impl<'a> Parser<'a> {
                         } else {
                             Vec::new()
                         };
-                        // D-TASKSCOPE1=A: `g.task { … }` — block body desugars to a
-                        // zero-parameter lambda (same closure shape as `tasks.spawn`).
+                        // D-TASKSCOPE1=A / D-ARROW-CONTROL1: `g.task => body`
+                        // desugars to a zero-parameter lambda.
                         if member == Syntax::TASKGROUP_SPAWN_METHOD
-                            && matches!(self.peek().kind, TokKind::LBrace)
+                            && matches!(self.peek().kind, TokKind::LambdaArrow)
                         {
                             let lam = self.parse_task_body_lambda()?;
                             let lam_span = lam.span;
@@ -213,8 +213,9 @@ impl<'a> Parser<'a> {
                             span,
                         };
                     }
-                    TokKind::LBrace => {
-                        // D-TASKSCOPE1=A: `g.task { … }` after `.task` was parsed as a field.
+                    TokKind::LambdaArrow => {
+                        // D-TASKSCOPE1=A / D-ARROW-CONTROL1: `g.task => body`
+                        // after `.task` was parsed as a field.
                         if let Expr::Field(base, member, member_span) = &expr {
                             if member == Syntax::TASKGROUP_SPAWN_METHOD {
                                 let lam = self.parse_task_body_lambda()?;
@@ -238,6 +239,9 @@ impl<'a> Parser<'a> {
                                 continue;
                             }
                         }
+                        break;
+                    }
+                    TokKind::LBrace => {
                         // In a control-flow header (`for … in expr {`, `if cond {`, …)
                         // the `{` opens the body, never a struct literal — even after a
                         // field chain like `recv.field`. Only treat `expr.Type { … }` as
@@ -296,7 +300,7 @@ impl<'a> Parser<'a> {
                                     Some(bad_span),
                                 ));
                             }
-                            let lam = self.parse_task_body_lambda()?;
+                            let lam = self.parse_trailing_block_lambda()?;
                             let lam_span = lam.span;
                             let arg = CallArg {
                                 convention: AccessConvention::Read,

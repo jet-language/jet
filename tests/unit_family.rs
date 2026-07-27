@@ -114,7 +114,7 @@ fn scaled_family_metadata_is_public_api_identity() {
     meter
     millimeter(scale: 2/2000)
 }
-pub fn length() -> Millimeter { return Millimeter.from_float(1.0)? }
+pub fn length() => Millimeter { return Millimeter.from_float(1.0)? }
 "#;
     let (tokens, diagnostics) = jet::Lexer::lex(src);
     assert!(diagnostics.is_empty());
@@ -122,7 +122,7 @@ pub fn length() -> Millimeter { return Millimeter.from_float(1.0)? }
     let snapshot = jet::Publish::ApiFreeze::snapshot_from_items(&program.items, "geometry", "1.0.0");
     assert_eq!(
         snapshot.funcs[0].signature,
-        "fn length() -> Millimeter{package=geometry; family=Length; base=Meter; dimension=L1T0; scale=1/1000; offset=0}"
+        "fn length() => Millimeter{package=geometry; family=Length; base=Meter; dimension=L1T0; scale=1/1000; offset=0}"
     );
 }
 
@@ -133,17 +133,17 @@ fn affine_point_and_delta_have_distinct_public_identities() {
     celsius(scale: 1, offset: 27315/100)
 }
 
-pub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }
-pub fn tolerance() -> CelsiusDelta { return CelsiusDelta.from_float(2.0) }
+pub fn target() => CelsiusPoint { return CelsiusPoint.from_float(20.0) }
+pub fn tolerance() => CelsiusDelta { return CelsiusDelta.from_float(2.0) }
 "#;
     let (tokens, diagnostics) = jet::Lexer::lex(src);
     assert!(diagnostics.is_empty());
     let program = jet::Parser::parse(&tokens).expect("affine family should parse");
     let snapshot = jet::Publish::ApiFreeze::snapshot_from_items(&program.items, "climate", "1.0.0");
     assert!(snapshot.funcs.iter().any(|func| func.signature ==
-        "fn target() -> CelsiusPoint{package=climate; family=Temperature; base=Kelvin; dimension=L0T0H1; scale=1; offset=5463/20}"));
+        "fn target() => CelsiusPoint{package=climate; family=Temperature; base=Kelvin; dimension=L0T0H1; scale=1; offset=5463/20}"));
     assert!(snapshot.funcs.iter().any(|func| func.signature ==
-        "fn tolerance() -> CelsiusDelta{package=climate; family=Temperature; base=Kelvin; dimension=L0T0H1; scale=1; offset=0}"));
+        "fn tolerance() => CelsiusDelta{package=climate; family=Temperature; base=Kelvin; dimension=L0T0H1; scale=1; offset=0}"));
 }
 
 #[test]
@@ -416,7 +416,7 @@ fn run() {
 
     let negative_digits = r#"
 #UnitFamily(Length, base: meter) { meter half(scale: 1/2) }
-fn run() -> Void ? {
+fn run() => Void ? {
     digits :: -1
     Meter.from_half_rounded(1half, .NearestEven, digits: digits)?
 }
@@ -537,7 +537,7 @@ fn rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits() {
 fn quantity_generic_bound_preserves_concrete_unit_and_kind() {
     let src = r#"
 #UnitFamily(Length, base: meter) { meter }
-fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }
+fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) => Q { return value }
 fn run() { source :: 3meter; value :: keep(^source); print("{(value.raw())}") }
 "#;
     let codes = codes_of(src);
@@ -549,14 +549,14 @@ fn quantity_generic_bound_rejects_wrong_dimension_and_kind() {
     let wrong_dimension = r#"
 #UnitFamily(Length) { meter }
 #UnitFamily(Time) { second }
-fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }
+fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) => Q { return value }
 fn run() { source :: 3second; keep(^source) }
 "#;
     assert_eq!(codes_of(wrong_dimension), vec!["E0905"]);
 
     let wrong_kind = r#"
 #UnitFamily(Temperature, base: kelvin) { kelvin celsius(offset: 27315/100) }
-fn keep<Q: Quantity<Temperature, .Delta>>(value: ^Q) -> Q { return value }
+fn keep<Q: Quantity<Temperature, .Delta>>(value: ^Q) => Q { return value }
 fn run() { source :: CelsiusPoint.from_float(3.0); keep(^source) }
 "#;
     assert_eq!(codes_of(wrong_kind), vec!["E0905"]);
@@ -575,9 +575,9 @@ fn imported_quantity_generic_preserves_concrete_type() {
     }
     let units = r#"
 pub #UnitFamily(Length) { meter }
-pub fn sample() -> Meter { return 2meter }
-pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }
-pub fn raw_meter(value: Meter) -> Float { return value.raw() }
+pub fn sample() => Meter { return 2meter }
+pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) => Q { return value }
+pub fn raw_meter(value: Meter) => Float { return value.raw() }
 "#;
     let main = r#"
 use "units" as units
@@ -606,7 +606,7 @@ fn imported_explicit_quantity_argument_checks_its_bound() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("units.jet"),
-        "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }\n",
+        "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) => Q { return value }\n",
     )
     .unwrap();
     let entry = dir.join("main.jet");
@@ -635,8 +635,8 @@ fn run() {
 #[test]
 fn quantity_bounds_reject_unknown_dimensions_and_kinds_at_parse_time() {
     for src in [
-        "fn keep<Q: Quantity<Banana, .Linear>>(value: ^Q) -> Q { return value }",
-        "fn keep<Q: Quantity<Length, .Mystery>>(value: ^Q) -> Q { return value }",
+        "fn keep<Q: Quantity<Banana, .Linear>>(value: ^Q) => Q { return value }",
+        "fn keep<Q: Quantity<Length, .Mystery>>(value: ^Q) => Q { return value }",
     ] {
         let (tokens, lex) = jet::Lexer::lex(src);
         assert!(lex.is_empty(), "lex diagnostics: {lex:?}");
@@ -652,16 +652,16 @@ fn quantity_generic_bounds_are_frozen_into_public_api_identity() {
         jet::Parser::parse(&tokens).expect("public Quantity generic should parse")
     };
     let length = parse(
-        "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }",
+        "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) => Q { return value }",
     );
     let time = parse(
-        "pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) -> Q { return value }",
+        "pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) => Q { return value }",
     );
     let length = jet::Publish::ApiFreeze::snapshot_from_items(&length.items, "units", "1.0.0");
     let time = jet::Publish::ApiFreeze::snapshot_from_items(&time.items, "units", "1.0.0");
     assert_eq!(
         length.funcs[0].signature,
-        "fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q"
+        "fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) => Q"
     );
     assert_ne!(length.funcs[0].signature, time.funcs[0].signature);
     let old = vec![jet::Publish::ApiItem {
@@ -818,7 +818,7 @@ fn run() {
 #[test]
 fn same_unit_arithmetic_compiles() {
     let src = format!(
-        "{}\nfn add(a: Usd, b: Usd) -> Usd {{ return a + b }}\nfn run() {{ t :: add(Usd.from_float(1.0), Usd.from_float(2.0)); print(\"{{(t.raw())}}\") }}\n",
+        "{}\nfn add(a: Usd, b: Usd) => Usd {{ return a + b }}\nfn run() {{ t :: add(Usd.from_float(1.0), Usd.from_float(2.0)); print(\"{{(t.raw())}}\") }}\n",
         FAMILY
     );
     let codes = codes_of(&src);
@@ -967,13 +967,13 @@ fn dimension_exponent_limit_is_a_sema_error_not_a_panic() {
 fn imported_same_leaf_units_keep_distinct_dimensions() {
     let length = r#"
 #UnitFamily(Length) { unit }
-pub fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
-pub fn first(groups: [[String: [Unit]]]) -> Unit { return ~groups[0]["values"][0] }
+pub fn sample() => [[String: [Unit]]] { return [["values": [1unit]]] }
+pub fn first(groups: [[String: [Unit]]]) => Unit { return ~groups[0]["values"][0] }
 "#;
     let time = r#"
 #UnitFamily(Time) { unit }
-pub fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
-pub fn first(groups: [[String: [Unit]]]) -> Unit { return ~groups[0]["values"][0] }
+pub fn sample() => [[String: [Unit]]] { return [["values": [1unit]]] }
+pub fn first(groups: [[String: [Unit]]]) => Unit { return ~groups[0]["values"][0] }
 "#;
     let good = r#"
 use "length" as length
@@ -1022,7 +1022,7 @@ fn same_named_unit_families_from_different_packages_do_not_convert() {
     std::fs::create_dir_all(&dir).unwrap();
     let unit = r#"
 pub #UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }
-pub fn sample() -> Meter { return 1meter }
+pub fn sample() => Meter { return 1meter }
 "#;
     std::fs::write(dir.join("left.jet"), unit).unwrap();
     std::fs::write(dir.join("right.jet"), unit).unwrap();
@@ -1078,8 +1078,8 @@ fn physical_dimensions_cross_file_boundaries_canonically() {
         r#"
 #UnitFamily(Length) { meter }
 #UnitFamily(Time) { second }
-pub fn distance() -> Meter { return 12meter }
-pub fn elapsed() -> Second { return 3second }
+pub fn distance() => Meter { return 12meter }
+pub fn elapsed() => Second { return 3second }
 "#,
     )
     .unwrap();

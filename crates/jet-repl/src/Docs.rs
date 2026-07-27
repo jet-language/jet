@@ -133,7 +133,7 @@ mod tests {
     fn builtin_list_filter_uses_shared_fact() {
         let session = Session::new();
         let doc = lookup(&session, "List.filter").expect("List.filter docs");
-        assert!(doc.starts_with("List.filter(f: fn(T) -> Bool) -> List<T>\n"));
+        assert!(doc.starts_with("List.filter(f: fn(T) => Bool) => List<T>\n"));
         assert!(doc.contains("Keeps items where f(item) is true."));
         assert!(doc.contains("Source: core.collections"));
     }
@@ -154,7 +154,7 @@ mod tests {
         let mut session = Session::new();
         session
             .item_srcs
-            .push("fn answer() -> Int { return 1 }".to_string());
+            .push("fn answer() => Int { return 1 }".to_string());
         session
             .scope
             .insert("answer".to_string(), crate::AST::CtValue::Int(42));

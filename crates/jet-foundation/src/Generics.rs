@@ -438,7 +438,7 @@ pub fn e0915(type_show: &str, span: Span) -> Diagnostic {
         "bare `{value}` interpolation calls `Display` — there is no default for user types"
             .to_string(),
         format!(
-            "add `impl {type_show}.Display {{ fn display(self) -> String {{ … }} }}`, or use `{{value#{}}}` for debug output",
+            "add `impl {type_show}.Display {{ fn display(self) => String {{ … }} }}`, or use `{{value#{}}}` for debug output",
             crate::Syntax::INTERP_SELECTOR_DEBUG
         ),
         Some(span),

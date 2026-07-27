@@ -541,23 +541,23 @@ fn static_guarantees_shared_engine() {
 Index4 :: distinct Int
 
 #Pre(n >= 0, "n non-negative") #Post(result >= 0, "result non-negative")
-fn absish(n: Int) -> Int {
+fn absish(n: Int) => Int {
     return n
 }
 
-#Sanitizer fn clean(raw: String) -> String {
+#Sanitizer fn clean(raw: String) => String {
     return raw
 }
 
-#Replayable fn add(a: Int, b: Int) -> Int {
+#Replayable fn add(a: Int, b: Int) => Int {
     return a + b
 }
 
-fn stamp(path: String) --[Fs]-> String ? {
+fn stamp(path: String) =[Fs]=> String ? {
     return path
 }
 
-fn pick(xs: [String#4], i: Index4) -> String {
+fn pick(xs: [String#4], i: Index4) => String {
     return xs[i]
 }
 

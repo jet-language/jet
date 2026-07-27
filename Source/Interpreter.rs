@@ -450,7 +450,7 @@ mod tests {
 
     #[test]
     fn task_spawn_is_resident() {
-        let src = "use core.tasks as tasks\nfn job() -> Int {\n    return 1\n}\nfn run() {\n    h :: tasks.spawn(() => job())\n    print(h.join())\n}\n";
+        let src = "use core.tasks as tasks\nfn job() => Int {\n    return 1\n}\nfn run() {\n    h :: tasks.spawn(() => job())\n    print(h.join())\n}\n";
         let b = bundle_from(src, "spawn");
         assert_eq!(detect_dev_mode(&b), DevMode::Resident);
     }

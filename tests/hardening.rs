@@ -47,7 +47,7 @@ fn instance_method_args_keep_read_convention() {
 struct Greeter {
     prefix: String
 
-    fn greet(self, name: String) -> String {
+    fn greet(self, name: String) => String {
         return "{self.prefix} {name}"
     }
 }
@@ -92,7 +92,7 @@ fn run() {
 #[test]
 fn or_fallback_keeps_sema_rewrites() {
     let src = r#"
-fn maybe() -> (Int?) {
+fn maybe() => (Int?) {
     return None
 }
 
@@ -114,7 +114,7 @@ fn run() {
 #[test]
 fn bare_question_return_uses_default_error() {
     let src = r#"
-fn parse_count(raw: String) -> Int? {
+fn parse_count(raw: String) => Int? {
     if raw == "" {
         return Err("empty")
     }
@@ -390,7 +390,7 @@ fn hyphenated_file_name_gets_sane_module_alias() {
     let dir = temp_project("hyphen");
     fs::write(
         dir.join("my-utils.jet"),
-        "pub fn helper() -> Int {\n    return 42\n}\n",
+        "pub fn helper() => Int {\n    return 42\n}\n",
     )
     .unwrap();
     fs::write(
@@ -439,12 +439,12 @@ fn duplicate_file_stems_get_unique_module_names() {
     fs::create_dir_all(dir.join("b")).unwrap();
     fs::write(
         dir.join("a/util.jet"),
-        "pub fn one() -> Int {\n    return 1\n}\n",
+        "pub fn one() => Int {\n    return 1\n}\n",
     )
     .unwrap();
     fs::write(
         dir.join("b/util.jet"),
-        "pub fn two() -> Int {\n    return 2\n}\n",
+        "pub fn two() => Int {\n    return 2\n}\n",
     )
     .unwrap();
     fs::write(

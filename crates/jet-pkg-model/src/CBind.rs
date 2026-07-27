@@ -8,7 +8,7 @@
 //! as an `#Extern module c.<lib>` overlay, which still wins on merge.
 //!
 //! Output is a `#Bindgen module c.<lib>.__bindgen__ { … }` cache as parsed by
-//! `src/cffi.rs`; each binding is `fn name(p: T, …) [-> R] = "c_symbol";`.
+//! `src/cffi.rs`; each binding is `fn name(p: T, …) [=> R] = "c_symbol";`.
 
 /// Compute the bind hash for a header + cflags pair (Phase 3 invalidation).
 /// The hash is SHA-256(header_src || "\0" || cflags_str) rendered as 64 hex digits.
@@ -272,7 +272,7 @@ fn render_binding(p: &Proto) -> Result<String, String> {
     }
     let params_str = params.join(", ");
     let line = match ret_jet {
-        Some(r) => format!("fn {}({}) -> {} = \"{}\";", p.name, params_str, r, p.name),
+        Some(r) => format!("fn {}({}) => {} = \"{}\";", p.name, params_str, r, p.name),
         None => format!("fn {}({}) = \"{}\";", p.name, params_str, p.name),
     };
     Ok(line)
@@ -387,13 +387,13 @@ mod tests {
         assert_eq!(valid.bound, vec!["foo"]);
         assert!(valid
             .source
-            .contains("fn foo(value: Int) -> Int = \"foo\";"));
+            .contains("fn foo(value: Int) => Int = \"foo\";"));
 
         let leading_underscore = generate("int _foo(int value);", "underscore").unwrap();
         assert_eq!(leading_underscore.bound, vec!["_foo"]);
         assert!(leading_underscore
             .source
-            .contains("fn _foo(value: Int) -> Int = \"_foo\";"));
+            .contains("fn _foo(value: Int) => Int = \"_foo\";"));
     }
 
     #[test]
@@ -406,7 +406,7 @@ mod tests {
         "#;
         let result = generate(header, "hostile").unwrap();
         assert_eq!(result.bound, vec!["valid"]);
-        assert!(result.source.contains("fn valid(value: Int) -> Int"));
+        assert!(result.source.contains("fn valid(value: Int) => Int"));
         assert!(!result.source.contains("trailing_comma"));
         assert!(!result.source.contains("trailing_junk"));
         assert!(!result.source.contains("unbalanced"));
@@ -426,15 +426,15 @@ mod tests {
         assert!(r.source.contains("#Bindgen module c.jetc.__bindgen__ {"));
         assert!(r
             .source
-            .contains("fn jetc_add(a: Int, b: Int) -> Int = \"jetc_add\";"));
+            .contains("fn jetc_add(a: Int, b: Int) => Int = \"jetc_add\";"));
         assert!(r
             .source
-            .contains("fn scale(x: Float, k: Float) -> Float = \"scale\";"));
+            .contains("fn scale(x: Float, k: Float) => Float = \"scale\";"));
         assert!(r.source.contains("fn reset() = \"reset\";"));
         assert!(r
             .source
-            .contains("fn name_of(id: Int) -> String = \"name_of\";"));
-        assert!(r.source.contains("fn is_ready() -> Bool = \"is_ready\";"));
+            .contains("fn name_of(id: Int) => String = \"name_of\";"));
+        assert!(r.source.contains("fn is_ready() => Bool = \"is_ready\";"));
         assert_eq!(r.bound.len(), 5);
         assert!(r.skipped.is_empty());
     }
@@ -449,7 +449,7 @@ mod tests {
             void log_msg(const char *fmt, ...);
         "#;
         let r = generate(h, "lib").unwrap();
-        assert!(r.source.contains("fn ok(x: Int) -> Int = \"ok\";"));
+        assert!(r.source.contains("fn ok(x: Int) => Int = \"ok\";"));
         // `void*` return, `int*` param, and varargs are all skipped.
         let skipped: Vec<&str> = r.skipped.iter().map(|(n, _)| n.as_str()).collect();
         assert!(skipped.contains(&"raw_alloc"));
@@ -469,7 +469,7 @@ mod tests {
         let r = generate("int f(int, double);", "m").unwrap();
         assert!(r
             .source
-            .contains("fn f(arg0: Int, arg1: Float) -> Int = \"f\";"));
+            .contains("fn f(arg0: Int, arg1: Float) => Int = \"f\";"));
     }
 
     // c43: U32/uint32_t boundary — C integers of all widths map to Jet `Int`.
@@ -489,19 +489,19 @@ mod tests {
         // surface; signed vs unsigned and width are transparent to Jet callers.
         assert!(
             r.source
-                .contains("fn add_u32(a: Int, b: Int) -> Int = \"add_u32\";"),
+                .contains("fn add_u32(a: Int, b: Int) => Int = \"add_u32\";"),
             "uint32_t must map to Int: got:\n{}",
             r.source
         );
         assert!(
             r.source
-                .contains("fn sub_i32(a: Int, b: Int) -> Int = \"sub_i32\";"),
+                .contains("fn sub_i32(a: Int, b: Int) => Int = \"sub_i32\";"),
             "int32_t must map to Int: got:\n{}",
             r.source
         );
         assert!(
             r.source
-                .contains("fn identity_u64(x: Int) -> Int = \"identity_u64\";"),
+                .contains("fn identity_u64(x: Int) => Int = \"identity_u64\";"),
             "uint64_t must map to Int: got:\n{}",
             r.source
         );

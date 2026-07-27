@@ -1,7 +1,15 @@
-Error [E0329]: a nested guard body needs braces
+Error [E0071]: this effect-only `if` uses a result arrow
+  --> tests/ui/subjectless_guard_direct_nesting.jet:2:13
+    |
+  2 |     if true -> if false -> print("never")
+    |             ^^
+ Why: an arrow says that control selects a value; this body only performs work
+ Fix: remove `->`; keep the one-line body adjacent or use braces
+
+Error [E0329]: a nested one-line `if` needs braces
   --> tests/ui/subjectless_guard_direct_nesting.jet:2:16
     |
   2 |     if true -> if false -> print("never")
     |                ^^
- Why: a braceless guard owns exactly one non-`if` statement, so direct nesting would be ambiguous
+ Why: an adjacent body owns one non-`if` statement, so direct nesting is ambiguous
  Fix: wrap the nested `if` in `{ ... }`

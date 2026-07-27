@@ -265,6 +265,9 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         // The parser only admits them inside a loop body, so they are always valid
         // where they appear; the label name is reproduced verbatim at lowering.
         Stmt::Break(_) | Stmt::Continue(_) | Stmt::BreakLabel(..) | Stmt::ContinueLabel(..) => true,
+        Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => {
+            expr_in_subset(value, cx, locals)
+        }
         // c109 Phase 4: a `when`/match (`Stmt::Switch`). Covered only in the two
         // shapes the TIR reproduces exactly — an exhaustive enum match or an
         // all-range-arm scalar switch (see `switch_in_subset`).

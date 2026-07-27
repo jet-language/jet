@@ -45,8 +45,8 @@ existing drift found during review.
 
 ## Law 4 — Effects
 
-- I/O effects are declared with the right effect marker (`--[Fs]->`, `--[Net]->`,
-  `--[Exec]->`, etc.).
+- I/O effects are declared with the right effect marker (`=[Fs]=>`, `=[Net]=>`,
+  `=[Exec]=>`, etc.).
 - Pure functions carry no effect markers; the compiler enforces this.
 - A function that performs multiple effects lists all of them; no hidden IO.
 - Comptime-evaluable functions satisfy D-CTCORE1's pure-Core whitelist.

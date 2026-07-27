@@ -1,16 +1,15 @@
-fn bump(n: Int) -> Int { return n + 1 }
-
+fn bump(n: Int) => Int = n + 1
 alias Boxed<T> = T
 
 enum CallbackPayload {
-    Callback(Boxed<fn(Int) -> Int>)
+    Callback(Boxed<fn(Int) => Int>)
 }
 
 fn run() {
-    callbacks :: [fn(Int) -> Int].{bump}
-    bad_item :: callbacks.para_filter((callback: fn(Int) -> Int) => true)
+    callbacks :: [fn(Int) => Int].{bump}
+    bad_item :: callbacks.para_filter((callback: fn(Int) => Int) => true)
     bad_result :: [1].para_map((n: Int) => (x: Int) => x + n)
-    bad_acc :: [1].para_fold(() => (x: Int) => x, (callback: fn(Int) -> Int, n: Int) => callback, (left: fn(Int) -> Int, right: fn(Int) -> Int) => left)
+    bad_acc :: [1].para_fold(() => (x: Int) => x, (callback: fn(Int) => Int, n: Int) => callback, (left: fn(Int) => Int, right: fn(Int) => Int) => left)
     payloads :: [CallbackPayload].{CallbackPayload.Callback(bump)}
     bad_enum :: payloads.para_map((payload: CallbackPayload) => 1)
     stored :: (n: Int) => n + 1

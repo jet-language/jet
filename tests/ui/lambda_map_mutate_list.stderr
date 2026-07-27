@@ -13,3 +13,11 @@ Error [E0507]: while the loop is reading `nums`, nothing may change it
     |             ^^^^
  Why: a `loop` borrows the whole collection until the body finishes
  Fix: collect changes into a second list, or loop over indices: `loop i; 0..nums.len()-1 { }`
+
+Error [E0204]: `nums` is already shared in this call, so it can't be changed here too
+  --> tests/ui/lambda_map_mutate_list.jet:5:13
+    |
+  5 |             nums.push(0)
+    |             ^^^^
+ Why: while something is being looked at, nobody else may be changing it
+ Fix: drop the extra use of `nums`, or copy first with `~nums`

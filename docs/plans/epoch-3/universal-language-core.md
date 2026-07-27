@@ -220,7 +220,7 @@ package/environment/CLI program.
 
 Card #436 is governed by `D-CABI-CALLBACK1=A`, `D-CABI-RESULT1=C`, and
 `D-CABI-PLATFORM1=A`. C callbacks are non-null, monomorphic, and C-safe.
-They must be capture-free or have an explicit `--[]->` bound. They remain
+They must be capture-free or have an explicit `=[]=>` bound. They remain
 restricted to the foreign-thread-safe subset. Generic Result stays outside C
 declarations; raw status/out-pointer
 functions get ordinary Jet wrappers. Alternate native conventions use a local

@@ -1,55 +1,55 @@
 Error [E0209]: implicit clone of `e.addr`
-  --> tests/ui/core_consuming_borrowed_field.jet:12:26
+  --> tests/ui/core_consuming_borrowed_field.jet:11:50
     |
- 12 |     return DataTree.Text(e.addr)
-    |                          ^^^^^^
+ 11 | fn shallow(e: Email) => DataTree = DataTree.Text(e.addr)
+    |                                                  ^^^^^^
  Why: `Text` stores its own copy of this value
  Fix: write `~e.addr` to copy explicitly
 
 Error [E0209]: implicit clone of `e.nested.text`
-  --> tests/ui/core_consuming_borrowed_field.jet:16:26
+  --> tests/ui/core_consuming_borrowed_field.jet:12:49
     |
- 16 |     return DataTree.Text(e.nested.text)
-    |                          ^^^^^^^^^^^^^
+ 12 | fn nested(e: Email) => DataTree = DataTree.Text(e.nested.text)
+    |                                                 ^^^^^^^^^^^^^
  Why: `Text` stores its own copy of this value
  Fix: write `~e.nested.text` to copy explicitly
 
 Error [E0209]: implicit clone of `e.items[0].text`
-  --> tests/ui/core_consuming_borrowed_field.jet:20:26
+  --> tests/ui/core_consuming_borrowed_field.jet:13:50
     |
- 20 |     return DataTree.Text(e.items[0].text)
-    |                          ^^^^^^^^^^^^^^^
+ 13 | fn indexed(e: Email) => DataTree = DataTree.Text(e.items[0].text)
+    |                                                  ^^^^^^^^^^^^^^^
  Why: `Text` stores its own copy of this value
  Fix: write `~e.items[0].text` to copy explicitly
 
 Error [E0209]: implicit clone of `e.items[i + 1].text`
-  --> tests/ui/core_consuming_borrowed_field.jet:24:26
+  --> tests/ui/core_consuming_borrowed_field.jet:14:65
     |
- 24 |     return DataTree.Text(e.items[i + 1].text)
-    |                          ^^^^^^^^^^^^^^^^^^^
+ 14 | fn computed_index(e: Email, i: Int) => DataTree = DataTree.Text(e.items[i + 1].text)
+    |                                                                 ^^^^^^^^^^^^^^^^^^^
  Why: `Text` stores its own copy of this value
  Fix: write `~e.items[i + 1].text` to copy explicitly
 
 Error [E0209]: implicit clone of `e.items[pick()].text`
-  --> tests/ui/core_consuming_borrowed_field.jet:32:26
+  --> tests/ui/core_consuming_borrowed_field.jet:16:53
     |
- 32 |     return DataTree.Text(e.items[pick()].text)
-    |                          ^^^^^^^^^^^^^^^^^^^^
+ 16 | fn call_index(e: Email) => DataTree = DataTree.Text(e.items[pick()].text)
+    |                                                     ^^^^^^^^^^^^^^^^^^^^
  Why: `Text` stores its own copy of this value
  Fix: write `~e.items[pick()].text` to copy explicitly
 
 Error [E0209]: implicit clone of `e.items[-(-i)].text`
-  --> tests/ui/core_consuming_borrowed_field.jet:36:26
+  --> tests/ui/core_consuming_borrowed_field.jet:17:76
     |
- 36 |     return DataTree.Text(e.items[-(-i)].text)
-    |                          ^^^^^^^^^^^^^^^^^^^
+ 17 | fn unary_parenthesized_index(e: Email, i: Int) => DataTree = DataTree.Text(e.items[-(-i)].text)
+    |                                                                            ^^^^^^^^^^^^^^^^^^^
  Why: `Text` stores its own copy of this value
  Fix: write `~e.items[-(-i)].text` to copy explicitly
 
 Error [E0209]: implicit clone of this consumed expression
-  --> tests/ui/core_consuming_borrowed_field.jet:40:26
+  --> tests/ui/core_consuming_borrowed_field.jet:19:26
     |
- 40 |     return DataTree.Text(e.items[if choose_first { 0 } else { 1 }].text)
-    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 19 |     return DataTree.Text(e.items[if choose_first -> 0 else -> 1].text)
+    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
  Why: `Text` stores its own copy of this value
  Fix: write `~` before the highlighted expression to copy it explicitly

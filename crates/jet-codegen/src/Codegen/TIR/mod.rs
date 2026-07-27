@@ -1556,9 +1556,14 @@ pub enum TStmt {
         exclusive: bool,
         body: Vec<TStmt>,
     },
-    /// `break` / `name.break()` (label resolved at lowering).
+    /// `break` / `break(name)` (label resolved at lowering).
     Break(Option<String>),
-    /// Source `next` / `name.next()`; internally retained as Continue.
+    /// `break value` / `break(name, value)`.
+    BreakValue {
+        label: Option<String>,
+        value: TExpr,
+    },
+    /// Source `next` / `next(name)`; internally retained as Continue.
     Continue(Option<String>),
     /// c109 Phase 4: an exhaustive `when`/match on an enum subject (`Stmt::Switch`
     /// whose arms are all variant patterns). Lowers to a Rust `match`, mirroring
@@ -1893,6 +1898,10 @@ pub enum TExprKind {
     /// Unit / default / uninit / comptime / host forms — structured facts only.
     /// Scalar comptime values use IntLit/BoolLit/CharLit via `lower_comptime_scalar`.
     Unit,
+    /// Compiler-private result block used by finite yielding loops. Unlike a
+    /// lambda, it executes in the current function, so `return` and cleanup
+    /// retain ordinary loop semantics.
+    InlineBlock(Vec<TStmt>),
     DefaultLit,
     Uninit,
     CtLit(crate::AST::CtValue),
@@ -2764,7 +2773,7 @@ pub enum TTryConvert {
     None,
     /// Source error implements `Fallible` — `.map_err(|e| e.to_error())` (D-ERR2).
     Fallible,
-    /// Declared `impl Source -> Target` conversion — `.map_err(<fn>)` (D-ERR-CONV);
+    /// Declared `impl Source => Target` conversion — `.map_err(<fn>)` (D-ERR-CONV);
     /// holds the mangled Rust conversion-function name.
     Typed(String),
     /// D-UNIONTYPE1=A: wrap the error into a compiler-generated union enum.
@@ -2787,9 +2796,9 @@ pub enum TOrFallback {
     Break,
     /// D-ORRETURN-ERG1=B: `?? next` — loop skip.
     Continue,
-    /// D-LOOPLABEL3=A: `?? label.break()`.
+    /// D-LOOPLABEL3=A as amended by D-ARROW-CONTROL1=A: `?? break(label)`.
     BreakLabel(String),
-    /// D-LOOPLABEL3=A: `?? label.next()`.
+    /// D-LOOPLABEL3=A as amended by D-ARROW-CONTROL1=A: `?? next(label)`.
     ContinueLabel(String),
 }
 

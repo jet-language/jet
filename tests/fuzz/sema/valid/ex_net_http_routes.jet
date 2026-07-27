@@ -8,26 +8,20 @@ use core.http.server as server
 use core.net as net
 use core.tasks as tasks
 
-fn handle_root(req: HttpRequest) -> HttpResponse ? HttpError {
-    return Ok(server.response(200, "welcome"))
-}
-
-fn handle_user(req: HttpRequest) -> HttpResponse ? HttpError {
+fn handle_root(req: HttpRequest) => HttpResponse ? HttpError = Ok(server.response(200, "welcome"))
+fn handle_user(req: HttpRequest) => HttpResponse ? HttpError {
     id :: req.param("id") ?? "unknown"
     return Ok(server.response(200, "user={id}"))
 }
 
-fn handle_create(req: HttpRequest) -> HttpResponse ? HttpError {
-    return Ok(server.response(201, "created"))
-}
-
+fn handle_create(req: HttpRequest) => HttpResponse ? HttpError = Ok(server.response(201, "created"))
 fn run() {
     router :: http.router()
     router.get("/", handle_root)
     router.get("/users/:id", handle_user)
     router.post("/users", handle_create)
     (sender, ch) :: tasks.channel<String>()
-    tasks.spawn(take(sender, router) () => {
+    tasks.spawn(() => {
         listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
         addr :: listener.local_addr() ?? panic("address failed")
         sender.send(~addr)

@@ -2293,13 +2293,13 @@ mod instance_collision_tests {
 module everything<T> {
     const answer = 42
     tag Marked;
-    trait Show { fn show(self) -> T }
+    trait Show { fn show(self) => T }
     struct Boxed { value: T }
     enum Maybe { Empty Value(T) }
-    impl Boxed.Show { fn show(self) -> T { return self.value } }
-    fn id(value: T) -> T { return ~value }
+    impl Boxed.Show { fn show(self) => T { return self.value } }
+    fn id(value: T) => T { return ~value }
     module nested { fn nested() {} }
-    module inner<U> { fn inner(value: U) -> U { return ~value } }
+    module inner<U> { fn inner(value: U) => U { return ~value } }
     module int_inner = inner<Int>
     #Test("smoke") { expect(answer == 42) }
     #Bench("work") { expect(answer == 42) }

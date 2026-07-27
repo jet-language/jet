@@ -229,7 +229,7 @@ pub(crate) fn is_covered_expanded_collection_ty(ty: &Type, cx: &Cx) -> bool {
 
 /// c109 Phase 21: a `Task<T>`/`Channel<T>`/`Sender<T>` element type. Any covered value
 /// type, PLUS `Unit` (`Type::Named("Unit")`) — the result type of a `() => { … }` spawn
-/// closure that returns nothing (`tasks.spawn(take(s) () => { s.send(…) })` →
+/// closure that returns nothing (`tasks.spawn(() => { s.send(…) })` →
 /// `Task<Unit>`, the `[Task<Unit>]` worker list in 34_parallel_scan). `Unit` renders via
 /// `cx.rust_type` to `()` (Source/Codegen/Context.rs), so `JetTask<()>` is byte-identical
 /// to the AST path. (`Unit` is not a covered value type generally — it has no binding/
@@ -428,7 +428,7 @@ pub(crate) fn foreign_struct_lit_in_subset(
         .all(|a| is_type_var_param_ty(a, cx) || is_subset_param_ty(a, cx))
 }
 
-/// c109 Phase 13: a `fn(…) -> …` parameter/return type the subset lowers. The fn-type
+/// c109 Phase 13: a Jet `fn(…) => …` parameter/return type the subset lowers. The fn-type
 /// renders via `cx.rust_type` (`Box<dyn Fn(…) -> … [+ Send + Sync]>`) exactly as the
 /// AST `rust_param_type`/`rust_return_type` do — passed/returned by value (no `&`,
 /// `param_place`'s deref matches `emit_func`'s slot). The param/return + arg types must

@@ -1,15 +1,15 @@
 Error [E2807]: route `/` is registered both by `builder` and `routes_collision/index.jet`
-  --> tests/ui/web_app_route_collision.jet:8:39
+  --> tests/ui/web_app_route_collision.jet:4:49
     |
-  8 |     return web.app().route("/", home).routes(from: "routes_collision").csr()
-    |                                       ^^^^^^
+  4 | fn app() => WebApp = web.app().route("/", home).routes(from: "routes_collision").csr()
+    |                                                 ^^^^^^
  Why: explicit builder entries and `.routes(from:)` conventions must not claim the same path (D-WEBAUTHOR1)
  Fix: remove one registration, or rename the convention file
 
 Error [E2807]: earlier registration of route `/`
-  --> tests/ui/web_app_route_collision.jet:8:22
+  --> tests/ui/web_app_route_collision.jet:4:32
     |
-  8 |     return web.app().route("/", home).routes(from: "routes_collision").csr()
-    |                      ^^^^^
+  4 | fn app() => WebApp = web.app().route("/", home).routes(from: "routes_collision").csr()
+    |                                ^^^^^
  Why: both spans are kept so provenance stays audible
  Fix: delete or rename this registration
