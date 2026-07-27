@@ -8973,6 +8973,8 @@ impl LowerCtx<'_, '_> {
                         .declare_func_in_func(self.host.core.process_exit, self.b.func);
                     let a0 = self.lower_expr(&args[0])?;
                     self.b.ins().call(host_ref, &[a0]);
+                    // Host sets exit_code + trap; unwind to epilogue like rich panic.
+                    self.emit_trap_check()?;
                     return Ok(self.b.ins().iconst(types::I8, 0));
                 }
                 if module == "core.process" {

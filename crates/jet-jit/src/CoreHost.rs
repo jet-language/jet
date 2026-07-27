@@ -1285,7 +1285,13 @@ extern "C" fn jet_jit_io_input(has_prompt: i8, prompt: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_process_exit(code: i64) {
-    std::process::exit(code as i32);
+    // Soft exit: set the code + trap so `resident_invoke` returns `Ran` with
+    // that exit status. Never `std::process::exit` — that would kill the
+    // resident/test process (three-way battery, `jet serve`, …).
+    Concurrency::with_runtime_mut(|rt| {
+        rt.exit_code = Some(code as i32);
+        rt.set_trap("__jet_process_exit__");
+    });
 }
 
 pub(crate) struct CoreHostFns {

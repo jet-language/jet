@@ -248,14 +248,17 @@ extern "C" fn jet_jit_list_join_str(list: i64, sep_id: i64) -> i64 {
             rt.set_trap("list join received an invalid separator");
             return 0;
         };
-        let Some(parts) = xs
+        // Match AOT JoinSep: `iter().map(|x| x.jet_show()).collect::<Vec<_>>().join(sep)`.
+        // String elements are heap handles; Int (and other non-string carriers) show as
+        // decimal — never trap. AOT already accepts `[Int].join(",")`.
+        let parts: Vec<String> = xs
             .iter()
-            .map(|id| rt.heap.clone_string(*id))
-            .collect::<Option<Vec<_>>>()
-        else {
-            rt.set_trap("list join received a non-string element");
-            return 0;
-        };
+            .map(|id| {
+                rt.heap
+                    .clone_string(*id)
+                    .unwrap_or_else(|| id.to_string())
+            })
+            .collect();
         let joined = parts.join(&sep);
         rt.heap.alloc_string(joined)
     })
