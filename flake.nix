@@ -116,6 +116,8 @@
             pkgs.clang
             pkgs.lld
             pkgs.nodejs_22
+            # agent_workloads / verify-full adapters shell out to python3.
+            pkgs.python3
             pkgs.nixfmt
             pkgs.ripgrep
             pkgs.jq
@@ -192,6 +194,8 @@
             # qemu-aarch64. OS image and VM tooling does not belong here.
             pkgs.qemu
             pkgs.nodejs_22
+            # agent_workloads / verify-full adapters shell out to python3.
+            pkgs.python3
             pkgs.nixfmt
             pkgs.ripgrep
             pkgs.jq
