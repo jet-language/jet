@@ -150,7 +150,13 @@ pub(crate) mod json_rt {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as i64;
-        eprintln!("{{\"level\":\"info\",\"body\":\"{msg}\",\"ts\":{ts}}}");
+        // Capture into JitRuntime.stderr (like jit_log_emit / core.io). Raw
+        // eprintln! escapes the ProgramOutput buffer and breaks JIT/AOT parity.
+        let line = format!("{{\"level\":\"info\",\"body\":\"{msg}\",\"ts\":{ts}}}");
+        crate::Concurrency::with_runtime_mut(|rt| {
+            rt.stderr.push_str(&line);
+            rt.stderr.push('\n');
+        });
     }
 
     pub fn parse_datatree(text: &str) -> Result<DataTree, JSONError> {
