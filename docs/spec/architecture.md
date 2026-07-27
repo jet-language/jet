@@ -222,9 +222,14 @@ server version. The runtime gates raw commands against that contract. A
 connection checks `session.status`, then creates the session with
 `session.new`; only that command's matched capability map enables optional
 protocols such as CDP. `Browser.context()` creates an isolated BiDi user
-context, and the context owns its pages. The beginner path uses semantic
-accessibility locators and bounded waits. The expert path exposes raw BiDi and
-capability-checked CDP commands through `Browser.protocol`.
+context. `context.page()` and `context.tab()` both create a BiDi tab under
+that context; the context owns its pages. `page.main_frame()` and
+`page.frames()` expose the browsing-context tree (main plus child frames)
+without auto-closing listed frames on drop — frame close is explicit.
+`frame.close()` on the main frame marks the page closed. The beginner path
+uses semantic accessibility locators and bounded waits. The expert path
+exposes raw BiDi and capability-checked CDP commands through
+`Browser.protocol`.
 
 The protocol core accepts only strict JSON objects and exact response IDs.
 Malformed messages, protocol errors, unsupported profiles, unavailable expert

@@ -722,7 +722,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
         ],
         // D-BROWSER-AUTO1=A: native BiDi profile/session entry points.
         "core.browser" => &[
-            "Browser", "BrowserContext", "BrowserPage", "BrowserLocator",
+            "Browser", "BrowserContext", "BrowserPage", "BrowserFrame", "BrowserLocator",
             "BrowserEvent", "BrowserTrace", "BrowserError", "BrowserCapabilities",
             "BrowserProfile", "BrowserTimeout", "BrowserProtocol", "BrowserLocked",
             "profile", "timeout", "locked", "connect", "connect_profile",
@@ -766,7 +766,7 @@ pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
             "Method" | "Status" | "Version" | "HeaderName" | "HeaderValue"
             | "Headers" | "Request" | "Response" | "Body" | "Handler" | "HTTPError" | "Client" | "Proxy")
         | ("core.browser",
-            "Browser" | "BrowserContext" | "BrowserPage" | "BrowserLocator"
+            "Browser" | "BrowserContext" | "BrowserPage" | "BrowserFrame" | "BrowserLocator"
             | "BrowserEvent" | "BrowserTrace" | "BrowserError" | "BrowserCapabilities"
             | "BrowserProfile" | "BrowserTimeout" | "BrowserProtocol" | "BrowserLocked")
         // D-WEBAPP1=D: namespaced `web.App` / `web.Page` / `web.Context` / `web.Mount`.

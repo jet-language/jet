@@ -250,6 +250,7 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
                 | "Browser"
                 | "BrowserContext"
                 | "BrowserPage"
+                | "BrowserFrame"
                 | "BrowserLocator"
                 | "BrowserEvent"
                 | "BrowserTrace"
@@ -284,8 +285,11 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
             method,
             "capabilities" | "context" | "subscribe" | "next_event" | "protocol" | "trace" | "close"
         ),
-        Some("BrowserContext") => matches!(method, "page" | "close"),
-        Some("BrowserPage") => matches!(method, "goto" | "get_by_role" | "close"),
+        Some("BrowserContext") => matches!(method, "page" | "tab" | "close"),
+        Some("BrowserPage") => {
+            matches!(method, "goto" | "get_by_role" | "close" | "main_frame" | "frames")
+        }
+        Some("BrowserFrame") => method == "close",
         Some("BrowserLocator") => matches!(method, "wait" | "click"),
         Some("BrowserEvent") => method == "kind",
         Some("BrowserProtocol") => method == "send",

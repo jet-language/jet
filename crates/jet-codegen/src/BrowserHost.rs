@@ -45,6 +45,7 @@ enum BrowserHostValue {
     Browser(JetBrowser),
     Context(JetBrowserContext),
     Page(JetBrowserPage),
+    Frame(JetBrowserFrame),
     Locator(JetBrowserLocator),
     Protocol(JetBrowserProtocol),
 }
@@ -310,6 +311,10 @@ pub(crate) fn eval_method(
                 jet_browser_context_page(context),
                 |page| store("BrowserPage", BrowserHostValue::Page(page)),
             ),
+            (BrowserHostValue::Context(context), "tab") => result(
+                jet_browser_context_tab(context),
+                |page| store("BrowserPage", BrowserHostValue::Page(page)),
+            ),
             (BrowserHostValue::Context(context), "close") => {
                 result(jet_browser_context_close(context), |_| CtValue::Unit)
             }
@@ -325,8 +330,26 @@ pub(crate) fn eval_method(
                     &string_arg(args, 1, span)?,
                 )),
             ),
+            (BrowserHostValue::Page(page), "main_frame") => result(
+                jet_browser_page_main_frame(page),
+                |frame| store("BrowserFrame", BrowserHostValue::Frame(frame)),
+            ),
+            (BrowserHostValue::Page(page), "frames") => result(
+                jet_browser_page_frames(page),
+                |frames| {
+                    CtValue::List(
+                        frames
+                            .into_iter()
+                            .map(|frame| store("BrowserFrame", BrowserHostValue::Frame(frame)))
+                            .collect(),
+                    )
+                },
+            ),
             (BrowserHostValue::Page(page), "close") => {
                 result(jet_browser_page_close(page), |_| CtValue::Unit)
+            }
+            (BrowserHostValue::Frame(frame), "close") => {
+                result(jet_browser_frame_close(frame), |_| CtValue::Unit)
             }
             (BrowserHostValue::Locator(locator), "wait") => result(
                 jet_browser_locator_wait(

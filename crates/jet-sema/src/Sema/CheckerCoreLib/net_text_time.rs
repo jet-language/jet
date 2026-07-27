@@ -19,8 +19,9 @@ impl<'a> Checker<'a> {
     ) -> bool {
         let expected = match (type_name, method) {
             ("Browser", "capabilities" | "context" | "close" | "trace")
-            | ("BrowserContext", "page" | "close")
-            | ("BrowserPage", "close")
+            | ("BrowserContext", "page" | "tab" | "close")
+            | ("BrowserPage", "close" | "main_frame" | "frames")
+            | ("BrowserFrame", "close")
             | ("BrowserLocator", "click")
             | ("BrowserEvent", "kind")
             | ("BrowserCapabilities", "bidi" | "cdp" | "profile")
@@ -41,8 +42,9 @@ impl<'a> Checker<'a> {
         if matches!(
             (type_name, method),
             ("Browser", "context" | "subscribe" | "close" | "next_event" | "protocol")
-                | ("BrowserContext", "page" | "close")
-                | ("BrowserPage", "goto" | "close")
+                | ("BrowserContext", "page" | "tab" | "close")
+                | ("BrowserPage", "goto" | "close" | "frames")
+                | ("BrowserFrame", "close")
                 | ("BrowserLocator", "wait" | "click")
                 | ("BrowserProtocol", "send")
         ) {
@@ -176,7 +178,7 @@ pub fn net_method_return(
         ("Browser", "trace") => {
             Some(Some(Type::Named("BrowserTrace".to_string())))
         }
-        ("BrowserContext", "page") => Some(Some(Type::Result {
+        ("BrowserContext", "page" | "tab") => Some(Some(Type::Result {
             ok: Box::new(Type::Named("BrowserPage".to_string())),
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
@@ -192,9 +194,21 @@ pub fn net_method_return(
             ok: Box::new(unit.clone()),
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
+        ("BrowserPage", "main_frame") => Some(Some(Type::Result {
+            ok: Box::new(Type::Named("BrowserFrame".to_string())),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
+        ("BrowserPage", "frames") => Some(Some(Type::Result {
+            ok: Box::new(Type::List(Box::new(Type::Named("BrowserFrame".to_string())))),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
         ("BrowserPage", "get_by_role") => {
             Some(Some(Type::Named("BrowserLocator".to_string())))
         }
+        ("BrowserFrame", "close") => Some(Some(Type::Result {
+            ok: Box::new(unit.clone()),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
         ("BrowserLocator", "wait") => Some(Some(Type::Result {
             ok: Box::new(unit.clone()),
             err: Box::new(Type::Named("BrowserError".to_string())),
@@ -604,7 +618,7 @@ pub fn http_type_method_return(
             _ => None,
         },
         Type::Named(n) if n == "BrowserContext" => match (method, _args.len()) {
-            ("page", 0) => Some(Some(Type::Result {
+            ("page" | "tab", 0) => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("BrowserPage".to_string())),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             })),
@@ -619,7 +633,22 @@ pub fn http_type_method_return(
                 ok: Box::new(unit_ty()),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             })),
+            ("main_frame", 0) => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("BrowserFrame".to_string())),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
+            ("frames", 0) => Some(Some(Type::Result {
+                ok: Box::new(Type::List(Box::new(Type::Named("BrowserFrame".to_string())))),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
             ("get_by_role", 2) => mk("BrowserLocator"),
+            _ => None,
+        },
+        Type::Named(n) if n == "BrowserFrame" => match (method, _args.len()) {
+            ("close", 0) => Some(Some(Type::Result {
+                ok: Box::new(unit_ty()),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
             _ => None,
         },
         Type::Named(n) if n == "BrowserLocator" => match (method, _args.len()) {
