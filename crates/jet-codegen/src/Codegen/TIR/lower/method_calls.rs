@@ -372,11 +372,77 @@ pub(crate) fn lower_method_call(
         };
         Some(helper)
     });
+    fn crypto_helper_return_ty(helper: &str) -> Type {
+        let u8_list = Type::List(Box::new(Type::IntN {
+            signed: false,
+            bits: 8,
+        }));
+        match helper {
+            "__digest256_hex" | "__digest512_hex" | "__x25519_public_text" | "__password_text" => {
+                Type::String
+            }
+            "__signing_public" => Type::Named("VerifyKey".into()),
+            "__x25519_public" => Type::Named("X25519PublicKey".into()),
+            "__signing_generate" => Type::Result {
+                ok: Box::new(Type::Named("SigningKey".into())),
+                err: Box::new(Type::Named("CryptoError".into())),
+            },
+            "__x25519_generate" => Type::Result {
+                ok: Box::new(Type::Named("X25519SecretKey".into())),
+                err: Box::new(Type::Named("CryptoError".into())),
+            },
+            "__secret_from_text" | "__secret_from_bytes" => Type::Result {
+                ok: Box::new(Type::Named("Secret".into())),
+                err: Box::new(Type::Named("CryptoError".into())),
+            },
+            "__verify_key_from_bytes" => Type::Result {
+                ok: Box::new(Type::Named("VerifyKey".into())),
+                err: Box::new(Type::Named("CryptoError".into())),
+            },
+            "__x25519_public_from_bytes" | "__x25519_public_from_text" => Type::Result {
+                ok: Box::new(Type::Named("X25519PublicKey".into())),
+                err: Box::new(Type::Named("CryptoError".into())),
+            },
+            "__signature_from_bytes" => Type::Result {
+                ok: Box::new(Type::Named("Signature".into())),
+                err: Box::new(Type::Named("CryptoError".into())),
+            },
+            "__sealed_from_bytes" => Type::Result {
+                ok: Box::new(Type::Named("Sealed".into())),
+                err: Box::new(Type::Named("CryptoError".into())),
+            },
+            "__wrapped_from_bytes" => Type::Result {
+                ok: Box::new(Type::Named("WrappedKey".into())),
+                err: Box::new(Type::Named("CryptoError".into())),
+            },
+            "__vault_wrapped_from_bytes" => Type::Result {
+                ok: Box::new(Type::Named("WrappedVaultKey".into())),
+                err: Box::new(Type::Named("CryptoError".into())),
+            },
+            "__password_parse" => Type::Result {
+                ok: Box::new(Type::Named("PasswordHash".into())),
+                err: Box::new(Type::Named("CryptoError".into())),
+            },
+            "__vault_unlock_recipient" | "__vault_unlock_passphrase" => {
+                Type::Named("KeyUnlock".into())
+            }
+            "__verify_key_bytes"
+            | "__x25519_public_bytes"
+            | "__signature_bytes"
+            | "__sealed_bytes"
+            | "__wrapped_bytes"
+            | "__vault_wrapped_bytes"
+            | "__digest256_bytes"
+            | "__digest512_bytes" => u8_list,
+            _ => unit_type(),
+        }
+    }
     if let Some(helper) = crypto_static {
         let module = "jet.crypto";
         let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
         let widen_to_vec = core_widen_to_vec(module, helper, &targs);
-        return TExpr { ty: resolved_ret.cloned().unwrap_or_else(unit_type), kind: TExprKind::CoreCall {
+        let ty = resolved_ret.cloned().unwrap_or_else(|| crypto_helper_return_ty(helper));
+        return TExpr { ty, kind: TExprKind::CoreCall {
             module: module.to_string(), method: helper.to_string(), args: targs, source_span: method_span, widen_to_vec,
         }};
     }
@@ -405,7 +471,8 @@ pub(crate) fn lower_method_call(
             let recv = lower_expr(receiver, cx, env);
             let args = vec![recv];
             let widen_to_vec = core_widen_to_vec("jet.crypto", helper, &args);
-            return TExpr { ty: resolved_ret.cloned().unwrap_or_else(unit_type), kind: TExprKind::CoreCall {
+            let ty = resolved_ret.cloned().unwrap_or_else(|| crypto_helper_return_ty(helper));
+            return TExpr { ty, kind: TExprKind::CoreCall {
                 module: "jet.crypto".to_string(), method: helper.to_string(), args, source_span: method_span, widen_to_vec,
             }};
         }

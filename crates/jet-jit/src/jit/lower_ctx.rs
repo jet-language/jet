@@ -4365,6 +4365,22 @@ impl LowerCtx<'_, '_> {
                         self.lower_named_str_interp(buf_id, e, type_name, *fmt)?;
                         continue;
                     }
+                    if let Type::Apply { name, .. } = &push_ty {
+                        if name == "KeyRef" && matches!(fmt, StrFormat::Display) {
+                            let recv = self.lower_expr(e)?;
+                            let host_ref = self.module.declare_func_in_func(
+                                self.host.crypto.vault_key_ref_show,
+                                self.b.func,
+                            );
+                            let call = self.b.ins().call(host_ref, &[recv]);
+                            let text = self.b.inst_results(call)[0];
+                            let push_ref = self
+                                .module
+                                .declare_func_in_func(self.host.str_push_str, self.b.func);
+                            self.b.ins().call(push_ref, &[buf_id, text]);
+                            continue;
+                        }
+                    }
                     let val = self.lower_expr(e)?;
                     if let Type::Option(inner) = &push_ty {
                         let zero = self.b.ins().iconst(types::I64, 0);
@@ -5699,29 +5715,199 @@ impl LowerCtx<'_, '_> {
                         .store(MemFlags::trusted(), value, pointer, 0);
                     return Ok(self.b.ins().iconst(types::I8, 0));
                 }
-                if module == "jet.crypto" && method == "__signing_generate" && args.is_empty() {
-                    let tag = self.b.ins().iconst(types::I8, 1);
-                    let generate = self
-                        .module
-                        .declare_func_in_func(self.host.memory.signing_generate, self.b.func);
-                    let generated = self.b.ins().call(generate, &[]);
-                    let key = self.b.inst_results(generated)[0];
+                if module == "jet.crypto" {
+                    let (host_id, arg_values): (FuncId, Vec<Value>) =
+                        match (method.as_str(), args.as_slice()) {
+                            ("__signing_generate", []) => {
+                                (self.host.crypto.signing_generate, Vec::new())
+                            }
+                            ("__x25519_generate", []) => {
+                                (self.host.crypto.x25519_generate, Vec::new())
+                            }
+                            ("__signing_public", [key]) => {
+                                (self.host.crypto.signing_public, vec![self.lower_expr(key)?])
+                            }
+                            ("__x25519_public", [key]) => {
+                                (self.host.crypto.x25519_public, vec![self.lower_expr(key)?])
+                            }
+                            ("sign", [key, message]) => (
+                                self.host.crypto.sign,
+                                vec![self.lower_expr(key)?, self.lower_expr(message)?],
+                            ),
+                            ("verify", [key, message, signature]) => (
+                                self.host.crypto.verify,
+                                vec![
+                                    self.lower_expr(key)?,
+                                    self.lower_expr(message)?,
+                                    self.lower_expr(signature)?,
+                                ],
+                            ),
+                            ("sha256", [data]) => {
+                                (self.host.crypto.sha256, vec![self.lower_expr(data)?])
+                            }
+                            ("seal", [recipients, plaintext, aad]) => (
+                                self.host.crypto.seal,
+                                vec![
+                                    self.lower_expr(recipients)?,
+                                    self.lower_expr(plaintext)?,
+                                    self.lower_expr(aad)?,
+                                ],
+                            ),
+                            ("open", [recipient, sealed, aad]) => (
+                                self.host.crypto.open,
+                                vec![
+                                    self.lower_expr(recipient)?,
+                                    self.lower_expr(sealed)?,
+                                    self.lower_expr(aad)?,
+                                ],
+                            ),
+                            ("password_hash", [password]) => (
+                                self.host.crypto.password_hash,
+                                vec![self.lower_expr(password)?],
+                            ),
+                            ("password_verify", [password, stored]) => (
+                                self.host.crypto.password_verify,
+                                vec![self.lower_expr(password)?, self.lower_expr(stored)?],
+                            ),
+                            ("file_open", [recipient, source, dest]) => (
+                                self.host.crypto.file_open,
+                                vec![
+                                    self.lower_expr(recipient)?,
+                                    self.lower_expr(source)?,
+                                    self.lower_expr(dest)?,
+                                ],
+                            ),
+                            ("__digest256_hex", [digest]) => (
+                                self.host.crypto.digest256_hex,
+                                vec![self.lower_expr(digest)?],
+                            ),
+                            ("__digest256_bytes", [digest]) => (
+                                self.host.crypto.digest256_bytes,
+                                vec![self.lower_expr(digest)?],
+                            ),
+                            ("__signature_bytes", [signature]) => (
+                                self.host.crypto.signature_bytes,
+                                vec![self.lower_expr(signature)?],
+                            ),
+                            ("__sealed_bytes", [sealed]) => (
+                                self.host.crypto.sealed_bytes,
+                                vec![self.lower_expr(sealed)?],
+                            ),
+                            ("__x25519_public_bytes", [key]) => (
+                                self.host.crypto.x25519_public_bytes,
+                                vec![self.lower_expr(key)?],
+                            ),
+                            ("__x25519_public_text", [key]) => (
+                                self.host.crypto.x25519_public_text,
+                                vec![self.lower_expr(key)?],
+                            ),
+                            ("__x25519_public_from_text", [text]) => (
+                                self.host.crypto.x25519_public_from_text,
+                                vec![self.lower_expr(text)?],
+                            ),
+                            ("__secret_from_text", [text]) => (
+                                self.host.crypto.secret_from_text,
+                                vec![self.lower_expr(text)?],
+                            ),
+                            ("__vault_wrapped_from_bytes", [bytes]) => (
+                                self.host.crypto.vault_wrapped_from_bytes,
+                                vec![self.lower_expr(bytes)?],
+                            ),
+                            ("__vault_wrapped_bytes", [wrapped]) => (
+                                self.host.crypto.vault_wrapped_bytes,
+                                vec![self.lower_expr(wrapped)?],
+                            ),
+                            ("__vault_unlock_recipient", [identity]) => (
+                                self.host.crypto.vault_unlock_recipient,
+                                vec![self.lower_expr(identity)?],
+                            ),
+                            ("__vault_unlock_passphrase", [passphrase]) => (
+                                self.host.crypto.vault_unlock_passphrase,
+                                vec![self.lower_expr(passphrase)?],
+                            ),
+                            _ => {
+                                return Err(format!(
+                                    "jit core call unsupported: {module}.{method}"
+                                ))
+                            }
+                        };
+                    let host = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host, &arg_values);
+                    let value = self.b.inst_results(call)[0];
                     self.emit_trap_check()?;
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.result_new_i64, self.b.func);
-                    let call = self.b.ins().call(host, &[tag, key]);
-                    return Ok(self.b.inst_results(call)[0]);
+                    return Ok(value);
                 }
-                if module == "jet.crypto" && method == "__signing_public" && args.len() == 1 {
-                    let key = self.lower_expr(&args[0])?;
-                    let public = self
-                        .module
-                        .declare_func_in_func(self.host.memory.signing_public, self.b.func);
-                    let call = self.b.ins().call(public, &[key]);
-                    let result = self.b.inst_results(call)[0];
-                    self.emit_trap_check()?;
-                    return Ok(result);
+                if module == "core.crypto.expert" {
+                    let (host_id, arg_values): (FuncId, Vec<Value>) =
+                        match (method.as_str(), args.as_slice()) {
+                            ("aes256gcm_seal", [key, nonce, plaintext, aad]) => (
+                                self.host.crypto.expert_aes256gcm_seal,
+                                vec![
+                                    self.lower_expr(key)?,
+                                    self.lower_expr(nonce)?,
+                                    self.lower_expr(plaintext)?,
+                                    self.lower_expr(aad)?,
+                                ],
+                            ),
+                            ("aes256gcm_open", [key, nonce, ciphertext, aad]) => (
+                                self.host.crypto.expert_aes256gcm_open,
+                                vec![
+                                    self.lower_expr(key)?,
+                                    self.lower_expr(nonce)?,
+                                    self.lower_expr(ciphertext)?,
+                                    self.lower_expr(aad)?,
+                                ],
+                            ),
+                            ("open_v1", [key, blob]) => (
+                                self.host.crypto.expert_open_v1,
+                                vec![self.lower_expr(key)?, self.lower_expr(blob)?],
+                            ),
+                            ("migrate_v1", [key, source, recipients, dest]) => (
+                                self.host.crypto.expert_migrate_v1,
+                                vec![
+                                    self.lower_expr(key)?,
+                                    self.lower_expr(source)?,
+                                    self.lower_expr(recipients)?,
+                                    self.lower_expr(dest)?,
+                                ],
+                            ),
+                            ("x25519", [secret, public]) => (
+                                self.host.crypto.expert_x25519,
+                                vec![
+                                    self.lower_expr(secret)?,
+                                    self.lower_expr(public)?,
+                                    self.b.ins().iconst(types::I64, 1),
+                                ],
+                            ),
+                            ("x25519", [secret, public, reject]) => {
+                                let secret_val = self.lower_expr(secret)?;
+                                let public_val = self.lower_expr(public)?;
+                                let reject_val = self.lower_expr(reject)?;
+                                let reject_i64 = if self.meta.clif_ty(&reject.ty)
+                                    == Some(types::I8)
+                                {
+                                    self.b.ins().uextend(types::I64, reject_val)
+                                } else {
+                                    reject_val
+                                };
+                                (
+                                    self.host.crypto.expert_x25519,
+                                    vec![secret_val, public_val, reject_i64],
+                                )
+                            }
+                            ("secret_bytes", [secret]) => (
+                                self.host.crypto.expert_secret_bytes,
+                                vec![self.lower_expr(secret)?],
+                            ),
+                            _ => {
+                                return Err(format!(
+                                    "jit core call unsupported: {module}.{method}"
+                                ))
+                            }
+                        };
+                    let host = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host, &arg_values);
+                    return Ok(self.b.inst_results(call)[0]);
                 }
                 if module == "core.io" && method == "args" && args.is_empty() {
                     let host_ref = self
@@ -5867,6 +6053,9 @@ impl LowerCtx<'_, '_> {
                         }
                         "remove_all" if args.len() == 1 => {
                             (self.host.core.fs_remove_all, vec![self.lower_expr(&args[0])?])
+                        }
+                        "remove" if args.len() == 1 => {
+                            (self.host.core.fs_remove, vec![self.lower_expr(&args[0])?])
                         }
                         "stat" if args.len() == 1 => {
                             (self.host.core.fs_stat, vec![self.lower_expr(&args[0])?])
@@ -6620,6 +6809,218 @@ impl LowerCtx<'_, '_> {
                     return Ok(clif_ty(&ret_ty)
                         .map(|_| self.b.inst_results(call)[0])
                         .unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)));
+                }
+                if module == "core.crypto.random" && method == "bytes" && args.len() == 1 {
+                    let count = self.lower_expr(&args[0])?;
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.crypto.random_bytes, self.b.func);
+                    let call = self.b.ins().call(host, &[count]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.auth" && method == "verify_jwt" && (3..=5).contains(&args.len()) {
+                    let token = self.lower_expr(&args[0])?;
+                    let key = self.lower_expr(&args[1])?;
+                    let audience = self.lower_expr(&args[2])?;
+                    let issuer = if args.len() >= 4 {
+                        let value = self.lower_expr(&args[3])?;
+                        self.b.ins().iadd_imm(value, 1)
+                    } else {
+                        self.b.ins().iconst(types::I64, 0)
+                    };
+                    let skew = if args.len() >= 5 {
+                        self.lower_expr(&args[4])?
+                    } else {
+                        self.b.ins().iconst(types::I64, 0)
+                    };
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.crypto.verify_jwt, self.b.func);
+                    let call = self
+                        .b
+                        .ins()
+                        .call(host, &[token, key, audience, issuer, skew]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.auth"
+                    && method == "verify_paseto"
+                    && (3..=7).contains(&args.len())
+                {
+                    let token = self.lower_expr(&args[0])?;
+                    let key = self.lower_expr(&args[1])?;
+                    let audience = self.lower_expr(&args[2])?;
+                    let issuer = if args.len() >= 4 {
+                        let value = self.lower_expr(&args[3])?;
+                        self.b.ins().iadd_imm(value, 1)
+                    } else {
+                        self.b.ins().iconst(types::I64, 0)
+                    };
+                    let skew = if args.len() >= 5 {
+                        self.lower_expr(&args[4])?
+                    } else {
+                        self.b.ins().iconst(types::I64, 0)
+                    };
+                    let footer = if args.len() >= 6 {
+                        self.lower_expr(&args[5])?
+                    } else {
+                        let empty = self
+                            .module
+                            .declare_func_in_func(self.host.coll.list_new, self.b.func);
+                        let call = self.b.ins().call(empty, &[]);
+                        self.b.inst_results(call)[0]
+                    };
+                    let implicit = if args.len() >= 7 {
+                        self.lower_expr(&args[6])?
+                    } else {
+                        let empty = self
+                            .module
+                            .declare_func_in_func(self.host.coll.list_new, self.b.func);
+                        let call = self.b.ins().call(empty, &[]);
+                        self.b.inst_results(call)[0]
+                    };
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.crypto.verify_paseto, self.b.func);
+                    let call = self.b.ins().call(
+                        host,
+                        &[token, key, audience, issuer, skew, footer, implicit],
+                    );
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.vault" || module == "core.vault.expert" {
+                    let tag = crate::Crypto::vault_key_tag(&expr.ty)
+                        .or_else(|| {
+                            args.first()
+                                .and_then(|arg| crate::Crypto::vault_key_tag(&arg.ty))
+                        })
+                        .unwrap_or(1);
+                    let tag_val = self.b.ins().iconst(types::I64, tag);
+                    let (host_id, mut arg_values): (FuncId, Vec<Value>) =
+                        match (module.as_str(), method.as_str(), args.as_slice()) {
+                            ("core.vault", "get", [name]) => {
+                                (self.host.crypto.vault_get, vec![self.lower_expr(name)?])
+                            }
+                            ("core.vault", "current", [name]) => (
+                                self.host.crypto.vault_current,
+                                vec![self.lower_expr(name)?, tag_val],
+                            ),
+                            ("core.vault", "versions", [name]) => (
+                                self.host.crypto.vault_versions,
+                                vec![self.lower_expr(name)?, tag_val],
+                            ),
+                            ("core.vault", "prepare_generate", [name]) => (
+                                self.host.crypto.vault_prepare_generate,
+                                vec![self.lower_expr(name)?, tag_val],
+                            ),
+                            ("core.vault", "prepare_rotate", [name]) => (
+                                self.host.crypto.vault_prepare_rotate,
+                                vec![self.lower_expr(name)?, tag_val],
+                            ),
+                            ("core.vault", "prepare_store", [name, key]) => (
+                                self.host.crypto.vault_prepare_store,
+                                vec![self.lower_expr(name)?, self.lower_expr(key)?, tag_val],
+                            ),
+                            ("core.vault", "prepare_retire", [key_ref, reason]) => (
+                                self.host.crypto.vault_prepare_retire,
+                                vec![
+                                    self.lower_expr(key_ref)?,
+                                    self.lower_expr(reason)?,
+                                    tag_val,
+                                ],
+                            ),
+                            ("core.vault", "prepare_revoke", [key_ref, reason]) => (
+                                self.host.crypto.vault_prepare_revoke,
+                                vec![
+                                    self.lower_expr(key_ref)?,
+                                    self.lower_expr(reason)?,
+                                    tag_val,
+                                ],
+                            ),
+                            ("core.vault", "authorize_write", [plan, reason]) => (
+                                self.host.crypto.vault_authorize_write,
+                                vec![self.lower_expr(plan)?, self.lower_expr(reason)?, tag_val],
+                            ),
+                            ("core.vault", "commit_generate", [write, plan]) => (
+                                self.host.crypto.vault_commit_generate,
+                                vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
+                            ),
+                            ("core.vault", "commit_store", [write, plan]) => (
+                                self.host.crypto.vault_commit_store,
+                                vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
+                            ),
+                            ("core.vault", "commit_rotate", [write, plan]) => (
+                                self.host.crypto.vault_commit_rotate,
+                                vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
+                            ),
+                            ("core.vault", "commit_retire", [write, plan]) => (
+                                self.host.crypto.vault_commit_retire,
+                                vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
+                            ),
+                            ("core.vault", "commit_revoke", [write, plan]) => (
+                                self.host.crypto.vault_commit_revoke,
+                                vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
+                            ),
+                            ("core.vault", "load", [key_ref]) => (
+                                self.host.crypto.vault_load,
+                                vec![self.lower_expr(key_ref)?, tag_val],
+                            ),
+                            ("core.vault", "status", [key_ref]) => (
+                                self.host.crypto.vault_status,
+                                vec![self.lower_expr(key_ref)?, tag_val],
+                            ),
+                            ("core.vault", "export_to_recipients", [key_ref, recipients]) => (
+                                self.host.crypto.vault_export_to_recipients,
+                                vec![
+                                    self.lower_expr(key_ref)?,
+                                    self.lower_expr(recipients)?,
+                                    tag_val,
+                                ],
+                            ),
+                            ("core.vault", "export_to_passphrase", [key_ref, passphrase]) => (
+                                self.host.crypto.vault_export_to_passphrase,
+                                vec![
+                                    self.lower_expr(key_ref)?,
+                                    self.lower_expr(passphrase)?,
+                                    tag_val,
+                                ],
+                            ),
+                            ("core.vault", "prepare_import_wrapped", [name, wrapped, unlock]) => (
+                                self.host.crypto.vault_prepare_import_wrapped,
+                                vec![
+                                    self.lower_expr(name)?,
+                                    self.lower_expr(wrapped)?,
+                                    self.lower_expr(unlock)?,
+                                    tag_val,
+                                ],
+                            ),
+                            ("core.vault", "authorize_wrapped_import", [plan, reason]) => (
+                                self.host.crypto.vault_authorize_wrapped_import,
+                                vec![self.lower_expr(plan)?, self.lower_expr(reason)?, tag_val],
+                            ),
+                            ("core.vault", "commit_import_wrapped", [write, plan]) => (
+                                self.host.crypto.vault_commit_import_wrapped,
+                                vec![self.lower_expr(write)?, self.lower_expr(plan)?, tag_val],
+                            ),
+                            ("core.vault.expert", "prepare_import_signing", [name, bytes]) => (
+                                self.host.crypto.vault_expert_prepare_import_signing,
+                                vec![self.lower_expr(name)?, self.lower_expr(bytes)?],
+                            ),
+                            ("core.vault.expert", "commit_import_signing", [write, plan]) => (
+                                self.host.crypto.vault_expert_commit_import_signing,
+                                vec![self.lower_expr(write)?, self.lower_expr(plan)?],
+                            ),
+                            _ => {
+                                return Err(format!(
+                                    "jit core call unsupported: {module}.{method}"
+                                ))
+                            }
+                        };
+                    if matches!(method.as_str(), "get") {
+                        arg_values.truncate(1);
+                    }
+                    let host = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host, &arg_values);
+                    return Ok(self.b.inst_results(call)[0]);
                 }
                 if module == "core.math" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
@@ -8747,7 +9148,16 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            TBuiltinOp::Bytes => Err("jit builtin method unsupported".to_string()),
+            TBuiltinOp::Bytes => {
+                if !matches!(&recv.ty, Type::String) {
+                    return Err("jit builtin method unsupported".to_string());
+                }
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_bytes, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
             TBuiltinOp::Split => {
                 let sep = self.lower_expr(&args[0])?;
                 let host_ref = self
@@ -10698,7 +11108,14 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::PathWriteAtomic => Err("jit handle method unsupported".to_string()),
+            THandleOp::PathWriteAtomic => {
+                let bytes = self.lower_expr(&args[0])?;
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.core.path_write_atomic, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val, bytes]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::UiBackendMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::DevServerMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::WebAppMethod { .. } => Err("jit handle method unsupported".to_string()),
@@ -13061,6 +13478,8 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         "MigrationStatus" => &["migrated", "from", "steps"],
         "DecodeResult" => &["value", "migration"],
         "TextWidth" => &["ambiguous", "controls"],
+        "Claims" => &["subject", "audience", "issuer", "expires_at", "issued_at"],
+        "Rotation" => &["previous", "current"],
         _ => return None,
     };
     fields.iter().position(|f| *f == field)

@@ -665,6 +665,9 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         "MigrationStatus" => &["migrated", "from", "steps"],
         "DecodeResult" => &["value", "migration"],
         "TextWidth" => &["ambiguous", "controls"],
+        // D-AUTH-TOKENPOLICY1=A — matches JetAuthClaims / JIT verify_jwt record.
+        "Claims" => &["subject", "audience", "issuer", "expires_at", "issued_at"],
+        "Rotation" => &["previous", "current"],
         _ => return None,
     };
     fields.iter().position(|f| *f == field)
@@ -675,6 +678,17 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
 /// user struct); recover the real type so JIT field/print/ABI stay total.
 pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Type> {
     match type_name {
+        "Claims" => match field {
+            "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),
+            "audience" => Some(Type::String),
+            "expires_at" => Some(Type::Int),
+            "issued_at" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        },
+        "Rotation" => match field {
+            "previous" | "current" => Some(Type::Named("KeyRef".into())),
+            _ => None,
+        },
         "ProcessResult" => match field {
             "code" => Some(Type::Int),
             "output" | "errors" => Some(Type::String),
