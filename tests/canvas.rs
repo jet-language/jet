@@ -279,7 +279,7 @@ const CANVAS_STRUCTURAL_WRITE_FIXTURE: &str = r#"fn run() => Void ? {
 }
 "#;
 
-const CANVAS_RAILS_FIXTURE: &str = r#"use core.mem
+const CANVAS_RAILS_FIXTURE: &str = r#"use core.mem as mem
 
 fn maybe() => Int ? String {
     return Ok(1)

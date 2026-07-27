@@ -46,8 +46,10 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Stmt::For] status=graph loop rail.
 - [Stmt::Switch] status=graph switch rail.
 - [Stmt::Break] status=graph control node.
+- [Stmt::BreakValue] status=graph control node with value in source detail.
 - [Stmt::Continue] status=graph control node.
 - [Stmt::BreakLabel] status=graph control node with label in source detail.
+- [Stmt::BreakLabelValue] status=graph control node with label and value in source detail.
 - [Stmt::ContinueLabel] status=graph control node with label in source detail.
 - [Stmt::Loop] status=graph loop rail.
 - [Stmt::CountedLoop] status=graph loop rail.
@@ -118,6 +120,7 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Expr::If] status=graph expression branch node.
 - [Expr::TupleLit] status=graph tuple node.
 - [Expr::Lambda] status=graph lambda node.
+- [Expr::TypedLit] status=graph typed literal node.
 - [Expr::CallValue] status=graph call-value node.
 - [Expr::PtrFromAddr] status=readonly unsafe pointer constructor, source edits.
 - [Expr::FanOut] status=graph fan-out node.
@@ -146,6 +149,7 @@ contract; it does not mean every form has a bespoke graph gesture. Status values
 - [Type::IntN] status=readonly type detail.
 - [Type::Float32] status=readonly type detail.
 - [Type::Tagged] status=readonly type detail.
+- [Type::Union] status=readonly type detail.
 
 ## Patterns
 

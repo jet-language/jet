@@ -19,6 +19,18 @@ pub(crate) use Items::{
 };
 pub(super) use Serde::expand_builtin_serde_items;
 
+fn is_void_named(ty: &Type) -> bool {
+    matches!(ty, Type::Named(name) if name == Syntax::TYPE_VOID || name == "Unit")
+}
+
+/// True when a declared return type carries no value payload: `Void` / `Unit`,
+/// or fallible void (`Void ? E`). Same void-named match used by asm return
+/// checks in this file.
+fn is_void_like_return(ty: &Type) -> bool {
+    is_void_named(ty)
+        || matches!(ty, Type::Result { ok, .. } if is_void_named(ok))
+}
+
 fn is_fallible_void_return(
     ty: &Type,
     registry: &TypeRegistry,
@@ -162,11 +174,14 @@ impl<'a> Checker<'a> {
     /// Shared tail of `check_func_body` / `check_func_body_bundle`:
     /// declare parameters, check the body, enforce definite return.
     pub(crate) fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
-        // D-ARROW-CONTROL1=A: an explicit callable result contract makes the
-        // final expression of a multiline body its normal result. Lower this
-        // after parsing so source-preserving formatter paths keep the written
-        // expression instead of printing an explicit `return`.
-        if f.return_type.is_some() {
+        // D-ARROW-CONTROL1=A: an explicit *value* result contract makes the
+        // final expression of a multiline body its normal result. Void / Unit
+        // and fallible Void (`Void ? …`) keep a trailing expression as a
+        // statement — rewriting `print(...)` into `return print(...)` would
+        // force value-context inference (E0116). Lower after parsing so
+        // source-preserving formatter paths keep the written expression
+        // instead of printing an explicit `return`.
+        if f.return_type.as_ref().is_some_and(|ty| !is_void_like_return(ty)) {
             if let Some(Stmt::Expr(expr)) = f.body.last().cloned() {
                 let span = expr.span();
                 *f.body.last_mut().expect("body has a final expression") =
