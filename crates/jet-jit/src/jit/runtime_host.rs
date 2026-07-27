@@ -224,6 +224,21 @@ extern "C" fn jet_jit_div_i64(a: i64, b: i64, _line: u32) -> i64 {
     }
 }
 
+extern "C" fn jet_jit_rem_i64(a: i64, b: i64, _line: u32) -> i64 {
+    use jet_codegen::Comptime::MathLayout;
+    if let Some(message) = MathLayout::integer_remainder_trap(a, b, true, 64) {
+        with_runtime_mut(|rt| rt.set_trap(message));
+        return 0;
+    }
+    match a.checked_rem(b) {
+        Some(value) => value,
+        None => {
+            with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_REMAINDER_OVERFLOW));
+            0
+        }
+    }
+}
+
 extern "C" fn jet_jit_intn_binop(
     left: i64,
     right: i64,
@@ -259,12 +274,11 @@ extern "C" fn jet_jit_intn_binop(
         with_runtime_mut(|rt| rt.set_trap(&message));
         return 0;
     }
-    if mode == INTN_MODE_TRAP
-        && op == BinOp::Rem
-        && MathLayout::integer_remainder_overflows(left, right, signed, bits)
-    {
-        with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_REMAINDER_OVERFLOW));
-        return 0;
+    if mode == INTN_MODE_TRAP && op == BinOp::Rem {
+        if let Some(message) = MathLayout::integer_remainder_trap(left, right, signed, bits) {
+            with_runtime_mut(|rt| rt.set_trap(message));
+            return 0;
+        }
     }
     let span = jet_codegen::Diagnostics::Span::new(0, 0);
     let result = match mode {
@@ -1068,6 +1082,7 @@ pub(crate) struct HostFns {
     pub(crate) sub_i64: FuncId,
     pub(crate) mul_i64: FuncId,
     pub(crate) div_i64: FuncId,
+    pub(crate) rem_i64: FuncId,
     pub(crate) intn_binop: FuncId,
     pub(crate) intn_to_string: FuncId,
     pub(crate) print_i64: FuncId,
@@ -1168,6 +1183,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_sub_i64", jet_jit_sub_i64 as *const u8);
     builder.symbol("jet_jit_mul_i64", jet_jit_mul_i64 as *const u8);
     builder.symbol("jet_jit_div_i64", jet_jit_div_i64 as *const u8);
+    builder.symbol("jet_jit_rem_i64", jet_jit_rem_i64 as *const u8);
     builder.symbol("jet_jit_intn_binop", jet_jit_intn_binop as *const u8);
     builder.symbol(
         "jet_jit_intn_to_string",
@@ -1547,6 +1563,7 @@ fn declare_host_fns(
         sub_i64: import("jet_jit_sub_i64", &sig_bin_i64)?,
         mul_i64: import("jet_jit_mul_i64", &sig_bin_i64)?,
         div_i64: import("jet_jit_div_i64", &sig_bin_i64)?,
+        rem_i64: import("jet_jit_rem_i64", &sig_bin_i64)?,
         intn_binop: import("jet_jit_intn_binop", &sig_intn_binop)?,
         intn_to_string: import("jet_jit_intn_to_string", &sig_i64_i64_i64)?,
         print_i64: import("jet_jit_print_i64", &sig_i64)?,

@@ -98,6 +98,22 @@ pub fn integer_remainder_overflows(
 }
 
 pub const INTEGER_REMAINDER_OVERFLOW: &str = "attempt to calculate the remainder with overflow";
+pub const INTEGER_REMAINDER_ZERO: &str = "divided by zero";
+
+pub fn integer_remainder_trap(
+    left: i64,
+    right: i64,
+    signed: bool,
+    bits: u8,
+) -> Option<&'static str> {
+    if right == 0 {
+        Some(INTEGER_REMAINDER_ZERO)
+    } else if integer_remainder_overflows(left, right, signed, bits) {
+        Some(INTEGER_REMAINDER_OVERFLOW)
+    } else {
+        None
+    }
+}
 
 pub fn integer_binop(
     op: BinOp,
@@ -120,16 +136,17 @@ pub fn integer_binop(
     if let Some(message) = integer_shift_trap(op, b, bits) {
         return Err(comptime_panic(&message, span));
     }
+    if op == BinOp::Rem {
+        if let Some(message) = integer_remainder_trap(left, right, signed, bits) {
+            return Err(comptime_panic(message, span));
+        }
+    }
     match op {
         BinOp::Add => checked(a.checked_add(b), "add"),
         BinOp::Sub => checked(a.checked_sub(b), "subtract"),
         BinOp::Mul => checked(a.checked_mul(b), "multiply"),
         BinOp::Div if b == 0 => Err(unsupported("division by zero", span)),
         BinOp::Div => checked(a.checked_div(b), "divide"),
-        BinOp::Rem if b == 0 => Err(unsupported("division by zero", span)),
-        BinOp::Rem if integer_remainder_overflows(left, right, signed, bits) => {
-            Err(comptime_panic(INTEGER_REMAINDER_OVERFLOW, span))
-        }
         BinOp::Rem => checked(a.checked_rem(b), "take the remainder of"),
         BinOp::BitAnd => Ok(CtValue::Int(integer_narrow(a & b, signed, bits))),
         BinOp::BitOr => Ok(CtValue::Int(integer_narrow(a | b, signed, bits))),

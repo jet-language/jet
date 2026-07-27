@@ -3981,6 +3981,7 @@ fn run() {
     print(i16_id(I16.{100}) - I16.{40})
     print(i32_id(I32.{7}) * I32.{6})
     print(i64_id(84) / 2)
+    print(19 % 4)
     print(i8_id(I8.{7}) % I8.{3})
     flags :: u8_id(U8.{13})
     mask :: U8.{10}
@@ -4073,7 +4074,7 @@ fn run() {
             "18446744073709551615\n18446744073709551615\n18446744073709551615\n",
             "18446744073709551615\n",
             "[18446744073709551615, 1]\n[18446744073709551615, 1]\n",
-            "-8\n-16\n-32\n-64\n15\n60\n42\n42\n1\n8\n15\n7\n26\n254\n-128\n3\n",
+            "-8\n-16\n-32\n-64\n15\n60\n42\n42\n3\n1\n8\n15\n7\n26\n254\n-128\n3\n",
             "true\ntrue\ntrue\n1\n3\n5\n4\n0\n",
             "-128\n127\n127\n0\n",
             "-32768\n32767\n32767\n0\n",
@@ -4253,6 +4254,136 @@ fn run() {
         ),
         "AOT remainder trap presentation drift"
     );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn fixed_width_and_plain_int_remainder_zero_traps_across_tiers() {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let cases = [
+        (
+            "fixed_width",
+            r#"
+fn remainder(value: I8, divisor: I8) -> I8 {
+    return value % divisor
+}
+
+fn run() {
+    print(remainder(I8.{7}, I8.{0}))
+}
+"#,
+        ),
+        (
+            "plain_int",
+            r#"
+fn remainder(value: Int, divisor: Int) -> Int {
+    return value % divisor
+}
+
+fn run() {
+    print(remainder(19, 0))
+}
+"#,
+        ),
+    ];
+    let dir =
+        std::env::temp_dir().join(format!("jet_remainder_zero_traps_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+
+    for (i, (tag, source)) in cases.into_iter().enumerate() {
+        let file = dir.join(format!("{tag}.jet"));
+        fs::write(&file, source).unwrap();
+        let shown = file.to_string_lossy().to_string();
+        let bundle = checked_bundle_from_path(&shown);
+        assert!(
+            jet_jit::resident_jit_safe_bundle(&bundle),
+            "{tag} remainder-zero fixture must stay resident-safe: {}",
+            jet_jit::resident_jit_safe_bundle_detail(&bundle)
+        );
+        jet_jit::try_compile_bundle(&bundle)
+            .unwrap_or_else(|reason| panic!("{tag} remainder-zero fixture must JIT-compile: {reason}"));
+
+        let interpreted = match dev_iteration(&shown, false, true) {
+            RunOutcome::Problems(diags) => diags,
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => panic!(
+                "{tag} interpreter did not trap: stdout={stdout:?} stderr={stderr:?} exit={exit_code}"
+            ),
+        };
+        jet_jit::reset_jit_trace_for_test();
+        let resident = match run_cranelift_outcome_without_fallback(source, tag) {
+            RunOutcome::Problems(diags) => diags,
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => panic!(
+                "{tag} resident JIT did not trap: stdout={stdout:?} stderr={stderr:?} exit={exit_code}"
+            ),
+        };
+        assert!(
+            jet_jit::jit_executed_for_test(),
+            "{tag} remainder-zero fixture did not execute in resident JIT"
+        );
+        assert!(
+            !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+            "{tag} remainder-zero fixture used deopt or fallback"
+        );
+
+        assert_eq!(interpreted.len(), 1, "{tag} interpreter trap count");
+        assert_eq!(resident.len(), 1, "{tag} resident JIT trap count");
+        let interpreted = &interpreted[0];
+        let resident = &resident[0];
+        assert_eq!(resident.severity, interpreted.severity, "{tag} severity drift");
+        assert_eq!(resident.code, interpreted.code, "{tag} code drift");
+        assert_eq!(resident.what, interpreted.what, "{tag} summary drift");
+        assert_eq!(resident.why, interpreted.why, "{tag} detail drift");
+        assert_eq!(resident.fix, interpreted.fix, "{tag} fix drift");
+        assert_eq!(resident.detail, interpreted.detail, "{tag} detail field drift");
+        assert_eq!(
+            resident.structured, interpreted.structured,
+            "{tag} structured field drift"
+        );
+        assert!(resident.edit.is_none() && interpreted.edit.is_none());
+        let trap = "divided by zero";
+        assert_eq!(interpreted.code, "E0953");
+        assert_eq!(
+            interpreted.what,
+            "your comptime code stopped the build"
+        );
+        assert_eq!(
+            interpreted.why,
+            format!(
+                "while computing this value at compile time, the program panicked: {trap}"
+            )
+        );
+        assert_eq!(
+            interpreted.fix,
+            "this is the sanctioned way to validate at compile time — fix the input the check rejects"
+        );
+
+        let aot = compiled_binary_output(&dir, tag, i, tag, &shown);
+        assert_eq!(
+            aot,
+            ProgramOutput::ran(
+                String::new(),
+                format!("panic: {trap}\n  --> {shown}:3\n"),
+                70,
+            ),
+            "{tag} AOT remainder-zero presentation drift"
+        );
+        assert!(
+            !aot.stderr.contains("panicked at"),
+            "{tag} leaked a raw Rust panic"
+        );
+    }
     let _ = fs::remove_dir_all(&dir);
 }
 

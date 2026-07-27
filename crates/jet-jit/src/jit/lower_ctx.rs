@@ -8652,6 +8652,7 @@ impl LowerCtx<'_, '_> {
                 BinOp::Sub => self.host.sub_i64,
                 BinOp::Mul => self.host.mul_i64,
                 BinOp::Div => self.host.div_i64,
+                BinOp::Rem => self.host.rem_i64,
                 _ => return Err("jit overflow op unsupported".to_string()),
             };
             let line_const = self.b.ins().iconst(types::I32, line as i64);
