@@ -15,7 +15,7 @@ use std::process::Command;
 // FfiLink struct lives in AST for cross-seam sharing; re-export here.
 pub use crate::AST::FfiLink;
 
-const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v2";
+const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v3-cabi";
 
 /// One foreign function collected from the import graph.
 #[derive(Debug, Clone)]
@@ -1670,10 +1670,30 @@ fn build_bridge_full(
     // path is a valid build for this call — reuse it without touching
     // `cargo` or rewriting the cached sources. No lock needed: we don't
     // write anything.
-    if rlib.is_file() && helper_ready {
+    if rlib.is_file() && helper_ready && {
+        let stem = format!("lib{}", crate_name);
+        let so = target.join(format!("{stem}.so"));
+        let dylib = target.join(format!("{stem}.dylib"));
+        let dll = target.join(format!("{crate_name}.dll"));
+        so.is_file() || dylib.is_file() || dll.is_file()
+    } {
+        let cdylib = {
+            let stem = format!("lib{}", crate_name);
+            let so = target.join(format!("{stem}.so"));
+            let dylib = target.join(format!("{stem}.dylib"));
+            let dll = target.join(format!("{crate_name}.dll"));
+            if so.is_file() {
+                so
+            } else if dylib.is_file() {
+                dylib
+            } else {
+                dll
+            }
+        };
         return Ok(FfiLink {
             crate_name,
             rlib_path: rlib,
+            cdylib_path: cdylib,
             target_deps_dir,
             host_deps_dir,
             helper_bin_path: helper_bin,
@@ -1705,10 +1725,30 @@ fn build_bridge_full(
 
     // Re-check under the lock: whoever held it may have just finished
     // building this exact key while we were waiting.
-    if rlib.is_file() && helper_ready {
+    if rlib.is_file() && helper_ready && {
+        let stem = format!("lib{}", crate_name);
+        let so = target.join(format!("{stem}.so"));
+        let dylib = target.join(format!("{stem}.dylib"));
+        let dll = target.join(format!("{crate_name}.dll"));
+        so.is_file() || dylib.is_file() || dll.is_file()
+    } {
+        let cdylib = {
+            let stem = format!("lib{}", crate_name);
+            let so = target.join(format!("{stem}.so"));
+            let dylib = target.join(format!("{stem}.dylib"));
+            let dll = target.join(format!("{crate_name}.dll"));
+            if so.is_file() {
+                so
+            } else if dylib.is_file() {
+                dylib
+            } else {
+                dll
+            }
+        };
         return Ok(FfiLink {
             crate_name,
             rlib_path: rlib,
+            cdylib_path: cdylib,
             target_deps_dir,
             host_deps_dir,
             helper_bin_path: helper_bin,
@@ -1897,9 +1937,29 @@ fn build_bridge_full(
             )));
         }
     }
+    let cdylib = {
+    let stem = format!("lib{}", crate_name);
+    let so = target.join(format!("{stem}.so"));
+    let dylib = target.join(format!("{stem}.dylib"));
+    let dll = target.join(format!("{crate_name}.dll"));
+    if so.is_file() {
+        so
+    } else if dylib.is_file() {
+        dylib
+    } else {
+        dll
+    }
+        };
+    if !cdylib.is_file() {
+        return Err(tool_error(&format!(
+            "FFI build finished but the JIT cdylib `{}` is missing",
+            cdylib.display()
+        )));
+    }
     Ok(FfiLink {
         crate_name,
         rlib_path: rlib,
+        cdylib_path: cdylib,
         target_deps_dir,
         host_deps_dir,
         helper_bin_path: helper_bin,
@@ -2485,7 +2545,7 @@ pub(crate) fn host_target() -> String {
 
 fn emit_cargo_toml(crate_name: &str, deps: &BTreeMap<String, String>, has_native: bool) -> String {
     let mut s = format!(
-        "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n{}\n[lib]\ncrate-type = [\"rlib\"]\n\n",
+        "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n{}\n[lib]\ncrate-type = [\"rlib\", \"cdylib\"]\n\n",
         if has_native { "build = \"build.rs\"\n" } else { "" }
     );
     if !deps.is_empty() {
@@ -2591,11 +2651,20 @@ fn emit_wrapper_lib(
     for e in entries {
         names.insert(e.jet_name.clone());
     }
+    if entries.iter().any(|e| emit_cabi_trampoline(e, &names).is_some()) {
+        out.push_str(
+            "#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_cabi_free(ptr: *mut u8, len: usize) {\n    if ptr.is_null() { return; }\n    let _ = Vec::from_raw_parts(ptr, len, len);\n}\n\n",
+        );
+    }
     for e in entries {
         if let Some(inline) = &e.inline {
             out.push_str(&emit_inline_wrapper_fn(e, inline));
         } else {
         out.push_str(&emit_wrapper_fn(e, &names));
+        }
+        if let Some(cabi) = emit_cabi_trampoline(e, &names) {
+            out.push_str(&cabi);
+            out.push('\n');
         }
         out.push('\n');
     }
@@ -2959,6 +3028,103 @@ fn emit_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> String 
             format!(" -> {ret}")
         }
     )
+}
+
+/// Cranelift-callable C ABI twin of a Rust-ABI wrapper. Scalars pass as i64/f64;
+/// `String` uses `(ptr,len)` in and `(out_ptr,out_len)` heap buffers the JIT frees
+/// via `jet_ffi_cabi_free`.
+fn emit_cabi_trampoline(entry: &ExternEntry, _user_types: &HashSet<String>) -> Option<String> {
+    fn cabi_ok(ty: &Type) -> bool {
+        matches!(
+            ty,
+            Type::Int | Type::Float | Type::Float32 | Type::Bool | Type::String
+        )
+    }
+    for (_, ty) in &entry.params {
+        if !cabi_ok(ty) {
+            return None;
+        }
+    }
+    if let Some(ret) = &entry.return_type {
+        if !cabi_ok(ret) {
+            return None;
+        }
+    }
+    let cabi = format!("{}_cabi", entry.wrapper_name);
+    let mut params = Vec::new();
+    let mut call_args = Vec::new();
+    for (i, (_, ty)) in entry.params.iter().enumerate() {
+        match ty {
+            Type::String => {
+                params.push(format!("p{i}_ptr: *const u8, p{i}_len: usize"));
+                call_args.push(format!(
+                    "unsafe {{ String::from_utf8_unchecked(std::slice::from_raw_parts(p{i}_ptr, p{i}_len).to_vec()) }}"
+                ));
+            }
+            Type::Int => {
+                params.push(format!("p{i}: i64"));
+                call_args.push(format!("p{i}"));
+            }
+            Type::Float | Type::Float32 => {
+                params.push(format!("p{i}: f64"));
+                call_args.push(if matches!(ty, Type::Float32) {
+                    format!("p{i} as f32")
+                } else {
+                    format!("p{i}")
+                });
+            }
+            Type::Bool => {
+                params.push(format!("p{i}: i8"));
+                call_args.push(format!("p{i} != 0"));
+            }
+            _ => return None,
+        }
+    }
+    let call = format!("{}({})", entry.wrapper_name, call_args.join(", "));
+    let (ret_params, ret_ty, body) = match &entry.return_type {
+        None => (
+            String::new(),
+            String::new(),
+            format!("    let _ = {call};\n"),
+        ),
+        Some(Type::String) => (
+            if params.is_empty() {
+                "out_ptr: *mut *mut u8, out_len: *mut usize".to_string()
+            } else {
+                "out_ptr: *mut *mut u8, out_len: *mut usize".to_string()
+            },
+            " -> i32".to_string(),
+            format!(
+                "    let s = {call};\n    let mut v = s.into_bytes();\n    v.shrink_to_fit();\n    let len = v.len();\n    let ptr = v.as_mut_ptr();\n    std::mem::forget(v);\n    unsafe {{\n        *out_len = len;\n        *out_ptr = ptr;\n    }}\n    0\n"
+            ),
+        ),
+        Some(Type::Int) => (
+            String::new(),
+            " -> i64".to_string(),
+            format!("    {call}\n"),
+        ),
+        Some(Type::Float) | Some(Type::Float32) => (
+            String::new(),
+            " -> f64".to_string(),
+            format!("    ({call}) as f64\n"),
+        ),
+        Some(Type::Bool) => (
+            String::new(),
+            " -> i8".to_string(),
+            format!("    i8::from({call})\n"),
+        ),
+        Some(_) => return None,
+    };
+    let all_params = {
+        let mut p = params;
+        if !ret_params.is_empty() {
+            p.push(ret_params);
+        }
+        p.join(", ")
+    };
+    Some(format!(
+        "#[no_mangle]\npub unsafe extern \"C\" fn {cabi}({all_params}){ret_ty} {{\n{body}}}\n"
+    ))
 }
 
 fn rust_type(ty: &Type, user_types: &HashSet<String>) -> String {

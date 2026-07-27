@@ -1337,9 +1337,35 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
         }
         // D-REACTCORE1: `#Reactive { … }` lowers to `jet_reactive_effect(closure)`.
         // Clone outer captures into the closure (same as a stored lambda).
-        Stmt::Reactive { body, .. } => {
+        Stmt::Reactive { body, span, .. } => {
             let closure = render_reactive_block_closure(body, cx, env);
-            TStmt::Reactive { closure }
+            // Synthetic zero-arg lambda so JIT can compile the body with captures.
+            let synthetic = crate::AST::Lambda {
+                take_names: Vec::new(),
+                params: Vec::new(),
+                body: crate::AST::LambdaBody::Block(body.clone()),
+                span: *span,
+                meta: {
+                    let reads = crate::Sema::block_free_var_reads(body);
+                    let mut meta = crate::AST::LambdaMeta::default();
+                    meta.cloned_captures = reads
+                        .into_iter()
+                        .filter(|n| env.locals.contains_key(n))
+                        .collect();
+                    meta.cloned_captures.sort();
+                    meta.needs_fn_mut = true;
+                    meta.escapes = true;
+                    meta
+                },
+            };
+            let executable = Box::new(crate::Codegen::TIR::lower_lambda(&synthetic, cx, env));
+            let jit_lambda =
+                crate::Codegen::TIR::lower_spawn_lambda_for_jit(&synthetic, cx, env);
+            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+            TStmt::Reactive {
+                closure,
+                executable,
+            }
         }
         // D-SHIELDNAME1=A: `#Shield { … }` lowers to a shield-guarded lexical block.
         Stmt::Shield { body, .. } => {

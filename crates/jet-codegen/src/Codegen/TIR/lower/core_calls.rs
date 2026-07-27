@@ -290,13 +290,20 @@ pub(crate) fn lower_core_closure_call(
             let lam = lam_at(0)?;
             let body_ty = lambda_body_ty(lam, cx, env);
             let closure = render_lambda_str(lam, cx, env);
+            let executable = Box::new(lower_lambda(lam, cx, env));
+            // Captured signals need the spawn-lambda ABI (explicit capture params).
+            let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
             return Some(TExpr {
                 ty: Type::Apply {
                     name: crate::Syntax::TYPE_DERIVED.to_string(),
                     args: vec![body_ty],
                 },
                 kind: TExprKind::CoreClosureCall {
-                    kind: TCoreClosureKind::ReactiveDerived { closure },
+                    kind: TCoreClosureKind::ReactiveDerived {
+                        closure,
+                        executable,
+                    },
                 },
             });
         }
@@ -304,6 +311,8 @@ pub(crate) fn lower_core_closure_call(
             let lam = lam_at(0)?;
             let closure = render_lambda_str(lam, cx, env);
             let executable = Box::new(lower_lambda(lam, cx, env));
+            let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
             TCoreClosureKind::ReactiveEffect { closure, executable }
         }
         // D-SIGNAL1: `computed` is a canonical alias for `derived`.
@@ -311,13 +320,19 @@ pub(crate) fn lower_core_closure_call(
             let lam = lam_at(0)?;
             let body_ty = lambda_body_ty(lam, cx, env);
             let closure = render_lambda_str(lam, cx, env);
+            let executable = Box::new(lower_lambda(lam, cx, env));
+            let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
             return Some(TExpr {
                 ty: Type::Apply {
                     name: crate::Syntax::TYPE_COMPUTED.to_string(),
                     args: vec![body_ty],
                 },
                 kind: TExprKind::CoreClosureCall {
-                    kind: TCoreClosureKind::ReactiveDerived { closure },
+                    kind: TCoreClosureKind::ReactiveDerived {
+                        closure,
+                        executable,
+                    },
                 },
             });
         }
@@ -326,6 +341,8 @@ pub(crate) fn lower_core_closure_call(
             let lam = lam_at(0)?;
             let closure = render_lambda_str(lam, cx, env);
             let executable = Box::new(lower_lambda(lam, cx, env));
+            let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+            cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
             TCoreClosureKind::UiReactiveRender { closure, executable }
         }
         _ => return None,

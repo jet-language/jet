@@ -26,6 +26,9 @@ mod enc_stream;
 mod Fmt;
 mod Game;
 mod Io;
+mod Layout;
+mod Math;
+mod Ffi;
 mod Memory;
 mod net_http_rt;
 mod Net;
@@ -34,11 +37,14 @@ mod Parse;
 mod Process;
 mod Random;
 mod Raylib;
+mod Reactive;
 mod Sketch;
 mod Solver;
 mod Text;
 mod Time;
+mod Ui;
 mod Watcher;
+mod Web;
 
 /// Shared by prelude `include!` fragments that impl `crate::JetShow`.
 pub(crate) trait JetShow {

@@ -73,6 +73,10 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         readers: Vec::new(),
         cursors: Vec::new(),
         reflect_values: Vec::new(),
+        layout_slots: Vec::new(),
+        reactive: crate::Reactive::ReactiveState::default(),
+        ui: crate::Ui::UiState::default(),
+        web: crate::Web::WebState::default(),
     }
 }
 
@@ -109,6 +113,7 @@ fn jit_panic_diag(msg: &str) -> Diagnostic {
 fn reset_run_heap(rt: &mut JitRuntime) {
     rt.heap.clear();
     crate::Data::clear_lazy_state();
+    crate::Math::clear_math_values();
     rt.channels.clear();
     rt.senders.clear();
     rt.tasks.clear();
@@ -156,6 +161,8 @@ pub(crate) fn resident_teardown() {
     crate::Watcher::clear_watcher_state();
     crate::Net::clear_net_state();
     crate::net_http_rt::clear_net_http_handles();
+    // Keep FFI cdylib binding across teardown→recompile in the same try_resident;
+    // `bind_bundle_ffi` / `clear_ffi` own its lifetime at the outer entry points.
     // CLI plan stays installed across teardown→recompile in the same try_resident;
     // prepare_cli_from_bundle / clear_cli_plan own its lifetime.
     // Keep STRUCT_REDACT: resident_run_fresh teardowns then recompiles in the

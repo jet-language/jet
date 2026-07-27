@@ -153,6 +153,18 @@ fn push_scope(state: EventScopeState) -> i64 {
     h
 }
 
+/// Shared with UI/reactive hosts so `core.event.scope` is one handle space (#1225+#1219).
+pub(crate) fn mirror_event_scope() -> i64 {
+    push_scope(EventScopeState {
+        cancelled: false,
+        subs: Vec::new(),
+    })
+}
+
+pub(crate) fn mirror_event_scope_cancel(handle: i64) {
+    jet_jit_event_scope_cancel(handle);
+}
+
 fn push_sub(state: SubscriptionState) -> i64 {
     SUBS.with(|slot| {
         let mut v = slot.borrow_mut();
@@ -575,11 +587,7 @@ pub(crate) fn clear_watcher_state() {
 }
 
 pub(crate) fn register_watcher_symbols(builder: &mut JITBuilder) {
-    builder.symbol("jet_jit_event_scope", jet_jit_event_scope as *const u8);
-    builder.symbol(
-        "jet_jit_event_scope_cancel",
-        jet_jit_event_scope_cancel as *const u8,
-    );
+    // `jet_jit_event_scope` / `_cancel` registered by Reactive (unified with UI).
     builder.symbol(
         "jet_jit_event_scope_frame_push",
         jet_jit_event_scope_frame_push as *const u8,

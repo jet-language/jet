@@ -40,17 +40,38 @@ impl<'a> EvalCtx<'a> {
         stmts: &'a [TStmt],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
+        let defer_mark = self.deferred_closes.len();
         for stmt in stmts {
             let flow = self.exec_stmt(stmt, scope)?;
             if let Some(flow) = self.pending_flow.take() {
+                self.run_deferred_closes(defer_mark, scope)?;
                 return Ok(flow);
             }
             match flow {
                 Flow::Normal => {}
-                other => return Ok(other),
+                other => {
+                    self.run_deferred_closes(defer_mark, scope)?;
+                    return Ok(other);
+                }
             }
         }
+        self.run_deferred_closes(defer_mark, scope)?;
         Ok(Flow::Normal)
+    }
+
+    fn run_deferred_closes(
+        &mut self,
+        mark: usize,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        while self.deferred_closes.len() > mark {
+            let close = self
+                .deferred_closes
+                .pop()
+                .expect("deferred close above mark");
+            self.eval_expr(close, scope)?;
+        }
+        Ok(())
     }
 
     pub(super) fn exec_stmt(
@@ -337,7 +358,10 @@ impl<'a> EvalCtx<'a> {
             | TStmt::Unsafe(body)
             | TStmt::Region(body) => self.exec_stmts(body, scope),
             TStmt::LineMarker(_) => Ok(Flow::Normal),
-            TStmt::DeferClose { .. } => Ok(Flow::Normal),
+            TStmt::DeferClose { close, .. } => {
+                self.deferred_closes.push(close);
+                Ok(Flow::Normal)
+            }
             TStmt::ForIn {
                 label,
                 var,

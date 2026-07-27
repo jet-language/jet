@@ -756,6 +756,10 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     for item in &module.items {
         match item {
             Item::Func(f) => {
+                // D-FFI-INLINE1: body lives in the hidden bridge; calls are ExternCall.
+                if f.inline_foreign.is_some() {
+                    continue;
+                }
                 if !f.type_params.is_empty() || !tir_covers(f, &cx) {
                     continue;
                 }
@@ -2102,8 +2106,10 @@ pub enum TStmt {
     /// impurity depth only while evaluating this body.
     Impure(Vec<TStmt>),
     /// D-REACTCORE1: `#Reactive { … }` — register a reactive effect at this point.
+    /// `closure` is the AOT Rust string; `executable` is the JIT-compilable body.
     Reactive {
         closure: String,
+        executable: Box<TLambda>,
     },
     /// c109 Phase 19: an explicit `region r { … }` (D-REGION1 opt B). Lowers to a plain
     /// Rust block `{ … }` — a lexical scope. The region's escape bound (E0631) and arena
@@ -3008,7 +3014,11 @@ pub enum TCoreClosureKind {
         executable: Box<TLambda>,
     },
     /// D-REACT1=B: `reactive.derived(<lambda>)` → `{root}jet_std::JetDerived::new(<closure>)`.
-    ReactiveDerived { closure: String },
+    /// `executable` is AOT-ignored; Cranelift JIT compiles it (captures via spawn-lambda table).
+    ReactiveDerived {
+        closure: String,
+        executable: Box<TLambda>,
+    },
     /// D-EFFECT-LIFECYCLE1=A: `reactive.effect(<lambda>)` returns a lifecycle handle.
     ReactiveEffect { closure: String, executable: Box<TLambda> },
     /// D-RENDERTGT2=A (c133 M2): reactive UI render loop through the backend seam.

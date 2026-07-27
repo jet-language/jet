@@ -1179,6 +1179,31 @@ extern "C" fn jet_jit_math_lcm(a: i64, b: i64) -> i64 {
     }
 }
 
+extern "C" fn jet_jit_math_sqrt(x: f64) -> f64 {
+    x.sqrt()
+}
+extern "C" fn jet_jit_math_sqrt_f32(x: f64) -> f64 {
+    ((x as f32).sqrt()) as f64
+}
+extern "C" fn jet_jit_math_pow(base: f64, exp: f64) -> f64 {
+    base.powf(exp)
+}
+extern "C" fn jet_jit_math_pow_f32(base: f64, exp: f64) -> f64 {
+    ((base as f32).powf(exp as f32)) as f64
+}
+extern "C" fn jet_jit_math_floor(x: f64) -> f64 {
+    x.floor()
+}
+extern "C" fn jet_jit_math_floor_f32(x: f64) -> f64 {
+    ((x as f32).floor()) as f64
+}
+extern "C" fn jet_jit_math_ceil(x: f64) -> f64 {
+    x.ceil()
+}
+extern "C" fn jet_jit_math_ceil_f32(x: f64) -> f64 {
+    ((x as f32).ceil()) as f64
+}
+
 // ── core.env / core.process (mirrors jet_std_env_get / jet_std_process_exit) ─
 
 /// Option ABI: `0` = None, else string-handle+1 (same as list_get_opt).
@@ -1338,6 +1363,14 @@ pub(crate) struct CoreHostFns {
     pub math_int_pow: cranelift_module::FuncId,
     pub math_gcd: cranelift_module::FuncId,
     pub math_lcm: cranelift_module::FuncId,
+    pub math_sqrt: cranelift_module::FuncId,
+    pub math_sqrt_f32: cranelift_module::FuncId,
+    pub math_pow: cranelift_module::FuncId,
+    pub math_pow_f32: cranelift_module::FuncId,
+    pub math_floor: cranelift_module::FuncId,
+    pub math_floor_f32: cranelift_module::FuncId,
+    pub math_ceil: cranelift_module::FuncId,
+    pub math_ceil_f32: cranelift_module::FuncId,
     pub env_get: cranelift_module::FuncId,
     pub env_set: cranelift_module::FuncId,
     pub env_unset: cranelift_module::FuncId,
@@ -1433,6 +1466,14 @@ pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder
     builder.symbol("jet_jit_math_int_pow", jet_jit_math_int_pow as *const u8);
     builder.symbol("jet_jit_math_gcd", jet_jit_math_gcd as *const u8);
     builder.symbol("jet_jit_math_lcm", jet_jit_math_lcm as *const u8);
+    builder.symbol("jet_jit_math_sqrt", jet_jit_math_sqrt as *const u8);
+    builder.symbol("jet_jit_math_sqrt_f32", jet_jit_math_sqrt_f32 as *const u8);
+    builder.symbol("jet_jit_math_pow", jet_jit_math_pow as *const u8);
+    builder.symbol("jet_jit_math_pow_f32", jet_jit_math_pow_f32 as *const u8);
+    builder.symbol("jet_jit_math_floor", jet_jit_math_floor as *const u8);
+    builder.symbol("jet_jit_math_floor_f32", jet_jit_math_floor_f32 as *const u8);
+    builder.symbol("jet_jit_math_ceil", jet_jit_math_ceil as *const u8);
+    builder.symbol("jet_jit_math_ceil_f32", jet_jit_math_ceil_f32 as *const u8);
     builder.symbol("jet_jit_env_get", jet_jit_env_get as *const u8);
     builder.symbol("jet_jit_env_set", jet_jit_env_set as *const u8);
     builder.symbol("jet_jit_env_unset", jet_jit_env_unset as *const u8);
@@ -1591,6 +1632,14 @@ pub(crate) fn declare_core_host_fns(
         math_int_pow: import("jet_jit_math_int_pow", &sig_i64_i64_i64)?,
         math_gcd: import("jet_jit_math_gcd", &sig_i64_i64_i64)?,
         math_lcm: import("jet_jit_math_lcm", &sig_i64_i64_i64)?,
+        math_sqrt: import("jet_jit_math_sqrt", &sig_f64_f64)?,
+        math_sqrt_f32: import("jet_jit_math_sqrt_f32", &sig_f64_f64)?,
+        math_pow: import("jet_jit_math_pow", &sig_f64_f64_f64)?,
+        math_pow_f32: import("jet_jit_math_pow_f32", &sig_f64_f64_f64)?,
+        math_floor: import("jet_jit_math_floor", &sig_f64_f64)?,
+        math_floor_f32: import("jet_jit_math_floor_f32", &sig_f64_f64)?,
+        math_ceil: import("jet_jit_math_ceil", &sig_f64_f64)?,
+        math_ceil_f32: import("jet_jit_math_ceil_f32", &sig_f64_f64)?,
         env_get: import("jet_jit_env_get", &sig_unary_i64)?,
         env_set: import("jet_jit_env_set", &sig_i64_i64_i64)?,
         env_unset: import("jet_jit_env_unset", &sig_unary_i64)?,

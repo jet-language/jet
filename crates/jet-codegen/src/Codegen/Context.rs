@@ -2501,6 +2501,17 @@ pub(crate) fn build_cx_items(
                             .map(|p| (p.convention, p.ty.clone()))
                             .collect(),
                     );
+                    // JIT print/use sites need the real return type (AOT emits the
+                    // Rust wrapper directly). Without this, TIR ExternCall falls
+                    // back to Unit and `print(extern(...))` becomes a no-op.
+                    cx.fn_types.insert(
+                        ef.name.clone(),
+                        Type::Fn {
+                            params: ef.params.iter().map(|p| p.ty.clone()).collect(),
+                            ret: ef.return_type.clone().map(Box::new),
+                            effect_bound: None,
+                        },
+                    );
                 }
             }
             Item::CModule(cm) => {
@@ -2513,6 +2524,14 @@ pub(crate) fn build_cx_items(
                             .iter()
                             .map(|p| (p.convention, p.ty.clone()))
                             .collect(),
+                    );
+                    cx.fn_types.insert(
+                        ef.name.clone(),
+                        Type::Fn {
+                            params: ef.params.iter().map(|p| p.ty.clone()).collect(),
+                            ret: ef.return_type.clone().map(Box::new),
+                            effect_bound: None,
+                        },
                     );
                 }
             }

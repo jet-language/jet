@@ -979,10 +979,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             lower_extern_call_arg(a, conv, env, cx)
                         })
                         .collect();
-                    // The extern fn's return type lives in `cx.fn_types` only if the
-                    // function is also a normal sig; extern fns are not in `fn_types`,
-                    // so fall back to Unit (the binding carries the real type — the call
-                    // result type is rarely load-bearing, like every covered call).
+                    // Return type comes from `cx.fn_types` (including extern rust /
+                    // CModule entries registered in Context).
                     return TExpr {
                         ty: call_return_type(cx, &call.name),
                         kind: TExprKind::ExternCall {

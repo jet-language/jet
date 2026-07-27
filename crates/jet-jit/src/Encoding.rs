@@ -221,19 +221,24 @@ pub(crate) fn alloc_datatree(tree: &json_rt::DataTree) -> i64 {
             alloc_dt_record(DT_ARRAY, list)
         }
         json_rt::DataTree::Object(entries) => {
+            // Ordered pair list (AOT `Vec<(String, DataTree)>`), not a key-sorted
+            // Map — Codable / source field order must survive `json.to_string`.
             let pairs: Vec<(String, i64)> = entries
                 .iter()
                 .map(|(k, v)| (k.clone(), alloc_datatree(v)))
                 .collect();
-            let map = Concurrency::with_runtime_mut(|rt| {
-                let map = rt.heap.alloc_empty_map();
+            let list = Concurrency::with_runtime_mut(|rt| {
+                let list = rt.heap.alloc_empty_list();
                 for (k, v) in pairs {
                     let kid = rt.heap.alloc_string(k);
-                    let _ = rt.heap.map_insert(map, kid, v);
+                    let rec = rt.heap.alloc_record(2);
+                    let _ = rt.heap.record_set_int(rec, 0, kid);
+                    let _ = rt.heap.record_set_int(rec, 1, v);
+                    let _ = rt.heap.list_push_int(list, rec);
                 }
-                map
+                list
             });
-            alloc_dt_record(DT_OBJECT, map)
+            alloc_dt_record(DT_OBJECT, list)
         }
     }
 }
@@ -263,11 +268,12 @@ pub(crate) fn read_datatree(handle: i64) -> Option<json_rt::DataTree> {
                 }
                 DT_OBJECT => {
                     let payload = rt.heap.record_get_int(handle, 1)?;
-                    let len = rt.heap.map_len(payload).unwrap_or(0);
+                    let len = rt.heap.list_len(payload).unwrap_or(0);
                     let mut pairs = Vec::with_capacity(len as usize);
                     for i in 0..len {
-                        let k = rt.heap.map_key_at(payload, i).unwrap_or(0);
-                        let v = rt.heap.map_value_at(payload, i).unwrap_or(0);
+                        let rec = rt.heap.list_get_int(payload, i).unwrap_or(0);
+                        let k = rt.heap.record_get_int(rec, 0).unwrap_or(0);
+                        let v = rt.heap.record_get_int(rec, 1).unwrap_or(0);
                         let ks = rt.heap.clone_string(k).unwrap_or_default();
                         pairs.push((ks, v));
                     }
@@ -1560,6 +1566,8 @@ pub(crate) struct EncodingHostFns {
     pub datatree_bool: cranelift_module::FuncId,
     pub datatree_float: cranelift_module::FuncId,
     pub datatree_pack: cranelift_module::FuncId,
+    pub object_from_map: cranelift_module::FuncId,
+    pub object_entries_to_map: cranelift_module::FuncId,
     pub datatree_migrate: cranelift_module::FuncId,
     pub toml_parse: cranelift_module::FuncId,
     pub toml_to_string: cranelift_module::FuncId,
@@ -1611,6 +1619,11 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
     builder.symbol("jet_jit_datatree_bool", jet_jit_datatree_bool as *const u8);
     builder.symbol("jet_jit_datatree_float", jet_jit_datatree_float as *const u8);
     builder.symbol("jet_jit_datatree_pack", jet_jit_datatree_pack as *const u8);
+    builder.symbol("jet_jit_object_from_map", jet_jit_object_from_map as *const u8);
+    builder.symbol(
+        "jet_jit_object_entries_to_map",
+        jet_jit_object_entries_to_map as *const u8,
+    );
     builder.symbol("jet_jit_datatree_migrate", jet_jit_datatree_migrate as *const u8);
     builder.symbol("jet_jit_toml_parse", jet_jit_toml_parse as *const u8);
     builder.symbol("jet_jit_toml_to_string", jet_jit_toml_to_string as *const u8);
@@ -1624,6 +1637,45 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
 
 extern "C" fn jet_jit_datatree_pack(disc: i64, payload: i64) -> i64 {
     alloc_dt_record(disc, payload)
+}
+
+/// `DataTree.Object(map)` when the payload is a computed Map: snapshot entries in
+/// map iteration order (BTree key order) into the ordered pair-list Object ABI.
+extern "C" fn jet_jit_object_from_map(map: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(len) = rt.heap.map_len(map) else {
+            rt.set_trap("data object payload is not a map");
+            return 0;
+        };
+        let list = rt.heap.alloc_empty_list();
+        for i in 0..len {
+            let k = rt.heap.map_key_at(map, i).unwrap_or(0);
+            let v = rt.heap.map_value_at(map, i).unwrap_or(0);
+            let rec = rt.heap.alloc_record(2);
+            let _ = rt.heap.record_set_int(rec, 0, k);
+            let _ = rt.heap.record_set_int(rec, 1, v);
+            let _ = rt.heap.list_push_int(list, rec);
+        }
+        list
+    })
+}
+
+/// Pattern `if tree == .Object(entries)`: ordered pair list → user-facing Map.
+extern "C" fn jet_jit_object_entries_to_map(list: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(len) = rt.heap.list_len(list) else {
+            rt.set_trap("data object payload is not an entry list");
+            return 0;
+        };
+        let map = rt.heap.alloc_empty_map();
+        for i in 0..len {
+            let rec = rt.heap.list_get_int(list, i).unwrap_or(0);
+            let k = rt.heap.record_get_int(rec, 0).unwrap_or(0);
+            let v = rt.heap.record_get_int(rec, 1).unwrap_or(0);
+            let _ = rt.heap.map_insert(map, k, v);
+        }
+        map
+    })
 }
 
 // ── D-MIGRATE3/4: decode_traced + silent migrate for plain decode ────────────
@@ -1919,6 +1971,8 @@ pub(crate) fn declare_encoding_host_fns(
         datatree_bool: import("jet_jit_datatree_bool", &sig_unary)?,
         datatree_float: import("jet_jit_datatree_float", &sig_unary)?,
         datatree_pack: import("jet_jit_datatree_pack", &sig_binary)?,
+        object_from_map: import("jet_jit_object_from_map", &sig_unary)?,
+        object_entries_to_map: import("jet_jit_object_entries_to_map", &sig_unary)?,
         datatree_migrate: import("jet_jit_datatree_migrate", &sig_binary)?,
         toml_parse: import("jet_jit_toml_parse", &sig_unary)?,
         toml_to_string: import("jet_jit_toml_to_string", &sig_unary)?,

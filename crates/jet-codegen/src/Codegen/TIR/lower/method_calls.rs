@@ -1560,6 +1560,17 @@ pub(crate) fn lower_method_call(
                 if handler_idx {
                     if let Expr::Lambda(lam) = &a.expr {
                         let params = expected_payload.clone().into_iter().collect::<Vec<_>>();
+                        let mut jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+                        if let Some(ty) = expected_payload.clone() {
+                            if jit_lambda.params.is_empty() {
+                                jit_lambda.params.push(("__payload".into(), ty));
+                            } else {
+                                for (_, pty) in &mut jit_lambda.params {
+                                    *pty = ty.clone();
+                                }
+                            }
+                        }
+                        cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
                         let tl = lower_lambda_expecting_value(lam, cx, env, params.as_slice());
                         return TExpr {
                             ty: Type::Fn {
@@ -1805,6 +1816,13 @@ pub(crate) fn lower_method_call(
             "label" | "button" => Type::Int,
             _ => unit_type(),
         };
+        // Resident JIT registers `on_click` via spawn-site (Game on_frame pattern).
+        if method == "on_click" {
+            if let Some(Expr::Lambda(lam)) = args.get(1).map(|a| &a.expr) {
+                let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+                cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+            }
+        }
         let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
         return TExpr {
             ty: result_ty,

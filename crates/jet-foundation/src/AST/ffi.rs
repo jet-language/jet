@@ -53,6 +53,8 @@ pub struct ComptimeInput {
 pub struct FfiLink {
     pub crate_name: String,
     pub rlib_path: PathBuf,
+    /// Shared library with `*_cabi` trampolines for the resident Cranelift JIT.
+    pub cdylib_path: PathBuf,
     /// Selected-target runtime dependencies emitted by Cargo.
     pub target_deps_dir: PathBuf,
     /// Host artifacts needed while rustc loads target metadata (notably proc macros).

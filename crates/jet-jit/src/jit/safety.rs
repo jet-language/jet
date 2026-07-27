@@ -36,6 +36,23 @@ fn erase_runtime_qualifiers(mut ty: &Type) -> &Type {
     ty
 }
 
+fn intish_ty(ty: &Type) -> bool {
+    matches!(erase_runtime_qualifiers(ty), Type::Int | Type::IntN { .. })
+}
+
+/// `Signal/Derived/Computed.get()` — TIR often erases the Apply payload to
+/// `Named("Unit")` inside closures. Overflow arithmetic still uses the Int
+/// host path for Int signals (`n.get() * 2`).
+fn reactive_get_intish(expr: &TExpr) -> bool {
+    matches!(
+        &expr.kind,
+        TExprKind::HandleMethod {
+            op: THandleOp::ReactiveGet,
+            ..
+        }
+    )
+}
+
 fn jit_bag_raw_key_candidate(ty: &Type) -> bool {
     match ty {
         Type::Tagged { inner, .. } => jit_bag_raw_key_candidate(inner),
@@ -56,8 +73,13 @@ pub(crate) fn jit_list_int_type(ty: &Type) -> bool {
 }
 
 pub(crate) fn jit_list_float_type(ty: &Type) -> bool {
-    matches!(ty, Type::List(inner) if matches!(inner.as_ref(), Type::Float))
-        || matches!(ty, Type::FixedList { elem, .. } if matches!(elem.as_ref(), Type::Float))
+    matches!(
+        ty,
+        Type::List(inner) if matches!(inner.as_ref(), Type::Float | Type::Float32)
+    ) || matches!(
+        ty,
+        Type::FixedList { elem, .. } if matches!(elem.as_ref(), Type::Float | Type::Float32)
+    )
 }
 
 pub(crate) fn jit_list_string_type(ty: &Type) -> bool {
@@ -102,7 +124,12 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
         Type::List(inner) | Type::FixedList { elem: inner, .. }
             if matches!(
                 inner.as_ref(),
-                Type::Int | Type::IntN { .. } | Type::Float | Type::String | Type::Char
+                Type::Int
+                    | Type::IntN { .. }
+                    | Type::Float
+                    | Type::Float32
+                    | Type::String
+                    | Type::Char
             ) =>
         {
             Some(inner.as_ref().clone())
@@ -334,6 +361,23 @@ pub(crate) fn jit_value_type(ty: &Type) -> bool {
         {
             // Opaque i64 handles: std/user structs and enums (Date, Cmd,
             // FileReader, WatchEvent, GameScene, …).
+            true
+        }
+        Type::Apply { name, args }
+            if matches!(
+                name.as_str(),
+                "Signal"
+                    | "Derived"
+                    | "Computed"
+                    | "Effect"
+                    | "Loadable"
+                    | "Event"
+                    | "AsyncEvent"
+                    | "Hook"
+                    | "DecisionHook"
+                    | "Watch"
+            ) && args.iter().all(jit_value_type) =>
+        {
             true
         }
         Type::Int
@@ -592,6 +636,24 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         }
         TExprKind::CoreClosureCall { kind } => match kind {
             TCoreClosureKind::Spawn { .. } => true,
+            TCoreClosureKind::ReactiveDerived { executable, .. }
+            | TCoreClosureKind::ReactiveEffect { executable, .. }
+            | TCoreClosureKind::UiReactiveRender { executable, .. } => {
+                match &executable.executable {
+                    TIR::TLambdaBody::Expr(e) => {
+                        if resident_safe_expr(e, callees) {
+                            true
+                        } else {
+                            // Keep false; tag surfaces via Let init detail when needed.
+                            let _ = expr_kind_tag(e);
+                            false
+                        }
+                    }
+                    TIR::TLambdaBody::Block(stmts) => {
+                        stmts.iter().all(|s| resident_safe_stmt(s, callees))
+                    }
+                }
+            }
             TCoreClosureKind::Guard { executable, .. }
             | TCoreClosureKind::OnCommit { executable, .. }
             | TCoreClosureKind::OnRollback { executable, .. } => {
@@ -605,8 +667,19 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             _ => false,
         },
         TExprKind::HandleMethod { recv, op, args } => {
+            let args_ok = match op {
+                // Frame / click callbacks are registered via JIT spawn-sites;
+                // the TIR lambda arg is not the resident-lowered body.
+                THandleOp::GameSceneOnFrame => args.len() <= 1,
+                THandleOp::UiBackendMethod { method } if method == "on_click" => {
+                    args.len() == 2
+                        && resident_safe_expr(&args[0], callees)
+                        && matches!(&args[1].kind, TExprKind::Lambda(_))
+                }
+                _ => args.iter().all(|a| resident_safe_expr(a, callees)),
+            };
             resident_safe_expr(recv, callees)
-                && args.iter().all(|a| resident_safe_expr(a, callees))
+                && args_ok
                 && resident_safe_handle_op(op, recv, args)
         }
         TExprKind::OrFallback {
@@ -886,11 +959,12 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     && resident_safe_expr(lhs, callees)
                     && resident_safe_expr(rhs, callees);
             }
-            if *overflow
-                && (!matches!(erase_runtime_qualifiers(&lhs.ty), Type::Int | Type::IntN { .. })
-                    || !matches!(erase_runtime_qualifiers(&rhs.ty), Type::Int | Type::IntN { .. }))
-            {
-                return false;
+            if *overflow {
+                let lhs_int = intish_ty(&lhs.ty) || reactive_get_intish(lhs);
+                let rhs_int = intish_ty(&rhs.ty) || reactive_get_intish(rhs);
+                if !lhs_int || !rhs_int {
+                    return false;
+                }
             }
             resident_safe_expr(lhs, callees) && resident_safe_expr(rhs, callees)
         }
@@ -1119,6 +1193,21 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             TIR::TRequireKind::Panic { msg } => resident_safe_expr(msg, callees),
         },
         TExprKind::Todo { .. } => true,
+        TExprKind::LayoutCompare { lhs, rhs, .. } => {
+            resident_safe_expr(lhs, callees) && resident_safe_expr(rhs, callees)
+        }
+        TExprKind::LayoutLit { inner } => resident_safe_expr(inner, callees),
+        TExprKind::MathBuiltin { args, .. } => {
+            args.iter().all(|a| resident_safe_expr(a, callees))
+        }
+        TExprKind::MathLaneIndex { base, index, .. } => {
+            resident_safe_expr(base, callees) && resident_safe_expr(index, callees)
+        }
+        TExprKind::MathSwizzleRead { recv, .. } => resident_safe_expr(recv, callees),
+        TExprKind::PtrFromAddr { addr, .. } => resident_safe_expr(addr, callees),
+        TExprKind::ExternCall { args, .. } => {
+            args.iter().all(|a| resident_safe_expr(&a.value, callees))
+        }
 
         _ => false,
     }
@@ -1779,6 +1868,8 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         }
         TStmt::Return(ret) => ret.as_ref().is_none_or(|e| resident_safe_expr(e, callees)),
         TStmt::ExprStmt(e) => resident_safe_expr(e, callees),
+        // Lowered by JIT (`Close` / file hosts); same expr gate as ExprStmt.
+        TStmt::DeferClose { close, .. } => resident_safe_expr(close, callees),
         TStmt::If {
             cond,
             then_body,
@@ -2052,6 +2143,11 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 .all(|(_, value)| resident_safe_expr(value, callees))
                 && body.iter().all(|s| resident_safe_stmt(s, callees))
         }
+        TStmt::Reactive { executable, .. } => match &executable.executable {
+            TIR::TLambdaBody::Expr(e) => resident_safe_expr(e, callees),
+            TIR::TLambdaBody::Block(stmts) => stmts.iter().all(|s| resident_safe_stmt(s, callees)),
+        },
+        TStmt::Layout { body, .. } => body.iter().all(|s| resident_safe_stmt(s, callees)),
         TStmt::IndexHookAssign {
             base,
             index,
@@ -2093,6 +2189,9 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     .as_ref()
                     .is_none_or(|(_, e)| resident_safe_expr(e, callees))
                 && resident_safe_stmt(stmt, callees)
+        }
+        TStmt::MathSwizzleAssign { base, value, .. } => {
+            resident_safe_expr(base, callees) && resident_safe_expr(value, callees)
         }
         _ => false,
     }
@@ -2139,7 +2238,168 @@ pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) 
     }
     for (i, s) in tir.body.iter().enumerate() {
         if !resident_safe_stmt(s, callees) {
-            return Some(format!("body stmt {i}"));
+            if let Some(drill) = first_unsafe_stmt_detail(std::slice::from_ref(s), callees) {
+                return Some(format!("body stmt {i}: {drill}"));
+            }
+            let extra = match s {
+                TStmt::Let { init, .. } | TStmt::ExprStmt(init) | TStmt::Assign { value: init, .. } => {
+                    let mut tag = format!(" init={}", expr_kind_tag(init));
+                    if let TExprKind::CoreClosureCall {
+                        kind: TCoreClosureKind::ReactiveDerived { executable, .. }
+                            | TCoreClosureKind::ReactiveEffect { executable, .. }
+                            | TCoreClosureKind::UiReactiveRender { executable, .. },
+                    } = &init.kind
+                    {
+                        match &executable.executable {
+                            TIR::TLambdaBody::Expr(e) => {
+                                tag.push_str(&format!(" body={}", expr_kind_tag(e)));
+                                if let TExprKind::Binary {
+                                    overflow,
+                                    lhs,
+                                    rhs,
+                                    ..
+                                } = &e.kind
+                                {
+                                    tag.push_str(&format!(
+                                        " bin=({} / {} overflow={overflow} lhs_ok={} rhs_ok={})",
+                                        expr_kind_tag(lhs),
+                                        expr_kind_tag(rhs),
+                                        intish_ty(&lhs.ty) || reactive_get_intish(lhs),
+                                        intish_ty(&rhs.ty) || reactive_get_intish(rhs),
+                                    ));
+                                }
+                                if let TExprKind::HandleMethod { recv, .. } = &e.kind {
+                                    tag.push_str(&format!(" hm_recv={}", expr_kind_tag(recv)));
+                                }
+                            }
+                            TIR::TLambdaBody::Block(stmts) => {
+                                tag.push_str(&format!(" block_len={}", stmts.len()));
+                            }
+                        }
+                    }
+                    tag
+                }
+                _ => String::new(),
+            };
+            return Some(format!("body stmt {i}: {:?}{extra}", stmt_kind_tag(s)));
+        }
+    }
+    None
+}
+
+fn expr_kind_tag(expr: &TExpr) -> &'static str {
+    match &expr.kind {
+        TExprKind::CoreCall { module, method, .. } => {
+            // Leak short tag for diagnostics only.
+            Box::leak(format!("CoreCall:{module}.{method}").into_boxed_str())
+        }
+        TExprKind::CoreClosureCall { kind } => match kind {
+            TCoreClosureKind::ReactiveDerived { .. } => "CoreClosure:Derived",
+            TCoreClosureKind::ReactiveEffect { .. } => "CoreClosure:Effect",
+            TCoreClosureKind::UiReactiveRender { .. } => "CoreClosure:UiRender",
+            TCoreClosureKind::Spawn { .. } => "CoreClosure:Spawn",
+            _ => "CoreClosure:Other",
+        },
+        TExprKind::HandleMethod { op, .. } => "HandleMethod",
+        TExprKind::Call { name, .. } => Box::leak(format!("Call:{name}").into_boxed_str()),
+        TExprKind::Binary { .. } => "Binary",
+        TExprKind::Local(_) => "Local",
+        TExprKind::Clone(_) => "Clone",
+        _ => "OtherExpr",
+    }
+}
+
+fn stmt_kind_tag(stmt: &TStmt) -> &'static str {
+    match stmt {
+        TStmt::Let { .. } => "Let",
+        TStmt::Assign { .. } => "Assign",
+        TStmt::Return(_) => "Return",
+        TStmt::ExprStmt(_) => "ExprStmt",
+        TStmt::Reactive { .. } => "Reactive",
+        TStmt::If { .. } => "If",
+        TStmt::Loop { .. } => "Loop",
+        TStmt::While { .. } => "While",
+        TStmt::ForIn { .. } => "ForIn",
+        TStmt::Inline(_) => "Inline",
+        TStmt::Impure(_) => "Impure",
+        TStmt::Region(_) => "Region",
+        TStmt::Unsafe(_) => "Unsafe",
+        _ => "Other",
+    }
+}
+
+fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Option<String> {
+    for (i, s) in stmts.iter().enumerate() {
+        if resident_safe_stmt(s, callees) {
+            continue;
+        }
+        match s {
+            TStmt::Inline(body) | TStmt::Impure(body) | TStmt::Region(body) | TStmt::Unsafe(body) => {
+                if let Some(inner) = first_unsafe_stmt_detail(body, callees) {
+                    return Some(format!("{}[{i}]>{inner}", stmt_kind_tag(s)));
+                }
+                return Some(format!("{}[{i}]", stmt_kind_tag(s)));
+            }
+            TStmt::Let { init, .. } | TStmt::ExprStmt(init) | TStmt::Assign { value: init, .. } => {
+                let mut detail = format!("{}[{i}] init={}", stmt_kind_tag(s), expr_kind_tag(init));
+                if let TExprKind::CoreClosureCall {
+                    kind: TCoreClosureKind::ReactiveDerived { executable, .. }
+                        | TCoreClosureKind::ReactiveEffect { executable, .. }
+                        | TCoreClosureKind::UiReactiveRender { executable, .. },
+                } = &init.kind
+                {
+                    match &executable.executable {
+                        TIR::TLambdaBody::Expr(e) => {
+                            detail.push_str(&format!(" body={}", expr_kind_tag(e)));
+                            if let TExprKind::Binary {
+                                overflow,
+                                lhs,
+                                rhs,
+                                ..
+                            } = &e.kind
+                            {
+                                let recv_ty = if let TExprKind::HandleMethod { recv, op, .. } =
+                                    &lhs.kind
+                                {
+                                    format!("recv={:?} op_is_get={}", recv.ty, matches!(op, THandleOp::ReactiveGet))
+                                } else {
+                                    "recv=?".into()
+                                };
+                                detail.push_str(&format!(
+                                    " bin=({}/{} overflow={overflow} lhs_ok={} rhs_ok={} lhs_ty={:?} rhs_ty={:?} {recv_ty})",
+                                    expr_kind_tag(lhs),
+                                    expr_kind_tag(rhs),
+                                    intish_ty(&lhs.ty) || reactive_get_intish(lhs),
+                                    intish_ty(&rhs.ty) || reactive_get_intish(rhs),
+                                    lhs.ty,
+                                    rhs.ty,
+                                ));
+                            }
+                        }
+                        TIR::TLambdaBody::Block(inner) => {
+                            if let Some(b) = first_unsafe_stmt_detail(inner, callees) {
+                                detail.push_str(&format!(" block>{b}"));
+                            }
+                        }
+                    }
+                }
+                if let TExprKind::HandleMethod { op, .. } = &init.kind {
+                    let op_tag = match op {
+                        THandleOp::UiBackendMethod { method } => {
+                            Box::leak(format!("UiBackend:{method}").into_boxed_str())
+                        }
+                        THandleOp::EventMethod { method } => {
+                            Box::leak(format!("Event:{method}").into_boxed_str())
+                        }
+                        THandleOp::ReactiveGet => "ReactiveGet",
+                        THandleOp::ReactiveSet => "ReactiveSet",
+                        _ => "HandleOp",
+                    };
+                    detail.push_str(&format!(" op={op_tag}"));
+                }
+                return Some(detail);
+            }
+            _ => return Some(format!("{}[{i}]", stmt_kind_tag(s))),
         }
     }
     None
@@ -2227,6 +2487,10 @@ fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut usize) {
             | TStmt::Unsafe(body)
             | TStmt::Shield { body }
             | TStmt::DebugOnly(body) => count_spawn_sites_stmts(body, n),
+            TStmt::Reactive { .. } => {
+                *n += 1;
+            }
+            TStmt::Layout { body, .. } => count_spawn_sites_stmts(body, n),
             TStmt::ContextBlock { guards, body } => {
                 for (_, value) in guards {
                     count_spawn_sites_expr(value, n);
@@ -2287,6 +2551,9 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
         expr.kind,
         TExprKind::CoreClosureCall {
             kind: TCoreClosureKind::Spawn { .. }
+                | TCoreClosureKind::ReactiveDerived { .. }
+                | TCoreClosureKind::ReactiveEffect { .. }
+                | TCoreClosureKind::UiReactiveRender { .. }
         }
     ) {
         *n += 1;
@@ -2309,6 +2576,24 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
     } = &expr.kind
     {
         *n += 1;
+    }
+    if let TExprKind::HandleMethod {
+        op: THandleOp::EventMethod { method },
+        ..
+    } = &expr.kind
+    {
+        if matches!(method.as_str(), "on" | "once" | "on_priority") {
+            *n += 1;
+        }
+    }
+    if let TExprKind::HandleMethod {
+        op: THandleOp::UiBackendMethod { method },
+        ..
+    } = &expr.kind
+    {
+        if method == "on_click" {
+            *n += 1;
+        }
     }
     match &expr.kind {
         TExprKind::Print(inner)
@@ -2474,23 +2759,74 @@ fn resident_safe_capture_policy(c: &JitSpawnCapture) -> bool {
                     | Type::Bool
                     | Type::Char
             )
-            || matches!(
-                &c.ty,
-                Type::Named(name) if matches!(
-                    name.as_str(),
-                    "TcpListener"
-                        | "TcpStream"
-                        | "SocketAddr"
-                        | "UdpSocket"
-                        | "UnixListener"
-                        | "UnixStream"
-                        | "HttpMux"
-                        | "HttpServer"
-                        | "WsConn"
-                )
-            )
+            || opaque_host_handle_ty(&c.ty)
     } else {
         true
+    }
+}
+
+/// Resident JIT opaque handles: i64 slots, clone = copy.
+pub(crate) fn opaque_host_handle_ty(ty: &Type) -> bool {
+    match ty {
+        Type::Named(n) => matches!(
+            n.as_str(),
+            "NullBackend"
+                | "TuiBackend"
+                | "GtkBackend"
+                | "UiNode"
+                | "EventResult"
+                | "InputEvent"
+                | "AriaRole"
+                | "Point"
+                | "Size"
+                | "Rect"
+                | "SizeConstraint"
+                | "WebApp"
+                | "WebPage"
+                | "DevServer"
+                | "AsyncPolicy"
+                | "Overflow"
+                | "FailurePolicy"
+                | "DispatchState"
+                | "HookPolicy"
+                | "HookDecision"
+                | "HookOutcome"
+                | "EventConfigError"
+                | "LayoutHandle"
+                | "GameScene"
+                | "GameFrame"
+                | "GameBackend"
+                | "RaylibWindow"
+                | "TcpListener"
+                | "TcpStream"
+                | "SocketAddr"
+                | "UdpSocket"
+                | "UnixListener"
+                | "UnixStream"
+                | "HttpMux"
+                | "HttpServer"
+                | "HttpHandler"
+                | "HttpRequest"
+                | "HttpResponse"
+                | "HttpBody"
+                | "HttpHeaders"
+                | "WsConn"
+                | "WsMessage"
+        ),
+        Type::Apply { name, .. } => matches!(
+            name.as_str(),
+            "Signal"
+                | "Derived"
+                | "Computed"
+                | "Effect"
+                | "Loadable"
+                | "Event"
+                | "AsyncEvent"
+                | "Hook"
+                | "DecisionHook"
+                | "Watch"
+        ),
+        _ => false,
     }
 }
 
@@ -2863,6 +3199,15 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                 && matches!(&args[1].ty, Type::String)
         }
         THandleOp::GameInputPressed => args.len() == 1 && matches!(&args[0].ty, Type::String),
+        THandleOp::ReactiveGet => args.is_empty(),
+        THandleOp::ReactiveSet => args.len() == 1,
+        THandleOp::ReactiveEffectMethod { .. } => args.is_empty(),
+        THandleOp::EventMethod { .. } => true,
+        THandleOp::LayoutMethod { .. } => true,
+        THandleOp::LoadableMethod { .. } => true,
+        THandleOp::UiBackendMethod { .. } => true,
+        THandleOp::DevServerMethod { .. } => true,
+        THandleOp::WebAppMethod { .. } => true,
         THandleOp::ReaderOver
         | THandleOp::ReaderReadU8
         | THandleOp::ReaderReadU16Le
@@ -2941,6 +3286,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         },
         THandleOp::HttpReqTrailers => args.is_empty(),
         THandleOp::HttpRespTrailers => args.len() == 1,
+        THandleOp::MathMethod { .. } => true,
         _ => false,
     }
 }

@@ -4,8 +4,164 @@ fn main() {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     write_yaml_std(&manifest);
     write_sketch_rt(&manifest);
+    write_layout_rt(&manifest);
+    write_reactive_rt(&manifest);
     write_time_rt(&manifest);
     write_regex_rt(&manifest);
+}
+
+fn write_reactive_rt(manifest: &PathBuf) {
+    let src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs");
+    println!("cargo:rerun-if-changed={}", src.display());
+    let raw = std::fs::read_to_string(&src).expect("read ReactiveEventWatch.rs");
+    // File is indented 4 spaces for jet_std string-concat embedding.
+    let unindent = |s: &str| -> String {
+        s.lines()
+            .map(|line| line.strip_prefix("    ").unwrap_or(line))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let start = raw
+        .find("// ── D-REACT1=B + D-DATARACE1=C")
+        .expect("reactive marker");
+    // Sync reactive + Event core, then skip AsyncEvent (needs task runtime),
+    // then Hook/DecisionHook. JIT hosts async with thin adapters.
+    let end_sync = raw
+        .find("    pub struct JetAsyncPolicy")
+        .expect("JetAsyncPolicy marker");
+    let start_hooks = raw
+        .find("    struct JetHookListener<")
+        .expect("JetHookListener marker");
+    let end_hooks = raw
+        .find("    pub struct WatchHandle")
+        .expect("WatchHandle marker");
+    fn strip_orphan_derives(body: &mut String) {
+        loop {
+            let trimmed = body.trim_end();
+            let orphan = trimmed.ends_with("#[derive(Clone)]")
+                || trimmed.ends_with("#[derive(Clone, Copy)]")
+                || trimmed.ends_with("#[derive(Clone, Copy, Debug, Eq, PartialEq)]")
+                || trimmed.ends_with("#[derive(Clone, Copy, Debug, PartialEq, Eq)]");
+            if !orphan {
+                break;
+            }
+            if let Some(i) = body.rfind("#[derive") {
+                body.truncate(i);
+                *body = body.trim_end().to_string();
+            } else {
+                break;
+            }
+        }
+    }
+    let mut body = unindent(&raw[start..end_sync]);
+    strip_orphan_derives(&mut body);
+    body.push_str("\n");
+    body.push_str(&unindent(&raw[start_hooks..end_hooks]));
+    strip_orphan_derives(&mut body);
+    // Pub types/fns JIT hosts need. Longest-first + already-pub skip so
+    // `JetEvent` does not smash `JetEventScope` into `pub pub`.
+    fn ensure_pub(body: &mut String, kind: &str, name: &str) {
+        let bare = format!("{kind} {name}");
+        let mut out = String::with_capacity(body.len() + 16);
+        let bytes = body.as_str();
+        let mut rest = bytes;
+        while let Some(i) = rest.find(&bare) {
+            let next = rest[i + bare.len()..].chars().next();
+            let ident_continue = next.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+            out.push_str(&rest[..i]);
+            if ident_continue {
+                out.push_str(&bare);
+            } else {
+                let before = &rest[..i];
+                let already = before.ends_with("pub ") || before.ends_with("pub(crate) ");
+                if already {
+                    out.push_str(&bare);
+                } else {
+                    out.push_str("pub ");
+                    out.push_str(&bare);
+                }
+            }
+            rest = &rest[i + bare.len()..];
+        }
+        out.push_str(rest);
+        *body = out;
+    }
+    for name in [
+        "JetReactiveEffect",
+        "JetSignal",
+        "JetDerived",
+        "JetEventPolicy",
+        "JetEventTrace",
+        "JetEventScope",
+        "JetEventOverflow",
+        "JetEventConfigError",
+        "JetSubscription",
+        "JetEvent",
+        "JetHookPolicy",
+        "JetHookDecision",
+        "JetHookOutcome",
+        "JetHook",
+        "JetDecisionHook",
+        "JetAsyncEvent",
+        "JetAsyncPolicy",
+        "JetFailurePolicy",
+        "JetDispatchReport",
+        "JetDispatchState",
+    ] {
+        ensure_pub(&mut body, "struct", name);
+        ensure_pub(&mut body, "enum", name);
+    }
+    for name in [
+        "jet_reactive_effect_rooted",
+        "jet_reactive_effect",
+        "jet_reactive_scope",
+    ] {
+        ensure_pub(&mut body, "fn", name);
+    }
+    // Observe lives in Prelude::Observe; stub a no-op for the sync Event include.
+    // AsyncEvent is host-shimmed (see Reactive.rs) — not included here.
+    let stub = r#"
+#[derive(Clone)]
+pub struct JetObserveEvent {
+    pub sequence: u64,
+    pub source: &'static str,
+    pub event_id: u64,
+    pub owner_id: u64,
+    pub subscription_id: u64,
+    pub dispatch_id: u64,
+    pub lifecycle: &'static str,
+    pub queued: i64,
+    pub blocked: i64,
+    pub running: i64,
+    pub capacity: i64,
+    pub overflow: &'static str,
+    pub priority: i64,
+    pub failure: &'static str,
+    pub terminal: &'static str,
+}
+pub fn jet_observe_event(_event: JetObserveEvent) {}
+"#;
+    body = body.replace("super::jet_observe_event", "jet_observe_event");
+    body = body.replace("super::JetObserveEvent", "JetObserveEvent");
+    let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("reactive_rt.rs");
+    std::fs::write(&out, format!("{stub}\n{body}\n")).expect("write reactive_rt.rs");
+}
+
+fn write_layout_rt(manifest: &PathBuf) {
+    let src = manifest.join("../jet-codegen/src/Prelude/Layout.rs");
+    println!("cargo:rerun-if-changed={}", src.display());
+    let raw = std::fs::read_to_string(&src).expect("read Prelude/Layout.rs");
+    let start = raw
+        .find("mod jet_layout {")
+        .expect("jet_layout module in Layout.rs");
+    let body = &raw[start + "mod jet_layout {".len()..];
+    let body = body.trim_end();
+    let body = body
+        .strip_suffix('}')
+        .expect("Layout.rs closing brace")
+        .trim_end();
+    let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("layout_rt.rs");
+    std::fs::write(&out, format!("{body}\n")).expect("write layout_rt.rs");
 }
 
 fn write_yaml_std(manifest: &PathBuf) {

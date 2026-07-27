@@ -146,6 +146,14 @@ pub(crate) struct JitRuntime {
     pub(crate) readers: Vec<crate::Parse::ReaderSlot>,
     pub(crate) cursors: Vec<crate::Parse::CursorSlot>,
     pub(crate) reflect_values: Vec<ReflectSlot>,
+    /// D-LAYOUT1: layout handles / LinExpr / Constraint slots (#1225).
+    pub(crate) layout_slots: Vec<crate::Layout::LayoutSlot>,
+    /// D-REACT1 / D-EVENT1: reactive + event opaque handles (#1225).
+    pub(crate) reactive: crate::Reactive::ReactiveState,
+    /// D-RENDERTGT*: UI backends / nodes / events (#1225).
+    pub(crate) ui: crate::Ui::UiState,
+    /// D-WEBAPP1 / c-devserver: web app + DevServer handles (#1226).
+    pub(crate) web: crate::Web::WebState,
 }
 
 impl JitRuntime {
@@ -1537,6 +1545,10 @@ pub(crate) struct HostFns {
     pub(crate) net_http: crate::net_http_rt::NetHttpHostFns,
     pub(crate) game: crate::Game::GameHostFns,
     pub(crate) raylib: crate::Raylib::RaylibHostFns,
+    pub(crate) layout: crate::Layout::LayoutHostFns,
+    pub(crate) reactive: crate::Reactive::ReactiveHostFns,
+    pub(crate) ui: crate::Ui::UiHostFns,
+    pub(crate) web: crate::Web::WebHostFns,
     pub(crate) parse: crate::Parse::HostFns,
     pub(crate) reflect_of_finish: FuncId,
     pub(crate) reflect_field_new: FuncId,
@@ -1551,6 +1563,8 @@ pub(crate) struct HostFns {
     pub(crate) time: crate::Time::TimeHostFns,
     pub(crate) io: crate::Io::IoHostFns,
     pub(crate) watcher: crate::Watcher::WatcherHostFns,
+    pub(crate) math: crate::Math::MathHostFns,
+    pub(crate) ffi: crate::Ffi::FfiHostFns,
 }
 
 pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
@@ -1731,6 +1745,10 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::net_http_rt::register_net_http_symbols(&mut builder);
     crate::Game::register_game_symbols(&mut builder);
     crate::Raylib::register_raylib_symbols(&mut builder);
+    crate::Layout::register_layout_symbols(&mut builder);
+    crate::Reactive::register_reactive_symbols(&mut builder);
+    crate::Ui::register_ui_symbols(&mut builder);
+    crate::Web::register_web_symbols(&mut builder);
     crate::Parse::register_symbols(&mut builder);
     crate::Data::register_symbols(&mut builder);
     builder.symbol("jet_jit_reflect_of_finish", jet_jit_reflect_of_finish as *const u8);
@@ -1745,6 +1763,9 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Time::register_time_symbols(&mut builder);
     crate::Io::register_io_symbols(&mut builder);
     crate::Watcher::register_watcher_symbols(&mut builder);
+    crate::Net::register_net_symbols(&mut builder);
+    crate::Math::register_math_host_symbols(&mut builder);
+    crate::Ffi::register_ffi_host_symbols(&mut builder);
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
     let memory = Memory::declare_memory_host_fns(&mut module)?;
@@ -1768,11 +1789,17 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let net_http = crate::net_http_rt::declare_net_http_host_fns(&mut module)?;
     let game = crate::Game::declare_game_host_fns(&mut module)?;
     let raylib = crate::Raylib::declare_raylib_host_fns(&mut module)?;
+    let layout = crate::Layout::declare_layout_host_fns(&mut module)?;
+    let reactive = crate::Reactive::declare_reactive_host_fns(&mut module)?;
+    let ui = crate::Ui::declare_ui_host_fns(&mut module)?;
+    let web = crate::Web::declare_web_host_fns(&mut module)?;
     let parse = crate::Parse::declare(&mut module)?;
     let data = crate::Data::declare(&mut module)?;
     let time = crate::Time::declare_time_host_fns(&mut module)?;
     let io = crate::Io::declare_io_host_fns(&mut module)?;
     let watcher = crate::Watcher::declare_watcher_host_fns(&mut module)?;
+    let math = crate::Math::declare_math_host_fns(&mut module)?;
+    let ffi = crate::Ffi::declare_ffi_host_fns(&mut module)?;
     let host = declare_host_fns(
         &mut module,
         coll,
@@ -1797,11 +1824,17 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         net_http,
         game,
         raylib,
+        layout,
+        reactive,
+        ui,
+        web,
         parse,
         data,
         time,
         io,
         watcher,
+        math,
+        ffi,
     )?;
     Ok((module, host))
 }
@@ -1973,11 +2006,17 @@ fn declare_host_fns(
     net_http: crate::net_http_rt::NetHttpHostFns,
     game: crate::Game::GameHostFns,
     raylib: crate::Raylib::RaylibHostFns,
+    layout: crate::Layout::LayoutHostFns,
+    reactive: crate::Reactive::ReactiveHostFns,
+    ui: crate::Ui::UiHostFns,
+    web: crate::Web::WebHostFns,
     parse: crate::Parse::HostFns,
     data: crate::Data::DataHostFns,
     time: crate::Time::TimeHostFns,
     io: crate::Io::IoHostFns,
     watcher: crate::Watcher::WatcherHostFns,
+    math: crate::Math::MathHostFns,
+    ffi: crate::Ffi::FfiHostFns,
 ) -> Result<HostFns, String> {
     let cc = module.target_config().default_call_conv;
     let mut sig_bin_i64 = Signature::new(cc);
@@ -2318,6 +2357,10 @@ fn declare_host_fns(
         net_http,
         game,
         raylib,
+        layout,
+        reactive,
+        ui,
+        web,
         parse,
         reflect_of_finish: import("jet_jit_reflect_of_finish", &sig_reflect_finish)?,
         reflect_field_new: import("jet_jit_reflect_field_new", &sig_str_binary_i64)?,
@@ -2332,5 +2375,7 @@ fn declare_host_fns(
         time,
         io,
         watcher,
+        math,
+        ffi,
     })
 }

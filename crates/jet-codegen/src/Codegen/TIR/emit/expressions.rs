@@ -37,6 +37,7 @@ use crate::Codegen::TIR::THostArg;
 use crate::Codegen::TIR::THostCall;
 use crate::Codegen::TIR::TOptionProbe;
 use crate::Codegen::TIR::TTypedTextForm;
+use crate::Codegen::TIR::TStmt;
 use crate::Codegen::TIR::TTryConvert;
 use crate::Codegen::TIR::tuple_join;
 
@@ -1422,18 +1423,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         s
                     };
                     if variant == "Object" {
-                        if let TExprKind::MapLit(entries) = &val.kind {
-                            let pairs = entries
-                                .iter()
-                                .map(|(key, value)| {
-                                    format!(
-                                        "(({}).clone(), {})",
-                                        emit_tir_expr(key, cx),
-                                        emit_tir_expr(value, cx)
-                                    )
-                                })
-                                .collect::<Vec<_>>()
-                                .join(", ");
+                        if let Some(pairs) = object_ordered_pairs_rust(val, cx) {
                             format!("{}::{}(vec![{}])", prefix, variant, pairs)
                         } else {
                             format!(
@@ -3531,7 +3521,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 format!("{}.on_rollback(Box::new({}))", handle, closure)
             }
             // D-REACT1=B: a derived value recomputed from its signals.
-            TCoreClosureKind::ReactiveDerived { closure } => {
+            TCoreClosureKind::ReactiveDerived { closure, .. } => {
                 format!("{}jet_std::JetDerived::new({})", cx.root_prefix, closure)
             }
             // D-REACT1=B: an effect re-run when a signal it read changes.
@@ -3653,4 +3643,71 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             format!("{}::{}({})", crate_name, wrapper, arg_str)
         }
     }
+}
+
+/// Recover source-order Object pairs from a MapLit or its #779 IfExpr desugar.
+fn object_ordered_pairs_rust(val: &TExpr, cx: &Cx) -> Option<String> {
+    let entries: Vec<(&TExpr, &TExpr)> = match &val.kind {
+        TExprKind::MapLit(entries) => entries.iter().map(|(k, v)| (k, v)).collect(),
+        TExprKind::IfExpr {
+            cond,
+            then_body,
+            then_value,
+            ..
+        } => {
+            let TIfCond::Plain(c) = cond.as_ref() else {
+                return None;
+            };
+            if !matches!(&c.kind, TExprKind::BoolLit(true)) {
+                return None;
+            }
+            let TExprKind::Local(result) = &then_value.kind else {
+                return None;
+            };
+            let (first, rest) = then_body.split_first()?;
+            let TStmt::Let { name, init, .. } = first else {
+                return None;
+            };
+            if name != &result.name {
+                return None;
+            }
+            if !matches!(&init.kind, TExprKind::MapLit(entries) if entries.is_empty()) {
+                return None;
+            }
+            let mut pairs = Vec::with_capacity(rest.len());
+            for stmt in rest {
+                let TStmt::IndexAssign {
+                    base,
+                    index,
+                    is_map: true,
+                    value,
+                } = stmt
+                else {
+                    return None;
+                };
+                let TExprKind::Local(base_local) = &base.kind else {
+                    return None;
+                };
+                if base_local.name != *name {
+                    return None;
+                }
+                pairs.push((index, value));
+            }
+            pairs
+        }
+        _ => return None,
+    };
+    Some(
+        entries
+            .into_iter()
+            .map(|(key, value)| {
+                format!(
+                    "(({}).clone(), {})",
+                    emit_tir_expr(key, cx),
+                    emit_tir_expr(value, cx)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
 }

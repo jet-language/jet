@@ -1,4 +1,4 @@
-use cranelift_codegen::ir::{types, AbiParam, InstBuilder, Signature};
+use cranelift_codegen::ir::{types, AbiParam, Endianness, InstBuilder, MemFlags, Signature, Value};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Linkage, Module};
@@ -39,6 +39,24 @@ fn register_packed_enum_show_table(meta: &JitMeta<'_>) {
             rows.push((variant.clone(), kind, nested));
         }
         Collections::register_packed_enum_show(enum_name, rows);
+    }
+}
+
+fn pack_spawn_return(
+    b: &mut FunctionBuilder,
+    val: Value,
+    ret_ty: &Type,
+) -> Result<Value, String> {
+    match clif_ty(ret_ty) {
+        Some(ty) if ty == types::F64 => Ok(b.ins().bitcast(
+            types::I64,
+            MemFlags::new().with_endianness(Endianness::Little),
+            val,
+        )),
+        Some(ty) if ty == types::I8 || ty == types::I32 => Ok(b.ins().uextend(types::I64, val)),
+        Some(ty) if ty == types::I64 => Ok(val),
+        None => Ok(val),
+        other => Err(format!("jit spawn return unsupported: {ret_ty:?} ({other:?})")),
     }
 }
 
@@ -100,7 +118,12 @@ fn lower_spawn_function(
             dead: false,
             next_var: 0,
             method_struct: None,
-            ret_clif: clif_ty(&lam.ret),
+            ret_clif: if clif_ty(&lam.ret).is_some() {
+                // Spawn bodies use a packed i64 ABI (Float → bitcast bits).
+                Some(types::I64)
+            } else {
+                None
+            },
             shield_depth: 0,
             deadline_depth: 0,
             switch_subject: None,
@@ -109,6 +132,7 @@ fn lower_spawn_function(
             shared_transaction_depth: 0,
             unsafe_depth: 0,
             scope_guards: Vec::new(),
+            deferred_closes: Vec::new(),
             txn_stack: Vec::new(),
         };
         for cap in &lam.captures {
@@ -131,7 +155,8 @@ fn lower_spawn_function(
             TJitSpawnBody::Expr(e) => {
                 let val = lctx.lower_expr(e)?;
                 if clif_ty(&lam.ret).is_some() {
-                    b.ins().return_(&[val]);
+                    let packed = pack_spawn_return(&mut b, val, &lam.ret)?;
+                    b.ins().return_(&[packed]);
                 } else {
                     let _ = val;
                     b.ins().return_(&[]);
@@ -142,7 +167,8 @@ fn lower_spawn_function(
                 if let Some(t) = tail {
                     let val = lctx.lower_expr(t)?;
                     if clif_ty(&lam.ret).is_some() {
-                        b.ins().return_(&[val]);
+                        let packed = pack_spawn_return(&mut b, val, &lam.ret)?;
+                        b.ins().return_(&[packed]);
                     } else {
                         let _ = val;
                         b.ins().return_(&[]);
@@ -157,9 +183,12 @@ fn lower_spawn_function(
         }
         b.finalize();
     }
+    if let Err(e) = cranelift_codegen::verify_function(&ctx.func, module.isa()) {
+        return Err(format!("spawn body verifier: {e:?}"));
+    }
     module
         .define_function(func_id, &mut ctx)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("define spawn body: {e:?}"))?;
     // Spawn bodies are named jet_jit_spawn_body_N at declare time; recover via FuncId scan.
     let export = (0..64)
         .find_map(|i| {
@@ -303,6 +332,7 @@ pub(crate) fn lower_callable_lambda(
             shared_transaction_depth: 0,
             unsafe_depth: 0,
             scope_guards: Vec::new(),
+            deferred_closes: Vec::new(),
             txn_stack: Vec::new(),
         };
         let mut arg_i = 0usize;
@@ -435,6 +465,7 @@ fn lower_function(
             shared_transaction_depth: 0,
             unsafe_depth: 0,
             scope_guards: Vec::new(),
+            deferred_closes: Vec::new(),
             txn_stack: Vec::new(),
         };
         if func_has_receiver(tir) {
@@ -510,7 +541,7 @@ fn lower_function(
     }
     module
         .define_function(func_id, &mut ctx)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("define {}: {e:?}", tir.name))?;
     let export_name = if matches!(
         module.get_name("jet_jit_main"),
         Some(cranelift_module::FuncOrDataId::Func(id)) if id == func_id
@@ -597,6 +628,7 @@ fn lower_generator_body(
             shared_transaction_depth: 0,
             unsafe_depth: 0,
             scope_guards: Vec::new(),
+            deferred_closes: Vec::new(),
             txn_stack: Vec::new(),
         };
         for (index, (name, ty, _)) in tir.params.iter().enumerate() {
