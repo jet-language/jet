@@ -715,6 +715,33 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // `emit_builtin_method` (Source/Codegen/Expression.rs) byte-for-byte. Args are
         // emitted PLAINLY (no clone/borrow wrappers — `arg(i)` is a raw `emit_expr`).
         TExprKind::BuiltinMethod { recv, op, args } => {
+            // Eager fuse: `list.map(f).to_list()` → `jet_list_map` so borrowed
+            // Fn captures need not be `'static` (E0521 under `jet_iter_map`).
+            if matches!(op, TBuiltinOp::IterToList | TBuiltinOp::IterCollect) {
+                if let TExprKind::ClosureMethod {
+                    recv: map_recv,
+                    op: map_op,
+                    args: map_args,
+                } = &recv.kind
+                {
+                    if matches!(map_op, TClosureOp::Map | TClosureOp::MapMut) {
+                        let list = emit_tir_expr(map_recv, cx);
+                        let mut f = map_args
+                            .first()
+                            .map(|e| emit_tir_expr(e, cx))
+                            .unwrap_or_default();
+                        if let Some(rest) = f.strip_prefix("move ") {
+                            f = rest.to_string();
+                        }
+                        let helper = if matches!(map_op, TClosureOp::MapMut) {
+                            "jet_list_map_mut"
+                        } else {
+                            "jet_list_map"
+                        };
+                        return format!("{helper}(({list}).clone(), {f})");
+                    }
+                }
+            }
             let recv_is_iter = crate::Collections::is_iter_type(&recv.ty);
             let recv = emit_tir_expr(recv, cx);
             let a = |i: usize| {
@@ -3473,18 +3500,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 emit_tir_expr(addr, cx),
                 closure
             ),
-            TCoreClosureKind::Guard { closure } => {
+            TCoreClosureKind::Guard { closure, .. } => {
                 format!("{}jet_scope_guard({})", cx.root_prefix, closure)
             }
             // D-TXN3: register a post-commit hook on the transaction handle. Boxed so
             // hooks of differing closure types share one queue; run LIFO in Drop, but
             // only after `commit()` (the `JetTransaction` prelude type).
-            TCoreClosureKind::OnCommit { handle, closure } => {
+            TCoreClosureKind::OnCommit { handle, closure, .. } => {
                 format!("{}.on_commit(Box::new({}))", handle, closure)
             }
             // D-TXN-ROLLBACK (layer 3): the rollback-hook registration, run LIFO on a
             // `?`-failure and dropped un-run on commit (the `JetTransaction` prelude type).
-            TCoreClosureKind::OnRollback { handle, closure } => {
+            TCoreClosureKind::OnRollback { handle, closure, .. } => {
                 format!("{}.on_rollback(Box::new({}))", handle, closure)
             }
             // D-REACT1=B: a derived value recomputed from its signals.

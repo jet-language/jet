@@ -87,6 +87,28 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) in_shared_transaction: bool,
     pub(crate) shared_transaction_depth: u32,
     pub(crate) unsafe_depth: usize,
+    /// `scope.guard` cleanups — compiled zero-arg funcs, run LIFO on exit.
+    pub(crate) scope_guards: Vec<FuncId>,
+    /// Open `#Transact` frames: snapshot restores + commit/rollback hook funcs.
+    pub(crate) txn_stack: Vec<TxnFrame>,
+}
+
+#[derive(Clone)]
+pub(crate) enum TxnSnap {
+    /// Restore via `Type::restore(current, snap)`.
+    Rollback(String),
+    /// Write-scalar param (`&Int`): `snap` is the loaded value; restore stores
+    /// through the still-current pointer in the local.
+    ScalarMut,
+    /// Plain handle/value rewrite into the local.
+    Plain,
+}
+
+pub(crate) struct TxnFrame {
+    /// `(place, snap_value, kind)`.
+    pub snapshots: Vec<(String, Value, TxnSnap)>,
+    pub on_commit: Vec<FuncId>,
+    pub on_rollback: Vec<FuncId>,
 }
 
 impl LowerCtx<'_, '_> {
@@ -543,6 +565,12 @@ impl LowerCtx<'_, '_> {
                 | THandleOp::ArgsSpecSubcommand
                 | THandleOp::ArgsSpecVersion => Some(Type::Int), // ArgsSpec handle
                 THandleOp::ArgsSpecParse => Some(Type::Int), // Result handle
+                // D-DET-CAPAPI: TIR may leave these as Unit; recover Int for print/interp.
+                THandleOp::ClockNow
+                | THandleOp::ClockTick
+                | THandleOp::ClockAdvance
+                | THandleOp::ClockWait => Some(Type::Int),
+                THandleOp::DurationIn { .. } => Some(Type::Option(Box::new(Type::Int))),
                 _ => {
                     let _ = args;
                     None
@@ -1617,10 +1645,14 @@ impl LowerCtx<'_, '_> {
         ty
     }
 
-    fn lower_try(&mut self, inner: &TExpr, convert: &TIR::TTryConvert) -> Result<Value, String> {
-        if !matches!(convert, TIR::TTryConvert::None) {
-            return Err("jit typed Result conversion unsupported".to_string());
-        }
+    fn lower_try(
+        &mut self,
+        inner: &TExpr,
+        convert: &TIR::TTryConvert,
+        file: &str,
+        line: usize,
+        fn_name: &str,
+    ) -> Result<Value, String> {
         let handle = self.lower_expr(inner)?;
         let status_ref = self
             .module
@@ -1632,9 +1664,54 @@ impl LowerCtx<'_, '_> {
         self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
         self.b.switch_to_block(err_block);
         self.b.seal_block(err_block);
+        {
+            let file_h = self.runtime.heap.alloc_string(Self::strip_rust_str_lit(file));
+            let fn_h = self.runtime.heap.alloc_string(Self::strip_rust_str_lit(fn_name));
+            let file_v = self.b.ins().iconst(types::I64, file_h);
+            let line_v = self.b.ins().iconst(types::I64, line as i64);
+            let fn_v = self.b.ins().iconst(types::I64, fn_h);
+            let trace = self
+                .module
+                .declare_func_in_func(self.host.trace_err, self.b.func);
+            self.b.ins().call(trace, &[file_v, line_v, fn_v]);
+        }
+        let return_handle = match convert {
+            TIR::TTryConvert::None => handle,
+            TIR::TTryConvert::Typed(conv_fn) => {
+                let err_ty = inner
+                    .ty
+                    .unwrap_result()
+                    .map(|(_, err)| err.clone())
+                    .ok_or("jit try Typed operand is not Result")?;
+                let err_payload = self.result_payload(handle, &err_ty)?;
+                let func_id = self
+                    .func_ids
+                    .get(conv_fn)
+                    .copied()
+                    .ok_or_else(|| format!("jit typed Result conversion unknown `{conv_fn}`"))?;
+                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+                let call = self.b.ins().call(func_ref, &[err_payload]);
+                let converted = self.b.inst_results(call)[0];
+                let tag = self.b.ins().iconst(types::I8, 0);
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.result_new_i64, self.b.func);
+                let pack = self.b.ins().call(host, &[tag, converted]);
+                self.b.inst_results(pack)[0]
+            }
+            TIR::TTryConvert::Fallible | TIR::TTryConvert::WidenUnion { .. } => {
+                return Err("jit typed Result conversion unsupported".to_string());
+            }
+        };
+        while !self.txn_stack.is_empty() {
+            // `?` early-return: emit restores but keep the stack for sibling paths.
+            self.emit_txn_rollbacks_keep()?;
+            break;
+        }
         self.emit_shared_transaction_aborts_to(0);
         self.emit_shield_leaves_to(0);
-        self.b.ins().return_(&[handle]);
+        self.emit_scope_guards()?;
+        self.b.ins().return_(&[return_handle]);
         self.b.switch_to_block(ok_block);
         self.b.seal_block(ok_block);
         let ok_ty = inner
@@ -1644,6 +1721,95 @@ impl LowerCtx<'_, '_> {
             .or_else(|| Self::result_ok_ty_recover(inner))
             .ok_or("jit try operand is not Result")?;
         self.result_payload(handle, &ok_ty)
+    }
+
+    fn strip_rust_str_lit(s: &str) -> String {
+        let s = s.strip_prefix('"').unwrap_or(s);
+        let s = s.strip_suffix('"').unwrap_or(s);
+        s.replace("\\\"", "\"").replace("\\\\", "\\")
+    }
+
+    pub(crate) fn emit_scope_guards(&mut self) -> Result<(), String> {
+        let guards: Vec<_> = self.scope_guards.drain(..).rev().collect();
+        for id in guards {
+            let func_ref = self.module.declare_func_in_func(id, self.b.func);
+            self.b.ins().call(func_ref, &[]);
+            self.emit_trap_check()?;
+        }
+        Ok(())
+    }
+
+    fn emit_txn_commit_hooks(&mut self) -> Result<(), String> {
+        let Some(frame) = self.txn_stack.last_mut() else {
+            return Ok(());
+        };
+        let hooks: Vec<_> = frame.on_commit.drain(..).rev().collect();
+        for id in hooks {
+            let func_ref = self.module.declare_func_in_func(id, self.b.func);
+            self.b.ins().call(func_ref, &[]);
+            self.emit_trap_check()?;
+        }
+        Ok(())
+    }
+
+    /// Emit restore + rollback-hook calls for every open transaction without
+    /// mutating the compile-time `txn_stack`. Required because a `return` inside
+    /// one `if` branch must not pop frames that sibling / fallthrough paths still
+    /// need for commit hooks.
+    fn emit_txn_rollbacks_keep(&mut self) -> Result<(), String> {
+        // Snapshot the restore plan so emit_trap_check can mutably borrow self.
+        let frames: Vec<(Vec<(String, Value, TxnSnap)>, Vec<FuncId>)> = self
+            .txn_stack
+            .iter()
+            .rev()
+            .map(|frame| (frame.snapshots.clone(), frame.on_rollback.clone()))
+            .collect();
+        for (snapshots, hooks) in frames {
+            for (place, snap, kind) in snapshots.into_iter().rev() {
+                match kind {
+                    TxnSnap::Rollback(type_name) => {
+                        let restore_id = self
+                            .func_ids
+                            .get(&format!("{type_name}::restore"))
+                            .copied()
+                            .ok_or_else(|| {
+                                format!("jit transaction restore missing `{type_name}::restore`")
+                            })?;
+                        let var = self.vars.get(&place).copied().ok_or_else(|| {
+                            format!("jit transaction restore unknown `{place}`")
+                        })?;
+                        let current = self.b.use_var(var);
+                        let restore_ref =
+                            self.module.declare_func_in_func(restore_id, self.b.func);
+                        self.b.ins().call(restore_ref, &[current, snap]);
+                    }
+                    TxnSnap::ScalarMut => {
+                        let var = self.vars.get(&place).copied().ok_or_else(|| {
+                            format!("jit transaction restore unknown `{place}`")
+                        })?;
+                        let ptr = self.b.use_var(var);
+                        self.b.ins().store(MemFlags::trusted(), snap, ptr, 0);
+                    }
+                    TxnSnap::Plain => {
+                        if let Some(var) = self.vars.get(&place).copied() {
+                            self.b.def_var(var, snap);
+                        }
+                    }
+                }
+            }
+            for id in hooks.into_iter().rev() {
+                let func_ref = self.module.declare_func_in_func(id, self.b.func);
+                self.b.ins().call(func_ref, &[]);
+                self.emit_trap_check()?;
+            }
+        }
+        Ok(())
+    }
+
+    fn emit_txn_rollback(&mut self) -> Result<(), String> {
+        self.emit_txn_rollbacks_keep()?;
+        self.txn_stack.clear();
+        Ok(())
     }
 
     fn loop_targets(&self, label: Option<&str>, kind: &str) -> Result<LoopTargets, String> {
@@ -2401,8 +2567,12 @@ impl LowerCtx<'_, '_> {
             }
             TStmt::Return(Some(expr)) => {
                 let val = self.lower_expr(expr)?;
+                // Keep compile-time txn_stack: a `return` in one `if` branch must
+                // not pop frames needed by the fallthrough / sibling path.
+                self.emit_txn_rollbacks_keep()?;
                 self.emit_shared_transaction_aborts_to(0);
                 self.emit_shield_leaves_to(0);
+                self.emit_scope_guards()?;
                 if let Some(sender) = self.yield_sender {
                     let close = self
                         .module
@@ -2413,8 +2583,10 @@ impl LowerCtx<'_, '_> {
                 self.dead = true;
             }
             TStmt::Return(None) => {
+                self.emit_txn_rollbacks_keep()?;
                 self.emit_shared_transaction_aborts_to(0);
                 self.emit_shield_leaves_to(0);
+                self.emit_scope_guards()?;
                 if let Some(sender) = self.yield_sender {
                     let close = self
                         .module
@@ -3550,8 +3722,7 @@ impl LowerCtx<'_, '_> {
                     self.dead = false;
                 }
             }
-            TStmt::Inline(stmts) if stmts.is_empty() => {}
-            TStmt::Inline(_) => return Err("jit inline comptime branch unsupported".to_string()),
+            TStmt::Inline(stmts) => self.lower_stmts_scoped(stmts)?,
             TStmt::Unsafe(body) => {
                 self.unsafe_depth += 1;
                 self.lower_stmts_scoped(body)?;
@@ -3559,8 +3730,11 @@ impl LowerCtx<'_, '_> {
             }
             TStmt::Reactive { .. } => return Err("jit reactive statement unsupported".to_string()),
             TStmt::Layout { .. } => return Err("jit layout block unsupported".to_string()),
-            TStmt::ContextBlock { .. } => {
-                return Err("jit context block unsupported".to_string());
+            TStmt::ContextBlock { guards, body } => {
+                for (_, value) in guards {
+                    self.lower_expr(value)?;
+                }
+                self.lower_stmts_scoped(body)?;
             }
             TStmt::Live { .. } => return Err("jit live block unsupported".to_string()),
             TStmt::Shield { body } => {
@@ -3585,9 +3759,72 @@ impl LowerCtx<'_, '_> {
                 body,
                 ..
             } => {
-                if !snapshots.is_empty() {
-                    return Err("jit transaction snapshots unsupported".to_string());
+                let mut snaps = Vec::new();
+                for (local, rollback_ty) in snapshots {
+                    let place = TIR::local_place(&local.name);
+                    let var = self
+                        .vars
+                        .get(&place)
+                        .copied()
+                        .ok_or_else(|| {
+                            format!("jit transaction snapshot unknown `{}`", local.name)
+                        })?;
+                    let current = self.b.use_var(var);
+                    // Prefer the TIR-stamped Rollback type; otherwise detect a
+                    // compiled `T::snapshot`/`T::restore` pair from the local's type.
+                    let rollback_name = rollback_ty
+                        .as_ref()
+                        .map(|ty| ty.name())
+                        .or_else(|| {
+                            self.var_tys.get(&place).and_then(|ty| match ty {
+                                Type::Named(n)
+                                    if self.func_ids.contains_key(&format!("{n}::snapshot"))
+                                        && self.func_ids.contains_key(&format!("{n}::restore")) =>
+                                {
+                                    Some(n.clone())
+                                }
+                                _ => None,
+                            })
+                        });
+                    let scalar_mut = matches!(
+                        self.var_tys.get(&place),
+                        Some(Type::Apply { name, .. }) if name == "__JetScalarMut"
+                    );
+                    let (snap, kind) = if let Some(type_name) = rollback_name {
+                        let snap_id = self
+                            .func_ids
+                            .get(&format!("{type_name}::snapshot"))
+                            .copied()
+                            .ok_or_else(|| {
+                                format!(
+                                    "jit transaction snapshot missing `{type_name}::snapshot`"
+                                )
+                            })?;
+                        let snap_ref = self.module.declare_func_in_func(snap_id, self.b.func);
+                        let call = self.b.ins().call(snap_ref, &[current]);
+                        (self.b.inst_results(call)[0], TxnSnap::Rollback(type_name))
+                    } else if scalar_mut {
+                        let clif = match self.var_tys.get(&place) {
+                            Some(Type::Apply { args, .. }) if !args.is_empty() => self
+                                .meta
+                                .clif_ty(&args[0])
+                                .ok_or("jit scalar-mut snapshot type")?,
+                            _ => types::I64,
+                        };
+                        (
+                            self.b.ins().load(clif, MemFlags::trusted(), current, 0),
+                            TxnSnap::ScalarMut,
+                        )
+                    } else {
+                        (current, TxnSnap::Plain)
+                    };
+                    snaps.push((place, snap, kind));
                 }
+                self.txn_stack.push(TxnFrame {
+                    snapshots: snaps,
+                    on_commit: Vec::new(),
+                    on_rollback: Vec::new(),
+                });
                 if *uses_stm {
                     let begin = self.module.declare_func_in_func(
                         self.host.memory.shared_txn_begin,
@@ -3596,7 +3833,9 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().call(begin, &[]);
                     self.in_shared_transaction = true;
                     self.shared_transaction_depth += 1;
-                    self.lower_stmts_scoped(body)?;
+                }
+                self.lower_stmts_scoped(body)?;
+                if *uses_stm {
                     self.shared_transaction_depth -= 1;
                     self.in_shared_transaction = self.shared_transaction_depth != 0;
                     if !self.dead {
@@ -3607,8 +3846,10 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().call(commit, &[]);
                         self.emit_trap_check()?;
                     }
-                } else {
-                    self.lower_stmts_scoped(body)?;
+                }
+                if !self.dead {
+                    self.emit_txn_commit_hooks()?;
+                    let _ = self.txn_stack.pop();
                 }
             }
             TStmt::LineMarker(_) => return Err("jit line marker unsupported".to_string()),
@@ -4143,6 +4384,21 @@ impl LowerCtx<'_, '_> {
                 let type_name =
                     record_type_key(&subject_ty).ok_or("jit switch subject field type")?;
                 self.lower_record_field(handle, &type_name, field, ty)
+            }
+            THostCall::Helper { helper, args } if helper.ends_with("jet_context") => {
+                let recv = match args.first() {
+                    Some(THostArg::Expr(e)) => self.lower_expr(e)?,
+                    _ => return Err("jit jet_context missing result".to_string()),
+                };
+                let msg = match args.get(1) {
+                    Some(THostArg::Expr(e)) => self.lower_expr(e)?,
+                    _ => return Err("jit jet_context missing message".to_string()),
+                };
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.result_context, self.b.func);
+                let call = self.b.ins().call(host, &[recv, msg]);
+                Ok(self.b.inst_results(call)[0])
             }
             THostCall::Helper { helper, .. } => {
                 Err(format!("jit helper unsupported: {helper}"))
@@ -5291,6 +5547,35 @@ impl LowerCtx<'_, '_> {
             self.b.ins().call(push_ref, &[handle, v]);
         }
         Ok(handle)
+    }
+
+    fn lower_ct_value(&mut self, value: &jet_foundation::AST::CtValue) -> Result<Value, String> {
+        use jet_foundation::AST::CtValue;
+        match value {
+            CtValue::Int(value) => Ok(self.b.ins().iconst(types::I64, *value)),
+            CtValue::Bool(value) => Ok(self.b.ins().iconst(types::I8, i64::from(*value))),
+            CtValue::Char(value) => Ok(self.b.ins().iconst(types::I32, u32::from(*value) as i64)),
+            CtValue::Str(value) => {
+                let handle = self.runtime.heap.alloc_string(value.clone());
+                Ok(self.b.ins().iconst(types::I64, handle))
+            }
+            CtValue::List(values) => {
+                let new_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_new, self.b.func);
+                let new_call = self.b.ins().call(new_ref, &[]);
+                let handle = self.b.inst_results(new_call)[0];
+                let push_ref = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_push, self.b.func);
+                for value in values {
+                    let value = self.lower_ct_value(value)?;
+                    self.b.ins().call(push_ref, &[handle, value]);
+                }
+                Ok(handle)
+            }
+            other => Err(format!("jit comptime value unsupported: {other:?}")),
+        }
     }
 
     fn lower_list_spread(
@@ -6941,14 +7226,56 @@ impl LowerCtx<'_, '_> {
                 TCoreClosureKind::Serve { .. } => {
                     Err("jit http serve closure unsupported".to_string())
                 }
-                TCoreClosureKind::Guard { .. } => {
-                    Err("jit scope guard closure unsupported".to_string())
+                TCoreClosureKind::Guard { executable, .. } => {
+                    let id = super::functions_compile::lower_callable_lambda(
+                        self.module,
+                        self.host,
+                        self.meta,
+                        executable,
+                        self.func_ids,
+                        self.spawn_func_ids,
+                        self.spawn_lambdas,
+                        self.spawn_site,
+                        self.runtime,
+                    )?;
+                    self.scope_guards.push(id);
+                    Ok(self.b.ins().iconst(types::I64, 0))
                 }
-                TCoreClosureKind::OnCommit { .. } => {
-                    Err("jit transact on_commit closure unsupported".to_string())
+                TCoreClosureKind::OnCommit { executable, .. } => {
+                    let id = super::functions_compile::lower_callable_lambda(
+                        self.module,
+                        self.host,
+                        self.meta,
+                        executable,
+                        self.func_ids,
+                        self.spawn_func_ids,
+                        self.spawn_lambdas,
+                        self.spawn_site,
+                        self.runtime,
+                    )?;
+                    let Some(frame) = self.txn_stack.last_mut() else {
+                        return Err("jit on_commit outside transaction".to_string());
+                    };
+                    frame.on_commit.push(id);
+                    Ok(self.b.ins().iconst(types::I64, 0))
                 }
-                TCoreClosureKind::OnRollback { .. } => {
-                    Err("jit transact on_rollback closure unsupported".to_string())
+                TCoreClosureKind::OnRollback { executable, .. } => {
+                    let id = super::functions_compile::lower_callable_lambda(
+                        self.module,
+                        self.host,
+                        self.meta,
+                        executable,
+                        self.func_ids,
+                        self.spawn_func_ids,
+                        self.spawn_lambdas,
+                        self.spawn_site,
+                        self.runtime,
+                    )?;
+                    let Some(frame) = self.txn_stack.last_mut() else {
+                        return Err("jit on_rollback outside transaction".to_string());
+                    };
+                    frame.on_rollback.push(id);
+                    Ok(self.b.ins().iconst(types::I64, 0))
                 }
                 TCoreClosureKind::ReactiveDerived { .. } => {
                     Err("jit reactive derived closure unsupported".to_string())
@@ -7634,9 +7961,7 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::Absent => Ok(self.b.ins().iconst(types::I64, 0)),
             TExprKind::Unit => Ok(self.b.ins().iconst(types::I64, 0)),
-            TExprKind::CtLit(jet_foundation::AST::CtValue::Int(v)) => {
-                Ok(self.b.ins().iconst(types::I64, *v))
-            }
+            TExprKind::CtLit(value) => self.lower_ct_value(value),
             TExprKind::Uninit => {
                 // D-UNINIT1 / GC promote: placeholder overwritten before read.
                 match self.meta.clif_ty(&expr.ty).or_else(|| clif_ty(&expr.ty)) {
@@ -7646,9 +7971,20 @@ impl LowerCtx<'_, '_> {
                 }
             }
             TExprKind::HostCall(host) => self.lower_host_call(host.as_ref(), &expr.ty),
-            TExprKind::CtLit(value) => Err(format!("jit ct-lit unsupported: {value:?}")),
             TExprKind::DefaultLit => Err("jit default literal unsupported".to_string()),
-            TExprKind::ConstRef(_) => Err("jit const ref unsupported".to_string()),
+            TExprKind::ConstRef(name) => {
+                let value = self
+                    .meta
+                    .constant(name)
+                    .cloned()
+                    .or_else(|| {
+                        self.meta
+                            .int_constant(name)
+                            .map(jet_foundation::AST::CtValue::Int)
+                    })
+                    .ok_or_else(|| format!("jit const ref unknown: {name}"))?;
+                self.lower_ct_value(&value)
+            }
             TExprKind::DataEntriesToMap(local) => {
                 let payload = self.load_local(local)?;
                 let validate = self
@@ -7747,7 +8083,85 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host_ref, &[has_prompt, prompt_v]);
                 Ok(self.b.inst_results(call)[0])
             }
-            TExprKind::RequireStop { .. } => Err("jit require/panic stop unsupported".to_string()),
+            TExprKind::RequireStop {
+                kind,
+                loc,
+                always_stops,
+            } => {
+                let fail_block = self.b.create_block();
+                let cont = self.b.create_block();
+                if *always_stops {
+                    self.b.ins().jump(fail_block, &[]);
+                } else {
+                    match kind {
+                        TIR::TRequireKind::Require { cond, .. } => {
+                            let ok = self.lower_expr(cond)?;
+                            let zero = self.b.ins().iconst(types::I8, 0);
+                            let is_true = self.b.ins().icmp(IntCC::NotEqual, ok, zero);
+                            self.b.ins().brif(is_true, cont, &[], fail_block, &[]);
+                        }
+                        TIR::TRequireKind::RequireEq { left, right } => {
+                            let l = self.lower_expr(left)?;
+                            let r = self.lower_expr(right)?;
+                            let eq = self.b.ins().icmp(IntCC::Equal, l, r);
+                            self.b.ins().brif(eq, cont, &[], fail_block, &[]);
+                        }
+                        TIR::TRequireKind::Panic { .. } => {
+                            self.b.ins().jump(fail_block, &[]);
+                        }
+                    }
+                }
+                self.b.switch_to_block(fail_block);
+                self.b.seal_block(fail_block);
+                let msg_val = match kind {
+                    TIR::TRequireKind::Require { msg: Some(msg), .. }
+                    | TIR::TRequireKind::Panic { msg } => self.lower_expr(msg)?,
+                    TIR::TRequireKind::Require { msg: None, .. } => {
+                        let h = self
+                            .runtime
+                            .heap
+                            .alloc_string("requirement failed");
+                        self.b.ins().iconst(types::I64, h)
+                    }
+                    TIR::TRequireKind::RequireEq { .. } => {
+                        let h = self
+                            .runtime
+                            .heap
+                            .alloc_string("values are not equal");
+                        self.b.ins().iconst(types::I64, h)
+                    }
+                };
+                let file_h = self
+                    .runtime
+                    .heap
+                    .alloc_string(Self::strip_rust_str_lit(&loc.file));
+                let fn_h = self
+                    .runtime
+                    .heap
+                    .alloc_string(Self::strip_rust_str_lit(&loc.fn_name));
+                let src_h = self
+                    .runtime
+                    .heap
+                    .alloc_string(Self::strip_rust_str_lit(&loc.src_line));
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.rich_panic, self.b.func);
+                let file_v = self.b.ins().iconst(types::I64, file_h);
+                let line_v = self.b.ins().iconst(types::I64, i64::from(loc.line));
+                let fn_v = self.b.ins().iconst(types::I64, fn_h);
+                let src_v = self.b.ins().iconst(types::I64, src_h);
+                let col_v = self.b.ins().iconst(types::I64, i64::from(loc.col));
+                let caret_v = self.b.ins().iconst(types::I64, i64::from(loc.caret));
+                self.b.ins().call(
+                    host,
+                    &[file_v, line_v, fn_v, src_v, col_v, caret_v, msg_val],
+                );
+                self.emit_trap_check()?;
+                self.b.ins().jump(cont, &[]);
+                self.b.switch_to_block(cont);
+                self.b.seal_block(cont);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
             TExprKind::LayoutCompare { .. } => Err("jit layout compare unsupported".to_string()),
             TExprKind::LayoutLit { .. } => Err("jit layout literal unsupported".to_string()),
             TExprKind::PtrFromAddr { .. } => Err("jit pointer from addr unsupported".to_string()),
@@ -7960,7 +8374,13 @@ impl LowerCtx<'_, '_> {
             TExprKind::DistinctRaw(inner) => self.lower_expr(inner),
             TExprKind::Ok(inner) => self.result_new(true, inner),
             TExprKind::Err(inner) => self.result_new(false, inner),
-            TExprKind::Try { inner, convert, .. } => self.lower_try(inner, convert),
+            TExprKind::Try {
+                inner,
+                convert,
+                file,
+                line,
+                fn_name,
+            } => self.lower_try(inner, convert, file, *line, fn_name),
             TExprKind::OptField { .. } => Err("jit optional field chain unsupported".to_string()),
             TExprKind::Lambda(lam) => {
                 let id = super::functions_compile::lower_callable_lambda(
@@ -8405,7 +8825,7 @@ impl LowerCtx<'_, '_> {
             }
         }
         if let TExprKind::HandleMethod {
-            op: THandleOp::RngWeightedPick,
+            op: THandleOp::RngPick | THandleOp::RngWeightedPick,
             ..
         } = &value.kind
         {
@@ -10008,8 +10428,24 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().call(host, &[recv_val, delta]);
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
-            THandleOp::ClockAdvance => Err("jit handle method unsupported".to_string()),
-            THandleOp::ClockWait => Err("jit handle method unsupported".to_string()),
+            THandleOp::ClockAdvance => {
+                let value = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.clock_advance, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, value]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ClockWait => {
+                // After `??` unwrap, Duration is the raw millisecond i64 (see
+                // `jet_jit_duration_from_*` / `duration_in`), not a struct handle.
+                let duration_ms = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.clock_wait, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, duration_ms]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::RngInt => {
                 let lo = self.lower_expr(&args[0])?;
                 let hi = self.lower_expr(&args[1])?;
@@ -10029,7 +10465,13 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[recv_val, lo, hi]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::RngBool => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngBool => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.random.rng_bool, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::RngBoolP => {
                 let p = self.lower_expr(&args[0])?;
                 let host = self
@@ -10055,7 +10497,14 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::RngPick => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngPick => {
+                let items = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.random.rng_pick, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, items]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::RngWeightedPick => {
                 if matches!(
                     &args[0].ty,
@@ -10083,7 +10532,14 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[recv_val, items, k]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::RngShuffle => Err("jit handle method unsupported".to_string()),
+            THandleOp::RngShuffle => {
+                let items = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.random.rng_shuffle, self.b.func);
+                self.b.ins().call(host, &[recv_val, items]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
             THandleOp::SolverNew => {
                 let host = self.module.declare_func_in_func(self.host.solver.new, self.b.func);
                 let call = self.b.ins().call(host, &[recv_val]);
@@ -11052,7 +11508,11 @@ impl LowerCtx<'_, '_> {
                 | THandleOp::RngFloatRange
                 | THandleOp::RngNormal
                 | THandleOp::RngExponential => Some(Type::Float),
-                THandleOp::RngInt => Some(Type::Int),
+                THandleOp::RngInt
+                | THandleOp::ClockNow
+                | THandleOp::ClockTick
+                | THandleOp::ClockAdvance
+                | THandleOp::ClockWait => Some(Type::Int),
                 THandleOp::RngBool | THandleOp::RngBoolP => Some(Type::Bool),
                 _ => None,
             },

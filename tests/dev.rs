@@ -4120,6 +4120,66 @@ fn language_callables_and_types_match_interpreter_jit_and_aot() {
 }
 
 #[test]
+fn comptime_effects_and_errors_match_interpreter_jit_and_aot() {
+    const CHILD_STEM: &str = "JET_1217_STEM";
+    if let Ok(stem) = std::env::var(CHILD_STEM) {
+        assert_cranelift_three_way(&example_path(&stem), &stem);
+        return;
+    }
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let stems = [
+        "comptime/comptime_if",
+        "comptime/comptime_table",
+        "devloop/persist",
+        "effects/determinism",
+        "effects/effect_higher_order",
+        "effects/effect_levers",
+        "effects/single_use_discard",
+        "effects/smart_context",
+        "errors/error_context",
+        "errors/must_use",
+        "errors/panic",
+        "errors/rollback_trait",
+        "errors/transact",
+        "errors/typed_error_families",
+    ];
+    let mut failures = Vec::new();
+    for stem in stems {
+        let mut command = Command::new(std::env::current_exe().expect("current dev test binary"));
+        command
+            .args([
+                "--exact",
+                "comptime_effects_and_errors_match_interpreter_jit_and_aot",
+                "--nocapture",
+            ])
+            .env(CHILD_STEM, stem)
+            .env("RUST_MIN_STACK", "33554432")
+            .env("NO_COLOR", "1");
+        let output = command_output_with_timeout(
+            command,
+            DEV_DIFF_TIMEOUT,
+            &format!("comptime/effect/error parity `{stem}`"),
+        );
+        if !output.status.success() {
+            failures.push(format!(
+                "{stem}: status={:?}\nstdout:\n{}\nstderr:\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "comptime/effect/error parity failures:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
 fn collections_memory_and_streams_match_interpreter_jit_and_aot() {
     const CHILD_STEM: &str = "JET_1216_STEM";
     if let Ok(stem) = std::env::var(CHILD_STEM) {

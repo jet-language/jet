@@ -687,27 +687,77 @@ impl<'a> EvalCtx<'a> {
             TStmt::SplitViews { .. } => Err(unsupported("split views", self.span())),
             TStmt::Reactive { .. } => Err(unsupported("statement `Reactive`", self.span())),
             TStmt::Layout { .. } => Err(unsupported("statement `Layout`", self.span())),
-            TStmt::ContextBlock { .. } => Err(unsupported("statement `ContextBlock`", self.span())),
+            TStmt::ContextBlock { body, .. } => self.exec_stmts(body, scope),
             TStmt::Live { .. } => Err(unsupported("statement `Live`", self.span())),
             TStmt::Shield { .. } => Err(unsupported("statement `Shield`", self.span())),
             TStmt::ScopeMember { .. } => Err(unsupported("statement `ScopeMember`", self.span())),
             TStmt::Transact {
-                body, uses_stm, ..
+                snapshots,
+                uses_stm,
+                body,
+                ..
             } => {
-                if !uses_stm {
-                    return self.exec_stmts(body, scope);
+                let mut snaps = Vec::new();
+                for (local, _) in snapshots {
+                    let key = local.name.clone();
+                    let value = scope
+                        .get(&key)
+                        .cloned()
+                        .or_else(|| {
+                            let mangled = format!("user_{key}");
+                            scope.get(&mangled).cloned()
+                        })
+                        .unwrap_or(CtValue::Unit);
+                    snaps.push((key, value));
                 }
-                self.shared_transactions.push(HashMap::new());
+                self.txn_stack.push(super::EvalTxnFrame {
+                    snapshots: snaps,
+                    on_commit: Vec::new(),
+                    on_rollback: Vec::new(),
+                });
+                if *uses_stm {
+                    self.shared_transactions.push(HashMap::new());
+                }
                 let flow = self.exec_stmts(body, scope);
-                let staged = self.shared_transactions.pop().unwrap_or_default();
+                let frame = self.txn_stack.pop().unwrap_or(super::EvalTxnFrame {
+                    snapshots: Vec::new(),
+                    on_commit: Vec::new(),
+                    on_rollback: Vec::new(),
+                });
+                let staged = if *uses_stm {
+                    self.shared_transactions.pop().unwrap_or_default()
+                } else {
+                    HashMap::new()
+                };
                 match flow {
                     Ok(Flow::Normal) => {
+                        for lam in frame.on_commit.into_iter().rev() {
+                            let _ = self.eval_tlambda(lam, Vec::new(), scope)?;
+                        }
                         for (index, value) in staged {
                             if let Some(slot) = self.shared_values.get_mut(index) {
                                 *slot = value;
                             }
                         }
                         Ok(Flow::Normal)
+                    }
+                    Ok(Flow::Return(v)) => {
+                        // Auto-snapshot restore + rollback hooks on early return
+                        // (including `return Err(...)` / `?`).
+                        for (place, snap) in frame.snapshots.into_iter().rev() {
+                            if scope.contains_key(&place) {
+                                scope.insert(place, snap);
+                            } else {
+                                let mangled = format!("user_{place}");
+                                if scope.contains_key(&mangled) {
+                                    scope.insert(mangled, snap);
+                                }
+                            }
+                        }
+                        for lam in frame.on_rollback.into_iter().rev() {
+                            let _ = self.eval_tlambda(lam, Vec::new(), scope)?;
+                        }
+                        Ok(Flow::Return(v))
                     }
                     other => other,
                 }

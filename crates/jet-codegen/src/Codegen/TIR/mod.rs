@@ -102,6 +102,7 @@ pub struct JitProgram {
     /// M5: payload field types per `user_Type::user_Variant` pattern prefix.
     pub enum_variant_payload_types: std::collections::HashMap<String, Vec<Type>>,
     pub int_constants: std::collections::HashMap<String, i64>,
+    pub constants: std::collections::HashMap<String, crate::AST::CtValue>,
     pub distinct_bases: std::collections::HashMap<String, Type>,
     /// Sema-resolved `(trait, method) -> concrete owner` dispatch facts.
     pub trait_method_owners:
@@ -737,6 +738,12 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                 let lowered = lower_func(f, &cx);
                 funcs.push(lowered);
             }
+            Item::ErrorConv(ec) => {
+                if !tir_covers_error_conv_body(&ec.body, &cx) {
+                    continue;
+                }
+                funcs.push(lower_error_conv(ec, &cx));
+            }
             Item::Struct(s) => {
                 if s.type_params.is_empty() {
                     for m in &s.methods {
@@ -952,6 +959,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             .collect(),
     );
     let mut int_constants = std::collections::HashMap::new();
+    let mut constants = std::collections::HashMap::new();
     for item in &module.items {
         match item {
             Item::Struct(s) => {
@@ -999,6 +1007,9 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                 }
             }
             Item::Const(c) => {
+                if let Some(value) = &c.ct {
+                    constants.insert(c.name.clone(), value.clone());
+                }
                 let value = match &c.ct {
                     Some(crate::AST::CtValue::Int(value)) => Some(*value),
                     _ => match &c.value { crate::AST::Expr::Int(value, _, _, _) => Some(*value), _ => None },
@@ -1043,6 +1054,12 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                                 );
                             }
                             Item::Const(c) => {
+                                if let Some(value) = &c.ct {
+                                    constants.insert(
+                                        format!("{}__{}", cm.name, c.name),
+                                        value.clone(),
+                                    );
+                                }
                                 let value = match &c.ct {
                                     Some(crate::AST::CtValue::Int(value)) => Some(*value),
                                     _ => match &c.value {
@@ -1158,6 +1175,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         enum_variants,
         enum_variant_payload_types,
         int_constants,
+        constants,
         distinct_bases,
         trait_method_owners,
         iterable_item_types,
@@ -2932,12 +2950,23 @@ pub enum TCoreClosureKind {
     /// `http.serve(addr, <lambda>)` → `{root}jet_http_serve(&(<addr>), <closure>)`.
     Serve { addr: Box<TExpr>, closure: String },
     /// `scope.guard(<lambda>)` → `{root}jet_scope_guard(<closure>)`.
-    Guard { closure: String },
+    Guard {
+        closure: String,
+        executable: Box<TLambda>,
+    },
     /// D-TXN3: `<handle>.on_commit(<lambda>)` → `<handle>.on_commit(Box::new(<closure>))`.
-    OnCommit { handle: String, closure: String },
+    OnCommit {
+        handle: String,
+        closure: String,
+        executable: Box<TLambda>,
+    },
     /// D-TXN-ROLLBACK (layer 3): `<handle>.on_rollback(<lambda>)` →
     /// `<handle>.on_rollback(Box::new(<closure>))`. Mirror of `OnCommit`.
-    OnRollback { handle: String, closure: String },
+    OnRollback {
+        handle: String,
+        closure: String,
+        executable: Box<TLambda>,
+    },
     /// D-REACT1=B: `reactive.derived(<lambda>)` → `{root}jet_std::JetDerived::new(<closure>)`.
     ReactiveDerived { closure: String },
     /// D-EFFECT-LIFECYCLE1=A: `reactive.effect(<lambda>)` returns a lifecycle handle.

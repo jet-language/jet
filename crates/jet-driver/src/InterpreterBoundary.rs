@@ -5,7 +5,7 @@
 //! depending on the root host or inventing a second boundary vocabulary.
 
 use crate::AST::{
-    AccessConvention, CallArg, ElseBranch, Expr, IfStmt, ImportKind, Item, ProgramBundle, Stmt,
+    ElseBranch, Expr, IfStmt, ImportKind, Item, ProgramBundle, Stmt,
 };
 use crate::Diagnostics::{Diagnostic, Span};
 use std::collections::HashSet;
@@ -111,8 +111,9 @@ fn native_module_feature(name: &str) -> Option<&'static str> {
         "core.files" => Some("reads or writes files"),
         "core.env" => Some("reads the environment"),
         "core.process" => Some("runs another process or exits early"),
-        "core.random" => Some("uses random numbers"),
-        "core.time" => Some("reads the clock or sleeps"),
+        // `core.time` / `core.random` are allowed: deterministic `Clock`/`Rng`
+        // injection (D-DET1) is interpreted; ambient wall-clock / OS-RNG still
+        // fail at the expression if unsupported.
         "core.auth" => Some("verifies signed authentication tokens using the native crypto runtime"),
         _ => None,
     }
@@ -171,29 +172,23 @@ fn scan_if_for_mut_arg(
 }
 
 fn expr_mut_arg(expr: &Expr, interpreted_functions: &HashSet<&str>) -> Option<Boundary> {
-    let argument = |arg: &CallArg| {
-        if matches!(arg.convention, AccessConvention::Write) && matches!(arg.expr, Expr::Ident(..)) {
-            Some(Boundary {
-                feature: "passes a `&` argument to a function (writeback isn't interpreted yet)".to_string(),
-                span: Some(arg.span),
-            })
-        } else {
-            expr_mut_arg(&arg.expr, interpreted_functions)
-        }
-    };
+    // Writeback for `&ident` args is implemented in the TIR evaluator for both
+    // direct calls and method calls (D-DET shuffle / Clock+Rng injection).
     match expr {
-        // Direct user calls write back `&ident` arguments after the callee
-        // frame returns. Method and call-value writeback remain outside the
-        // interpreter subset.
-        Expr::Call(call) if interpreted_functions.contains(call.name.as_str()) => call
+        Expr::Call(call) => call
             .args
             .iter()
             .find_map(|arg| expr_mut_arg(&arg.expr, interpreted_functions)),
-        Expr::Call(call) => call.args.iter().find_map(argument),
         Expr::MethodCall { receiver, args, .. } => expr_mut_arg(receiver, interpreted_functions)
-            .or_else(|| args.iter().find_map(argument)),
+            .or_else(|| {
+                args.iter()
+                    .find_map(|arg| expr_mut_arg(&arg.expr, interpreted_functions))
+            }),
         Expr::CallValue { callee, args, .. } => expr_mut_arg(callee, interpreted_functions)
-            .or_else(|| args.iter().find_map(argument)),
+            .or_else(|| {
+                args.iter()
+                    .find_map(|arg| expr_mut_arg(&arg.expr, interpreted_functions))
+            }),
         Expr::Unary(_, inner, _) | Expr::IncDec { operand: inner, .. }
         | Expr::Deref(inner, _) | Expr::RawOf(inner, _) | Expr::Copy(inner, _)
         | Expr::Place(inner, _, _)

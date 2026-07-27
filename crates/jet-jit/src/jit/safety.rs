@@ -459,6 +459,16 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         }
         TExprKind::CoreClosureCall { kind } => match kind {
             TCoreClosureKind::Spawn { .. } => true,
+            TCoreClosureKind::Guard { executable, .. }
+            | TCoreClosureKind::OnCommit { executable, .. }
+            | TCoreClosureKind::OnRollback { executable, .. } => {
+                match &executable.executable {
+                    TIR::TLambdaBody::Expr(e) => resident_safe_expr(e, callees),
+                    TIR::TLambdaBody::Block(stmts) => {
+                        stmts.iter().all(|s| resident_safe_stmt(s, callees))
+                    }
+                }
+            }
             _ => false,
         },
         TExprKind::HandleMethod { recv, op, args } => {
@@ -682,7 +692,10 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             resident_safe_expr(inner, callees)
         }
         TExprKind::Try { inner, convert, .. } => {
-            matches!(convert, TIR::TTryConvert::None) && resident_safe_expr(inner, callees)
+            matches!(
+                convert,
+                TIR::TTryConvert::None | TIR::TTryConvert::Typed(_)
+            ) && resident_safe_expr(inner, callees)
         }
         TExprKind::Absent => true,
         TExprKind::DistinctCtor { arg, base, .. } => {
@@ -697,7 +710,14 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         | TExprKind::FloatLit(_)
         | TExprKind::BoolLit(_)
         | TExprKind::CharLit(_) => true,
-        TExprKind::CtLit(jet_foundation::AST::CtValue::Int(_)) => true,
+        TExprKind::CtLit(
+            jet_foundation::AST::CtValue::Int(_)
+            | jet_foundation::AST::CtValue::Bool(_)
+            | jet_foundation::AST::CtValue::Char(_)
+            | jet_foundation::AST::CtValue::Str(_)
+            | jet_foundation::AST::CtValue::List(_),
+        )
+        | TExprKind::ConstRef(_) => true,
         TExprKind::StrLit(parts) => resident_safe_string_parts(parts, callees),
         TExprKind::Local(_) => true,
         TExprKind::Unary { op, operand } => {
@@ -889,6 +909,15 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                         TIR::THostArg::Lambda(_) => false,
                     })
             }
+            THostCall::Helper { helper, args } if helper.ends_with("jet_context") => {
+                args.len() == 2
+                    && args.iter().all(|arg| match arg {
+                        TIR::THostArg::Expr(expr) | TIR::THostArg::Borrow(expr) => {
+                            resident_safe_expr(expr, callees)
+                        }
+                        TIR::THostArg::Lambda(_) => false,
+                    })
+            }
             THostCall::ExpiringValueNew {
                 value,
                 duration,
@@ -914,6 +943,18 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 let (inner, _) = boxed.as_ref();
                 enum_payload_value_type(&inner.ty) && resident_safe_expr(inner, callees)
             }
+        },
+        TExprKind::RequireStop { kind, .. } => match kind {
+            TIR::TRequireKind::Require { cond, msg, .. } => {
+                resident_safe_expr(cond, callees)
+                    && msg
+                        .as_ref()
+                        .is_none_or(|m| resident_safe_expr(m, callees))
+            }
+            TIR::TRequireKind::RequireEq { left, right } => {
+                resident_safe_expr(left, callees) && resident_safe_expr(right, callees)
+            }
+            TIR::TRequireKind::Panic { msg } => resident_safe_expr(msg, callees),
         },
         _ => false,
     }
@@ -1722,10 +1763,17 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         }
         TStmt::Region(body)
         | TStmt::Impure(body)
+        | TStmt::Inline(body)
         | TStmt::Unsafe(body)
         | TStmt::Shield { body }
         | TStmt::Transact { body, .. } => {
             body.iter().all(|s| resident_safe_stmt(s, callees))
+        }
+        TStmt::ContextBlock { guards, body } => {
+            guards
+                .iter()
+                .all(|(_, value)| resident_safe_expr(value, callees))
+                && body.iter().all(|s| resident_safe_stmt(s, callees))
         }
         TStmt::IndexHookAssign {
             base,
@@ -2136,9 +2184,15 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                 )
         }
         THandleOp::DurationNew { .. } => args.is_empty(),
+        THandleOp::DurationIn { .. } => args.len() <= 1,
         THandleOp::AllocAlloc => args.len() == 1,
-        THandleOp::AllocReset | THandleOp::ClockNow => args.is_empty(),
-        THandleOp::ClockTick => args.len() == 1,
+        THandleOp::AllocReset | THandleOp::ClockNow | THandleOp::RngBool => args.is_empty(),
+        THandleOp::RngInt => args.len() == 2,
+        THandleOp::ClockTick
+        | THandleOp::ClockAdvance
+        | THandleOp::ClockWait
+        | THandleOp::RngPick
+        | THandleOp::RngShuffle => args.len() == 1,
         THandleOp::ExpiringMethod { method } => {
             matches!(method.as_str(), "get" | "is_valid") && args.len() == 1
         }

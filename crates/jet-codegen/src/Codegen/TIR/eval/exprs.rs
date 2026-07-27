@@ -390,6 +390,15 @@ impl<'a> EvalCtx<'a> {
                 if let Some(index) = handle_index(&r, "__JetTirClock") {
                     let delta = argv.first().and_then(|value| match value {
                         CtValue::Int(value) => Some(*value),
+                        CtValue::Struct { type_name, fields }
+                            if type_name == crate::Syntax::DURATION_TYPE
+                                || type_name == "Duration" =>
+                        {
+                            fields.iter().find_map(|(name, v)| match (name.as_str(), v) {
+                                ("ms", CtValue::Int(ms)) => Some(*ms),
+                                _ => None,
+                            })
+                        }
                         _ => None,
                     });
                     let span = self.span();
@@ -398,14 +407,22 @@ impl<'a> EvalCtx<'a> {
                     };
                     let result = match op {
                         crate::Codegen::TIR::THandleOp::ClockNow => CtValue::Int(*clock),
+                        // D-DET-CAPAPI: `advance(to_ms)` sets an absolute instant;
+                        // `tick` / `wait` advance relatively. Match AOT `jet_clock_*`.
+                        crate::Codegen::TIR::THandleOp::ClockAdvance => {
+                            let Some(to_ms) = delta else {
+                                return Err(unsupported("clock advance target", span));
+                            };
+                            *clock = to_ms;
+                            CtValue::Int(*clock)
+                        }
                         crate::Codegen::TIR::THandleOp::ClockTick
-                        | crate::Codegen::TIR::THandleOp::ClockAdvance
                         | crate::Codegen::TIR::THandleOp::ClockWait => {
                             let Some(delta) = delta else {
                                 return Err(unsupported("clock delta", span));
                             };
                             *clock = clock.saturating_add(delta);
-                            CtValue::Unit
+                            CtValue::Int(*clock)
                         }
                         _ => return Err(unsupported("clock method", self.span())),
                     };
@@ -984,11 +1001,31 @@ impl<'a> EvalCtx<'a> {
                     self.span(),
                 ))
             }
-            TExprKind::Try { inner, .. } => {
+            TExprKind::Try {
+                inner,
+                convert: _,
+                file,
+                line,
+                fn_name,
+            } => {
                 let v = self.eval_expr(inner, scope)?;
                 match v {
                     CtValue::ResOk(inner) | CtValue::Some(inner) => Ok(*inner),
                     CtValue::ResErr(e) => {
+                        // D-ERRCTX1: match AOT `jet_trace_err` / JIT host (dev builds).
+                        let file = file.trim_matches('"');
+                        let fn_name = fn_name.trim_matches('"');
+                        let frame = format!(
+                            "error propagated from: {fn_name} ({file}:{line}) via ?\n"
+                        );
+                        if let Some(sink) = self.sink.as_mut() {
+                            let skip = sink
+                                .stderr
+                                .ends_with(&frame);
+                            if !skip {
+                                sink.stderr.push_str(&frame);
+                            }
+                        }
                         // Propagate as a function return of the error value.
                         self.pending_return = Some(CtValue::ResErr(e));
                         Ok(CtValue::Unit)
@@ -1363,6 +1400,26 @@ impl<'a> EvalCtx<'a> {
                             fields: vec![("now".to_string(), CtValue::Int(0))],
                         });
                     }
+                    // D-ERRCTX1: `.context(msg)` — prepend message on Err only.
+                    if leaf == "jet_context" || leaf.ends_with("jet_context") {
+                        let msg = match argv.get(1) {
+                            Some(CtValue::Str(s)) => s.clone(),
+                            Some(other) => other.jet_show(),
+                            None => String::new(),
+                        };
+                        return Ok(match argv.first() {
+                            Some(CtValue::ResOk(v)) => CtValue::ResOk(v.clone()),
+                            Some(CtValue::ResErr(err)) => {
+                                CtValue::ResErr(Box::new(CtValue::Str(format!(
+                                    "{}: {}",
+                                    msg,
+                                    err.jet_show()
+                                ))))
+                            }
+                            Some(other) => other.clone(),
+                            None => CtValue::Unit,
+                        });
+                    }
                     Err(unsupported(
                         &format!("expr `HostCall` helper `{leaf}`"),
                         self.span(),
@@ -1540,34 +1597,62 @@ impl<'a> EvalCtx<'a> {
             TExprKind::AmbientInput { .. } => Err(unsupported("expr `AmbientInput`", self.span())),
             TExprKind::RequireStop {
                 kind,
+                loc,
                 always_stops,
-                ..
             } => {
-                if *always_stops {
-                    return Err(unsupported("panic(...)", self.span()));
-                }
-                match kind {
-                    crate::Codegen::TIR::TRequireKind::Require { cond, .. } => {
-                        let ok = self.eval_expr(cond, scope)?;
-                        if as_bool(&ok, self.span())? {
-                            Ok(CtValue::Unit)
-                        } else {
-                            Err(unsupported("require failed", self.span()))
+                let failed = if *always_stops {
+                    true
+                } else {
+                    match kind {
+                        crate::Codegen::TIR::TRequireKind::Require { cond, .. } => {
+                            !as_bool(&self.eval_expr(cond, scope)?, self.span())?
                         }
-                    }
-                    crate::Codegen::TIR::TRequireKind::RequireEq { left, right, .. } => {
-                        let l = self.eval_expr(left, scope)?;
-                        let r = self.eval_expr(right, scope)?;
-                        if l == r {
-                            Ok(CtValue::Unit)
-                        } else {
-                            Err(unsupported("require_eq failed", self.span()))
+                        crate::Codegen::TIR::TRequireKind::RequireEq { left, right, .. } => {
+                            self.eval_expr(left, scope)? != self.eval_expr(right, scope)?
                         }
+                        crate::Codegen::TIR::TRequireKind::Panic { .. } => true,
                     }
-                    crate::Codegen::TIR::TRequireKind::Panic { .. } => {
-                        Err(unsupported("panic(...)", self.span()))
-                    }
+                };
+                if !failed {
+                    return Ok(CtValue::Unit);
                 }
+                let msg = match kind {
+                    crate::Codegen::TIR::TRequireKind::Require { msg: Some(msg), .. }
+                    | crate::Codegen::TIR::TRequireKind::Panic { msg } => {
+                        self.eval_expr(msg, scope)?.jet_show()
+                    }
+                    crate::Codegen::TIR::TRequireKind::Require { msg: None, .. } => {
+                        "requirement failed".to_string()
+                    }
+                    crate::Codegen::TIR::TRequireKind::RequireEq { .. } => {
+                        "values are not equal".to_string()
+                    }
+                };
+                let file = loc.file.trim_matches('"');
+                let fn_name = loc.fn_name.trim_matches('"');
+                let src_line = loc.src_line.trim_matches('"');
+                let line_s = loc.line.to_string();
+                let margin = line_s.len();
+                let pad = " ".repeat(margin);
+                let col_offset = loc.col.saturating_sub(1) as usize;
+                let caret = "^".repeat(loc.caret.max(1) as usize);
+                let rendered = format!(
+                    "panic: {msg}\n  --> {file}:{} in {fn_name}\n   {pad}|\n{line_s} | {src_line}\n   {pad}| {}{caret}\n",
+                    loc.line,
+                    " ".repeat(col_offset)
+                );
+                if let Some(sink) = self.sink.as_mut() {
+                    sink.stderr.push_str(&rendered);
+                    sink.exit_code = Some(70);
+                    return Err(Diagnostic::error(
+                        "SOFT_EXIT",
+                        "70".to_string(),
+                        "require/panic stop".to_string(),
+                        String::new(),
+                        Some(self.span()),
+                    ));
+                }
+                Err(unsupported("require/panic stop", self.span()))
             }
             TExprKind::LayoutCompare { .. } => Err(unsupported("expr `LayoutCompare`", self.span())),
             TExprKind::LayoutLit { .. } => Err(unsupported("expr `LayoutLit`", self.span())),
@@ -2011,6 +2096,30 @@ impl<'a> EvalCtx<'a> {
             TExprKind::CoreClosureCall {
                 kind: TCoreClosureKind::Spawn { .. },
             } => self.eval_spawn(scope),
+            TExprKind::CoreClosureCall {
+                kind: TCoreClosureKind::Guard { executable, .. },
+            } => {
+                self.scope_guards.push(executable.as_ref());
+                Ok(CtValue::Unit)
+            }
+            TExprKind::CoreClosureCall {
+                kind: TCoreClosureKind::OnCommit { executable, .. },
+            } => {
+                let Some(frame) = self.txn_stack.last_mut() else {
+                    return Err(unsupported("on_commit outside transaction", self.span()));
+                };
+                frame.on_commit.push(executable.as_ref());
+                Ok(CtValue::Unit)
+            }
+            TExprKind::CoreClosureCall {
+                kind: TCoreClosureKind::OnRollback { executable, .. },
+            } => {
+                let Some(frame) = self.txn_stack.last_mut() else {
+                    return Err(unsupported("on_rollback outside transaction", self.span()));
+                };
+                frame.on_rollback.push(executable.as_ref());
+                Ok(CtValue::Unit)
+            }
             TExprKind::CoreClosureCall { .. } => {
                 Err(unsupported("expr `CoreClosureCall`", self.span()))
             }

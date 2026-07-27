@@ -56,6 +56,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         expirings: Vec::new(),
         secrets: Vec::new(),
         trapped: None,
+        exit_code: None,
         deadline_exceeded: None,
     }
 }
@@ -239,6 +240,16 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
             return Ok(RunOutcome::Problems(vec![jit_deadline_diag(&rendered)]));
         }
         if let Some(msg) = runtime.trapped.take() {
+            // Rich require/panic already wrote AOT-matching stderr and set exit_code.
+            if msg == "__jet_rich_panic__" || runtime.exit_code.is_some() {
+                let code = runtime.exit_code.take().unwrap_or(1);
+                reset_run_heap(runtime);
+                return Ok(RunOutcome::Ran {
+                    stdout: runtime.stdout.clone(),
+                    stderr: runtime.stderr.clone(),
+                    exit_code: code,
+                });
+            }
             // A runtime panic unwound to `main`'s epilogue via the trapped-flag
             // branches (no Rust panic crossed a JIT frame — I1). Report it exactly
             // as the tier-0 interpreter reports the same panic (E0953), and scrub

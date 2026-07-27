@@ -107,6 +107,8 @@ fn lower_spawn_function(
             in_shared_transaction: false,
             shared_transaction_depth: 0,
             unsafe_depth: 0,
+            scope_guards: Vec::new(),
+            txn_stack: Vec::new(),
         };
         for cap in &lam.captures {
             let var = lctx.fresh_var(types::I64);
@@ -231,6 +233,8 @@ pub(crate) fn lower_callable_lambda(
             in_shared_transaction: false,
             shared_transaction_depth: 0,
             unsafe_depth: 0,
+            scope_guards: Vec::new(),
+            txn_stack: Vec::new(),
         };
         for (i, (name, ty)) in lam
             .source_params
@@ -338,6 +342,8 @@ fn lower_function(
             in_shared_transaction: false,
             shared_transaction_depth: 0,
             unsafe_depth: 0,
+            scope_guards: Vec::new(),
+            txn_stack: Vec::new(),
         };
         if func_has_receiver(tir) {
             let self_var = lctx.fresh_var(types::I64);
@@ -382,6 +388,7 @@ fn lower_function(
 
         lctx.lower_stmts(&tir.body)?;
         if !lctx.dead {
+            lctx.emit_scope_guards()?;
             if let Some(ret) = &tir.ret {
                 if matches!(ret, Type::Result { ok, err }
                     if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit")
@@ -496,6 +503,8 @@ fn lower_generator_body(
             in_shared_transaction: false,
             shared_transaction_depth: 0,
             unsafe_depth: 0,
+            scope_guards: Vec::new(),
+            txn_stack: Vec::new(),
         };
         for (index, (name, ty, _)) in tir.params.iter().enumerate() {
             let var = lctx.fresh_var(types::I64);

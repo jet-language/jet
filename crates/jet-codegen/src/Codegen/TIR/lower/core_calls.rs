@@ -101,8 +101,12 @@ pub(crate) fn lower_core_closure_call(
         }
         ("core.scope", "guard") => {
             let lam = lam_at(0)?;
+            let executable = Box::new(lower_lambda(lam, cx, env));
             let closure = render_lambda_str(lam, cx, env);
-            TCoreClosureKind::Guard { closure }
+            TCoreClosureKind::Guard {
+                closure,
+                executable,
+            }
         }
         ("core.data", "filter" | "sort_by") => {
             let rows = lower_expr(&args[0].expr, cx, env);

@@ -87,6 +87,46 @@ pub(crate) fn lower_func(f: &Func, cx: &Cx) -> TFunc {
     lower_func_with_web_boundary(f, cx, false)
 }
 
+pub(crate) fn lower_error_conv(
+    conversion: &crate::AST::ErrorConvDef,
+    cx: &Cx,
+) -> TFunc {
+    let name = crate::Sema::error_conv_fn_name(&conversion.from_ty, &conversion.to_ty);
+    let from_ty = Type::Named(conversion.from_ty.clone());
+    let to_ty = Type::Named(conversion.to_ty.clone());
+    let mut env = LowerEnv::new(name.clone());
+    env.ret_ty = Some(to_ty.clone());
+    env.bind(
+        Syntax::KW_SELF,
+        TLocal::user(Syntax::KW_SELF),
+        Some(from_ty.clone()),
+    );
+    TFunc {
+        name,
+        params: vec![(
+            cx.mangle_name(Syntax::KW_SELF),
+            from_ty,
+            AccessConvention::Move,
+        )],
+        web_param_reconstructions: Vec::new(),
+        ret: Some(to_ty),
+        gc_return: false,
+        return_view_provenance: None,
+        generics: String::new(),
+        clone_types: Vec::new(),
+        is_main: false,
+        line: cov_line(cx, conversion.from_span.start),
+        is_unsafe: false,
+        is_pure: true,
+        is_reactive: false,
+        reactive_upgrades: Vec::new(),
+        is_inline: false,
+        is_inline_always: false,
+        body: lower_stmts(&conversion.body, cx, &mut env),
+        kind: TFuncKind::TopLevel,
+    }
+}
+
 /// Lower a web function through the same executable TIR as every other target,
 /// but retain the one target-boundary fact a flattened `#WasmExport` needs:
 /// an all-integer Codable struct parameter is an owned typed local inside the

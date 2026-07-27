@@ -235,6 +235,47 @@ extern "C" fn jet_jit_rng_bool_p(handle: i64, p: f64) -> i8 {
     })
 }
 
+extern "C" fn jet_jit_rng_bool(handle: i64) -> i8 {
+    // Match AOT `jet_rng_bool` / comptime seeded rng: LSB of SplitMix64 next.
+    with_rng(handle, |r| i8::from((det_next(r) & 1) == 1))
+}
+
+extern "C" fn jet_jit_rng_pick(handle: i64, items: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(items).unwrap_or(0);
+        if len == 0 {
+            return pack_option_string(None);
+        }
+        let index = {
+            let rng = rt
+                .rngs
+                .get_mut(handle.saturating_sub(1) as usize)
+                .expect("jit rng pick: bad handle");
+            rng_int(rng, 0, len - 1)
+        };
+        pack_option_string(rt.heap.list_get_int(items, index))
+    })
+}
+
+extern "C" fn jet_jit_rng_shuffle(handle: i64, items: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(items).unwrap_or(0);
+        for i in (1..len).rev() {
+            let j = {
+                let rng = rt
+                    .rngs
+                    .get_mut(handle.saturating_sub(1) as usize)
+                    .expect("jit rng shuffle: bad handle");
+                rng_int(rng, 0, i)
+            };
+            let a = rt.heap.list_get_int(items, i).unwrap_or(0);
+            let b = rt.heap.list_get_int(items, j).unwrap_or(0);
+            let _ = rt.heap.list_set_int(items, i, b);
+            let _ = rt.heap.list_set_int(items, j, a);
+        }
+    });
+}
+
 extern "C" fn jet_jit_rng_weighted_pick(handle: i64, items: i64, weights: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let len = rt.heap.list_len(items).unwrap_or(0);
@@ -346,7 +387,10 @@ pub(crate) struct RandomHostFns {
     pub rng_new: cranelift_module::FuncId,
     pub rng_int: cranelift_module::FuncId,
     pub rng_float_range: cranelift_module::FuncId,
+    pub rng_bool: cranelift_module::FuncId,
     pub rng_bool_p: cranelift_module::FuncId,
+    pub rng_pick: cranelift_module::FuncId,
+    pub rng_shuffle: cranelift_module::FuncId,
     pub rng_weighted_pick: cranelift_module::FuncId,
     pub rng_sample: cranelift_module::FuncId,
     pub rng_bytes: cranelift_module::FuncId,
@@ -378,6 +422,9 @@ pub(crate) fn register_random_symbols(builder: &mut cranelift_jit::JITBuilder) {
         jet_jit_rng_float_range as *const u8,
     );
     builder.symbol("jet_jit_rng_bool_p", jet_jit_rng_bool_p as *const u8);
+    builder.symbol("jet_jit_rng_bool", jet_jit_rng_bool as *const u8);
+    builder.symbol("jet_jit_rng_pick", jet_jit_rng_pick as *const u8);
+    builder.symbol("jet_jit_rng_shuffle", jet_jit_rng_shuffle as *const u8);
     builder.symbol(
         "jet_jit_rng_weighted_pick",
         jet_jit_rng_weighted_pick as *const u8,
@@ -402,6 +449,9 @@ pub(crate) fn declare_random_host_fns(
 
     let mut sig_void_i64 = Signature::new(cc);
     sig_void_i64.params.push(AbiParam::new(types::I64));
+    let mut sig_void_i64_i64 = Signature::new(cc);
+    sig_void_i64_i64.params.push(AbiParam::new(types::I64));
+    sig_void_i64_i64.params.push(AbiParam::new(types::I64));
     let mut sig_f64_i8 = Signature::new(cc);
     sig_f64_i8.params.push(AbiParam::new(types::F64));
     sig_f64_i8.returns.push(AbiParam::new(types::I8));
@@ -433,6 +483,9 @@ pub(crate) fn declare_random_host_fns(
     sig_rng_bool.params.push(AbiParam::new(types::I64));
     sig_rng_bool.params.push(AbiParam::new(types::F64));
     sig_rng_bool.returns.push(AbiParam::new(types::I8));
+    let mut sig_rng_bool_default = Signature::new(cc);
+    sig_rng_bool_default.params.push(AbiParam::new(types::I64));
+    sig_rng_bool_default.returns.push(AbiParam::new(types::I8));
 
     Ok(RandomHostFns {
         seed: import("jet_jit_random_seed", &sig_void_i64)?,
@@ -446,7 +499,10 @@ pub(crate) fn declare_random_host_fns(
         rng_new: import("jet_jit_rng_new", &sig_i64_i64)?,
         rng_int: import("jet_jit_rng_int", &sig_i64_i64_i64_i64)?,
         rng_float_range: import("jet_jit_rng_float_range", &sig_rng_fr)?,
+        rng_bool: import("jet_jit_rng_bool", &sig_rng_bool_default)?,
         rng_bool_p: import("jet_jit_rng_bool_p", &sig_rng_bool)?,
+        rng_pick: import("jet_jit_rng_pick", &sig_i64_i64_i64)?,
+        rng_shuffle: import("jet_jit_rng_shuffle", &sig_void_i64_i64)?,
         rng_weighted_pick: import("jet_jit_rng_weighted_pick", &sig_i64_i64_i64_i64)?,
         rng_sample: import("jet_jit_rng_sample", &sig_i64_i64_i64_i64)?,
         rng_bytes: import("jet_jit_rng_bytes", &sig_i64_i64_i64)?,

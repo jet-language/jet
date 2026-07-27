@@ -688,7 +688,11 @@ pub(crate) fn lower_method_call(
             return TExpr {
                 ty: Type::Named("TransactionGuard".to_string()),
                 kind: TExprKind::CoreClosureCall {
-                    kind: TCoreClosureKind::OnCommit { handle, closure },
+                    kind: TCoreClosureKind::OnCommit {
+                        handle,
+                        closure,
+                        executable: Box::new(tl),
+                    },
                 },
             };
         }
@@ -713,7 +717,11 @@ pub(crate) fn lower_method_call(
             return TExpr {
                 ty: Type::Named("TransactionGuard".to_string()),
                 kind: TExprKind::CoreClosureCall {
-                    kind: TCoreClosureKind::OnRollback { handle, closure },
+                    kind: TCoreClosureKind::OnRollback {
+                        handle,
+                        closure,
+                        executable: Box::new(tl),
+                    },
                 },
             };
         }
