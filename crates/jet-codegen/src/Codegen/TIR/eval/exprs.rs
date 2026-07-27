@@ -645,11 +645,20 @@ impl<'a> EvalCtx<'a> {
             TExprKind::Field { recv, field, .. } => {
                 let r = self.eval_expr(recv, scope)?;
                 match r {
-                    CtValue::Struct { fields, .. } => fields
-                        .into_iter()
-                        .find(|(n, _)| n == field)
-                        .map(|(_, v)| v)
-                        .ok_or_else(|| unsupported(&format!("field `{field}`"), self.span())),
+                    // TupleLit stores Rust-mangled `user_<f>` names (emit needs them);
+                    // Field TIR keeps Jet names. Accept either so named-tuple reads work.
+                    CtValue::Struct { fields, .. } => {
+                        let mangled = crate::Codegen::mangle(field);
+                        fields
+                            .into_iter()
+                            .find(|(n, _)| {
+                                n == field
+                                    || n == &mangled
+                                    || n.strip_prefix("user_") == Some(field.as_str())
+                            })
+                            .map(|(_, v)| v)
+                            .ok_or_else(|| unsupported(&format!("field `{field}`"), self.span()))
+                    }
                     _ => Err(unsupported("field recv", self.span())),
                 }
             }
@@ -2200,7 +2209,12 @@ impl<'a> EvalCtx<'a> {
                 let mut base_val = self.eval_expr(recv, scope)?;
                 match &mut base_val {
                     CtValue::Struct { fields, .. } => {
-                        if let Some((_, slot)) = fields.iter_mut().find(|(n, _)| n == field) {
+                        let mangled = crate::Codegen::mangle(field);
+                        if let Some((_, slot)) = fields.iter_mut().find(|(n, _)| {
+                            n == field
+                                || n == &mangled
+                                || n.strip_prefix("user_") == Some(field.as_str())
+                        }) {
                             *slot = value;
                         } else {
                             fields.push((field.clone(), value));

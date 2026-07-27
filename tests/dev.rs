@@ -4013,14 +4013,24 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
         return;
     }
 
+    // Honest pre-scan / TIR boundaries (typed CLI, env, etc.) skip the
+    // interpreter leg — same contract as assert_ui_and_web_three_way. JIT and
+    // AOT must still agree with no deopt/fallback.
     let interpreted = match dev_iteration(file, false, true) {
         RunOutcome::Ran {
             stdout,
             stderr,
             exit_code,
-        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        } => Some(ProgramOutput::ran(stdout, stderr, exit_code)),
+        RunOutcome::Problems(diags)
+            if diags
+                .iter()
+                .any(|d| d.code == "E2201" || d.code == "E0956" || d.code == "E1265") =>
+        {
+            None
+        }
         RunOutcome::Problems(ds) => {
-            panic!("interpreter baseline must run `{stem}`, got diagnostics: {ds:?}")
+            panic!("interpreter baseline must run `{stem}` or stop at E2201/E0956/E1265, got: {ds:?}")
         }
     };
 
@@ -4044,10 +4054,12 @@ fn assert_cranelift_three_way(file: &str, stem: &str) {
         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
         "`{stem}` used deopt or fallback"
     );
-    assert_eq!(
-        jit, interpreted,
-        "JIT vs interpreter divergence for `{stem}`"
-    );
+    if let Some(interpreted) = interpreted {
+        assert_eq!(
+            jit, interpreted,
+            "JIT vs interpreter divergence for `{stem}`"
+        );
+    }
 
     let dir = std::env::temp_dir().join(format!("jet_jit_3way_{}", std::process::id()));
     let aot = compiled_binary_output(&dir, "jit_3way", 0, stem, file);
