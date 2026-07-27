@@ -277,6 +277,13 @@ handles are thread-confined. Programs that use them select the canonical TIR
 tier-0 network host; the tier trace reports that choice and no AOT fallback is
 hidden behind `jet dev`.
 
+Closeout (#1194) keeps one acceptance matrix over the shipped surface
+(provision → lifecycle → locators → network → artifacts → checked CDP →
+privacy), agent-facing examples under `examples/features/net/browser_*.jet`,
+and hostile proofs in `tests/browser_bidi.rs` / `tests/browser_lock.rs` with
+no skip or fallback paths. Live browser binaries remain host-supplied; the
+product path always speaks BiDi over the existing WebSocket transport.
+
 ### Adding an FFI bridge
 
 Foreign dependencies stay behind the existing runtime boundary; they never

@@ -532,6 +532,29 @@ Example: `examples/features/net/ws_echo.jet`.
 Examples: `examples/features/net/http_rest_service.jet` and
 `examples/features/net/http_server_trailers.jet`.
 
+### `core.browser` — WebDriver BiDi automation (D-BROWSER-AUTO1=A)
+
+`core.browser` is the portable browser automation home. It speaks versioned
+WebDriver BiDi over `core.ws`, with Jetpack-locked browser binaries and an
+explicit capability-checked CDP expert path. There is no Node or Playwright
+runtime dependency.
+
+| Surface | Notes |
+|---------|-------|
+| `browser.profile` / `browser.timeout` / `browser.connect_profile` | Pin the BiDi command contract and connect |
+| `browser.locked(engine)` | Read a Jetpack `[[browser]]` pin (`jetpack browser lock`) |
+| `session.context` / `context.page` / `context.tab` / frames | Isolated user contexts; explicit close |
+| Semantic locators + waits | `get_by_role` / `text` / `label` / `placeholder` / `test_id` / `css`; `wait` / `wait_gone`; click/hover/fill/press |
+| Events + network | `subscribe` / `next_event`; redacted request facts; intercept continue/fail/fulfill |
+| Artifacts | cookies, local/session storage, `set_files`, downloads folder, screenshot, PDF |
+| `session.protocol("cdp"\|"bidi")` | Expert raw commands; CDP only after `goog:cdp` capability |
+| `privacy` / `receipt` / `trace` | Isolated profiles on; shared denied; redacted audit facts only |
+
+Acceptance matrix and agent cookbook:
+`examples/features/net/browser_matrix.jet`,
+`examples/features/net/browser_agent.jet`. Focused proof:
+`tests/browser_bidi.rs`, `tests/browser_lock.rs`.
+
 ### `core.crypto` — safe envelopes and expert primitives
 
 `core.crypto` is the safe-by-default cryptography surface. Beginner APIs hide

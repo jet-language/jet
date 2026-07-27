@@ -2888,3 +2888,330 @@ fn run() {
     );
 }
 
+/// D-BROWSER-AUTO1=A (#1194): closeout acceptance matrix — one production-path
+/// session covers lifecycle, locators, artifacts, checked CDP, and privacy
+/// receipt without skip/fallback.
+#[test]
+fn native_bidi_browser_surface_matrix_success() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!(
+        "ws://{}/session?token=MATRIX_SUCCESS_SECRET",
+        listener.local_addr().unwrap()
+    );
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        accept_websocket(&mut stream);
+        let mut methods = Vec::new();
+        let mut creates = 0u32;
+        for _ in 0..24 {
+            let request = read_text_frame(&mut stream);
+            let id = field(&request, "id");
+            let method = field(&request, "method");
+            methods.push(method.clone());
+            let result = match method.as_str() {
+                "session.status" => r#"{"ready":true,"message":"ready"}"#,
+                "session.new" => {
+                    assert!(
+                        !request.contains("MATRIX_SUCCESS_SECRET"),
+                        "endpoint secret must not enter session.new: {request}"
+                    );
+                    r#"{"sessionId":"matrix","capabilities":{"goog:cdp":true,"browserName":"mock"}}"#
+                }
+                "browser.createUserContext" => r#"{"userContext":"user-matrix"}"#,
+                "browsingContext.create" => {
+                    creates += 1;
+                    assert!(
+                        request.contains(r#""type":"tab""#),
+                        "page/tab create must request type=tab: {request}"
+                    );
+                    if creates == 1 {
+                        r#"{"context":"page-1"}"#
+                    } else {
+                        r#"{"context":"tab-2"}"#
+                    }
+                }
+                "browsingContext.navigate" => "{}",
+                "browsingContext.locateNodes" => {
+                    r#"{"nodes":[{"sharedId":"node-save","type":"node"}]}"#
+                }
+                "input.performActions" => "{}",
+                "storage.setCookie" => {
+                    assert!(
+                        request.contains(r#""value":"agent-token""#),
+                        "setCookie must carry caller value: {request}"
+                    );
+                    assert!(
+                        !request.contains("MATRIX_SUCCESS_SECRET"),
+                        "endpoint secret must not enter cookie params: {request}"
+                    );
+                    "{}"
+                }
+                "goog:cdp.sendCommand" => {
+                    assert!(
+                        request.contains(r#""method":"Page.enable""#),
+                        "checked CDP must wrap Page.enable: {request}"
+                    );
+                    "{}"
+                }
+                "browsingContext.close" | "browser.removeUserContext" | "session.end" => "{}",
+                other => panic!("unexpected matrix method {other}: {request}"),
+            };
+            write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+            );
+            if method == "session.end" {
+                break;
+            }
+        }
+        methods
+    });
+
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+
+    privacy :: session.privacy()
+    caps :: session.capabilities()
+    print("privacy:{privacy.isolated_profiles()}:{privacy.shared_profiles()}:{privacy.redact_receipts()}")
+    print("caps:{caps.bidi()}:{caps.cdp()}:{caps.profile()}")
+
+    context :: session.context() ?? panic("context")
+    print("isolated:{context.isolated()}")
+    page :: context.page() ?? panic("page")
+    tab :: context.tab() ?? panic("tab")
+    page.goto("https://example.test/agent") ?? panic("goto")
+
+    save :: page.get_by_role("button", "Save")
+    save.wait(timeout) ?? panic("wait")
+    save.click() ?? panic("click")
+    page.set_cookie("session", "agent-token", "example.test") ?? panic("cookie")
+
+    cdp :: session.protocol("cdp") ?? panic("cdp")
+    print(cdp.send("Page.enable", "{{}}") ?? panic("cdp send"))
+
+    tab.close() ?? panic("tab close")
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+
+    receipt :: session.receipt()
+    leak :: receipt.summary().contains("MATRIX_SUCCESS_SECRET")
+    print("receipt:{receipt.cleaned()}:{receipt.redacted()}:{receipt.isolated()}:{leak}")
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_matrix",
+        "browser_bidi_matrix",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "privacy:true:false:true\ncaps:true:true:bidi-2025.5\nisolated:true\n{}\nreceipt:true:true:true:false\n"
+    );
+    assert!(!stdout.contains("MATRIX_SUCCESS_SECRET"), "{stdout}");
+    assert!(!stderr.contains("MATRIX_SUCCESS_SECRET"), "{stderr}");
+    let methods = server.join().unwrap();
+    assert!(
+        methods.iter().any(|m| m == "browsingContext.locateNodes"),
+        "matrix must exercise locators: {methods:?}"
+    );
+    assert!(
+        methods.iter().any(|m| m == "input.performActions"),
+        "matrix must exercise actions: {methods:?}"
+    );
+    assert!(
+        methods.iter().any(|m| m == "storage.setCookie"),
+        "matrix must exercise artifacts: {methods:?}"
+    );
+    assert!(
+        methods.iter().any(|m| m == "goog:cdp.sendCommand"),
+        "matrix must exercise checked CDP: {methods:?}"
+    );
+    assert_eq!(methods.last().map(String::as_str), Some("session.end"));
+    assert_eq!(
+        methods
+            .iter()
+            .filter(|m| *m == "browsingContext.create")
+            .count(),
+        2,
+        "page + tab creates: {methods:?}"
+    );
+}
+
+/// D-BROWSER-AUTO1=A (#1194): closeout hostile matrix — bad profile, missing
+/// CDP, wire error with secrets, and closed-session ops fail closed without
+/// leaks or skip/fallback.
+#[test]
+fn native_bidi_browser_surface_hostile_matrix() {
+    let (no_cdp, no_cdp_server) = hostile_listener(HostileReply::NoCdp);
+
+    let wire = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let wire_endpoint = format!(
+        "ws://{}/session?token=MATRIX_HOSTILE_SECRET",
+        wire.local_addr().unwrap()
+    );
+    let wire_server = thread::spawn(move || {
+        let (mut stream, _) = wire.accept().unwrap();
+        accept_websocket(&mut stream);
+        let mut methods = Vec::new();
+        for _ in 0..6 {
+            let request = read_text_frame(&mut stream);
+            let id = field(&request, "id");
+            let method = field(&request, "method");
+            methods.push(method.clone());
+            match method.as_str() {
+                "session.status" => write_text_frame(
+                    &mut stream,
+                    &format!(
+                        r#"{{"type":"success","id":{id},"result":{{"ready":true,"message":"ready"}}}}"#
+                    ),
+                ),
+                "session.new" => write_text_frame(
+                    &mut stream,
+                    &format!(
+                        r#"{{"type":"success","id":{id},"result":{{"sessionId":"hostile","capabilities":{{"goog:cdp":true}}}}}}"#
+                    ),
+                ),
+                "browser.createUserContext" => write_text_frame(
+                    &mut stream,
+                    &format!(
+                        r#"{{"type":"error","id":{id},"error":"unknown error","message":"MATRIX_HOSTILE_SECRET page dump","stacktrace":"SECRET STACK"}}"#
+                    ),
+                ),
+                "session.end" => {
+                    write_text_frame(
+                        &mut stream,
+                        &format!(r#"{{"type":"success","id":{id},"result":{{}}}}"#),
+                    );
+                    break;
+                }
+                other => panic!("unexpected hostile-matrix method {other}: {request}"),
+            }
+        }
+        methods
+    });
+
+    let closed = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let closed_endpoint = format!(
+        "ws://{}/session?token=MATRIX_CLOSED_SECRET",
+        closed.local_addr().unwrap()
+    );
+    let closed_server = thread::spawn(move || {
+        let (mut stream, _) = closed.accept().unwrap();
+        accept_websocket(&mut stream);
+        let mut methods = Vec::new();
+        for _ in 0..5 {
+            let request = read_text_frame(&mut stream);
+            let id = field(&request, "id");
+            let method = field(&request, "method");
+            methods.push(method.clone());
+            let result = match method.as_str() {
+                "session.status" => r#"{"ready":true,"message":"ready"}"#,
+                "session.new" => r#"{"sessionId":"closed-matrix","capabilities":{}}"#,
+                "session.end" => "{}",
+                other => panic!("unexpected closed-matrix method {other}: {request}"),
+            };
+            write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+            );
+            if method == "session.end" {
+                break;
+            }
+        }
+        methods
+    });
+
+    let source = r#"
+use core.browser as browser
+
+fn bad_profile() => String {
+    browser.profile("not-a-profile") ?? return "caught-profile"
+    return "unexpected-profile"
+}
+
+fn missing_cdp(endpoint: String) => String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    session.protocol("cdp") ?? return "caught-cdp"
+    return "unexpected-cdp"
+}
+
+fn wire_error(endpoint: String) => String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    session.context() ?? return "caught-wire"
+    return "unexpected-wire"
+}
+
+fn closed_ops(endpoint: String) => String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    session.close() ?? return "unexpected-close"
+    loop attempt; [1] {
+        session.context() ?? next
+        return "unexpected-open"
+    }
+    receipt :: session.receipt()
+    if receipt.cleaned() && receipt.redacted() {
+        return "caught-closed"
+    }
+    return "bad-receipt"
+}
+
+fn run() {
+    print(bad_profile())
+    print(missing_cdp("__NO_CDP__"))
+    print(wire_error("__WIRE__"))
+    print(closed_ops("__CLOSED__"))
+}
+"#
+    .replace("__NO_CDP__", &no_cdp)
+    .replace("__WIRE__", &wire_endpoint)
+    .replace("__CLOSED__", &closed_endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_hostile_matrix",
+        "browser_bidi_hostile_matrix",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "caught-profile\ncaught-cdp\ncaught-wire\ncaught-closed\n"
+    );
+    for secret in [
+        "MATRIX_HOSTILE_SECRET",
+        "MATRIX_CLOSED_SECRET",
+        "SECRET STACK",
+    ] {
+        assert!(!stdout.contains(secret), "{secret} leaked in stdout:\n{stdout}");
+        assert!(!stderr.contains(secret), "{secret} leaked in stderr:\n{stderr}");
+    }
+    no_cdp_server.join().unwrap();
+    assert_eq!(
+        wire_server.join().unwrap(),
+        [
+            "session.status",
+            "session.new",
+            "browser.createUserContext",
+            "session.end",
+        ]
+    );
+    assert_eq!(
+        closed_server.join().unwrap(),
+        ["session.status", "session.new", "session.end"]
+    );
+}
+
