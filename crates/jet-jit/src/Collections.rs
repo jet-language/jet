@@ -195,6 +195,30 @@ extern "C" fn jet_jit_list_sort(list: i64) {
     });
 }
 
+/// Lexicographic sort of a `[String]` list (handles are string arena ids).
+extern "C" fn jet_jit_list_sort_str(list: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(ids) = rt.heap.clone_int_list(list) else {
+            jet_foundation::ice!(None, "jit list sort_str: bad handle");
+        };
+        let mut pairs: Vec<(String, i64)> = ids
+            .into_iter()
+            .map(|id| {
+                (
+                    rt.heap.clone_string(id).unwrap_or_default(),
+                    id,
+                )
+            })
+            .collect();
+        pairs.sort_by(|a, b| a.0.cmp(&b.0));
+        for (i, (_, id)) in pairs.into_iter().enumerate() {
+            rt.heap
+                .list_set_int(list, i as i64, id)
+                .expect("jit list sort_str: set");
+        }
+    });
+}
+
 extern "C" fn jet_jit_list_clone(list: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.clone_list(list).expect("jit list clone: bad handle"))
 }
@@ -703,6 +727,22 @@ extern "C" fn jet_jit_print_opt(packed: i64, kind: i64) {
         }
         rt.stdout.push('\n');
     });
+}
+
+/// `list.pop()` — Option ABI: `0` = None, `value + 1` = Some (i64/handle elems).
+extern "C" fn jet_jit_list_pop(list: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let values: &mut Vec<jet_rt::JetVal> =
+            unsafe { &mut *(&mut rt.heap as *mut jet_rt::JetArena as *mut Vec<jet_rt::JetVal>) };
+        let Some(jet_rt::JetVal::List(xs)) = values.get_mut(list as usize) else {
+            jet_foundation::ice!(None, "jit list pop: bad handle");
+        };
+        match xs.pop() {
+            Some(jet_rt::JetVal::Int(v)) => v.wrapping_add(1),
+            Some(jet_rt::JetVal::Float(v)) => (v.to_bits() as i64).wrapping_add(1),
+            Some(_) | None => 0,
+        }
+    })
 }
 
 /// `list.remove(i)` — AOT `jet_list_remove` panic text on OOB; in-bounds mutates
@@ -1358,6 +1398,7 @@ pub(crate) struct CollectionsHostFns {
     pub list_eq: cranelift_module::FuncId,
     pub list_indexes: cranelift_module::FuncId,
     pub list_sort: cranelift_module::FuncId,
+    pub list_sort_str: cranelift_module::FuncId,
     pub list_clone: cranelift_module::FuncId,
     pub list_slice: cranelift_module::FuncId,
     pub list_join_str: cranelift_module::FuncId,
@@ -1394,6 +1435,7 @@ pub(crate) struct CollectionsHostFns {
     pub print_enum: cranelift_module::FuncId,
     pub list_show: cranelift_module::FuncId,
     pub list_remove: cranelift_module::FuncId,
+    pub list_pop: cranelift_module::FuncId,
     pub set_from_list: cranelift_module::FuncId,
     pub set_insert: cranelift_module::FuncId,
     pub set_remove: cranelift_module::FuncId,
@@ -1459,6 +1501,7 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_list_eq", jet_jit_list_eq as *const u8);
     builder.symbol("jet_jit_list_indexes", jet_jit_list_indexes as *const u8);
     builder.symbol("jet_jit_list_sort", jet_jit_list_sort as *const u8);
+    builder.symbol("jet_jit_list_sort_str", jet_jit_list_sort_str as *const u8);
     builder.symbol("jet_jit_list_clone", jet_jit_list_clone as *const u8);
     builder.symbol("jet_jit_list_slice", jet_jit_list_slice as *const u8);
     builder.symbol("jet_jit_list_join_str", jet_jit_list_join_str as *const u8);
@@ -1498,6 +1541,7 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_print_enum", jet_jit_print_enum as *const u8);
     builder.symbol("jet_jit_list_show", jet_jit_list_show as *const u8);
     builder.symbol("jet_jit_list_remove", jet_jit_list_remove as *const u8);
+    builder.symbol("jet_jit_list_pop", jet_jit_list_pop as *const u8);
     builder.symbol("jet_jit_set_from_list", jet_jit_set_from_list as *const u8);
     builder.symbol("jet_jit_set_insert", jet_jit_set_insert as *const u8);
     builder.symbol("jet_jit_set_remove", jet_jit_set_remove as *const u8);
@@ -1646,6 +1690,7 @@ pub(crate) fn declare_collections_host_fns(
         list_eq: import("jet_jit_list_eq", &sig_list_eq)?,
         list_indexes: import("jet_jit_list_indexes", &sig_len)?,
         list_sort: import("jet_jit_list_sort", &sig_sort)?,
+        list_sort_str: import("jet_jit_list_sort_str", &sig_sort)?,
         list_clone: import("jet_jit_list_clone", &sig_len)?,
         list_slice: import("jet_jit_list_slice", &sig_slice)?,
         list_join_str: import("jet_jit_list_join_str", &sig_join)?,
@@ -1682,6 +1727,7 @@ pub(crate) fn declare_collections_host_fns(
         print_enum: import("jet_jit_print_enum", &sig_print_enum)?,
         list_show: import("jet_jit_list_show", &sig_get_opt)?,
         list_remove: import("jet_jit_list_remove", &sig_get_opt)?,
+        list_pop: import("jet_jit_list_pop", &sig_len)?,
         set_from_list: import("jet_jit_set_from_list", &sig_len)?,
         set_insert: import("jet_jit_set_insert", &sig_list_eq)?,
         set_remove: import("jet_jit_set_remove", &sig_push)?,

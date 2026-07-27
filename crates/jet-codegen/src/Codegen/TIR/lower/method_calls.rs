@@ -2749,6 +2749,17 @@ pub(crate) fn lower_method_call(
                 });
             }
             let recv_t = lower_expr(receiver, cx, env);
+            // D-GAME*: stash spawn-lambda for resident JIT `game.run` callbacks.
+            // Keep the lowered lambda arg so AOT emit still receives it.
+            if matches!(op, THandleOp::GameSceneOnFrame) {
+                if let Some(Expr::Lambda(lam)) = args.first().map(|a| &a.expr) {
+                    let mut jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+                    for (_, ty) in &mut jit_lambda.params {
+                        *ty = Type::Named("GameFrame".to_string());
+                    }
+                    cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
+                }
+            }
             let targs: Vec<TExpr> = args
                 .iter()
                 .enumerate()

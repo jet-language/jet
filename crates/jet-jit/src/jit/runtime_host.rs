@@ -104,6 +104,14 @@ pub(crate) struct JitRuntime {
     pub(crate) expirings: Vec<Memory::ExpiringState>,
     pub(crate) secrets: Vec<Option<Memory::SecretState>>,
     pub(crate) crypto_values: Vec<Option<Crypto::CryptoValue>>,
+    /// `core.game` scene / frame / replay / backend handles (#1218).
+    pub(crate) game_scenes: Vec<crate::Game::GameSceneState>,
+    pub(crate) game_frames: Vec<crate::Game::GameFrameState>,
+    pub(crate) game_replays: Vec<crate::Game::GameReplayState>,
+    pub(crate) game_backends: Vec<crate::Game::GameBackendState>,
+    /// `core.raylib` window / color handles (#1218).
+    pub(crate) raylib_windows: Vec<crate::Raylib::RaylibWindowState>,
+    pub(crate) raylib_colors: Vec<crate::Raylib::RaylibColorState>,
     /// Set by a host shim when the user program hits a runtime panic (overflow,
     /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
     /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,
@@ -1481,6 +1489,8 @@ pub(crate) struct HostFns {
     pub(crate) args: crate::Args::ArgsHostFns,
     pub(crate) db: crate::Db::DbHostFns,
     pub(crate) crypto: Crypto::CryptoHostFns,
+    pub(crate) game: crate::Game::GameHostFns,
+    pub(crate) raylib: crate::Raylib::RaylibHostFns,
 }
 
 pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
@@ -1653,6 +1663,8 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Args::register_args_symbols(&mut builder);
     crate::Db::register_db_symbols(&mut builder);
     Crypto::register_crypto_symbols(&mut builder);
+    crate::Game::register_game_symbols(&mut builder);
+    crate::Raylib::register_raylib_symbols(&mut builder);
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
     let memory = Memory::declare_memory_host_fns(&mut module)?;
@@ -1672,6 +1684,8 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let args = crate::Args::declare_args_host_fns(&mut module)?;
     let db = crate::Db::declare_db_host_fns(&mut module)?;
     let crypto = Crypto::declare_crypto_host_fns(&mut module)?;
+    let game = crate::Game::declare_game_host_fns(&mut module)?;
+    let raylib = crate::Raylib::declare_raylib_host_fns(&mut module)?;
     let host = declare_host_fns(
         &mut module,
         coll,
@@ -1692,6 +1706,8 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         args,
         db,
         crypto,
+        game,
+        raylib,
     )?;
     Ok((module, host))
 }
@@ -1716,6 +1732,8 @@ fn declare_host_fns(
     args: crate::Args::ArgsHostFns,
     db: crate::Db::DbHostFns,
     crypto: Crypto::CryptoHostFns,
+    game: crate::Game::GameHostFns,
+    raylib: crate::Raylib::RaylibHostFns,
 ) -> Result<HostFns, String> {
     let cc = module.target_config().default_call_conv;
     let mut sig_bin_i64 = Signature::new(cc);
@@ -2039,5 +2057,7 @@ fn declare_host_fns(
         args,
         db,
         crypto,
+        game,
+        raylib,
     })
 }

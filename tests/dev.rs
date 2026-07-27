@@ -4299,6 +4299,152 @@ fn crypto_auth_and_vault_match_interpreter_jit_and_aot() {
     );
 }
 
+#[test]
+fn concurrency_and_game_match_interpreter_jit_and_aot() {
+    const CHILD_STEM: &str = "JET_1218_STEM";
+    if let Ok(stem) = std::env::var(CHILD_STEM) {
+        assert_concurrency_and_game_three_way(&example_path(&stem), &stem);
+        return;
+    }
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let stems = [
+        "concurrency/deadline_context",
+        "concurrency/detached_task",
+        "concurrency/parallel_iter",
+        "concurrency/parallel_scan",
+        "concurrency/task_controls",
+        "concurrency/task_runtime_audit",
+        "game/core_game_headless",
+        "game/raylib_window",
+    ];
+    let mut failures = Vec::new();
+    for stem in stems {
+        let mut command = Command::new(std::env::current_exe().expect("current dev test binary"));
+        command
+            .args([
+                "--exact",
+                "concurrency_and_game_match_interpreter_jit_and_aot",
+                "--nocapture",
+            ])
+            .env(CHILD_STEM, stem)
+            .env("RUST_MIN_STACK", "8388608")
+            .env("NO_COLOR", "1");
+        let output = command_output_with_timeout(
+            command,
+            DEV_DIFF_TIMEOUT,
+            &format!("concurrency/game parity `{stem}`"),
+        );
+        if !output.status.success() {
+            failures.push(format!(
+                "{stem}: status={:?}\nstdout:\n{}\nstderr:\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "concurrency/game parity failures:\n{}",
+        failures.join("\n")
+    );
+}
+
+fn assert_concurrency_and_game_three_way(file: &str, stem: &str) {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "`{stem}` must type-check");
+    let safety_detail = jet_jit::resident_jit_safe_bundle_detail(&bundle);
+    let compile = jet_jit::try_compile_bundle(&bundle);
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle) && compile.is_ok(),
+        "`{stem}` must be resident-JIT safe for three-way differential: safety={safety_detail:?}, compile={compile:?}"
+    );
+
+    let expected = if stem == "concurrency/deadline_context" {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut stderr = fs::read_to_string(
+            root.join("examples/features/expected/concurrency/deadline_context.err.out"),
+        )
+        .expect("deadline_context.err.out");
+        if !stderr.ends_with('\n') {
+            stderr.push('\n');
+        }
+        stderr.push_str("panic: a task panicked\n");
+        ProgramOutput::ran(golden_stdout(stem), stderr, 70)
+    } else {
+        ProgramOutput::ran(golden_stdout(stem), String::new(), 0)
+    };
+
+    let interpreted = match dev_iteration(file, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => Some(ProgramOutput::ran(stdout, stderr, exit_code)),
+        RunOutcome::Problems(diags)
+            if diags
+                .iter()
+                .any(|d| d.code == "E2201" || d.code == "E0956" || d.code == "E1265") =>
+        {
+            // Native concurrency/game surfaces stop at the honest interpreter
+            // boundary; golden + resident JIT + AOT carry ProgramOutput parity.
+            None
+        }
+        RunOutcome::Problems(diags) => {
+            panic!("interpreter baseline must run `{stem}` or stop at E2201/E0956/E1265, got: {diags:?}")
+        }
+    };
+
+    jet_jit::reset_jit_trace_for_test();
+    let mut backend = CraneliftBackend::new();
+    let jit = jet_jit::with_program_args(&[file.to_string()], || {
+        match backend.run(&bundle, false) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => ProgramOutput::ran(stdout, stderr, exit_code),
+            RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
+        }
+    });
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "`{stem}` did not execute in resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "`{stem}` used deopt or fallback"
+    );
+
+    let dir = std::env::temp_dir().join(format!("jet_jit_1218_{}", std::process::id()));
+    let aot = compiled_binary_output(&dir, "jit_1218", 0, stem, file);
+
+    if let Some(interpreted) = interpreted {
+        assert_eq!(
+            interpreted, expected,
+            "interpreter drifted from golden for `{stem}`"
+        );
+        assert_eq!(
+            jit, interpreted,
+            "JIT vs interpreter divergence for `{stem}`"
+        );
+    } else {
+        assert_eq!(jit, expected, "JIT drifted from golden for `{stem}`");
+    }
+    assert_eq!(jit, aot, "JIT vs AOT divergence for `{stem}`");
+}
+
 fn assert_crypto_auth_vault_three_way(file: &str, stem: &str) {
     if skip_if_cranelift_host_unsupported() {
         return;
