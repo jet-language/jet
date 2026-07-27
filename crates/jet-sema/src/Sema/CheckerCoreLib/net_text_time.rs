@@ -23,12 +23,15 @@ impl<'a> Checker<'a> {
             | ("BrowserPage", "close" | "main_frame" | "frames")
             | ("BrowserFrame", "close")
             | ("BrowserLocator", "click" | "hover")
-            | ("BrowserEvent", "kind")
+            | ("BrowserIntercept", "remove")
+            | ("BrowserEvent", "kind" | "request_id" | "request_method" | "url_hash"
+                | "is_blocked" | "status_code")
             | ("BrowserCapabilities", "bidi" | "cdp" | "profile")
             | ("BrowserTrace", "entry_count" | "redacted" | "summary")
             | ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => Vec::new(),
             ("BrowserLocked", "verify") => Vec::new(),
-            ("Browser", "subscribe" | "protocol")
+            ("Browser", "subscribe" | "protocol" | "add_intercept" | "continue_request"
+                | "fail_request")
             | ("BrowserPage", "goto" | "get_by_text" | "get_by_label" | "get_by_placeholder"
                 | "get_by_test_id" | "get_by_css")
             | ("BrowserLocator", "fill" | "press") => {
@@ -37,17 +40,25 @@ impl<'a> Checker<'a> {
             ("Browser", "next_event") | ("BrowserLocator", "wait" | "wait_gone") => {
                 vec![Type::Named("BrowserTimeout".to_string())]
             }
-            ("BrowserPage", "get_by_role") | ("BrowserProtocol", "send") => {
+            ("Browser", "add_intercept_url")
+            | ("BrowserPage", "get_by_role")
+            | ("BrowserProtocol", "send") => {
                 vec![Type::String, Type::String]
+            }
+            ("Browser", "fulfill_request") => {
+                vec![Type::String, Type::Int, Type::String]
             }
             _ => return false,
         };
         if matches!(
             (type_name, method),
-            ("Browser", "context" | "subscribe" | "close" | "next_event" | "protocol")
+            ("Browser", "context" | "subscribe" | "close" | "next_event" | "protocol"
+                | "add_intercept" | "add_intercept_url" | "continue_request" | "fail_request"
+                | "fulfill_request")
                 | ("BrowserContext", "page" | "tab" | "close")
                 | ("BrowserPage", "goto" | "close" | "frames")
                 | ("BrowserFrame", "close")
+                | ("BrowserIntercept", "remove")
                 | ("BrowserLocator", "wait" | "wait_gone" | "click" | "hover" | "fill" | "press")
                 | ("BrowserProtocol", "send")
         ) {
@@ -174,6 +185,16 @@ pub fn net_method_return(
             ok: Box::new(Type::Named("BrowserEvent".to_string())),
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
+        ("Browser", "add_intercept" | "add_intercept_url") => Some(Some(Type::Result {
+            ok: Box::new(Type::Named("BrowserIntercept".to_string())),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
+        ("Browser", "continue_request" | "fail_request" | "fulfill_request") => {
+            Some(Some(Type::Result {
+                ok: Box::new(unit.clone()),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            }))
+        }
         ("Browser", "protocol") => Some(Some(Type::Result {
             ok: Box::new(Type::Named("BrowserProtocol".to_string())),
             err: Box::new(Type::Named("BrowserError".to_string())),
@@ -219,7 +240,15 @@ pub fn net_method_return(
                 err: Box::new(Type::Named("BrowserError".to_string())),
             }))
         }
-        ("BrowserEvent", "kind") => Some(Some(Type::String)),
+        ("BrowserIntercept", "remove") => Some(Some(Type::Result {
+            ok: Box::new(unit.clone()),
+            err: Box::new(Type::Named("BrowserError".to_string())),
+        })),
+        ("BrowserEvent", "kind" | "request_id" | "request_method" | "url_hash") => {
+            Some(Some(Type::String))
+        }
+        ("BrowserEvent", "is_blocked") => Some(Some(Type::Bool)),
+        ("BrowserEvent", "status_code") => Some(Some(Type::Int)),
         ("BrowserProtocol", "send") => Some(Some(Type::Result {
             ok: Box::new(Type::String),
             err: Box::new(Type::Named("BrowserError".to_string())),
@@ -604,12 +633,18 @@ pub fn http_type_method_return(
                 ok: Box::new(Type::Named("BrowserContext".to_string())),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             })),
-            ("subscribe", 1) | ("close", 0) => Some(Some(Type::Result {
+            ("subscribe", 1) | ("close", 0)
+            | ("continue_request" | "fail_request", 1)
+            | ("fulfill_request", 3) => Some(Some(Type::Result {
                 ok: Box::new(unit_ty()),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             })),
             ("next_event", 1) => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("BrowserEvent".to_string())),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
+            ("add_intercept", 1) | ("add_intercept_url", 2) => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("BrowserIntercept".to_string())),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             })),
             ("protocol", 1) => Some(Some(Type::Result {
@@ -664,8 +699,17 @@ pub fn http_type_method_return(
             })),
             _ => None,
         },
+        Type::Named(n) if n == "BrowserIntercept" => match (method, _args.len()) {
+            ("remove", 0) => Some(Some(Type::Result {
+                ok: Box::new(unit_ty()),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            })),
+            _ => None,
+        },
         Type::Named(n) if n == "BrowserEvent" => match (method, _args.len()) {
-            ("kind", 0) => mk_str(),
+            ("kind" | "request_id" | "request_method" | "url_hash", 0) => mk_str(),
+            ("is_blocked", 0) => Some(Some(Type::Bool)),
+            ("status_code", 0) => mk_int(),
             _ => None,
         },
         Type::Named(n) if n == "BrowserProtocol" => match (method, _args.len()) {

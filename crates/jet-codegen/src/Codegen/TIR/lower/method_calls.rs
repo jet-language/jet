@@ -1987,6 +1987,14 @@ pub(crate) fn lower_method_call(
                 ok: Box::new(Type::Named("BrowserEvent".to_string())),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             },
+            ("Browser", "add_intercept" | "add_intercept_url") => Type::Result {
+                ok: Box::new(Type::Named("BrowserIntercept".to_string())),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            },
+            ("Browser", "continue_request" | "fail_request" | "fulfill_request") => Type::Result {
+                ok: Box::new(unit_type()),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            },
             ("Browser", "protocol") => Type::Result {
                 ok: Box::new(Type::Named("BrowserProtocol".to_string())),
                 err: Box::new(Type::Named("BrowserError".to_string())),
@@ -1999,6 +2007,7 @@ pub(crate) fn lower_method_call(
             ("BrowserContext", "close")
             | ("BrowserPage", "goto" | "close")
             | ("BrowserFrame", "close")
+            | ("BrowserIntercept", "remove")
             | ("BrowserLocator", "wait" | "wait_gone" | "click" | "hover" | "fill" | "press") => {
                 Type::Result {
                     ok: Box::new(unit_type()),
@@ -2015,15 +2024,17 @@ pub(crate) fn lower_method_call(
             },
             ("BrowserPage", "get_by_role" | "get_by_text" | "get_by_label" | "get_by_placeholder"
                 | "get_by_test_id" | "get_by_css") => Type::Named("BrowserLocator".to_string()),
-            ("BrowserEvent", "kind")
+            ("BrowserEvent", "kind" | "request_id" | "request_method" | "url_hash")
             | ("BrowserCapabilities", "profile")
             | ("BrowserTrace", "summary")
             | ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => Type::String,
+            ("BrowserEvent", "status_code") => Type::Int,
             ("BrowserProtocol", "send") => Type::Result {
                 ok: Box::new(Type::String),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             },
-            ("BrowserCapabilities", "bidi" | "cdp")
+            ("BrowserEvent", "is_blocked")
+            | ("BrowserCapabilities", "bidi" | "cdp")
             | ("BrowserTrace", "redacted") => Type::Bool,
             ("BrowserTrace", "entry_count") => Type::Int,
             ("BrowserLocked", "verify") => Type::Result {
@@ -2085,6 +2096,7 @@ pub(crate) fn lower_method_call(
                     | "BrowserPage"
                     | "BrowserFrame"
                     | "BrowserLocator"
+                    | "BrowserIntercept"
                     | "BrowserEvent"
                     | "BrowserTrace"
                     | "BrowserCapabilities"

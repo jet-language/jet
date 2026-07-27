@@ -252,6 +252,7 @@ pub(crate) fn is_http_type(recv_type: Option<&str>) -> bool {
                 | "BrowserPage"
                 | "BrowserFrame"
                 | "BrowserLocator"
+                | "BrowserIntercept"
                 | "BrowserEvent"
                 | "BrowserTrace"
                 | "BrowserCapabilities"
@@ -283,7 +284,18 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
         Some("WsMessage") => matches!(method, "is_text" | "is_binary" | "is_close" | "text" | "bytes"),
         Some("Browser") => matches!(
             method,
-            "capabilities" | "context" | "subscribe" | "next_event" | "protocol" | "trace" | "close"
+            "capabilities"
+                | "context"
+                | "subscribe"
+                | "next_event"
+                | "add_intercept"
+                | "add_intercept_url"
+                | "continue_request"
+                | "fail_request"
+                | "fulfill_request"
+                | "protocol"
+                | "trace"
+                | "close"
         ),
         Some("BrowserContext") => matches!(method, "page" | "tab" | "close"),
         Some("BrowserPage") => matches!(
@@ -303,7 +315,16 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
         Some("BrowserLocator") => {
             matches!(method, "wait" | "wait_gone" | "click" | "hover" | "fill" | "press")
         },
-        Some("BrowserEvent") => method == "kind",
+        Some("BrowserIntercept") => method == "remove",
+        Some("BrowserEvent") => matches!(
+            method,
+            "kind"
+                | "request_id"
+                | "request_method"
+                | "url_hash"
+                | "is_blocked"
+                | "status_code"
+        ),
         Some("BrowserProtocol") => method == "send",
         Some("BrowserCapabilities") => matches!(method, "bidi" | "cdp" | "profile"),
         Some("BrowserTrace") => matches!(method, "entry_count" | "redacted" | "summary"),

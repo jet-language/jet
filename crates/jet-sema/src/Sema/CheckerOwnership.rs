@@ -3037,6 +3037,7 @@ impl<'a> Checker<'a> {
                         | "BrowserPage"
                         | "BrowserFrame"
                         | "BrowserLocator"
+                        | "BrowserIntercept"
                         | "BrowserProtocol"
                 ) =>
             {

@@ -259,6 +259,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "HTTPHeaders" | "HTTPBody" | "HTTPBodyChunks" | "HTTPError" | "HTTPOperation" | "HTTPProxy" | "HTTPRedirectPolicy" | "HTTPRetryPolicy" | "HTTPCookieJar" | "HTTPMux" | "HTTPHandler" | "HTTPServerTls" | "HTTPServer" | "HTTPShutdownReport" | "HTTPCorsPolicy" | "HTTPCompressEncoding"
         | "WsConn" | "WsError" | "WsMessage"
         | "Browser" | "BrowserContext" | "BrowserPage" | "BrowserFrame" | "BrowserLocator"
+        | "BrowserIntercept"
         | "BrowserEvent" | "BrowserTrace" | "BrowserError" | "BrowserCapabilities"
         | "BrowserProfile" | "BrowserTimeout" | "BrowserProtocol" | "BrowserLocked"
         // D-TYPEDTEXT1=D: typed text — a checked query/markup template built by

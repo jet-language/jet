@@ -3075,6 +3075,39 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             recv,
                             a(0)
                         ),
+                        ("Browser", "add_intercept") => format!(
+                            "{}jet_browser_add_intercept(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
+                        ("Browser", "add_intercept_url") => format!(
+                            "{}jet_browser_add_intercept_url(&({}), &({}), &({}))",
+                            root,
+                            recv,
+                            a(0),
+                            a(1)
+                        ),
+                        ("Browser", "continue_request") => format!(
+                            "{}jet_browser_continue_request(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
+                        ("Browser", "fail_request") => format!(
+                            "{}jet_browser_fail_request(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
+                        ("Browser", "fulfill_request") => format!(
+                            "{}jet_browser_fulfill_request(&({}), &({}), {}, &({}))",
+                            root,
+                            recv,
+                            a(0),
+                            a(1),
+                            a(2)
+                        ),
                         ("Browser", "protocol") => format!(
                             "{}jet_browser_protocol(&({}), &({}))",
                             root,
@@ -3181,8 +3214,26 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             recv,
                             a(0)
                         ),
+                        ("BrowserIntercept", "remove") => {
+                            format!("{}jet_browser_intercept_remove(&({}))", root, recv)
+                        }
                         ("BrowserEvent", "kind") => {
                             format!("{}jet_browser_event_kind(&({}))", root, recv)
+                        }
+                        ("BrowserEvent", "request_id") => {
+                            format!("{}jet_browser_event_request_id(&({}))", root, recv)
+                        }
+                        ("BrowserEvent", "request_method") => {
+                            format!("{}jet_browser_event_request_method(&({}))", root, recv)
+                        }
+                        ("BrowserEvent", "url_hash") => {
+                            format!("{}jet_browser_event_url_hash(&({}))", root, recv)
+                        }
+                        ("BrowserEvent", "is_blocked") => {
+                            format!("{}jet_browser_event_is_blocked(&({}))", root, recv)
+                        }
+                        ("BrowserEvent", "status_code") => {
+                            format!("{}jet_browser_event_status_code(&({}))", root, recv)
                         }
                         ("BrowserProtocol", "send") => format!(
                             "{}jet_browser_protocol_send(&({}), &({}), &({}))",
