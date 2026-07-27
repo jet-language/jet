@@ -997,11 +997,9 @@ fn datatree_payload(variant: &str) -> &'static [Type] {
     static ARRAY: LazyLock<[Type; 1]> =
         LazyLock::new(|| [Type::List(Box::new(Type::Named("DataTree".into())))]);
     static OBJECT: LazyLock<[Type; 1]> = LazyLock::new(|| {
-        [Type::Map {
-            key: Box::new(Type::String),
-            key_span: None,
-            value: Box::new(Type::Named("DataTree".into())),
-        }]
+        // Ordered entry list (pair records), matching AOT `Vec<(String, DataTree)>`.
+        // `DataEntriesToMap` turns this into the user-facing Map for patterns.
+        [Type::List(Box::new(Type::Int))]
     });
     match variant {
         "Null" => &[],

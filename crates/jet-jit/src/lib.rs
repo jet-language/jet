@@ -27,6 +27,8 @@ mod Fmt;
 mod Game;
 mod Io;
 mod Layout;
+mod Math;
+mod Ffi;
 mod Memory;
 mod Net;
 mod Numeric;

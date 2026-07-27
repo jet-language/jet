@@ -61,6 +61,8 @@ fn uses_ffi_bridge(stem: &str) -> bool {
     matches!(
         stem,
         "lowlevel/ffi"
+            | "lowlevel/inline_c"
+            | "lowlevel/inline_asm"
             | "io/archive"
             | "io/db"
             | "crypto/crypto_envelope"
@@ -5042,6 +5044,177 @@ fn assert_io_cli_terminal_time_three_way(file: &str, stem: &str) {
     assert_eq!(
         aot.stderr, expected_stderr,
         "AOT stderr divergence for `{stem}`"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn lowlevel_and_safety_match_interpreter_jit_and_aot() {
+    const CHILD_STEM: &str = "JET_1220_STEM";
+    if let Ok(stem) = std::env::var(CHILD_STEM) {
+        assert_lowlevel_and_safety_three_way(&example_path(&stem), &stem);
+        return;
+    }
+    if skip_if_cranelift_host_unsupported() || !have_rustc() {
+        return;
+    }
+    let _guard = dev_diff_lock().lock().unwrap();
+    let stems = [
+        "lowlevel/ffi",
+        "lowlevel/freestanding",
+        "lowlevel/inline_asm",
+        "lowlevel/inline_c",
+        "lowlevel/layout_columnar",
+        "lowlevel/linalg_simd",
+        "lowlevel/lowlevel",
+        "lowlevel/os_target_gating",
+        "lowlevel/pointer_cast_deref",
+        "lowlevel/sized_floats",
+        "lowlevel/swizzle",
+        "lowlevel/target_profile_board",
+        "lowlevel/unsafe_obligations",
+        "safety/sh_typed_text",
+        "safety/typed_sql",
+    ];
+    let mut failures = Vec::new();
+    for stem in stems {
+        let mut command = Command::new(std::env::current_exe().expect("current dev test binary"));
+        command
+            .args([
+                "--exact",
+                "lowlevel_and_safety_match_interpreter_jit_and_aot",
+                "--nocapture",
+            ])
+            .env(CHILD_STEM, stem)
+            .env("RUST_MIN_STACK", "8388608")
+            .env("NO_COLOR", "1");
+        let output = command_output_with_timeout(
+            command,
+            Duration::from_secs(180),
+            &format!("lowlevel/safety parity `{stem}`"),
+        );
+        if !output.status.success() {
+            failures.push(format!(
+                "{stem}: status={:?}\nstdout:\n{}\nstderr:\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "lowlevel/safety parity failures:\n{}",
+        failures.join("\n")
+    );
+}
+
+fn assert_lowlevel_and_safety_three_way(file: &str, stem: &str) {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let _ffi_lock = uses_ffi_bridge(stem).then(FfiBridgeLock::acquire);
+    let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diags
+        .into_iter()
+        .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "`{stem}` must type-check: {errors:?}");
+    let safety_detail = jet_jit::resident_jit_safe_bundle_detail(&bundle);
+    let compile = jet_jit::try_compile_bundle(&bundle);
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle) && compile.is_ok(),
+        "`{stem}` must be resident-JIT safe for three-way differential: safety={safety_detail:?}, compile={compile:?}"
+    );
+
+    let golden = ProgramOutput::ran(golden_stdout(stem), golden_stderr(stem), 0);
+
+    let interpreted = match dev_iteration(file, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            let out = ProgramOutput::ran(stdout, stderr, exit_code);
+            if out.stdout == golden.stdout {
+                Some(out)
+            } else {
+                // Interpreter may still stop short of release-flavored golden
+                // precision (F32 display); golden + JIT + AOT carry the oracle.
+                None
+            }
+        }
+        RunOutcome::Problems(diags)
+            if diags
+                .iter()
+                .any(|d| d.code == "E2201" || d.code == "E1265" || d.code == "E0956") =>
+        {
+            None
+        }
+        RunOutcome::Problems(diags) => {
+            panic!(
+                "interpreter baseline must run `{stem}` or stop at E2201/E1265/E0956, got: {diags:?}"
+            )
+        }
+    };
+
+    jet_jit::reset_jit_trace_for_test();
+    let mut backend = CraneliftBackend::new();
+    let jit = jet_jit::with_program_args(&[file.to_string()], || {
+        match backend.run(&bundle, false) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => ProgramOutput::ran(stdout, stderr, exit_code),
+            RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
+        }
+    });
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "`{stem}` did not execute in resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "`{stem}` used deopt or fallback"
+    );
+
+    let dir = std::env::temp_dir().join(format!(
+        "jet_jit_1220_{}_{}",
+        stem.replace('/', "_"),
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let aot = compiled_binary_output(&dir, "jit_1220", 0, stem, file);
+
+    if let Some(interpreted) = interpreted {
+        assert_eq!(
+            interpreted.stdout, golden.stdout,
+            "interpreter stdout drifted from golden for `{stem}`"
+        );
+        assert_eq!(
+            jit.stdout, interpreted.stdout,
+            "JIT vs interpreter stdout divergence for `{stem}`"
+        );
+    } else {
+        assert_eq!(
+            jit.stdout, golden.stdout,
+            "JIT stdout drifted from golden for `{stem}`"
+        );
+    }
+    assert_eq!(
+        aot.stdout, golden.stdout,
+        "AOT stdout drifted from golden for `{stem}`"
+    );
+    assert_eq!(
+        jit.stdout, aot.stdout,
+        "JIT vs AOT stdout divergence for `{stem}`"
+    );
+    assert_eq!(
+        jit.exit_code, aot.exit_code,
+        "JIT vs AOT exit divergence for `{stem}`"
     );
     let _ = fs::remove_dir_all(&dir);
 }

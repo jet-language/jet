@@ -686,6 +686,15 @@ extern "C" fn jet_jit_print_list(list: i64, kind: i64) {
 }
 
 fn list_show_text(rt: &crate::JitRuntime, list: i64, kind: i64) -> String {
+    if kind == 4 {
+        let len = rt.heap.list_len(list).unwrap_or(0);
+        let mut parts = Vec::with_capacity(len as usize);
+        for i in 0..len {
+            let v = rt.heap.list_get_float(list, i).unwrap_or(0.0);
+            parts.push(jet_rt::display_f64(v));
+        }
+        return format!("[{}]", parts.join(", "));
+    }
     let xs = rt
         .heap
         .clone_int_list(list)

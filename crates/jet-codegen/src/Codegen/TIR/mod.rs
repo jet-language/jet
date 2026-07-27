@@ -756,6 +756,10 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     for item in &module.items {
         match item {
             Item::Func(f) => {
+                // D-FFI-INLINE1: body lives in the hidden bridge; calls are ExternCall.
+                if f.inline_foreign.is_some() {
+                    continue;
+                }
                 if !f.type_params.is_empty() || !tir_covers(f, &cx) {
                     continue;
                 }

@@ -73,8 +73,13 @@ pub(crate) fn jit_list_int_type(ty: &Type) -> bool {
 }
 
 pub(crate) fn jit_list_float_type(ty: &Type) -> bool {
-    matches!(ty, Type::List(inner) if matches!(inner.as_ref(), Type::Float))
-        || matches!(ty, Type::FixedList { elem, .. } if matches!(elem.as_ref(), Type::Float))
+    matches!(
+        ty,
+        Type::List(inner) if matches!(inner.as_ref(), Type::Float | Type::Float32)
+    ) || matches!(
+        ty,
+        Type::FixedList { elem, .. } if matches!(elem.as_ref(), Type::Float | Type::Float32)
+    )
 }
 
 pub(crate) fn jit_list_string_type(ty: &Type) -> bool {
@@ -119,7 +124,12 @@ pub(crate) fn jit_list_iter_elem_type(ty: &Type) -> Option<Type> {
         Type::List(inner) | Type::FixedList { elem: inner, .. }
             if matches!(
                 inner.as_ref(),
-                Type::Int | Type::IntN { .. } | Type::Float | Type::String | Type::Char
+                Type::Int
+                    | Type::IntN { .. }
+                    | Type::Float
+                    | Type::Float32
+                    | Type::String
+                    | Type::Char
             ) =>
         {
             Some(inner.as_ref().clone())
@@ -1182,6 +1192,17 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             resident_safe_expr(lhs, callees) && resident_safe_expr(rhs, callees)
         }
         TExprKind::LayoutLit { inner } => resident_safe_expr(inner, callees),
+        TExprKind::MathBuiltin { args, .. } => {
+            args.iter().all(|a| resident_safe_expr(a, callees))
+        }
+        TExprKind::MathLaneIndex { base, index, .. } => {
+            resident_safe_expr(base, callees) && resident_safe_expr(index, callees)
+        }
+        TExprKind::MathSwizzleRead { recv, .. } => resident_safe_expr(recv, callees),
+        TExprKind::PtrFromAddr { addr, .. } => resident_safe_expr(addr, callees),
+        TExprKind::ExternCall { args, .. } => {
+            args.iter().all(|a| resident_safe_expr(&a.value, callees))
+        }
 
         _ => false,
     }
@@ -2163,6 +2184,9 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     .as_ref()
                     .is_none_or(|(_, e)| resident_safe_expr(e, callees))
                 && resident_safe_stmt(stmt, callees)
+        }
+        TStmt::MathSwizzleAssign { base, value, .. } => {
+            resident_safe_expr(base, callees) && resident_safe_expr(value, callees)
         }
         _ => false,
     }
@@ -3186,6 +3210,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::ReflectValueFields
         | THandleOp::ReflectFieldName
         | THandleOp::ReflectFieldValue => args.is_empty(),
+        THandleOp::MathMethod { .. } => true,
         _ => false,
     }
 }

@@ -1560,6 +1560,8 @@ pub(crate) struct HostFns {
     pub(crate) io: crate::Io::IoHostFns,
     pub(crate) watcher: crate::Watcher::WatcherHostFns,
     pub(crate) net: crate::Net::NetHostFns,
+    pub(crate) math: crate::Math::MathHostFns,
+    pub(crate) ffi: crate::Ffi::FfiHostFns,
 }
 
 pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
@@ -1757,6 +1759,8 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Io::register_io_symbols(&mut builder);
     crate::Watcher::register_watcher_symbols(&mut builder);
     crate::Net::register_net_symbols(&mut builder);
+    crate::Math::register_math_host_symbols(&mut builder);
+    crate::Ffi::register_ffi_host_symbols(&mut builder);
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
     let memory = Memory::declare_memory_host_fns(&mut module)?;
@@ -1788,6 +1792,8 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let io = crate::Io::declare_io_host_fns(&mut module)?;
     let watcher = crate::Watcher::declare_watcher_host_fns(&mut module)?;
     let net = crate::Net::declare_net_host_fns(&mut module)?;
+    let math = crate::Math::declare_math_host_fns(&mut module)?;
+    let ffi = crate::Ffi::declare_ffi_host_fns(&mut module)?;
     let host = declare_host_fns(
         &mut module,
         coll,
@@ -1820,6 +1826,8 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         io,
         watcher,
         net,
+        math,
+        ffi,
     )?;
     Ok((module, host))
 }
@@ -1999,6 +2007,8 @@ fn declare_host_fns(
     io: crate::Io::IoHostFns,
     watcher: crate::Watcher::WatcherHostFns,
     net: crate::Net::NetHostFns,
+    math: crate::Math::MathHostFns,
+    ffi: crate::Ffi::FfiHostFns,
 ) -> Result<HostFns, String> {
     let cc = module.target_config().default_call_conv;
     let mut sig_bin_i64 = Signature::new(cc);
@@ -2356,5 +2366,7 @@ fn declare_host_fns(
         io,
         watcher,
         net,
+        math,
+        ffi,
     })
 }

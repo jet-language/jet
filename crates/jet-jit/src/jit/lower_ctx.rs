@@ -724,6 +724,92 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.inst_results(call)[0])
     }
 
+    /// `DataTree.Object([k: v, …])` — source/Codable field order, not Map sort.
+    fn lower_datatree_object_maplit(
+        &mut self,
+        entries: &[(TExpr, TExpr)],
+    ) -> Result<Value, String> {
+        self.lower_datatree_object_maplit_refs(
+            &entries.iter().map(|(k, v)| (k, v)).collect::<Vec<_>>(),
+        )
+    }
+
+    fn lower_datatree_object_maplit_refs(
+        &mut self,
+        entries: &[(&TExpr, &TExpr)],
+    ) -> Result<Value, String> {
+        let new_list = self
+            .module
+            .declare_func_in_func(self.host.coll.list_new, self.b.func);
+        let call = self.b.ins().call(new_list, &[]);
+        let list = self.b.inst_results(call)[0];
+        let push = self
+            .module
+            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+        let struct_new = self
+            .module
+            .declare_func_in_func(self.host.struct_new, self.b.func);
+        let set_i64 = self
+            .module
+            .declare_func_in_func(self.host.struct_set_i64, self.b.func);
+        for (key, value) in entries {
+            let k = self.lower_expr(key)?;
+            let v = self.lower_expr(value)?;
+            let two = self.b.ins().iconst(types::I64, 2);
+            let rec_call = self.b.ins().call(struct_new, &[two]);
+            let rec = self.b.inst_results(rec_call)[0];
+            let zero = self.b.ins().iconst(types::I64, 0);
+            let one = self.b.ins().iconst(types::I64, 1);
+            self.b.ins().call(set_i64, &[rec, zero, k]);
+            self.b.ins().call(set_i64, &[rec, one, v]);
+            self.b.ins().call(push, &[list, rec]);
+        }
+        self.pack_datatree_enum(6, Some((list, &Type::List(Box::new(Type::Int)))))
+    }
+
+    /// Object payload: ordered MapLit (including #779 IfExpr desugar), else Map.
+    fn lower_datatree_object_payload(
+        &mut self,
+        expr: &TExpr,
+        disc: i64,
+    ) -> Result<Value, String> {
+        match &expr.kind {
+            TExprKind::MapLit(entries) => self.lower_datatree_object_maplit(entries),
+            TExprKind::Clone(inner) => self.lower_datatree_object_payload(inner, disc),
+            TExprKind::IfExpr {
+                cond,
+                then_body,
+                then_value,
+                ..
+            } => {
+                if let Some(entries) =
+                    Self::map_lit_desugar_entries(cond.as_ref(), then_body, then_value)
+                {
+                    return self.lower_datatree_object_maplit_refs(&entries);
+                }
+                // Non-desugar if: evaluate as Map, then snapshot (key-sorted).
+                let map = self.lower_expr(expr)?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.encoding.object_from_map, self.b.func);
+                let call = self.b.ins().call(host, &[map]);
+                let list = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                self.pack_datatree_enum(disc, Some((list, &Type::List(Box::new(Type::Int)))))
+            }
+            _ => {
+                let map = self.lower_expr(expr)?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.encoding.object_from_map, self.b.func);
+                let call = self.b.ins().call(host, &[map]);
+                let list = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                self.pack_datatree_enum(disc, Some((list, &Type::List(Box::new(Type::Int)))))
+            }
+        }
+    }
+
     /// Primitive / container / user `Encode` → DataTree handle (D-SERDE2).
     fn lower_serde_encode_value(&mut self, val: Value, ty: &Type) -> Result<Value, String> {
         let ty = self.erase_distinct_ty(ty);
@@ -3895,8 +3981,39 @@ impl LowerCtx<'_, '_> {
                     }
                 }
             }
-            TStmt::MathSwizzleAssign { .. } => {
-                return Err("jit math swizzle assign unsupported".to_string());
+            TStmt::MathSwizzleAssign {
+                base,
+                type_name,
+                lanes,
+                value,
+                ..
+            } => {
+                let base_v = self.lower_expr(base)?;
+                let val_v = self.lower_expr(value)?;
+                let mut arg_vals = vec![base_v];
+                if lanes.len() == 1 {
+                    let bits = match self.meta.clif_ty(&value.ty) {
+                        Some(t) if t == types::F64 => self.b.ins().bitcast(
+                            types::I64,
+                            Self::scalar_bitcast_memflags(),
+                            val_v,
+                        ),
+                        _ => val_v,
+                    };
+                    arg_vals.push(bits);
+                } else {
+                    arg_vals.push(val_v);
+                }
+                for &lane in lanes {
+                    arg_vals.push(self.b.ins().iconst(types::I64, i64::from(lane)));
+                }
+                self.lower_math_host_call(type_name, "swizzle_assign", &arg_vals, &Type::Int)?;
+                if let TExprKind::Local(local) = &base.kind {
+                    let key = Self::local_key(local);
+                    if let Some(var) = self.vars.get(&key).copied() {
+                        self.b.def_var(var, base_v);
+                    }
+                }
             }
             TStmt::RangeSwitch {
                 subject,
@@ -5766,13 +5883,66 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().call(set, &[rec, one, params]);
                 Ok(rec)
             }
-            THostCall::TypedTextInterp { kind, .. } => {
-                let label = match kind {
-                    TTypedTextInterpKind::Sql => "Sql",
-                    TTypedTextInterpKind::Html => "Html",
-                    TTypedTextInterpKind::Sh => "Sh",
+            THostCall::TypedTextInterp {
+                kind: TTypedTextInterpKind::Sh,
+                literals,
+                holes,
+            } => {
+                let list_new = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_new, self.b.func);
+                let call = self.b.ins().call(list_new, &[]);
+                let argv = self.b.inst_results(call)[0];
+                let push = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_push, self.b.func);
+                for (i, lit) in literals.iter().enumerate() {
+                    for word in lit.split_whitespace() {
+                        let id = self.runtime.heap.alloc_string(word.to_string());
+                        let v = self.b.ins().iconst(types::I64, id);
+                        self.b.ins().call(push, &[argv, v]);
+                    }
+                    if let Some(hole) = holes.get(i) {
+                        let shown = self.lower_jet_show(hole)?;
+                        self.b.ins().call(push, &[argv, shown]);
+                    }
+                }
+                Ok(argv)
+            }
+            THostCall::TypedTextInterp {
+                kind: TTypedTextInterpKind::Html,
+                literals,
+                holes,
+            } => {
+                let mut acc = {
+                    let id = self.runtime.heap.alloc_string(String::new());
+                    self.b.ins().iconst(types::I64, id)
                 };
-                Err(format!("jit TypedTextInterp unsupported: {label}"))
+                let concat = self
+                    .module
+                    .declare_func_in_func(self.host.math.str_concat, self.b.func);
+                let escape = self
+                    .module
+                    .declare_func_in_func(self.host.math.html_escape, self.b.func);
+                for (i, lit) in literals.iter().enumerate() {
+                    if !lit.is_empty() {
+                        let id = self.runtime.heap.alloc_string(lit.clone());
+                        let lit_v = self.b.ins().iconst(types::I64, id);
+                        let call = self.b.ins().call(concat, &[acc, lit_v]);
+                        acc = self.b.inst_results(call)[0];
+                    }
+                    if let Some(hole) = holes.get(i) {
+                        let raw = match &hole.ty {
+                            Type::String => self.lower_expr(hole)?,
+                            _ => self.lower_jet_show(hole)?,
+                        };
+                        let call = self.b.ins().call(escape, &[raw]);
+                        let esc = self.b.inst_results(call)[0];
+                        let call = self.b.ins().call(concat, &[acc, esc]);
+                        acc = self.b.inst_results(call)[0];
+                    }
+                }
+                Ok(acc)
             }
             THostCall::Helper { helper, .. } => {
                 Err(format!("jit helper unsupported: {helper}"))
@@ -7523,6 +7693,41 @@ impl LowerCtx<'_, '_> {
                 if module == "core.data" {
                     return self.lower_data_call(method, args, &expr.ty);
                 }
+                if module == "core.mem" && method == "address_of" && args.len() == 1 {
+                    let place = &args[0];
+                    if let Some(local) = Self::raw_place_local(place) {
+                        let key = Self::local_key(local);
+                        let var = self
+                            .vars
+                            .get(&key)
+                            .copied()
+                            .ok_or_else(|| {
+                                format!("jit address_of unknown local `{}`", local.name)
+                            })?;
+                        let clif = self.meta.clif_ty(&place.ty).ok_or_else(|| {
+                            format!("jit address_of payload unsupported: {:?}", place.ty)
+                        })?;
+                        let slot = if let Some(slot) = self.raw_slots.get(&key).copied() {
+                            slot
+                        } else {
+                            let slot = self.b.create_sized_stack_slot(StackSlotData::new(
+                                StackSlotKind::ExplicitSlot,
+                                u32::from(clif.bytes()),
+                                0,
+                            ));
+                            let value = self.b.use_var(var);
+                            self.b.ins().stack_store(value, slot, 0);
+                            self.raw_slots.insert(key, slot);
+                            slot
+                        };
+                        return Ok(self.b.ins().stack_addr(
+                            self.module.target_config().pointer_type(),
+                            slot,
+                            0,
+                        ));
+                    }
+                    return Err("jit address_of needs a local place".to_string());
+                }
                 if module == "core.mem" && method == "volatile_read" && args.len() == 1 {
                     if self.unsafe_depth == 0 {
                         return Err("jit volatile read outside #Unsafe".to_string());
@@ -9102,6 +9307,50 @@ impl LowerCtx<'_, '_> {
                             self.host.core.math_lcm,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
+                        "sqrt" if args.len() == 1 => {
+                            let f32_path = matches!(args[0].ty, Type::Float32);
+                            (
+                                if f32_path {
+                                    self.host.core.math_sqrt_f32
+                                } else {
+                                    self.host.core.math_sqrt
+                                },
+                                vec![self.lower_expr(&args[0])?],
+                            )
+                        }
+                        "pow" if args.len() == 2 => {
+                            let f32_path = matches!(args[0].ty, Type::Float32);
+                            (
+                                if f32_path {
+                                    self.host.core.math_pow_f32
+                                } else {
+                                    self.host.core.math_pow
+                                },
+                                vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                            )
+                        }
+                        "floor" if args.len() == 1 => {
+                            let f32_path = matches!(args[0].ty, Type::Float32);
+                            (
+                                if f32_path {
+                                    self.host.core.math_floor_f32
+                                } else {
+                                    self.host.core.math_floor
+                                },
+                                vec![self.lower_expr(&args[0])?],
+                            )
+                        }
+                        "ceil" if args.len() == 1 => {
+                            let f32_path = matches!(args[0].ty, Type::Float32);
+                            (
+                                if f32_path {
+                                    self.host.core.math_ceil_f32
+                                } else {
+                                    self.host.core.math_ceil
+                                },
+                                vec![self.lower_expr(&args[0])?],
+                            )
+                        }
                         "decimal" if args.len() == 1 => (
                             self.host.num.decimal_from_str,
                             vec![self.lower_expr(&args[0])?],
@@ -10643,10 +10892,10 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::DataEntriesToMap(local) => {
                 let payload = self.load_local(local)?;
-                let validate = self
+                let convert = self
                     .module
-                    .declare_func_in_func(self.host.coll.map_validate, self.b.func);
-                let call = self.b.ins().call(validate, &[payload]);
+                    .declare_func_in_func(self.host.encoding.object_entries_to_map, self.b.func);
+                let call = self.b.ins().call(convert, &[payload]);
                 let map = self.b.inst_results(call)[0];
                 self.emit_trap_check()?;
                 Ok(map)
@@ -10687,7 +10936,11 @@ impl LowerCtx<'_, '_> {
                 Err("jit range-checked ctor unsupported".to_string())
             }
             TExprKind::DistinctCtor { arg, .. } => self.lower_expr(arg),
-            TExprKind::MathBuiltin { .. } => Err("jit math builtin unsupported".to_string()),
+            TExprKind::MathBuiltin {
+                type_name,
+                func,
+                args,
+            } => self.lower_math_dispatch(type_name, func, None, args, &expr.ty),
             // D-BIGINT1 / D-DECIMAL1: precise numeric ctor/binop.
             TExprKind::PreciseBuiltin {
                 type_name,
@@ -10907,7 +11160,7 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[f]);
                 Ok(self.b.inst_results(call)[0])
             }
-            TExprKind::PtrFromAddr { .. } => Err("jit pointer from addr unsupported".to_string()),
+            TExprKind::PtrFromAddr { addr, .. } => self.lower_expr(addr),
             TExprKind::RawOf(inner) => {
                 if self.unsafe_depth == 0 {
                     return Err("jit raw pointer creation outside #Unsafe".to_string());
@@ -10993,6 +11246,12 @@ impl LowerCtx<'_, '_> {
                     None => self.pack_datatree_enum(disc, None),
                     Some(boxed) => {
                         let (expr, _) = boxed.as_ref();
+                        // AOT emit special-cases Object(MapLit) into an ordered
+                        // `vec![(k,v),…]`. Mirror that — do not route through
+                        // Jet's key-sorted Map heap.
+                        if variant == "Object" {
+                            return self.lower_datatree_object_payload(expr, disc);
+                        }
                         let payload_ty = expr.ty.clone();
                         let payload = self.lower_expr(expr)?;
                         self.pack_datatree_enum(disc, Some((payload, &payload_ty)))
@@ -11098,9 +11357,32 @@ impl LowerCtx<'_, '_> {
                 self.emit_trap_check()?;
                 Ok(self.b.block_params(merge)[0])
             }
-            TExprKind::MathLaneIndex { .. } => Err("jit math lane index unsupported".to_string()),
-            TExprKind::MathSwizzleRead { .. } => {
-                Err("jit math swizzle read unsupported".to_string())
+            TExprKind::MathLaneIndex {
+                lane_ty,
+                base,
+                index,
+                ..
+            } => {
+                let recv = self.lower_expr(base)?;
+                let idx = self.lower_expr(index)?;
+                let idx_bits = match self.meta.clif_ty(&index.ty) {
+                    Some(t) if t == types::I64 => idx,
+                    Some(t) if t.bits() < 64 => self.b.ins().sextend(types::I64, idx),
+                    _ => idx,
+                };
+                self.lower_math_host_call(lane_ty, "lane", &[recv, idx_bits], &expr.ty)
+            }
+            TExprKind::MathSwizzleRead {
+                type_name,
+                recv,
+                lanes,
+            } => {
+                let recv_v = self.lower_expr(recv)?;
+                let mut arg_vals = vec![recv_v];
+                for &lane in lanes {
+                    arg_vals.push(self.b.ins().iconst(types::I64, i64::from(lane)));
+                }
+                self.lower_math_host_call(type_name, "swizzle_read", &arg_vals, &expr.ty)
             }
             TExprKind::MaterializeView(inner) => self.lower_expr(inner),
             TExprKind::FnFieldCall { recv, field, args } => {
@@ -11317,7 +11599,54 @@ impl LowerCtx<'_, '_> {
                 }
                 TModuleCallForm::Qualified { .. } => Err("jit file-module call unsupported".to_string()),
             },
-            TExprKind::ExternCall { .. } => Err("jit extern call unsupported".to_string()),
+            TExprKind::ExternCall { wrapper, args } => {
+                let wid = self.runtime.heap.alloc_string(wrapper.clone());
+                let wrapper_v = self.b.ins().iconst(types::I64, wid);
+                let list_new = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_new, self.b.func);
+                let call = self.b.ins().call(list_new, &[]);
+                let list = self.b.inst_results(call)[0];
+                let push = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_push, self.b.func);
+                for arg in args {
+                    let mut v = self.lower_expr(&arg.value)?;
+                    if arg.clone {
+                        // Strings: clone for Read non-scalars, matching AOT.
+                        if matches!(arg.value.ty, Type::String) {
+                            let host_ref = self
+                                .module
+                                .declare_func_in_func(self.host.str_clone, self.b.func);
+                            let call = self.b.ins().call(host_ref, &[v]);
+                            v = self.b.inst_results(call)[0];
+                        }
+                    }
+                    let bits = match self.meta.clif_ty(&arg.value.ty) {
+                        Some(t) if t == types::F64 => self.b.ins().bitcast(
+                            types::I64,
+                            Self::scalar_bitcast_memflags(),
+                            v,
+                        ),
+                        _ => v,
+                    };
+                    self.b.ins().call(push, &[list, bits]);
+                }
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.ffi.call, self.b.func);
+                let call = self.b.ins().call(host, &[wrapper_v, list]);
+                let result = self.b.inst_results(call)[0];
+                self.emit_trap_check()?;
+                match &expr.ty {
+                    Type::Float | Type::Float32 => Ok(self.b.ins().bitcast(
+                        types::F64,
+                        Self::scalar_bitcast_memflags(),
+                        result,
+                    )),
+                    _ => Ok(result),
+                }
+            }
             TExprKind::Close(inner) => {
                 let handle = self.lower_expr(inner)?;
                 let host = match &inner.ty {
@@ -12621,11 +12950,18 @@ impl LowerCtx<'_, '_> {
         if matches!(self.erase_distinct_ty(&inner.ty), Type::Int | Type::Float) {
             return self.lower_expr(inner);
         }
-        if inner.ty == Type::String {
+        if inner.ty == Type::String
+            || matches!(&inner.ty, Type::Named(name) if name == "Html")
+        {
             let val = self.lower_expr(inner)?;
             let host_ref = self.module.declare_func_in_func(self.host.str_clone, self.b.func);
             let call = self.b.ins().call(host_ref, &[val]);
             return Ok(self.b.inst_results(call)[0]);
+        }
+        // Math lane/matrix values are opaque i64 handles in the side table — clone
+        // is a bitwise copy of the handle (values are immutable Copy).
+        if Self::is_math_value_ty(&inner.ty) {
+            return self.lower_expr(inner);
         }
         if jit_list_native_type(&inner.ty) {
             let val = self.lower_expr(inner)?;
@@ -14247,7 +14583,33 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.inst_results(call)[0])
             }
             THandleOp::HttpRouterRegister { .. } => Err("jit handle method unsupported".to_string()),
-            THandleOp::MathMethod { .. } => Err("jit handle method unsupported".to_string()),
+            THandleOp::MathMethod {
+                type_name,
+                method,
+                reduce_op,
+            } => {
+                let mut arg_vals = vec![recv_val];
+                if let Some(op) = reduce_op {
+                    let op_h = self.runtime.heap.alloc_string(op.clone());
+                    arg_vals.push(self.b.ins().iconst(types::I64, op_h));
+                    self.lower_math_host_call(type_name, "reduce", &arg_vals, ret_ty)
+                } else {
+                    for a in args {
+                        let v = self.lower_expr(a)?;
+                        // Float args for math methods are rare; math-value args are handles.
+                        let bits = match self.meta.clif_ty(&a.ty) {
+                            Some(t) if t == types::F64 => self.b.ins().bitcast(
+                                types::I64,
+                                Self::scalar_bitcast_memflags(),
+                                v,
+                            ),
+                            _ => v,
+                        };
+                        arg_vals.push(bits);
+                    }
+                    self.lower_math_host_call(type_name, method, &arg_vals, ret_ty)
+                }
+            }
             THandleOp::ReactiveGet => {
                 let is_derived = matches!(
                     &recv.ty,
@@ -15466,6 +15828,110 @@ impl LowerCtx<'_, '_> {
         Ok(result)
     }
 
+    fn is_math_value_ty(ty: &Type) -> bool {
+        matches!(
+            ty,
+            Type::Named(name)
+                if matches!(
+                    name.as_str(),
+                    "F32x4" | "F64x2" | "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
+                )
+        )
+    }
+
+    fn lower_math_dispatch(
+        &mut self,
+        type_name: &str,
+        func: &str,
+        recv: Option<Value>,
+        args: &[TExpr],
+        ret_ty: &Type,
+    ) -> Result<Value, String> {
+        let mut arg_vals = Vec::new();
+        if let Some(recv) = recv {
+            arg_vals.push(recv);
+        }
+        for a in args {
+            let v = self.lower_expr(a)?;
+            let bits = match self.meta.clif_ty(&a.ty) {
+                Some(t) if t == types::F64 => self.b.ins().bitcast(
+                    types::I64,
+                    Self::scalar_bitcast_memflags(),
+                    v,
+                ),
+                _ => v,
+            };
+            arg_vals.push(bits);
+        }
+        self.lower_math_host_call(type_name, func, &arg_vals, ret_ty)
+    }
+
+    fn lower_math_host_call(
+        &mut self,
+        type_name: &str,
+        func: &str,
+        arg_vals: &[Value],
+        ret_ty: &Type,
+    ) -> Result<Value, String> {
+        let ty_id = self.runtime.heap.alloc_string(type_name.to_string());
+        let fn_id = self.runtime.heap.alloc_string(func.to_string());
+        let ty_v = self.b.ins().iconst(types::I64, ty_id);
+        let fn_v = self.b.ins().iconst(types::I64, fn_id);
+        let list_new = self
+            .module
+            .declare_func_in_func(self.host.coll.list_new, self.b.func);
+        let call = self.b.ins().call(list_new, &[]);
+        let args = self.b.inst_results(call)[0];
+        let push = self
+            .module
+            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+        for &v in arg_vals {
+            self.b.ins().call(push, &[args, v]);
+        }
+        let host = self
+            .module
+            .declare_func_in_func(self.host.math.call, self.b.func);
+        let call = self.b.ins().call(host, &[ty_v, fn_v, args]);
+        let packed = self.b.inst_results(call)[0];
+        self.emit_trap_check()?;
+        self.unpack_math_result(packed, ret_ty)
+    }
+
+    fn unpack_math_result(&mut self, packed: Value, ret_ty: &Type) -> Result<Value, String> {
+        if matches!(ret_ty, Type::Float | Type::Float32) {
+            let is_f = self
+                .module
+                .declare_func_in_func(self.host.math.result_is_float, self.b.func);
+            let call = self.b.ins().call(is_f, &[packed]);
+            let flag = self.b.inst_results(call)[0];
+            let float_block = self.b.create_block();
+            let bad_block = self.b.create_block();
+            let merge = self.b.create_block();
+            self.b.append_block_param(merge, types::F64);
+            self.b.ins().brif(flag, float_block, &[], bad_block, &[]);
+            self.b.switch_to_block(bad_block);
+            self.b.seal_block(bad_block);
+            let zero = self.b.ins().f64const(0.0);
+            self.b.ins().jump(merge, &[zero]);
+            self.b.switch_to_block(float_block);
+            self.b.seal_block(float_block);
+            let get = self
+                .module
+                .declare_func_in_func(self.host.math.result_float, self.b.func);
+            let call = self.b.ins().call(get, &[packed]);
+            let f = self.b.inst_results(call)[0];
+            self.b.ins().jump(merge, &[f]);
+            self.b.switch_to_block(merge);
+            self.b.seal_block(merge);
+            return Ok(self.b.block_params(merge)[0]);
+        }
+        let get = self
+            .module
+            .declare_func_in_func(self.host.math.result_handle, self.b.func);
+        let call = self.b.ins().call(get, &[packed]);
+        Ok(self.b.inst_results(call)[0])
+    }
+
     fn lower_binary(
         &mut self,
         op: BinOp,
@@ -15478,6 +15944,37 @@ impl LowerCtx<'_, '_> {
         let r = self.lower_expr(rhs)?;
         let lhs_ty = self.expr_arith_type(lhs);
         let _rhs_ty = self.expr_arith_type(rhs);
+        if Self::is_math_value_ty(&lhs_ty)
+            || Self::is_math_value_ty(&rhs.ty)
+            || Self::is_math_value_ty(&lhs.ty)
+        {
+            let type_name = match &lhs.ty {
+                Type::Named(n) if Self::is_math_value_ty(&lhs.ty) => n.as_str(),
+                _ => match &rhs.ty {
+                    Type::Named(n) => n.as_str(),
+                    _ => return Err("jit math binary needs Named math type".to_string()),
+                },
+            };
+            let func = match op {
+                BinOp::Add => "add",
+                BinOp::Sub => "sub",
+                BinOp::Mul => "mul",
+                BinOp::Div => "div",
+                _ => return Err("jit math binary op unsupported".to_string()),
+            };
+            let ret_ty = if Self::is_math_value_ty(&lhs.ty) {
+                &lhs.ty
+            } else {
+                &rhs.ty
+            };
+            // MatN * VecN returns the vector type (rhs).
+            let ret_ty = if func == "mul" && Self::is_math_value_ty(&rhs.ty) {
+                &rhs.ty
+            } else {
+                ret_ty
+            };
+            return self.lower_math_host_call(type_name, func, &[l, r], ret_ty);
+        }
         if let Type::IntN { signed, bits } = lhs_ty {
             let right_signed = !matches!(&rhs.ty, Type::IntN { signed: false, .. });
             let comparison = match op {
@@ -15565,22 +16062,30 @@ impl LowerCtx<'_, '_> {
             (Type::Int, BinOp::BitXor) => self.b.ins().bxor(l, r),
             (Type::Int, BinOp::Shl) => self.b.ins().ishl(l, r),
             (Type::Int, BinOp::Shr) => self.b.ins().sshr(l, r),
-            (Type::Float, BinOp::Add) => self.b.ins().fadd(l, r),
-            (Type::Float, BinOp::Sub) => self.b.ins().fsub(l, r),
-            (Type::Float, BinOp::Mul) => self.b.ins().fmul(l, r),
-            (Type::Float, BinOp::Div) => self.b.ins().fdiv(l, r),
+            (Type::Float | Type::Float32, BinOp::Add) => self.b.ins().fadd(l, r),
+            (Type::Float | Type::Float32, BinOp::Sub) => self.b.ins().fsub(l, r),
+            (Type::Float | Type::Float32, BinOp::Mul) => self.b.ins().fmul(l, r),
+            (Type::Float | Type::Float32, BinOp::Div) => self.b.ins().fdiv(l, r),
             (Type::Int, BinOp::Eq) => self.bool_from_icmp(IntCC::Equal, l, r),
             (Type::Int, BinOp::Ne) => self.bool_from_icmp(IntCC::NotEqual, l, r),
             (Type::Int, BinOp::Lt) => self.bool_from_icmp(IntCC::SignedLessThan, l, r),
             (Type::Int, BinOp::Gt) => self.bool_from_icmp(IntCC::SignedGreaterThan, l, r),
             (Type::Int, BinOp::Le) => self.bool_from_icmp(IntCC::SignedLessThanOrEqual, l, r),
             (Type::Int, BinOp::Ge) => self.bool_from_icmp(IntCC::SignedGreaterThanOrEqual, l, r),
-            (Type::Float, BinOp::Eq) => self.bool_from_fcmp(FloatCC::Equal, l, r),
-            (Type::Float, BinOp::Ne) => self.bool_from_fcmp(FloatCC::NotEqual, l, r),
-            (Type::Float, BinOp::Lt) => self.bool_from_fcmp(FloatCC::LessThan, l, r),
-            (Type::Float, BinOp::Gt) => self.bool_from_fcmp(FloatCC::GreaterThan, l, r),
-            (Type::Float, BinOp::Le) => self.bool_from_fcmp(FloatCC::LessThanOrEqual, l, r),
-            (Type::Float, BinOp::Ge) => self.bool_from_fcmp(FloatCC::GreaterThanOrEqual, l, r),
+            (Type::Float | Type::Float32, BinOp::Eq) => self.bool_from_fcmp(FloatCC::Equal, l, r),
+            (Type::Float | Type::Float32, BinOp::Ne) => self.bool_from_fcmp(FloatCC::NotEqual, l, r),
+            (Type::Float | Type::Float32, BinOp::Lt) => {
+                self.bool_from_fcmp(FloatCC::LessThan, l, r)
+            }
+            (Type::Float | Type::Float32, BinOp::Gt) => {
+                self.bool_from_fcmp(FloatCC::GreaterThan, l, r)
+            }
+            (Type::Float | Type::Float32, BinOp::Le) => {
+                self.bool_from_fcmp(FloatCC::LessThanOrEqual, l, r)
+            }
+            (Type::Float | Type::Float32, BinOp::Ge) => {
+                self.bool_from_fcmp(FloatCC::GreaterThanOrEqual, l, r)
+            }
             (Type::Bool, BinOp::Eq) => self.bool_from_icmp(IntCC::Equal, l, r),
             (Type::Bool, BinOp::Ne) => self.bool_from_icmp(IntCC::NotEqual, l, r),
             (Type::Named(name), BinOp::Eq | BinOp::Ne) if name == "BigInt" => {
@@ -15729,6 +16234,7 @@ impl LowerCtx<'_, '_> {
                         Type::String => 1,
                         Type::IntN { signed: true, .. } => 2,
                         Type::IntN { signed: false, .. } => 3,
+                        Type::Float | Type::Float32 => 4,
                         _ => 0,
                     };
                     let flag = self
@@ -15808,7 +16314,7 @@ impl LowerCtx<'_, '_> {
                 let host_id = match &print_ty {
                     Type::Int | Type::IntN { .. } => self.host.print_i64,
                     Type::String => self.host.print_str,
-                    Type::Float => self.host.print_f64,
+                    Type::Float | Type::Float32 => self.host.print_f64,
                     Type::Bool => self.host.print_bool,
                     Type::Char => self.host.print_char,
                     Type::Named(n) if n == "DataTree" || n == "Json" => {
@@ -16523,29 +17029,19 @@ impl LowerCtx<'_, '_> {
         let mut old_ty = None;
         match &pattern.position {
             TPatternPosition::DataEntries { temp } => {
-                // Object → bind temp to map payload; body prefix converts via DataEntriesToMap.
-                let payload = self.unpack_enum_heap_payload(
-                    handle,
-                    &payload_ty.clone().unwrap_or(Type::Map {
-                        key: Box::new(Type::String),
-                        key_span: None,
-                        value: Box::new(Type::Named("DataTree".into())),
-                    }),
-                )?;
+                // Object → bind temp to ordered entry list; body prefix converts
+                // via DataEntriesToMap into the user-facing Map.
+                let entries_ty = payload_ty
+                    .clone()
+                    .unwrap_or(Type::List(Box::new(Type::Int)));
+                let payload = self.unpack_enum_heap_payload(handle, &entries_ty)?;
                 let place = temp.clone();
                 old_var = self.vars.remove(&place);
                 old_ty = self.var_tys.remove(&place);
                 let var = self.fresh_var(types::I64);
                 self.b.def_var(var, payload);
                 self.vars.insert(place.clone(), var);
-                self.var_tys.insert(
-                    place.clone(),
-                    payload_ty.clone().unwrap_or(Type::Map {
-                        key: Box::new(Type::String),
-                        key_span: None,
-                        value: Box::new(Type::Named("DataTree".into())),
-                    }),
-                );
+                self.var_tys.insert(place.clone(), entries_ty);
                 bound_place = Some(place);
             }
             _ => {

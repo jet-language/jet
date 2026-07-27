@@ -50,6 +50,13 @@ pub(crate) fn try_resident(bundle: &ProgramBundle) -> Result<RunOutcome, super::
     }
     crate::Encoding::register_migrations(bundle);
     super::types_meta::install_struct_redact(bundle);
+    if let Err(reason) = crate::Ffi::bind_bundle_ffi(bundle) {
+        let mut plan = plan_tiers(bundle, None);
+        if let Some(gap) = plan.gap.as_mut() {
+            gap.reason = reason;
+        }
+        return Err(plan);
+    }
     let program = match TIR::lower_jit_program(bundle) {
         Some(program) => program,
         None => return Err(plan_tiers(bundle, None)),
@@ -97,6 +104,13 @@ pub(crate) fn try_resident_hot_swap(
     }
     crate::Encoding::register_migrations(bundle);
     super::types_meta::install_struct_redact(bundle);
+    if let Err(reason) = crate::Ffi::bind_bundle_ffi(bundle) {
+        let mut plan = plan_tiers(bundle, None);
+        if let Some(gap) = plan.gap.as_mut() {
+            gap.reason = reason;
+        }
+        return Err(plan);
+    }
     let program = match TIR::lower_jit_program(bundle) {
         Some(program) => program,
         None => return Err(plan_tiers(bundle, None)),
@@ -128,6 +142,13 @@ pub(crate) fn try_resident_restart(
     }
     crate::Encoding::register_migrations(bundle);
     super::types_meta::install_struct_redact(bundle);
+    if let Err(reason) = crate::Ffi::bind_bundle_ffi(bundle) {
+        let mut plan = plan_tiers(bundle, None);
+        if let Some(gap) = plan.gap.as_mut() {
+            gap.reason = reason;
+        }
+        return Err(plan);
+    }
     let program = match TIR::lower_jit_program(bundle) {
         Some(program) => program,
         None => return Err(plan_tiers(bundle, None)),
@@ -183,6 +204,7 @@ pub fn try_compile_bundle(bundle: &ProgramBundle) -> Result<(), String> {
     if !cranelift_host_supported() {
         return Err("cranelift-jit host path unsupported on this architecture".to_string());
     }
+    crate::Ffi::bind_bundle_ffi(bundle)?;
     let program = TIR::lower_jit_program(bundle).ok_or_else(|| {
         format!(
             "lower_jit_program returned None ({})",
@@ -196,6 +218,7 @@ pub fn try_compile_bundle(bundle: &ProgramBundle) -> Result<(), String> {
         super::types_meta::install_struct_redact(bundle);
         // Teardown must not wipe CLI plan — reinstall after.
         crate::Cli::prepare_cli_from_bundle(bundle);
+        crate::Ffi::bind_bundle_ffi(bundle)?;
         RESIDENT_RUNTIME.with(|slot| *slot.borrow_mut() = Some(fresh_runtime()));
         ensure_resident_module(&program)
     })
@@ -659,11 +682,11 @@ pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
             // gtk4 is hosted by jet-jit Ui (headless under JET_UI_HEADLESS); the
             // CModule only names the native link key for AOT.
             Item::CModule(cm) if cm.lib == "gtk4" => false,
-            Item::CModule(_) | Item::ExternRust(_) => true,
+            // Prepared Rust/inline FFI loads via cdylib; bare CModule still AOT-only.
+            Item::CModule(_) => true,
             _ => false,
-        })
-    {
-        return "foreign ABI boundary requires the native build/link path; resident JIT has no foreign symbol resolver".to_string();
+        })    {
+        return "C module ABI requires the native build/link path; resident JIT resolves only the prepared Rust/inline FFI cdylib".to_string();
     }
     let Some(program) = TIR::lower_jit_program(bundle) else {
         return format!(
