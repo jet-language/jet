@@ -2305,9 +2305,24 @@ impl<'a> EvalCtx<'a> {
             TNumericOp::Origin(origin) => Ok(CtValue::Str(
                 origin.clone().unwrap_or_else(|| "untracked".to_string()),
             )),
-            TNumericOp::CastAs { .. } => {
-                // Width casts keep the same CtValue scalar representation.
-                Ok(v.clone())
+            TNumericOp::CastAs { dst_rust } => {
+                // Match AOT `(({recv}) as {dst_rust})` / JIT CastAs lowering:
+                // int→float and F32↔F64 must change the CtFloat width tag so
+                // later math/print keep the destination precision (D-FLOATW1,
+                // D-SHAPE-CONVERT1). Integer→integer stays i64 host storage.
+                match dst_rust.as_str() {
+                    "f64" => match v {
+                        CtValue::Float(f) => Ok(CtValue::Float(CtFloat::f64(f.as_f64()))),
+                        CtValue::Int(n) => Ok(CtValue::Float(CtFloat::f64(*n as f64))),
+                        _ => Err(unsupported("CastAs to f64", self.span())),
+                    },
+                    "f32" => match v {
+                        CtValue::Float(f) => Ok(CtValue::Float(CtFloat::f32(f.as_f32()))),
+                        CtValue::Int(n) => Ok(CtValue::Float(CtFloat::f32(*n as f32))),
+                        _ => Err(unsupported("CastAs to f32", self.span())),
+                    },
+                    _ => Ok(v.clone()),
+                }
             }
             TNumericOp::TryFrom {
                 dst_spelling,
