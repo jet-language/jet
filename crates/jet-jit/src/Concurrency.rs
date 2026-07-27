@@ -1,11 +1,12 @@
 //! M4: scheduler-backed task/channel host shims for the Cranelift JIT.
 
 use jet_codegen::scheduler::{
-    jet_scheduler_all, jet_scheduler_any, jet_scheduler_race, jet_scheduler_select_int_channels,
+    jet_scheduler_all, jet_scheduler_any, jet_scheduler_ctx_deadline_ms,
+    jet_scheduler_push_deadline, jet_scheduler_race, jet_scheduler_select_int_channels_timed,
     jet_scheduler_deliver_shield_exit, jet_scheduler_shield_enter,
     jet_scheduler_shield_leave_status, jet_scheduler_sleep_ms, jet_scheduler_spawn_blocking_with_control,
-    jet_scheduler_wait_without_unwind, JetSchedulerChannel, JetSchedulerJoin, JetSchedulerWait,
-    JetShieldExit, JetTaskControl,
+    jet_scheduler_wait_without_unwind, JetSchedulerChannel, JetSchedulerDeadlineGuard,
+    JetSchedulerJoin, JetSchedulerWait, JetShieldExit, JetTaskControl,
 };
 use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -154,12 +155,54 @@ extern "C" fn jet_jit_channel_new() -> i64 {
     })
 }
 
+/// `tasks.channel<T>(capacity)` — bounded buffer (D-TASKRUNTIME1).
+extern "C" fn jet_jit_channel_bounded(capacity: i64) -> i64 {
+    with_runtime_mut(|rt| {
+        let id = rt.channels.len() as i64;
+        rt.channels
+            .push(JetSchedulerChannel::bounded(capacity.max(0) as usize));
+        id
+    })
+}
+
 extern "C" fn jet_jit_generator_channel_new() -> i64 {
     with_runtime_mut(|rt| {
         let id = rt.channels.len() as i64;
         rt.channels.push(JetSchedulerChannel::bounded(0));
         id
     })
+}
+
+/// `core.time.now()` — wall millis (honours `LEX_TEST_EPOCH`).
+extern "C" fn jet_jit_time_now() -> i64 {
+    if let Ok(s) = std::env::var("LEX_TEST_EPOCH") {
+        if let Ok(n) = s.parse::<i64>() {
+            return n;
+        }
+    }
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
+/// `#Context(deadline: …)` enter.
+extern "C" fn jet_jit_deadline_push(deadline_ms: i64) {
+    DEADLINE_STACK.with(|stack| {
+        stack
+            .borrow_mut()
+            .push(jet_scheduler_push_deadline(deadline_ms));
+    });
+}
+
+extern "C" fn jet_jit_deadline_pop() {
+    DEADLINE_STACK.with(|stack| {
+        let _ = stack.borrow_mut().pop();
+    });
+}
+
+thread_local! {
+    static DEADLINE_STACK: RefCell<Vec<JetSchedulerDeadlineGuard>> = const { RefCell::new(Vec::new()) };
 }
 
 extern "C" fn jet_jit_channel_close(ch: i64) {
@@ -320,6 +363,7 @@ where
 {
     let rt_ptr = active_runtime_ptr().expect("jit spawn without active runtime");
     let rt_addr = rt_ptr as usize;
+    let inherited_deadline = jet_scheduler_ctx_deadline_ms();
     let control = JetTaskControl::new();
     let join = jet_scheduler_spawn_blocking_with_control(
         move || {
@@ -327,6 +371,7 @@ where
             // only touch mutex-backed channel state and indexed sender slots.
             let rt_ptr = rt_addr as *mut super::JitRuntime;
             set_active_runtime(Some(rt_ptr));
+            let _deadline = inherited_deadline.map(jet_scheduler_push_deadline);
             let _ = take_pending_shield_exit();
             let out = f();
             set_active_runtime(None);
@@ -381,6 +426,35 @@ extern "C" fn jet_jit_task_cancel(task: i64) {
     });
 }
 
+extern "C" fn jet_jit_task_detach(task: i64) {
+    // D-DETACH1: drop the join handle; task keeps running.
+    with_runtime_mut(|rt| {
+        let _ = rt.tasks[task as usize].take();
+    });
+}
+
+extern "C" fn jet_jit_task_pause(task: i64) {
+    with_runtime_mut(|rt| {
+        rt.task_controls[task as usize].pause();
+    });
+}
+
+extern "C" fn jet_jit_task_resume(task: i64) {
+    with_runtime_mut(|rt| {
+        rt.task_controls[task as usize].resume();
+    });
+}
+
+extern "C" fn jet_jit_task_trace(task: i64) -> i64 {
+    with_runtime_mut(|rt| {
+        let ctrl = &rt.task_controls[task as usize];
+        let paused = ctrl.paused.load(std::sync::atomic::Ordering::Relaxed);
+        let cancel = ctrl.cancelled.load(std::sync::atomic::Ordering::Relaxed);
+        let text = format!("paused={paused},cancel={cancel}");
+        rt.heap.alloc_string(text)
+    })
+}
+
 extern "C" fn jet_jit_task_join(task: i64) -> i64 {
     let join = with_runtime_mut(|rt| {
         Some(
@@ -423,11 +497,12 @@ extern "C" fn jet_jit_task_any(task_list: i64) -> i64 {
     wait_status(|| jet_scheduler_any(entries))
 }
 
-/// D-CONCSELECT1=A: `g.select().recv(…).wait()` — multiplex channel/timer arms.
+/// D-CONCSELECT1=A: `g.select().recv(…).after(ms[, v]).wait()`.
+/// `after_list` is flat `[ms0, val0, ms1, val1, …]` (even length). Empty → no timers.
 extern "C" fn jet_jit_select_wait(recv_list: i64, after_list: i64) -> i64 {
     let (channels, timers) = with_runtime_mut(|rt| {
         let ch_ids = task_ids_from_list(rt, recv_list);
-        let after_ids = task_ids_from_list(rt, after_list);
+        let after_flat = task_ids_from_list(rt, after_list);
         let channels: Vec<JetSchedulerChannel<i64>> = ch_ids
             .iter()
             .map(|&id| {
@@ -437,10 +512,96 @@ extern "C" fn jet_jit_select_wait(recv_list: i64, after_list: i64) -> i64 {
                     .clone()
             })
             .collect();
-        let timers: Vec<u64> = after_ids.iter().map(|&ms| (ms.max(0)) as u64).collect();
+        let mut timers = Vec::new();
+        let mut i = 0;
+        while i + 1 < after_flat.len() {
+            timers.push((after_flat[i].max(0) as u64, after_flat[i + 1]));
+            i += 2;
+        }
+        // Legacy: odd trailing ms-only entries (no value) → value 0.
+        if i < after_flat.len() {
+            timers.push((after_flat[i].max(0) as u64, 0));
+        }
         (channels, timers)
     });
-    wait_status(|| jet_scheduler_select_int_channels(&channels, timers))
+    wait_status(|| jet_scheduler_select_int_channels_timed(&channels, timers))
+}
+
+/// `tasks.after(ms, value)` — one-shot timer channel that receives `value`.
+extern "C" fn jet_jit_after_value(ms: i64, value: i64) -> i64 {
+    // Sender is stashed in `rt.senders` so `with_runtime_mut` stays `Default`-safe.
+    let (ch_id, sender_id) = with_runtime_mut(|rt| {
+        let id = rt.channels.len() as i64;
+        let ch = JetSchedulerChannel::new();
+        let tx = ch.sender();
+        rt.channels.push(ch);
+        let sid = rt.senders.len() as i64;
+        rt.senders.push(Some(tx));
+        (id, sid)
+    });
+    let tx = with_runtime_mut(|rt| {
+        Some(
+            rt.senders
+                .get(sender_id as usize)
+                .and_then(Option::as_ref)
+                .expect("jit after_value: missing sender")
+                .clone(),
+        )
+    })
+    .expect("jit after_value without active runtime");
+    let delay = ms.max(0) as u64;
+    let inherited_deadline = jet_scheduler_ctx_deadline_ms();
+    let control = JetTaskControl::new();
+    let _join = jet_scheduler_spawn_blocking_with_control(
+        move || {
+            let _deadline = inherited_deadline.map(jet_scheduler_push_deadline);
+            let _ = wait_status(|| {
+                jet_scheduler_sleep_ms(delay);
+                0
+            });
+            let _ = tx.send(value);
+            // Drop tx → close send side after one shot.
+        },
+        control,
+    );
+    // Fire-and-forget join handle (D-DETACH1 shape for timer tasks).
+    ch_id
+}
+
+/// `tasks.interval(ms)` — ticking channel sending 1, 2, …
+extern "C" fn jet_jit_interval(ms: i64) -> i64 {
+    let (ch_id, sender_id) = with_runtime_mut(|rt| {
+        let id = rt.channels.len() as i64;
+        let ch = JetSchedulerChannel::new();
+        let tx = ch.sender();
+        rt.channels.push(ch);
+        let sid = rt.senders.len() as i64;
+        rt.senders.push(Some(tx));
+        (id, sid)
+    });
+    let tx = with_runtime_mut(|rt| {
+        Some(
+            rt.senders
+                .get(sender_id as usize)
+                .and_then(Option::as_ref)
+                .expect("jit interval: missing sender")
+                .clone(),
+        )
+    })
+    .expect("jit interval without active runtime");
+    let delay = ms.max(1) as u64;
+    // Detached ticker thread — matches prelude `interval` (std::thread::spawn).
+    std::thread::spawn(move || {
+        let mut tick = 1i64;
+        loop {
+            jet_scheduler_sleep_ms(delay);
+            if !tx.send(tick) {
+                break;
+            }
+            tick += 1;
+        }
+    });
+    ch_id
 }
 
 extern "C" fn jet_jit_sleep(millis: i64) -> i64 {
@@ -452,6 +613,7 @@ extern "C" fn jet_jit_sleep(millis: i64) -> i64 {
 
 pub(crate) struct ConcurrencyHostFns {
     pub channel_new: cranelift_module::FuncId,
+    pub channel_bounded: cranelift_module::FuncId,
     pub generator_channel_new: cranelift_module::FuncId,
     pub channel_close: cranelift_module::FuncId,
     pub channel_sender: cranelift_module::FuncId,
@@ -468,18 +630,31 @@ pub(crate) struct ConcurrencyHostFns {
     pub spawn4: cranelift_module::FuncId,
     pub task_join: cranelift_module::FuncId,
     pub task_cancel: cranelift_module::FuncId,
+    pub task_detach: cranelift_module::FuncId,
+    pub task_pause: cranelift_module::FuncId,
+    pub task_resume: cranelift_module::FuncId,
+    pub task_trace: cranelift_module::FuncId,
     pub task_all: cranelift_module::FuncId,
     pub task_race: cranelift_module::FuncId,
     pub task_any: cranelift_module::FuncId,
     pub select_wait: cranelift_module::FuncId,
+    pub after_value: cranelift_module::FuncId,
+    pub interval: cranelift_module::FuncId,
     pub shield_enter: cranelift_module::FuncId,
     pub shield_leave: cranelift_module::FuncId,
     pub wait_value: cranelift_module::FuncId,
     pub sleep: cranelift_module::FuncId,
+    pub time_now: cranelift_module::FuncId,
+    pub deadline_push: cranelift_module::FuncId,
+    pub deadline_pop: cranelift_module::FuncId,
 }
 
 pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuilder) {
     builder.symbol("jet_jit_channel_new", jet_jit_channel_new as *const u8);
+    builder.symbol(
+        "jet_jit_channel_bounded",
+        jet_jit_channel_bounded as *const u8,
+    );
     builder.symbol(
         "jet_jit_generator_channel_new",
         jet_jit_generator_channel_new as *const u8,
@@ -511,14 +686,23 @@ pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_spawn4", jet_jit_spawn4 as *const u8);
     builder.symbol("jet_jit_task_join", jet_jit_task_join as *const u8);
     builder.symbol("jet_jit_task_cancel", jet_jit_task_cancel as *const u8);
+    builder.symbol("jet_jit_task_detach", jet_jit_task_detach as *const u8);
+    builder.symbol("jet_jit_task_pause", jet_jit_task_pause as *const u8);
+    builder.symbol("jet_jit_task_resume", jet_jit_task_resume as *const u8);
+    builder.symbol("jet_jit_task_trace", jet_jit_task_trace as *const u8);
     builder.symbol("jet_jit_task_all", jet_jit_task_all as *const u8);
     builder.symbol("jet_jit_task_race", jet_jit_task_race as *const u8);
     builder.symbol("jet_jit_task_any", jet_jit_task_any as *const u8);
     builder.symbol("jet_jit_select_wait", jet_jit_select_wait as *const u8);
+    builder.symbol("jet_jit_after_value", jet_jit_after_value as *const u8);
+    builder.symbol("jet_jit_interval", jet_jit_interval as *const u8);
     builder.symbol("jet_jit_shield_enter", jet_jit_shield_enter as *const u8);
     builder.symbol("jet_jit_shield_leave", jet_jit_shield_leave as *const u8);
     builder.symbol("jet_jit_wait_value", jet_jit_wait_value as *const u8);
     builder.symbol("jet_jit_sleep", jet_jit_sleep as *const u8);
+    builder.symbol("jet_jit_time_now", jet_jit_time_now as *const u8);
+    builder.symbol("jet_jit_deadline_push", jet_jit_deadline_push as *const u8);
+    builder.symbol("jet_jit_deadline_pop", jet_jit_deadline_pop as *const u8);
 }
 
 pub(crate) fn declare_concurrency_host_fns(
@@ -573,6 +757,7 @@ pub(crate) fn declare_concurrency_host_fns(
 
     Ok(ConcurrencyHostFns {
         channel_new: import("jet_jit_channel_new", &sig_channel_new)?,
+        channel_bounded: import("jet_jit_channel_bounded", &sig_i64)?,
         generator_channel_new: import("jet_jit_generator_channel_new", &sig_channel_new)?,
         channel_close: import("jet_jit_channel_close", &sig_void_i64)?,
         channel_sender: import("jet_jit_channel_sender", &sig_i64)?,
@@ -589,13 +774,22 @@ pub(crate) fn declare_concurrency_host_fns(
         spawn4: import("jet_jit_spawn4", &sig_spawn4)?,
         task_join: import("jet_jit_task_join", &sig_i64)?,
         task_cancel: import("jet_jit_task_cancel", &sig_void_i64)?,
+        task_detach: import("jet_jit_task_detach", &sig_void_i64)?,
+        task_pause: import("jet_jit_task_pause", &sig_void_i64)?,
+        task_resume: import("jet_jit_task_resume", &sig_void_i64)?,
+        task_trace: import("jet_jit_task_trace", &sig_i64)?,
         task_all: import("jet_jit_task_all", &sig_i64)?,
         task_race: import("jet_jit_task_race", &sig_i64)?,
         task_any: import("jet_jit_task_any", &sig_i64)?,
         select_wait: import("jet_jit_select_wait", &sig_i64_i64)?,
+        after_value: import("jet_jit_after_value", &sig_i64_i64)?,
+        interval: import("jet_jit_interval", &sig_i64)?,
         shield_enter: import("jet_jit_shield_enter", &sig_void)?,
         shield_leave: import("jet_jit_shield_leave", &sig_noarg_i64)?,
         wait_value: import("jet_jit_wait_value", &sig_noarg_i64)?,
         sleep: import("jet_jit_sleep", &sig_i64)?,
+        time_now: import("jet_jit_time_now", &sig_noarg_i64)?,
+        deadline_push: import("jet_jit_deadline_push", &sig_void_i64)?,
+        deadline_pop: import("jet_jit_deadline_pop", &sig_void)?,
     })
 }

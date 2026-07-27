@@ -334,6 +334,17 @@ pub(crate) fn jit_value_type(ty: &Type) -> bool {
                     | "Bump"
                     | "Pool"
                     | "Fixed"
+                    | "GameScene"
+                    | "GameAssets"
+                    | "GameInputMap"
+                    | "GameFrame"
+                    | "GameInputSnapshot"
+                    | "GameImage"
+                    | "GameSound"
+                    | "GameReplay"
+                    | "GameBackend"
+                    | "RaylibWindow"
+                    | "RaylibColor"
             ) =>
         {
             true
@@ -497,7 +508,39 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 return args.is_empty();
             }
             if module == "core.tasks" && method == "channel" {
-                return false;
+                return args.len() <= 1 && args.iter().all(|a| resident_safe_expr(a, callees));
+            }
+            if module == "core.tasks" && matches!(method.as_str(), "after" | "interval") {
+                return !args.is_empty()
+                    && args.len() <= 2
+                    && args.iter().all(|a| {
+                        matches!(&a.ty, Type::Int) && resident_safe_expr(a, callees)
+                    });
+            }
+            if module == "core.time" && matches!(method.as_str(), "now" | "sleep") {
+                return match (method.as_str(), args.len()) {
+                    ("now", 0) => true,
+                    ("sleep", 1) => {
+                        matches!(&args[0].ty, Type::Int) && resident_safe_expr(&args[0], callees)
+                    }
+                    _ => false,
+                };
+            }
+            if module == "core.game" && method == "run" {
+                return !args.is_empty()
+                    && args.len() <= 3
+                    && args.iter().all(|a| resident_safe_expr(a, callees));
+            }
+            if module == "core.raylib" {
+                return match method.as_str() {
+                    "window_open" => args.len() == 3,
+                    "color" => args.len() == 4,
+                    "set_target_fps" | "key_down" | "begin_drawing" | "clear_background"
+                    | "close_window" => args.len() == 1,
+                    "draw_rectangle" | "draw_text" => args.len() == 5,
+                    "end_drawing" => args.is_empty(),
+                    _ => false,
+                } && args.iter().all(|a| resident_safe_expr(a, callees));
             }
             if module == "core.random"
                 && method == "weighted_pick"
@@ -1107,6 +1150,37 @@ fn resident_safe_fold_lambda(args: &[TExpr], callees: &HashSet<String>) -> bool 
         )
 }
 
+/// `para_fold(seed, step, merge)` — seed is `() => U`, step/merge are binary.
+fn resident_safe_para_fold_lambdas(args: &[TExpr], callees: &HashSet<String>) -> bool {
+    if args.len() != 3 {
+        return false;
+    }
+    let seed_ok = matches!(
+        &args[0].kind,
+        TExprKind::Lambda(lam)
+            if lam.prep.is_empty()
+                && lam.source_params.is_empty()
+                && matches!(
+                    &lam.executable,
+                    TIR::TLambdaBody::Expr(e)
+                        if matches!(&e.ty, Type::Int) && resident_safe_expr(e, callees)
+                )
+    );
+    let bin_ok = |arg: &TExpr| {
+        matches!(
+            &arg.kind,
+            TExprKind::Lambda(lam)
+                if lam.prep.is_empty()
+                    && lam.source_params.len() == 2
+                    && matches!(
+                        &lam.executable,
+                        TIR::TLambdaBody::Expr(e) if resident_safe_expr(e, callees)
+                    )
+        )
+    };
+    seed_ok && bin_ok(&args[1]) && bin_ok(&args[2])
+}
+
 fn resident_safe_closure_method(
     recv: &TExpr,
     op: &TIR::TClosureOp,
@@ -1122,6 +1196,11 @@ fn resident_safe_closure_method(
                 matches!(elem, Type::Int | Type::String | Type::Named(_))
             }) && resident_safe_unary_lambda(args, callees)
         }
+        TIR::TClosureOp::ParaMap => {
+            jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
+                matches!(elem, Type::Int | Type::String | Type::Named(_))
+            }) && resident_safe_unary_lambda(args, callees)
+        }
         // D-HOLE1: Option.map — packed Option ABI; unary lambda over the payload.
         TIR::TClosureOp::OptionMap => {
             matches!(
@@ -1131,10 +1210,21 @@ fn resident_safe_closure_method(
                         || matches!(inner.as_ref(), Type::Named(_) | Type::Tuple(_))
             ) && resident_safe_unary_lambda(args, callees)
         }
-        TIR::TClosureOp::Filter => {
+        TIR::TClosureOp::Filter | TIR::TClosureOp::ParaFilter => {
             jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
                 matches!(elem, Type::Int | Type::String | Type::Named(_))
             }) && resident_safe_unary_lambda(args, callees)
+        }
+        TIR::TClosureOp::ParaPartition { .. } => {
+            jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
+                matches!(elem, Type::Int | Type::String | Type::Named(_))
+            }) && resident_safe_unary_lambda(args, callees)
+        }
+        TIR::TClosureOp::ParaFold => {
+            jit_closure_elem_type(&recv.ty)
+                .is_some_and(|elem| matches!(elem, Type::Int | Type::Named(_)))
+                && args.len() == 3
+                && resident_safe_para_fold_lambdas(args, callees)
         }
         TIR::TClosureOp::Each | TIR::TClosureOp::EachMut | TIR::TClosureOp::EachRef => {
             jit_closure_elem_type(&recv.ty).is_some_and(|elem| {
@@ -1254,7 +1344,9 @@ fn resident_safe_builtin_op(
         TBuiltinOp::Keys | TBuiltinOp::Values => {
             jit_map_string_type(&recv.ty) && args.is_empty()
         }
-        TBuiltinOp::Sort => jit_list_int_type(&recv.ty) && args.is_empty(),
+        TBuiltinOp::Sort => {
+            (jit_list_int_type(&recv.ty) || jit_list_string_type(&recv.ty)) && args.is_empty()
+        }
         TBuiltinOp::LenList => {
             (matches!(&recv.ty, Type::String)
                 || jit_list_native_type(&recv.ty)
@@ -1425,7 +1517,9 @@ fn resident_safe_builtin_op(
                 && args.is_empty()
         }
         TBuiltinOp::Pop => {
-            matches!(&recv.ty, Type::Apply { name, .. } if name == "PriorityQueue")
+            (matches!(&recv.ty, Type::Apply { name, .. } if name == "PriorityQueue")
+                || jit_list_native_type(&recv.ty)
+                || matches!(&recv.ty, Type::List(elem) if jit_value_type(elem) || matches!(elem.as_ref(), Type::Apply { name, .. } if name == "Task")))
                 && args.is_empty()
         }
         TBuiltinOp::LruPut | TBuiltinOp::LruAddNew => {
@@ -1527,7 +1621,10 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 && matches!(
                     &init.kind,
                     TExprKind::CoreCall { module, method, args, .. }
-                        if module == "core.tasks" && method == "channel" && args.is_empty()
+                        if module == "core.tasks"
+                            && method == "channel"
+                            && args.len() <= 1
+                            && args.iter().all(|a| resident_safe_expr(a, callees))
                 ))
                 || (jit_tuple_type(&init.ty)
                     && binds.len()
@@ -1989,8 +2086,42 @@ fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut usize) {
                 }
                 count_spawn_sites_stmts(body, n);
             }
-            TStmt::Region(body) | TStmt::Impure(body) => count_spawn_sites_stmts(body, n),
-            TStmt::ForIn { body, .. } => count_spawn_sites_stmts(body, n),
+            TStmt::Region(body)
+            | TStmt::Impure(body)
+            | TStmt::Inline(body)
+            | TStmt::Unsafe(body)
+            | TStmt::Shield { body }
+            | TStmt::DebugOnly(body) => count_spawn_sites_stmts(body, n),
+            TStmt::ContextBlock { guards, body } => {
+                for (_, value) in guards {
+                    count_spawn_sites_expr(value, n);
+                }
+                count_spawn_sites_stmts(body, n);
+            }
+            TStmt::Transact { body, .. } => count_spawn_sites_stmts(body, n),
+            TStmt::GcEdit { index_temp, stmt, .. } => {
+                if let Some((_, idx)) = index_temp {
+                    count_spawn_sites_expr(idx, n);
+                }
+                count_spawn_sites_stmts(std::slice::from_ref(stmt), n);
+            }
+            TStmt::ForIn {
+                source,
+                collection,
+                step,
+                body,
+                ..
+            } => {
+                count_spawn_sites_expr(source, n);
+                count_spawn_sites_expr(collection, n);
+                if let Some(step) = step {
+                    count_spawn_sites_expr(step, n);
+                }
+                count_spawn_sites_stmts(body, n);
+            }
+            TStmt::TupleDestructure { init, .. }
+            | TStmt::StructDestructure { init, .. }
+            | TStmt::ListDestructure { init, .. } => count_spawn_sites_expr(init, n),
             TStmt::EnumMatch {
                 arms, else_body, ..
             } => {
@@ -2021,6 +2152,15 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
         expr.kind,
         TExprKind::CoreClosureCall {
             kind: TCoreClosureKind::Spawn { .. }
+        }
+    ) {
+        *n += 1;
+    }
+    if matches!(
+        &expr.kind,
+        TExprKind::HandleMethod {
+            op: THandleOp::GameSceneOnFrame,
+            ..
         }
     ) {
         *n += 1;
@@ -2060,6 +2200,18 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
                 count_spawn_sites_expr(a, n);
             }
         }
+        TExprKind::BuiltinMethod { recv, args, .. }
+        | TExprKind::ClosureMethod { recv, args, .. } => {
+            count_spawn_sites_expr(recv, n);
+            for a in args {
+                count_spawn_sites_expr(a, n);
+            }
+        }
+        TExprKind::CoreCall { args, .. } => {
+            for a in args {
+                count_spawn_sites_expr(a, n);
+            }
+        }
         TExprKind::OrFallback { value, .. } => count_spawn_sites_expr(value, n),
         TExprKind::TaskGroupAll { tasks }
         | TExprKind::TaskGroupRace { tasks }
@@ -2091,12 +2243,16 @@ fn resident_safe_task_list_expr(tasks: &TExpr, callees: &HashSet<String>) -> boo
 
 fn resident_safe_select_wait(builder: &TExpr, callees: &HashSet<String>) -> bool {
     let (recvs, afters) = collect_select_arms_jit(builder);
-    !recvs.is_empty()
+    (!recvs.is_empty() || !afters.is_empty())
         && recvs
             .iter()
             .all(|ch| jit_concurrency_type(&ch.ty) && resident_safe_expr(ch, callees))
         && afters.iter().all(|(ms, value)| {
-            matches!(&ms.ty, Type::Int) && resident_safe_expr(ms, callees) && value.is_none()
+            matches!(&ms.ty, Type::Int)
+                && resident_safe_expr(ms, callees)
+                && value
+                    .map(|v| matches!(&v.ty, Type::Int) && resident_safe_expr(v, callees))
+                    .unwrap_or(true)
         })
 }
 
@@ -2163,6 +2319,7 @@ fn resident_safe_capture_policy(c: &JitSpawnCapture) -> bool {
     if c.clone_at_spawn {
         matches!(&c.ty, Type::Apply { name, .. } if name == "Sender")
             || matches!(&c.ty, Type::Shared(_))
+            || matches!(&c.ty, Type::String | Type::Int | Type::Bool | Type::Float)
     } else {
         true
     }
@@ -2205,7 +2362,12 @@ fn resident_safe_process_lines_body(stmt: &TStmt, callees: &HashSet<String>) -> 
 
 fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool {
     match op {
-        THandleOp::TaskJoin | THandleOp::TaskCancel => {
+        THandleOp::TaskJoin
+        | THandleOp::TaskCancel
+        | THandleOp::TaskDetach
+        | THandleOp::TaskPause
+        | THandleOp::TaskResume
+        | THandleOp::TaskTrace => {
             args.is_empty() && jit_concurrency_type(&recv.ty)
         }
         THandleOp::ChannelReceive => {
@@ -2344,6 +2506,25 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         | THandleOp::PathToString
         |         THandleOp::PathWalk => args.is_empty(),
         THandleOp::PathWriteAtomic => args.len() == 1,
+        THandleOp::GameSceneNew => args.is_empty() && matches!(&recv.ty, Type::String),
+        THandleOp::GameReplayRecord => args.is_empty() && matches!(&recv.ty, Type::String),
+        THandleOp::GameBackendHeadless => args.is_empty(),
+        THandleOp::GameSceneOnFrame => {
+            // AOT keeps the frame lambda in TIR args; JIT registers via spawn-site.
+            args.len() <= 1
+        }
+        THandleOp::GameSceneComponent | THandleOp::GameSceneQuery => {
+            args.len() == 1 && matches!(&args[0].ty, Type::String)
+        }
+        THandleOp::GameAssetsImage | THandleOp::GameAssetsSound => {
+            args.len() == 1 && matches!(&args[0].ty, Type::String)
+        }
+        THandleOp::GameInputBind => {
+            args.len() == 2
+                && matches!(&args[0].ty, Type::String)
+                && matches!(&args[1].ty, Type::String)
+        }
+        THandleOp::GameInputPressed => args.len() == 1 && matches!(&args[0].ty, Type::String),
         _ => false,
     }
 }

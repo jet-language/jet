@@ -56,6 +56,12 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         expirings: Vec::new(),
         secrets: Vec::new(),
         crypto_values: Vec::new(),
+        game_scenes: Vec::new(),
+        game_frames: Vec::new(),
+        game_replays: Vec::new(),
+        game_backends: Vec::new(),
+        raylib_windows: Vec::new(),
+        raylib_colors: Vec::new(),
         trapped: None,
         exit_code: None,
         deadline_exceeded: None,
@@ -83,22 +89,6 @@ fn jit_panic_diag(msg: &str) -> Diagnostic {
         format!("while computing this value at compile time, the program panicked: {msg}"),
         "this is the sanctioned way to validate at compile time — fix the input the check rejects"
             .to_string(),
-        None,
-    )
-}
-
-fn jit_deadline_diag(rendered: &str) -> Diagnostic {
-    let wait = rendered
-        .lines()
-        .next()
-        .and_then(|line| line.strip_prefix("Error [E3003]: "))
-        .unwrap_or("deadline exceeded while waiting in a scheduler wait point");
-    Diagnostic::error(
-        "E3003",
-        wait.to_string(),
-        "this wait point observed the task context deadline from `#Context(deadline: …)`"
-            .to_string(),
-        "raise the deadline budget or shorten the work before this wait point".to_string(),
         None,
     )
 }
@@ -237,8 +227,22 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         jet_codegen::scheduler::jet_scheduler_drain();
         Concurrency::set_active_runtime(None);
         if let Some(rendered) = runtime.deadline_exceeded.take() {
+            // Match AOT `#Context(deadline:)` ProgramOutput: keep prior stdout,
+            // emit the rendered E3003, then the join-fatal line, exit 70.
+            let mut stderr = rendered;
+            if !stderr.ends_with('\n') {
+                stderr.push('\n');
+            }
+            if !stderr.contains("panic: a task panicked") {
+                stderr.push_str("panic: a task panicked\n");
+            }
+            let stdout = runtime.stdout.clone();
             reset_run_heap(runtime);
-            return Ok(RunOutcome::Problems(vec![jit_deadline_diag(&rendered)]));
+            return Ok(RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code: 70,
+            });
         }
         if let Some(msg) = runtime.trapped.take() {
             // Rich require/panic already wrote AOT-matching stderr and set exit_code.

@@ -26,8 +26,8 @@ use super::runtime_host::{
 use super::safety::{
     collect_select_arms_jit, flatten_string, jit_closure_elem_type, jit_list_float_type,
     jit_list_iter_elem_type, jit_list_native_type, jit_list_of_int_list_type, jit_list_record_type,
-    jit_map_string_type, jit_result_list_elem, jit_struct_type, jit_tuple_type, jit_value_type,
-    record_type_key, user_type_name,
+    jit_list_string_type, jit_map_string_type, jit_result_list_elem, jit_struct_type, jit_tuple_type,
+    jit_value_type, record_type_key, user_type_name,
 };
 use super::types_meta::{
     clif_ty, core_struct_field_type, fn_value_signature, init_clif_ty, JitMeta,
@@ -80,6 +80,8 @@ pub(crate) struct LowerCtx<'a, 'b> {
     /// Lexical `#Shield` depth in emitted native code. Used to emit exact
     /// cleanup calls before every non-local control-flow edge.
     pub(crate) shield_depth: u32,
+    /// Nested `#Context(deadline: …)` depth — pop host TLS on early returns.
+    pub(crate) deadline_depth: u32,
     /// Current structured subject for `MixedSwitch` field tests and bindings.
     pub(crate) switch_subject: Option<(Value, Type)>,
     /// Sender handle for a native generator body.
@@ -255,6 +257,7 @@ impl LowerCtx<'_, '_> {
                 .declare_func_in_func(self.host.conc.sender_close, self.b.func);
             self.b.ins().call(close, &[sender]);
         }
+        self.emit_deadline_pops_to(0);
         match self.ret_clif {
             Some(ty) => {
                 let value = if ty == types::F64 {
@@ -267,6 +270,15 @@ impl LowerCtx<'_, '_> {
             None => {
                 self.b.ins().return_(&[]);
             }
+        }
+    }
+
+    fn emit_deadline_pops_to(&mut self, target_depth: u32) {
+        let pop = self
+            .module
+            .declare_func_in_func(self.host.conc.deadline_pop, self.b.func);
+        for _ in target_depth..self.deadline_depth {
+            self.b.ins().call(pop, &[]);
         }
     }
 
@@ -2170,40 +2182,48 @@ impl LowerCtx<'_, '_> {
                 self.vars.insert(place.clone(), var);
                 self.var_tys.insert(place, bound_ty);
             }
-            // D-TUPLE-DESTRUCT1: `(tx, rx) := tasks.channel<T>()`. The coverage gate
-            // (`resident_safe_stmt`) admitted only this exact shape: a 2-element
-            // `TupleDestructure` whose init is the `tasks.channel` producer, canonical
-            // field order `(sender, receiver)`. Reproduce the old single-handle
-            // `let ch := tasks.channel(); s := ch.sender();` host calls — `channel_new`
-            // for the receiver handle, then `channel_sender` on it for the sender
-            // handle — both fired here instead of at a later `.sender()` call.
+            // D-TUPLE-DESTRUCT1: `(tx, rx) := tasks.channel<T>()` / `tasks.channel<T>(n)`.
             TStmt::TupleDestructure { init, binds, .. } => {
-                if matches!(
-                    &init.kind,
-                    TExprKind::CoreCall { module, method, args, .. }
-                        if module == "core.tasks" && method == "channel" && args.is_empty()
-                ) {
-                    let ch_ref = self
-                        .module
-                        .declare_func_in_func(self.host.conc.channel_new, self.b.func);
-                    let ch_call = self.b.ins().call(ch_ref, &[]);
-                    let ch_val = self.b.inst_results(ch_call)[0];
-                    let tx_ref = self
-                        .module
-                        .declare_func_in_func(self.host.conc.channel_sender, self.b.func);
-                    let tx_call = self.b.ins().call(tx_ref, &[ch_val]);
-                    let tx_val = self.b.inst_results(tx_call)[0];
-                    // `binds[i].0` is already the mangled Rust name (`mangle(elem.name)`,
-                    // set at TIR lowering — unlike plain `Let.name`, which is the raw Jet
-                    // name and needs `local_place`'s own `mangle` call). Use it directly.
-                    let tx_var = self.fresh_var(types::I64);
-                    self.b.def_var(tx_var, tx_val);
-                    self.vars.insert(binds[0].0.clone(), tx_var);
-                    self.var_tys.insert(binds[0].0.clone(), Type::Int);
-                    let ch_var = self.fresh_var(types::I64);
-                    self.b.def_var(ch_var, ch_val);
-                    self.vars.insert(binds[1].0.clone(), ch_var);
-                    self.var_tys.insert(binds[1].0.clone(), Type::Int);
+                if let TExprKind::CoreCall {
+                    module,
+                    method,
+                    args,
+                    ..
+                } = &init.kind
+                {
+                    if module == "core.tasks" && method == "channel" {
+                        let ch_val = if args.is_empty() {
+                            let ch_ref = self
+                                .module
+                                .declare_func_in_func(self.host.conc.channel_new, self.b.func);
+                            let ch_call = self.b.ins().call(ch_ref, &[]);
+                            self.b.inst_results(ch_call)[0]
+                        } else if args.len() == 1 {
+                            let cap = self.lower_expr(&args[0])?;
+                            let ch_ref = self
+                                .module
+                                .declare_func_in_func(self.host.conc.channel_bounded, self.b.func);
+                            let ch_call = self.b.ins().call(ch_ref, &[cap]);
+                            self.b.inst_results(ch_call)[0]
+                        } else {
+                            return Err("jit tasks.channel arity unsupported".to_string());
+                        };
+                        let tx_ref = self
+                            .module
+                            .declare_func_in_func(self.host.conc.channel_sender, self.b.func);
+                        let tx_call = self.b.ins().call(tx_ref, &[ch_val]);
+                        let tx_val = self.b.inst_results(tx_call)[0];
+                        let tx_var = self.fresh_var(types::I64);
+                        self.b.def_var(tx_var, tx_val);
+                        self.vars.insert(binds[0].0.clone(), tx_var);
+                        self.var_tys.insert(binds[0].0.clone(), Type::Int);
+                        let ch_var = self.fresh_var(types::I64);
+                        self.b.def_var(ch_var, ch_val);
+                        self.vars.insert(binds[1].0.clone(), ch_var);
+                        self.var_tys.insert(binds[1].0.clone(), Type::Int);
+                    } else {
+                        self.lower_tuple_destructure(init, binds)?;
+                    }
                 } else {
                     self.lower_tuple_destructure(init, binds)?;
                 }
@@ -3731,10 +3751,25 @@ impl LowerCtx<'_, '_> {
             TStmt::Reactive { .. } => return Err("jit reactive statement unsupported".to_string()),
             TStmt::Layout { .. } => return Err("jit layout block unsupported".to_string()),
             TStmt::ContextBlock { guards, body } => {
-                for (_, value) in guards {
-                    self.lower_expr(value)?;
+                let mut pushed = 0u32;
+                for (field, value) in guards {
+                    if field == "deadline" {
+                        let ms = self.lower_expr(value)?;
+                        let push = self
+                            .module
+                            .declare_func_in_func(self.host.conc.deadline_push, self.b.func);
+                        self.b.ins().call(push, &[ms]);
+                        self.deadline_depth += 1;
+                        pushed += 1;
+                    } else {
+                        let _ = self.lower_expr(value)?;
+                    }
                 }
                 self.lower_stmts_scoped(body)?;
+                if !self.dead {
+                    self.emit_deadline_pops_to(self.deadline_depth - pushed);
+                    self.deadline_depth -= pushed;
+                }
             }
             TStmt::Live { .. } => return Err("jit live block unsupported".to_string()),
             TStmt::Shield { body } => {
@@ -4768,6 +4803,23 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().call(push_ref, &[buf_id, text]);
                 return Ok(());
             }
+            if matches!(type_name, "GameImage" | "GameSound") {
+                let recv = self.lower_expr(expr)?;
+                let kind = self
+                    .b
+                    .ins()
+                    .iconst(types::I64, i64::from(type_name == "GameSound"));
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.game.asset_show, self.b.func);
+                let call = self.b.ins().call(host, &[kind, recv]);
+                let text = self.b.inst_results(call)[0];
+                let push_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_push_str, self.b.func);
+                self.b.ins().call(push_ref, &[buf_id, text]);
+                return Ok(());
+            }
             let display_key = format!("{type_name}::display");
             if let Some(&func_id) = self.func_ids.get(&display_key) {
                 let recv = self.lower_expr(expr)?;
@@ -4780,6 +4832,23 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().call(host_ref, &[buf_id, text]);
                 return Ok(());
             }
+        }
+        if matches!(fmt, StrFormat::Debug) && matches!(type_name, "GameImage" | "GameSound") {
+            let recv = self.lower_expr(expr)?;
+            let kind = self
+                .b
+                .ins()
+                .iconst(types::I64, i64::from(type_name == "GameSound"));
+            let host = self
+                .module
+                .declare_func_in_func(self.host.game.asset_show, self.b.func);
+            let call = self.b.ins().call(host, &[kind, recv]);
+            let text = self.b.inst_results(call)[0];
+            let push_ref = self
+                .module
+                .declare_func_in_func(self.host.str_push_str, self.b.func);
+            self.b.ins().call(push_ref, &[buf_id, text]);
+            return Ok(());
         }
         let (field_names, field_tys) = self.meta.struct_layout(type_name).ok_or_else(|| {
             format!("jit string interp type unsupported: Named({type_name:?})")
@@ -6979,6 +7048,95 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &arg_vals);
                     return Ok(self.b.inst_results(call)[0]);
                 }
+                if module == "core.game" && method == "run" {
+                    let scene = self.lower_expr(&args[0])?;
+                    let zero = self.b.ins().iconst(types::I64, 0);
+                    let mut replay = zero;
+                    let mut backend = zero;
+                    // Named kwargs: replay: / backend: — TIR may pass 1–3 args.
+                    if args.len() >= 2 {
+                        replay = self.lower_expr(&args[1])?;
+                    }
+                    if args.len() >= 3 {
+                        backend = self.lower_expr(&args[2])?;
+                    }
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.game.run, self.b.func);
+                    let call = self.b.ins().call(host, &[scene, replay, backend]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.raylib" {
+                    let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
+                        "window_open" if args.len() == 3 => (
+                            self.host.raylib.window_open,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                            ],
+                        ),
+                        "color" if args.len() == 4 => (
+                            self.host.raylib.color,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                                self.lower_expr(&args[3])?,
+                            ],
+                        ),
+                        "set_target_fps" if args.len() == 1 => {
+                            (self.host.raylib.set_target_fps, vec![self.lower_expr(&args[0])?])
+                        }
+                        "key_down" if args.len() == 1 => {
+                            (self.host.raylib.key_down, vec![self.lower_expr(&args[0])?])
+                        }
+                        "begin_drawing" if args.len() == 1 => {
+                            (self.host.raylib.begin_drawing, vec![self.lower_expr(&args[0])?])
+                        }
+                        "clear_background" if args.len() == 1 => {
+                            (
+                                self.host.raylib.clear_background,
+                                vec![self.lower_expr(&args[0])?],
+                            )
+                        }
+                        "draw_rectangle" if args.len() == 5 => (
+                            self.host.raylib.draw_rectangle,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                                self.lower_expr(&args[3])?,
+                                self.lower_expr(&args[4])?,
+                            ],
+                        ),
+                        "draw_text" if args.len() == 5 => (
+                            self.host.raylib.draw_text,
+                            vec![
+                                self.lower_expr(&args[0])?,
+                                self.lower_expr(&args[1])?,
+                                self.lower_expr(&args[2])?,
+                                self.lower_expr(&args[3])?,
+                                self.lower_expr(&args[4])?,
+                            ],
+                        ),
+                        "end_drawing" if args.is_empty() => (self.host.raylib.end_drawing, vec![]),
+                        "close_window" if args.len() == 1 => {
+                            (self.host.raylib.close_window, vec![self.lower_expr(&args[0])?])
+                        }
+                        _ => {
+                            return Err(format!(
+                                "jit core call unsupported: core.raylib.{method}"
+                            ))
+                        }
+                    };
+                    let host_ref = self.module.declare_func_in_func(host_id, self.b.func);
+                    let call = self.b.ins().call(host_ref, &arg_vals);
+                    return Ok(match method.as_str() {
+                        "window_open" | "color" | "key_down" => self.b.inst_results(call)[0],
+                        _ => self.b.ins().iconst(types::I8, 0),
+                    });
+                }
                 if module == "core.compress.gzip" || module == "core.compress.zstd" {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match (module.as_str(), method.as_str()) {
                         ("core.compress.gzip", "compress") if args.len() == 1 => {
@@ -7383,6 +7541,42 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host_ref, &[]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
+                if module == "core.tasks" && method == "channel" && args.len() == 1 {
+                    let cap = self.lower_expr(&args[0])?;
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.conc.channel_bounded, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[cap]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.tasks" && method == "after" {
+                    let ms = self.lower_expr(&args[0])?;
+                    let value = if args.len() >= 2 {
+                        self.lower_expr(&args[1])?
+                    } else {
+                        self.b.ins().iconst(types::I64, 0)
+                    };
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.conc.after_value, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[ms, value]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.tasks" && method == "interval" && args.len() == 1 {
+                    let ms = self.lower_expr(&args[0])?;
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.conc.interval, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[ms]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                if module == "core.time" && method == "now" && args.is_empty() {
+                    let host_ref = self
+                        .module
+                        .declare_func_in_func(self.host.conc.time_now, self.b.func);
+                    let call = self.b.ins().call(host_ref, &[]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
                 if module == "core.time" && method == "sleep" && args.len() == 1 {
                     let millis = self.lower_expr(&args[0])?;
                     let host_ref = self
@@ -7735,15 +7929,16 @@ impl LowerCtx<'_, '_> {
                 for ch in recvs {
                     recv_vals.push(self.lower_expr(ch)?);
                 }
-                let mut after_vals = Vec::new();
+                let mut after_flat = Vec::new();
                 for (ms, value) in afters {
-                    if value.is_some() {
-                        return Err("jit select timer value unsupported".to_string());
-                    }
-                    after_vals.push(self.lower_expr(ms)?);
+                    after_flat.push(self.lower_expr(ms)?);
+                    after_flat.push(match value {
+                        Some(v) => self.lower_expr(v)?,
+                        None => self.b.ins().iconst(types::I64, 0),
+                    });
                 }
                 let recv_list = self.lower_i64_value_list(&recv_vals)?;
-                let after_list = self.lower_i64_value_list(&after_vals)?;
+                let after_list = self.lower_i64_value_list(&after_flat)?;
                 let host_ref = self
                     .module
                     .declare_func_in_func(self.host.conc.select_wait, self.b.func);
@@ -8064,8 +8259,42 @@ impl LowerCtx<'_, '_> {
                     other => other.clone(),
                 };
                 let type_name = record_type_key(&record_ty)
-                    .or_else(|| self.method_struct.clone())
-                    .ok_or("jit field recv type")?;
+                    .or_else(|| self.method_struct.clone());
+                // GameFrame.input / .index — TIR may erase the frame param to Int
+                // inside spawn-lambda bodies; treat input/index on Int as GameFrame.
+                if matches!(field.as_str(), "input" | "index")
+                    && (matches!(&record_ty, Type::Int)
+                        || matches!(
+                            type_name.as_deref().or_else(|| match &record_ty {
+                                Type::Named(n) => Some(n.as_str()),
+                                _ => None,
+                            }),
+                            Some("GameFrame")
+                        ))
+                {
+                    if field == "input" {
+                        return Ok(handle);
+                    }
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.game.frame_index, self.b.func);
+                    let call = self.b.ins().call(host, &[handle]);
+                    return Ok(self.b.inst_results(call)[0]);
+                }
+                // GameScene.assets / .input — identity projection onto the scene handle.
+                if matches!(
+                    type_name.as_deref().or_else(|| match &record_ty {
+                        Type::Named(n) => Some(n.as_str()),
+                        _ => None,
+                    }),
+                    Some("GameScene")
+                ) && matches!(field.as_str(), "assets" | "input")
+                {
+                    return Ok(handle);
+                }
+                let type_name = type_name.ok_or_else(|| {
+                    format!("jit field recv type: field `{field}` on {record_ty:?}")
+                })?;
                 // TIR may leave CORE struct fields as Int when cx.struct_fields
                 // lacks the type; recover the real ABI type for get_*/print.
                 let field_ty = self.meta.struct_field_ty(&type_name, field)
@@ -9324,9 +9553,14 @@ impl LowerCtx<'_, '_> {
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
             TBuiltinOp::Sort => {
+                let host_id = if jit_list_string_type(&recv.ty) {
+                    self.host.coll.list_sort_str
+                } else {
+                    self.host.coll.list_sort
+                };
                 let host_ref = self
                     .module
-                    .declare_func_in_func(self.host.coll.list_sort, self.b.func);
+                    .declare_func_in_func(host_id, self.b.func);
                 self.b.ins().call(host_ref, &[recv_val]);
                 Ok(self.b.ins().iconst(types::I8, 0))
             }
@@ -9407,6 +9641,14 @@ impl LowerCtx<'_, '_> {
                     let host = self
                         .module
                         .declare_func_in_func(self.host.coll.priority_queue_pop, self.b.func);
+                    let call = self.b.ins().call(host, &[recv_val]);
+                    Ok(self.b.inst_results(call)[0])
+                } else if jit_list_native_type(&recv.ty)
+                    || matches!(&recv.ty, Type::List(elem) if jit_value_type(elem) || matches!(elem.as_ref(), Type::Apply { name, .. } if name == "Task"))
+                {
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.coll.list_pop, self.b.func);
                     let call = self.b.ins().call(host, &[recv_val]);
                     Ok(self.b.inst_results(call)[0])
                 } else {
@@ -10605,6 +10847,56 @@ impl LowerCtx<'_, '_> {
         Ok(self.b.inst_results(call)[0])
     }
 
+    /// `scene.on_frame(…)` — spawn-site callback registered with the game host.
+    fn lower_game_on_frame(&mut self, scene: Value) -> Result<Value, String> {
+        let site = *self.spawn_site;
+        *self.spawn_site += 1;
+        let lam = self
+            .spawn_lambdas
+            .get(site)
+            .ok_or_else(|| format!("jit game on_frame site {site} missing lambda"))?;
+        let spawn_fn = self
+            .spawn_func_ids
+            .get(site)
+            .copied()
+            .ok_or_else(|| format!("jit game on_frame site {site} missing"))?;
+        let mut cap_vals = Vec::new();
+        for cap in &lam.captures {
+            let captured = TExpr {
+                ty: cap.ty.clone(),
+                kind: TExprKind::Local(TLocal::user(&cap.name)),
+            };
+            let val = if cap.clone_at_spawn {
+                self.lower_clone(&captured)?
+            } else {
+                self.lower_expr(&captured)?
+            };
+            cap_vals.push(val);
+        }
+        if cap_vals.len() > 4 {
+            return Err(format!(
+                "jit game on_frame capture count {} > 4",
+                cap_vals.len()
+            ));
+        }
+        let spawn_ref = self.module.declare_func_in_func(spawn_fn, self.b.func);
+        let spawn_ptr = self.b.ins().func_addr(types::I64, spawn_ref);
+        let n_caps = self.b.ins().iconst(types::I64, cap_vals.len() as i64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let mut caps = [zero; 4];
+        for (i, v) in cap_vals.into_iter().enumerate() {
+            caps[i] = v;
+        }
+        let host = self
+            .module
+            .declare_func_in_func(self.host.game.on_frame, self.b.func);
+        self.b.ins().call(
+            host,
+            &[scene, spawn_ptr, n_caps, caps[0], caps[1], caps[2], caps[3]],
+        );
+        Ok(self.b.ins().iconst(types::I8, 0))
+    }
+
     /// Exhaustive match on `THandleOp` (`TIR/mod.rs`) for `TExprKind::
     /// HandleMethod`. `THandleOp` covers every runtime-handle method in the
     /// stdlib (I/O, RNG, DB, HTTP, math types, …); the JIT lowers only the
@@ -10971,16 +11263,77 @@ impl LowerCtx<'_, '_> {
                 let call = self.b.ins().call(host, &[recv_val]);
                 Ok(self.b.inst_results(call)[0])
             }
-            THandleOp::GameSceneNew => Err("jit handle method unsupported".to_string()),
-            THandleOp::GameReplayRecord => Err("jit handle method unsupported".to_string()),
-            THandleOp::GameBackendHeadless => Err("jit handle method unsupported".to_string()),
-            THandleOp::GameSceneOnFrame => Err("jit handle method unsupported".to_string()),
-            THandleOp::GameSceneComponent => Err("jit handle method unsupported".to_string()),
-            THandleOp::GameSceneQuery => Err("jit handle method unsupported".to_string()),
-            THandleOp::GameAssetsImage => Err("jit handle method unsupported".to_string()),
-            THandleOp::GameAssetsSound => Err("jit handle method unsupported".to_string()),
-            THandleOp::GameInputBind => Err("jit handle method unsupported".to_string()),
-            THandleOp::GameInputPressed => Err("jit handle method unsupported".to_string()),
+            THandleOp::GameSceneNew => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.game.scene_new, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::GameReplayRecord => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.game.replay_record, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::GameBackendHeadless => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.game.backend_headless, self.b.func);
+                let call = self.b.ins().call(host, &[]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::GameSceneOnFrame => self.lower_game_on_frame(recv_val),
+            THandleOp::GameSceneComponent => {
+                let name = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.game.component, self.b.func);
+                self.b.ins().call(host, &[recv_val, name]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            THandleOp::GameSceneQuery => {
+                let names = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.game.query, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, names]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::GameAssetsImage => {
+                let path = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.game.assets_image, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, path]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::GameAssetsSound => {
+                let path = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.game.assets_sound, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, path]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::GameInputBind => {
+                let action = self.lower_expr(&args[0])?;
+                let key = self.lower_expr(&args[1])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.game.input_bind, self.b.func);
+                self.b.ins().call(host, &[recv_val, action, key]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            THandleOp::GameInputPressed => {
+                let action = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.game.input_pressed, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, action]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::DurationNew { unit, float } => {
                 let scale = match *unit {
                     "Milliseconds" => 1,
@@ -11332,10 +11685,34 @@ impl LowerCtx<'_, '_> {
             THandleOp::ReflectValueFields => Err("jit handle method unsupported".to_string()),
             THandleOp::ReflectFieldName => Err("jit handle method unsupported".to_string()),
             THandleOp::ReflectFieldValue => Err("jit handle method unsupported".to_string()),
-            THandleOp::TaskDetach => Err("jit handle method unsupported".to_string()),
-            THandleOp::TaskPause => Err("jit handle method unsupported".to_string()),
-            THandleOp::TaskResume => Err("jit handle method unsupported".to_string()),
-            THandleOp::TaskTrace => Err("jit handle method unsupported".to_string()),
+            THandleOp::TaskDetach => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.conc.task_detach, self.b.func);
+                self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            THandleOp::TaskPause => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.conc.task_pause, self.b.func);
+                self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            THandleOp::TaskResume => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.conc.task_resume, self.b.func);
+                self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.ins().iconst(types::I8, 0))
+            }
+            THandleOp::TaskTrace => {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.conc.task_trace, self.b.func);
+                let call = self.b.ins().call(host_ref, &[recv_val]);
+                Ok(self.b.inst_results(call)[0])
+            }
             THandleOp::HttpRouterRegister { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::MathMethod { .. } => Err("jit handle method unsupported".to_string()),
             THandleOp::ReactiveGet => Err("jit handle method unsupported".to_string()),
@@ -12466,7 +12843,13 @@ impl LowerCtx<'_, '_> {
                 }
                 self.lower_iter_map_filter(recv, args, false)
             }
+            // D-PARCAPTURE1: order-preserving parallel adapters — serial Cranelift
+            // inlining matches AOT results for the covered examples.
+            TClosureOp::ParaMap => self.lower_iter_map_filter(recv, args, false),
             TClosureOp::Filter => self.lower_iter_map_filter(recv, args, true),
+            TClosureOp::ParaFilter => self.lower_iter_map_filter(recv, args, true),
+            TClosureOp::ParaPartition { .. } => self.lower_para_partition(recv, args),
+            TClosureOp::ParaFold => self.lower_para_fold(recv, args),
             TClosureOp::Each | TClosureOp::EachMut | TClosureOp::EachRef => {
                 self.lower_iter_each(recv, args)
             }
@@ -13561,6 +13944,196 @@ impl LowerCtx<'_, '_> {
         let next_acc = self.with_bound_local(&acc_place, Type::Int, acc, |this| {
             this.with_bound_local(&elem_place, elem_ty.clone(), elem, |inner| {
                 inner.lower_expr(body_expr)
+            })
+        })?;
+        self.b.def_var(acc_var, next_acc);
+        self.b.ins().jump(step, &[]);
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(idx, one);
+        self.b.def_var(idx_var, next);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        Ok(self.b.use_var(acc_var))
+    }
+
+    /// Serial para_partition → `(false_, true_)` record (order-preserving).
+    fn lower_para_partition(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
+        let elem_ty = jit_closure_elem_type(&recv.ty)
+            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+        if !matches!(elem_ty, Type::Int | Type::String | Type::Named(_)) {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let (param_place, body_expr) = self.closure_unary_lambda(args)?;
+        let recv_val = self.lower_expr(recv)?;
+        let coll_var = self.fresh_var(types::I64);
+        self.b.def_var(coll_var, recv_val);
+
+        let new_list = self
+            .module
+            .declare_func_in_func(self.host.coll.list_new, self.b.func);
+        let falses_call = self.b.ins().call(new_list, &[]);
+        let falses = self.b.inst_results(falses_call)[0];
+        let falses_var = self.fresh_var(types::I64);
+        self.b.def_var(falses_var, falses);
+        let trues_call = self.b.ins().call(new_list, &[]);
+        let trues = self.b.inst_results(trues_call)[0];
+        let trues_var = self.fresh_var(types::I64);
+        self.b.def_var(trues_var, trues);
+
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        let idx_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(idx_var, zero);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let idx = self.b.use_var(idx_var);
+        let coll = self.b.use_var(coll_var);
+        let len_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_len, self.b.func);
+        let len_call = self.b.ins().call(len_ref, &[coll]);
+        let len = self.b.inst_results(len_call)[0];
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let get_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
+        let elem = self.b.inst_results(get_call)[0];
+        self.emit_trap_check()?;
+        let pred = self.with_bound_local(&param_place, elem_ty.clone(), elem, |this| {
+            this.lower_expr(body_expr)
+        })?;
+        let zero_b = self.b.ins().iconst(types::I8, 0);
+        let pred_true = self.b.ins().icmp(IntCC::NotEqual, pred, zero_b);
+        let to_true = self.b.create_block();
+        let to_false = self.b.create_block();
+        self.b.ins().brif(pred_true, to_true, &[], to_false, &[]);
+
+        self.b.switch_to_block(to_true);
+        self.b.seal_block(to_true);
+        let push = self
+            .module
+            .declare_func_in_func(self.host.coll.list_push, self.b.func);
+        let tlist = self.b.use_var(trues_var);
+        self.b.ins().call(push, &[tlist, elem]);
+        self.b.ins().jump(step, &[]);
+
+        self.b.switch_to_block(to_false);
+        self.b.seal_block(to_false);
+        let flist = self.b.use_var(falses_var);
+        self.b.ins().call(push, &[flist, elem]);
+        self.b.ins().jump(step, &[]);
+
+        self.b.switch_to_block(step);
+        self.b.seal_block(step);
+        let idx = self.b.use_var(idx_var);
+        let one = self.b.ins().iconst(types::I64, 1);
+        let next = self.b.ins().iadd(idx, one);
+        self.b.def_var(idx_var, next);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(exit);
+        self.b.seal_block(header);
+        self.b.seal_block(exit);
+        let falses = self.b.use_var(falses_var);
+        let trues = self.b.use_var(trues_var);
+        let handle = self.new_record(2);
+        self.set_record_slot(handle, 0, falses, &Type::Int)?;
+        self.set_record_slot(handle, 1, trues, &Type::Int)?;
+        Ok(handle)
+    }
+
+    /// Serial para_fold: call seed once, fold with step (single chunk; merge unused).
+    fn lower_para_fold(&mut self, recv: &TExpr, args: &[TExpr]) -> Result<Value, String> {
+        let elem_ty = jit_closure_elem_type(&recv.ty)
+            .ok_or_else(|| "jit closure method unsupported".to_string())?;
+        if !matches!(elem_ty, Type::Int | Type::Named(_)) || args.len() != 3 {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let TExprKind::Lambda(seed_lam) = &args[0].kind else {
+            return Err("jit closure method unsupported".to_string());
+        };
+        if !seed_lam.prep.is_empty() || !seed_lam.source_params.is_empty() {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let TLambdaBody::Expr(seed_body) = &seed_lam.executable else {
+            return Err("jit closure method unsupported".to_string());
+        };
+        let seed = self.lower_expr(seed_body)?;
+
+        let TExprKind::Lambda(step_lam) = &args[1].kind else {
+            return Err("jit closure method unsupported".to_string());
+        };
+        if !step_lam.prep.is_empty() || step_lam.source_params.len() != 2 {
+            return Err("jit closure method unsupported".to_string());
+        }
+        let TLambdaBody::Expr(step_body) = &step_lam.executable else {
+            return Err("jit closure method unsupported".to_string());
+        };
+        let acc_place = TIR::local_place(&step_lam.source_params[0]);
+        let elem_place = TIR::local_place(&step_lam.source_params[1]);
+
+        let recv_val = self.lower_expr(recv)?;
+        let coll_var = self.fresh_var(types::I64);
+        self.b.def_var(coll_var, recv_val);
+        let acc_var = self.fresh_var(types::I64);
+        self.b.def_var(acc_var, seed);
+
+        let header = self.b.create_block();
+        let body = self.b.create_block();
+        let step = self.b.create_block();
+        let exit = self.b.create_block();
+        let idx_var = self.fresh_var(types::I64);
+        let zero = self.b.ins().iconst(types::I64, 0);
+        self.b.def_var(idx_var, zero);
+        self.b.ins().jump(header, &[]);
+
+        self.b.switch_to_block(header);
+        let idx = self.b.use_var(idx_var);
+        let coll = self.b.use_var(coll_var);
+        let len_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_len, self.b.func);
+        let len_call = self.b.ins().call(len_ref, &[coll]);
+        let len = self.b.inst_results(len_call)[0];
+        let done = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, idx, len);
+        self.b.ins().brif(done, exit, &[], body, &[]);
+
+        self.b.switch_to_block(body);
+        self.b.seal_block(body);
+        let get_ref = self
+            .module
+            .declare_func_in_func(self.host.coll.list_get, self.b.func);
+        let line = self.b.ins().iconst(types::I32, 0);
+        let get_call = self.b.ins().call(get_ref, &[coll, idx, line]);
+        let elem = self.b.inst_results(get_call)[0];
+        self.emit_trap_check()?;
+        let acc = self.b.use_var(acc_var);
+        let next_acc = self.with_bound_local(&acc_place, Type::Int, acc, |this| {
+            this.with_bound_local(&elem_place, elem_ty.clone(), elem, |inner| {
+                inner.lower_expr(step_body)
             })
         })?;
         self.b.def_var(acc_var, next_acc);

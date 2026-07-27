@@ -5,31 +5,68 @@ thread_local! {
     static TEST_DEADLINE_EXCEEDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+thread_local! {
+    /// Shared `#Context(deadline: …)` budget for JIT hosts and scheduler waits.
+    /// Mirrors prelude `JET_CTX_DEADLINE_MS` (MathRandomTime.rs) — one mechanism.
+    static JIT_CTX_DEADLINE_MS: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+}
+
 mod io;
 pub use io::jet_scheduler_io_wait;
 
+fn wall_now_ms() -> i64 {
+    if let Ok(s) = std::env::var("LEX_TEST_EPOCH") {
+        if let Ok(n) = s.parse::<i64>() {
+            return n;
+        }
+    }
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
+/// Absolute deadline millis currently installed for this task/thread, if any.
+pub fn jet_scheduler_ctx_deadline_ms() -> Option<i64> {
+    JIT_CTX_DEADLINE_MS.with(|c| c.get())
+}
+
+/// Push a `#Context(deadline: …)` budget; drop restores the previous value.
+pub fn jet_scheduler_push_deadline(deadline_ms: i64) -> JetSchedulerDeadlineGuard {
+    let saved = JIT_CTX_DEADLINE_MS.with(|c| c.replace(Some(deadline_ms)));
+    JetSchedulerDeadlineGuard { saved }
+}
+
+pub struct JetSchedulerDeadlineGuard {
+    saved: Option<i64>,
+}
+
+impl Drop for JetSchedulerDeadlineGuard {
+    fn drop(&mut self) {
+        JIT_CTX_DEADLINE_MS.with(|c| c.set(self.saved));
+    }
+}
+
 #[cfg(test)]
 fn jet_deadline_remaining_ms() -> Option<i64> {
-    TEST_DEADLINE_EXCEEDED.with(|deadline| deadline.get().then_some(0))
+    if TEST_DEADLINE_EXCEEDED.with(|deadline| deadline.get()) {
+        return Some(0);
+    }
+    jet_scheduler_ctx_deadline_ms().map(|d| d.saturating_sub(wall_now_ms()))
 }
 
 #[cfg(not(test))]
 fn jet_deadline_remaining_ms() -> Option<i64> {
-    None
+    jet_scheduler_ctx_deadline_ms().map(|d| d.saturating_sub(wall_now_ms()))
 }
 
-#[cfg(test)]
-fn jet_deadline_exceeded(_kind: &str) -> ! {
-    std::panic::panic_any(JetDeadlineUnwind {
-        rendered: "deadline exceeded".to_string(),
-    });
-}
-
-#[cfg(not(test))]
-fn jet_deadline_exceeded(_kind: &str) -> ! {
-    std::panic::panic_any(JetDeadlineUnwind {
-        rendered: "Error [E3003]: deadline exceeded while waiting in a scheduler wait point\nWhy: this wait point observed the task context deadline from `#Context(deadline: …)`\nFix: raise the deadline budget or shorten the work before this wait point".to_string(),
-    })
+fn jet_deadline_exceeded(kind: &str) -> ! {
+    let rendered = format!(
+        "Error [E3003]: deadline exceeded while waiting in {kind}\n\
+Why: this wait point observed the task context deadline from `#Context(deadline: …)`\n\
+Fix: raise the deadline budget or shorten the work before this wait point"
+    );
+    std::panic::panic_any(JetDeadlineUnwind { rendered })
 }
 
 thread_local! {
@@ -1363,12 +1400,23 @@ pub fn jet_scheduler_select_int_channels(
     channels: &[JetSchedulerChannel<i64>],
     after_ms: Vec<u64>,
 ) -> i64 {
+    jet_scheduler_select_int_channels_timed(channels, after_ms.into_iter().map(|ms| (ms, 0)).collect())
+}
+
+/// Select over int channels plus typed timer arms `(ms, value)`.
+/// Timer win returns `value` (D-TASKRUNTIME1 / `g.select().after(ms, v)`).
+pub fn jet_scheduler_select_int_channels_timed(
+    channels: &[JetSchedulerChannel<i64>],
+    timers: Vec<(u64, i64)>,
+) -> i64 {
     let inners: Vec<_> = channels.iter().map(|c| c.select_inner()).collect();
+    let after_ms: Vec<u64> = timers.iter().map(|(ms, _)| *ms).collect();
     match jet_scheduler_select(inners, after_ms) {
         JetSelectOutcome::Recv { value, .. } => value,
-        JetSelectOutcome::After { .. } => {
-            jet_scheduler_fatal("select timer arm has no receive value");
-        }
+        JetSelectOutcome::After { arm } => timers
+            .get(arm)
+            .map(|(_, v)| *v)
+            .unwrap_or_else(|| jet_scheduler_fatal("select timer arm has no receive value")),
         JetSelectOutcome::Closed => {
             jet_scheduler_fatal("select closed");
         }
