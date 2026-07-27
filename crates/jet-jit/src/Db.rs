@@ -219,6 +219,184 @@ extern "C" fn jet_jit_db_query_one(handle: i64, sql: i64, params: i64) -> i64 {
     }
 }
 
+fn empty_params_wire() -> String {
+    let empty: Vec<wire::DbValue> = Vec::new();
+    wire::jet_db_encode_params(&empty)
+}
+
+fn list_of_strings(list: i64) -> Vec<String> {
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(list).unwrap_or(0);
+        let mut out = Vec::with_capacity(len as usize);
+        for i in 0..len {
+            let sid = rt.heap.list_get_int(list, i).unwrap_or(0);
+            out.push(rt.heap.clone_string(sid).unwrap_or_default());
+        }
+        out
+    })
+}
+
+extern "C" fn jet_jit_db_migrate(conn: i64, name: i64, steps: i64) -> i64 {
+    let name_s = clone_heap_string(name);
+    let steps_v = list_of_strings(steps);
+    let empty = empty_params_wire();
+    if !runtime::jet_db_begin(conn as u64) {
+        return result_err_msg(&format!("could not begin migration `{name_s}`"));
+    }
+    let create_sql =
+        "CREATE TABLE IF NOT EXISTS __jet_migrations (name TEXT PRIMARY KEY, checksum TEXT NOT NULL)"
+            .to_string();
+    match wire::jet_db_decode_execute_result(&runtime::jet_db_execute(
+        conn as u64,
+        &create_sql,
+        &empty,
+    )) {
+        Err(e) => {
+            let _ = runtime::jet_db_rollback(conn as u64);
+            return result_err_msg(&e.message);
+        }
+        Ok(_) => {}
+    }
+    let checksum = wire::jet_db_migration_checksum(&steps_v);
+    let check_sql = "SELECT checksum FROM __jet_migrations WHERE name = ?".to_string();
+    let check_vec = vec![wire::DbValue::Text(name_s.clone())];
+    let check_params = wire::jet_db_encode_params(&check_vec);
+    let existing = match wire::jet_db_decode_query_result(&runtime::jet_db_query(
+        conn as u64,
+        &check_sql,
+        &check_params,
+    )) {
+        Err(e) => {
+            let _ = runtime::jet_db_rollback(conn as u64);
+            return result_err_msg(&e.message);
+        }
+        Ok(rows) => rows,
+    };
+    if let Some(row) = existing.into_iter().next() {
+        let old = row
+            .get("checksum")
+            .and_then(|v| v.text().ok())
+            .unwrap_or_default();
+        if old == checksum {
+            if runtime::jet_db_commit(conn as u64) {
+                return result_ok_bits(0);
+            }
+            return result_err_msg(&format!("could not commit migration `{name_s}`"));
+        }
+        let _ = runtime::jet_db_rollback(conn as u64);
+        return result_err_msg(&format!("migration `{name_s}` checksum changed"));
+    }
+    let mut done: i64 = 0;
+    for sql in &steps_v {
+        match wire::jet_db_decode_execute_result(&runtime::jet_db_execute(
+            conn as u64, sql, &empty,
+        )) {
+            Ok(_) => done += 1,
+            Err(e) => {
+                let _ = runtime::jet_db_rollback(conn as u64);
+                return result_err_msg(&e.message);
+            }
+        }
+    }
+    let insert_sql = "INSERT INTO __jet_migrations (name, checksum) VALUES (?, ?)".to_string();
+    let insert_vec = vec![
+        wire::DbValue::Text(name_s.clone()),
+        wire::DbValue::Text(checksum),
+    ];
+    let insert_params = wire::jet_db_encode_params(&insert_vec);
+    match wire::jet_db_decode_execute_result(&runtime::jet_db_execute(
+        conn as u64,
+        &insert_sql,
+        &insert_params,
+    )) {
+        Err(e) => {
+            let _ = runtime::jet_db_rollback(conn as u64);
+            return result_err_msg(&e.message);
+        }
+        Ok(_) => {}
+    }
+    if runtime::jet_db_commit(conn as u64) {
+        result_ok_bits(done as u64)
+    } else {
+        result_err_msg(&format!("could not commit migration `{name_s}`"))
+    }
+}
+
+extern "C" fn jet_jit_db_transaction(conn: i64, _label: i64, steps: i64) -> i64 {
+    let steps_v = list_of_strings(steps);
+    let empty = empty_params_wire();
+    if !runtime::jet_db_begin(conn as u64) {
+        return result_err_msg("could not begin transaction");
+    }
+    let mut done: i64 = 0;
+    for sql in &steps_v {
+        match wire::jet_db_decode_execute_result(&runtime::jet_db_execute(
+            conn as u64, sql, &empty,
+        )) {
+            Ok(_) => done += 1,
+            Err(e) => {
+                let _ = runtime::jet_db_rollback(conn as u64);
+                return result_err_msg(&e.message);
+            }
+        }
+    }
+    if runtime::jet_db_commit(conn as u64) {
+        result_ok_bits(done as u64)
+    } else {
+        result_err_msg("could not commit transaction")
+    }
+}
+
+/// `db.params(sql)` — Sql is a 2-slot record `(template, params_list)`.
+extern "C" fn jet_jit_db_params(sql: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let params_list = rt.heap.record_get_int(sql, 1).unwrap_or(0);
+        let len = rt.heap.list_len(params_list).unwrap_or(0);
+        let list = rt.heap.alloc_empty_list();
+        for i in 0..len {
+            let sid = rt.heap.list_get_int(params_list, i).unwrap_or(0);
+            let h = rt.heap.alloc_record(2);
+            let _ = rt.heap.record_set_int(h, 0, DV_TEXT);
+            let _ = rt.heap.record_set_int(h, 1, sid);
+            let _ = rt.heap.list_push_int(list, h);
+        }
+        list
+    })
+}
+
+extern "C" fn jet_jit_db_row_int(row: i64, key: i64) -> i64 {
+    let key_s = clone_heap_string(key);
+    let val = Concurrency::with_runtime_mut(|rt| {
+        let kid = rt.heap.alloc_string(key_s.clone());
+        rt.heap.map_get(row, kid)
+    });
+    match val.and_then(read_dbvalue) {
+        Some(v) => match v.int() {
+            Ok(n) => result_ok_bits(n as u64),
+            Err(e) => result_err_msg(&e),
+        },
+        None => result_err_msg(&format!("missing column `{key_s}`")),
+    }
+}
+
+extern "C" fn jet_jit_db_row_text(row: i64, key: i64) -> i64 {
+    let key_s = clone_heap_string(key);
+    let val = Concurrency::with_runtime_mut(|rt| {
+        let kid = rt.heap.alloc_string(key_s.clone());
+        rt.heap.map_get(row, kid)
+    });
+    match val.and_then(read_dbvalue) {
+        Some(v) => match v.text() {
+            Ok(s) => {
+                let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
+                result_ok_bits(sid as u64)
+            }
+            Err(e) => result_err_msg(&e),
+        },
+        None => result_err_msg(&format!("missing column `{key_s}`")),
+    }
+}
+
 extern "C" fn jet_jit_dbvalue_pack(disc: i64, payload: i64) -> i64 {
     if disc == DV_FLOAT {
         alloc_dbvalue_float(f64::from_bits(payload as u64))
@@ -287,6 +465,11 @@ pub(crate) struct DbHostFns {
     pub execute: FuncId,
     pub query: FuncId,
     pub query_one: FuncId,
+    pub migrate: FuncId,
+    pub transaction: FuncId,
+    pub params: FuncId,
+    pub row_int: FuncId,
+    pub row_text: FuncId,
     pub dbvalue_pack: FuncId,
     pub dbvalue_int: FuncId,
     pub dbvalue_float: FuncId,
@@ -305,6 +488,11 @@ pub(crate) fn register_db_symbols(builder: &mut JITBuilder) {
     builder.symbol("jet_jit_db_execute", jet_jit_db_execute as *const u8);
     builder.symbol("jet_jit_db_query", jet_jit_db_query as *const u8);
     builder.symbol("jet_jit_db_query_one", jet_jit_db_query_one as *const u8);
+    builder.symbol("jet_jit_db_migrate", jet_jit_db_migrate as *const u8);
+    builder.symbol("jet_jit_db_transaction", jet_jit_db_transaction as *const u8);
+    builder.symbol("jet_jit_db_params", jet_jit_db_params as *const u8);
+    builder.symbol("jet_jit_db_row_int", jet_jit_db_row_int as *const u8);
+    builder.symbol("jet_jit_db_row_text", jet_jit_db_row_text as *const u8);
     builder.symbol("jet_jit_dbvalue_pack", jet_jit_dbvalue_pack as *const u8);
     builder.symbol("jet_jit_dbvalue_int", jet_jit_dbvalue_int as *const u8);
     builder.symbol("jet_jit_dbvalue_float", jet_jit_dbvalue_float as *const u8);
@@ -350,6 +538,11 @@ pub(crate) fn declare_db_host_fns(module: &mut JITModule) -> Result<DbHostFns, S
         execute: import("jet_jit_db_execute", &ternary)?,
         query: import("jet_jit_db_query", &ternary)?,
         query_one: import("jet_jit_db_query_one", &ternary)?,
+        migrate: import("jet_jit_db_migrate", &ternary)?,
+        transaction: import("jet_jit_db_transaction", &ternary)?,
+        params: import("jet_jit_db_params", &unary)?,
+        row_int: import("jet_jit_db_row_int", &binary)?,
+        row_text: import("jet_jit_db_row_text", &binary)?,
         dbvalue_pack: import("jet_jit_dbvalue_pack", &binary)?,
         dbvalue_int: import("jet_jit_dbvalue_int", &unary)?,
         dbvalue_float: import("jet_jit_dbvalue_float", &unary)?,

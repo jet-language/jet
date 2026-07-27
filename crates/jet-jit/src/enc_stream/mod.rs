@@ -672,6 +672,16 @@ fn take_file_reader(handle: i64) -> Result<runtime::JetFileReader, String> {
     out.unwrap_or_else(|| Err("no active JIT runtime".into()))
 }
 
+/// Drop a FileWriter handle (BufWriter Drop flushes). Used by `close` / resource cleanup.
+pub(crate) extern "C" fn jet_jit_file_writer_close(handle: i64) {
+    let _ = take_file_writer(handle);
+}
+
+/// Drop a FileReader handle.
+pub(crate) extern "C" fn jet_jit_file_reader_close(handle: i64) {
+    let _ = take_file_reader(handle);
+}
+
 fn read_limits(handle: i64) -> runtime::jet_std::EncodingLimits {
     let mut lim = runtime::jet_std::EncodingLimits::safe();
     Concurrency::with_runtime_mut(|rt| {

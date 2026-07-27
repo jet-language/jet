@@ -2566,7 +2566,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     _ => format!("({}).{}()", recv, method),
                 },
                 // D-WATCH-SCOPE1: unified watcher handle/set runtime.
-                THandleOp::WatchMethod { method } => match method.as_str() {
+                THandleOp::WatchMethod { method, .. } => match method.as_str() {
                     "on" | "once" => format!("({}).{}(&({}), {})", recv, method, a(0), a(1)),
                     "add" => format!("({}).add({})", recv, a(0)),
                     "poll" | "events" | "summary" | "cancel" => {

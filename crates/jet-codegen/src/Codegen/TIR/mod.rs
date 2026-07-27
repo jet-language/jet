@@ -708,24 +708,48 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
     let type_shapes = collect_type_shapes(&module.items);
     let mut funcs = Vec::new();
-    let entry_name = module
-        .items
-        .iter()
-        .find_map(|item| {
-                let Item::Const(value) = item else { return None };
-                value.resolved_output.as_ref().and_then(|output| {
-                    (output.selected
-                        && output.module == bundle.entry
-                        && output.params.is_empty())
-                    .then(|| output.semantic_name.clone())
-                })
-            })
-        .or_else(|| module.items.iter().find_map(|item| match item {
+    let zero_arg_entry = module.items.iter().find_map(|item| {
+        let Item::Const(value) = item else { return None };
+        value.resolved_output.as_ref().and_then(|output| {
+            (output.selected
+                && output.module == bundle.entry
+                && output.params.is_empty())
+            .then(|| output.semantic_name.clone())
+        })
+    })
+    .or_else(|| {
+        module.items.iter().find_map(|item| match item {
             Item::Func(function) if function.name == "run" && function.params.is_empty() => {
                 Some("run".to_string())
             }
             _ => None,
-        }))?;
+        })
+    });
+    let cli_run = zero_arg_entry.is_none().then(|| {
+        module.items.iter().find_map(|item| match item {
+            Item::Func(function)
+                if function.name == "run"
+                    && function.params.len() == 1
+                    && jet_foundation::CliSchema::entry_schema(&module.items).is_some() =>
+            {
+                Some(function.name.clone())
+            }
+            Item::Const(value) => value.resolved_output.as_ref().and_then(|output| {
+                (output.selected
+                    && output.module == bundle.entry
+                    && output.params.len() == 1
+                    && jet_foundation::CliSchema::entry_schema(&module.items).is_some())
+                .then(|| output.semantic_name.clone())
+            }),
+            _ => None,
+        })
+    })
+    .flatten();
+    let entry_name = match (zero_arg_entry, cli_run) {
+        (Some(name), _) => name,
+        (None, Some(_)) => "__jet_cli_main".to_string(),
+        (None, None) => return None,
+    };
     cx.jit_spawn_lambdas.borrow_mut().clear();
     cx.jit_method_calls.borrow_mut().clear();
     cx.jit_generic_calls.borrow_mut().clear();
@@ -943,7 +967,12 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     }
     lower_demanded_generic_methods(&module.items, &cx, &mut funcs)?;
     specialize_generic_free_functions(&module.items, &cx, &mut funcs);
-    if !funcs.iter().any(|function| function.name == entry_name) {
+    let entry_ok = if entry_name == "__jet_cli_main" {
+        funcs.iter().any(|function| function.name == "run")
+    } else {
+        funcs.iter().any(|function| function.name == entry_name)
+    };
+    if !entry_ok {
         return None;
     }
     let spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
@@ -1214,9 +1243,16 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
                 Some("run".to_string())
             }
             _ => None,
-        }));
+        })).or_else(|| {
+            jet_foundation::CliSchema::entry_schema(&module.items).map(|_| "__jet_cli_main".to_string())
+        });
     let Some(selected) = selected else {
         return "no zero-parameter runnable entry".to_string();
+    };
+    let entry_check = if selected == "__jet_cli_main" {
+        "run".to_string()
+    } else {
+        selected.clone()
     };
     let mut saw_entry = false;
     let mut entry_tir = false;
@@ -1224,13 +1260,17 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
         let Item::Func(f) = item else {
             continue;
         };
-        if f.name == selected {
+        if f.name == entry_check {
             saw_entry = true;
             entry_tir = tir_covers(f, &cx);
         }
     }
     if !saw_entry {
-        return "selected entry is not a top-level function".to_string();
+        return if selected == "__jet_cli_main" {
+            "cli entry missing `run`".to_string()
+        } else {
+            "selected entry is not a top-level function".to_string()
+        };
     }
     if !entry_tir {
         let mut locals: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -1238,7 +1278,7 @@ pub fn lower_jit_program_fail_reason(bundle: &ProgramBundle) -> String {
             let Item::Func(f) = item else {
                 continue;
             };
-            if f.name != selected {
+            if f.name != entry_check {
                 continue;
             }
             for (i, stmt) in f.body.iter().enumerate() {
@@ -3720,8 +3760,10 @@ pub enum THandleOp {
         method: String,
     },
     /// D-WATCH-SCOPE1: WatchHandle/WatchSet polling and callback methods.
+    /// `callback_index` is an index into `JitProgram.spawn_lambdas` for `on`/`once`.
     WatchMethod {
         method: String,
+        callback_index: Option<usize>,
     },
     /// D-HONESTNUM1=A: `Measurement<Float>` arithmetic / accessors.
     /// `.add(m)/.sub(m)/.mul(m)/.div(m)` → `(recv).<method>(a0)` → `JetMeasurement<f64>`.

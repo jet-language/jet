@@ -263,6 +263,17 @@ fn lower_lambda_expecting_with_host_borrow(
 
 /// c139 M4: lower a spawn lambda to compilable TIR for the Cranelift JIT.
 pub(crate) fn lower_spawn_lambda_for_jit(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> TJitSpawnLambda {
+    lower_spawn_lambda_for_jit_expecting(lam, cx, env, &[])
+}
+
+/// Like [`lower_spawn_lambda_for_jit`], but bare params take types from
+/// `expected_params` (watch/event callbacks pass `WatchEvent`, etc.).
+pub(crate) fn lower_spawn_lambda_for_jit_expecting(
+    lam: &Lambda,
+    cx: &Cx,
+    env: &LowerEnv,
+    expected_params: &[Type],
+) -> TJitSpawnLambda {
     let param_names: HashSet<&str> = lam.params.iter().map(|p| p.name.as_str()).collect();
     let cloned: HashSet<&str> = lam
         .meta
@@ -293,12 +304,13 @@ pub(crate) fn lower_spawn_lambda_for_jit(lam: &Lambda, cx: &Cx, env: &LowerEnv) 
     for cap in &captures {
         lam_env.bind(&cap.name, TLocal::user(&cap.name), Some(cap.ty.clone()));
     }
-    for p in &lam.params {
-        lam_env.bind(
-            &p.name,
-            TLocal::user(&p.name),
-            p.ty.clone().or_else(|| Some(Type::Int)),
-        );
+    for (i, p) in lam.params.iter().enumerate() {
+        let ty = p
+            .ty
+            .clone()
+            .or_else(|| expected_params.get(i).cloned())
+            .or_else(|| Some(Type::Int));
+        lam_env.bind(&p.name, TLocal::user(&p.name), ty);
     }
 
     let ret = lambda_body_ty(lam, cx, env);
@@ -332,7 +344,16 @@ pub(crate) fn lower_spawn_lambda_for_jit(lam: &Lambda, cx: &Cx, env: &LowerEnv) 
         params: lam
             .params
             .iter()
-            .map(|p| (p.name.clone(), p.ty.clone().unwrap_or_else(|| Type::Int)))
+            .enumerate()
+            .map(|(i, p)| {
+                (
+                    p.name.clone(),
+                    p.ty
+                        .clone()
+                        .or_else(|| expected_params.get(i).cloned())
+                        .unwrap_or_else(|| Type::Int),
+                )
+            })
             .collect(),
         captures,
         body,

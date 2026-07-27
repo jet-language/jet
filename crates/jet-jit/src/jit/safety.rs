@@ -328,33 +328,12 @@ pub(crate) fn jit_value_type(ty: &Type) -> bool {
     match ty {
         Type::Tagged { inner, .. } => jit_value_type(inner),
         Type::Named(n)
-            if matches!(
-                n.as_str(),
-                "Unit"
-                    | "Duration"
-                    | "DurationUnit"
-                    | "RangeError"
-                    | "ParseError"
-                    | "ProcessResult"
-                    | "ProcessSpec"
-                    | "ProcessChild"
-                    | "Arena"
-                    | "Bump"
-                    | "Pool"
-                    | "Fixed"
-                    | "GameScene"
-                    | "GameAssets"
-                    | "GameInputMap"
-                    | "GameFrame"
-                    | "GameInputSnapshot"
-                    | "GameImage"
-                    | "GameSound"
-                    | "GameReplay"
-                    | "GameBackend"
-                    | "RaylibWindow"
-                    | "RaylibColor"
-            ) =>
+            if n.chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_uppercase()) =>
         {
+            // Opaque i64 handles: std/user structs and enums (Date, Cmd,
+            // FileReader, WatchEvent, GameScene, …).
             true
         }
         Type::Int
@@ -688,6 +667,11 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     && elems.iter().all(|e| resident_safe_expr(e, callees)))
                 || (jit_list_record_type(&expr.ty)
                     && elems.iter().all(|e| resident_safe_expr(e, callees)))
+                || (matches!(
+                    &expr.ty,
+                    Type::List(elem) | Type::FixedList { elem, .. }
+                        if matches!(elem.as_ref(), Type::Named(_) | Type::Union(_))
+                ) && elems.iter().all(|e| resident_safe_expr(e, callees)))
         }
         TExprKind::ListSpread { parts } => {
             matches!(&expr.ty, Type::List(_) | Type::FixedList { .. })
@@ -774,12 +758,17 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             func,
             args,
         } => {
-            type_name == "BigInt"
+            ((type_name == "BigInt"
                 && matches!(
                     (func.as_str(), args.len()),
                     ("from_int" | "from_str" | "to_string", 1)
                         | ("add" | "sub" | "mul", 2)
-                )
+                ))
+                || (type_name == "Decimal"
+                    && matches!(
+                        (func.as_str(), args.len()),
+                        ("from_str" | "to_string", 1) | ("add" | "sub" | "mul", 2)
+                    )))
                 && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
         TExprKind::StructLit { fields, .. } => {
@@ -1090,10 +1079,22 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     && resident_safe_expr(clock, callees)
             }
             THostCall::YieldSend { value } => resident_safe_expr(value, callees),
+            THostCall::TypedText { arg, .. } => resident_safe_expr(arg, callees),
+            THostCall::TypedTextInterp { holes, .. } => {
+                holes.iter().all(|h| resident_safe_expr(h, callees))
+            }
             _ => false,
         },
         // Codable encode lowers to `JsonLit` (DataTree/Json foreign enum).
         TExprKind::JsonLit { arg, .. } => match arg.as_ref() {
+            None => true,
+            Some(boxed) => {
+                let (inner, _) = boxed.as_ref();
+                enum_payload_value_type(&inner.ty) && resident_safe_expr(inner, callees)
+            }
+        },
+        // D-DBDRIVER1: `DbValue.Int(n)` / `.Text(s)` / … — foreign prelude enum.
+        TExprKind::DbValueLit { arg, .. } => match arg.as_ref() {
             None => true,
             Some(boxed) => {
                 let (inner, _) = boxed.as_ref();
@@ -1358,6 +1359,7 @@ fn enum_payload_value_type(ty: &Type) -> bool {
             | Type::Float32
             | Type::Bool
             | Type::String
+            | Type::Char
             | Type::Named(_)
     ) || jit_map_string_type(ty)
         || jit_list_native_type(ty)
@@ -1650,6 +1652,12 @@ fn resident_safe_builtin_op(
                 && matches!(&args[0].ty, Type::String)
                 && resident_safe_expr(&args[0], callees)
         }
+        TBuiltinOp::MatchGroup => {
+            (matches!(&recv.ty, Type::Named(n) if n == "Match")
+                || matches!(&recv.kind, TExprKind::Local(_)))
+                && args.len() == 1
+                && resident_safe_expr(&args[0], callees)
+        }
         TBuiltinOp::DequePushFront | TBuiltinOp::DequePushBack => {
             matches!(&recv.ty, Type::Apply { name, args: targs }
                 if name == "Deque" && targs.len() == 1 && matches!(&targs[0], Type::Int))
@@ -1784,7 +1792,43 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     ) && resident_safe_expr(subj, callees)
                 }
                 TIfCond::Matches { subj, .. } => resident_safe_expr(subj, callees),
-                TIfCond::And { .. } => false,
+                TIfCond::And { left, right } => {
+                    // `if a == .V(x) && …` and similar dual conditions.
+                    matches!(
+                        (left.as_ref(), right.as_ref()),
+                        (
+                            TIfCond::Plain(e)
+                                | TIfCond::Matches { subj: e, .. }
+                                | TIfCond::IfLet { subj: e, .. }
+                                | TIfCond::IsNone { subj: e },
+                            TIfCond::Plain(e2)
+                                | TIfCond::Matches { subj: e2, .. }
+                                | TIfCond::IfLet { subj: e2, .. }
+                                | TIfCond::IsNone { subj: e2 },
+                        ) if resident_safe_expr(e, callees) && resident_safe_expr(e2, callees)
+                    ) || {
+                        // Recurse for nested And / Plain bool.
+                        let left_ok = match left.as_ref() {
+                            TIfCond::Plain(e) => {
+                                matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees)
+                            }
+                            TIfCond::IfLet { subj, .. }
+                            | TIfCond::Matches { subj, .. }
+                            | TIfCond::IsNone { subj } => resident_safe_expr(subj, callees),
+                            TIfCond::And { .. } => false,
+                        };
+                        let right_ok = match right.as_ref() {
+                            TIfCond::Plain(e) => {
+                                matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees)
+                            }
+                            TIfCond::IfLet { subj, .. }
+                            | TIfCond::Matches { subj, .. }
+                            | TIfCond::IsNone { subj } => resident_safe_expr(subj, callees),
+                            TIfCond::And { .. } => false,
+                        };
+                        left_ok && right_ok
+                    }
+                }
                 // `if maybe == .None` — Option ABI already lowered in lower_ctx.
                 TIfCond::IsNone { subj } => {
                     matches!(&subj.ty, Type::Option(_)) && resident_safe_expr(subj, callees)
@@ -1906,17 +1950,18 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                         if matches!(&recv.ty, Type::Named(n) if n == "ProcessChild")
                             && (field == "stdout" || field == "stderr")
                 );
+            let file_lines_ok = matches!(method_kind, Some(TForInMethod::LinesFile)) && var2.is_none();
+            let stdin_lines_ok =
+                matches!(method_kind, Some(TForInMethod::LinesStdin)) && var2.is_none();
             // TIR leaves `.lines()` MethodCall as Unit and the loop var unbound;
             // lower hardcodes String elems. Don't demand collection/body types.
-            if process_lines_ok {
+            if process_lines_ok || file_lines_ok || stdin_lines_ok {
                 return !columnar
                     && resident_safe_expr(source, callees)
                     && step
                         .as_ref()
                         .is_none_or(|step| resident_safe_expr(step, callees))
-                    && body
-                        .iter()
-                        .all(|s| resident_safe_process_lines_body(s, callees));
+                    && body.iter().all(|s| resident_safe_process_lines_body(s, callees));
             }
             let list_ok = method_kind.is_none()
                 && var2.is_none()
@@ -1992,7 +2037,8 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
         | TStmt::Inline(body)
         | TStmt::Unsafe(body)
         | TStmt::Shield { body }
-        | TStmt::Transact { body, .. } => {
+        | TStmt::Transact { body, .. }
+        | TStmt::Live { body } => {
             body.iter().all(|s| resident_safe_stmt(s, callees))
         }
         TStmt::ContextBlock { guards, body } => {
@@ -2096,15 +2142,22 @@ pub(crate) fn resident_safe_func_detail(tir: &TFunc, callees: &HashSet<String>) 
 
 pub(crate) fn resident_safe_program(program: &JitProgram) -> bool {
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
-    let main_ok = program.funcs.iter().any(|f| {
-        f.name == program.entry
-            && f.params.is_empty()
-            && (f.ret.is_none()
-                || matches!(&f.ret, Some(Type::Result { ok, err })
-                    if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit")
-                        && matches!(err.as_ref(), Type::String | Type::Named(_))))
-            && resident_safe_func(f, &names)
-    });
+    let main_ok = if program.entry == "__jet_cli_main" {
+        program
+            .funcs
+            .iter()
+            .any(|f| f.name == "run" && resident_safe_func(f, &names))
+    } else {
+        program.funcs.iter().any(|f| {
+            f.name == program.entry
+                && f.params.is_empty()
+                && (f.ret.is_none()
+                    || matches!(&f.ret, Some(Type::Result { ok, err })
+                        if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit")
+                            && matches!(err.as_ref(), Type::String | Type::Named(_))))
+                && resident_safe_func(f, &names)
+        })
+    };
     if !main_ok {
         return false;
     }
@@ -2240,6 +2293,16 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
             ..
         }
     ) {
+        *n += 1;
+    }
+    if let TExprKind::HandleMethod {
+        op: THandleOp::WatchMethod {
+            callback_index: Some(_),
+            ..
+        },
+        ..
+    } = &expr.kind
+    {
         *n += 1;
     }
     match &expr.kind {
@@ -2396,7 +2459,16 @@ fn resident_safe_capture_policy(c: &JitSpawnCapture) -> bool {
     if c.clone_at_spawn {
         matches!(&c.ty, Type::Apply { name, .. } if name == "Sender")
             || matches!(&c.ty, Type::Shared(_))
-            || matches!(&c.ty, Type::String | Type::Int | Type::Bool | Type::Float)
+            || matches!(
+                &c.ty,
+                Type::String
+                    | Type::Int
+                    | Type::IntN { .. }
+                    | Type::Float
+                    | Type::Float32
+                    | Type::Bool
+                    | Type::Char
+            )
     } else {
         true
     }
@@ -2431,8 +2503,72 @@ fn resident_safe_process_lines_body(stmt: &TStmt, callees: &HashSet<String>) -> 
                 TExprKind::Local(_) => true,
                 _ => resident_safe_expr(e, callees),
             },
+            TExprKind::Try { inner, .. } => match &inner.kind {
+                TExprKind::HandleMethod {
+                    op: THandleOp::FileWriterWriteLine,
+                    args,
+                    ..
+                } if args.len() == 1 => match &args[0].kind {
+                    TExprKind::BuiltinMethod { op, recv, args: a }
+                        if matches!(op, TBuiltinOp::ToUpper | TBuiltinOp::ToLower | TBuiltinOp::Trim)
+                            && a.is_empty()
+                            && matches!(&recv.kind, TExprKind::Local(_)) =>
+                    {
+                        true
+                    }
+                    TExprKind::Local(_) => true,
+                    _ => resident_safe_expr(inner, callees),
+                },
+                _ => resident_safe_expr(e, callees),
+            },
+            TExprKind::HandleMethod {
+                op: THandleOp::FileWriterWriteLine,
+                args,
+                ..
+            } if args.len() == 1 => match &args[0].kind {
+                TExprKind::BuiltinMethod { op, recv, args: a }
+                    if matches!(op, TBuiltinOp::ToUpper | TBuiltinOp::ToLower | TBuiltinOp::Trim)
+                        && a.is_empty()
+                        && matches!(&recv.kind, TExprKind::Local(_)) =>
+                {
+                    true
+                }
+                TExprKind::Local(_) => true,
+                _ => resident_safe_expr(e, callees),
+            },
             _ => resident_safe_expr(e, callees),
         },
+        TStmt::Assign { value, .. } => resident_safe_expr(value, callees),
+        TStmt::If {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
+            let cond_ok = match cond {
+                TIfCond::Plain(e) => match &e.kind {
+                    TExprKind::BuiltinMethod { op, recv, args }
+                        if matches!(op, TBuiltinOp::Contains)
+                            && args.len() == 1
+                            && matches!(&recv.kind, TExprKind::Local(_))
+                            && matches!(&args[0].ty, Type::String)
+                            && resident_safe_expr(&args[0], callees) =>
+                    {
+                        true
+                    }
+                    _ => matches!(&e.ty, Type::Bool) && resident_safe_expr(e, callees),
+                },
+                _ => false,
+            };
+            cond_ok
+                && then_body
+                    .iter()
+                    .all(|s| resident_safe_process_lines_body(s, callees))
+                && else_body.as_ref().is_none_or(|b| {
+                    b.iter()
+                        .all(|s| resident_safe_process_lines_body(s, callees))
+                })
+        }
         _ => resident_safe_stmt(stmt, callees),
     }
 }
@@ -2467,12 +2603,102 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                 )
         }
         THandleOp::PreciseMethod { type_name, method } => {
-            type_name == "BigInt"
+            ((type_name == "BigInt"
                 && recv.ty == Type::Named("BigInt".into())
                 && matches!(
                     (method.as_str(), args.len()),
                     ("add" | "sub" | "mul", 1) | ("neg" | "to_string", 0)
+                ))
+                || (type_name == "Decimal"
+                    && recv.ty == Type::Named("Decimal".into())
+                    && matches!(
+                        (method.as_str(), args.len()),
+                        ("add" | "sub" | "mul", 1) | ("to_string", 0)
+                    )))
+        }
+        THandleOp::CivilTimeMethod { method, .. } => {
+            // Civil date/time/zoned methods are host-backed; arity is checked in lower.
+            matches!(args.len(), 0 | 1 | 2)
+                && matches!(
+                    method.as_str(),
+                    "year"
+                        | "month"
+                        | "day"
+                        | "hour"
+                        | "minute"
+                        | "second"
+                        | "to_string"
+                        | "weekday"
+                        | "day_of_year"
+                        | "timestamp"
+                        | "to_timestamp"
+                        | "to_unix_ms"
+                        | "date"
+                        | "time"
+                        | "format"
+                        | "format_rfc3339"
+                        | "iso_weekday"
+                        | "iso_week"
+                        | "offset_seconds"
+                        | "elapsed_millis"
+                        | "add_days"
+                        | "add_months"
+                        | "add_years"
+                        | "add_period"
+                        | "diff_days"
+                        | "with_time"
                 )
+        }
+        THandleOp::RegexMethod { method, .. } => {
+            matches!(
+                (method.as_str(), args.len()),
+                (
+                    "matches"
+                        | "match"
+                        | "is_match"
+                        | "find"
+                        | "find_all"
+                        | "split"
+                        | "start"
+                        | "end",
+                    0..=1
+                ) | ("group" | "name", 1)
+                    | ("replace_all" | "split_limit" | "replace_all_with", 2)
+            )
+        }
+        THandleOp::FileReaderReadLine if args.is_empty() => true,
+        THandleOp::FileWriterWriteLine if args.len() == 1 => true,
+        THandleOp::FileWriterFlush if args.is_empty() => true,
+        THandleOp::StdinReadLine if args.is_empty() => true,
+        THandleOp::StdoutWrite
+        | THandleOp::StdoutWriteLine
+        | THandleOp::StdoutWriteBytes
+            if args.len() == 1 =>
+        {
+            true
+        }
+        THandleOp::StdoutFlush | THandleOp::StdoutIsTty if args.is_empty() => true,
+        THandleOp::StderrWrite
+        | THandleOp::StderrWriteLine
+        | THandleOp::StderrWriteBytes
+            if args.len() == 1 =>
+        {
+            true
+        }
+        THandleOp::StderrFlush | THandleOp::StderrIsTty if args.is_empty() => true,
+        THandleOp::DbQuery | THandleOp::DbQueryOne | THandleOp::DbExecute if args.len() == 2 => true,
+        THandleOp::DbBegin
+        | THandleOp::DbCommit
+        | THandleOp::DbRollback
+        | THandleOp::DbClose
+        | THandleOp::DbValueInt
+        | THandleOp::DbValueFloat
+        | THandleOp::DbValueText
+        | THandleOp::DbValueBool
+        | THandleOp::DbValueIsNull
+            if args.is_empty() =>
+        {
+            true
         }
         THandleOp::DurationNew { .. } => args.is_empty(),
         THandleOp::DurationIn { .. } => args.len() <= 1,
@@ -2495,8 +2721,23 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             )
         }
         THandleOp::ProcessChildMethod { method } => {
-            method == "wait" && args.is_empty()
+            matches!(
+                (method.as_str(), args.len()),
+                ("wait" | "id" | "kill" | "terminate" | "interrupt", 0)
+            )
         }
+        THandleOp::EventMethod { method } => {
+            matches!(
+                (method.as_str(), args.len()),
+                ("cancel" | "is_active", 0)
+            )
+        }
+        THandleOp::WatchMethod { method, .. } => match method.as_str() {
+            "poll" | "events" | "cancel" | "is_active" | "summary" => args.is_empty(),
+            "add" => args.len() == 1,
+            "on" | "once" => args.len() == 2,
+            _ => false,
+        },
         THandleOp::ArgsSpecFlag
         | THandleOp::ArgsSpecPositional
             if args.len() == 2 =>

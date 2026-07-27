@@ -393,6 +393,9 @@ impl<'a> JitMeta<'a> {
         if matches!(enum_name, "DataTree" | "Json" | "Toml" | "Yaml" | "Csv") {
             return Some(datatree_payload(variant));
         }
+        if enum_name == "Key" {
+            return Some(key_payload(variant));
+        }
         let key = format!("user_{enum_name}::user_{variant}");
         self.enum_variant_payload_types
             .get(&key)
@@ -498,6 +501,25 @@ impl<'a> JitMeta<'a> {
                 _ => None,
             };
         }
+        // D-TERM1: prelude `Key` / `JetKey` variant order.
+        if enum_name == "Key" {
+            return match variant {
+                "Char" => Some(0),
+                "Enter" => Some(1),
+                "Escape" => Some(2),
+                "Backspace" => Some(3),
+                "Tab" => Some(4),
+                "Delete" => Some(5),
+                "Up" => Some(6),
+                "Down" => Some(7),
+                "Left" => Some(8),
+                "Right" => Some(9),
+                "F" => Some(10),
+                "Ctrl" => Some(11),
+                "Unknown" => Some(12),
+                _ => None,
+            };
+        }
         // D-ENCSTREAM-SURFACE1 core enums (not always on JitProgram).
         if enum_name == "EncodingFormat" {
             return match variant {
@@ -590,6 +612,7 @@ impl<'a> JitMeta<'a> {
                 | "EncodingFormat"
                 | "EncodingErrorKind"
                 | "DataEvent"
+                | "Key"
         ) || self.enum_variants.contains_key(name)
     }
 
@@ -715,6 +738,7 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         // D-AUTH-TOKENPOLICY1=A — matches JetAuthClaims / JIT verify_jwt record.
         "Claims" => &["subject", "audience", "issuer", "expires_at", "issued_at"],
         "Rotation" => &["previous", "current"],
+        "WatchEvent" => &["domain", "kind", "path", "detail", "pid", "port"],
         _ => return None,
     };
     fields.iter().position(|f| *f == field)
@@ -833,6 +857,11 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
             "migration" => Some(Type::Named("MigrationStatus".into())),
             _ => None,
         },
+        "WatchEvent" => match field {
+            "domain" | "kind" | "path" | "detail" => Some(Type::String),
+            "pid" | "port" => Some(Type::Int),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -860,6 +889,17 @@ fn datatree_payload(variant: &str) -> &'static [Type] {
         "Text" => TEXT.as_slice(),
         "Array" => ARRAY.as_slice(),
         "Object" => OBJECT.as_slice(),
+        _ => &[],
+    }
+}
+
+fn key_payload(variant: &str) -> &'static [Type] {
+    use std::sync::LazyLock;
+    static CHAR: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Char]);
+    static INT: LazyLock<[Type; 1]> = LazyLock::new(|| [Type::Int]);
+    match variant {
+        "Char" | "Ctrl" => CHAR.as_slice(),
+        "F" => INT.as_slice(),
         _ => &[],
     }
 }

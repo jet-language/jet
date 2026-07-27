@@ -16,7 +16,6 @@ frontend_rejected:
 
 gate_excluded:
   game/raylib_window: interactive display required
-  io/watcher: filesystem watch loop
   lowlevel/cross: cross-target demo
   net/http_server: network service
   net/http_server_lifecycle: network service
@@ -27,9 +26,6 @@ gate_excluded:
   ui/ui_native_linux: native GTK shell
 
 non_runnable:
-  cli/positionals: no zero-parameter runnable entry
-  cli/subcommands: no zero-parameter runnable entry
-  cli/typed_entry_args: no zero-parameter runnable entry
 
 expected_exit:
   collections/list_bounds: golden expects non-zero exit
@@ -79,6 +75,9 @@ resident_jit:
   basics/switch
   basics/values
   basics/variadics_spread
+  cli/positionals
+  cli/subcommands
+  cli/typed_entry_args
   collections/struct_list_mutation
   comptime/comptime_splice
   comptime/doctests
@@ -107,6 +106,13 @@ resident_jit:
   effects/self_mutation
   effects/share_boundary
   errors/fallible_run
+  io/db_checked_sql
+  io/scope_guard
+  io/stdin_filter
+  io/stream
+  io/terminal
+  io/terminal_parity
+  io/watcher
   lowlevel/layout_c
   memory/parameter_modes
   memory/ref_field
@@ -121,8 +127,13 @@ resident_jit:
   serde/user_derive
   syntax/maturity_tags
   syntax/trailing_block
+  text/dates
+  text/datetime
+  text/decimal
+  text/regex
   text/string_parse
   text/strings
+  text/time_calendar
   tooling/bench
   tooling/canvas_blueprint_demo
   tooling/debug
@@ -231,7 +242,6 @@ deopt_interp:
   io/compress_gzip: E0956: enum match can't run at compile time yet
   io/compress_zstd: E0956: enum match can't run at compile time yet
   io/db: E0956: expr `ResourceNew` can't run at compile time yet
-  io/db_checked_sql: E0956: expr `ResourceNew` can't run at compile time yet
   io/db_read_footprint: E0956: expr `ResourceNew` can't run at compile time yet
   io/dir_entry: E0956: `core.path.join()` at comptime (impure tier) can't run at compile time yet
   io/env_overlay: E0956: expr `HostCall` can't run at compile time yet
@@ -245,11 +255,6 @@ deopt_interp:
   io/os_facts: E0956: `core.os.name()` at comptime (impure tier) can't run at compile time yet
   io/path: E0956: handle `PathFrom` can't run at compile time yet
   io/process_builder: E0956: handle `DurationNew` can't run at compile time yet
-  io/scope_guard: E0956: expr `CoreClosureCall` can't run at compile time yet
-  io/stdin_filter: E0956: for-in method collection can't run at compile time yet
-  io/stream: E0956: `core.path.join()` at comptime (impure tier) can't run at compile time yet
-  io/terminal: E0956: if-let can't run at compile time yet
-  io/terminal_parity: E0956: expr `HostCall` can't run at compile time yet
   lowlevel/ffi: E0956: expr `ExternCall` can't run at compile time yet
   lowlevel/freestanding: E0956: `core.math.sqrt()` at comptime (impure tier) can't run at compile time yet
   lowlevel/inline_asm: E0956: expr `ExternCall` can't run at compile time yet
@@ -317,14 +322,9 @@ deopt_interp:
   serde/yaml: E0956: `core.encoding.yaml.decode()` at comptime (impure tier) can't run at compile time yet
   streams/generators: E0956: expr `HostCall` can't run at compile time yet
   text/bigint
-  text/dates: E0956: `core.time.date.new()` at comptime (impure tier) can't run at compile time yet
-  text/datetime: E0956: `core.time.datetime.from_timestamp()` at comptime (impure tier) can't run at compile time yet
-  text/decimal: E0956: `core.math.decimal()` at comptime (impure tier) can't run at compile time yet
   text/hex_base64: E0956: `core.encoding.hex.encode()` at comptime (impure tier) can't run at compile time yet
   text/human_format: E0956: `core.fmt.number()` at comptime (impure tier) can't run at compile time yet
-  text/regex: E0956: `jet.regex.is_match()` at comptime (impure tier) can't run at compile time yet
   text/runtime_duration: E0956: handle `DurationNew` can't run at compile time yet
-  text/time_calendar: E0956: `core.time.parse_rfc3339()` at comptime (impure tier) can't run at compile time yet
   text/unicode_text: E0956: `core.text.unicode.scalar_count()` at comptime (impure tier) can't run at compile time yet
   text/unicode_text_audit: E0956: `core.text.byte_count()` at comptime (impure tier) can't run at compile time yet
   text/uuid: E0956: `core.uuid.v4()` at comptime (impure tier) can't run at compile time yet
