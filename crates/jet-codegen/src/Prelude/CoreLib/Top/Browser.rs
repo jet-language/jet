@@ -67,9 +67,27 @@ struct JetBrowserCapabilities {
     profile: String,
 }
 
+/// D-BROWSER-AUTO1=A (#1190): BiDi event with redacted network inspection facts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct JetBrowserEvent {
     method: String,
+    request_id: String,
+    request_method: String,
+    url_hash: String,
+    is_blocked: bool,
+    status_code: i64,
+}
+
+/// D-BROWSER-AUTO1=A (#1190): network intercept handle (explicit remove).
+#[derive(Clone)]
+struct JetBrowserIntercept {
+    state: std::rc::Rc<JetBrowserInterceptState>,
+}
+
+struct JetBrowserInterceptState {
+    browser: JetBrowser,
+    id: String,
+    removed: std::cell::Cell<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -260,6 +278,38 @@ fn jet_browser_recv_json(
     jet_browser_parse_message(&text)
 }
 
+fn jet_browser_event_network_facts(
+    value: &jet_std::JSON,
+) -> (String, String, String, bool, i64) {
+    let Some(params) = jet_browser_get(value, "params") else {
+        return (String::new(), String::new(), String::new(), false, 0);
+    };
+    let is_blocked = matches!(
+        jet_browser_get(params, "isBlocked"),
+        Some(jet_std::JSON::Boolean(true))
+    );
+    let request = jet_browser_get(params, "request");
+    let request_id = request
+        .and_then(|request| jet_browser_string(request, "request").ok())
+        .unwrap_or_default();
+    let request_method = request
+        .and_then(|request| jet_browser_string(request, "method").ok())
+        .unwrap_or_default();
+    let url_hash = request
+        .and_then(|request| jet_browser_string(request, "url").ok())
+        .map(|url| jet_browser_fact_hash(&url))
+        .unwrap_or_default();
+    let status_code = jet_browser_get(params, "response")
+        .and_then(|response| match jet_browser_get(response, "status") {
+            Some(jet_std::JSON::Number(n)) if n.is_finite() && *n >= 0.0 && *n <= 599.0 => {
+                Some(*n as i64)
+            }
+            _ => None,
+        })
+        .unwrap_or(0);
+    (request_id, request_method, url_hash, is_blocked, status_code)
+}
+
 fn jet_browser_capture_event(
     state: &mut JetBrowserState,
     value: &jet_std::JSON,
@@ -271,11 +321,20 @@ fn jet_browser_capture_event(
         return Ok(false);
     }
     let method = jet_browser_string(value, "method")?;
+    let (request_id, request_method, url_hash, is_blocked, status_code) =
+        jet_browser_event_network_facts(value);
     jet_browser_trace_push(state, format!("event:{}", jet_browser_fact_hash(&method)));
     if state.events.len() == JET_BROWSER_EVENT_LIMIT {
         state.events.pop_front();
     }
-    state.events.push_back(JetBrowserEvent { method });
+    state.events.push_back(JetBrowserEvent {
+        method,
+        request_id,
+        request_method,
+        url_hash,
+        is_blocked,
+        status_code,
+    });
     Ok(true)
 }
 
@@ -653,6 +712,140 @@ fn jet_browser_next_event(
         }
         return Err(JetBrowserError::new("protocol"));
     }
+}
+
+fn jet_browser_phase_ok(phase: &str) -> bool {
+    matches!(
+        phase,
+        "beforeRequestSent" | "responseStarted" | "authRequired"
+    )
+}
+
+fn jet_browser_add_intercept(
+    browser: &JetBrowser,
+    phase: &String,
+) -> Result<JetBrowserIntercept, JetBrowserError> {
+    if !jet_browser_phase_ok(phase) {
+        return Err(JetBrowserError::new("protocol"));
+    }
+    let result = jet_browser_command(
+        browser,
+        "network.addIntercept",
+        jet_browser_object(vec![(
+            "phases",
+            jet_std::JSON::Array(vec![jet_browser_text(phase)]),
+        )]),
+    )?;
+    Ok(JetBrowserIntercept {
+        state: std::rc::Rc::new(JetBrowserInterceptState {
+            browser: browser.clone(),
+            id: jet_browser_string(&result, "intercept")?,
+            removed: std::cell::Cell::new(false),
+        }),
+    })
+}
+
+fn jet_browser_add_intercept_url(
+    browser: &JetBrowser,
+    phase: &String,
+    url_pattern: &String,
+) -> Result<JetBrowserIntercept, JetBrowserError> {
+    if !jet_browser_phase_ok(phase) || url_pattern.is_empty() {
+        return Err(JetBrowserError::new("protocol"));
+    }
+    let pattern = jet_browser_object(vec![
+        ("type", jet_browser_text("string")),
+        ("pattern", jet_browser_text(url_pattern)),
+    ]);
+    let result = jet_browser_command(
+        browser,
+        "network.addIntercept",
+        jet_browser_object(vec![
+            (
+                "phases",
+                jet_std::JSON::Array(vec![jet_browser_text(phase)]),
+            ),
+            ("urlPatterns", jet_std::JSON::Array(vec![pattern])),
+        ]),
+    )?;
+    Ok(JetBrowserIntercept {
+        state: std::rc::Rc::new(JetBrowserInterceptState {
+            browser: browser.clone(),
+            id: jet_browser_string(&result, "intercept")?,
+            removed: std::cell::Cell::new(false),
+        }),
+    })
+}
+
+fn jet_browser_intercept_remove(intercept: &JetBrowserIntercept) -> Result<(), JetBrowserError> {
+    if intercept.state.removed.get() {
+        return Ok(());
+    }
+    jet_browser_command(
+        &intercept.state.browser,
+        "network.removeIntercept",
+        jet_browser_object(vec![("intercept", jet_browser_text(&intercept.state.id))]),
+    )?;
+    intercept.state.removed.set(true);
+    Ok(())
+}
+
+fn jet_browser_continue_request(
+    browser: &JetBrowser,
+    request_id: &String,
+) -> Result<(), JetBrowserError> {
+    if request_id.is_empty() {
+        return Err(JetBrowserError::new("protocol"));
+    }
+    jet_browser_command(
+        browser,
+        "network.continueRequest",
+        jet_browser_object(vec![("request", jet_browser_text(request_id))]),
+    )
+    .map(|_| ())
+}
+
+fn jet_browser_fail_request(
+    browser: &JetBrowser,
+    request_id: &String,
+) -> Result<(), JetBrowserError> {
+    if request_id.is_empty() {
+        return Err(JetBrowserError::new("protocol"));
+    }
+    jet_browser_command(
+        browser,
+        "network.failRequest",
+        jet_browser_object(vec![
+            ("request", jet_browser_text(request_id)),
+            ("errorReason", jet_browser_text("Failed")),
+        ]),
+    )
+    .map(|_| ())
+}
+
+fn jet_browser_fulfill_request(
+    browser: &JetBrowser,
+    request_id: &String,
+    status: i64,
+    body: &String,
+) -> Result<(), JetBrowserError> {
+    if request_id.is_empty() || !(100..=599).contains(&status) {
+        return Err(JetBrowserError::new("protocol"));
+    }
+    let body_value = jet_browser_object(vec![
+        ("type", jet_browser_text("string")),
+        ("value", jet_browser_text(body)),
+    ]);
+    jet_browser_command(
+        browser,
+        "network.provideResponse",
+        jet_browser_object(vec![
+            ("request", jet_browser_text(request_id)),
+            ("statusCode", jet_std::JSON::Number(status as f64)),
+            ("body", body_value),
+        ]),
+    )
+    .map(|_| ())
 }
 
 fn jet_browser_protocol(
@@ -1213,6 +1406,26 @@ fn jet_browser_locator_press(
 
 fn jet_browser_event_kind(event: &JetBrowserEvent) -> String {
     event.method.clone()
+}
+
+fn jet_browser_event_request_id(event: &JetBrowserEvent) -> String {
+    event.request_id.clone()
+}
+
+fn jet_browser_event_request_method(event: &JetBrowserEvent) -> String {
+    event.request_method.clone()
+}
+
+fn jet_browser_event_url_hash(event: &JetBrowserEvent) -> String {
+    event.url_hash.clone()
+}
+
+fn jet_browser_event_is_blocked(event: &JetBrowserEvent) -> bool {
+    event.is_blocked
+}
+
+fn jet_browser_event_status_code(event: &JetBrowserEvent) -> i64 {
+    event.status_code
 }
 
 fn jet_browser_protocol_send(

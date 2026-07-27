@@ -47,6 +47,7 @@ enum BrowserHostValue {
     Page(JetBrowserPage),
     Frame(JetBrowserFrame),
     Locator(JetBrowserLocator),
+    Intercept(JetBrowserIntercept),
     Protocol(JetBrowserProtocol),
 }
 
@@ -124,6 +125,30 @@ fn host_error(what: &str, span: Span) -> Diagnostic {
         "create and use the Browser value in one `jet dev` iteration".to_string(),
         Some(span),
     )
+}
+
+fn int_arg(args: &[CtValue], index: usize, span: Span) -> Result<i64, Diagnostic> {
+    match args.get(index) {
+        Some(CtValue::Int(value)) => Ok(*value),
+        _ => Err(host_error("Int argument", span)),
+    }
+}
+
+fn event_ct(event: JetBrowserEvent) -> CtValue {
+    CtValue::Struct {
+        type_name: "BrowserEvent".to_string(),
+        fields: vec![
+            ("method".to_string(), CtValue::Str(event.method)),
+            ("request_id".to_string(), CtValue::Str(event.request_id)),
+            (
+                "request_method".to_string(),
+                CtValue::Str(event.request_method),
+            ),
+            ("url_hash".to_string(), CtValue::Str(event.url_hash)),
+            ("is_blocked".to_string(), CtValue::Bool(event.is_blocked)),
+            ("status_code".to_string(), CtValue::Int(event.status_code)),
+        ],
+    }
 }
 
 fn string_arg(args: &[CtValue], index: usize, span: Span) -> Result<String, Diagnostic> {
@@ -285,10 +310,36 @@ pub(crate) fn eval_method(
                     browser,
                     timeout_value(args.first().ok_or_else(|| host_error("timeout", span))?, span)?,
                 ),
-                |event| CtValue::Struct {
-                    type_name: "BrowserEvent".to_string(),
-                    fields: vec![("method".to_string(), CtValue::Str(event.method))],
-                },
+                event_ct,
+            ),
+            (BrowserHostValue::Browser(browser), "add_intercept") => result(
+                jet_browser_add_intercept(browser, &string_arg(args, 0, span)?),
+                |intercept| store("BrowserIntercept", BrowserHostValue::Intercept(intercept)),
+            ),
+            (BrowserHostValue::Browser(browser), "add_intercept_url") => result(
+                jet_browser_add_intercept_url(
+                    browser,
+                    &string_arg(args, 0, span)?,
+                    &string_arg(args, 1, span)?,
+                ),
+                |intercept| store("BrowserIntercept", BrowserHostValue::Intercept(intercept)),
+            ),
+            (BrowserHostValue::Browser(browser), "continue_request") => result(
+                jet_browser_continue_request(browser, &string_arg(args, 0, span)?),
+                |_| CtValue::Unit,
+            ),
+            (BrowserHostValue::Browser(browser), "fail_request") => result(
+                jet_browser_fail_request(browser, &string_arg(args, 0, span)?),
+                |_| CtValue::Unit,
+            ),
+            (BrowserHostValue::Browser(browser), "fulfill_request") => result(
+                jet_browser_fulfill_request(
+                    browser,
+                    &string_arg(args, 0, span)?,
+                    int_arg(args, 1, span)?,
+                    &string_arg(args, 2, span)?,
+                ),
+                |_| CtValue::Unit,
             ),
             (BrowserHostValue::Browser(browser), "protocol") => result(
                 jet_browser_protocol(browser, &string_arg(args, 0, span)?),
@@ -414,6 +465,9 @@ pub(crate) fn eval_method(
                 jet_browser_locator_press(locator, &string_arg(args, 0, span)?),
                 |_| CtValue::Unit,
             ),
+            (BrowserHostValue::Intercept(intercept), "remove") => {
+                result(jet_browser_intercept_remove(intercept), |_| CtValue::Unit)
+            }
             (BrowserHostValue::Protocol(protocol), "send") => result(
                 jet_browser_protocol_send(
                     protocol,
@@ -434,6 +488,11 @@ pub(crate) fn eval_value_method(
 ) -> Result<Option<CtValue>, Diagnostic> {
     let value = match (kind, method) {
         ("BrowserEvent", "kind") => field(recv, kind, "method").cloned(),
+        ("BrowserEvent", "request_id" | "request_method" | "url_hash") => {
+            field(recv, kind, method).cloned()
+        }
+        ("BrowserEvent", "is_blocked") => field(recv, kind, "is_blocked").cloned(),
+        ("BrowserEvent", "status_code") => field(recv, kind, "status_code").cloned(),
         ("BrowserCapabilities", "bidi" | "cdp" | "profile") => {
             field(recv, kind, method).cloned()
         }

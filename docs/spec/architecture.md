@@ -230,7 +230,13 @@ without auto-closing listed frames on drop — frame close is explicit.
 uses semantic accessibility locators (`get_by_role`, `get_by_label`), text and
 CSS helpers (`get_by_text`, `get_by_placeholder`, `get_by_test_id`, `get_by_css`),
 locator actions (`click`, `hover`, `fill`, `press`), and bounded deterministic
-waits (`wait`, `wait_gone`). The expert path
+waits (`wait`, `wait_gone`). `Browser.subscribe` / `next_event` deliver BiDi
+events; network events expose redacted inspection facts (`request_id`,
+`request_method`, `url_hash`, `is_blocked`, `status_code`) without putting URLs
+or payloads in the trace. `add_intercept` / `add_intercept_url` register BiDi
+network intercepts; paused requests use `continue_request`, `fail_request`, or
+`fulfill_request`, and `BrowserIntercept.remove` is explicit and idempotent.
+The expert path
 exposes raw BiDi and capability-checked CDP commands through
 `Browser.protocol`.
 

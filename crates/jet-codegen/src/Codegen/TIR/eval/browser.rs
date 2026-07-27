@@ -28,6 +28,7 @@ pub(super) fn handle(
             | "BrowserPage"
             | "BrowserFrame"
             | "BrowserLocator"
+            | "BrowserIntercept"
             | "BrowserEvent"
             | "BrowserTrace"
             | "BrowserCapabilities"

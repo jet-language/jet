@@ -593,6 +593,11 @@ fn run() {
 
     session.subscribe(1) ?? return
     session.next_event("soon") ?? return
+    session.add_intercept(1) ?? return
+    session.add_intercept_url(1, 2) ?? return
+    session.continue_request(1) ?? return
+    session.fail_request(1) ?? return
+    session.fulfill_request(1, "200", 3) ?? return
     session.protocol(1) ?? return
     page.goto(1) ?? return
     wrong_locator :: page.get_by_role(1, 2)
@@ -615,6 +620,11 @@ fn run() {
     for method in [
         "subscribe",
         "next_event",
+        "add_intercept",
+        "add_intercept_url",
+        "continue_request",
+        "fail_request",
+        "fulfill_request",
         "protocol",
         "goto",
         "get_by_role",
@@ -692,6 +702,15 @@ fn connect() =[FS]=> Unit { browser.connect("ws://127.0.0.1:1") ?? return }
 fn context(session: Browser) =[FS]=> Unit { session.context() ?? return }
 fn subscribe(session: Browser) =[FS]=> Unit { session.subscribe("log.entryAdded") ?? return }
 fn next(session: Browser, timeout: BrowserTimeout) =[FS]=> Unit { session.next_event(timeout) ?? return }
+fn add_intercept(session: Browser) =[FS]=> Unit { session.add_intercept("beforeRequestSent") ?? return }
+fn add_intercept_url(session: Browser) =[FS]=> Unit {
+    session.add_intercept_url("beforeRequestSent", "https://example.test/*") ?? return
+}
+fn continue_request(session: Browser) =[FS]=> Unit { session.continue_request("req-1") ?? return }
+fn fail_request(session: Browser) =[FS]=> Unit { session.fail_request("req-1") ?? return }
+fn fulfill_request(session: Browser) =[FS]=> Unit {
+    session.fulfill_request("req-1", 200, "blocked") ?? return
+}
 fn protocol(session: Browser) =[FS]=> Unit { session.protocol("bidi") ?? return }
 fn close(session: Browser) =[FS]=> Unit { session.close() ?? return }
 fn page(context: BrowserContext) =[FS]=> Unit { context.page() ?? return }
@@ -705,12 +724,13 @@ fn click(locator: BrowserLocator) =[FS]=> Unit { locator.click() ?? return }
 fn hover(locator: BrowserLocator) =[FS]=> Unit { locator.hover() ?? return }
 fn fill(locator: BrowserLocator) =[FS]=> Unit { locator.fill("value") ?? return }
 fn press(locator: BrowserLocator) =[FS]=> Unit { locator.press("Enter") ?? return }
+fn remove(intercept: BrowserIntercept) =[FS]=> Unit { intercept.remove() ?? return }
 fn send(protocol: BrowserProtocol) =[FS]=> Unit { protocol.send("session.status", "{{}}") ?? return }
 fn run() {}
 "#;
     let diags = jet::compile(source).expect_err("Browser I/O methods must infer Net");
     assert!(
-        diags.iter().filter(|diag| diag.code == "E0740").count() >= 18,
+        diags.iter().filter(|diag| diag.code == "E0740").count() >= 24,
         "Browser connect and every I/O method must violate an FS-only bound: {diags:?}"
     );
 }
@@ -1511,3 +1531,313 @@ fn run() {
         "missing locator must not click: {methods:?}"
     );
 }
+
+fn run_network_events(listener: TcpListener) -> Vec<String> {
+    let (mut stream, _) = listener.accept().unwrap();
+    accept_websocket(&mut stream);
+    let mut methods = Vec::new();
+    let mut add_intercepts = 0usize;
+    for _ in 0..20 {
+        let request = read_text_frame(&mut stream);
+        let id = field(&request, "id");
+        let method = field(&request, "method");
+        methods.push(method.clone());
+        match method.as_str() {
+            "session.status" => write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{{"ready":true,"message":"ready"}}}}"#),
+            ),
+            "session.new" => write_text_frame(
+                &mut stream,
+                &format!(
+                    r#"{{"type":"success","id":{id},"result":{{"sessionId":"mock-session","capabilities":{{"browserName":"mock","browserVersion":"1"}}}}}}"#
+                ),
+            ),
+            "session.subscribe" => write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{{}}}}"#),
+            ),
+            "network.addIntercept" => {
+                add_intercepts += 1;
+                write_text_frame(
+                    &mut stream,
+                    &format!(
+                        r#"{{"type":"success","id":{id},"result":{{"intercept":"intercept-{add_intercepts}"}}}}"#
+                    ),
+                );
+                if add_intercepts == 1 {
+                    // Deliver a blocked request event with a secret URL that must stay redacted.
+                    write_text_frame(
+                        &mut stream,
+                        r#"{"type":"event","method":"network.beforeRequestSent","params":{"isBlocked":true,"request":{"request":"req-secret-1","method":"GET","url":"https://leak.example/TOP_SECRET_TOKEN"},"response":null}}"#,
+                    );
+                }
+            }
+            "network.continueRequest" | "network.failRequest" | "network.provideResponse"
+            | "network.removeIntercept" | "session.end" => write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{{}}}}"#),
+            ),
+            other => panic!("unexpected BiDi method {other}: {request}"),
+        }
+        if method == "session.end" {
+            break;
+        }
+    }
+    methods
+}
+
+#[test]
+fn native_bidi_network_events_inspection_and_interception() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!(
+        "ws://{}/session?token=NETWORK_SECRET",
+        listener.local_addr().unwrap()
+    );
+    let server = thread::spawn(move || run_network_events(listener));
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    session.subscribe("network.beforeRequestSent") ?? panic("subscribe")
+
+    intercept :: session.add_intercept("beforeRequestSent") ?? panic("add_intercept")
+    event :: session.next_event(timeout) ?? panic("next_event")
+    print(event.kind())
+    print(event.request_id())
+    print(event.request_method())
+    print(event.is_blocked())
+    hash :: event.url_hash()
+    print(hash.len() == 16)
+    print(hash.contains("SECRET") == false)
+
+    session.continue_request(event.request_id()) ?? panic("continue")
+    session.fail_request("req-secret-1") ?? panic("fail")
+    session.fulfill_request("req-secret-1", 200, "ok") ?? panic("fulfill")
+
+    url_intercept :: session.add_intercept_url("beforeRequestSent", "https://api.test/*")
+        ?? panic("add_intercept_url")
+    url_intercept.remove() ?? panic("remove url")
+    intercept.remove() ?? panic("remove")
+    intercept.remove() ?? panic("remove idempotent")
+
+    print("network:ok")
+    session.close() ?? panic("session close")
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_network",
+        "browser_bidi_network",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert!(stdout.contains("network.beforeRequestSent\n"), "{stdout}");
+    assert!(stdout.contains("req-secret-1\n"), "{stdout}");
+    assert!(stdout.contains("GET\n"), "{stdout}");
+    assert!(stdout.contains("true\n"), "{stdout}");
+    assert!(stdout.contains("network:ok\n"), "{stdout}");
+    assert!(!stdout.contains("TOP_SECRET"), "{stdout}");
+    assert!(!stdout.contains("NETWORK_SECRET"), "{stdout}");
+    assert!(!stderr.contains("TOP_SECRET"), "{stderr}");
+    assert!(!stderr.contains("NETWORK_SECRET"), "{stderr}");
+    let methods = server.join().unwrap();
+    assert!(
+        methods.iter().any(|m| m == "session.subscribe"),
+        "{methods:?}"
+    );
+    assert_eq!(
+        methods.iter().filter(|m| *m == "network.addIntercept").count(),
+        2,
+        "{methods:?}"
+    );
+    assert!(
+        methods.iter().any(|m| m == "network.continueRequest"),
+        "{methods:?}"
+    );
+    assert!(
+        methods.iter().any(|m| m == "network.failRequest"),
+        "{methods:?}"
+    );
+    assert!(
+        methods.iter().any(|m| m == "network.provideResponse"),
+        "{methods:?}"
+    );
+    assert_eq!(
+        methods.iter().filter(|m| *m == "network.removeIntercept").count(),
+        2,
+        "second remove must be local-idempotent: {methods:?}"
+    );
+    assert_eq!(methods.last().map(String::as_str), Some("session.end"));
+}
+
+#[test]
+fn native_bidi_network_intercept_rejects_bad_phase_and_empty_request() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!(
+        "ws://{}/session?token=HOSTILE_NETWORK_SECRET",
+        listener.local_addr().unwrap()
+    );
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        accept_websocket(&mut stream);
+        let mut methods = Vec::new();
+        for _ in 0..10 {
+            let request = read_text_frame(&mut stream);
+            let id = field(&request, "id");
+            let method = field(&request, "method");
+            methods.push(method.clone());
+            let result = match method.as_str() {
+                "session.status" => r#"{"ready":true,"message":"ready"}"#,
+                "session.new" => {
+                    r#"{"sessionId":"mock-session","capabilities":{"browserName":"mock","browserVersion":"1"}}"#
+                }
+                "session.end" => "{}",
+                other => panic!("unexpected BiDi method {other}: {request}"),
+            };
+            write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+            );
+            if method == "session.end" {
+                break;
+            }
+        }
+        methods
+    });
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(200) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+
+    loop attempt; [1] {
+        session.add_intercept("not-a-phase") ?? next
+        print("unexpected phase")
+    }
+    loop attempt; [1] {
+        session.continue_request("") ?? next
+        print("unexpected empty")
+    }
+    loop attempt; [1] {
+        session.fulfill_request("req", 99, "nope") ?? next
+        print("unexpected status")
+    }
+    print("caught")
+    session.close() ?? panic("close")
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_network_hostile",
+        "browser_bidi_network_hostile",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "caught\n");
+    assert!(!stdout.contains("SECRET"), "{stdout}");
+    assert!(!stderr.contains("SECRET"), "{stderr}");
+    let methods = server.join().unwrap();
+    assert!(
+        !methods.iter().any(|m| m.starts_with("network.")),
+        "invalid client calls must not hit the wire: {methods:?}"
+    );
+}
+
+#[test]
+fn native_bidi_network_response_event_exposes_status_without_payload_leak() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!(
+        "ws://{}/session?token=RESPONSE_SECRET",
+        listener.local_addr().unwrap()
+    );
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        accept_websocket(&mut stream);
+        let mut methods = Vec::new();
+        for _ in 0..12 {
+            let request = read_text_frame(&mut stream);
+            let id = field(&request, "id");
+            let method = field(&request, "method");
+            methods.push(method.clone());
+            match method.as_str() {
+                "session.status" => write_text_frame(
+                    &mut stream,
+                    &format!(
+                        r#"{{"type":"success","id":{id},"result":{{"ready":true,"message":"ready"}}}}"#
+                    ),
+                ),
+                "session.new" => write_text_frame(
+                    &mut stream,
+                    &format!(
+                        r#"{{"type":"success","id":{id},"result":{{"sessionId":"mock-session","capabilities":{{"browserName":"mock","browserVersion":"1"}}}}}}"#
+                    ),
+                ),
+                "session.subscribe" => {
+                    write_text_frame(
+                        &mut stream,
+                        &format!(r#"{{"type":"success","id":{id},"result":{{}}}}"#),
+                    );
+                    write_text_frame(
+                        &mut stream,
+                        r#"{"type":"event","method":"network.responseCompleted","params":{"isBlocked":false,"request":{"request":"req-2","method":"POST","url":"https://api.example/SECRET_PATH"},"response":{"status":201,"headers":[{"name":"set-cookie","value":"session=SECRET"}]}}}"#,
+                    );
+                }
+                "session.end" => write_text_frame(
+                    &mut stream,
+                    &format!(r#"{{"type":"success","id":{id},"result":{{}}}}"#),
+                ),
+                other => panic!("unexpected BiDi method {other}: {request}"),
+            }
+            if method == "session.end" {
+                break;
+            }
+        }
+        methods
+    });
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    session.subscribe("network.responseCompleted") ?? panic("subscribe")
+    event :: session.next_event(timeout) ?? panic("next_event")
+    print(event.kind())
+    print(event.request_method())
+    print(event.status_code())
+    print(event.is_blocked())
+    print(event.url_hash().contains("SECRET") == false)
+    trace :: session.trace()
+    print(trace.redacted())
+    print(trace.summary().contains("SECRET") == false)
+    print("response:ok")
+    session.close() ?? panic("close")
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_network_response",
+        "browser_bidi_network_response",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert!(stdout.contains("network.responseCompleted\n"), "{stdout}");
+    assert!(stdout.contains("POST\n"), "{stdout}");
+    assert!(stdout.contains("201\n"), "{stdout}");
+    assert!(stdout.contains("response:ok\n"), "{stdout}");
+    assert!(!stdout.contains("SECRET"), "{stdout}");
+    assert!(!stderr.contains("SECRET"), "{stderr}");
+    let methods = server.join().unwrap();
+    assert_eq!(methods.last().map(String::as_str), Some("session.end"));
+}
+
