@@ -10828,11 +10828,20 @@ impl LowerCtx<'_, '_> {
                     let call = self.b.ins().call(host, &[handle, field_v]);
                     return Ok(self.b.inst_results(call)[0]);
                 }
-                // TIR may leave CORE struct fields as Int when cx.struct_fields
-                // lacks the type; recover the real ABI type for get_*/print.
-                let field_ty = self.meta.struct_field_ty(&type_name, field)
-                    .or_else(|| core_struct_field_type(&type_name, field))
-                    .unwrap_or_else(|| expr.ty.clone());
+                // Prefer TIR field type for ABI. Metadata on generic owners still
+                // has binder params (`Wrap.value: T`); using that picks
+                // `struct_get_i64` for a String slot (stored via `struct_set_str`)
+                // and yields handle 0 — often a stale compile-time string lit.
+                // Fall back to meta only when TIR left Int (CORE structs missing
+                // from `cx.struct_fields`).
+                let field_ty = if matches!(&expr.ty, Type::Int) {
+                    self.meta
+                        .struct_field_ty(&type_name, field)
+                        .or_else(|| core_struct_field_type(&type_name, field))
+                        .unwrap_or_else(|| expr.ty.clone())
+                } else {
+                    expr.ty.clone()
+                };
                 self.lower_record_field(handle, &type_name, field, &field_ty)
             }
             TExprKind::MethodCall {
