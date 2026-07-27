@@ -4,6 +4,7 @@
 // Traces keep method/sequence facts only: endpoints, parameters, results, event
 // payloads, and page data never enter the trace.
 // #1192: CDP is a capability-checked expert supplement via protocol("cdp") only.
+// #1193: cleanup, profile isolation, privacy facts, and redacted receipts.
 
 const JET_BROWSER_TRACE_LIMIT_BYTES: usize = 8 * 1024;
 const JET_BROWSER_EVENT_LIMIT: usize = 256;
@@ -96,6 +97,24 @@ struct JetBrowserInterceptState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct JetBrowserTrace {
     entries: Vec<String>,
+}
+
+/// D-BROWSER-AUTO1=A (#1193): session privacy defaults — isolated profiles and
+/// redacted receipts are always on; shared profiles are always denied.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JetBrowserPrivacy {
+    isolated_profiles: bool,
+    redact_receipts: bool,
+    shared_profiles: bool,
+}
+
+/// D-BROWSER-AUTO1=A (#1193): normal audit receipt. Entries mirror the redacted
+/// trace; secrets, endpoints, and page data never appear.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct JetBrowserReceipt {
+    entries: Vec<String>,
+    isolated: bool,
+    cleaned: bool,
 }
 
 struct JetBrowserState {
@@ -921,6 +940,25 @@ fn jet_browser_trace(browser: &JetBrowser) -> JetBrowserTrace {
     }
 }
 
+/// D-BROWSER-AUTO1=A (#1193): privacy defaults for the connected session.
+fn jet_browser_privacy(_browser: &JetBrowser) -> JetBrowserPrivacy {
+    JetBrowserPrivacy {
+        isolated_profiles: true,
+        redact_receipts: true,
+        shared_profiles: false,
+    }
+}
+
+/// D-BROWSER-AUTO1=A (#1193): normal receipt — redacted facts only.
+fn jet_browser_receipt(browser: &JetBrowser) -> JetBrowserReceipt {
+    let state = browser.state.borrow();
+    JetBrowserReceipt {
+        entries: state.trace.clone(),
+        isolated: true,
+        cleaned: state.closed,
+    }
+}
+
 fn jet_browser_close(browser: &JetBrowser) -> Result<(), JetBrowserError> {
     let state = browser.state.borrow();
     if state.closed {
@@ -987,10 +1025,24 @@ fn jet_browser_context_close(context: &JetBrowserContext) -> Result<(), JetBrows
     jet_browser_context_state_close(&context.state)
 }
 
+/// D-BROWSER-AUTO1=A (#1193): contexts are always isolated BiDi user contexts.
+fn jet_browser_context_isolated(_context: &JetBrowserContext) -> bool {
+    true
+}
+
+/// D-BROWSER-AUTO1=A (#1193): hashed user-context id for receipts (never raw).
+fn jet_browser_context_user_hash(context: &JetBrowserContext) -> String {
+    jet_browser_fact_hash(&context.state.id)
+}
+
 fn jet_browser_context_state_close(
     context: &JetBrowserContextState,
 ) -> Result<(), JetBrowserError> {
     if context.closed.get() {
+        return Ok(());
+    }
+    if context.browser.state.borrow().closed {
+        context.closed.set(true);
         return Ok(());
     }
     jet_browser_command(
@@ -1453,7 +1505,10 @@ fn jet_browser_frame_close(frame: &JetBrowserFrame) -> Result<(), JetBrowserErro
     if frame.state.closed.get() {
         return Ok(());
     }
-    if frame.state.page.closed.get() || frame.state.page.context.closed.get() {
+    if frame.state.page.closed.get()
+        || frame.state.page.context.closed.get()
+        || frame.state.browser.state.borrow().closed
+    {
         frame.state.closed.set(true);
         return Ok(());
     }
@@ -1477,7 +1532,7 @@ fn jet_browser_page_state_close(page: &JetBrowserPageState) -> Result<(), JetBro
     if page.closed.get() {
         return Ok(());
     }
-    if page.context.closed.get() {
+    if page.context.closed.get() || page.browser.state.borrow().closed {
         page.closed.set(true);
         return Ok(());
     }
@@ -1872,4 +1927,38 @@ fn jet_browser_trace_redacted(trace: &JetBrowserTrace) -> bool {
 
 fn jet_browser_trace_summary(trace: &JetBrowserTrace) -> String {
     trace.entries.join(",")
+}
+
+fn jet_browser_privacy_isolated_profiles(privacy: &JetBrowserPrivacy) -> bool {
+    privacy.isolated_profiles
+}
+
+fn jet_browser_privacy_redact_receipts(privacy: &JetBrowserPrivacy) -> bool {
+    privacy.redact_receipts
+}
+
+fn jet_browser_privacy_shared_profiles(privacy: &JetBrowserPrivacy) -> bool {
+    privacy.shared_profiles
+}
+
+fn jet_browser_receipt_entry_count(receipt: &JetBrowserReceipt) -> i64 {
+    receipt.entries.len() as i64
+}
+
+fn jet_browser_receipt_redacted(receipt: &JetBrowserReceipt) -> bool {
+    jet_browser_trace_redacted(&JetBrowserTrace {
+        entries: receipt.entries.clone(),
+    })
+}
+
+fn jet_browser_receipt_isolated(receipt: &JetBrowserReceipt) -> bool {
+    receipt.isolated
+}
+
+fn jet_browser_receipt_cleaned(receipt: &JetBrowserReceipt) -> bool {
+    receipt.cleaned
+}
+
+fn jet_browser_receipt_summary(receipt: &JetBrowserReceipt) -> String {
+    receipt.entries.join(",")
 }

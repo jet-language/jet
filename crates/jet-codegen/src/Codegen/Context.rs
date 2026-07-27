@@ -1087,6 +1087,8 @@ impl Cx {
             Type::Named(name) if name == "BrowserIntercept" => "JetBrowserIntercept".to_string(),
             Type::Named(name) if name == "BrowserEvent" => "JetBrowserEvent".to_string(),
             Type::Named(name) if name == "BrowserTrace" => "JetBrowserTrace".to_string(),
+            Type::Named(name) if name == "BrowserReceipt" => "JetBrowserReceipt".to_string(),
+            Type::Named(name) if name == "BrowserPrivacy" => "JetBrowserPrivacy".to_string(),
             Type::Named(name) if name == "BrowserError" => "JetBrowserError".to_string(),
             Type::Named(name) if name == "BrowserCapabilities" => {
                 "JetBrowserCapabilities".to_string()
@@ -2332,6 +2334,8 @@ pub(crate) fn build_cx_items(
         "BrowserIntercept",
         "BrowserEvent",
         "BrowserTrace",
+        "BrowserReceipt",
+        "BrowserPrivacy",
         "BrowserError",
         "BrowserCapabilities",
         "BrowserProfile",

@@ -18,8 +18,8 @@ impl<'a> Checker<'a> {
         span: Span,
     ) -> bool {
         let expected = match (type_name, method) {
-            ("Browser", "capabilities" | "context" | "close" | "trace")
-            | ("BrowserContext", "page" | "tab" | "close")
+            ("Browser", "capabilities" | "context" | "close" | "trace" | "privacy" | "receipt")
+            | ("BrowserContext", "page" | "tab" | "close" | "isolated" | "user_hash")
             | ("BrowserPage", "close" | "main_frame" | "frames" | "screenshot" | "pdf"
                 | "clear_cookies")
             | ("BrowserFrame", "close")
@@ -29,6 +29,8 @@ impl<'a> Checker<'a> {
                 | "is_blocked" | "status_code" | "download_id" | "suggested_filename_hash")
             | ("BrowserCapabilities", "bidi" | "cdp" | "profile")
             | ("BrowserTrace", "entry_count" | "redacted" | "summary")
+            | ("BrowserReceipt", "entry_count" | "redacted" | "summary" | "isolated" | "cleaned")
+            | ("BrowserPrivacy", "isolated_profiles" | "redact_receipts" | "shared_profiles")
             | ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => Vec::new(),
             ("BrowserLocked", "verify") => Vec::new(),
             ("Browser", "subscribe" | "protocol" | "add_intercept" | "continue_request"
@@ -210,6 +212,12 @@ pub fn net_method_return(
         ("Browser", "trace") => {
             Some(Some(Type::Named("BrowserTrace".to_string())))
         }
+        ("Browser", "privacy") => {
+            Some(Some(Type::Named("BrowserPrivacy".to_string())))
+        }
+        ("Browser", "receipt") => {
+            Some(Some(Type::Named("BrowserReceipt".to_string())))
+        }
         ("BrowserContext", "page" | "tab") => Some(Some(Type::Result {
             ok: Box::new(Type::Named("BrowserPage".to_string())),
             err: Box::new(Type::Named("BrowserError".to_string())),
@@ -218,6 +226,8 @@ pub fn net_method_return(
             ok: Box::new(unit.clone()),
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
+        ("BrowserContext", "isolated") => Some(Some(Type::Bool)),
+        ("BrowserContext", "user_hash") => Some(Some(Type::String)),
         ("BrowserPage", "goto") => Some(Some(Type::Result {
             ok: Box::new(unit.clone()),
             err: Box::new(Type::Named("BrowserError".to_string())),
@@ -282,6 +292,12 @@ pub fn net_method_return(
         ("BrowserTrace", "entry_count") => Some(Some(Type::Int)),
         ("BrowserTrace", "redacted") => Some(Some(Type::Bool)),
         ("BrowserTrace", "summary") => Some(Some(Type::String)),
+        ("BrowserReceipt", "entry_count") => Some(Some(Type::Int)),
+        ("BrowserReceipt", "redacted" | "isolated" | "cleaned") => Some(Some(Type::Bool)),
+        ("BrowserReceipt", "summary") => Some(Some(Type::String)),
+        ("BrowserPrivacy", "isolated_profiles" | "redact_receipts" | "shared_profiles") => {
+            Some(Some(Type::Bool))
+        }
         ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => {
             Some(Some(Type::String))
         }
@@ -676,6 +692,8 @@ pub fn http_type_method_return(
                 err: Box::new(Type::Named("BrowserError".to_string())),
             })),
             ("trace", 0) => mk("BrowserTrace"),
+            ("privacy", 0) => mk("BrowserPrivacy"),
+            ("receipt", 0) => mk("BrowserReceipt"),
             _ => None,
         },
         Type::Named(n) if n == "BrowserContext" => match (method, _args.len()) {
@@ -687,6 +705,8 @@ pub fn http_type_method_return(
                 ok: Box::new(unit_ty()),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             })),
+            ("isolated", 0) => Some(Some(Type::Bool)),
+            ("user_hash", 0) => mk_str(),
             _ => None,
         },
         Type::Named(n) if n == "BrowserPage" => match (method, _args.len()) {
@@ -763,6 +783,18 @@ pub fn http_type_method_return(
             ("entry_count", 0) => mk_int(),
             ("redacted", 0) => Some(Some(Type::Bool)),
             ("summary", 0) => mk_str(),
+            _ => None,
+        },
+        Type::Named(n) if n == "BrowserReceipt" => match (method, _args.len()) {
+            ("entry_count", 0) => mk_int(),
+            ("redacted" | "isolated" | "cleaned", 0) => Some(Some(Type::Bool)),
+            ("summary", 0) => mk_str(),
+            _ => None,
+        },
+        Type::Named(n) if n == "BrowserPrivacy" => match (method, _args.len()) {
+            ("isolated_profiles" | "redact_receipts" | "shared_profiles", 0) => {
+                Some(Some(Type::Bool))
+            }
             _ => None,
         },
         Type::Named(n) if n == "BrowserLocked" => match (method, _args.len()) {
