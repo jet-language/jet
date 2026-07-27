@@ -1607,6 +1607,11 @@ impl<'a> EvalCtx<'a> {
                 if type_name != "__JetRawLocal" {
                     return Err(unsupported("raw pointer target", self.span()));
                 }
+                if let Some(value) = fields.iter().find_map(|(field, value)| {
+                    (field == "value").then(|| value.clone())
+                }) {
+                    return Ok(value);
+                }
                 let name = fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
                     ("name", CtValue::Str(name)) => Some(name.as_str()),
                     _ => None,
@@ -1615,13 +1620,22 @@ impl<'a> EvalCtx<'a> {
                     .ok_or_else(|| unsupported("raw pointer local", self.span()))
             }
             TExprKind::RawOf(inner) => {
+                if matches!(
+                    &inner.ty,
+                    Type::Apply { name, args }
+                        if name == crate::Syntax::TYPE_PTR && args.len() == 1
+                ) {
+                    return self.eval_expr(inner, scope);
+                }
                 let local = super::raw_place_local(inner);
-                let Some(local) = local else {
-                    return Err(unsupported("raw pointer non-local place", self.span()));
+                let fields = if let Some(local) = local {
+                    vec![("name".to_string(), CtValue::Str(local.name.clone()))]
+                } else {
+                    vec![("value".to_string(), self.eval_expr(inner, scope)?)]
                 };
                 Ok(CtValue::Struct {
                     type_name: "__JetRawLocal".to_string(),
-                    fields: vec![("name".to_string(), CtValue::Str(local.name.clone()))],
+                    fields,
                 })
             }
             TExprKind::AllocNew { ctor } => Ok(CtValue::Struct {

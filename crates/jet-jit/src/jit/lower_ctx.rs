@@ -3934,9 +3934,26 @@ impl LowerCtx<'_, '_> {
                 let TExprKind::Lambda(lambda) = &args[0].kind else {
                     return Err("jit ExpiringSecret callback must be a lambda".to_string());
                 };
+
+                let available = self.b.create_block();
+                let expired = self.b.create_block();
+                let merge = self.b.create_block();
+                self.b.append_block_param(merge, types::I64);
+                self.b.ins().brif(present, available, &[], expired, &[]);
+
+                self.b.switch_to_block(available);
+                self.b.seal_block(available);
                 let callback = self.lower_inline_lambda(lambda, payload)?;
                 let callback_plus_one = self.b.ins().iadd(callback, one);
-                let packed = self.b.ins().select(present, callback_plus_one, zero);
+                self.b.ins().jump(merge, &[callback_plus_one]);
+
+                self.b.switch_to_block(expired);
+                self.b.seal_block(expired);
+                self.b.ins().jump(merge, &[zero]);
+
+                self.b.switch_to_block(merge);
+                self.b.seal_block(merge);
+                let packed = self.b.block_params(merge)[0];
                 Ok(self.result_from_packed_i64(packed))
             }
             THostCall::YieldSend { value } => {
@@ -4625,6 +4642,14 @@ impl LowerCtx<'_, '_> {
 
     fn is_string_abi_ty(ty: &Type) -> bool {
         matches!(ty, Type::String)
+            || matches!(
+                ty,
+                Type::Apply { name, args }
+                    if name == "View"
+                        && args.len() == 1
+                        && (matches!(&args[0], Type::String)
+                            || matches!(&args[0], Type::Named(name) if name == "str"))
+            )
     }
 
     fn is_field_mut_ty(ty: &Type) -> bool {
