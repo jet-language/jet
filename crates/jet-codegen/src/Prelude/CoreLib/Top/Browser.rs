@@ -132,11 +132,15 @@ struct JetBrowserFrameState {
     closed: std::cell::Cell<bool>,
 }
 
+/// D-BROWSER-AUTO1=A (#1189): semantic BiDi locator (accessibility / css / innerText).
 #[derive(Clone)]
 struct JetBrowserLocator {
     page: std::rc::Rc<JetBrowserPageState>,
+    /// `accessibility`, `css`, or `innerText`.
+    locator_type: String,
     role: String,
     name: String,
+    value: String,
 }
 
 #[derive(Clone)]
@@ -785,6 +789,20 @@ fn jet_browser_page_goto(
     .map(|_| ())
 }
 
+fn jet_browser_css_attr_equals(attr: &str, value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' | '"' => {
+                escaped.push('\\');
+                escaped.push(ch);
+            }
+            _ => escaped.push(ch),
+        }
+    }
+    format!("[{attr}=\"{escaped}\"]")
+}
+
 fn jet_browser_page_get_by_role(
     page: &JetBrowserPage,
     role: &String,
@@ -792,8 +810,89 @@ fn jet_browser_page_get_by_role(
 ) -> JetBrowserLocator {
     JetBrowserLocator {
         page: page.state.clone(),
+        locator_type: "accessibility".to_string(),
         role: role.clone(),
         name: name.clone(),
+        value: String::new(),
+    }
+}
+
+fn jet_browser_page_get_by_text(page: &JetBrowserPage, text: &String) -> JetBrowserLocator {
+    JetBrowserLocator {
+        page: page.state.clone(),
+        locator_type: "innerText".to_string(),
+        role: String::new(),
+        name: String::new(),
+        value: text.clone(),
+    }
+}
+
+fn jet_browser_page_get_by_label(page: &JetBrowserPage, name: &String) -> JetBrowserLocator {
+    JetBrowserLocator {
+        page: page.state.clone(),
+        locator_type: "accessibility".to_string(),
+        role: String::new(),
+        name: name.clone(),
+        value: String::new(),
+    }
+}
+
+fn jet_browser_page_get_by_placeholder(
+    page: &JetBrowserPage,
+    text: &String,
+) -> JetBrowserLocator {
+    JetBrowserLocator {
+        page: page.state.clone(),
+        locator_type: "css".to_string(),
+        role: String::new(),
+        name: String::new(),
+        value: jet_browser_css_attr_equals("placeholder", text),
+    }
+}
+
+fn jet_browser_page_get_by_test_id(page: &JetBrowserPage, id: &String) -> JetBrowserLocator {
+    JetBrowserLocator {
+        page: page.state.clone(),
+        locator_type: "css".to_string(),
+        role: String::new(),
+        name: String::new(),
+        value: jet_browser_css_attr_equals("data-testid", id),
+    }
+}
+
+fn jet_browser_page_get_by_css(page: &JetBrowserPage, selector: &String) -> JetBrowserLocator {
+    JetBrowserLocator {
+        page: page.state.clone(),
+        locator_type: "css".to_string(),
+        role: String::new(),
+        name: String::new(),
+        value: selector.clone(),
+    }
+}
+
+fn jet_browser_locator_wire(locator: &JetBrowserLocator) -> Result<jet_std::JSON, JetBrowserError> {
+    match locator.locator_type.as_str() {
+        "accessibility" => {
+            let mut value = Vec::new();
+            if !locator.role.is_empty() {
+                value.push(("role", jet_browser_text(&locator.role)));
+            }
+            if !locator.name.is_empty() {
+                value.push(("name", jet_browser_text(&locator.name)));
+            }
+            if value.is_empty() {
+                return Err(JetBrowserError::new("protocol"));
+            }
+            Ok(jet_browser_object(vec![
+                ("type", jet_browser_text("accessibility")),
+                ("value", jet_browser_object(value)),
+            ]))
+        }
+        "css" | "innerText" => Ok(jet_browser_object(vec![
+            ("type", jet_browser_text(&locator.locator_type)),
+            ("value", jet_browser_text(&locator.value)),
+        ])),
+        _ => Err(JetBrowserError::new("protocol")),
     }
 }
 
@@ -922,22 +1021,12 @@ fn jet_browser_locator_query_with_timeout(
     if locator.page.closed.get() || locator.page.context.closed.get() {
         return Err(JetBrowserError::new("closed"));
     }
-    let value = jet_browser_object(vec![
-        ("role", jet_browser_text(&locator.role)),
-        ("name", jet_browser_text(&locator.name)),
-    ]);
     let result = jet_browser_command_with_timeout(
         &locator.page.browser,
         "browsingContext.locateNodes",
         jet_browser_object(vec![
             ("context", jet_browser_text(&locator.page.id)),
-            (
-                "locator",
-                jet_browser_object(vec![
-                    ("type", jet_browser_text("accessibility")),
-                    ("value", value),
-                ]),
-            ),
+            ("locator", jet_browser_locator_wire(locator)?),
             ("maxNodeCount", jet_std::JSON::Number(1.0)),
         ]),
         timeout_ms,
@@ -966,35 +1055,58 @@ fn jet_browser_locator_wait(
     }
 }
 
-fn jet_browser_locator_click(locator: &JetBrowserLocator) -> Result<(), JetBrowserError> {
+fn jet_browser_locator_wait_gone(
+    locator: &JetBrowserLocator,
+    timeout: JetBrowserTimeout,
+) -> Result<(), JetBrowserError> {
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_millis(timeout.milliseconds as u64);
+    loop {
+        let remaining = jet_browser_remaining_ms(deadline)?;
+        if jet_browser_locator_query_with_timeout(locator, remaining)?.is_none() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+fn jet_browser_locator_resolve(
+    locator: &JetBrowserLocator,
+) -> Result<String, JetBrowserError> {
     if locator.page.closed.get() || locator.page.context.closed.get() {
         return Err(JetBrowserError::new("closed"));
     }
-    let shared_id = jet_browser_locator_query(locator)?
-        .ok_or_else(|| JetBrowserError::new("timeout"))?;
+    jet_browser_locator_query(locator)?.ok_or_else(|| JetBrowserError::new("timeout"))
+}
+
+fn jet_browser_locator_pointer(
+    locator: &JetBrowserLocator,
+    shared_id: &str,
+    down_up: bool,
+) -> Result<(), JetBrowserError> {
     let origin = jet_browser_object(vec![
         ("type", jet_browser_text("element")),
         (
             "element",
-            jet_browser_object(vec![("sharedId", jet_browser_text(&shared_id))]),
+            jet_browser_object(vec![("sharedId", jet_browser_text(shared_id))]),
         ),
     ]);
-    let actions = jet_std::JSON::Array(vec![
-        jet_browser_object(vec![
-            ("type", jet_browser_text("pointerMove")),
-            ("x", jet_std::JSON::Number(0.0)),
-            ("y", jet_std::JSON::Number(0.0)),
-            ("origin", origin),
-        ]),
-        jet_browser_object(vec![
+    let mut actions = vec![jet_browser_object(vec![
+        ("type", jet_browser_text("pointerMove")),
+        ("x", jet_std::JSON::Number(0.0)),
+        ("y", jet_std::JSON::Number(0.0)),
+        ("origin", origin),
+    ])];
+    if down_up {
+        actions.push(jet_browser_object(vec![
             ("type", jet_browser_text("pointerDown")),
             ("button", jet_std::JSON::Number(0.0)),
-        ]),
-        jet_browser_object(vec![
+        ]));
+        actions.push(jet_browser_object(vec![
             ("type", jet_browser_text("pointerUp")),
             ("button", jet_std::JSON::Number(0.0)),
-        ]),
-    ]);
+        ]));
+    }
     let source = jet_browser_object(vec![
         ("type", jet_browser_text("pointer")),
         ("id", jet_browser_text("mouse")),
@@ -1002,6 +1114,90 @@ fn jet_browser_locator_click(locator: &JetBrowserLocator) -> Result<(), JetBrows
             "parameters",
             jet_browser_object(vec![("pointerType", jet_browser_text("mouse"))]),
         ),
+        ("actions", jet_std::JSON::Array(actions)),
+    ]);
+    jet_browser_command(
+        &locator.page.browser,
+        "input.performActions",
+        jet_browser_object(vec![
+            ("context", jet_browser_text(&locator.page.id)),
+            ("actions", jet_std::JSON::Array(vec![source])),
+        ]),
+    )
+    .map(|_| ())
+}
+
+fn jet_browser_locator_click(locator: &JetBrowserLocator) -> Result<(), JetBrowserError> {
+    let shared_id = jet_browser_locator_resolve(locator)?;
+    jet_browser_locator_pointer(locator, &shared_id, true)
+}
+
+fn jet_browser_locator_hover(locator: &JetBrowserLocator) -> Result<(), JetBrowserError> {
+    let shared_id = jet_browser_locator_resolve(locator)?;
+    jet_browser_locator_pointer(locator, &shared_id, false)
+}
+
+fn jet_browser_locator_fill(
+    locator: &JetBrowserLocator,
+    text: &String,
+) -> Result<(), JetBrowserError> {
+    let shared_id = jet_browser_locator_resolve(locator)?;
+    // Clear then assign through the DOM value path — no page data enters the trace.
+    let function = "function(el, value) {\
+        el.focus();\
+        if ('value' in el) { el.value = ''; el.value = value; }\
+        else if (el.isContentEditable) { el.textContent = value; }\
+        el.dispatchEvent(new Event('input', { bubbles: true }));\
+        el.dispatchEvent(new Event('change', { bubbles: true }));\
+    }"
+    .to_string();
+    jet_browser_command(
+        &locator.page.browser,
+        "script.callFunction",
+        jet_browser_object(vec![
+            ("functionDeclaration", jet_browser_text(&function)),
+            ("awaitPromise", jet_std::JSON::Boolean(false)),
+            (
+                "target",
+                jet_browser_object(vec![("context", jet_browser_text(&locator.page.id))]),
+            ),
+            (
+                "arguments",
+                jet_std::JSON::Array(vec![
+                    jet_browser_object(vec![
+                        ("type", jet_browser_text("node")),
+                        ("sharedId", jet_browser_text(&shared_id)),
+                    ]),
+                    jet_browser_object(vec![
+                        ("type", jet_browser_text("string")),
+                        ("value", jet_browser_text(text)),
+                    ]),
+                ]),
+            ),
+        ]),
+    )
+    .map(|_| ())
+}
+
+fn jet_browser_locator_press(
+    locator: &JetBrowserLocator,
+    key: &String,
+) -> Result<(), JetBrowserError> {
+    let shared_id = jet_browser_locator_resolve(locator)?;
+    jet_browser_locator_pointer(locator, &shared_id, true)?;
+    let actions = jet_std::JSON::Array(vec![
+        jet_browser_object(vec![
+            ("type", jet_browser_text("keyDown")),
+            ("value", jet_browser_text(key)),
+        ]),
+        jet_browser_object(vec![
+            ("type", jet_browser_text("keyUp")),
+            ("value", jet_browser_text(key)),
+        ]),
+    ]);
+    let source = jet_browser_object(vec![
+        ("type", jet_browser_text("key")),
+        ("id", jet_browser_text("keyboard")),
         ("actions", actions),
     ]);
     jet_browser_command(

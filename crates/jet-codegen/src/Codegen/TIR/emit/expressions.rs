@@ -3109,6 +3109,36 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             a(0),
                             a(1)
                         ),
+                        ("BrowserPage", "get_by_text") => format!(
+                            "{}jet_browser_page_get_by_text(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
+                        ("BrowserPage", "get_by_label") => format!(
+                            "{}jet_browser_page_get_by_label(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
+                        ("BrowserPage", "get_by_placeholder") => format!(
+                            "{}jet_browser_page_get_by_placeholder(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
+                        ("BrowserPage", "get_by_test_id") => format!(
+                            "{}jet_browser_page_get_by_test_id(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
+                        ("BrowserPage", "get_by_css") => format!(
+                            "{}jet_browser_page_get_by_css(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
                         ("BrowserPage", "main_frame") => {
                             format!("{}jet_browser_page_main_frame(&({}))", root, recv)
                         }
@@ -3127,9 +3157,30 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             recv,
                             a(0)
                         ),
+                        ("BrowserLocator", "wait_gone") => format!(
+                            "{}jet_browser_locator_wait_gone(&({}), {})",
+                            root,
+                            recv,
+                            a(0)
+                        ),
                         ("BrowserLocator", "click") => {
                             format!("{}jet_browser_locator_click(&({}))", root, recv)
                         }
+                        ("BrowserLocator", "hover") => {
+                            format!("{}jet_browser_locator_hover(&({}))", root, recv)
+                        }
+                        ("BrowserLocator", "fill") => format!(
+                            "{}jet_browser_locator_fill(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
+                        ("BrowserLocator", "press") => format!(
+                            "{}jet_browser_locator_press(&({}), &({}))",
+                            root,
+                            recv,
+                            a(0)
+                        ),
                         ("BrowserEvent", "kind") => {
                             format!("{}jet_browser_event_kind(&({}))", root, recv)
                         }

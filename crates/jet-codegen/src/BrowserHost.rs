@@ -330,6 +330,41 @@ pub(crate) fn eval_method(
                     &string_arg(args, 1, span)?,
                 )),
             ),
+            (BrowserHostValue::Page(page), "get_by_text") => store(
+                "BrowserLocator",
+                BrowserHostValue::Locator(jet_browser_page_get_by_text(
+                    page,
+                    &string_arg(args, 0, span)?,
+                )),
+            ),
+            (BrowserHostValue::Page(page), "get_by_label") => store(
+                "BrowserLocator",
+                BrowserHostValue::Locator(jet_browser_page_get_by_label(
+                    page,
+                    &string_arg(args, 0, span)?,
+                )),
+            ),
+            (BrowserHostValue::Page(page), "get_by_placeholder") => store(
+                "BrowserLocator",
+                BrowserHostValue::Locator(jet_browser_page_get_by_placeholder(
+                    page,
+                    &string_arg(args, 0, span)?,
+                )),
+            ),
+            (BrowserHostValue::Page(page), "get_by_test_id") => store(
+                "BrowserLocator",
+                BrowserHostValue::Locator(jet_browser_page_get_by_test_id(
+                    page,
+                    &string_arg(args, 0, span)?,
+                )),
+            ),
+            (BrowserHostValue::Page(page), "get_by_css") => store(
+                "BrowserLocator",
+                BrowserHostValue::Locator(jet_browser_page_get_by_css(
+                    page,
+                    &string_arg(args, 0, span)?,
+                )),
+            ),
             (BrowserHostValue::Page(page), "main_frame") => result(
                 jet_browser_page_main_frame(page),
                 |frame| store("BrowserFrame", BrowserHostValue::Frame(frame)),
@@ -358,9 +393,27 @@ pub(crate) fn eval_method(
                 ),
                 |_| CtValue::Unit,
             ),
+            (BrowserHostValue::Locator(locator), "wait_gone") => result(
+                jet_browser_locator_wait_gone(
+                    locator,
+                    timeout_value(args.first().ok_or_else(|| host_error("timeout", span))?, span)?,
+                ),
+                |_| CtValue::Unit,
+            ),
             (BrowserHostValue::Locator(locator), "click") => {
                 result(jet_browser_locator_click(locator), |_| CtValue::Unit)
             }
+            (BrowserHostValue::Locator(locator), "hover") => {
+                result(jet_browser_locator_hover(locator), |_| CtValue::Unit)
+            }
+            (BrowserHostValue::Locator(locator), "fill") => result(
+                jet_browser_locator_fill(locator, &string_arg(args, 0, span)?),
+                |_| CtValue::Unit,
+            ),
+            (BrowserHostValue::Locator(locator), "press") => result(
+                jet_browser_locator_press(locator, &string_arg(args, 0, span)?),
+                |_| CtValue::Unit,
+            ),
             (BrowserHostValue::Protocol(protocol), "send") => result(
                 jet_browser_protocol_send(
                     protocol,

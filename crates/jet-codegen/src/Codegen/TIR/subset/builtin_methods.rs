@@ -286,11 +286,23 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
             "capabilities" | "context" | "subscribe" | "next_event" | "protocol" | "trace" | "close"
         ),
         Some("BrowserContext") => matches!(method, "page" | "tab" | "close"),
-        Some("BrowserPage") => {
-            matches!(method, "goto" | "get_by_role" | "close" | "main_frame" | "frames")
-        }
+        Some("BrowserPage") => matches!(
+            method,
+            "goto"
+                | "get_by_role"
+                | "get_by_text"
+                | "get_by_label"
+                | "get_by_placeholder"
+                | "get_by_test_id"
+                | "get_by_css"
+                | "close"
+                | "main_frame"
+                | "frames"
+        ),
         Some("BrowserFrame") => method == "close",
-        Some("BrowserLocator") => matches!(method, "wait" | "click"),
+        Some("BrowserLocator") => {
+            matches!(method, "wait" | "wait_gone" | "click" | "hover" | "fill" | "press")
+        },
         Some("BrowserEvent") => method == "kind",
         Some("BrowserProtocol") => method == "send",
         Some("BrowserCapabilities") => matches!(method, "bidi" | "cdp" | "profile"),

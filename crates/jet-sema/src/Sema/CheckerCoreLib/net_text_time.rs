@@ -22,16 +22,19 @@ impl<'a> Checker<'a> {
             | ("BrowserContext", "page" | "tab" | "close")
             | ("BrowserPage", "close" | "main_frame" | "frames")
             | ("BrowserFrame", "close")
-            | ("BrowserLocator", "click")
+            | ("BrowserLocator", "click" | "hover")
             | ("BrowserEvent", "kind")
             | ("BrowserCapabilities", "bidi" | "cdp" | "profile")
             | ("BrowserTrace", "entry_count" | "redacted" | "summary")
             | ("BrowserLocked", "engine" | "version" | "binary" | "protocol") => Vec::new(),
             ("BrowserLocked", "verify") => Vec::new(),
-            ("Browser", "subscribe" | "protocol") | ("BrowserPage", "goto") => {
+            ("Browser", "subscribe" | "protocol")
+            | ("BrowserPage", "goto" | "get_by_text" | "get_by_label" | "get_by_placeholder"
+                | "get_by_test_id" | "get_by_css")
+            | ("BrowserLocator", "fill" | "press") => {
                 vec![Type::String]
             }
-            ("Browser", "next_event") | ("BrowserLocator", "wait") => {
+            ("Browser", "next_event") | ("BrowserLocator", "wait" | "wait_gone") => {
                 vec![Type::Named("BrowserTimeout".to_string())]
             }
             ("BrowserPage", "get_by_role") | ("BrowserProtocol", "send") => {
@@ -45,7 +48,7 @@ impl<'a> Checker<'a> {
                 | ("BrowserContext", "page" | "tab" | "close")
                 | ("BrowserPage", "goto" | "close" | "frames")
                 | ("BrowserFrame", "close")
-                | ("BrowserLocator", "wait" | "click")
+                | ("BrowserLocator", "wait" | "wait_gone" | "click" | "hover" | "fill" | "press")
                 | ("BrowserProtocol", "send")
         ) {
             self.record_effect(Effect::Net.name(), span);
@@ -202,21 +205,20 @@ pub fn net_method_return(
             ok: Box::new(Type::List(Box::new(Type::Named("BrowserFrame".to_string())))),
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
-        ("BrowserPage", "get_by_role") => {
+        ("BrowserPage", "get_by_role" | "get_by_text" | "get_by_label" | "get_by_placeholder"
+            | "get_by_test_id" | "get_by_css") => {
             Some(Some(Type::Named("BrowserLocator".to_string())))
         }
         ("BrowserFrame", "close") => Some(Some(Type::Result {
             ok: Box::new(unit.clone()),
             err: Box::new(Type::Named("BrowserError".to_string())),
         })),
-        ("BrowserLocator", "wait") => Some(Some(Type::Result {
-            ok: Box::new(unit.clone()),
-            err: Box::new(Type::Named("BrowserError".to_string())),
-        })),
-        ("BrowserLocator", "click") => Some(Some(Type::Result {
-            ok: Box::new(unit.clone()),
-            err: Box::new(Type::Named("BrowserError".to_string())),
-        })),
+        ("BrowserLocator", "wait" | "wait_gone" | "click" | "hover" | "fill" | "press") => {
+            Some(Some(Type::Result {
+                ok: Box::new(unit.clone()),
+                err: Box::new(Type::Named("BrowserError".to_string())),
+            }))
+        }
         ("BrowserEvent", "kind") => Some(Some(Type::String)),
         ("BrowserProtocol", "send") => Some(Some(Type::Result {
             ok: Box::new(Type::String),
@@ -641,7 +643,9 @@ pub fn http_type_method_return(
                 ok: Box::new(Type::List(Box::new(Type::Named("BrowserFrame".to_string())))),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             })),
-            ("get_by_role", 2) => mk("BrowserLocator"),
+            ("get_by_role", 2)
+            | ("get_by_text" | "get_by_label" | "get_by_placeholder" | "get_by_test_id"
+                | "get_by_css", 1) => mk("BrowserLocator"),
             _ => None,
         },
         Type::Named(n) if n == "BrowserFrame" => match (method, _args.len()) {
@@ -652,7 +656,9 @@ pub fn http_type_method_return(
             _ => None,
         },
         Type::Named(n) if n == "BrowserLocator" => match (method, _args.len()) {
-            ("wait", 1) | ("click", 0) => Some(Some(Type::Result {
+            ("wait" | "wait_gone", 1)
+            | ("click" | "hover", 0)
+            | ("fill" | "press", 1) => Some(Some(Type::Result {
                 ok: Box::new(unit_ty()),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             })),

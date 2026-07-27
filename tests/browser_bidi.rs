@@ -584,6 +584,11 @@ fn run() {
     context :: session.context() ?? return
     page :: context.page() ?? return
     locator :: page.get_by_role("button", "Save")
+    text :: page.get_by_text("Save")
+    label :: page.get_by_label("Name")
+    placeholder :: page.get_by_placeholder("email")
+    test_id :: page.get_by_test_id("save")
+    css :: page.get_by_css("button.save")
     protocol :: session.protocol("bidi") ?? return
 
     session.subscribe(1) ?? return
@@ -591,7 +596,15 @@ fn run() {
     session.protocol(1) ?? return
     page.goto(1) ?? return
     wrong_locator :: page.get_by_role(1, 2)
+    page.get_by_text(1)
+    page.get_by_label(1)
+    page.get_by_placeholder(1)
+    page.get_by_test_id(1)
+    page.get_by_css(1)
     locator.wait(1) ?? return
+    locator.wait_gone(1) ?? return
+    locator.fill(1) ?? return
+    locator.press(1) ?? return
     protocol.send(1, 2) ?? return
     event_name :: "log.entryAdded"
     session.subscribe(^event_name) ?? return
@@ -605,7 +618,15 @@ fn run() {
         "protocol",
         "goto",
         "get_by_role",
+        "get_by_text",
+        "get_by_label",
+        "get_by_placeholder",
+        "get_by_test_id",
+        "get_by_css",
         "wait",
+        "wait_gone",
+        "fill",
+        "press",
         "send",
     ] {
         assert!(
@@ -679,13 +700,17 @@ fn goto(page: BrowserPage) =[FS]=> Unit { page.goto("https://example.test") ?? r
 fn frames(page: BrowserPage) =[FS]=> Unit { page.frames() ?? return }
 fn frame_close(frame: BrowserFrame) =[FS]=> Unit { frame.close() ?? return }
 fn wait(locator: BrowserLocator, timeout: BrowserTimeout) =[FS]=> Unit { locator.wait(timeout) ?? return }
+fn wait_gone(locator: BrowserLocator, timeout: BrowserTimeout) =[FS]=> Unit { locator.wait_gone(timeout) ?? return }
 fn click(locator: BrowserLocator) =[FS]=> Unit { locator.click() ?? return }
+fn hover(locator: BrowserLocator) =[FS]=> Unit { locator.hover() ?? return }
+fn fill(locator: BrowserLocator) =[FS]=> Unit { locator.fill("value") ?? return }
+fn press(locator: BrowserLocator) =[FS]=> Unit { locator.press("Enter") ?? return }
 fn send(protocol: BrowserProtocol) =[FS]=> Unit { protocol.send("session.status", "{{}}") ?? return }
 fn run() {}
 "#;
     let diags = jet::compile(source).expect_err("Browser I/O methods must infer Net");
     assert!(
-        diags.iter().filter(|diag| diag.code == "E0740").count() >= 14,
+        diags.iter().filter(|diag| diag.code == "E0740").count() >= 18,
         "Browser connect and every I/O method must violate an FS-only bound: {diags:?}"
     );
 }
@@ -1291,5 +1316,198 @@ fn run() {
     assert_eq!(
         surrogate_server.join().unwrap(),
         ["session.status", "session.new", "session.end"]
+    );
+}
+
+fn run_locator_actions(listener: TcpListener) -> Vec<String> {
+    let (mut stream, _) = listener.accept().unwrap();
+    accept_websocket(&mut stream);
+    let mut methods = Vec::new();
+    let mut locate_calls = 0usize;
+    // Handshake + context/page + navigate + locator ops + cleanup.
+    for _ in 0..24 {
+        let request = read_text_frame(&mut stream);
+        let id = field(&request, "id");
+        let method = field(&request, "method");
+        methods.push(method.clone());
+        let result = match method.as_str() {
+            "session.status" => r#"{"ready":true,"message":"ready"}"#,
+            "session.new" => {
+                r#"{"sessionId":"mock-session","capabilities":{"browserName":"mock","browserVersion":"1"}}"#
+            }
+            "browser.createUserContext" => r#"{"userContext":"user-1"}"#,
+            "browsingContext.create" => r#"{"context":"page-1"}"#,
+            "browsingContext.navigate" => {
+                r#"{"url":"https://example.test/form","navigation":"nav-1"}"#
+            }
+            "browsingContext.locateNodes" => {
+                locate_calls += 1;
+                // First waits/actions see the node; wait_gone then sees absence.
+                if locate_calls <= 10 {
+                    r#"{"nodes":[{"type":"node","sharedId":"node-1"}]}"#
+                } else {
+                    r#"{"nodes":[]}"#
+                }
+            }
+            "input.performActions" | "script.callFunction" | "browsingContext.close"
+            | "browser.removeUserContext" | "session.end" => "{}",
+            other => panic!("unexpected BiDi method {other}: {request}"),
+        };
+        write_text_frame(
+            &mut stream,
+            &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+        );
+        if method == "session.end" {
+            break;
+        }
+    }
+    methods
+}
+
+#[test]
+fn native_bidi_semantic_locators_actions_and_waits() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!(
+        "ws://{}/session?token=LOCATOR_SECRET",
+        listener.local_addr().unwrap()
+    );
+    let server = thread::spawn(move || run_locator_actions(listener));
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    page.goto("https://example.test/form") ?? panic("goto")
+
+    save :: page.get_by_role("button", "Save")
+    save.wait(timeout) ?? panic("wait")
+    save.hover() ?? panic("hover")
+    save.click() ?? panic("click")
+
+    name :: page.get_by_label("Name")
+    name.fill("Ada") ?? panic("fill")
+    name.press("Tab") ?? panic("press")
+
+    page.get_by_text("Save").wait(timeout) ?? panic("text wait")
+    page.get_by_placeholder("email").wait(timeout) ?? panic("placeholder wait")
+    page.get_by_test_id("save").wait(timeout) ?? panic("test id wait")
+    page.get_by_css("button.save").wait(timeout) ?? panic("css wait")
+
+    gone :: page.get_by_role("status", "Saving")
+    gone.wait_gone(timeout) ?? panic("wait_gone")
+
+    print("locators:ok")
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_locators",
+        "browser_bidi_locators",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "locators:ok\n");
+    assert!(!stdout.contains("SECRET"), "{stdout}");
+    assert!(!stderr.contains("SECRET"), "{stderr}");
+    let methods = server.join().unwrap();
+    assert!(
+        methods.iter().filter(|m| *m == "browsingContext.locateNodes").count() >= 11,
+        "expected repeated locateNodes for waits/actions: {methods:?}"
+    );
+    assert!(
+        methods.iter().any(|m| m == "script.callFunction"),
+        "fill must use script.callFunction: {methods:?}"
+    );
+    assert!(
+        methods.iter().filter(|m| *m == "input.performActions").count() >= 3,
+        "hover/click/press need performActions: {methods:?}"
+    );
+    assert_eq!(methods.last().map(String::as_str), Some("session.end"));
+}
+
+#[test]
+fn native_bidi_missing_locator_action_times_out_without_leaks() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let endpoint = format!(
+        "ws://{}/session?token=MISSING_LOCATOR_SECRET",
+        listener.local_addr().unwrap()
+    );
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        accept_websocket(&mut stream);
+        let mut methods = Vec::new();
+        for _ in 0..12 {
+            let request = read_text_frame(&mut stream);
+            let id = field(&request, "id");
+            let method = field(&request, "method");
+            methods.push(method.clone());
+            let result = match method.as_str() {
+                "session.status" => r#"{"ready":true,"message":"ready"}"#,
+                "session.new" => {
+                    r#"{"sessionId":"mock-session","capabilities":{"browserName":"mock","browserVersion":"1"}}"#
+                }
+                "browser.createUserContext" => r#"{"userContext":"user-1"}"#,
+                "browsingContext.create" => r#"{"context":"page-1"}"#,
+                "browsingContext.locateNodes" => r#"{"nodes":[]}"#,
+                "browsingContext.close" | "browser.removeUserContext" | "session.end" => "{}",
+                other => panic!("unexpected BiDi method {other}: {request}"),
+            };
+            write_text_frame(
+                &mut stream,
+                &format!(r#"{{"type":"success","id":{id},"result":{result}}}"#),
+            );
+            if method == "session.end" {
+                break;
+            }
+        }
+        methods
+    });
+    let source = r#"
+use core.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(80) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    missing :: page.get_by_role("button", "Missing")
+    loop attempt; [1] {
+        missing.click() ?? next
+        print("unexpected")
+    }
+    print("caught")
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}
+"#
+    .replace("__ENDPOINT__", &endpoint);
+
+    let (code, stdout, stderr) = common::build_and_run(
+        "jet_browser_bidi_missing_locator",
+        "browser_bidi_missing_locator",
+        &source,
+    );
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(stdout, "caught\n");
+    assert!(!stdout.contains("SECRET"), "{stdout}");
+    assert!(!stderr.contains("SECRET"), "{stderr}");
+    let methods = server.join().unwrap();
+    assert!(
+        methods.iter().any(|m| m == "browsingContext.locateNodes"),
+        "{methods:?}"
+    );
+    assert!(
+        !methods.iter().any(|m| m == "input.performActions"),
+        "missing locator must not click: {methods:?}"
     );
 }

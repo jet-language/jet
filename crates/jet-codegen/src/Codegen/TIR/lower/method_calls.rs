@@ -1999,10 +1999,12 @@ pub(crate) fn lower_method_call(
             ("BrowserContext", "close")
             | ("BrowserPage", "goto" | "close")
             | ("BrowserFrame", "close")
-            | ("BrowserLocator", "wait" | "click") => Type::Result {
-                ok: Box::new(unit_type()),
-                err: Box::new(Type::Named("BrowserError".to_string())),
-            },
+            | ("BrowserLocator", "wait" | "wait_gone" | "click" | "hover" | "fill" | "press") => {
+                Type::Result {
+                    ok: Box::new(unit_type()),
+                    err: Box::new(Type::Named("BrowserError".to_string())),
+                }
+            }
             ("BrowserPage", "main_frame") => Type::Result {
                 ok: Box::new(Type::Named("BrowserFrame".to_string())),
                 err: Box::new(Type::Named("BrowserError".to_string())),
@@ -2011,7 +2013,8 @@ pub(crate) fn lower_method_call(
                 ok: Box::new(Type::List(Box::new(Type::Named("BrowserFrame".to_string())))),
                 err: Box::new(Type::Named("BrowserError".to_string())),
             },
-            ("BrowserPage", "get_by_role") => Type::Named("BrowserLocator".to_string()),
+            ("BrowserPage", "get_by_role" | "get_by_text" | "get_by_label" | "get_by_placeholder"
+                | "get_by_test_id" | "get_by_css") => Type::Named("BrowserLocator".to_string()),
             ("BrowserEvent", "kind")
             | ("BrowserCapabilities", "profile")
             | ("BrowserTrace", "summary")

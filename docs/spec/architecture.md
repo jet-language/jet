@@ -227,7 +227,10 @@ that context; the context owns its pages. `page.main_frame()` and
 `page.frames()` expose the browsing-context tree (main plus child frames)
 without auto-closing listed frames on drop — frame close is explicit.
 `frame.close()` on the main frame marks the page closed. The beginner path
-uses semantic accessibility locators and bounded waits. The expert path
+uses semantic accessibility locators (`get_by_role`, `get_by_label`), text and
+CSS helpers (`get_by_text`, `get_by_placeholder`, `get_by_test_id`, `get_by_css`),
+locator actions (`click`, `hover`, `fill`, `press`), and bounded deterministic
+waits (`wait`, `wait_gone`). The expert path
 exposes raw BiDi and capability-checked CDP commands through
 `Browser.protocol`.
 
