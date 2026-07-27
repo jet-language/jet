@@ -84,7 +84,7 @@ pub(crate) fn deopt_marshallable(tir: &TFunc) -> bool {
 
 fn marshallable_ty(ty: &Type) -> bool {
     match ty {
-        Type::Int | Type::String | Type::Bool | Type::Char => true,
+        Type::Int | Type::IntN { .. } | Type::String | Type::Bool | Type::Char => true,
         Type::Named(n) if matches!(n.as_str(), "Int" | "String" | "Bool" | "Char" | "Unit") => {
             true
         }

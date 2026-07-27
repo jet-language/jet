@@ -8,12 +8,12 @@ use crate::Diagnostics::Diagnostic;
 
 use super::{materialize_view_mut_window, unsupported, EvalCtx, Flow};
 
-impl EvalCtx<'_> {
+impl<'a> EvalCtx<'a> {
     pub(super) fn eval_closure_method(
         &mut self,
-        recv: &TExpr,
+        recv: &'a TExpr,
         op: &TClosureOp,
-        args: &[TExpr],
+        args: &'a [TExpr],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         let mut recv_v = self.eval_expr(recv, scope)?;
@@ -381,18 +381,17 @@ impl EvalCtx<'_> {
 
     pub(super) fn apply_callable(
         &mut self,
-        f: &TExpr,
+        f: &'a TExpr,
         argv: Vec<CtValue>,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         match &f.kind {
             TExprKind::Lambda(lam) => self.eval_tlambda(lam, argv, scope),
             TExprKind::Local(local) => {
-                if let Some(CtValue::Closure(_)) = scope.get(&local.name) {
-                    return Err(unsupported(
-                        "stored CtValue::Closure invoke (use inline lambda)",
-                        self.span(),
-                    ));
+                if let Some(value) = scope.get(&local.name).cloned() {
+                    if Self::callable_index(&value).is_some() {
+                        return self.call_callable(&value, argv);
+                    }
                 }
                 if let Some(func) = self.funcs.get(&local.name).copied() {
                     let mut child = HashMap::new();
@@ -416,9 +415,9 @@ impl EvalCtx<'_> {
         }
     }
 
-    fn eval_tlambda(
+    pub(super) fn eval_tlambda(
         &mut self,
-        lam: &TLambda,
+        lam: &'a TLambda,
         argv: Vec<CtValue>,
         outer: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
@@ -455,5 +454,38 @@ impl EvalCtx<'_> {
             }
         }
         Ok(result)
+    }
+
+    pub(super) fn eval_tlambda_mut_arg(
+        &mut self,
+        lam: &'a TLambda,
+        arg: CtValue,
+        outer: &mut HashMap<String, CtValue>,
+    ) -> Result<(CtValue, CtValue), Diagnostic> {
+        let Some(param) = lam.source_params.first() else {
+            return Err(unsupported("shared lambda parameter", self.span()));
+        };
+        let mut child = outer.clone();
+        child.insert(param.clone(), arg);
+        let result = match &lam.executable {
+            TLambdaBody::Expr(expr) => self.eval_expr(expr, &mut child)?,
+            TLambdaBody::Block(stmts) => match self.exec_stmts(stmts, &mut child)? {
+                Flow::Return(value) => value,
+                Flow::Normal => CtValue::Unit,
+                other => {
+                    return Err(unsupported(
+                        &format!("control flow {other:?} escaping shared lambda"),
+                        self.span(),
+                    ));
+                }
+            },
+        };
+        let updated = child.remove(param).unwrap_or(CtValue::Unit);
+        for (name, value) in child {
+            if outer.contains_key(&name) {
+                outer.insert(name, value);
+            }
+        }
+        Ok((result, updated))
     }
 }

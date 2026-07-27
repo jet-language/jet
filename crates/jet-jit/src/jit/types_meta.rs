@@ -158,8 +158,36 @@ pub(crate) fn clif_ty_with_distinct(
             return clif_ty_with_distinct(base, distinct_bases);
         }
     }
+    if let Type::Tagged { inner, .. } = &ty {
+        return clif_ty_with_distinct(inner, distinct_bases);
+    }
     if matches!(&ty, Type::Named(n) if n == "Unit") {
         return None;
+    }
+    if matches!(&ty, Type::Named(n)
+        if matches!(
+            n.as_str(),
+            "Arena" | "Bump" | "Pool" | "Fixed" | "Solver" | "BitSet" | "ByteBuffer"
+        ))
+    {
+        return Some(types::I64);
+    }
+    if matches!(&ty, Type::Shared(_))
+        || matches!(&ty, Type::Apply { name, .. }
+            if matches!(
+                name.as_str(),
+                "Pool"
+                    | "Id"
+                    | "Ptr"
+                    | "Stream"
+                    | "ExpiringValue"
+                    | "ExpiringSecret"
+                    | "SortedSet"
+                    | "PriorityQueue"
+                    | "Lru"
+            ))
+    {
+        return Some(types::I64);
     }
     if matches!(&ty, Type::Named(n) if matches!(n.as_str(), "Duration" | "DurationUnit" | "RangeError" | "ParseError")) {
         return Some(types::I64);
@@ -167,8 +195,8 @@ pub(crate) fn clif_ty_with_distinct(
     if jit_concurrency_type(&ty) {
         return Some(types::I64);
     }
-    // List/FixedList/Iter/View handles share the I64 arena ABI (string elems are
-    // string-handle ints). Fn values stay unsupported until call/closure ABI lands.
+    // List/FixedList/Iter/View and structural-union values share the I64 arena
+    // ABI. Noncapturing function values use an I64 code-pointer ABI.
     // Nested lists (`[[String]]` CSV rows, etc.) are also arena handles.
     if jit_list_native_type(&ty)
         || jit_list_of_int_list_type(&ty)
@@ -187,6 +215,15 @@ pub(crate) fn clif_ty_with_distinct(
         || (jit_struct_type(&ty) && !distinct_bases.contains_key(ty.name().as_str()))
         || jit_tuple_type(&ty)
         || jit_enum_type(&ty)
+        || matches!(
+            &ty,
+            Type::Union(_)
+                | Type::Fn {
+                    effect_bound: None,
+                    ..
+                }
+                | Type::TraitObject(_)
+        )
     {
         return Some(types::I64);
     }
@@ -231,13 +268,50 @@ pub(crate) fn func_signature(
     if func_has_receiver(tir) {
         sig.params.push(AbiParam::new(types::I64));
     }
-    for (_, ty, _) in &tir.params {
-        sig.params.push(AbiParam::new(
-            meta.clif_ty(ty)
-                .ok_or_else(|| format!("jit param type unsupported: {ty:?}"))?,
-        ));
+    for (_, ty, convention) in &tir.params {
+        if matches!(convention, jet_foundation::AST::AccessConvention::Write)
+            && matches!(
+                ty,
+                Type::Int
+                    | Type::IntN { .. }
+                    | Type::Float
+                    | Type::Float32
+                    | Type::Bool
+                    | Type::Char
+            )
+        {
+            sig.params.push(AbiParam::new(types::I64));
+        } else {
+            sig.params.push(AbiParam::new(
+                meta.clif_ty(ty)
+                    .ok_or_else(|| format!("jit param type unsupported: {ty:?}"))?,
+            ));
+        }
     }
     if let Some(ret) = &tir.ret {
+        if let Some(clif) = meta.clif_ty(ret) {
+            sig.returns.push(AbiParam::new(clif));
+        }
+    }
+    Ok(sig)
+}
+
+pub(crate) fn fn_value_signature(
+    module: &JITModule,
+    ty: &Type,
+    meta: &JitMeta<'_>,
+) -> Result<Signature, String> {
+    let Type::Fn { params, ret, .. } = ty else {
+        return Err(format!("jit callable type unsupported: {ty:?}"));
+    };
+    let mut sig = Signature::new(module.target_config().default_call_conv);
+    for param in params {
+        sig.params.push(AbiParam::new(
+            meta.clif_ty(param)
+                .ok_or_else(|| format!("jit callable param unsupported: {param:?}"))?,
+        ));
+    }
+    if let Some(ret) = ret {
         if let Some(clif) = meta.clif_ty(ret) {
             sig.returns.push(AbiParam::new(clif));
         }
@@ -258,6 +332,10 @@ pub(crate) fn jit_fn_name(name: &str) -> String {
 }
 
 pub(crate) struct JitMeta<'a> {
+    trait_method_owners:
+        &'a HashMap<(String, String), Vec<String>>,
+    iterable_item_types:
+        &'a HashMap<(String, String), Type>,
     struct_fields: &'a HashMap<String, Vec<String>>,
     struct_field_types: &'a HashMap<String, Vec<Type>>,
     enum_variants: &'a HashMap<String, Vec<String>>,
@@ -270,6 +348,8 @@ pub(crate) struct JitMeta<'a> {
 impl<'a> JitMeta<'a> {
     pub(crate) fn from_program(program: &'a JitProgram) -> Self {
         JitMeta {
+            trait_method_owners: &program.trait_method_owners,
+            iterable_item_types: &program.iterable_item_types,
             struct_fields: &program.struct_fields,
             struct_field_types: &program.struct_field_types,
             enum_variants: &program.enum_variants,
@@ -282,6 +362,28 @@ impl<'a> JitMeta<'a> {
 
     pub(crate) fn clif_ty(&self, ty: &Type) -> Option<types::Type> {
         clif_ty_with_distinct(ty, self.distinct_bases)
+    }
+
+    pub(crate) fn trait_method_owners(
+        &self,
+        trait_name: &str,
+        method_name: &str,
+    ) -> Vec<&str> {
+        self.trait_method_owners
+            .get(&(trait_name.to_string(), method_name.to_string()))
+            .into_iter()
+            .flatten()
+            .map(String::as_str)
+            .collect()
+    }
+
+    pub(crate) fn iterable_item_type(
+        &self,
+        collection: &str,
+        iterator: &str,
+    ) -> Option<&Type> {
+        self.iterable_item_types
+            .get(&(collection.to_string(), iterator.to_string()))
     }
 
     pub(crate) fn enum_variant_payload_types(
@@ -302,6 +404,30 @@ impl<'a> JitMeta<'a> {
                     .get(&alt)
                     .map(|types| types.as_slice())
             })
+    }
+
+    pub(crate) fn raw_bag_key_type(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Tagged { inner, .. } => self.raw_bag_key_type(inner),
+            Type::Int | Type::IntN { .. } | Type::Bool | Type::Char => true,
+            Type::Named(name) => {
+                if let Some(base) = self.distinct_base(name) {
+                    return self.raw_bag_key_type(base);
+                }
+                let Some(variants) = self.enum_variant_names(name) else {
+                    return false;
+                };
+                variants.iter().all(|variant| {
+                    let variant = variant.strip_prefix("user_").unwrap_or(variant);
+                    self.enum_variant_payload_types(name, variant)
+                        .is_some_and(|payloads| {
+                            payloads.is_empty()
+                                || payloads.iter().all(|payload| self.raw_bag_key_type(payload))
+                        })
+                })
+            }
+            _ => false,
+        }
     }
 
     pub(crate) fn int_constant(&self, rust_name: &str) -> Option<i64> {
@@ -334,6 +460,15 @@ impl<'a> JitMeta<'a> {
             return None;
         }
         Some((names.as_slice(), tys.as_slice()))
+    }
+
+    pub(crate) fn struct_type_id(&self, type_name: &str) -> Option<i64> {
+        let mut names: Vec<&str> = self.struct_fields.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        names
+            .iter()
+            .position(|name| *name == type_name)
+            .map(|index| index as i64 + 1)
     }
 
     /// Field type by Jet or mangled Rust field name.
@@ -415,6 +550,26 @@ impl<'a> JitMeta<'a> {
             .iter()
             .position(|v| v == variant || v == &mangled || v.strip_prefix("user_") == Some(variant))
             .map(|i| i as i64)
+    }
+
+    pub(crate) fn enum_variant_indices(&self, enum_name: &str, variant: &str) -> Vec<i64> {
+        if let Some(index) = self.enum_variant_index(enum_name, variant) {
+            return vec![index];
+        }
+        let prefix = format!("{variant}.");
+        self.enum_variants
+            .get(enum_name)
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .filter_map(|(index, candidate)| {
+                candidate
+                    .strip_prefix("user_")
+                    .unwrap_or(candidate)
+                    .starts_with(&prefix)
+                    .then_some(index as i64)
+            })
+            .collect()
     }
 
     pub(crate) fn is_enum(&self, name: &str) -> bool {

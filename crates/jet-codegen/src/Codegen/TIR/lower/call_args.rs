@@ -182,14 +182,10 @@ pub(crate) fn lower_one_call_arg(
                 })),
             }
         }
-        (Expr::Lambda(lam), Some((_, Type::Fn { params, .. }))) => {
+        (Expr::Lambda(lam), Some((_, ty @ Type::Fn { params, .. }))) => {
             let tl = lower_lambda_expecting(lam, cx, env, Some(params.as_slice()));
             TExpr {
-                ty: Type::Fn {
-                    params: Vec::new(),
-                    ret: None,
-                    effect_bound: None,
-                },
+                ty: ty.clone(),
                 kind: TExprKind::Lambda(Box::new(tl)),
             }
         }

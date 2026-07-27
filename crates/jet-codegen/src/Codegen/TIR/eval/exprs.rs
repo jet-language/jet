@@ -1,18 +1,80 @@
 //! Exhaustive TExprKind evaluation (#777).
 use std::collections::HashMap;
 use crate::AST::{CtFloat, Type, UnOp};
-use crate::Codegen::TIR::{TCallArg, TExpr, TExprKind, TPlace, TStrPart};
+use crate::Codegen::TIR::{
+    ListSpreadPart, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFnValueKind, TPlace, TStrPart,
+};
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::{apply_core_call, apply_impure_core_call, CtValue};
 use crate::Diagnostics::Diagnostic;
 use super::builtins::eval_builtin;
 use super::handles::eval_handle;
-use super::{materialize_view_mut_window, unsupported, EvalCtx, Flow};
+use super::{materialize_view_mut_window, unsupported, EvalCallable, EvalCtx, Flow};
 
-impl EvalCtx<'_> {
+fn handle_index(value: &CtValue, type_name: &str) -> Option<usize> {
+    let CtValue::Struct {
+        type_name: actual,
+        fields,
+    } = value
+    else {
+        return None;
+    };
+    (actual == type_name).then_some(())?;
+    fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+        ("index", CtValue::Int(index)) => Some(*index as usize),
+        _ => None,
+    })
+}
+
+fn struct_int(value: &CtValue, field: &str) -> Option<i64> {
+    let CtValue::Struct { fields, .. } = value else {
+        return None;
+    };
+    fields.iter().find_map(|(name, value)| match value {
+        CtValue::Int(value) if name == field => Some(*value),
+        _ => None,
+    })
+}
+
+fn show_typed_value(value: &CtValue, ty: &Type, debug: bool) -> Option<String> {
+    match (value, ty) {
+        (CtValue::Int(value), ty) => {
+            let (signed, _) = crate::Comptime::MathLayout::integer_type_layout(ty)?;
+            Some(crate::Comptime::MathLayout::integer_show(*value, signed))
+        }
+        (CtValue::Some(value), Type::Option(inner)) => {
+            Some(show_typed_value(value, inner, debug).unwrap_or_else(|| {
+                if debug {
+                    value.debug_rust()
+                } else {
+                    value.jet_show()
+                }
+            }))
+        }
+        (CtValue::None(_), Type::Option(_)) => Some("null".to_string()),
+        (CtValue::List(values), Type::List(inner) | Type::FixedList { elem: inner, .. }) => {
+            let parts = values
+                .iter()
+                .map(|value| {
+                    show_typed_value(value, inner, debug).unwrap_or_else(|| {
+                        if debug {
+                            value.debug_rust()
+                        } else {
+                            value.jet_show()
+                        }
+                    })
+                })
+                .collect::<Vec<_>>();
+            Some(format!("[{}]", parts.join(", ")))
+        }
+        _ => None,
+    }
+}
+
+impl<'a> EvalCtx<'a> {
     pub(crate) fn eval_expr(
         &mut self,
-        expr: &TExpr,
+        expr: &'a TExpr,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         self.burn()?;
@@ -32,8 +94,14 @@ impl EvalCtx<'_> {
                         TStrPart::Interp(e, fmt) => {
                             let v = self.eval_expr(e, scope)?;
                             let text = match fmt {
-                                crate::AST::StrFormat::Debug => self.debug_value(&v),
-                                crate::AST::StrFormat::Display => self.show_value(&v, scope)?,
+                                crate::AST::StrFormat::Debug => {
+                                    show_typed_value(&v, &e.ty, true)
+                                        .unwrap_or_else(|| self.debug_value(&v))
+                                }
+                                crate::AST::StrFormat::Display => {
+                                    show_typed_value(&v, &e.ty, false)
+                                        .unwrap_or(self.show_value(&v, scope)?)
+                                }
                             };
                             out.push_str(&text);
                         }
@@ -130,7 +198,11 @@ impl EvalCtx<'_> {
                 if self.pending_return.is_some() {
                     return Ok(CtValue::Unit);
                 }
-                self.write_print(&v.jet_show(), false)?;
+                let shown = match show_typed_value(&v, &inner.ty, false) {
+                    Some(shown) => shown,
+                    None => self.show_value(&v, scope)?,
+                };
+                self.write_print(&shown, false)?;
                 Ok(CtValue::Unit)
             }
             TExprKind::Drop(inner) | TExprKind::Close(inner) => {
@@ -140,12 +212,40 @@ impl EvalCtx<'_> {
             TExprKind::Binary { op, lhs, rhs, .. } => {
                 let l = self.eval_expr(lhs, scope)?;
                 let r = self.eval_expr(rhs, scope)?;
+                if let Type::IntN { signed, bits } = &lhs.ty {
+                    let a = as_int(&l, self.span())?;
+                    let b = as_int(&r, self.span())?;
+                    let right_signed =
+                        crate::Comptime::MathLayout::integer_type_layout(&rhs.ty)
+                            .map(|(signed, _)| signed)
+                            .unwrap_or(true);
+                    return crate::Comptime::MathLayout::integer_binop(
+                        *op,
+                        a,
+                        b,
+                        *signed,
+                        *bits,
+                        right_signed,
+                        self.span(),
+                    );
+                }
                 eval_binop(*op, l, r, self.span())
             }
             TExprKind::Unary { op, operand } => {
                 let v = self.eval_expr(operand, scope)?;
                 match (*op, v) {
-                    (UnOp::Neg, CtValue::Int(n)) => Ok(CtValue::Int(-n)),
+                    (UnOp::Neg, CtValue::Int(n))
+                        if matches!(&operand.ty, Type::IntN { signed: true, .. }) =>
+                    {
+                        let (_, bits) =
+                            crate::Comptime::MathLayout::integer_type_layout(&operand.ty)
+                                .expect("IntN layout");
+                        crate::Comptime::MathLayout::integer_neg(n, bits, self.span())
+                    }
+                    (UnOp::Neg, CtValue::Int(n)) => n
+                        .checked_neg()
+                        .map(CtValue::Int)
+                        .ok_or_else(|| unsupported("integer negation overflow", self.span())),
                     (UnOp::Neg, CtValue::Float(n)) => Ok(CtValue::Float(n.neg())),
                     (UnOp::Neg, CtValue::BigInt(n)) => Ok(CtValue::BigInt(n.neg())),
                     (UnOp::Not, CtValue::Bool(b)) => Ok(CtValue::Bool(!b)),
@@ -158,7 +258,23 @@ impl EvalCtx<'_> {
                     vals.push(self.eval_expr(o, scope)?);
                 }
                 for (i, op) in ops.iter().enumerate() {
-                    let part = eval_binop(*op, vals[i].clone(), vals[i + 1].clone(), self.span())?;
+                    let part = if let Type::IntN { signed, bits } = &operands[i].ty {
+                        let right_signed =
+                            crate::Comptime::MathLayout::integer_type_layout(&operands[i + 1].ty)
+                                .map(|(signed, _)| signed)
+                                .unwrap_or(true);
+                        crate::Comptime::MathLayout::integer_binop(
+                            *op,
+                            as_int(&vals[i], self.span())?,
+                            as_int(&vals[i + 1], self.span())?,
+                            *signed,
+                            *bits,
+                            right_signed,
+                            self.span(),
+                        )?
+                    } else {
+                        eval_binop(*op, vals[i].clone(), vals[i + 1].clone(), self.span())?
+                    };
                     if !as_bool(&part, self.span())? {
                         return Ok(CtValue::Bool(false));
                     }
@@ -271,6 +387,77 @@ impl EvalCtx<'_> {
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
                 }
+                if let Some(index) = handle_index(&r, "__JetTirClock") {
+                    let delta = argv.first().and_then(|value| match value {
+                        CtValue::Int(value) => Some(*value),
+                        _ => None,
+                    });
+                    let span = self.span();
+                    let Some(clock) = self.clocks.get_mut(index) else {
+                        return Err(unsupported("clock handle", span));
+                    };
+                    let result = match op {
+                        crate::Codegen::TIR::THandleOp::ClockNow => CtValue::Int(*clock),
+                        crate::Codegen::TIR::THandleOp::ClockTick
+                        | crate::Codegen::TIR::THandleOp::ClockAdvance
+                        | crate::Codegen::TIR::THandleOp::ClockWait => {
+                            let Some(delta) = delta else {
+                                return Err(unsupported("clock delta", span));
+                            };
+                            *clock = clock.saturating_add(delta);
+                            CtValue::Unit
+                        }
+                        _ => return Err(unsupported("clock method", self.span())),
+                    };
+                    return Ok(result);
+                }
+                if matches!(
+                    op,
+                    crate::Codegen::TIR::THandleOp::ExpiringMethod { .. }
+                ) {
+                    let deadline = struct_int(&r, "deadline")
+                        .ok_or_else(|| unsupported("expiring deadline", self.span()))?;
+                    let clock_index = argv
+                        .first()
+                        .and_then(|clock| handle_index(clock, "__JetTirClock"))
+                        .ok_or_else(|| unsupported("expiring clock", self.span()))?;
+                    let now = *self
+                        .clocks
+                        .get(clock_index)
+                        .ok_or_else(|| unsupported("expiring clock handle", self.span()))?;
+                    let valid = now <= deadline;
+                    let result = match op {
+                        crate::Codegen::TIR::THandleOp::ExpiringMethod { method }
+                            if method == "is_valid" =>
+                        {
+                            CtValue::Bool(valid)
+                        }
+                        crate::Codegen::TIR::THandleOp::ExpiringMethod { method }
+                            if method == "get" =>
+                        {
+                            let value = if valid {
+                                let CtValue::Struct { fields, .. } = &r else {
+                                    unreachable!();
+                                };
+                                fields
+                                    .iter()
+                                    .find_map(|(name, value)| {
+                                        (name == "value").then(|| value.clone())
+                                    })
+                                    .unwrap_or(CtValue::Unit)
+                            } else {
+                                CtValue::Str("expired".to_string())
+                            };
+                            if valid {
+                                CtValue::ResOk(Box::new(value))
+                            } else {
+                                CtValue::ResErr(Box::new(value))
+                            }
+                        }
+                        _ => return Err(unsupported("expiring method", self.span())),
+                    };
+                    return Ok(result);
+                }
                 let result = eval_handle(op, &mut r, &mut argv, self.span())?;
                 self.write_back_place(recv, r, scope)?;
                 // `Rng.shuffle(&list)` mutates the list arg in place. Fragment
@@ -298,9 +485,60 @@ impl EvalCtx<'_> {
                 if module == "core.data" {
                     return self.eval_core_data_call(method, args, &expr.ty, scope);
                 }
+                if module == "core.mem" && method == "volatile_write" && args.len() == 2 {
+                    let pointer = self.eval_expr(&args[0], scope)?;
+                    let value = self.eval_expr(&args[1], scope)?;
+                    let CtValue::Struct { type_name, fields } = pointer else {
+                        return Err(unsupported("raw pointer carrier", self.span()));
+                    };
+                    if type_name != "__JetRawLocal" {
+                        return Err(unsupported("raw pointer target", self.span()));
+                    }
+                    let name = fields.iter().find_map(|(field, value)| {
+                        match (field.as_str(), value) {
+                            ("name", CtValue::Str(name)) => Some(name.clone()),
+                            _ => None,
+                        }
+                    });
+                    let Some(name) = name else {
+                        return Err(unsupported("raw pointer local", self.span()));
+                    };
+                    scope.insert(name, value);
+                    return Ok(CtValue::Unit);
+                }
+                if module == "core.mem" && method == "volatile_read" && args.len() == 1 {
+                    let pointer = self.eval_expr(&args[0], scope)?;
+                    let CtValue::Struct { type_name, fields } = pointer else {
+                        return Err(unsupported("raw pointer carrier", self.span()));
+                    };
+                    if type_name != "__JetRawLocal" {
+                        return Err(unsupported("raw pointer target", self.span()));
+                    }
+                    let name = fields.iter().find_map(|(field, value)| {
+                        match (field.as_str(), value) {
+                            ("name", CtValue::Str(name)) => Some(name.as_str()),
+                            _ => None,
+                        }
+                    });
+                    return name
+                        .and_then(|name| scope.get(name).cloned())
+                        .ok_or_else(|| unsupported("raw pointer local", self.span()));
+                }
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
+                }
+                if module == "jet.crypto"
+                    && method == "__signing_generate"
+                    && argv.is_empty()
+                {
+                    return Ok(CtValue::ResOk(Box::new(CtValue::Int(1))));
+                }
+                if module == "jet.crypto"
+                    && method == "__signing_public"
+                    && argv.len() == 1
+                {
+                    return Ok(argv.remove(0));
                 }
                 if module == "core.browser" && self.runtime_execution {
                     return super::browser::core_call(method, argv, *source_span);
@@ -353,16 +591,21 @@ impl EvalCtx<'_> {
                     ))
                 }
             }
-            TExprKind::StructLit { fields, .. } => {
+            TExprKind::StructLit {
+                fields, as_trait, ..
+            } => {
                 let mut out = Vec::with_capacity(fields.len());
                 for (name, val, _) in fields {
                     out.push((name.clone(), self.eval_expr(val, scope)?));
                 }
-                let type_name = match &expr.ty {
-                    crate::AST::Type::Named(n) => n.clone(),
-                    crate::AST::Type::Apply { name, .. } => name.clone(),
-                    _ => "struct".into(),
-                };
+                let type_name = as_trait
+                    .as_ref()
+                    .map(|(_, concrete)| concrete.clone())
+                    .unwrap_or_else(|| match &expr.ty {
+                        crate::AST::Type::Named(n) => n.clone(),
+                        crate::AST::Type::Apply { name, .. } => name.clone(),
+                        _ => "struct".into(),
+                    });
                 Ok(CtValue::Struct {
                     type_name,
                     fields: out,
@@ -513,6 +756,76 @@ impl EvalCtx<'_> {
                 if method.name == "clone" {
                     return Ok(r);
                 }
+                if method.name == "apply" {
+                    if let (
+                        CtValue::Struct {
+                            type_name,
+                            fields,
+                        },
+                        Some(CtValue::Struct {
+                            type_name: patch_name,
+                            fields: patch_fields,
+                        }),
+                    ) = (&r, argv.first())
+                    {
+                        if patch_name == &format!("{type_name}.Patch") {
+                            let fields = fields
+                                .iter()
+                                .map(|(name, old)| {
+                                    let value = patch_fields
+                                        .iter()
+                                        .find_map(|(patch_name, value)| {
+                                            (patch_name == name).then_some(value)
+                                        })
+                                        .and_then(|value| match value {
+                                            CtValue::Some(value) => Some((**value).clone()),
+                                            _ => None,
+                                        })
+                                        .unwrap_or_else(|| old.clone());
+                                    (name.clone(), value)
+                                })
+                                .collect();
+                            return Ok(CtValue::Struct {
+                                type_name: type_name.clone(),
+                                fields,
+                            });
+                        }
+                    }
+                }
+                if method.name == "merge" {
+                    if let (
+                        CtValue::Struct {
+                            type_name,
+                            fields,
+                        },
+                        Some(CtValue::Struct {
+                            type_name: other_name,
+                            fields: other_fields,
+                        }),
+                    ) = (&r, argv.first())
+                    {
+                        if type_name.ends_with(".Patch") && type_name == other_name {
+                            let fields = fields
+                                .iter()
+                                .map(|(name, current)| {
+                                    let incoming = other_fields
+                                        .iter()
+                                        .find_map(|(other_name, value)| {
+                                            (other_name == name).then_some(value)
+                                        })
+                                        .filter(|value| matches!(value, CtValue::Some(_)))
+                                        .cloned()
+                                        .unwrap_or_else(|| current.clone());
+                                    (name.clone(), incoming)
+                                })
+                                .collect();
+                            return Ok(CtValue::Struct {
+                                type_name: type_name.clone(),
+                                fields,
+                            });
+                        }
+                    }
+                }
                 let span = self.span();
                 let base_dir = self.base_dir.clone();
                 if let Some(result) =
@@ -602,6 +915,20 @@ impl EvalCtx<'_> {
                         return Ok(ret);
                     }
                 }
+                if method.name == "compare" {
+                    if let (CtValue::Int(lhs), [CtValue::Int(rhs)]) = (&r, argv.as_slice()) {
+                        let variant = match lhs.cmp(rhs) {
+                            std::cmp::Ordering::Less => "Less",
+                            std::cmp::Ordering::Equal => "Equal",
+                            std::cmp::Ordering::Greater => "Greater",
+                        };
+                        return Ok(CtValue::Enum {
+                            type_name: "Ordering".to_string(),
+                            variant: variant.to_string(),
+                            args: Vec::new(),
+                        });
+                    }
+                }
                 if let Ok(v) = crate::Comptime::Builtins::apply_method(
                     &r,
                     &method.name,
@@ -621,13 +948,15 @@ impl EvalCtx<'_> {
                     if let Some(func) = self.funcs.get(&name).copied() {
                         let mut child = HashMap::new();
                         // Instance methods lower `self` into the env, not `params`.
-                        let argv_for_params = if matches!(
+                        let has_receiver = matches!(
                             &func.kind,
                             crate::Codegen::TIR::TFuncKind::Method {
                                 self_conv: Some(_),
                                 ..
                             }
-                        ) {
+                                | crate::Codegen::TIR::TFuncKind::TraitMethod { .. }
+                        );
+                        let argv_for_params = if has_receiver {
                             child.insert("self".to_string(), r.clone());
                             argv
                         } else {
@@ -814,10 +1143,12 @@ impl EvalCtx<'_> {
                         (Type::IntN { signed: true, bits: 32 }, "MIN") => {
                             Ok(CtValue::Int(i32::MIN as i64))
                         }
-                        (Type::IntN { signed: false, bits: 64 }, "MAX") => {
-                            Ok(CtValue::Int(i64::MAX))
-                        }
-                        (Type::IntN { signed: false, bits: 64 }, "MIN") => Ok(CtValue::Int(0)),
+                        (Type::IntN { signed, bits }, "MAX") => Ok(CtValue::Int(
+                            crate::Comptime::MathLayout::integer_bound(*signed, *bits, true),
+                        )),
+                        (Type::IntN { signed, bits }, "MIN") => Ok(CtValue::Int(
+                            crate::Comptime::MathLayout::integer_bound(*signed, *bits, false),
+                        )),
                         _ => Err(unsupported(
                             &format!("numeric bounds `{member}`"),
                             self.span(),
@@ -846,8 +1177,99 @@ impl EvalCtx<'_> {
                         }
                     }
                 }
+                crate::Codegen::TIR::THostCall::SwitchSubjectField { field } => {
+                    let CtValue::Struct { fields, .. } = self
+                        .switch_subject
+                        .as_ref()
+                        .ok_or_else(|| unsupported("switch subject field outside switch", self.span()))?
+                    else {
+                        return Err(unsupported("switch subject is not a struct", self.span()));
+                    };
+                    fields
+                        .iter()
+                        .find_map(|(name, value)| (name == field).then(|| value.clone()))
+                        .ok_or_else(|| unsupported(&format!("switch subject field `{field}`"), self.span()))
+                }
                 crate::Codegen::TIR::THostCall::Method { recv, method, args } => {
                     let mut r = self.eval_expr(recv, scope)?;
+                    if matches!(&r, CtValue::Struct { type_name, .. } if type_name == "__JetTirExpiring")
+                        && method == "with"
+                    {
+                        let clock_index = struct_int(&r, "clock")
+                            .ok_or_else(|| unsupported("expiring secret clock", self.span()))?
+                            as usize;
+                        let deadline = struct_int(&r, "deadline")
+                            .ok_or_else(|| unsupported("expiring secret deadline", self.span()))?;
+                        let valid = self
+                            .clocks
+                            .get(clock_index)
+                            .is_some_and(|now| *now <= deadline);
+                        if !valid {
+                            return Ok(CtValue::ResErr(Box::new(CtValue::Str(
+                                "expired".to_string(),
+                            ))));
+                        }
+                        let CtValue::Struct { fields, .. } = &r else {
+                            unreachable!();
+                        };
+                        let value = fields
+                            .iter()
+                            .find_map(|(name, value)| (name == "value").then(|| value.clone()))
+                            .unwrap_or(CtValue::Unit);
+                        let Some(TExpr {
+                            kind: TExprKind::Lambda(lambda),
+                            ..
+                        }) = args.first()
+                        else {
+                            return Err(unsupported("expiring secret lambda", self.span()));
+                        };
+                        let result = self.eval_tlambda(lambda, vec![value], scope)?;
+                        return Ok(CtValue::ResOk(Box::new(result)));
+                    }
+                    if matches!(&r, CtValue::Struct { type_name, .. } if type_name == "__JetTirShared") {
+                        let CtValue::Struct { fields, .. } = &r else {
+                            unreachable!();
+                        };
+                        let index = fields
+                            .iter()
+                            .find_map(|(name, value)| match (name.as_str(), value) {
+                                ("index", CtValue::Int(index)) => Some(*index as usize),
+                                _ => None,
+                            })
+                            .ok_or_else(|| unsupported("shared handle", self.span()))?;
+                        let transactional = method == "edit_txn";
+                        let current = if transactional {
+                            self.shared_transactions
+                                .last()
+                                .and_then(|transaction| transaction.get(&index))
+                                .cloned()
+                                .or_else(|| self.shared_values.get(index).cloned())
+                        } else {
+                            self.shared_values.get(index).cloned()
+                        }
+                        .ok_or_else(|| unsupported("shared value", self.span()))?;
+                        let Some(TExpr {
+                            kind: TExprKind::Lambda(lambda),
+                            ..
+                        }) = args.first()
+                        else {
+                            return Err(unsupported("shared method lambda", self.span()));
+                        };
+                        let (result, updated) =
+                            self.eval_tlambda_mut_arg(lambda, current, scope)?;
+                        if transactional {
+                            let Some(transaction) = self.shared_transactions.last_mut() else {
+                                return Err(unsupported(
+                                    "Shared.edit_txn outside #Transact",
+                                    self.span(),
+                                ));
+                            };
+                            transaction.insert(index, updated);
+                        } else if method == "edit" {
+                            self.shared_values[index] = updated;
+                        }
+                        return Ok(result);
+                    }
                     let mut argv = Vec::with_capacity(args.len());
                     for a in args {
                         argv.push(self.eval_expr(a, scope)?);
@@ -907,9 +1329,11 @@ impl EvalCtx<'_> {
                                 ));
                             }
                         };
+                        let index = self.clocks.len();
+                        self.clocks.push(seed);
                         return Ok(CtValue::Struct {
-                            type_name: crate::Syntax::CLOCK_TYPE.to_string(),
-                            fields: vec![("now".to_string(), CtValue::Int(seed))],
+                            type_name: "__JetTirClock".to_string(),
+                            fields: vec![("index".to_string(), CtValue::Int(index as i64))],
                         });
                     }
                     if leaf == "jet_std_clock_system" || leaf.ends_with("jet_std_clock_system") {
@@ -922,6 +1346,65 @@ impl EvalCtx<'_> {
                         &format!("expr `HostCall` helper `{leaf}`"),
                         self.span(),
                     ))
+                }
+                crate::Codegen::TIR::THostCall::YieldSend { value } => {
+                    let yielded = self.eval_expr(value, scope)?;
+                    let consumer = self
+                        .yield_consumer
+                        .clone()
+                        .ok_or_else(|| unsupported("yield outside a stream consumer", self.span()))?;
+                    let mut consumer_scope = self
+                        .yield_scope
+                        .take()
+                        .ok_or_else(|| unsupported("stream consumer scope", self.span()))?;
+                    consumer_scope.insert(consumer.var, yielded);
+                    let result = self.exec_stmts(consumer.body, &mut consumer_scope);
+                    self.yield_scope = Some(consumer_scope);
+                    match result? {
+                        Flow::Normal | Flow::Continue => Ok(CtValue::Unit),
+                        Flow::Break => {
+                            self.pending_return = Some(CtValue::Unit);
+                            Ok(CtValue::Unit)
+                        }
+                        other => Err(unsupported(
+                            &format!("stream consumer control flow {other:?}"),
+                            self.span(),
+                        )),
+                    }
+                }
+                crate::Codegen::TIR::THostCall::ExpiringValueNew {
+                    value,
+                    duration,
+                    clock,
+                }
+                | crate::Codegen::TIR::THostCall::ExpiringSecretNew {
+                    value,
+                    duration,
+                    clock,
+                    ..
+                } => {
+                    let value = self.eval_expr(value, scope)?;
+                    let duration = self.eval_expr(duration, scope)?;
+                    let duration = struct_int(&duration, "ms")
+                        .ok_or_else(|| unsupported("expiring duration", self.span()))?;
+                    let clock = self.eval_expr(clock, scope)?;
+                    let clock_index = handle_index(&clock, "__JetTirClock")
+                        .ok_or_else(|| unsupported("expiring clock", self.span()))?;
+                    let now = *self
+                        .clocks
+                        .get(clock_index)
+                        .ok_or_else(|| unsupported("expiring clock handle", self.span()))?;
+                    Ok(CtValue::Struct {
+                        type_name: "__JetTirExpiring".to_string(),
+                        fields: vec![
+                            ("value".to_string(), value),
+                            (
+                                "deadline".to_string(),
+                                CtValue::Int(now.saturating_add(duration)),
+                            ),
+                            ("clock".to_string(), CtValue::Int(clock_index as i64)),
+                        ],
+                    })
                 }
                 other => {
                     let tag = match other {
@@ -939,7 +1422,7 @@ impl EvalCtx<'_> {
                         crate::Codegen::TIR::THostCall::SwitchSubjectField { .. } => {
                             "SwitchSubjectField"
                         }
-                        crate::Codegen::TIR::THostCall::YieldSend { .. } => "YieldSend",
+                        crate::Codegen::TIR::THostCall::YieldSend { .. } => unreachable!(),
                         crate::Codegen::TIR::THostCall::TypedTextInterp { .. } => "TypedTextInterp",
                         crate::Codegen::TIR::THostCall::ExpectSnapshot { .. } => "ExpectSnapshot",
                         crate::Codegen::TIR::THostCall::EnvSet { .. } => "EnvSet",
@@ -951,7 +1434,11 @@ impl EvalCtx<'_> {
                     ))
                 }
             },
-            TExprKind::DataEntriesToMap(..) => Err(unsupported("expr `DataEntriesToMap`", self.span())),
+            TExprKind::DataEntriesToMap(local) => scope
+                .get(&local.name)
+                .cloned()
+                .or_else(|| self.globals.get(&local.name).cloned())
+                .ok_or_else(|| unsupported(&format!("unbound `{}`", local.name), self.span())),
             TExprKind::DistinctCtor { name: _, arg, base: _ } => {
                 // Distinct is a zero-cost nominal wrapper over its base scalar.
                 self.eval_expr(arg, scope)
@@ -985,7 +1472,7 @@ impl EvalCtx<'_> {
                     let CtValue::Int(n) = &inner else {
                         return Err(unsupported("distinct range check on non-Int", self.span()));
                     };
-                    if *n < *lo || *n >= *hi {
+                    if *n < *lo || *n > *hi {
                         let err = CtValue::Str(format!("value doesn't fit in range {lo}..{hi}"));
                         return Ok(if *fallible {
                             CtValue::ResErr(Box::new(err))
@@ -1047,8 +1534,13 @@ impl EvalCtx<'_> {
                 }
                 eval_precise_builtin(type_name, func, argv, self.span())
             }
-            TExprKind::ResourceNew(..) => Err(unsupported("expr `ResourceNew`", self.span())),
-            TExprKind::ResourceTake(..) => Err(unsupported("expr `ResourceTake`", self.span())),
+            TExprKind::ResourceNew(inner) => self.eval_expr(inner, scope),
+            TExprKind::ResourceTake(place) => scope
+                .get(place)
+                .cloned()
+                .or_else(|| place.strip_prefix("user_").and_then(|name| scope.get(name).cloned()))
+                .or_else(|| self.globals.get(place).cloned())
+                .ok_or_else(|| unsupported(&format!("resource `{place}`"), self.span())),
             TExprKind::AmbientInput { .. } => Err(unsupported("expr `AmbientInput`", self.span())),
             TExprKind::RequireStop {
                 kind,
@@ -1111,9 +1603,35 @@ impl EvalCtx<'_> {
                 })
             }
             TExprKind::PtrFromAddr { .. } => Err(unsupported("expr `PtrFromAddr`", self.span())),
-            TExprKind::Deref(inner) => self.eval_expr(inner, scope),
-            TExprKind::RawOf(inner) => self.eval_expr(inner, scope),
-            TExprKind::AllocNew { .. } => Err(unsupported("expr `AllocNew`", self.span())),
+            TExprKind::Deref(inner) => {
+                let pointer = self.eval_expr(inner, scope)?;
+                let CtValue::Struct { type_name, fields } = pointer else {
+                    return Err(unsupported("raw pointer carrier", self.span()));
+                };
+                if type_name != "__JetRawLocal" {
+                    return Err(unsupported("raw pointer target", self.span()));
+                }
+                let name = fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
+                    ("name", CtValue::Str(name)) => Some(name.as_str()),
+                    _ => None,
+                });
+                name.and_then(|name| scope.get(name).cloned())
+                    .ok_or_else(|| unsupported("raw pointer local", self.span()))
+            }
+            TExprKind::RawOf(inner) => {
+                let local = super::raw_place_local(inner);
+                let Some(local) = local else {
+                    return Err(unsupported("raw pointer non-local place", self.span()));
+                };
+                Ok(CtValue::Struct {
+                    type_name: "__JetRawLocal".to_string(),
+                    fields: vec![("name".to_string(), CtValue::Str(local.name.clone()))],
+                })
+            }
+            TExprKind::AllocNew { ctor } => Ok(CtValue::Struct {
+                type_name: "__JetTirAllocator".to_string(),
+                fields: vec![("ctor".to_string(), CtValue::Str(ctor.clone()))],
+            }),
             TExprKind::JsonLit { variant, arg } => {
                 let payload = match arg {
                     Some(inner) => Some(self.eval_expr(&inner.0, scope)?),
@@ -1129,7 +1647,23 @@ impl EvalCtx<'_> {
                 })
             }
             TExprKind::DbValueLit { .. } => Err(unsupported("expr `DbValueLit`", self.span())),
-            TExprKind::ListSpread { .. } => Err(unsupported("expr `ListSpread`", self.span())),
+            TExprKind::ListSpread { parts } => {
+                let mut values = Vec::new();
+                for part in parts {
+                    match part {
+                        ListSpreadPart::Elem(expr) => {
+                            values.push(self.eval_expr(expr, scope)?);
+                        }
+                        ListSpreadPart::Spread(expr) => {
+                            let CtValue::List(items) = self.eval_expr(expr, scope)? else {
+                                return Err(unsupported("list spread operand", self.span()));
+                            };
+                            values.extend(items);
+                        }
+                    }
+                }
+                Ok(CtValue::List(values))
+            }
             TExprKind::ColumnarListLit { .. } => {
                 Err(unsupported("expr `ColumnarListLit`", self.span()))
             }
@@ -1139,8 +1673,72 @@ impl EvalCtx<'_> {
             TExprKind::ColumnarColumnRead { .. } => {
                 Err(unsupported("expr `ColumnarColumnRead`", self.span()))
             }
-            TExprKind::PoolSlot { .. } => Err(unsupported("expr `PoolSlot`", self.span())),
-            TExprKind::IndexHook { .. } => Err(unsupported("expr `IndexHook`", self.span())),
+            TExprKind::PoolSlot {
+                pool,
+                id,
+                field,
+                ..
+            } => {
+                let pool_value = self.eval_expr(pool, scope)?;
+                let id_value = self.eval_expr(id, scope)?;
+                let Some((index, generation)) = pool_id_parts(&id_value) else {
+                    return Err(pool_stale_diagnostic());
+                };
+                let CtValue::Struct { fields, .. } = pool_value else {
+                    return Err(pool_stale_diagnostic());
+                };
+                let slots = fields.iter().find_map(|(name, value)| match value {
+                    CtValue::List(slots) if name == "slots" => Some(slots),
+                    _ => None,
+                });
+                let Some(CtValue::Enum {
+                    variant,
+                    args,
+                    ..
+                }) = slots.and_then(|slots| slots.get(index))
+                else {
+                    return Err(pool_stale_diagnostic());
+                };
+                if variant != "Occupied"
+                    || !matches!(args.first(), Some((_, CtValue::Int(found))) if *found == generation)
+                {
+                    return Err(pool_stale_diagnostic());
+                }
+                let Some((_, mut value)) = args.get(1).cloned() else {
+                    return Err(pool_stale_diagnostic());
+                };
+                if let Some(field) = field {
+                    let CtValue::Struct { fields, .. } = value else {
+                        return Err(unsupported("Pool field on a non-struct", self.span()));
+                    };
+                    value = fields
+                        .into_iter()
+                        .find_map(|(name, value)| (name == *field).then_some(value))
+                        .ok_or_else(|| unsupported(&format!("Pool field `{field}`"), self.span()))?;
+                }
+                Ok(value)
+            }
+            TExprKind::IndexHook {
+                type_name,
+                base,
+                index,
+                ..
+            } => {
+                let recv = self.eval_expr(base, scope)?;
+                let key = self.eval_expr(index, scope)?;
+                let func = self
+                    .funcs
+                    .get(&format!("{type_name}::get"))
+                    .copied()
+                    .ok_or_else(|| unsupported("Index.get", self.span()))?;
+                let mut child = HashMap::new();
+                child.insert("self".to_string(), recv);
+                match self.run_func(func, vec![key], &mut child)? {
+                    CtValue::Some(value) => Ok(*value),
+                    CtValue::None(_) => Err(unsupported("index miss", self.span())),
+                    _ => Err(unsupported("Index.get result", self.span())),
+                }
+            }
             TExprKind::MathLaneIndex { base, index, .. } => {
                 let b = self.eval_expr(base, scope)?;
                 let i = as_int(&self.eval_expr(index, scope)?, self.span())?;
@@ -1152,7 +1750,21 @@ impl EvalCtx<'_> {
             TExprKind::MathSwizzleRead { .. } => {
                 Err(unsupported("expr `MathSwizzleRead`", self.span()))
             }
-            TExprKind::FnFieldCall { .. } => Err(unsupported("expr `FnFieldCall`", self.span())),
+            TExprKind::FnFieldCall { recv, field, args } => {
+                let value = self.eval_expr(recv, scope)?;
+                let CtValue::Struct { fields, .. } = value else {
+                    return Err(unsupported("function field receiver", self.span()));
+                };
+                let callable = fields
+                    .into_iter()
+                    .find_map(|(name, value)| (name == *field).then_some(value))
+                    .ok_or_else(|| unsupported(&format!("function field `{field}`"), self.span()))?;
+                let mut argv = Vec::with_capacity(args.len());
+                for arg in args {
+                    argv.push(self.eval_expr(&arg.value, scope)?);
+                }
+                self.call_callable(&callable, argv)
+            }
             TExprKind::StaticCall {
                 owner,
                 method,
@@ -1165,6 +1777,45 @@ impl EvalCtx<'_> {
                 }
                 match owner {
                     crate::Codegen::TIR::TStaticOwner::User(type_name) => {
+                        if method.name == "diff" && argv.len() == 2 {
+                            if let (
+                                CtValue::Struct {
+                                    type_name: new_name,
+                                    fields: new_fields,
+                                },
+                                CtValue::Struct {
+                                    type_name: old_name,
+                                    fields: old_fields,
+                                },
+                            ) = (&argv[0], &argv[1])
+                            {
+                                if new_name == type_name && old_name == type_name {
+                                    let fields = new_fields
+                                        .iter()
+                                        .map(|(name, new_value)| {
+                                            let changed = old_fields
+                                                .iter()
+                                                .find_map(|(old_name, old_value)| {
+                                                    (old_name == name).then_some(old_value)
+                                                })
+                                                != Some(new_value);
+                                            (
+                                                name.clone(),
+                                                if changed {
+                                                    CtValue::Some(Box::new(new_value.clone()))
+                                                } else {
+                                                    CtValue::None(new_value.jet_type())
+                                                },
+                                            )
+                                        })
+                                        .collect();
+                                    return Ok(CtValue::Struct {
+                                        type_name: format!("{type_name}.Patch"),
+                                        fields,
+                                    });
+                                }
+                            }
+                        }
                         if let Some(res) = crate::Comptime::Builtins::apply_static_type_method(
                             type_name,
                             &method.name,
@@ -1202,6 +1853,14 @@ impl EvalCtx<'_> {
                         ))
                     }
                     crate::Codegen::TIR::TStaticOwner::Prelude { path, .. } => {
+                        if path == "jet_std::JetShared" && method.name == "new" && argv.len() == 1 {
+                            let index = self.shared_values.len();
+                            self.shared_values.push(argv.remove(0));
+                            return Ok(CtValue::Struct {
+                                type_name: "__JetTirShared".to_string(),
+                                fields: vec![("index".to_string(), CtValue::Int(index as i64))],
+                            });
+                        }
                         if let Some(res) = crate::Comptime::Builtins::apply_static_type_method(
                             path,
                             &method.name,
@@ -1261,7 +1920,10 @@ impl EvalCtx<'_> {
                     _ => Err(unsupported("opt-field recv", self.span())),
                 }
             }
-            TExprKind::Lambda(..) => Err(unsupported("expr `Lambda`", self.span())),
+            TExprKind::Lambda(lambda) => Ok(self.store_callable(EvalCallable::Lambda {
+                lambda,
+                captured: scope.clone(),
+            })),
             TExprKind::PatternMatches { .. } => {
                 Err(unsupported("expr `PatternMatches`", self.span()))
             }
@@ -1336,6 +1998,9 @@ impl EvalCtx<'_> {
                     self.span(),
                 )
             }
+            TExprKind::CoreClosureCall {
+                kind: TCoreClosureKind::Spawn { .. },
+            } => self.eval_spawn(scope),
             TExprKind::CoreClosureCall { .. } => {
                 Err(unsupported("expr `CoreClosureCall`", self.span()))
             }
@@ -1347,7 +2012,22 @@ impl EvalCtx<'_> {
             TExprKind::SelectAfter { .. } => Err(unsupported("expr `SelectAfter`", self.span())),
             TExprKind::SelectRead { .. } => Err(unsupported("expr `SelectRead`", self.span())),
             TExprKind::SelectWait { .. } => Err(unsupported("expr `SelectWait`", self.span())),
-            TExprKind::FnValue { .. } => Err(unsupported("expr `FnValue`", self.span())),
+            TExprKind::FnValue { kind } => match kind {
+                TFnValueKind::NamedFn {
+                    name: Some(name), ..
+                } => Ok(self.store_callable(EvalCallable::Named(name))),
+                TFnValueKind::NamedFn { name: None, .. } => {
+                    Err(unsupported("rendered function coercion", self.span()))
+                }
+                TFnValueKind::Call { callee, args } => {
+                    let callable = self.eval_expr(callee, scope)?;
+                    let mut argv = Vec::with_capacity(args.len());
+                    for arg in args {
+                        argv.push(self.eval_expr(&arg.value, scope)?);
+                    }
+                    self.call_callable(&callable, argv)
+                }
+            },
             TExprKind::ModuleCall { .. } => Err(unsupported("expr `ModuleCall`", self.span())),
             TExprKind::ExternCall { .. } => Err(unsupported("expr `ExternCall`", self.span())),
         }
@@ -1355,7 +2035,7 @@ impl EvalCtx<'_> {
 
     pub(crate) fn write_back_place(
         &mut self,
-        place: &TExpr,
+        place: &'a TExpr,
         value: CtValue,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<(), Diagnostic> {
@@ -1365,6 +2045,24 @@ impl EvalCtx<'_> {
                 Ok(())
             }
             TExprKind::Borrow { place, .. } => self.write_back_place(place, value, scope),
+            TExprKind::Deref(inner) => {
+                let pointer = self.eval_expr(inner, scope)?;
+                let CtValue::Struct { type_name, fields } = pointer else {
+                    return Err(unsupported("raw pointer carrier", self.span()));
+                };
+                if type_name != "__JetRawLocal" {
+                    return Err(unsupported("raw pointer target", self.span()));
+                }
+                let name = fields.iter().find_map(|(field, value)| match (field.as_str(), value) {
+                    ("name", CtValue::Str(name)) => Some(name.clone()),
+                    _ => None,
+                });
+                let Some(name) = name else {
+                    return Err(unsupported("raw pointer local", self.span()));
+                };
+                scope.insert(name, value);
+                Ok(())
+            }
             TExprKind::Field { recv, field, .. } => {
                 let mut base_val = self.eval_expr(recv, scope)?;
                 match &mut base_val {
@@ -1380,6 +2078,54 @@ impl EvalCtx<'_> {
                     }
                 }
                 self.write_back_place(recv, base_val, scope)
+            }
+            TExprKind::PoolSlot {
+                pool,
+                id,
+                field,
+                ..
+            } => {
+                let mut pool_value = self.eval_expr(pool, scope)?;
+                let id_value = self.eval_expr(id, scope)?;
+                let Some((index, generation)) = pool_id_parts(&id_value) else {
+                    return Err(pool_stale_diagnostic());
+                };
+                let CtValue::Struct { fields, .. } = &mut pool_value else {
+                    return Err(pool_stale_diagnostic());
+                };
+                let slots = fields.iter_mut().find_map(|(name, value)| match value {
+                    CtValue::List(slots) if name == "slots" => Some(slots),
+                    _ => None,
+                });
+                let Some(CtValue::Enum {
+                    variant,
+                    args,
+                    ..
+                }) = slots.and_then(|slots| slots.get_mut(index))
+                else {
+                    return Err(pool_stale_diagnostic());
+                };
+                if variant != "Occupied"
+                    || !matches!(args.first(), Some((_, CtValue::Int(found))) if *found == generation)
+                {
+                    return Err(pool_stale_diagnostic());
+                }
+                let Some((_, payload)) = args.get_mut(1) else {
+                    return Err(pool_stale_diagnostic());
+                };
+                if let Some(field) = field {
+                    let CtValue::Struct { fields, .. } = payload else {
+                        return Err(unsupported("Pool field on a non-struct", self.span()));
+                    };
+                    let slot = fields
+                        .iter_mut()
+                        .find_map(|(name, value)| (name == field).then_some(value))
+                        .ok_or_else(|| unsupported(&format!("Pool field `{field}`"), self.span()))?;
+                    *slot = value;
+                } else {
+                    *payload = value;
+                }
+                self.write_back_place(pool, pool_value, scope)
             }
             _ => Ok(()),
         }
@@ -1399,26 +2145,13 @@ impl EvalCtx<'_> {
                 let CtValue::Int(value) = v else {
                     return Err(unsupported("numeric bit-count recv", self.span()));
                 };
-                let width = *width;
-                let mask = if width == 64 {
-                    u64::MAX
-                } else {
-                    (1_u64 << width) - 1
-                };
-                let bits = (*value as u64) & mask;
-                let ones = bits.count_ones();
-                let count = match method.as_str() {
-                    "count_ones" => ones,
-                    "count_zeros" => width - ones,
-                    "leading_zeros" => bits.leading_zeros() - (64 - width),
-                    "trailing_zeros" => bits.trailing_zeros().min(width),
-                    _ => {
-                        return Err(unsupported(&format!("numeric `{method}`"), self.span()));
-                    }
-                };
-                Ok(CtValue::Int(i64::from(count)))
+                crate::Comptime::MathLayout::integer_bit_count(*value, *width, method)
+                    .map(CtValue::Int)
+                    .ok_or_else(|| unsupported(&format!("numeric `{method}`"), self.span()))
             }
-            TNumericOp::ToShow => Ok(CtValue::Str(v.jet_show())),
+            TNumericOp::ToShow => Ok(CtValue::Str(
+                show_typed_value(v, recv_ty, false).unwrap_or_else(|| v.jet_show()),
+            )),
             TNumericOp::Predicate(method) => {
                 crate::Comptime::Builtins::apply_method(v, method, vec![], self.span())
             }
@@ -1510,7 +2243,7 @@ impl EvalCtx<'_> {
     fn eval_call(
         &mut self,
         name: &str,
-        args: &[TCallArg],
+        args: &'a [TCallArg],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         let mut argv = Vec::with_capacity(args.len());
@@ -1580,6 +2313,12 @@ impl EvalCtx<'_> {
         let Some(func) = self.funcs.get(name).copied() else {
             return Err(unsupported(&format!("call `{name}`"), self.span()));
         };
+        if matches!(
+            &func.ret,
+            Some(Type::Apply { name, .. }) if name == crate::Syntax::TYPE_STREAM
+        ) {
+            return Ok(self.store_stream(func, argv));
+        }
         let mut child = HashMap::new();
         let result = self.run_func(func, argv, &mut child)?;
         // CtValue params are copy-in/copy-out. Fragment lowering often lacks
@@ -1615,7 +2354,8 @@ impl EvalCtx<'_> {
             let key = format!("{type_name}::display");
             if let Some(func) = self.funcs.get(&key).copied() {
                 let mut child = HashMap::new();
-                if let CtValue::Str(s) = self.run_func(func, vec![v.clone()], &mut child)? {
+                child.insert("self".to_string(), v.clone());
+                if let CtValue::Str(s) = self.run_func(func, Vec::new(), &mut child)? {
                     return Ok(s);
                 }
             }
@@ -1683,6 +2423,33 @@ impl EvalCtx<'_> {
         }
     }
 
+}
+
+fn pool_id_parts(value: &CtValue) -> Option<(usize, i64)> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "Id" {
+        return None;
+    }
+    let int_field = |wanted: &str| {
+        fields.iter().find_map(|(name, value)| match value {
+            CtValue::Int(value) if name == wanted => Some(*value),
+            _ => None,
+        })
+    };
+    Some((usize::try_from(int_field("index")?).ok()?, int_field("generation")?))
+}
+
+fn pool_stale_diagnostic() -> Diagnostic {
+    Diagnostic::error(
+        "E0953",
+        "your comptime code stopped the build".to_string(),
+        "while computing this value at compile time, the program panicked: this Id no longer refers to a live value — its pool slot was removed".to_string(),
+        "this is the sanctioned way to validate at compile time — fix the input the check rejects"
+            .to_string(),
+        None,
+    )
 }
 
 fn eval_precise_builtin(

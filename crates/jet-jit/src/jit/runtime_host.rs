@@ -8,8 +8,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::resident::resident_teardown;
 use super::{
-    Archive, Collections, Compress, Concurrency, CoreHost, Encoding, Fmt, JitResultValue, Numeric,
-    Process, Random, Sketch, Solver, Text, TRY_COMPILE_PANIC_HOOK_LOCK,
+    Archive, Collections, Compress, Concurrency, CoreHost, Encoding, Fmt, JitResultValue, Memory,
+    Numeric, Process, Random, Sketch, Solver, Text, TRY_COMPILE_PANIC_HOOK_LOCK,
 };
 
 pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
@@ -55,7 +55,7 @@ pub(crate) struct JitRuntime {
     pub(crate) heap: jet_rt::JetArena,
     pub(crate) invocations: u64,
     pub(crate) channels: Vec<JetSchedulerChannel<i64>>,
-    pub(crate) senders: Vec<JetSchedulerSender<i64>>,
+    pub(crate) senders: Vec<Option<JetSchedulerSender<i64>>>,
     pub(crate) tasks: Vec<Option<JetSchedulerJoin<i64>>>,
     pub(crate) task_controls: Vec<std::sync::Arc<JetTaskControl>>,
     /// General `Result<T, E>` ABI arena. Handles are one-based indices; payload
@@ -91,6 +91,18 @@ pub(crate) struct JitRuntime {
     pub(crate) sets: Vec<std::collections::HashSet<i64>>,
     /// `Deque<T>` handles — 1-based indices (#729 collections/deque). Int elems only.
     pub(crate) deques: Vec<std::collections::VecDeque<i64>>,
+    /// `Bag<T>` handles — counted JIT-value bits, keyed by the checked element ABI.
+    pub(crate) bags: Vec<std::collections::HashMap<i64, usize>>,
+    pub(crate) sorted_sets: Vec<std::collections::BTreeSet<i64>>,
+    pub(crate) priority_queues: Vec<std::collections::BinaryHeap<i64>>,
+    pub(crate) lrus: Vec<Collections::LruState>,
+    pub(crate) bit_sets: Vec<std::collections::BTreeSet<i64>>,
+    pub(crate) byte_buffers: Vec<Vec<u8>>,
+    pub(crate) allocators: Vec<Memory::AllocatorState>,
+    pub(crate) pools: Vec<std::sync::Arc<std::sync::Mutex<Memory::PoolState>>>,
+    pub(crate) shareds: Vec<std::sync::Arc<Memory::SharedState>>,
+    pub(crate) expirings: Vec<Memory::ExpiringState>,
+    pub(crate) secrets: Vec<Option<Memory::SecretState>>,
     /// Set by a host shim when the user program hits a runtime panic (overflow,
     /// list index/slice OOB, a couple of concurrency panics). Non-`None` makes
     /// JIT-generated code branch to its epilogue on the next `emit_trap_check`,
@@ -163,6 +175,21 @@ fn jet_trap_overflow(op: &str) {
     with_runtime_mut(|rt| rt.set_trap(msg));
 }
 
+pub(crate) const INTN_OP_ADD: i64 = 0;
+pub(crate) const INTN_OP_SUB: i64 = 1;
+pub(crate) const INTN_OP_MUL: i64 = 2;
+pub(crate) const INTN_OP_DIV: i64 = 3;
+pub(crate) const INTN_OP_REM: i64 = 4;
+pub(crate) const INTN_OP_BIT_AND: i64 = 5;
+pub(crate) const INTN_OP_BIT_OR: i64 = 6;
+pub(crate) const INTN_OP_BIT_XOR: i64 = 7;
+pub(crate) const INTN_OP_SHL: i64 = 8;
+pub(crate) const INTN_OP_SHR: i64 = 9;
+pub(crate) const INTN_MODE_TRAP: i64 = 0;
+pub(crate) const INTN_MODE_WRAPPING: i64 = 1;
+pub(crate) const INTN_MODE_SATURATING: i64 = 2;
+pub(crate) const INTN_MODE_CHECKED: i64 = 3;
+
 /// Reads the resident runtime's trapped flag from JIT code. `1` = a trap is
 /// pending (branch to epilogue); `0` = keep going.
 extern "C" fn jet_jit_is_trapped() -> i64 {
@@ -207,6 +234,131 @@ extern "C" fn jet_jit_div_i64(a: i64, b: i64, _line: u32) -> i64 {
             0
         }
     }
+}
+
+extern "C" fn jet_jit_rem_i64(a: i64, b: i64, _line: u32) -> i64 {
+    use jet_codegen::Comptime::MathLayout;
+    if let Some(message) = MathLayout::integer_remainder_trap(a, b, true, 64) {
+        with_runtime_mut(|rt| rt.set_trap(message));
+        return 0;
+    }
+    match a.checked_rem(b) {
+        Some(value) => value,
+        None => {
+            with_runtime_mut(|rt| rt.set_trap(MathLayout::INTEGER_REMAINDER_OVERFLOW));
+            0
+        }
+    }
+}
+
+extern "C" fn jet_jit_intn_binop(
+    left: i64,
+    right: i64,
+    op: i64,
+    mode: i64,
+    signed: i64,
+    bits: i64,
+    right_signed: i64,
+) -> i64 {
+    use jet_codegen::AST::BinOp;
+    use jet_codegen::Comptime::{CtValue, MathLayout};
+    let op = match op {
+        INTN_OP_ADD => BinOp::Add,
+        INTN_OP_SUB => BinOp::Sub,
+        INTN_OP_MUL => BinOp::Mul,
+        INTN_OP_DIV => BinOp::Div,
+        INTN_OP_REM => BinOp::Rem,
+        INTN_OP_BIT_AND => BinOp::BitAnd,
+        INTN_OP_BIT_OR => BinOp::BitOr,
+        INTN_OP_BIT_XOR => BinOp::BitXor,
+        INTN_OP_SHL => BinOp::Shl,
+        INTN_OP_SHR => BinOp::Shr,
+        _ => {
+            with_runtime_mut(|rt| rt.set_trap("unknown fixed-width integer operation"));
+            return 0;
+        }
+    };
+    let signed = signed != 0;
+    let bits = bits as u8;
+    let right_signed = right_signed != 0;
+    let shift_count = MathLayout::integer_widen(right, right_signed);
+    if let Some(message) = MathLayout::integer_shift_trap(op, shift_count, bits) {
+        with_runtime_mut(|rt| rt.set_trap(&message));
+        return 0;
+    }
+    if mode == INTN_MODE_TRAP && op == BinOp::Rem {
+        if let Some(message) = MathLayout::integer_remainder_trap(left, right, signed, bits) {
+            with_runtime_mut(|rt| rt.set_trap(message));
+            return 0;
+        }
+    }
+    let span = jet_codegen::Diagnostics::Span::new(0, 0);
+    let result = match mode {
+        INTN_MODE_TRAP => {
+            MathLayout::integer_binop(op, left, right, signed, bits, right_signed, span)
+        }
+        INTN_MODE_WRAPPING => MathLayout::overflow_opt(
+            jet_codegen::Syntax::BUILTIN_WRAPPING,
+            op,
+            left,
+            right,
+            signed,
+            bits,
+            span,
+        ),
+        INTN_MODE_SATURATING => MathLayout::overflow_opt(
+            jet_codegen::Syntax::BUILTIN_SATURATING,
+            op,
+            left,
+            right,
+            signed,
+            bits,
+            span,
+        ),
+        INTN_MODE_CHECKED => MathLayout::overflow_opt(
+            jet_codegen::Syntax::BUILTIN_CHECKED,
+            op,
+            left,
+            right,
+            signed,
+            bits,
+            span,
+        ),
+        _ => unreachable!("fixed-width integer mode"),
+    };
+    match result {
+        Ok(CtValue::Int(value)) => value,
+        Ok(CtValue::Some(value)) => {
+            let CtValue::Int(value) = *value else {
+                return 0;
+            };
+            Concurrency::with_runtime_mut(|rt| alloc_jit_result(rt, true, value as u64))
+        }
+        Ok(CtValue::None(_)) => 0,
+        Ok(_) => 0,
+        Err(_) if mode == INTN_MODE_CHECKED => 0,
+        Err(_) => {
+            let name = match op {
+                BinOp::Add => "add",
+                BinOp::Sub => "sub",
+                BinOp::Mul => "mul",
+                BinOp::Div | BinOp::Rem => "div",
+                _ => "shift",
+            };
+            jet_trap_overflow(name);
+            0
+        }
+    }
+}
+
+extern "C" fn jet_jit_intn_to_string(value: i64, signed: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .alloc_string(jet_codegen::Comptime::MathLayout::integer_show(
+                value,
+                signed != 0,
+            ))
+    })
 }
 
 extern "C" fn jet_jit_print_i64(v: i64) {
@@ -481,6 +633,41 @@ extern "C" fn jet_jit_str_before(id: i64, sep_id: i64) -> i64 {
     })
 }
 
+extern "C" fn jet_jit_str_trim_view(id: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        let Some(text) = rt.heap.get_string(id) else {
+            return 0;
+        };
+        let start = text.len() - text.trim_start().len();
+        let end = text.trim_end().len();
+        rt.heap.alloc_string_view(id, start, end).unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_str_after_view(id: i64, sep_id: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        let sep = rt.heap.clone_string(sep_id).unwrap_or_default();
+        let Some(text) = rt.heap.get_string(id) else {
+            return 0;
+        };
+        let start = text.find(&sep).map_or(0, |index| index + sep.len());
+        rt.heap
+            .alloc_string_view(id, start, text.len())
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_str_before_view(id: i64, sep_id: i64) -> i64 {
+    with_runtime_result(0, |rt| {
+        let sep = rt.heap.clone_string(sep_id).unwrap_or_default();
+        let Some(text) = rt.heap.get_string(id) else {
+            return 0;
+        };
+        let end = text.find(&sep).unwrap_or(text.len());
+        rt.heap.alloc_string_view(id, 0, end).unwrap_or(0)
+    })
+}
+
 /// Inclusive string slice (`s.slice(lo, hi)`). Same start/end = one char.
 extern "C" fn jet_jit_str_slice(id: i64, start: i64, end: i64) -> i64 {
     with_runtime_result(0, |rt| {
@@ -504,6 +691,23 @@ extern "C" fn jet_jit_clock_new(ms: i64) -> i64 {
         rt.clocks.push(ms);
         rt.clocks.len() as i64
     })
+}
+
+extern "C" fn jet_jit_clock_now(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.clocks
+            .get((handle as usize).wrapping_sub(1))
+            .copied()
+            .unwrap_or(0)
+    })
+}
+
+extern "C" fn jet_jit_clock_tick(handle: i64, delta: i64) {
+    Concurrency::with_runtime_mut(|rt| {
+        if let Some(now) = rt.clocks.get_mut((handle as usize).wrapping_sub(1)) {
+            *now = now.saturating_add(delta);
+        }
+    });
 }
 
 extern "C" fn jet_jit_trap_panic(_unused: i64) -> i64 {
@@ -634,13 +838,14 @@ extern "C" fn jet_jit_numeric_predicate(value: f64, op: i64) -> i8 {
     }
 }
 
-extern "C" fn jet_jit_numeric_bit_count(value: i64, op: i64) -> i64 {
-    match op {
-        0 => value.count_ones() as i64,
-        1 => value.count_zeros() as i64,
-        2 => value.leading_zeros() as i64,
-        _ => value.trailing_zeros() as i64,
-    }
+extern "C" fn jet_jit_numeric_bit_count(value: i64, op: i64, width: i64) -> i64 {
+    let method = match op {
+        0 => "count_ones",
+        1 => "count_zeros",
+        2 => "leading_zeros",
+        _ => "trailing_zeros",
+    };
+    jet_codegen::Comptime::MathLayout::integer_bit_count(value, width as u32, method).unwrap_or(0)
 }
 
 extern "C" fn jet_jit_struct_new(n: i64) -> i64 {
@@ -711,6 +916,127 @@ extern "C" fn jet_jit_struct_set_str(h: i64, idx: i64, v: i64) {
     });
 }
 
+fn measurement_ct(value: f64, uncertainty: f64) -> Option<jet_codegen::AST::CtValue> {
+    use jet_codegen::AST::{CtFloat, CtValue};
+    jet_codegen::Comptime::apply_core_call(
+        "core.science.measurement",
+        "from",
+        vec![
+            CtValue::Float(CtFloat::f64(value)),
+            CtValue::Float(CtFloat::f64(uncertainty)),
+        ],
+        jet_codegen::Diagnostics::Span::new(0, 0),
+        false,
+    )
+    .ok()
+}
+
+fn measurement_parts(value: &jet_codegen::AST::CtValue) -> Option<(f64, f64)> {
+    use jet_codegen::AST::CtValue;
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != "Measurement" {
+        return None;
+    }
+    let field = |name: &str| {
+        fields.iter().find_map(|(field, value)| {
+            (field == name).then_some(value).and_then(|value| match value {
+                CtValue::Float(value) => Some(value.as_f64()),
+                _ => None,
+            })
+        })
+    };
+    Some((field("value")?, field("uncertainty")?))
+}
+
+fn alloc_measurement(rt: &mut JitRuntime, value: &jet_codegen::AST::CtValue) -> i64 {
+    let Some((measured, uncertainty)) = measurement_parts(value) else {
+        rt.set_trap("the canonical Measurement operation returned a malformed value");
+        return 0;
+    };
+    let handle = rt.heap.alloc_record(2);
+    let _ = rt.heap.record_set_float(handle, 0, measured);
+    let _ = rt.heap.record_set_float(handle, 1, uncertainty);
+    handle
+}
+
+fn read_measurement(rt: &mut JitRuntime, handle: i64) -> Option<jet_codegen::AST::CtValue> {
+    measurement_ct(
+        rt.heap.record_get_float(handle, 0)?,
+        rt.heap.record_get_float(handle, 1)?,
+    )
+}
+
+extern "C" fn jet_jit_measurement_new(value: f64, uncertainty: f64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| match measurement_ct(value, uncertainty) {
+        Some(value) => alloc_measurement(rt, &value),
+        None => {
+            rt.set_trap("the canonical Measurement constructor rejected Float inputs");
+            0
+        }
+    })
+}
+
+extern "C" fn jet_jit_measurement_arithmetic(left: i64, right: i64, op: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let (Some(left), Some(right)) = (
+            read_measurement(rt, left),
+            read_measurement(rt, right),
+        ) else {
+            rt.set_trap("the JIT received an invalid Measurement handle");
+            return 0;
+        };
+        let method = match op {
+            0 => "add",
+            1 => "sub",
+            2 => "mul",
+            3 => "div",
+            _ => {
+                rt.set_trap("the JIT received an invalid Measurement operation");
+                return 0;
+            }
+        };
+        match jet_codegen::Comptime::Builtins::apply_method(
+            &left,
+            method,
+            vec![right],
+            jet_codegen::Diagnostics::Span::new(0, 0),
+        ) {
+            Ok(value) => alloc_measurement(rt, &value),
+            Err(_) => {
+                rt.set_trap("the canonical Measurement operation rejected valid operands");
+                0
+            }
+        }
+    })
+}
+
+extern "C" fn jet_jit_measurement_get(handle: i64, field: i64) -> f64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .record_get_float(handle, field)
+            .unwrap_or_else(|| {
+                rt.set_trap("the JIT received an invalid Measurement handle");
+                0.0
+            })
+    })
+}
+
+extern "C" fn jet_jit_measurement_show(handle: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(value) = read_measurement(rt, handle) else {
+            rt.set_trap("the JIT received an invalid Measurement handle");
+            return 0;
+        };
+        let Some(rendered) = jet_codegen::Comptime::display_core_pure_value(&value) else {
+            rt.set_trap("the canonical Measurement display rejected a valid value");
+            return 0;
+        };
+        rt.heap.alloc_string(rendered)
+    })
+}
+
 const JIT_PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
 // D-FIDELITY-API1=A: this signal is deliberately outside `JitRuntime` — it
 // must survive `resident_teardown()` + a fresh `JitRuntime` (a "restart"),
@@ -727,7 +1053,7 @@ thread_local! {
         const { std::cell::Cell::new(JIT_PERF_DEFAULT_FIDELITY_BITS) };
 }
 
-fn alloc_jit_result(rt: &mut JitRuntime, ok: bool, bits: u64) -> i64 {
+pub(crate) fn alloc_jit_result(rt: &mut JitRuntime, ok: bool, bits: u64) -> i64 {
     rt.results.push(JitResultValue { ok, bits });
     rt.results.len() as i64
 }
@@ -737,6 +1063,14 @@ pub(crate) fn jit_result(rt: &JitRuntime, handle: i64) -> Option<JitResultValue>
         .ok()
         .and_then(|index| index.checked_sub(1))
         .and_then(|index| rt.results.get(index).copied())
+}
+
+pub(crate) fn jit_result_i64(rt: &JitRuntime, handle: i64) -> Option<i64> {
+    jit_result(rt, handle).map(|result| result.bits as i64)
+}
+
+pub(crate) fn jit_result_is_ok(rt: &JitRuntime, handle: i64) -> Option<bool> {
+    jit_result(rt, handle).map(|result| result.ok)
 }
 
 extern "C" fn jet_jit_result_new_i64(ok: i8, value: i64) -> i64 {
@@ -937,6 +1271,9 @@ pub(crate) struct HostFns {
     pub(crate) sub_i64: FuncId,
     pub(crate) mul_i64: FuncId,
     pub(crate) div_i64: FuncId,
+    pub(crate) rem_i64: FuncId,
+    pub(crate) intn_binop: FuncId,
+    pub(crate) intn_to_string: FuncId,
     pub(crate) print_i64: FuncId,
     pub(crate) print_f64: FuncId,
     pub(crate) print_bool: FuncId,
@@ -965,8 +1302,13 @@ pub(crate) struct HostFns {
     pub(crate) str_scalar_strings: FuncId,
     pub(crate) str_after: FuncId,
     pub(crate) str_before: FuncId,
+    pub(crate) str_trim_view: FuncId,
+    pub(crate) str_after_view: FuncId,
+    pub(crate) str_before_view: FuncId,
     pub(crate) str_slice: FuncId,
     pub(crate) clock_new: FuncId,
+    pub(crate) clock_now: FuncId,
+    pub(crate) clock_tick: FuncId,
     pub(crate) parse_i64: FuncId,
     pub(crate) parse_f64: FuncId,
     pub(crate) numeric_try_i64: FuncId,
@@ -988,6 +1330,10 @@ pub(crate) struct HostFns {
     pub(crate) struct_set_bool: FuncId,
     pub(crate) struct_set_char: FuncId,
     pub(crate) struct_set_str: FuncId,
+    pub(crate) measurement_new: FuncId,
+    pub(crate) measurement_arithmetic: FuncId,
+    pub(crate) measurement_get: FuncId,
+    pub(crate) measurement_show: FuncId,
     pub(crate) result_new_i64: FuncId,
     pub(crate) result_new_f64: FuncId,
     pub(crate) result_new_i8: FuncId,
@@ -1011,6 +1357,7 @@ pub(crate) struct HostFns {
     pub(crate) is_trapped: FuncId,
     pub(crate) deopt_call: FuncId,
     pub(crate) coll: Collections::CollectionsHostFns,
+    pub(crate) memory: Memory::MemoryHostFns,
     pub(crate) conc: Concurrency::ConcurrencyHostFns,
     pub(crate) core: CoreHost::CoreHostFns,
     pub(crate) encoding: Encoding::EncodingHostFns,
@@ -1035,6 +1382,12 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_sub_i64", jet_jit_sub_i64 as *const u8);
     builder.symbol("jet_jit_mul_i64", jet_jit_mul_i64 as *const u8);
     builder.symbol("jet_jit_div_i64", jet_jit_div_i64 as *const u8);
+    builder.symbol("jet_jit_rem_i64", jet_jit_rem_i64 as *const u8);
+    builder.symbol("jet_jit_intn_binop", jet_jit_intn_binop as *const u8);
+    builder.symbol(
+        "jet_jit_intn_to_string",
+        jet_jit_intn_to_string as *const u8,
+    );
     builder.symbol("jet_jit_print_i64", jet_jit_print_i64 as *const u8);
     builder.symbol("jet_jit_print_f64", jet_jit_print_f64 as *const u8);
     builder.symbol("jet_jit_print_bool", jet_jit_print_bool as *const u8);
@@ -1063,8 +1416,22 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_scalar_strings", jet_jit_str_scalar_strings as *const u8);
     builder.symbol("jet_jit_str_after", jet_jit_str_after as *const u8);
     builder.symbol("jet_jit_str_before", jet_jit_str_before as *const u8);
+    builder.symbol(
+        "jet_jit_str_trim_view",
+        jet_jit_str_trim_view as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_str_after_view",
+        jet_jit_str_after_view as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_str_before_view",
+        jet_jit_str_before_view as *const u8,
+    );
     builder.symbol("jet_jit_str_slice", jet_jit_str_slice as *const u8);
     builder.symbol("jet_jit_clock_new", jet_jit_clock_new as *const u8);
+    builder.symbol("jet_jit_clock_now", jet_jit_clock_now as *const u8);
+    builder.symbol("jet_jit_clock_tick", jet_jit_clock_tick as *const u8);
     builder.symbol("jet_jit_trap_panic", jet_jit_trap_panic as *const u8);
     builder.symbol("jet_jit_parse_i64", jet_jit_parse_i64 as *const u8);
     builder.symbol("jet_jit_parse_f64", jet_jit_parse_f64 as *const u8);
@@ -1117,6 +1484,13 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
         "jet_jit_struct_set_str",
         jet_jit_struct_set_str as *const u8,
     );
+    builder.symbol("jet_jit_measurement_new", jet_jit_measurement_new as *const u8);
+    builder.symbol(
+        "jet_jit_measurement_arithmetic",
+        jet_jit_measurement_arithmetic as *const u8,
+    );
+    builder.symbol("jet_jit_measurement_get", jet_jit_measurement_get as *const u8);
+    builder.symbol("jet_jit_measurement_show", jet_jit_measurement_show as *const u8);
     builder.symbol("jet_jit_result_new_i64", jet_jit_result_new_i64 as *const u8);
     builder.symbol("jet_jit_result_new_f64", jet_jit_result_new_f64 as *const u8);
     builder.symbol("jet_jit_result_new_i8", jet_jit_result_new_i8 as *const u8);
@@ -1148,6 +1522,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_is_trapped", jet_jit_is_trapped as *const u8);
     builder.symbol("jet_deopt_call", super::deopt::jet_deopt_call as *const u8);
     Collections::register_collections_symbols(&mut builder);
+    Memory::register_memory_symbols(&mut builder);
     Concurrency::register_concurrency_symbols(&mut builder);
     CoreHost::register_core_host_symbols(&mut builder);
     Encoding::register_encoding_symbols(&mut builder);
@@ -1165,6 +1540,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     crate::Db::register_db_symbols(&mut builder);
     let mut module = JITModule::new(builder);
     let coll = Collections::declare_collections_host_fns(&mut module)?;
+    let memory = Memory::declare_memory_host_fns(&mut module)?;
     let conc = Concurrency::declare_concurrency_host_fns(&mut module)?;
     let core = CoreHost::declare_core_host_fns(&mut module)?;
     let encoding = Encoding::declare_encoding_host_fns(&mut module)?;
@@ -1183,6 +1559,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     let host = declare_host_fns(
         &mut module,
         coll,
+        memory,
         conc,
         core,
         encoding,
@@ -1205,6 +1582,7 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
 fn declare_host_fns(
     module: &mut JITModule,
     coll: Collections::CollectionsHostFns,
+    memory: Memory::MemoryHostFns,
     conc: Concurrency::ConcurrencyHostFns,
     core: CoreHost::CoreHostFns,
     encoding: Encoding::EncodingHostFns,
@@ -1227,6 +1605,11 @@ fn declare_host_fns(
     sig_bin_i64.params.push(AbiParam::new(types::I64));
     sig_bin_i64.params.push(AbiParam::new(types::I32));
     sig_bin_i64.returns.push(AbiParam::new(types::I64));
+    let mut sig_intn_binop = Signature::new(cc);
+    for _ in 0..7 {
+        sig_intn_binop.params.push(AbiParam::new(types::I64));
+    }
+    sig_intn_binop.returns.push(AbiParam::new(types::I64));
 
     let mut sig_i64 = Signature::new(cc);
     sig_i64.params.push(AbiParam::new(types::I64));
@@ -1330,6 +1713,19 @@ fn declare_host_fns(
     sig_struct_set_i32.params.push(AbiParam::new(types::I64));
     sig_struct_set_i32.params.push(AbiParam::new(types::I64));
     sig_struct_set_i32.params.push(AbiParam::new(types::I32));
+    let mut sig_measurement_new = Signature::new(cc);
+    sig_measurement_new.params.push(AbiParam::new(types::F64));
+    sig_measurement_new.params.push(AbiParam::new(types::F64));
+    sig_measurement_new.returns.push(AbiParam::new(types::I64));
+    let mut sig_measurement_arithmetic = Signature::new(cc);
+    sig_measurement_arithmetic.params.push(AbiParam::new(types::I64));
+    sig_measurement_arithmetic.params.push(AbiParam::new(types::I64));
+    sig_measurement_arithmetic.params.push(AbiParam::new(types::I64));
+    sig_measurement_arithmetic.returns.push(AbiParam::new(types::I64));
+    let mut sig_measurement_get = Signature::new(cc);
+    sig_measurement_get.params.push(AbiParam::new(types::I64));
+    sig_measurement_get.params.push(AbiParam::new(types::I64));
+    sig_measurement_get.returns.push(AbiParam::new(types::F64));
     let mut sig_is_trapped = Signature::new(cc);
     sig_is_trapped.returns.push(AbiParam::new(types::I64));
     let mut sig_result_new_i64 = Signature::new(cc);
@@ -1404,6 +1800,9 @@ fn declare_host_fns(
         sub_i64: import("jet_jit_sub_i64", &sig_bin_i64)?,
         mul_i64: import("jet_jit_mul_i64", &sig_bin_i64)?,
         div_i64: import("jet_jit_div_i64", &sig_bin_i64)?,
+        rem_i64: import("jet_jit_rem_i64", &sig_bin_i64)?,
+        intn_binop: import("jet_jit_intn_binop", &sig_intn_binop)?,
+        intn_to_string: import("jet_jit_intn_to_string", &sig_i64_i64_i64)?,
         print_i64: import("jet_jit_print_i64", &sig_i64)?,
         print_f64: import("jet_jit_print_f64", &sig_f64)?,
         print_bool: import("jet_jit_print_bool", &sig_i8)?,
@@ -1432,8 +1831,13 @@ fn declare_host_fns(
         str_scalar_strings: import("jet_jit_str_scalar_strings", &sig_str_unary_i64)?,
         str_after: import("jet_jit_str_after", &sig_str_binary_i64)?,
         str_before: import("jet_jit_str_before", &sig_str_binary_i64)?,
+        str_trim_view: import("jet_jit_str_trim_view", &sig_str_unary_i64)?,
+        str_after_view: import("jet_jit_str_after_view", &sig_str_binary_i64)?,
+        str_before_view: import("jet_jit_str_before_view", &sig_str_binary_i64)?,
         str_slice: import("jet_jit_str_slice", &sig_str_replace)?,
         clock_new: import("jet_jit_clock_new", &sig_str_unary_i64)?,
+        clock_now: import("jet_jit_clock_now", &sig_str_unary_i64)?,
+        clock_tick: import("jet_jit_clock_tick", &sig_struct_assign)?,
         parse_i64: import("jet_jit_parse_i64", &sig_str_unary_i64)?,
         parse_f64: import("jet_jit_parse_f64", &sig_str_unary_i64)?,
         numeric_try_i64: import("jet_jit_numeric_try_i64", &sig_i64_i64_i64_i64)?,
@@ -1442,7 +1846,7 @@ fn declare_host_fns(
         distinct_range: import("jet_jit_distinct_range", &sig_i64_i64_i64_i64)?,
         distinct_range_result: import("jet_jit_distinct_range_result", &sig_i64_i64_i64_i64)?,
         numeric_predicate: import("jet_jit_numeric_predicate", &sig_f64_i64_i8)?,
-        numeric_bit_count: import("jet_jit_numeric_bit_count", &sig_i64_i64_i64)?,
+        numeric_bit_count: import("jet_jit_numeric_bit_count", &sig_i64_i64_i64_i64)?,
         struct_new: import("jet_jit_struct_new", &sig_struct_new)?,
         struct_assign: import("jet_jit_struct_assign", &sig_struct_assign)?,
         struct_get_i64: import("jet_jit_struct_get_i64", &sig_struct_get_i64)?,
@@ -1455,6 +1859,13 @@ fn declare_host_fns(
         struct_set_bool: import("jet_jit_struct_set_bool", &sig_struct_set_i8)?,
         struct_set_char: import("jet_jit_struct_set_char", &sig_struct_set_i32)?,
         struct_set_str: import("jet_jit_struct_set_str", &sig_struct_set_i64)?,
+        measurement_new: import("jet_jit_measurement_new", &sig_measurement_new)?,
+        measurement_arithmetic: import(
+            "jet_jit_measurement_arithmetic",
+            &sig_measurement_arithmetic,
+        )?,
+        measurement_get: import("jet_jit_measurement_get", &sig_measurement_get)?,
+        measurement_show: import("jet_jit_measurement_show", &sig_str_unary_i64)?,
         result_new_i64: import("jet_jit_result_new_i64", &sig_result_new_i64)?,
         result_new_f64: import("jet_jit_result_new_f64", &sig_result_new_f64)?,
         result_new_i8: import("jet_jit_result_new_i8", &sig_result_new_i8)?,
@@ -1478,6 +1889,7 @@ fn declare_host_fns(
         is_trapped: import("jet_jit_is_trapped", &sig_is_trapped)?,
         deopt_call: import("jet_deopt_call", &sig_deopt)?,
         coll,
+        memory,
         conc,
         core,
         encoding,

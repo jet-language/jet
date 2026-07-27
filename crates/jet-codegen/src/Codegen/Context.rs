@@ -193,6 +193,13 @@ pub(crate) struct Cx {
     /// The key is `Owner<Args>::method`, keeping discovery deterministic.
     pub(crate) jit_method_calls:
         std::cell::RefCell<std::collections::BTreeMap<String, (Type, String)>>,
+    /// Concrete argument types at calls to generic free functions. TIR uses
+    /// these facts to admit one native specialization per concrete call shape.
+    pub(crate) jit_generic_calls:
+        std::cell::RefCell<std::collections::BTreeMap<String, Vec<Vec<Type>>>>,
+    /// Free-function type parameter names, used to give generic call results
+    /// their concrete TIR type at the call site.
+    pub(crate) fn_type_params: HashMap<String, HashSet<String>>,
     /// D-DBG3 step 2 (dap-debugger): when true, `lower_stmts` interleaves a
     /// `TStmt::LineMarker` before every lowered statement, and emission turns each
     /// into a `// jet:line N` comment. Set ONLY by the native `jet debug` build path
@@ -2130,6 +2137,8 @@ pub(crate) fn build_cx_items(
         current_type_params: std::cell::RefCell::new(HashSet::new()),
         jit_spawn_lambdas: std::cell::RefCell::new(Vec::new()),
         jit_method_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
+        jit_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
+        fn_type_params: HashMap::new(),
         variadic_bound_fns: HashMap::new(),
         needed_variadic_arities: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         active_os: crate::Syntax::OsTarget::host(),
@@ -2343,6 +2352,10 @@ pub(crate) fn build_cx_items(
     for item in items {
         match item {
             Item::Func(f) => {
+                cx.fn_type_params.insert(
+                    f.name.clone(),
+                    f.type_params.iter().map(|param| param.name.clone()).collect(),
+                );
                 cx.sigs.insert(
                     f.name.clone(),
                     f.params

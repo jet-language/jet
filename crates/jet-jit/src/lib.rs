@@ -21,6 +21,7 @@ mod Db;
 mod Encoding;
 mod enc_stream;
 mod Fmt;
+mod Memory;
 mod Numeric;
 mod Process;
 mod Random;

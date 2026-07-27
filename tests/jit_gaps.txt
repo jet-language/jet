@@ -5,7 +5,9 @@
 # Covered/gap movement is intentional only; update this file in the same diff.
 
 covered:
+  basics/bare_lambda_param
   basics/branches
+  basics/callbacks
   basics/closures
   basics/compound
   basics/counted_loop
@@ -26,16 +28,21 @@ covered:
   basics/multiline_string
   basics/named_args
   basics/numbers
+  basics/pattern_matching
   basics/printable
   basics/range_step
   basics/switch
   basics/tuples
   basics/values
+  basics/variadics_spread
   collections/deque
   collections/dynamic-array-view
   collections/filter_map
   collections/fixed_arrays
+  collections/index_hook
   collections/iter_adapters
+  collections/iter_hook
+  collections/iter_tools_audit
   collections/lazy_iter
   collections/list_bounds
   collections/list_remove_bounds
@@ -71,6 +78,7 @@ covered:
   effects/capability_sigils
   effects/effect_caps
   effects/effect_grant
+  effects/effect_higher_order
   effects/effect_prohibition
   effects/effect_trait_bound
   effects/effect_tree
@@ -84,6 +92,7 @@ covered:
   effects/self_mutation
   effects/share_boundary
   effects/single_use
+  effects/single_use_discard
   effects/taint
   errors/discard_fallible
   errors/errors
@@ -114,14 +123,30 @@ covered:
   io/process_builder
   lowlevel/cross
   lowlevel/layout_c
+  lowlevel/lowlevel
+  lowlevel/sized_integers
   math/math_audit
   math/random_audit
+  memory/arena
+  memory/arena_parse
+  memory/arena_regions
   memory/copy_verb
+  memory/entity_tree
+  memory/entity_world
+  memory/expiring_secret
   memory/gc_cyclic
   memory/no_alloc_policy
+  memory/ownership
+  memory/parameter_modes
   memory/place_windows
+  memory/pool_stale_id
+  memory/rawptr
   memory/ref_field
   memory/resource_close
+  memory/returned_views
+  memory/shared_config
+  memory/shared_transact
+  memory/string_view
   memory/uninit
   memory/uninit_buffer
   modules/inline_module
@@ -131,6 +156,7 @@ covered:
   modules/selective_imports
   operators/chained_comparison
   operators/user_defined
+  patterns/struct_destructure
   serde/codable_default
   serde/csv
   serde/csv_typed
@@ -147,6 +173,7 @@ covered:
   serde/encoding_xml_projection
   serde/encoding_xml_stream
   serde/hand_codec
+  serde/json
   serde/json_coerce
   serde/json_typed
   serde/serde_derive
@@ -155,7 +182,9 @@ covered:
   serde/user_derive
   serde/validate
   serde/yaml
+  streams/generators
   syntax/maturity_tags
+  syntax/trailing_block
   text/bigint
   text/hex_base64
   text/human_format
@@ -177,6 +206,7 @@ covered:
   tooling/test_members
   tooling/tests
   types/affine_unit_types
+  types/anonymous_unions
   types/associated_types
   types/capability_bundles
   types/computed_field
@@ -188,16 +218,29 @@ covered:
   types/enum_dot_patterns
   types/enums
   types/external_methods
+  types/generic_types
   types/inferred_new
+  types/measurement
+  types/nested_enum_groups
+  types/no_any_alternatives
   types/option
   types/option_combinators
+  types/optional_result_variants
+  types/patchable
   types/range_types
   types/recursive_enum
+  types/refinements
+  types/renderable-varargs
+  types/renderable-varargs-multi
   types/structs
   types/tags_and_traits
+  types/traits
+  types/type_alias
+  types/typed_literal_head
   types/typestate
   types/unit_family
   types/unit_literals
+  types/value_tag_type
   web/app_hello
   web/web_compute
   web/web_wasm_for_in
@@ -209,16 +252,9 @@ covered:
   web/web_wasm_string_param
 
 gaps:
-  basics/bare_lambda_param: jit param type unsupported: Fn { params: [Int], ret: None, effect_bound: None }
-  basics/callbacks: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
-  basics/pattern_matching: describe_conn: jit unknown local `id`
-  basics/variadics_spread: join: jit list spread unsupported
   cli/positionals: lower_jit_program returned None (no zero-parameter runnable entry)
   cli/subcommands: lower_jit_program returned None (no zero-parameter runnable entry)
   cli/typed_entry_args: lower_jit_program returned None (no zero-parameter runnable entry)
-  collections/index_hook: run: jit index-hook assign unsupported
-  collections/iter_hook: run: jit for-in method-call collection unsupported
-  collections/iter_tools_audit: run: jit builtin method unsupported
   comptime/comptime_if: run: jit inline comptime branch unsupported
   comptime/comptime_table: run: jit const ref unsupported
   concurrency/deadline_context: run: jit context block unsupported
@@ -230,7 +266,7 @@ gaps:
   crypto/auth_tokens: run: jit core call unsupported: core.auth.verify_jwt
   crypto/crypto_envelope: run: jit core call unsupported: jet.crypto.__x25519_generate
   crypto/crypto_migration: run: jit core call unsupported: jet.crypto.__x25519_generate
-  crypto/crypto_sign: run: jit core call unsupported: jet.crypto.__signing_generate
+  crypto/crypto_sign: run: jit core call unsupported: jet.crypto.sign
   crypto/hash: run: jit builtin method unsupported
   crypto/random_api_split: run: jit core call unsupported: core.crypto.random.bytes
   crypto/typed_crypto: run: jit core call unsupported: jet.crypto.__x25519_generate
@@ -238,16 +274,14 @@ gaps:
   crypto/vault_keys: provision: jit core call unsupported: core.vault.prepare_generate
   crypto/vault_secret: handler: jit core call unsupported: core.vault.get
   devloop/persist: run: jit const ref unsupported
-  effects/determinism: roll_at: jit handle method unsupported
-  effects/effect_higher_order: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
+  effects/determinism: coin_and_card: jit handle method unsupported
   effects/effect_levers: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: Some([]) }
-  effects/single_use_discard: run: jit unsafe region unsupported
-  effects/smart_context: run: jit allocator constructor unsupported
-  errors/error_context: load_config: jit host/default/uninit/ct-lit unsupported
+  effects/smart_context: run: jit context block unsupported
+  errors/error_context: load_config: jit helper unsupported: jet_context
   errors/must_use: run: jit scope guard closure unsupported
   errors/panic: run: jit require/panic stop unsupported
-  errors/rollback_trait: transfer: jit transact block unsupported
-  errors/transact: place_order: jit transact block unsupported
+  errors/rollback_trait: transfer: jit transaction snapshots unsupported
+  errors/transact: place_order: jit transact on_commit closure unsupported
   errors/typed_error_families: load: jit typed Result conversion unsupported
   game/core_game_headless: run: jit handle method unsupported
   game/raylib_window: run: jit core call unsupported: core.raylib.window_open
@@ -262,30 +296,15 @@ gaps:
   lowlevel/freestanding: run: jit core call unsupported
   lowlevel/inline_asm: add_registers: jit function missing return
   lowlevel/inline_c: add: jit function missing return
-  lowlevel/layout_columnar: total_mass: jit for-in columnar unsupported
+  lowlevel/layout_columnar: run: jit require/panic stop unsupported
   lowlevel/linalg_simd: run: jit math builtin unsupported
-  lowlevel/lowlevel: run: jit unsafe region unsupported
   lowlevel/os_target_gating: run: jit inline comptime branch unsupported
-  lowlevel/pointer_cast_deref: run: jit unsafe region unsupported
+  lowlevel/pointer_cast_deref: run: jit core call unsupported: core.mem.address_of
   lowlevel/sized_floats: run: jit core call unsupported
-  lowlevel/sized_integers: run: jit unary neg unsupported type: IntN { signed: true, bits: 8 }
   lowlevel/swizzle: run: jit math builtin unsupported
   lowlevel/target_profile_board: run: jit core call unsupported
-  lowlevel/unsafe_obligations: run: jit unsafe region unsupported
-  memory/arena: run: jit allocator constructor unsupported
-  memory/arena_parse: run: jit allocator constructor unsupported
-  memory/arena_regions: run: jit allocator constructor unsupported
-  memory/entity_tree: run: jit static `jet_std::JetPool::new`
-  memory/entity_world: tick: jit host/default/uninit/ct-lit unsupported
-  memory/expiring_secret: run: jit host/default/uninit/ct-lit unsupported
-  memory/ownership: jit param type unsupported: Fn { params: [String], ret: Some(Int), effect_bound: None }
-  memory/parameter_modes: jit param type unsupported: Fn { params: [Int], ret: Some(Int), effect_bound: None }
-  memory/pool_stale_id: run: jit static `jet_std::JetPool::new`
-  memory/rawptr: run: jit unsafe region unsupported
-  memory/returned_views: domain: jit builtin method unsupported
-  memory/shared_config: jit param type unsupported: Shared(Named("AppConfig"))
-  memory/shared_transact: jit param type unsupported: Shared(Named("Account"))
-  memory/string_view: run: jit builtin method unsupported
+  lowlevel/unsafe_obligations: run: jit core call unsupported: core.mem.volatile_read
+  net/browser_bidi_profiles: profile_outcome: jit core call unsupported: core.browser.profile
   net/email_dkim: run: jit core call unsupported: jet.crypto.__secret_from_text
   net/email_message: run: jit core call unsupported: core.email.address
   net/http_client: jit core call unsupported: core.net.tcp_listen
@@ -302,15 +321,12 @@ gaps:
   net/url_mime: run: jit core call unsupported: core.url.parse
   net/ws_echo: jit handle method unsupported
   parsing/binary-reader: run: jit handle method unsupported
-  parsing/binary_pattern: run: jit host/default/uninit/ct-lit unsupported
-  parsing/parse_interpolation: run: jit host/default/uninit/ct-lit unsupported
+  parsing/binary_pattern: run: jit host call unsupported
+  parsing/parse_interpolation: run: jit host call unsupported
   parsing/text-cursor: run: jit handle method unsupported
-  patterns/struct_destructure: run: jit host/default/uninit/ct-lit unsupported
   reflection/reflect-value: run: jit core call unsupported: core.reflect.of
-  safety/sh_typed_text: run: jit host/default/uninit/ct-lit unsupported
-  safety/typed_sql: run_query: jit host/default/uninit/ct-lit unsupported
-  streams/generators: count: jit host/default/uninit/ct-lit unsupported
-  syntax/trailing_block: jit param type unsupported: Fn { params: [], ret: None, effect_bound: None }
+  safety/sh_typed_text: run: jit host call unsupported
+  safety/typed_sql: run_query: jit host call unsupported
   text/dates: run: jit core call unsupported: core.time.date.new
   text/datetime: run: jit core call unsupported: core.time.datetime.from_timestamp
   text/decimal: run: jit precise numeric builtin unsupported
@@ -331,19 +347,6 @@ gaps:
   tooling/provenance_track: run: jit numeric origin unsupported
   tooling/testing_helpers: run: jit core call unsupported: core.testing.temp_dir
   tooling/todo_hole: not_yet: jit todo expression unsupported
-  types/anonymous_unions: jit param type unsupported: Union([Int, String])
-  types/generic_types: run: jit call to unknown function `make_pair`
-  types/measurement: run: jit core call unsupported: core.science.measurement.from
-  types/no_any_alternatives: run: jit call to unknown function `echo`
-  types/optional_result_variants: run: jit enum arm is not a variant pattern
-  types/patchable: run: jit missing method `Employee::apply`
-  types/refinements: pick: jit host/default/uninit/ct-lit unsupported
-  types/renderable-varargs-multi: run: jit call to unknown function `announce__va1`
-  types/renderable-varargs: run: jit call to unknown function `log_all__va4`
-  types/traits: print_area: jit missing method `Shape::name`
-  types/type_alias: run: jit result ?? operand is not Result
-  types/typed_literal_head: run: jit string interp type unsupported: IntN { signed: false, bits: 8 }
-  types/value_tag_type: jit param type unsupported: Tagged { marker: "Raw", inner: Int }
   ui/events: show_publish: jit enum `HookOutcome::Continue`
   ui/layout_basic: run: jit layout block unsupported
   ui/loadable: run: jit core call unsupported: core.reactive.loadable.idle

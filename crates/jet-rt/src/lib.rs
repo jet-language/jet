@@ -55,6 +55,11 @@ pub enum JetVal {
     Bool(bool),
     Char(char),
     String(String),
+    StringView {
+        owner: i64,
+        start: usize,
+        end: usize,
+    },
     List(Vec<JetVal>),
     /// String-keyed map; values are packed i64 (ints or heap handles).
     Map(BTreeMap<String, i64>),
@@ -84,8 +89,38 @@ impl JetArena {
     pub fn get_string(&self, id: i64) -> Option<&str> {
         match self.values.get(id as usize) {
             Some(JetVal::String(value)) => Some(value.as_str()),
+            Some(JetVal::StringView { owner, start, end }) => {
+                let Some(JetVal::String(value)) = self.values.get(*owner as usize) else {
+                    return None;
+                };
+                value.get(*start..*end)
+            }
             _ => None,
         }
+    }
+
+    pub fn alloc_string_view(&mut self, owner: i64, start: usize, end: usize) -> Option<i64> {
+        let (owner, base, len) = match self.values.get(owner as usize)? {
+            JetVal::String(value) => (owner, 0, value.len()),
+            JetVal::StringView {
+                owner,
+                start,
+                end,
+            } => (*owner, *start, end.checked_sub(*start)?),
+            _ => return None,
+        };
+        if start > end || end > len {
+            return None;
+        }
+        let start = base.checked_add(start)?;
+        let end = base.checked_add(end)?;
+        let JetVal::String(value) = self.values.get(owner as usize)? else {
+            return None;
+        };
+        value.get(start..end)?;
+        let id = self.values.len() as i64;
+        self.values.push(JetVal::StringView { owner, start, end });
+        Some(id)
     }
 
     pub fn get_string_mut(&mut self, id: i64) -> Option<&mut String> {
@@ -597,5 +632,18 @@ mod tests {
         assert_eq!(arena.record_get_float(record, 1), Some(2.5));
         assert_eq!(arena.record_get_bool(record, 2), Some(true));
         assert_eq!(arena.record_get_char(record, 3), Some('J'));
+    }
+
+    #[test]
+    fn string_views_borrow_owned_storage_and_validate_bounds() {
+        let mut arena = JetArena::default();
+        let owner = arena.alloc_string("αbeta");
+        let view = arena.alloc_string_view(owner, 2, 6).unwrap();
+        let nested = arena.alloc_string_view(view, 1, 4).unwrap();
+        assert_eq!(arena.get_string(view), Some("beta"));
+        assert_eq!(arena.get_string(nested), Some("eta"));
+        assert_eq!(arena.string_slots(), vec![(0, "αbeta".to_string())]);
+        assert_eq!(arena.alloc_string_view(owner, 1, 3), None);
+        assert_eq!(arena.alloc_string_view(999, 0, 0), None);
     }
 }

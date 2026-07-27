@@ -1,16 +1,16 @@
 //! Exhaustive TStmt evaluation (#777).
 use std::collections::HashMap;
-use crate::Codegen::TIR::{TIfCond, TPlace, TStmt};
+use crate::Codegen::TIR::{TForInMethod, TIfCond, TPatternPosition, TPlace, TStmt};
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::CtValue;
 use crate::Diagnostics::Diagnostic;
 use super::{unsupported, EvalCtx, Flow};
 
-impl EvalCtx<'_> {
+impl<'a> EvalCtx<'a> {
     pub(super) fn exec_loop_value(
         &mut self,
         label: Option<&str>,
-        body: &[TStmt],
+        body: &'a [TStmt],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
         loop {
@@ -37,7 +37,7 @@ impl EvalCtx<'_> {
 
     pub(crate) fn exec_stmts(
         &mut self,
-        stmts: &[TStmt],
+        stmts: &'a [TStmt],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
         for stmt in stmts {
@@ -55,7 +55,7 @@ impl EvalCtx<'_> {
 
     pub(super) fn exec_stmt(
         &mut self,
-        stmt: &TStmt,
+        stmt: &'a TStmt,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
         match self.exec_stmt_inner(stmt, scope) {
@@ -102,6 +102,36 @@ impl EvalCtx<'_> {
                             rhs = eval_binop(*binop, cur, rhs, self.span())?;
                         }
                         scope.insert(key, rhs);
+                        Ok(Flow::Normal)
+                    }
+                    TPlace::Expr(place_expr)
+                        if matches!(place_expr.kind, crate::Codegen::TIR::TExprKind::PoolSlot { .. }) =>
+                    {
+                        if let Some(binop) = op {
+                            let current = self.eval_expr(place_expr, scope)?;
+                            rhs = eval_binop(*binop, current, rhs, self.span())?;
+                        }
+                        self.write_back_place(place_expr, rhs, scope)?;
+                        Ok(Flow::Normal)
+                    }
+                    TPlace::Expr(place_expr)
+                        if matches!(place_expr.kind, crate::Codegen::TIR::TExprKind::Field { .. }) =>
+                    {
+                        if let Some(binop) = op {
+                            let current = self.eval_expr(place_expr, scope)?;
+                            rhs = eval_binop(*binop, current, rhs, self.span())?;
+                        }
+                        self.write_back_place(place_expr, rhs, scope)?;
+                        Ok(Flow::Normal)
+                    }
+                    TPlace::Expr(place_expr)
+                        if matches!(place_expr.kind, crate::Codegen::TIR::TExprKind::Deref(_)) =>
+                    {
+                        if let Some(binop) = op {
+                            let current = self.eval_expr(place_expr, scope)?;
+                            rhs = eval_binop(*binop, current, rhs, self.span())?;
+                        }
+                        self.write_back_place(place_expr, rhs, scope)?;
                         Ok(Flow::Normal)
                     }
                     TPlace::Expr(_) => Err(unsupported("complex assign place", self.span())),
@@ -318,10 +348,75 @@ impl EvalCtx<'_> {
                 body,
                 ..
             } => {
+                let coll = self.eval_expr(source, scope)?;
+                if let Some(TForInMethod::Iterable {
+                    coll_type,
+                    iter_type,
+                }) = method_kind
+                {
+                    let iter_func = self
+                        .funcs
+                        .get(&format!("{coll_type}::iter"))
+                        .copied()
+                        .ok_or_else(|| unsupported("Iterable.iter", self.span()))?;
+                    let next_func = self
+                        .funcs
+                        .get(&format!("{iter_type}::next"))
+                        .copied()
+                        .ok_or_else(|| unsupported("Iterator.next", self.span()))?;
+                    let mut iter_scope = HashMap::new();
+                    iter_scope.insert("self".to_string(), coll);
+                    let mut iterator = self.run_func(iter_func, Vec::new(), &mut iter_scope)?;
+                    loop {
+                        self.burn()?;
+                        let mut next_scope = HashMap::new();
+                        next_scope.insert("self".to_string(), iterator);
+                        let next = self.run_func(next_func, Vec::new(), &mut next_scope)?;
+                        iterator = next_scope.remove("self").unwrap_or(CtValue::Unit);
+                        let CtValue::Some(item) = next else {
+                            if matches!(next, CtValue::None(_)) {
+                                break;
+                            }
+                            return Err(unsupported("Iterator.next result", self.span()));
+                        };
+                        scope.insert(var.clone(), *item);
+                        match self.exec_stmts(body, scope)? {
+                            Flow::Normal | Flow::Continue => {}
+                            Flow::Break => break,
+                            Flow::BreakLabel(ref name)
+                                if label.as_deref() == Some(name.as_str()) =>
+                            {
+                                break
+                            }
+                            Flow::ContinueLabel(ref name)
+                                if label.as_deref() == Some(name.as_str()) => {}
+                            other => return Ok(other),
+                        }
+                    }
+                    return Ok(Flow::Normal);
+                }
                 if method_kind.is_some() {
                     return Err(unsupported("for-in method collection", self.span()));
                 }
-                let coll = self.eval_expr(source, scope)?;
+                if let Some(stream_index) = super::EvalCtx::stream_index(&coll) {
+                    let (func, args) = self
+                        .streams
+                        .get(stream_index)
+                        .map(|stream| (stream.func, stream.args.clone()))
+                        .ok_or_else(|| unsupported("stream handle", self.span()))?;
+                    let previous_consumer = self.yield_consumer.replace(super::YieldConsumer {
+                        var: var.clone(),
+                        body,
+                    });
+                    let previous_scope = self.yield_scope.replace(std::mem::take(scope));
+                    let mut generator_scope = HashMap::new();
+                    let result = self.run_func(func, args, &mut generator_scope);
+                    *scope = self.yield_scope.take().unwrap_or_default();
+                    self.yield_scope = previous_scope;
+                    self.yield_consumer = previous_consumer;
+                    result?;
+                    return Ok(Flow::Normal);
+                }
                 let stride = match step {
                     Some(s) => as_int(&self.eval_expr(s, scope)?, self.span())?,
                     None => 1,
@@ -409,23 +504,40 @@ impl EvalCtx<'_> {
                 }
                 Ok(Flow::Normal)
             }
-            TStmt::RangeSwitch { .. } => Err(unsupported("range switch", self.span())),
-            TStmt::MixedSwitch {
-                subject: _,
+            TStmt::RangeSwitch {
+                subject,
                 arms,
                 else_body,
             } => {
-                // Subject is bound for AOT parity only; arm conditions are full exprs.
-                for (cond, body) in arms {
-                    let c = self.eval_expr(cond, scope)?;
-                    if as_bool(&c, self.span())? {
+                let value = as_int(&self.eval_expr(subject, scope)?, self.span())?;
+                for (lo, hi, body) in arms {
+                    if value >= *lo && value <= *hi {
                         return self.exec_stmts(body, scope);
                     }
                 }
-                if let Some(body) = else_body {
-                    return self.exec_stmts(body, scope);
-                }
-                Ok(Flow::Normal)
+                self.exec_stmts(else_body, scope)
+            }
+            TStmt::MixedSwitch {
+                subject,
+                arms,
+                else_body,
+            } => {
+                let value = self.eval_expr(subject, scope)?;
+                let saved = self.switch_subject.replace(value);
+                let result = (|| {
+                    for (cond, body) in arms {
+                        let c = self.eval_expr(cond, scope)?;
+                        if as_bool(&c, self.span())? {
+                            return self.exec_stmts(body, scope);
+                        }
+                    }
+                    if let Some(body) = else_body {
+                        return self.exec_stmts(body, scope);
+                    }
+                    Ok(Flow::Normal)
+                })();
+                self.switch_subject = saved;
+                result
             }
             TStmt::IndexAssign {
                 base,
@@ -504,12 +616,6 @@ impl EvalCtx<'_> {
                 if assign.is_map {
                     return Err(unsupported("index field assign on map", self.span()));
                 }
-                let base_name = match &assign.base.kind {
-                    crate::Codegen::TIR::TExprKind::Local(local) => local.name.clone(),
-                    _ => {
-                        return Err(unsupported("index field assign base", self.span()));
-                    }
-                };
                 let idx = as_int(&self.eval_expr(&assign.index, scope)?, self.span())?;
                 if idx < 0 {
                     return Err(unsupported("negative index field assign", self.span()));
@@ -518,7 +624,7 @@ impl EvalCtx<'_> {
                 if assign.clone_value {
                     rhs = rhs.clone();
                 }
-                let Some(CtValue::List(mut items)) = scope.get(&base_name).cloned() else {
+                let CtValue::List(mut items) = self.eval_expr(&assign.base, scope)? else {
                     return Err(unsupported("index field assign list", self.span()));
                 };
                 let i = idx as usize;
@@ -551,10 +657,31 @@ impl EvalCtx<'_> {
                     ));
                 }
                 items[i] = CtValue::Struct { type_name, fields };
-                scope.insert(base_name, CtValue::List(items));
+                self.write_back_place(&assign.base, CtValue::List(items), scope)?;
                 Ok(Flow::Normal)
             }
-            TStmt::IndexHookAssign { .. } => Err(unsupported("index hook assign", self.span())),
+            TStmt::IndexHookAssign {
+                type_name,
+                base,
+                index,
+                value,
+            } => {
+                let recv = self.eval_expr(base, scope)?;
+                let key = self.eval_expr(index, scope)?;
+                let rhs = self.eval_expr(value, scope)?;
+                let func = self
+                    .funcs
+                    .get(&format!("{type_name}::set"))
+                    .copied()
+                    .ok_or_else(|| unsupported("IndexMut.set", self.span()))?;
+                let mut child = HashMap::new();
+                child.insert("self".to_string(), recv);
+                self.run_func(func, vec![key, rhs], &mut child)?;
+                if let Some(updated) = child.remove("self") {
+                    self.write_back_place(base, updated, scope)?;
+                }
+                Ok(Flow::Normal)
+            }
             TStmt::MathSwizzleAssign { .. } => Err(unsupported("math swizzle assign", self.span())),
             TStmt::GcEdit { .. } => Err(unsupported("gc edit", self.span())),
             TStmt::SplitViews { .. } => Err(unsupported("split views", self.span())),
@@ -564,13 +691,33 @@ impl EvalCtx<'_> {
             TStmt::Live { .. } => Err(unsupported("statement `Live`", self.span())),
             TStmt::Shield { .. } => Err(unsupported("statement `Shield`", self.span())),
             TStmt::ScopeMember { .. } => Err(unsupported("statement `ScopeMember`", self.span())),
-            TStmt::Transact { .. } => Err(unsupported("statement `Transact`", self.span())),
+            TStmt::Transact {
+                body, uses_stm, ..
+            } => {
+                if !uses_stm {
+                    return self.exec_stmts(body, scope);
+                }
+                self.shared_transactions.push(HashMap::new());
+                let flow = self.exec_stmts(body, scope);
+                let staged = self.shared_transactions.pop().unwrap_or_default();
+                match flow {
+                    Ok(Flow::Normal) => {
+                        for (index, value) in staged {
+                            if let Some(slot) = self.shared_values.get_mut(index) {
+                                *slot = value;
+                            }
+                        }
+                        Ok(Flow::Normal)
+                    }
+                    other => other,
+                }
+            }
         }
     }
 
     pub(super) fn eval_if_cond(
         &mut self,
-        cond: &TIfCond,
+        cond: &'a TIfCond,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<bool, Diagnostic> {
         match cond {
@@ -586,6 +733,13 @@ impl EvalCtx<'_> {
             }
             TIfCond::IfLet { pattern, subj } => {
                 let value = self.eval_expr(subj, scope)?;
+                if let TPatternPosition::DataEntries { temp } = &pattern.position {
+                    if let CtValue::Enum { args, .. } = &value {
+                        if let Some((_, payload)) = args.first() {
+                            scope.insert(temp.clone(), payload.clone());
+                        }
+                    }
+                }
                 match &pattern.pattern {
                     crate::AST::Pattern::Ok { binding, .. } => match value {
                         CtValue::ResOk(inner) => {
@@ -611,17 +765,20 @@ impl EvalCtx<'_> {
                     crate::AST::Pattern::Absent(_) => {
                         Ok(matches!(value, CtValue::None(_) | CtValue::Unit))
                     }
-                    _ => Err(unsupported("if-let pattern", self.span())),
+                    _ => bind_match_pattern(&pattern.pattern, &value, scope),
                 }
             }
-            TIfCond::Matches { .. } => Err(unsupported("if-matches", self.span())),
+            TIfCond::Matches { pattern, subj } => {
+                let value = self.eval_expr(subj, scope)?;
+                bind_match_pattern(&pattern.pattern, &value, scope)
+            }
         }
     }
 
     fn exec_infinite(
         &mut self,
         label: Option<&str>,
-        body: &[TStmt],
+        body: &'a [TStmt],
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
         loop {
@@ -660,7 +817,9 @@ fn bind_match_pattern(
                 CtValue::ResErr(inner) if variant == "Err" => {
                     return bind_slots(bindings, &[(**inner).clone()], scope);
                 }
-                CtValue::Some(inner) if variant == "Some" || variant == "Present" => {
+                CtValue::Some(inner)
+                    if variant == "Some" || variant == "Present" || variant == "Val" =>
+                {
                     return bind_slots(bindings, &[(**inner).clone()], scope);
                 }
                 CtValue::None(_) | CtValue::Unit if variant == "None" || variant == "Absent" => {
@@ -668,7 +827,11 @@ fn bind_match_pattern(
                 }
                 _ => return Ok(false),
             };
-            if got != variant.as_str() {
+            if got != variant.as_str()
+                && got
+                    .strip_prefix(variant)
+                    .is_none_or(|suffix| !suffix.starts_with('.'))
+            {
                 return Ok(false);
             }
             let positional: Vec<CtValue> = args.iter().map(|(_, v)| v.clone()).collect();

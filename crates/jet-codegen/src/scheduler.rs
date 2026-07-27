@@ -624,7 +624,7 @@ impl<T: Send> JetSchedulerChannel<T> {
     }
 
     pub fn bounded(capacity: usize) -> Self {
-        Self::with_capacity(Some(capacity.max(1)))
+        Self::with_capacity(Some(capacity))
     }
 
     fn with_capacity(capacity: Option<usize>) -> Self {
@@ -663,7 +663,7 @@ impl<T: Send> JetSchedulerChannel<T> {
                 ctrl.wait_while_paused();
             }
             let slot = ParkSlot::new();
-            let parked = {
+            let wake_sender = {
                 let mut st = self.inner.state.lock().unwrap();
                 if let Some(v) = st.queue.pop_front() {
                     if let Some(slot) = st.send_waiters.pop() {
@@ -675,13 +675,14 @@ impl<T: Send> JetSchedulerChannel<T> {
                     return None;
                 }
                 st.recv_waiters.push(slot.clone());
-                true
+                st.send_waiters.last().cloned()
             };
-            if parked {
-                jet_scheduler_yield("channel receive", &slot, None);
-                let mut st = self.inner.state.lock().unwrap();
-                st.recv_waiters.retain(|w| !Arc::ptr_eq(w, &slot));
+            if let Some(sender) = wake_sender {
+                jet_scheduler_wake(&sender);
             }
+            jet_scheduler_yield("channel receive", &slot, None);
+            let mut st = self.inner.state.lock().unwrap();
+            st.recv_waiters.retain(|w| !Arc::ptr_eq(w, &slot));
         }
     }
 
@@ -756,25 +757,42 @@ impl<T: Send> JetSchedulerSender<T> {
                 ctrl.wait_while_paused();
             }
             let slot = ParkSlot::new();
-            let wake = {
+            let (wake, rendezvous) = {
                 let mut st = self.inner.state.lock().unwrap();
                 if st.closed || st.receiver_count == 0 {
                     return false;
                 }
-                let full = st.capacity.is_some_and(|cap| st.queue.len() >= cap);
+                let full = st.capacity.is_some_and(|cap| {
+                    if cap == 0 {
+                        st.recv_waiters.is_empty()
+                    } else {
+                        st.queue.len() >= cap
+                    }
+                });
                 if full {
                     st.send_waiters.push(slot.clone());
-                    None
+                    (None, false)
                 } else {
-                    st.queue.push_back(value.take().expect("channel send value missing"));
-                    st.recv_waiters.pop()
+                    let rendezvous = st.capacity == Some(0);
+                    st.queue
+                        .push_back(value.take().expect("channel send value missing"));
+                    if rendezvous {
+                        st.send_waiters.push(slot.clone());
+                    }
+                    (st.recv_waiters.pop(), rendezvous)
                 }
             };
             if let Some(slot) = wake {
                 jet_scheduler_wake(&slot);
             }
             if value.is_none() {
-                return true;
+                if !rendezvous {
+                    return true;
+                }
+                jet_scheduler_yield("channel send", &slot, None);
+                let mut st = self.inner.state.lock().unwrap();
+                st.send_waiters.retain(|w| !Arc::ptr_eq(w, &slot));
+                return st.queue.is_empty();
             }
             jet_scheduler_yield("channel send", &slot, None);
             let mut st = self.inner.state.lock().unwrap();
@@ -1455,6 +1473,25 @@ pub fn jet_scheduler_drain() {
 #[cfg(test)]
 mod interrupt_boundary_tests {
     use super::*;
+
+    #[test]
+    fn zero_capacity_channel_is_a_rendezvous() {
+        let channel = JetSchedulerChannel::bounded(0);
+        let sender = channel.sender();
+        let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
+        let worker = std::thread::spawn(move || {
+            assert!(sender.send(7));
+            done_tx.send(()).unwrap();
+        });
+        assert!(done_rx
+            .recv_timeout(std::time::Duration::from_millis(25))
+            .is_err());
+        assert_eq!(channel.receive(), Some(7));
+        done_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap();
+        worker.join().unwrap();
+    }
 
     fn ready_entries_in_reverse_completion_order(
     ) -> Vec<(JetSchedulerJoin<i64>, Arc<JetTaskControl>)> {

@@ -5,8 +5,184 @@ use crate::AST::{BinOp, CtFloat, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 
-use super::Diagnostics::{overflow, unsupported};
+use super::Diagnostics::{comptime_panic, overflow, unsupported};
 use super::Value::CtValue;
+
+pub fn integer_type_layout(ty: &Type) -> Option<(bool, u8)> {
+    match ty {
+        Type::Int => Some((true, 64)),
+        Type::IntN { signed, bits } => Some((*signed, *bits)),
+        Type::Named(name) => match name.as_str() {
+            "I8" => Some((true, 8)),
+            "I16" => Some((true, 16)),
+            "I32" => Some((true, 32)),
+            "I64" | "Int" => Some((true, 64)),
+            "U8" => Some((false, 8)),
+            "U16" => Some((false, 16)),
+            "U32" => Some((false, 32)),
+            "U64" => Some((false, 64)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+pub fn integer_widen(value: i64, signed: bool) -> i128 {
+    if signed {
+        value as i128
+    } else {
+        value as u64 as i128
+    }
+}
+
+pub fn integer_narrow(value: i128, signed: bool, bits: u8) -> i64 {
+    if bits == 64 {
+        return value as u64 as i64;
+    }
+    let mask = (1i128 << bits) - 1;
+    let mut value = value & mask;
+    if signed && value & (1i128 << (bits - 1)) != 0 {
+        value |= !mask;
+    }
+    value as i64
+}
+
+pub fn integer_show(value: i64, signed: bool) -> String {
+    if signed {
+        value.to_string()
+    } else {
+        (value as u64).to_string()
+    }
+}
+
+pub fn integer_bound(signed: bool, bits: u8, maximum: bool) -> i64 {
+    let (lo, hi) = crate::AST::int_range(signed, bits);
+    integer_narrow(if maximum { hi } else { lo }, signed, bits)
+}
+
+pub fn integer_bit_count(value: i64, width: u32, method: &str) -> Option<i64> {
+    let mask = if width == 64 {
+        u64::MAX
+    } else {
+        (1_u64 << width) - 1
+    };
+    let bits = (value as u64) & mask;
+    let ones = bits.count_ones();
+    let count = match method {
+        "count_ones" => ones,
+        "count_zeros" => width - ones,
+        "leading_zeros" => bits.leading_zeros() - (64 - width),
+        "trailing_zeros" => bits.trailing_zeros().min(width),
+        _ => return None,
+    };
+    Some(i64::from(count))
+}
+
+pub fn integer_shift_trap(op: BinOp, count: i128, bits: u8) -> Option<String> {
+    if !matches!(op, BinOp::Shl | BinOp::Shr) || (0..i128::from(bits)).contains(&count) {
+        return None;
+    }
+    let direction = if op == BinOp::Shl { "left" } else { "right" };
+    Some(format!(
+        "shifting {direction} by {count} bits is out of range (this type is {bits} bits wide)"
+    ))
+}
+
+pub fn integer_remainder_overflows(
+    left: i64,
+    right: i64,
+    signed: bool,
+    bits: u8,
+) -> bool {
+    signed && left == integer_bound(true, bits, false) && right == -1
+}
+
+pub const INTEGER_REMAINDER_OVERFLOW: &str = "attempt to calculate the remainder with overflow";
+pub const INTEGER_REMAINDER_ZERO: &str = "divided by zero";
+
+pub fn integer_remainder_trap(
+    left: i64,
+    right: i64,
+    signed: bool,
+    bits: u8,
+) -> Option<&'static str> {
+    if right == 0 {
+        Some(INTEGER_REMAINDER_ZERO)
+    } else if integer_remainder_overflows(left, right, signed, bits) {
+        Some(INTEGER_REMAINDER_OVERFLOW)
+    } else {
+        None
+    }
+}
+
+pub fn integer_binop(
+    op: BinOp,
+    left: i64,
+    right: i64,
+    signed: bool,
+    bits: u8,
+    right_signed: bool,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let a = integer_widen(left, signed);
+    let b = integer_widen(right, right_signed);
+    let (lo, hi) = crate::AST::int_range(signed, bits);
+    let checked = |value: Option<i128>, name: &str| {
+        value
+            .filter(|value| (lo..=hi).contains(value))
+            .map(|value| CtValue::Int(integer_narrow(value, signed, bits)))
+            .ok_or_else(|| overflow(name, span))
+    };
+    if let Some(message) = integer_shift_trap(op, b, bits) {
+        return Err(comptime_panic(&message, span));
+    }
+    if op == BinOp::Rem {
+        if let Some(message) = integer_remainder_trap(left, right, signed, bits) {
+            return Err(comptime_panic(message, span));
+        }
+    }
+    match op {
+        BinOp::Add => checked(a.checked_add(b), "add"),
+        BinOp::Sub => checked(a.checked_sub(b), "subtract"),
+        BinOp::Mul => checked(a.checked_mul(b), "multiply"),
+        BinOp::Div if b == 0 => Err(unsupported("division by zero", span)),
+        BinOp::Div => checked(a.checked_div(b), "divide"),
+        BinOp::Rem => checked(a.checked_rem(b), "take the remainder of"),
+        BinOp::BitAnd => Ok(CtValue::Int(integer_narrow(a & b, signed, bits))),
+        BinOp::BitOr => Ok(CtValue::Int(integer_narrow(a | b, signed, bits))),
+        BinOp::BitXor => Ok(CtValue::Int(integer_narrow(a ^ b, signed, bits))),
+        BinOp::Shl => Ok(CtValue::Int(integer_narrow(
+            a << (b as u32),
+            signed,
+            bits,
+        ))),
+        BinOp::Shr => {
+            let value = if signed {
+                a >> (b as u32)
+            } else {
+                ((left as u64) >> (b as u32)) as i128
+            };
+            Ok(CtValue::Int(integer_narrow(value, signed, bits)))
+        }
+        BinOp::Eq => Ok(CtValue::Bool(a == b)),
+        BinOp::Ne => Ok(CtValue::Bool(a != b)),
+        BinOp::Lt => Ok(CtValue::Bool(a < b)),
+        BinOp::Gt => Ok(CtValue::Bool(a > b)),
+        BinOp::Le => Ok(CtValue::Bool(a <= b)),
+        BinOp::Ge => Ok(CtValue::Bool(a >= b)),
+        _ => Err(unsupported("this fixed-width integer operation", span)),
+    }
+}
+
+pub fn integer_neg(value: i64, bits: u8, span: Span) -> Result<CtValue, Diagnostic> {
+    let value = integer_widen(value, true);
+    let (lo, hi) = crate::AST::int_range(true, bits);
+    value
+        .checked_neg()
+        .filter(|value| (lo..=hi).contains(value))
+        .map(|value| CtValue::Int(integer_narrow(value, true, bits)))
+        .ok_or_else(|| overflow("negate", span))
+}
 
 const MATH_TYPES: &[&str] = &[
     Syntax::SIMD_F32X4_TYPE,
@@ -459,23 +635,7 @@ pub fn overflow_opt(
     span: Span,
 ) -> Result<CtValue, Diagnostic> {
     let (lo, hi) = crate::AST::int_range(signed, bits);
-    let narrow = |n: i128| -> i64 {
-        if bits == 64 && signed {
-            n as i64
-        } else if bits == 64 {
-            n as u64 as i64
-        } else if signed {
-            let mask = (1i128 << bits) - 1;
-            let mut v = n & mask;
-            let sign = 1i128 << (bits - 1);
-            if v & sign != 0 {
-                v |= !mask;
-            }
-            v as i64
-        } else {
-            (n & ((1i128 << bits) - 1)) as i64
-        }
-    };
+    let narrow = |n: i128| -> i64 { integer_narrow(n, signed, bits) };
     // Bit-pattern wrap matching Rust's wrapping_* on fixed widths.
     let wrapping = |n: i128| -> i64 { narrow(n) };
     let checked_op = |op: BinOp, a: i128, b: i128| -> Option<i128> {
@@ -487,8 +647,8 @@ pub fn overflow_opt(
             _ => None,
         }
     };
-    let a = left as i128;
-    let b = right as i128;
+    let a = integer_widen(left, signed);
+    let b = integer_widen(right, signed);
     match mode {
         Syntax::BUILTIN_WRAPPING => {
             let raw = match op {

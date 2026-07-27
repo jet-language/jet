@@ -119,12 +119,12 @@ fn parse_cell(ty: &Type, cell: &str) -> Result<CtValue, String> {
     }
 }
 
-impl EvalCtx<'_> {
+impl<'a> EvalCtx<'a> {
     /// Evaluate `core.data.*` without pre-evaluating lambda arguments.
     pub(super) fn eval_core_data_call(
         &mut self,
         method: &str,
-        args: &[TExpr],
+        args: &'a [TExpr],
         call_ty: &Type,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {

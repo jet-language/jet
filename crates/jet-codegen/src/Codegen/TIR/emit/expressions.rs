@@ -1102,7 +1102,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             BinOp::Sub => "jet_sub",
                             BinOp::Mul => "jet_mul",
                             BinOp::Div => "jet_div",
-                            _ => unreachable!("overflow flag only set for +,-,*,/,<<,>>"),
+                            BinOp::Rem => "jet_rem",
+                            _ => unreachable!("overflow flag only set for +,-,*,/,%,<<,>>"),
                         };
                         format!("({}).{}(({}), {:?}, {})", ls, method, rs, file, line)
                     }
@@ -1199,9 +1200,13 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             extra,
             as_trait,
         } => {
+            let literal_ty = as_trait
+                .as_ref()
+                .map(|(_, concrete)| Type::Named(concrete.clone()))
+                .unwrap_or_else(|| e.ty.clone());
             // Value-position generic heads need turbofish (`Foo::<T> {…}`);
             // `cx.rust_type` spells type-position `Foo<T>` and rustc rejects it.
-            let rust_type = match &e.ty {
+            let rust_type = match &literal_ty {
                 Type::Apply { name, args } if !args.is_empty() => {
                     let head = match cx.foreign_types.get(name) {
                         Some(rust_mod) => {
@@ -1234,10 +1239,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                             .join(", ")
                     )
                 }
-                _ => cx.rust_type(&e.ty),
+                _ => cx.rust_type(&literal_ty),
             };
             let plain_fields = matches!(
-                &e.ty,
+                &literal_ty,
                 Type::Named(n) if crate::Codegen::net_handle_rust_type(n).is_some()
                     || matches!(
                         n.as_str(),
@@ -1260,7 +1265,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     let field_rust = if plain_fields {
                         field.clone()
                     } else {
-                        emit_field_rust(cx, &e.ty, field)
+                        emit_field_rust(cx, &literal_ty, field)
                     };
                     let value = emit_tir_expr(v, cx);
                     let value = if *boxed {
@@ -1277,7 +1282,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             }
             let lit = format!("{rust_type} {{ {} }}", parts.join(", "));
             match as_trait {
-                Some(trait_name) => {
+                Some((trait_name, _)) => {
                     let trait_rust = crate::Generics::user_trait_rust(trait_name);
                     format!("Box::new({lit}) as Box<dyn {trait_rust}>")
                 }
@@ -1311,7 +1316,11 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // `*mut`). Forming the pointer is safe Rust; only dereferencing it needs
         // the surrounding `#Unsafe`. The const→mut cast is the standard idiom.
         TExprKind::RawOf(operand) => {
-            format!("(&({}) as *const _ as *mut _)", emit_tir_expr(operand, cx))
+            if matches!(&operand.ty, Type::Apply { name, .. } if name == "Ptr") {
+                emit_tir_expr(operand, cx)
+            } else {
+                format!("(&({}) as *const _ as *mut _)", emit_tir_expr(operand, cx))
+            }
         }
         // c109 Phase 19: the arena allocator constructor — the ctor tail was rendered whole
         // at lowering (`jet_mem::Jet<Alloc>::new()` / `::with_capacity(...)`), so emit just
@@ -3555,7 +3564,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // a fn-value emits `({callee})({args})`, byte-for-byte `emit_expr`'s
         // `Expr::CallValue` (Source/Codegen/Expression.rs).
         TExprKind::FnValue { kind } => match kind {
-            TFnValueKind::NamedFn { wrapper } => wrapper.clone(),
+            TFnValueKind::NamedFn { wrapper, .. } => wrapper.clone(),
             TFnValueKind::Call { callee, args } => {
                 format!(
                     "({})({})",

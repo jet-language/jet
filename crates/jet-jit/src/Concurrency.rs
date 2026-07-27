@@ -7,13 +7,44 @@ use jet_codegen::scheduler::{
     jet_scheduler_wait_without_unwind, JetSchedulerChannel, JetSchedulerJoin, JetSchedulerWait,
     JetShieldExit, JetTaskControl,
 };
-use std::cell::RefCell;
-use std::sync::Arc;
+use std::cell::{Cell, RefCell};
+use std::sync::{Arc, Mutex, MutexGuard};
+
+// Every native host call that reaches the resident runtime crosses this lock.
+// Spawned Cranelift frames share the same arena as their parent, so the raw
+// runtime pointer must never be dereferenced concurrently.
+static RUNTIME_ACCESS: Mutex<()> = Mutex::new(());
 
 thread_local! {
     static ACTIVE_RUNTIME: RefCell<Option<*mut super::JitRuntime>> = const { RefCell::new(None) };
+    static RUNTIME_ACCESS_DEPTH: Cell<usize> = const { Cell::new(0) };
     static PENDING_SHIELD_EXIT: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
     static WAIT_VALUE: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+}
+
+struct RuntimeAccessGuard {
+    _lock: Option<MutexGuard<'static, ()>>,
+}
+
+impl RuntimeAccessGuard {
+    fn enter() -> Self {
+        let lock = RUNTIME_ACCESS_DEPTH.with(|depth| {
+            let current = depth.get();
+            depth.set(current + 1);
+            (current == 0).then(|| {
+                RUNTIME_ACCESS
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+            })
+        });
+        Self { _lock: lock }
+    }
+}
+
+impl Drop for RuntimeAccessGuard {
+    fn drop(&mut self) {
+        RUNTIME_ACCESS_DEPTH.with(|depth| depth.set(depth.get() - 1));
+    }
 }
 
 #[repr(i64)]
@@ -91,6 +122,7 @@ where
     let mut out = R::default();
     ACTIVE_RUNTIME.with(|slot| {
         if let Some(ptr) = *slot.borrow() {
+            let _guard = RuntimeAccessGuard::enter();
             // SAFETY: set only for the duration of resident_invoke on this thread.
             unsafe {
                 if let Some(rt) = ptr.as_mut() {
@@ -122,6 +154,22 @@ extern "C" fn jet_jit_channel_new() -> i64 {
     })
 }
 
+extern "C" fn jet_jit_generator_channel_new() -> i64 {
+    with_runtime_mut(|rt| {
+        let id = rt.channels.len() as i64;
+        rt.channels.push(JetSchedulerChannel::bounded(0));
+        id
+    })
+}
+
+extern "C" fn jet_jit_channel_close(ch: i64) {
+    with_runtime_mut(|rt| {
+        if let Some(channel) = rt.channels.get(ch as usize) {
+            channel.close();
+        }
+    });
+}
+
 extern "C" fn jet_jit_channel_sender(ch: i64) -> i64 {
     with_runtime_mut(|rt| {
         let ch = rt
@@ -129,7 +177,7 @@ extern "C" fn jet_jit_channel_sender(ch: i64) -> i64 {
             .get(ch as usize)
             .expect("jit channel sender: bad handle");
         let id = rt.senders.len() as i64;
-        rt.senders.push(ch.sender());
+        rt.senders.push(Some(ch.sender()));
         id
     })
 }
@@ -139,22 +187,36 @@ extern "C" fn jet_jit_sender_clone(s: i64) -> i64 {
         let tx = rt
             .senders
             .get(s as usize)
+            .and_then(Option::as_ref)
             .expect("jit sender clone: bad handle")
             .clone();
         let id = rt.senders.len() as i64;
-        rt.senders.push(tx);
+        rt.senders.push(Some(tx));
         id
     })
 }
 
 extern "C" fn jet_jit_sender_send(s: i64, v: i64) -> i64 {
-    wait_status(|| with_runtime_mut(|rt| {
-        let tx = rt
+    let tx = with_runtime_mut(|rt| {
+        Some(
+            rt
             .senders
             .get(s as usize)
-            .expect("jit sender send: bad handle");
-        i64::from(tx.send(v))
-    }))
+            .and_then(Option::as_ref)
+            .expect("jit sender send: bad handle")
+            .clone(),
+        )
+    })
+    .expect("jit sender send without active runtime");
+    wait_status(|| i64::from(tx.send(v)))
+}
+
+extern "C" fn jet_jit_sender_close(s: i64) {
+    with_runtime_mut(|rt| {
+        if let Some(sender) = rt.senders.get_mut(s as usize) {
+            *sender = None;
+        }
+    });
 }
 
 /// `0` = closed; otherwise `received + 1` (encoding avoids colliding with `0`).
@@ -162,32 +224,44 @@ extern "C" fn jet_jit_sender_send(s: i64, v: i64) -> i64 {
 /// Blocks until a message arrives or the channel closes — matches AOT
 /// `Channel.receive()` + `??` on `Result` (not `try_receive`).
 extern "C" fn jet_jit_channel_receive_status(ch: i64) -> i64 {
-    wait_status(|| with_runtime_mut(|rt| {
-        let chan = rt
+    let chan = with_runtime_mut(|rt| {
+        Some(
+            rt
             .channels
             .get(ch as usize)
-            .expect("jit channel receive: bad handle");
+            .expect("jit channel receive: bad handle")
+            .clone(),
+        )
+    })
+    .expect("jit channel receive without active runtime");
+    wait_status(|| {
         match chan.receive() {
             Some(v) => v + 1,
             None => 0,
         }
-    }))
+    })
 }
 
 extern "C" fn jet_jit_channel_receive(ch: i64, _line: u32) -> i64 {
-    wait_status(|| with_runtime_mut(|rt| {
-        let chan = rt
+    let chan = with_runtime_mut(|rt| {
+        Some(
+            rt
             .channels
             .get(ch as usize)
-            .expect("jit channel receive: bad handle");
+            .expect("jit channel receive: bad handle")
+            .clone(),
+        )
+    })
+    .expect("jit channel receive without active runtime");
+    wait_status(|| {
         match chan.receive() {
             Some(v) => v,
             None => {
-                rt.set_trap("channel closed");
+                with_runtime_mut(|rt| rt.set_trap("channel closed"));
                 0
             }
         }
-    }))
+    })
 }
 
 extern "C" fn jet_jit_panic_channel_closed(_line: u32) -> i64 {
@@ -308,44 +382,50 @@ extern "C" fn jet_jit_task_cancel(task: i64) {
 }
 
 extern "C" fn jet_jit_task_join(task: i64) -> i64 {
-    wait_status(|| with_runtime_mut(|rt| {
-        let join = rt.tasks[task as usize]
-            .take()
-            .expect("jit task join: already joined");
-        join.join()
-    }))
+    let join = with_runtime_mut(|rt| {
+        Some(
+            rt.tasks[task as usize]
+                .take()
+                .expect("jit task join: already joined"),
+        )
+    })
+    .expect("jit task join without active runtime");
+    wait_status(|| join.join())
 }
 
 /// D-NURSERY1=A: `g.all([h1, h2, …])` — returns a new `[Int]` list handle.
 extern "C" fn jet_jit_task_all(task_list: i64) -> i64 {
-    wait_status(|| with_runtime_mut(|rt| {
+    let entries = with_runtime_mut(|rt| {
         let ids = task_ids_from_list(rt, task_list);
-        let entries = take_task_entries(rt, &ids);
-        store_i64_list(rt, jet_scheduler_all(entries))
-    }))
+        take_task_entries(rt, &ids)
+    });
+    wait_status(|| {
+        let values = jet_scheduler_all(entries);
+        with_runtime_mut(|rt| store_i64_list(rt, values))
+    })
 }
 
 /// D-CONCCOMB1=A: `g.race([h1, h2, …])` — first successful result.
 extern "C" fn jet_jit_task_race(task_list: i64) -> i64 {
-    wait_status(|| with_runtime_mut(|rt| {
+    let entries = with_runtime_mut(|rt| {
         let ids = task_ids_from_list(rt, task_list);
-        let entries = take_task_entries(rt, &ids);
-        jet_scheduler_race(entries)
-    }))
+        take_task_entries(rt, &ids)
+    });
+    wait_status(|| jet_scheduler_race(entries))
 }
 
 /// D-CONCCOMB1=A: `g.any([h1, h2, …])` — first completed result.
 extern "C" fn jet_jit_task_any(task_list: i64) -> i64 {
-    wait_status(|| with_runtime_mut(|rt| {
+    let entries = with_runtime_mut(|rt| {
         let ids = task_ids_from_list(rt, task_list);
-        let entries = take_task_entries(rt, &ids);
-        jet_scheduler_any(entries)
-    }))
+        take_task_entries(rt, &ids)
+    });
+    wait_status(|| jet_scheduler_any(entries))
 }
 
 /// D-CONCSELECT1=A: `g.select().recv(…).wait()` — multiplex channel/timer arms.
 extern "C" fn jet_jit_select_wait(recv_list: i64, after_list: i64) -> i64 {
-    wait_status(|| with_runtime_mut(|rt| {
+    let (channels, timers) = with_runtime_mut(|rt| {
         let ch_ids = task_ids_from_list(rt, recv_list);
         let after_ids = task_ids_from_list(rt, after_list);
         let channels: Vec<JetSchedulerChannel<i64>> = ch_ids
@@ -358,8 +438,9 @@ extern "C" fn jet_jit_select_wait(recv_list: i64, after_list: i64) -> i64 {
             })
             .collect();
         let timers: Vec<u64> = after_ids.iter().map(|&ms| (ms.max(0)) as u64).collect();
-        jet_scheduler_select_int_channels(&channels, timers)
-    }))
+        (channels, timers)
+    });
+    wait_status(|| jet_scheduler_select_int_channels(&channels, timers))
 }
 
 extern "C" fn jet_jit_sleep(millis: i64) -> i64 {
@@ -371,9 +452,12 @@ extern "C" fn jet_jit_sleep(millis: i64) -> i64 {
 
 pub(crate) struct ConcurrencyHostFns {
     pub channel_new: cranelift_module::FuncId,
+    pub generator_channel_new: cranelift_module::FuncId,
+    pub channel_close: cranelift_module::FuncId,
     pub channel_sender: cranelift_module::FuncId,
     pub sender_clone: cranelift_module::FuncId,
     pub sender_send: cranelift_module::FuncId,
+    pub sender_close: cranelift_module::FuncId,
     pub channel_receive: cranelift_module::FuncId,
     pub channel_receive_status: cranelift_module::FuncId,
     pub panic_channel_closed: cranelift_module::FuncId,
@@ -397,11 +481,17 @@ pub(crate) struct ConcurrencyHostFns {
 pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuilder) {
     builder.symbol("jet_jit_channel_new", jet_jit_channel_new as *const u8);
     builder.symbol(
+        "jet_jit_generator_channel_new",
+        jet_jit_generator_channel_new as *const u8,
+    );
+    builder.symbol("jet_jit_channel_close", jet_jit_channel_close as *const u8);
+    builder.symbol(
         "jet_jit_channel_sender",
         jet_jit_channel_sender as *const u8,
     );
     builder.symbol("jet_jit_sender_clone", jet_jit_sender_clone as *const u8);
     builder.symbol("jet_jit_sender_send", jet_jit_sender_send as *const u8);
+    builder.symbol("jet_jit_sender_close", jet_jit_sender_close as *const u8);
     builder.symbol(
         "jet_jit_channel_receive",
         jet_jit_channel_receive as *const u8,
@@ -483,9 +573,12 @@ pub(crate) fn declare_concurrency_host_fns(
 
     Ok(ConcurrencyHostFns {
         channel_new: import("jet_jit_channel_new", &sig_channel_new)?,
+        generator_channel_new: import("jet_jit_generator_channel_new", &sig_channel_new)?,
+        channel_close: import("jet_jit_channel_close", &sig_void_i64)?,
         channel_sender: import("jet_jit_channel_sender", &sig_i64)?,
         sender_clone: import("jet_jit_sender_clone", &sig_i64)?,
         sender_send: import("jet_jit_sender_send", &sig_send)?,
+        sender_close: import("jet_jit_sender_close", &sig_void_i64)?,
         channel_receive: import("jet_jit_channel_receive", &sig_recv)?,
         channel_receive_status: import("jet_jit_channel_receive_status", &sig_i64)?,
         panic_channel_closed: import("jet_jit_panic_channel_closed", &sig_panic_line)?,

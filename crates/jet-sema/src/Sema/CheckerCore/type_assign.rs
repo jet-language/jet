@@ -30,6 +30,13 @@ fn union_member_has_open_shape(ty: &Type) -> bool {
     }
 }
 
+fn is_core_view_generic(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, .. } if matches!(name.as_str(), "View" | "ViewMut")
+    )
+}
+
 impl<'a> Checker<'a> {
         pub(crate) fn check_declared_type(&mut self, ty: &Type, span: Span) {
             self.warn_soft_public_declared_type(ty, span);
@@ -262,7 +269,7 @@ impl<'a> Checker<'a> {
                             // secret-lifetime wrapper.
                             | "ExpiringSecret"
                             | "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
-                    );
+                    ) || is_core_view_generic(ty);
                     if name == "ExpiringSecret"
                         && (args.len() != 1
                             || !args.first().is_some_and(
@@ -567,4 +574,25 @@ impl<'a> Checker<'a> {
             ));
         }
     
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_core_view_generic;
+    use crate::AST::Type;
+
+    #[test]
+    fn returned_view_generic_recognition_is_exact() {
+        for name in ["View", "ViewMut"] {
+            assert!(is_core_view_generic(&Type::Apply {
+                name: name.to_string(),
+                args: vec![Type::Int],
+            }));
+            assert!(!is_core_view_generic(&Type::Named(name.to_string())));
+        }
+        assert!(!is_core_view_generic(&Type::Apply {
+            name: "UserView".to_string(),
+            args: vec![Type::Int],
+        }));
+    }
 }

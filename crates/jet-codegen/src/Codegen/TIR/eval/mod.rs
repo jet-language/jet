@@ -15,7 +15,9 @@ use std::sync::OnceLock;
 
 use crate::AST::{Expr, ProgramBundle, Stmt};
 use super::Cx;
-use crate::Codegen::TIR::{self, JitProgram, LowerEnv, TExpr, TFunc, TLocal, TStmt};
+use crate::Codegen::TIR::{
+    self, JitProgram, LowerEnv, TExpr, TFunc, TJitSpawnBody, TJitSpawnLambda, TLocal, TStmt,
+};
 use super::build_cx_items;
 use crate::Comptime::{self, CtValue, DevSink};
 use crate::Diagnostics::{Diagnostic, Span};
@@ -33,6 +35,15 @@ pub fn set_native_call_hook(hook: Option<NativeCallHook>) {
 
 pub(super) fn native_call_hook() -> Option<NativeCallHook> {
     NATIVE_CALL_HOOK.with(Cell::get)
+}
+
+pub(super) fn raw_place_local(expr: &TExpr) -> Option<&TLocal> {
+    match &expr.kind {
+        TIR::TExprKind::Local(local) => Some(local),
+        TIR::TExprKind::Borrow { place, .. } => raw_place_local(place),
+        TIR::TExprKind::DistinctCtor { arg, .. } => raw_place_local(arg),
+        _ => None,
+    }
 }
 
 pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
@@ -121,9 +132,93 @@ pub(super) struct EvalCtx<'a> {
     pub(super) struct_fields: HashMap<String, Vec<(String, bool)>>,
     /// `TypeName -> [(field, Type)]` for `core.data.csv` / decode on deopt.
     pub(super) struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
+    /// Current `MixedSwitch` subject for structured field conditions.
+    switch_subject: Option<CtValue>,
+    /// TIR-native callable values. Entries borrow the already-lowered program
+    /// and retain only the captured evaluator scope.
+    callables: Vec<EvalCallable<'a>>,
+    /// Generator calls are inert handles until a `ForIn` consumer drives them.
+    streams: Vec<EvalStream<'a>>,
+    /// Shared<T> values live behind evaluator-local handles so cloned handles
+    /// preserve aliasing across task capture scopes.
+    shared_values: Vec<CtValue>,
+    shared_transactions: Vec<HashMap<usize, CtValue>>,
+    /// Manual clocks are aliased handles so an ExpiringSecret observes later
+    /// ticks through the same clock instance.
+    clocks: Vec<i64>,
+    /// Spawn bodies are lowered separately because native tiers compile them as
+    /// independent functions. The evaluator executes each site synchronously,
+    /// which is observationally exact at the task `wait` boundary.
+    spawn_lambdas: &'a [TJitSpawnLambda],
+    spawn_site: usize,
+    /// Direct yield delivery keeps generator evaluation streaming: no eager
+    /// collection is materialized between producer and consumer.
+    yield_consumer: Option<YieldConsumer<'a>>,
+    yield_scope: Option<HashMap<String, CtValue>>,
 }
 
-impl EvalCtx<'_> {
+enum EvalCallable<'a> {
+    Lambda {
+        lambda: &'a TIR::TLambda,
+        captured: HashMap<String, CtValue>,
+    },
+    Named(&'a str),
+}
+
+struct EvalStream<'a> {
+    func: &'a TFunc,
+    args: Vec<CtValue>,
+}
+
+#[derive(Clone)]
+struct YieldConsumer<'a> {
+    var: String,
+    body: &'a [TStmt],
+}
+
+impl<'a> EvalCtx<'a> {
+    fn eval_spawn(
+        &mut self,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let lam = self
+            .spawn_lambdas
+            .get(self.spawn_site)
+            .ok_or_else(|| unsupported("spawn body", self.span()))?;
+        self.spawn_site += 1;
+        let mut child = HashMap::new();
+        for capture in &lam.captures {
+            child.insert(
+                capture.name.clone(),
+                scope
+                    .get(&capture.name)
+                    .cloned()
+                    .or_else(|| self.globals.get(&capture.name).cloned())
+                    .unwrap_or(CtValue::Unit),
+            );
+        }
+        let value = match &lam.body {
+            TJitSpawnBody::Expr(expr) => self.eval_expr(expr, &mut child)?,
+            TJitSpawnBody::Block { prefix, tail } => match self.exec_stmts(prefix, &mut child)? {
+                Flow::Return(value) => value,
+                Flow::Normal => match tail {
+                    Some(expr) => self.eval_expr(expr, &mut child)?,
+                    None => CtValue::Unit,
+                },
+                other => {
+                    return Err(unsupported(
+                        &format!("control flow {other:?} escaping spawn"),
+                        self.span(),
+                    ));
+                }
+            },
+        };
+        Ok(CtValue::Struct {
+            type_name: "__JetTirTask".to_string(),
+            fields: vec![("value".to_string(), value)],
+        })
+    }
+
     pub(crate) fn span(&self) -> Span {
         Span::new(0, 0)
     }
@@ -157,7 +252,7 @@ impl EvalCtx<'_> {
 
     pub(crate) fn run_func(
         &mut self,
-        func: &TFunc,
+        func: &'a TFunc,
         args: Vec<CtValue>,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
@@ -184,6 +279,86 @@ impl EvalCtx<'_> {
         };
         self.call_depth -= 1;
         result
+    }
+
+    fn store_callable(&mut self, callable: EvalCallable<'a>) -> CtValue {
+        let index = self.callables.len() as i64;
+        self.callables.push(callable);
+        CtValue::Struct {
+            type_name: "__JetTirCallable".to_string(),
+            fields: vec![("index".to_string(), CtValue::Int(index))],
+        }
+    }
+
+    fn callable_index(value: &CtValue) -> Option<usize> {
+        let CtValue::Struct { type_name, fields } = value else {
+            return None;
+        };
+        if type_name != "__JetTirCallable" {
+            return None;
+        }
+        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+            ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
+            _ => None,
+        })
+    }
+
+    fn store_stream(&mut self, func: &'a TFunc, args: Vec<CtValue>) -> CtValue {
+        let index = self.streams.len() as i64;
+        self.streams.push(EvalStream { func, args });
+        CtValue::Struct {
+            type_name: "__JetTirStream".to_string(),
+            fields: vec![("index".to_string(), CtValue::Int(index))],
+        }
+    }
+
+    fn stream_index(value: &CtValue) -> Option<usize> {
+        let CtValue::Struct { type_name, fields } = value else {
+            return None;
+        };
+        if type_name != "__JetTirStream" {
+            return None;
+        }
+        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+            ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
+            _ => None,
+        })
+    }
+
+    fn call_callable(
+        &mut self,
+        value: &CtValue,
+        args: Vec<CtValue>,
+    ) -> Result<CtValue, Diagnostic> {
+        let index = Self::callable_index(value)
+            .ok_or_else(|| unsupported("calling this non-function value", self.span()))?;
+        let (lambda, named, mut captured) = match self.callables.get(index) {
+            Some(EvalCallable::Lambda { lambda, captured }) => {
+                (Some(*lambda), None, captured.clone())
+            }
+            Some(EvalCallable::Named(name)) => (None, Some(*name), HashMap::new()),
+            None => return Err(unsupported("calling an unknown function value", self.span())),
+        };
+        if let Some(lambda) = lambda {
+            let result = self.eval_tlambda(lambda, args, &mut captured);
+            if result.is_ok() {
+                if let Some(EvalCallable::Lambda {
+                    captured: stored, ..
+                }) = self.callables.get_mut(index)
+                {
+                    *stored = captured;
+                }
+            }
+            return result;
+        }
+        let name = named.expect("callable target");
+        let func = self
+            .funcs
+            .get(name)
+            .copied()
+            .ok_or_else(|| unsupported(&format!("callable function `{name}`"), self.span()))?;
+        let mut child = HashMap::new();
+        self.run_func(func, args, &mut child)
     }
 }
 
@@ -376,6 +551,16 @@ pub fn run_program_with_structs(
         embed_inputs: None,
         struct_fields,
         struct_field_types,
+        switch_subject: None,
+        callables: Vec::new(),
+        streams: Vec::new(),
+        shared_values: Vec::new(),
+        shared_transactions: Vec::new(),
+        clocks: Vec::new(),
+        spawn_lambdas: &program.spawn_lambdas,
+        spawn_site: 0,
+        yield_consumer: None,
+        yield_scope: None,
     };
     let mut scope = HashMap::new();
     ctx.run_func(entry, Vec::new(), &mut scope)
@@ -421,6 +606,16 @@ pub fn run_named_func(
         embed_inputs: None,
         struct_fields: HashMap::new(),
         struct_field_types: HashMap::new(),
+        switch_subject: None,
+        callables: Vec::new(),
+        streams: Vec::new(),
+        shared_values: Vec::new(),
+        shared_transactions: Vec::new(),
+        clocks: Vec::new(),
+        spawn_lambdas: &program.spawn_lambdas,
+        spawn_site: 0,
+        yield_consumer: None,
+        yield_scope: None,
     };
     let mut scope = HashMap::new();
     ctx.run_func(func, args, &mut scope)
@@ -535,6 +730,16 @@ fn eval_expr_hook(
         embed_inputs,
         struct_fields: HashMap::new(),
         struct_field_types: HashMap::new(),
+        switch_subject: None,
+        callables: Vec::new(),
+        streams: Vec::new(),
+        shared_values: Vec::new(),
+        shared_transactions: Vec::new(),
+        clocks: Vec::new(),
+        spawn_lambdas: &[],
+        spawn_site: 0,
+        yield_consumer: None,
+        yield_scope: None,
     };
     let mut scope = globals;
     ctx.eval_expr(&tir, &mut scope)
@@ -593,6 +798,16 @@ fn eval_block_hook(
         embed_inputs,
         struct_fields: HashMap::new(),
         struct_field_types: HashMap::new(),
+        switch_subject: None,
+        callables: Vec::new(),
+        streams: Vec::new(),
+        shared_values: Vec::new(),
+        shared_transactions: Vec::new(),
+        clocks: Vec::new(),
+        spawn_lambdas: &[],
+        spawn_site: 0,
+        yield_consumer: None,
+        yield_scope: None,
     };
     let mut scope = globals;
     match ctx.exec_stmts(&tir, &mut scope)? {

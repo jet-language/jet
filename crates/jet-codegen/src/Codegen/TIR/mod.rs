@@ -103,6 +103,12 @@ pub struct JitProgram {
     pub enum_variant_payload_types: std::collections::HashMap<String, Vec<Type>>,
     pub int_constants: std::collections::HashMap<String, i64>,
     pub distinct_bases: std::collections::HashMap<String, Type>,
+    /// Sema-resolved `(trait, method) -> concrete owner` dispatch facts.
+    pub trait_method_owners:
+        std::collections::HashMap<(String, String), Vec<String>>,
+    /// Sema-resolved `(collection, iterator) -> Iterable.Item` facts.
+    pub iterable_item_types:
+        std::collections::HashMap<(String, String), Type>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,6 +154,61 @@ fn register_enum_variants(
     for variant in variants {
         let pattern = format!("user_{enum_name}::user_{}", variant.name);
         enum_variant_payload_types.insert(pattern, payload_types_for_variant(&variant.payload));
+    }
+}
+
+fn register_union_type(
+    ty: &Type,
+    enum_variants: &mut std::collections::HashMap<String, Vec<String>>,
+    enum_variant_payload_types: &mut std::collections::HashMap<String, Vec<Type>>,
+) {
+    match ty {
+        Type::Union(members) => {
+            let name = crate::AST::union_enum_name(members);
+            enum_variants.entry(name.clone()).or_insert_with(|| {
+                members
+                    .iter()
+                    .map(crate::AST::union_member_tag)
+                    .collect()
+            });
+            for member in members {
+                let tag = crate::AST::union_member_tag(member);
+                enum_variant_payload_types
+                    .entry(format!("{name}::{tag}"))
+                    .or_insert_with(|| vec![member.clone()]);
+                register_union_type(member, enum_variants, enum_variant_payload_types);
+            }
+        }
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::Tagged { inner, .. }
+        | Type::FixedList { elem: inner, .. } => {
+            register_union_type(inner, enum_variants, enum_variant_payload_types)
+        }
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            register_union_type(key, enum_variants, enum_variant_payload_types);
+            register_union_type(value, enum_variants, enum_variant_payload_types);
+        }
+        Type::Fn { params, ret, .. } => {
+            for param in params {
+                register_union_type(param, enum_variants, enum_variant_payload_types);
+            }
+            if let Some(ret) = ret {
+                register_union_type(ret, enum_variants, enum_variant_payload_types);
+            }
+        }
+        Type::Apply { args, .. } => {
+            for arg in args {
+                register_union_type(arg, enum_variants, enum_variant_payload_types);
+            }
+        }
+        Type::Tuple(fields) => {
+            for (_, field) in fields {
+                register_union_type(field, enum_variants, enum_variant_payload_types);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -237,6 +298,9 @@ impl TLocal {
 pub struct TMethodRef {
     pub name: String,
     pub mangled: bool,
+    /// Sema-resolved trait that owns a dynamic call. `None` for inherent and
+    /// prelude calls; JIT dispatch never reconstructs this fact from names.
+    pub trait_owner: Option<String>,
 }
 
 impl TMethodRef {
@@ -245,6 +309,7 @@ impl TMethodRef {
         TMethodRef {
             name: name.into(),
             mangled: true,
+            trait_owner: None,
         }
     }
 
@@ -253,6 +318,18 @@ impl TMethodRef {
         TMethodRef {
             name: name.into(),
             mangled: false,
+            trait_owner: None,
+        }
+    }
+
+    pub fn trait_method(
+        trait_owner: impl Into<String>,
+        name: impl Into<String>,
+    ) -> TMethodRef {
+        TMethodRef {
+            name: name.into(),
+            mangled: false,
+            trait_owner: Some(trait_owner.into()),
         }
     }
 
@@ -492,6 +569,127 @@ fn lower_demanded_generic_methods(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc
     Some(())
 }
 
+pub(crate) fn bind_generic_type(
+    template: &Type,
+    actual: &Type,
+    params: &std::collections::HashSet<String>,
+    subst: &mut std::collections::HashMap<String, Type>,
+) -> bool {
+    match template {
+        Type::Named(name) if params.contains(name) => match subst.get(name) {
+            Some(bound) => bound == actual,
+            None => {
+                subst.insert(name.clone(), actual.clone());
+                true
+            }
+        },
+        Type::Apply { name, args } => {
+            let Type::Apply {
+                name: actual_name,
+                args: actual_args,
+            } = actual
+            else {
+                return false;
+            };
+            name == actual_name
+                && args.len() == actual_args.len()
+                && args
+                    .iter()
+                    .zip(actual_args)
+                    .all(|(left, right)| bind_generic_type(left, right, params, subst))
+        }
+        Type::List(inner) => matches!(actual, Type::List(actual_inner)
+            if bind_generic_type(inner, actual_inner, params, subst)),
+        Type::Option(inner) => matches!(actual, Type::Option(actual_inner)
+            if bind_generic_type(inner, actual_inner, params, subst)),
+        Type::Result { ok, err } => matches!(actual, Type::Result { ok: actual_ok, err: actual_err }
+            if bind_generic_type(ok, actual_ok, params, subst)
+                && bind_generic_type(err, actual_err, params, subst)),
+        Type::Tagged { inner, .. } => bind_generic_type(inner, actual, params, subst),
+        _ => template == actual,
+    }
+}
+
+fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TFunc>) {
+    let calls = std::mem::take(&mut *cx.jit_generic_calls.borrow_mut());
+    for (called_name, shapes) in calls {
+        if funcs.iter().any(|func| func.name == called_name) {
+            continue;
+        }
+        let mut unique = shapes;
+        unique.sort_by_key(|shape| format!("{shape:?}"));
+        unique.dedup();
+        // One native symbol has one ABI. Multiple concrete shapes keep the
+        // program outside resident JIT until call-site symbol mangling lands.
+        let [actuals] = unique.as_slice() else {
+            continue;
+        };
+        let (template, emitted_name) = if let Some((base, arity)) = called_name
+            .rsplit_once("__va")
+            .and_then(|(base, arity)| arity.parse::<usize>().ok().map(|arity| (base, arity)))
+        {
+            let Some((_, bounds)) = cx.variadic_bound_fns.get(base) else {
+                continue;
+            };
+            let Some(source) = items.iter().find_map(|item| match item {
+                Item::Func(func) if func.name == base => Some(func),
+                _ => None,
+            }) else {
+                continue;
+            };
+            (
+                crate::Codegen::VariadicBound::build_variadic_bound_func(
+                    source, bounds, arity,
+                ),
+                called_name.clone(),
+            )
+        } else {
+            let Some(source) = items.iter().find_map(|item| match item {
+                Item::Func(func) if func.name == called_name => Some(func.clone()),
+                _ => None,
+            }) else {
+                continue;
+            };
+            (source, called_name.clone())
+        };
+        if template.params.len() != actuals.len() || template.type_params.is_empty() {
+            continue;
+        }
+        let names: std::collections::HashSet<String> =
+            template.type_params.iter().map(|param| param.name.clone()).collect();
+        let mut subst = std::collections::HashMap::new();
+        if !template
+            .params
+            .iter()
+            .zip(actuals)
+            .all(|(param, actual)| bind_generic_type(&param.ty, actual, &names, &mut subst))
+            || subst.len() != names.len()
+        {
+            continue;
+        }
+        let mut specialized = crate::Sema::specialize_function_types(template, &subst);
+        let residual_type_params: std::collections::HashSet<String> = specialized
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect();
+        specialized.type_params.clear();
+        // Sema has replaced the value types, but bounded operator calls retain
+        // their resolved source type-parameter owner (`T::compare`). Preserve
+        // that exact identity while coverage and lowering consume the body.
+        let previous_type_params = cx.current_type_params.replace(residual_type_params);
+        let covered = tir_covers(&specialized, cx);
+        if !covered {
+            cx.current_type_params.replace(previous_type_params);
+            continue;
+        }
+        let mut lowered = lower_func(&specialized, cx);
+        cx.current_type_params.replace(previous_type_params);
+        lowered.name = emitted_name;
+        funcs.push(lowered);
+    }
+}
+
 /// c139 M3: lower every `tir_covers` top-level function in the entry module so the
 /// JIT can compile multi-function programs (calls between covered helpers).
 pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
@@ -529,6 +727,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         }))?;
     cx.jit_spawn_lambdas.borrow_mut().clear();
     cx.jit_method_calls.borrow_mut().clear();
+    cx.jit_generic_calls.borrow_mut().clear();
     for item in &module.items {
         match item {
             Item::Func(f) => {
@@ -547,6 +746,70 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                         let mut lowered = lower_method(m, &s.name, &cx);
                         lowered.name = format!("{}::{}", s.name, m.name);
                         funcs.push(lowered);
+                    }
+                    for implementation in &s.trait_impls {
+                        if matches!(
+                            implementation.trait_name.as_str(),
+                            crate::Generics::ENCODE | crate::Generics::DECODE
+                        ) {
+                            continue;
+                        }
+                        for method in &implementation.methods {
+                            if !tir_covers_trait_method(
+                                method,
+                                &s.name,
+                                &cx,
+                                &implementation.trait_name,
+                            ) {
+                                continue;
+                            }
+                            let mut lowered = lower_trait_method(
+                                method,
+                                &s.name,
+                                &cx,
+                                &implementation.trait_name,
+                            );
+                            lowered.name = format!("{}::{}", s.name, method.name);
+                            funcs.push(lowered);
+                        }
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                if e.type_params.is_empty() {
+                    for method in &e.methods {
+                        if !tir_covers_method(method, &e.name, &cx) {
+                            continue;
+                        }
+                        let mut lowered = lower_method(method, &e.name, &cx);
+                        lowered.name = format!("{}::{}", e.name, method.name);
+                        funcs.push(lowered);
+                    }
+                    for implementation in &e.trait_impls {
+                        if matches!(
+                            implementation.trait_name.as_str(),
+                            crate::Generics::ENCODE | crate::Generics::DECODE
+                        ) {
+                            continue;
+                        }
+                        for method in &implementation.methods {
+                            if !tir_covers_trait_method(
+                                method,
+                                &e.name,
+                                &cx,
+                                &implementation.trait_name,
+                            ) {
+                                continue;
+                            }
+                            let mut lowered = lower_trait_method(
+                                method,
+                                &e.name,
+                                &cx,
+                                &implementation.trait_name,
+                            );
+                            lowered.name = format!("{}::{}", e.name, method.name);
+                            funcs.push(lowered);
+                        }
                     }
                 }
             }
@@ -672,6 +935,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         }
     }
     lower_demanded_generic_methods(&module.items, &cx, &mut funcs)?;
+    specialize_generic_free_functions(&module.items, &cx, &mut funcs);
     if !funcs.iter().any(|function| function.name == entry_name) {
         return None;
     }
@@ -702,6 +966,13 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                     s.name.clone(),
                     s.fields.iter().map(|f| f.ty.clone()).collect(),
                 );
+                for field in &s.fields {
+                    register_union_type(
+                        &field.ty,
+                        &mut enum_variants,
+                        &mut enum_variant_payload_types,
+                    );
+                }
             }
             Item::Enum(e) if e.type_params.is_empty() => {
                 register_enum_variants(
@@ -710,6 +981,22 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                     &mut enum_variants,
                     &mut enum_variant_payload_types,
                 );
+            }
+            Item::Func(function) => {
+                for param in &function.params {
+                    register_union_type(
+                        &param.ty,
+                        &mut enum_variants,
+                        &mut enum_variant_payload_types,
+                    );
+                }
+                if let Some(ret) = &function.return_type {
+                    register_union_type(
+                        ret,
+                        &mut enum_variants,
+                        &mut enum_variant_payload_types,
+                    );
+                }
             }
             Item::Const(c) => {
                 let value = match &c.ct {
@@ -808,6 +1095,58 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             _ => {}
         }
     }
+    let mut trait_method_owners =
+        std::collections::HashMap::<(String, String), Vec<String>>::new();
+    for item in &module.items {
+        let mut record = |trait_name: &str, owner: &str, methods: &[crate::AST::Func]| {
+            for method in methods {
+                trait_method_owners
+                    .entry((trait_name.to_string(), method.name.clone()))
+                    .or_default()
+                    .push(owner.to_string());
+            }
+        };
+        match item {
+            Item::Struct(def) => {
+                for implementation in &def.trait_impls {
+                    record(
+                        &implementation.trait_name,
+                        &def.name,
+                        &implementation.methods,
+                    );
+                }
+            }
+            Item::Enum(def) => {
+                for implementation in &def.trait_impls {
+                    record(
+                        &implementation.trait_name,
+                        &def.name,
+                        &implementation.methods,
+                    );
+                }
+            }
+            Item::Impl(implementation) => {
+                if let Some(trait_name) = &implementation.trait_name {
+                    record(
+                        trait_name,
+                        &implementation.type_name,
+                        &implementation.methods,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+    let iterable_item_types = cx
+        .iterable_hooks
+        .iter()
+        .map(|(collection, hook)| {
+            (
+                (collection.clone(), hook.iter_type.clone()),
+                hook.item_type.clone(),
+            )
+        })
+        .collect();
     Some(JitProgram {
         instance_provenance: instance_provenance(bundle),
         source_file: module.display.clone(),
@@ -820,6 +1159,8 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         enum_variant_payload_types,
         int_constants,
         distinct_bases,
+        trait_method_owners,
+        iterable_item_types,
     })
     })
 }
@@ -2069,9 +2410,8 @@ pub enum TExprKind {
         /// c109 Phase 17: injected prelude fields (HttpRequest route metadata).
         /// Structured — emit spells the Rust field lines.
         extra: Option<TStructExtra>,
-        /// c109 Phase 30: TRAIT-OBJECT coercion — Jet trait name; emit wraps
-        /// `Box::new({lit}) as Box<dyn {trait_rust}>`.
-        as_trait: Option<String>,
+        /// c109 Phase 30: TRAIT-OBJECT coercion — `(trait, concrete owner)`.
+        as_trait: Option<(String, String)>,
     },
     /// c109 Phase 3: a struct field *read* `recv.field` in borrow position.
     /// `field` is the Jet field name (emit mangles / core-renames).
@@ -2611,7 +2951,12 @@ pub enum TFnValueKind {
     /// A bare function name used as a value. `wrapper` is the already-rendered
     /// `Box::new(move |…| user_<name>(…)) as <fn-type>` string (`emit_named_fn_value`),
     /// produced at lowering so emit only echoes it.
-    NamedFn { wrapper: String },
+    NamedFn {
+        wrapper: String,
+        /// Jet function key for native backends. `None` is a rendered closure
+        /// coercion used only by the Rust emitter.
+        name: Option<String>,
+    },
     /// A call through a fn-value `(f)(args)`. `callee` lowers to its place (a local
     /// of `Type::Fn`, or another fn-value form); args are lowered plainly.
     Call {
@@ -2756,6 +3101,10 @@ pub struct TLambda {
     pub executable: TLambdaBody,
     /// Unmangled source parameter names for non-Rust targets.
     pub source_params: Vec<String>,
+    /// Stable native symbol and resolved signature for noncapturing JIT calls.
+    pub jit_name: String,
+    pub param_types: Vec<Type>,
+    pub ret: Option<Type>,
     pub is_move: bool,
     pub boxed: bool,
     pub arc: bool,

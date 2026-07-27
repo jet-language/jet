@@ -305,6 +305,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         kind: TExprKind::FnValue {
                             kind: TFnValueKind::NamedFn {
                                 wrapper: emit_named_fn_value(cx, name, ft),
+                                name: Some(name.clone()),
                             },
                         },
                     };
@@ -636,13 +637,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // field. We instead replay `operand_is_integer` on the AST operands.
             // `operand_is_integer` inspects only the LEFT spine of nested
             // arithmetic, so check the left operand first, then the right.
-            // D-NUMOPS1: `+`/`-`/`*`/`/` trap on value overflow; `<<`/`>>` trap on a
-            // bit-count out of the type's width (both via the `JetArith` helpers, so
-            // no raw Rust overflow panic leaks — I2). A shift's overflow is governed
-            // by its LEFT operand's integer-ness (the value), never the count.
-            let arith_overflow = matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
-                && (ast_operand_is_integer(l, env) == Some(true)
-                    || ast_operand_is_integer(r, env) == Some(true));
+            // D-NUMOPS1: `+`/`-`/`*`/`/`/`%` trap on value overflow; `<<`/`>>`
+            // trap on a bit-count out of the type's width (both via the `JetArith`
+            // helpers, so no raw Rust overflow panic leaks — I2). A shift's
+            // overflow is governed by its LEFT operand's integer-ness (the value),
+            // never the count.
+            let arith_overflow = matches!(
+                op,
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem
+            ) && (ast_operand_is_integer(l, env) == Some(true)
+                || ast_operand_is_integer(r, env) == Some(true));
             let shift_overflow = matches!(op, BinOp::Shl | BinOp::Shr)
                 && ast_operand_is_integer(l, env) == Some(true);
             let overflow = arith_overflow || shift_overflow;
@@ -1144,7 +1148,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // `emit_call_args` reproduction). c109 Phase 13: a callee with a Fn-typed
             // param (now in subset) routes its arg through the Box-coercion form.
             let sig = cx.sigs.get(&call.name).cloned();
-            let args = call
+            let args: Vec<TCallArg> = call
                 .args
                 .iter()
                 .enumerate()
@@ -1156,7 +1160,44 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     lower_one_call_arg(a, conv, env, cx)
                 })
                 .collect();
-            let ret = call_return_type(cx, &call.name);
+            cx.jit_generic_calls
+                .borrow_mut()
+                .entry(call.name.clone())
+                .or_default()
+                .push(
+                    args.iter()
+                        .map(|arg| {
+                            if arg.widen_to_vec {
+                                if let Type::FixedList { elem, .. } = &arg.value.ty {
+                                    return Type::List(elem.clone());
+                                }
+                            }
+                            arg.value.ty.clone()
+                        })
+                        .collect(),
+                );
+            let declared_ret = call_return_type(cx, &call.name);
+            let ret = match (
+                cx.fn_type_params.get(&call.name),
+                cx.sigs.get(&call.name),
+            ) {
+                (Some(params), Some(sig)) if !params.is_empty() => {
+                    let mut subst = std::collections::HashMap::new();
+                    if sig.iter().zip(&args).all(|((_, template), actual)| {
+                        crate::Codegen::TIR::bind_generic_type(
+                            template,
+                            &actual.value.ty,
+                            params,
+                            &mut subst,
+                        )
+                    }) {
+                        crate::Generics::substitute_type(&declared_ret, &subst)
+                    } else {
+                        declared_ret
+                    }
+                }
+                _ => declared_ret,
+            };
             TExpr {
                 ty: ret,
                 kind: TExprKind::Call {
@@ -1221,7 +1262,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // not a construct any covered program produces; the gate keeps those uncoerced).
             let trait_coerce = as_trait
                 .as_ref()
-                .map(|t| crate::Generics::user_trait_rust(t));
+                .map(|trait_name| (trait_name.clone(), type_name.clone()));
             // c109 Phase 19: a FOREIGN (imported user) struct literal `alias.Type { … }`
             // (`import_ns`). The AST `emit_struct_lit` `import_ns` branch emits
             // `{root}{import_mods[alias]}::{mangle(Type)}[::<args>]` with MANGLED fields.
@@ -2326,10 +2367,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // placeholder `Fn` type; the binding/arg context supplies the real Rust type.
         Expr::Lambda(lam) => {
             let tl = lower_lambda(lam, cx, env);
+            let params = tl.param_types.clone();
+            let ret = tl.ret.clone().map(Box::new);
             TExpr {
                 ty: Type::Fn {
-                    params: Vec::new(),
-                    ret: None,
+                    params,
+                    ret,
                     effect_bound: None,
                 },
                 kind: TExprKind::Lambda(Box::new(tl)),

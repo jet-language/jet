@@ -12,9 +12,7 @@ frontend_rejected:
   comptime/find_empty: E0956: call `find` can't run at compile time yet; E0107: nothing named `paths` exists here
   crypto/crypto_suite: E1004: `jet.crypto` has no item `constant_time_equal_bytes`; E1004: `jet.crypto` has no item `constant_time_equal_bytes`
   modules/generic_modules: E0857: value argument for `mode` is not known at compile time; E0119: there's no type called `K`; E0963: this list has 1 element, but `[T#0]` expects exactly 0; E0113: `echo` promises to return [Int#3], but this returns [Int#capacity]; E0107: nothing named `values` exists here; E0963: this list has 1 element, but `[T#3]` expects exactly 3
-  serde/json: E0108: this map holds values of type `Json`, not `DataTree`; E0108: this map holds values of type `Json`, not `DataTree`; E0112: `Object` wants [String: DataTree] for argument 1, but this is [String: Json]
   types/generic_constructor_inference: E0501: an empty list needs a type
-  types/nested_enum_groups: E0108: argument 1 to `.add()` should be Int (a whole number), not `Damage`; E0108: argument 1 to `.add()` should be Int (a whole number), not `Damage`; E0108: argument 1 to `.remove()` should be Int (a whole number), not `Damage`; E0108: argument 1 to `.count()` should be Int (a whole number), not `Damage`; E0108: argument 1 to `.has()` should be Int (a whole number), not `Damage`
 
 gate_excluded:
   game/raylib_window: interactive display required
@@ -55,10 +53,11 @@ expected_exit:
   net/http_routes: AOT compile or run failed
   net/ws_echo: AOT compile or run failed
   tooling/panic_report: golden expects non-zero exit
-  types/traits: AOT compile or run failed
 
 resident_jit:
+  basics/bare_lambda_param
   basics/branches
+  basics/callbacks
   basics/compound
   basics/counted_loop
   basics/default_refs
@@ -76,8 +75,10 @@ resident_jit:
   basics/multiline_string
   basics/named_args
   basics/numbers
+  basics/pattern_matching
   basics/switch
   basics/values
+  basics/variadics_spread
   collections/struct_list_mutation
   comptime/comptime_splice
   comptime/doctests
@@ -96,6 +97,7 @@ resident_jit:
   devloop/schedule_every
   devloop/task_runner
   effects/effect_caps
+  effects/effect_higher_order
   effects/effect_prohibition
   effects/effect_trait_bound
   effects/effect_tree
@@ -106,6 +108,7 @@ resident_jit:
   effects/share_boundary
   errors/fallible_run
   lowlevel/layout_c
+  memory/parameter_modes
   memory/ref_field
   modules/inline_module
   modules/module_inline_sibling
@@ -113,8 +116,11 @@ resident_jit:
   modules/selective_imports
   operators/chained_comparison
   operators/user_defined
+  patterns/struct_destructure
+  serde/json_typed
   serde/user_derive
   syntax/maturity_tags
+  syntax/trailing_block
   text/string_parse
   text/strings
   tooling/bench
@@ -128,16 +134,29 @@ resident_jit:
   tooling/test_members
   tooling/tests
   types/affine_unit_types
+  types/anonymous_unions
   types/associated_types
   types/computed_field
   types/dimensional_quantities
   types/dot_construction
   types/enums
   types/external_methods
+  types/generic_types
   types/inferred_new
+  types/measurement
+  types/nested_enum_groups
+  types/no_any_alternatives
+  types/optional_result_variants
+  types/patchable
+  types/refinements
+  types/renderable-varargs
+  types/renderable-varargs-multi
   types/structs
   types/tags_and_traits
+  types/traits
+  types/type_alias
   types/typestate
+  types/value_tag_type
   web/web_compute
   web/web_wasm_for_in
   web/web_wasm_range
@@ -145,15 +164,11 @@ resident_jit:
   web/web_wasm_string_param
 
 deopt_interp:
-  basics/bare_lambda_param: E0956: expr `Lambda` can't run at compile time yet
-  basics/callbacks: E0956: expr `FnValue` can't run at compile time yet
   basics/closures
   basics/fan_out
-  basics/pattern_matching: E0956: enum match can't run at compile time yet
   basics/printable
   basics/range_step
   basics/tuples: E0956: field `x` can't run at compile time yet
-  basics/variadics_spread: E0956: expr `ListSpread` can't run at compile time yet
   collections/deque: E0956: prelude static `std::collections::VecDeque.new` can't run at compile time yet
   collections/dynamic-array-view: E0956: split views can't run at compile time yet
   collections/filter_map: E0956: the method `.parse` at compile time can't run at compile time yet
@@ -190,7 +205,6 @@ deopt_interp:
   effects/capability_sigils: E0956: complex assign place can't run at compile time yet
   effects/determinism: E0956: expr `HostCall` can't run at compile time yet
   effects/effect_grant
-  effects/effect_higher_order: E0956: expr `FnValue` can't run at compile time yet
   effects/effect_levers: E0956: expr `FnValue` can't run at compile time yet
   effects/infer_capability: E0956: complex assign place can't run at compile time yet
   effects/infer_receiver: E0956: complex assign place can't run at compile time yet
@@ -260,7 +274,6 @@ deopt_interp:
   memory/gc_cyclic: E0956: expr `HostCall` can't run at compile time yet
   memory/no_alloc_policy: E0956: complex assign place can't run at compile time yet
   memory/ownership: E0956: expr `FnValue` can't run at compile time yet
-  memory/parameter_modes: E0956: call `read_generic` can't run at compile time yet
   memory/place_windows
   memory/resource_close: E0956: expr `ResourceNew` can't run at compile time yet
   memory/returned_views
@@ -276,7 +289,6 @@ deopt_interp:
   parsing/binary_pattern: E0956: expr `HostCall` can't run at compile time yet
   parsing/parse_interpolation: E0956: expr `HostCall` can't run at compile time yet
   parsing/text-cursor: E0956: handle `CursorOver` can't run at compile time yet
-  patterns/struct_destructure: E0956: expr `HostCall` can't run at compile time yet
   reflection/reflect-value: E0956: `core.reflect.of()` at comptime (impure tier) can't run at compile time yet
   safety/sh_typed_text: E0956: expr `HostCall` can't run at compile time yet
   safety/typed_sql: E0956: expr `HostCall` can't run at compile time yet
@@ -296,15 +308,14 @@ deopt_interp:
   serde/encoding_xml_projection: E0956: `core.encoding.xml.parse()` at comptime (impure tier) can't run at compile time yet
   serde/encoding_xml_stream: E0956: expr `ResourceNew` can't run at compile time yet
   serde/hand_codec: E0956: `core.encoding.json.to_string()` at comptime (impure tier) can't run at compile time yet
-  serde/json_coerce: E0956: `core.encoding.json.decode()` at comptime (impure tier) can't run at compile time yet
-  serde/json_typed: E0956: `core.encoding.json.decode()` at comptime (impure tier) can't run at compile time yet
+  serde/json: E0956: if-let pattern can't run at compile time yet
+  serde/json_coerce: E0956: JSON lenient decode coercion audit effects can't run at compile time yet
   serde/serde_derive: E0956: `core.encoding.json.to_string()` at comptime (impure tier) can't run at compile time yet
   serde/serde_generic: E0956: `core.encoding.json.to_string()` at comptime (impure tier) can't run at compile time yet
   serde/toml: E0956: `core.encoding.toml.decode()` at comptime (impure tier) can't run at compile time yet
   serde/validate: E0956: enum match can't run at compile time yet
   serde/yaml: E0956: `core.encoding.yaml.decode()` at comptime (impure tier) can't run at compile time yet
   streams/generators: E0956: expr `HostCall` can't run at compile time yet
-  syntax/trailing_block: E0956: expr `Lambda` can't run at compile time yet
   text/bigint
   text/dates: E0956: `core.time.date.new()` at comptime (impure tier) can't run at compile time yet
   text/datetime: E0956: `core.time.datetime.from_timestamp()` at comptime (impure tier) can't run at compile time yet
@@ -337,23 +348,13 @@ deopt_interp:
   types/distinct_types: E0956: expr `DistinctConvert` can't run at compile time yet
   types/enum_dot: E0956: enum match can't run at compile time yet
   types/enum_dot_patterns: E0956: enum match can't run at compile time yet
-  types/generic_types: E0956: call `make_pair` can't run at compile time yet
-  types/measurement: E0956: `core.science.measurement.from()` at comptime (impure tier) can't run at compile time yet
-  types/no_any_alternatives: E0956: enum match can't run at compile time yet
   types/option: E0956: if-let can't run at compile time yet
   types/option_combinators: E0956: expr `OptionLift2` can't run at compile time yet
-  types/optional_result_variants: E0956: enum match can't run at compile time yet
-  types/patchable: E0956: method `apply` can't run at compile time yet
   types/range_types: E0956: expr `DistinctConvert` can't run at compile time yet
   types/recursive_enum
-  types/refinements: E0956: expr `DistinctConvert` can't run at compile time yet
-  types/renderable-varargs: E0956: call `log_all__va4` can't run at compile time yet
-  types/renderable-varargs-multi: E0956: call `announce__va1` can't run at compile time yet
-  types/type_alias
   types/typed_literal_head
   types/unit_family: E0956: expr `DistinctConvert` can't run at compile time yet
   types/unit_literals: E0956: expr `DistinctConvert` can't run at compile time yet
-  types/value_tag_type
   ui/events: E0956: `core.event.scope()` at comptime (impure tier) can't run at compile time yet
   ui/layout_basic: E0956: statement `Layout` can't run at compile time yet
   ui/loadable: E0956: `core.reactive.loadable.idle()` at comptime (impure tier) can't run at compile time yet
