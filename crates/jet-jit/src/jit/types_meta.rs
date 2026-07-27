@@ -889,6 +889,28 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
             "signal" => Some(Type::Option(Box::new(Type::Int))),
             _ => None,
         },
+        // D-LSDIR1 / D-FSOPS1 — CORE FS records omitted from TIR ProgramBundle.
+        "DirEntry" => match field {
+            "name" | "path" => Some(Type::String),
+            "is_dir" => Some(Type::Bool),
+            _ => None,
+        },
+        "Stat" => match field {
+            "size" | "modified_ms" | "created_ms" => Some(Type::Int),
+            "readonly" | "is_file" | "is_dir" | "is_symlink" => Some(Type::Bool),
+            "kind" => Some(Type::String),
+            _ => None,
+        },
+        "WalkEntry" => match field {
+            "path" | "relative" => Some(Type::String),
+            "is_dir" => Some(Type::Bool),
+            "depth" => Some(Type::Int),
+            _ => None,
+        },
+        "TempDir" | "TempFile" | "FileLock" => match field {
+            "path" => Some(Type::String),
+            _ => None,
+        },
         "EncodingLimits" => match field {
             "buffer_bytes" | "max_depth" | "max_item_bytes" | "max_expansion_depth"
             | "max_expansion_bytes" => Some(Type::Int),
