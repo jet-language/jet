@@ -1430,7 +1430,7 @@ const IGNORED_DIRS: &[&str] = &[
     "vendor", "target", "build", ".git", "node_modules", ".jet",
 ];
 
-/// Recursively collect `.jet` files under `dir`, skipping IGNORED_DIRS.
+/// Recursively collect source `.jet` files under `dir`, skipping IGNORED_DIRS and `pkg.jet`.
 /// Entries are sorted deterministically.
 fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
@@ -1443,7 +1443,10 @@ fn walk_jet_files(dir: &Path, out: &mut Vec<PathBuf>) {
             if !IGNORED_DIRS.contains(&name) {
                 walk_jet_files(&path, out);
             }
-        } else if path.extension().and_then(|e| e.to_str()) == Some(jet::Syntax::FILE_EXT) {
+        } else if path.extension().and_then(|e| e.to_str()) == Some(jet::Syntax::FILE_EXT)
+            && path.file_name().and_then(|name| name.to_str())
+                != Some(jet::Syntax::PAYLOAD_FILE)
+        {
             out.push(path);
         }
     }

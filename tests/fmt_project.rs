@@ -94,6 +94,64 @@ fn explicit_dir_arg_formats_files() {
     assert_ne!(read(&f), UNFORMATTED);
 }
 
+/// Directory traversal skips `pkg.jet`; an explicit `pkg.jet` path stays intentional.
+#[test]
+fn explicit_dir_ignores_payload_manifest() {
+    let dir = tmpdir(&line!().to_string());
+    let source = write(&dir, "src/main.jet", UNFORMATTED);
+    let manifest = write(
+        &dir,
+        jet::Syntax::PAYLOAD_FILE,
+        "payload: {\n    name: \"demo\",\n}\ndeps: {\n    helpers: notaref,\n}\n",
+    );
+    let manifest_before = fs::read(&manifest).unwrap();
+
+    let check = Command::new(jet())
+        .args(["fmt", "--check"])
+        .arg(&dir)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(
+        check.status.code(),
+        Some(1),
+        "only the ordinary source should need formatting\nstderr: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(
+        !String::from_utf8_lossy(&check.stdout).contains(jet::Syntax::PAYLOAD_FILE),
+        "directory check must not report pkg.jet"
+    );
+    assert_eq!(fs::read(&manifest).unwrap(), manifest_before);
+
+    let format = Command::new(jet())
+        .arg("fmt")
+        .arg(&dir)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(
+        format.status.code(),
+        Some(0),
+        "directory format should ignore pkg.jet\nstderr: {}",
+        String::from_utf8_lossy(&format.stderr)
+    );
+    assert_ne!(read(&source), UNFORMATTED);
+    assert_eq!(fs::read(&manifest).unwrap(), manifest_before);
+
+    let explicit = Command::new(jet())
+        .arg("fmt")
+        .arg(&manifest)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert_eq!(
+        explicit.status.code(),
+        Some(2),
+        "an explicit pkg.jet path must still reach the formatter"
+    );
+}
+
 /// `jet fmt <file>` formats a single explicit file.
 #[test]
 fn explicit_file_arg_formats_file() {
