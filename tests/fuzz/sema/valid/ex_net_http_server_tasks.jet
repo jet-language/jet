@@ -1,32 +1,25 @@
-// E2-M10: HTTP server with tasks/channels — one task per connection.
-// The handler function receives an HTTPRequest and returns an HTTPResponse;
-// the server task accepts one connection (for golden-test determinism).
-use core.http as http
+// E2-M10: HTTP server with tasks — one serve_once per connection.
+// The handler receives an HTTPRequest and returns an HTTPResponse; the server
+// task accepts one connection (for golden-test determinism).
+use core.http.client as http
 use core.http.server as server
 use core.net as net
 use core.tasks as tasks
 
-fn handle(req: HTTPRequest) => HTTPResponse {
+fn handle(req: HTTPRequest) => HTTPResponse ? HTTPError {
     greeting :: "hello from Jet! method={req.method()} path={req.path()}"
-    return server.response(200, greeting)
+    return Ok(server.response(200, greeting))
 }
 
 fn run() {
-    (sender, ch) :: tasks.channel<String>()
-    // Start the server in a background task (handles one request for golden-test determinism).
-    tasks.spawn(() => {
-        listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
-        addr :: listener.local_addr() ?? panic("address failed")
-        sender.send(~addr)
-        stream :: listener.accept() ?? panic("accept failed")
-        req_raw :: stream.read_text(8192) ?? panic("read failed")
-        req :: http.parse(req_raw)
-        resp :: handle(req)
-        body :: resp.body().text(1048576) ?? panic("body failed")
-        net.tcp_reply(^stream, "{resp.status()}", body) ?? panic("tcp reply")
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
+    addr :: listener.local_addr() ?? panic("address failed")
+    mux :: server.mux()
+    mux.get("/", (req: HTTPRequest) => handle(req))
+    t :: tasks.spawn(() => {
+        server.serve_once_listener(listener, mux) ?? panic("serve failed")
     })
-    addr :: ch.receive() ?? panic("no address")
-    // Send one HTTP request and print the response body (not the address).
     resp :: http.get("http://{addr}/") ?? panic("http get failed")
     print(resp.body().text(8388608) ?? panic("body failed"))
+    t.join()
 }
