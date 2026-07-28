@@ -307,6 +307,41 @@ mod tests {
     fn unavailable_provider(request:&ProviderRequest,_:&ProviderCancellation)->Result<Vec<ProviderEvent>,ProviderFailure>{Ok(vec![ProviderEvent::Unavailable{spec:0,reason:"probe could not observe ready event".into(),details:vec![]},ProviderEvent::Complete{request_id:request.request_id.clone(),samples:0}])}
     fn temporary(name:&str)->PathBuf{static NEXT:AtomicU64=AtomicU64::new(0);std::env::temp_dir().join(format!("jet-budget-provider-{}-{name}-{}",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)))}
     #[cfg(target_os="linux")]fn assert_last_group_gone(){extern "C"{fn kill(pid:i32,signal:i32)->i32;}let group=LAST_ISOLATED_GROUP.load(Ordering::SeqCst)as i32;let deadline=Instant::now()+Duration::from_millis(100);while unsafe{kill(-group,0)}==0&&Instant::now()<deadline{std::thread::yield_now()}assert_ne!(unsafe{kill(-group,0)},0,"isolated provider process group survived timeout");}
+    #[cfg(target_os="linux")]#[derive(Debug,PartialEq,Eq)]enum ProcessIdentity{Same,Gone,Reused,Indeterminate}
+    #[cfg(target_os="linux")]fn parse_process_start_time(stat:&str)->std::io::Result<u64>{let close=stat.rfind(')').ok_or_else(||std::io::Error::new(std::io::ErrorKind::InvalidData,"process stat has no closing comm delimiter"))?;stat[close+1..].split_whitespace().nth(19).ok_or_else(||std::io::Error::new(std::io::ErrorKind::InvalidData,"process stat has no start time"))?.parse().map_err(|_|std::io::Error::new(std::io::ErrorKind::InvalidData,"process stat has an invalid start time"))}
+    #[cfg(target_os="linux")]fn process_start_time(pid:i32)->std::io::Result<u64>{parse_process_start_time(&std::fs::read_to_string(format!("/proc/{pid}/stat"))?)}
+    #[cfg(target_os="linux")]fn process_identity(pid:i32,start_time:u64)->std::io::Result<ProcessIdentity>{
+        extern "C"{fn kill(pid:i32,signal:i32)->i32;}const ESRCH:i32=3;
+        match process_start_time(pid){
+            Ok(current)if current==start_time=>Ok(ProcessIdentity::Same),
+            Ok(_)=>Ok(ProcessIdentity::Reused),
+            Err(error)if error.kind()==std::io::ErrorKind::NotFound=>{
+                if unsafe{kill(pid,0)} == -1 {
+                    let error=std::io::Error::last_os_error();
+                    if error.raw_os_error()==Some(ESRCH){Ok(ProcessIdentity::Gone)}else{Err(error)}
+                }else{
+                    match process_start_time(pid){
+                        Ok(current)if current==start_time=>Ok(ProcessIdentity::Same),
+                        Ok(_)=>Ok(ProcessIdentity::Reused),
+                        Err(error)if error.kind()==std::io::ErrorKind::NotFound=>Ok(ProcessIdentity::Indeterminate),
+                        Err(error)=>Err(error),
+                    }
+                }
+            }
+            Err(error)=>Err(error),
+        }
+    }
+
+    #[cfg(target_os="linux")]
+    #[test]
+    fn process_identity_uses_start_time_and_esrch(){
+        let middle=(4..=21).map(|field|field.to_string()).collect::<Vec<_>>().join(" ");
+        assert_eq!(parse_process_start_time(&format!("7 (worker ) name) S {middle} 4242")).unwrap(),4242);
+        let pid=std::process::id()as i32;let start_time=process_start_time(pid).unwrap();
+        assert_eq!(process_identity(pid,start_time).unwrap(),ProcessIdentity::Same);
+        assert_eq!(process_identity(pid,start_time+1).unwrap(),ProcessIdentity::Reused);
+        assert_eq!(process_identity(i32::MAX,0).unwrap(),ProcessIdentity::Gone);
+    }
 
     #[cfg(target_os="linux")]
     #[test]
@@ -339,14 +374,15 @@ mod tests {
             assert!(supervisor.try_wait().unwrap().is_none(),"isolated worker supervisor exited before publishing its PID");
             std::thread::sleep(Duration::from_millis(2));
         };
+        let start_time=process_start_time(worker).unwrap();
         supervisor.kill().unwrap();supervisor.wait().unwrap();
         let exit_deadline=Instant::now()+Duration::from_secs(2);
-        while unsafe{kill(worker,0)}==0&&Instant::now()<exit_deadline{std::thread::sleep(Duration::from_millis(2));}
-        let gone=unsafe{kill(worker,0)}!=0;
+        let identity=loop{let identity=process_identity(worker,start_time).unwrap();if !matches!(identity,ProcessIdentity::Same|ProcessIdentity::Indeterminate)||Instant::now()>=exit_deadline{break identity}std::thread::sleep(Duration::from_millis(2));};
+        let gone=matches!(identity,ProcessIdentity::Gone|ProcessIdentity::Reused);
         if !gone{
-            unsafe{kill(-worker,SIGKILL);kill(worker,SIGKILL);}
+            if process_identity(worker,start_time).unwrap()==ProcessIdentity::Same{unsafe{kill(worker,SIGKILL);}}
             let cleanup_deadline=Instant::now()+Duration::from_secs(2);
-            while unsafe{kill(worker,0)}==0&&Instant::now()<cleanup_deadline{std::thread::sleep(Duration::from_millis(2));}
+            loop{let identity=process_identity(worker,start_time).unwrap();if matches!(identity,ProcessIdentity::Gone|ProcessIdentity::Reused)||Instant::now()>=cleanup_deadline{break}std::thread::sleep(Duration::from_millis(2));}
         }
         let _=std::fs::remove_file(&path);
         assert!(gone,"isolated worker survived its supervisor");
