@@ -108,7 +108,9 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
                     let ok = if b.uninit {
                         true
                     } else if b.is_comptime {
-                        b.ct.is_some()
+                        // Unresolved inside a `comptime { … }` block: the
+                        // interpreter evaluates the init itself.
+                        b.ct.is_some() || expr_in_subset(&b.init, cx, locals)
                     } else {
                         expr_in_subset(&b.init, cx, locals)
                     };

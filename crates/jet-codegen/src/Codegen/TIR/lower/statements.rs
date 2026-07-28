@@ -635,7 +635,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             // `(b.mutable && !b.is_comptime)` guard makes it `let`, never `let mut`) and the
             // type clause from `b.ty` (rendered exactly as the non-comptime path below). All
             // facts are pre-resolved (I3): no inference here.
-            if b.is_comptime {
+            // A comptime local inside a `comptime { … }` block is evaluated by
+            // the interpreter itself, so sema never pre-resolves `b.ct`. There
+            // the binding is an ordinary one whose init runs now; only a
+            // pre-resolved value becomes literal data.
+            if b.is_comptime && b.ct.is_some() {
                 let let_ty = crate::Codegen::TIR::let_ty_for_opt(b.ty.as_ref(), cx, false, false, false);
                 let init = TExpr {
                     ty: b.ty.clone().unwrap_or(Type::Int),
