@@ -15116,6 +15116,8 @@ impl LowerCtx<'_, '_> {
                     "timeout" => (self.host.process.spec_timeout, 1),
                     "output_limit" => (self.host.process.spec_output_limit, 1),
                     "cwd" => (self.host.process.spec_cwd, 1),
+                    "env" => (self.host.process.spec_env, 2),
+                    "env_remove" => (self.host.process.spec_env_remove, 1),
                     "env_clear" => (self.host.process.spec_env_clear, 0),
                     "detached" => (self.host.process.spec_detached, 0),
                     "terminal" => (self.host.process.spec_terminal, 0),

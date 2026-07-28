@@ -41,6 +41,9 @@ pub(crate) struct JitProcessSpec {
     env_clear: bool,
     detached: bool,
     terminal: bool,
+    cwd: Option<String>,
+    env_set: Vec<(String, String)>,
+    env_remove: Vec<String>,
 }
 
 impl JitProcessSpec {
@@ -54,6 +57,9 @@ impl JitProcessSpec {
             env_clear: false,
             detached: false,
             terminal: false,
+            cwd: None,
+            env_set: Vec::new(),
+            env_remove: Vec::new(),
         }
     }
 }
@@ -95,6 +101,10 @@ fn clone_string_list(list: i64) -> Vec<String> {
         }
         out
     })
+}
+
+fn clone_string(sid: i64) -> String {
+    Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(sid).unwrap_or_default())
 }
 
 fn result_ok_bits(bits: u64) -> i64 {
@@ -201,8 +211,21 @@ fn build_command(spec: &JitProcessSpec) -> Result<std::process::Command, String>
         command.args(&spec.cmd[1..]);
         command
     };
+    if let Some(cwd) = &spec.cwd {
+        command.current_dir(cwd);
+    }
+    // Same composition order as `jet_process_command` in the AOT prelude: start
+    // from the inherited environment unless `env_clear`, apply every `env` set,
+    // then every `env_remove`. Removes run last there too, so a name that is
+    // both set and removed is absent under both lenses.
     if spec.env_clear {
         command.env_clear();
+    }
+    for (name, value) in &spec.env_set {
+        command.env(name, value);
+    }
+    for name in &spec.env_remove {
+        command.env_remove(name);
     }
     command.stdin(std::process::Stdio::null());
     command.stdout(spec.stdout.stdio());
@@ -479,8 +502,35 @@ extern "C" fn jet_jit_process_spec_stdin(spec: i64, _mode: i64) -> i64 {
     spec
 }
 
-extern "C" fn jet_jit_process_spec_cwd(spec: i64, _cwd: i64) -> i64 {
-    spec
+extern "C" fn jet_jit_process_spec_cwd(spec: i64, cwd: i64) -> i64 {
+    let path = clone_string(cwd);
+    match with_spec_mut(spec, |s| {
+        s.cwd = Some(path);
+    }) {
+        Some(()) => spec,
+        None => 0,
+    }
+}
+
+extern "C" fn jet_jit_process_spec_env(spec: i64, name: i64, value: i64) -> i64 {
+    let name = clone_string(name);
+    let value = clone_string(value);
+    match with_spec_mut(spec, |s| {
+        s.env_set.push((name, value));
+    }) {
+        Some(()) => spec,
+        None => 0,
+    }
+}
+
+extern "C" fn jet_jit_process_spec_env_remove(spec: i64, name: i64) -> i64 {
+    let name = clone_string(name);
+    match with_spec_mut(spec, |s| {
+        s.env_remove.push(name);
+    }) {
+        Some(()) => spec,
+        None => 0,
+    }
 }
 
 /// `tag`: 0 = stdout, 1 = stderr.
@@ -686,6 +736,8 @@ pub(crate) struct ProcessHostFns {
     pub spec_timeout: cranelift_module::FuncId,
     pub spec_output_limit: cranelift_module::FuncId,
     pub spec_cwd: cranelift_module::FuncId,
+    pub spec_env: cranelift_module::FuncId,
+    pub spec_env_remove: cranelift_module::FuncId,
     pub spec_env_clear: cranelift_module::FuncId,
     pub spec_detached: cranelift_module::FuncId,
     pub spec_terminal: cranelift_module::FuncId,
@@ -710,6 +762,11 @@ pub(crate) fn register_process_symbols(builder: &mut cranelift_jit::JITBuilder) 
         jet_jit_process_spec_output_limit as *const u8,
     );
     builder.symbol("jet_jit_process_spec_cwd", jet_jit_process_spec_cwd as *const u8);
+    builder.symbol("jet_jit_process_spec_env", jet_jit_process_spec_env as *const u8);
+    builder.symbol(
+        "jet_jit_process_spec_env_remove",
+        jet_jit_process_spec_env_remove as *const u8,
+    );
     builder.symbol(
         "jet_jit_process_spec_env_clear",
         jet_jit_process_spec_env_clear as *const u8,
@@ -744,6 +801,11 @@ pub(crate) fn declare_process_host_fns(
     sig_binary.params.push(AbiParam::new(types::I64));
     sig_binary.params.push(AbiParam::new(types::I64));
     sig_binary.returns.push(AbiParam::new(types::I64));
+    let mut sig_ternary = Signature::new(cc);
+    sig_ternary.params.push(AbiParam::new(types::I64));
+    sig_ternary.params.push(AbiParam::new(types::I64));
+    sig_ternary.params.push(AbiParam::new(types::I64));
+    sig_ternary.returns.push(AbiParam::new(types::I64));
 
     let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
         module
@@ -761,6 +823,8 @@ pub(crate) fn declare_process_host_fns(
         spec_timeout: import("jet_jit_process_spec_timeout", &sig_binary)?,
         spec_output_limit: import("jet_jit_process_spec_output_limit", &sig_binary)?,
         spec_cwd: import("jet_jit_process_spec_cwd", &sig_binary)?,
+        spec_env: import("jet_jit_process_spec_env", &sig_ternary)?,
+        spec_env_remove: import("jet_jit_process_spec_env_remove", &sig_binary)?,
         spec_env_clear: import("jet_jit_process_spec_env_clear", &sig_unary)?,
         spec_detached: import("jet_jit_process_spec_detached", &sig_unary)?,
         spec_terminal: import("jet_jit_process_spec_terminal", &sig_unary)?,
