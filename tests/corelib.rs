@@ -4881,6 +4881,19 @@ fn receive<T: Reader>(&stream: T, limit: Int) => [U8] ? IOError {
     return stream.read(limit)
 }
 
+fn operation_name(operation: IOOperation) => String {
+    if operation == {
+        .Read -> return "read"
+        .Write -> return "write"
+        .Flush -> return "flush"
+        .Connect -> return "connect"
+        .Accept -> return "accept"
+        .Close -> return "close"
+        .Resolve -> return "resolve"
+        .Codec -> return "codec"
+    }
+}
+
 fn run() {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
@@ -4889,7 +4902,7 @@ fn run() {
         Ok(_) -> panic("zero read succeeded")
         Err(error) -> {
             if error == {
-                .InvalidInput(context) -> print(if context.operation == .Read { "invalid-read" } else { "invalid-other" })
+                .InvalidInput(context) -> print(if operation_name(context.operation) == "read" -> "invalid-read" else -> "invalid-other")
                 else -> { print("other") }
             }
         }
@@ -4907,7 +4920,7 @@ fn run() {
         Ok(_) -> panic("directory write succeeded")
         Err(error) -> {
             if error == {
-                .Other(context) -> print(if context.operation == .Write { "write" } else { "wrong-write-operation" })
+                .Other(context) -> print(if operation_name(context.operation) == "write" -> "write" else -> "wrong-write-operation")
                 else -> { print("wrong-write-kind") }
             }
         }
@@ -4916,7 +4929,7 @@ fn run() {
         Ok(_) -> panic("empty command succeeded")
         Err(error) -> {
             if error == {
-                .InvalidInput(context) -> print(if context.operation == .Resolve { "empty-command" } else { "wrong-command-operation" })
+                .InvalidInput(context) -> print(if operation_name(context.operation) == "resolve" -> "empty-command" else -> "wrong-command-operation")
                 else -> { print("wrong-command-kind") }
             }
         }
@@ -4925,7 +4938,7 @@ fn run() {
         Ok(_) -> panic("empty pipeline succeeded")
         Err(error) -> {
             if error == {
-                .InvalidInput(context) -> print(if context.operation == .Resolve { "empty-pipeline" } else { "wrong-pipeline-operation" })
+                .InvalidInput(context) -> print(if operation_name(context.operation) == "resolve" -> "empty-pipeline" else -> "wrong-pipeline-operation")
                 else -> { print("wrong-pipeline-kind") }
             }
         }
@@ -4934,7 +4947,7 @@ fn run() {
         Ok(_) -> panic("invalid environment succeeded")
         Err(error) -> {
             if error == {
-                .InvalidInput(context) -> print(if context.operation == .Resolve { context.resource ?? "missing-env-resource" } else { "wrong-env-operation" })
+                .InvalidInput(context) -> print(if operation_name(context.operation) == "resolve" -> context.resource ?? "missing-env-resource" else -> "wrong-env-operation")
                 else -> { print("wrong-env-kind") }
             }
         }
@@ -4958,6 +4971,58 @@ fn run() {
             assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected, ""));
         }
         other => panic!("IOError tree did not run in default dev: {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn core_ioerror_debug_renders_in_aot_and_dev() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_ioerror_debug_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    // Direct core values alone do not emit `jet_std`; this unused helper keeps the AOT prelude present.
+    let source = r#"
+fn activate_core() => String {
+    return input() ?? ""
+}
+
+fn fail() => Int ? IOError {
+    return Err(IOError.InvalidInput(IOContext.{
+        operation: .Resolve,
+        resource: None,
+        os_code: None,
+        cause: Val("debug"),
+    }))
+}
+
+fn run() {
+    if fail() == {
+        Ok(_) -> panic("failure succeeded")
+        Err(error) -> print("{error#Debug}")
+    }
+}
+"#;
+    let expected_aot = "InvalidInput(IOContext { operation: Resolve, resource: None, os_code: None, cause: Some(\"debug\") })\n";
+    let expected_dev = expected_aot;
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "ioerror_debug",
+        source,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, expected_aot);
+    let file = dir.join("ioerror_debug.jet");
+    fs::write(&file, source).unwrap();
+    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
+            assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, expected_dev, ""));
+        }
+        other => panic!("IOError Debug did not run in default dev: {other:?}"),
     }
     let _ = fs::remove_dir_all(&dir);
 }

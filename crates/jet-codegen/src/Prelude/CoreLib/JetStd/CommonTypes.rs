@@ -1168,6 +1168,11 @@
             text
         }
     }
+    impl super::JetDebug for IOError {
+        fn jet_debug(&self) -> String {
+            format!("{:?}", self)
+        }
+    }
     impl super::JetShow for EnvError {
         fn jet_show(&self) -> String {
             match self {

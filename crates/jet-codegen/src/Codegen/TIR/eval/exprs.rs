@@ -2559,6 +2559,46 @@ impl<'a> EvalCtx<'a> {
             } => {
                 let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
                 let var = variant.strip_prefix("user_").unwrap_or(variant);
+                if ty == "IOError" {
+                    let parts: Vec<String> = args
+                        .iter()
+                        .map(|(_, value)| match value {
+                            CtValue::Struct { type_name, fields }
+                                if type_name
+                                    .strip_prefix("user_")
+                                    .unwrap_or(type_name)
+                                    == "IOContext" =>
+                            {
+                                let fields: Vec<String> = fields
+                                    .iter()
+                                    .map(|(name, value)| {
+                                        let name =
+                                            name.strip_prefix("user_").unwrap_or(name);
+                                        let value = match value {
+                                            CtValue::Enum { variant, args, .. }
+                                                if args.is_empty() =>
+                                            {
+                                                variant
+                                                    .strip_prefix("user_")
+                                                    .unwrap_or(variant)
+                                                    .to_string()
+                                            }
+                                            _ => value.debug_rust(),
+                                        };
+                                        format!("{name}: {value}")
+                                    })
+                                    .collect();
+                                format!("IOContext {{ {} }}", fields.join(", "))
+                            }
+                            _ => value.debug_rust(),
+                        })
+                        .collect();
+                    return if parts.is_empty() {
+                        var.to_string()
+                    } else {
+                        format!("{var}({})", parts.join(", "))
+                    };
+                }
                 if args.is_empty() {
                     format!("{ty}.{var}")
                 } else if args.iter().all(|(label, _)| label.is_some()) {
