@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1265,
-    "rev": 18297,
+    "rev": 18309,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58798,12 +58798,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
-      "plan": "S55 and D-DISPLAYDBG1 settle the law: IOError is a core enum whose IOContext fields are debuggable, so #Debug must work without ceremony. Add the missing JetDebug bridge beside IOError JetShow, reusing the existing derived Rust Debug representation used by other core types. Extend core_ioerror_preserves_kind_operation_and_resource with a stable constructed error debug interpolation and prove byte-identical AOT and default-dev output. No new diagnostic or sema exception: is_debuggable is already correct once the runtime capability exists. blockedBy: none.",
+      "plan": "Implement S55/D-DISPLAYDBG1 capability parity: add the missing IOError JetDebug bridge, add a separate same-source AOT/default-dev exact-output regression, and canonicalize the TIR evaluator's IOError/IOContext Debug rendering without changing generic user Debug. Preserve the broad IOError fixture, migrating only its retired value-if spellings. blockedBy: none.",
       "blockedBy": [],
-      "assignee": "e3-1252-ioerror-debug",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "burndown-root",
+          "text": "Closed after fresh-context review and repair. Exact AOT/default-dev IOError Debug parity passes; ordinary user Debug passes; commits d5b9806be and 6c6b38492."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "burndown-root",
+          "text": "Implementation complete in d5b9806be + 6c6b38492. Root reran the exact two-lens regression: 1 passed, 182 filtered. Broad fixture reaches only known #1254."
+        },
         {
           "at": "2026-07-28",
           "by": "e3-1252-ioerror-debug",
@@ -58820,17 +58830,45 @@
           "text": "Scope is wider than first recorded. Confirmed independently while building #1253: '{e#Debug}' on an IOError does not only break the dev lens. It ICEs under AOT as well, with 'no method jet_debug found for enum IOError'. So both lenses reject generated code from ordinary Jet source, which is an I2 violation on the shipped path, not a JIT-only defect."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "IOError #Debug succeeds through AOT without exposing rustc rejection and prints canonical derived Debug output.",
+          "status": "verified",
+          "metBy": "e3-1252-ioerror-debug",
+          "verifiedBy": "review-1252-ioerror",
+          "evidence": "Fresh review: authority requires support, AOT bridge is complete, and the focused AOT proof passes 1/1.",
+          "at": "2026-07-28T12:34:22.110Z"
+        },
+        {
+          "n": 2,
+          "text": "Default dev prints byte-identical IOError Debug output for declaration-order and reordered populated IOContext literals, without changing ordinary user Debug.",
+          "status": "verified",
+          "metBy": "e3-1252-ioerror-debug",
+          "verifiedBy": "review-1252-ioerror",
+          "evidence": "Reviewer found and forced repair of literal-order divergence; recheck passes reordered/populated IOError parity 1/1 and ordinary user Debug regression 1/1.",
+          "at": "2026-07-28T12:34:22.346Z"
+        },
+        {
+          "n": 3,
+          "text": "The pre-existing broad IOError behavior fixture remains intact apart from current ratified conditional spelling and reaches only its separately tracked #1254 dev limitation.",
+          "status": "verified",
+          "metBy": "e3-1252-ioerror-debug",
+          "verifiedBy": "review-1252-ioerror",
+          "evidence": "Reviewer confirmed the broad fixture was not weakened; root reproduced only the existing #1254 E3412 dev limitation after AOT success.",
+          "at": "2026-07-28T12:34:22.591Z"
+        }
+      ],
       "refs": [
         "docs/spec/syntax-decisions.md",
         "crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
+        "crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs",
         "tests/corelib.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T04:21:36.454Z",
-      "updated": "2026-07-28T11:56:32.978Z",
-      "updatedBy": "e3-1252-ioerror-debug",
-      "claimedAt": "2026-07-28T11:56:32.978Z"
+      "updated": "2026-07-28T12:34:22.878Z",
+      "updatedBy": "burndown-root"
     },
     {
       "id": "c0ndi2ss",
@@ -75329,6 +75367,90 @@
   ],
   "events": [
     {
+      "at": "2026-07-28T12:34:22.878Z",
+      "by": "burndown-root",
+      "action": "card.update",
+      "ref": "c0gvdqxf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T12:34:22.591Z",
+      "by": "review-1252-ioerror",
+      "action": "card.criteria-verify",
+      "ref": "c0gvdqxf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-28T12:34:22.346Z",
+      "by": "review-1252-ioerror",
+      "action": "card.criteria-verify",
+      "ref": "c0gvdqxf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T12:34:22.110Z",
+      "by": "review-1252-ioerror",
+      "action": "card.criteria-verify",
+      "ref": "c0gvdqxf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T12:34:21.868Z",
+      "by": "burndown-root",
+      "action": "card.update",
+      "ref": "c0gvdqxf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T12:34:21.587Z",
+      "by": "e3-1252-ioerror-debug",
+      "action": "card.criteria-meet",
+      "ref": "c0gvdqxf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-28T12:34:21.345Z",
+      "by": "e3-1252-ioerror-debug",
+      "action": "card.criteria-meet",
+      "ref": "c0gvdqxf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T12:34:21.107Z",
+      "by": "e3-1252-ioerror-debug",
+      "action": "card.criteria-meet",
+      "ref": "c0gvdqxf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T12:34:20.867Z",
+      "by": "e3-1252-ioerror-debug",
+      "action": "card.criteria-add",
+      "ref": "c0gvdqxf",
+      "note": "#3 The pre-existing broad IOError behavior fixture remains inta"
+    },
+    {
+      "at": "2026-07-28T12:34:20.630Z",
+      "by": "e3-1252-ioerror-debug",
+      "action": "card.criteria-add",
+      "ref": "c0gvdqxf",
+      "note": "#2 Default dev prints byte-identical IOError Debug output for d"
+    },
+    {
+      "at": "2026-07-28T12:34:20.388Z",
+      "by": "e3-1252-ioerror-debug",
+      "action": "card.criteria-add",
+      "ref": "c0gvdqxf",
+      "note": "#1 IOError #Debug succeeds through AOT without exposing rustc r"
+    },
+    {
+      "at": "2026-07-28T12:34:20.147Z",
+      "by": "burndown-root",
+      "action": "card.update",
+      "ref": "c0gvdqxf",
+      "note": "plan,refs"
+    },
+    {
       "at": "2026-07-28T11:56:32.978Z",
       "by": "e3-1252-ioerror-debug",
       "action": "card.update",
@@ -78743,90 +78865,6 @@
       "action": "card.update",
       "ref": "c0d8o43a",
       "note": "phase"
-    },
-    {
-      "at": "2026-07-27T22:01:00.029Z",
-      "by": "e3-1191-grok",
-      "action": "card.claim",
-      "ref": "c0d8o43a",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T22:00:19.431Z",
-      "by": "e3-1190-grok",
-      "action": "card.update",
-      "ref": "c055r4xc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-27T22:00:02.422Z",
-      "by": "e3-1190-verify",
-      "action": "card.update",
-      "ref": "c055r4xc",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T22:00:02.199Z",
-      "by": "e3-1190-verify",
-      "action": "card.criteria-verify",
-      "ref": "c055r4xc",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T22:00:02.016Z",
-      "by": "e3-1190-verify",
-      "action": "card.criteria-verify",
-      "ref": "c055r4xc",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T22:00:01.828Z",
-      "by": "e3-1190-verify",
-      "action": "card.criteria-verify",
-      "ref": "c055r4xc",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T22:00:01.641Z",
-      "by": "e3-1190-grok",
-      "action": "card.update",
-      "ref": "c055r4xc",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T22:00:01.409Z",
-      "by": "e3-1190-grok",
-      "action": "card.criteria-meet",
-      "ref": "c055r4xc",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T22:00:01.202Z",
-      "by": "e3-1190-grok",
-      "action": "card.criteria-meet",
-      "ref": "c055r4xc",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T22:00:01.006Z",
-      "by": "e3-1190-grok",
-      "action": "card.criteria-meet",
-      "ref": "c055r4xc",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T21:51:32.172Z",
-      "by": "e3-1190-grok",
-      "action": "card.update",
-      "ref": "c055r4xc",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T21:51:26.798Z",
-      "by": "e3-1190-grok",
-      "action": "card.claim",
-      "ref": "c055r4xc",
-      "note": ""
     }
   ],
   "nextNum": 368,
