@@ -17288,6 +17288,9 @@ impl LowerCtx<'_, '_> {
                         return Ok(());
                     }
                     if self.meta.is_enum(name) && self.meta.enum_packed_showable(name) {
+                        // This process-local pointer and its host table cannot
+                        // survive disk tier-cache reuse in another process.
+                        super::tier_cache::abort_capture();
                         // Leak the type name once: heap string handles die on
                         // resident reset between compile and run.
                         let leaked: &'static str = Box::leak(name.clone().into_boxed_str());

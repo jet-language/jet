@@ -2486,6 +2486,41 @@ fn dev_default_interprets_display_debug_interpolation() {
     }
 }
 
+#[test]
+fn dev_packed_enum_print_is_safe_across_run_processes() {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let cache = std::env::temp_dir().join(format!(
+        "jet_dev_packed_enum_cache_{}_{}",
+        std::process::id(),
+        stamp
+    ));
+    let file = "examples/features/errors/errors.jet";
+    let expected = "42\n84\nBadDigit(\"x\")\n";
+
+    for run in 1..=2 {
+        let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+            .args(["run", file])
+            .env("JET_RUN_CACHE_DIR", &cache)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "run {run} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            expected,
+            "run {run} must preserve the Jet enum name"
+        );
+    }
+
+    let _ = fs::remove_dir_all(cache);
+}
+
 /// D-DEV1 "try anyway": the opt-in flag skips the boundary scan and attempts
 /// execution. For a task program it then fails honestly at whatever
 /// unsupported construct it actually hits during interpretation, rather than
