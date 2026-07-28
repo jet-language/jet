@@ -603,7 +603,7 @@ fn jet_cli_uses_explicit_html_marker() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("app.jet"),
-        "#Target(Web)\n#HTML(\"custom.html\")\nfn run() {}\n",
+        "#[Target(Web), HTML(\"custom.html\")]\nfn run() {}\n",
     )
     .unwrap();
     // A sibling `app.html` exists too — the explicit marker must win over it.
@@ -647,7 +647,7 @@ fn jet_cli_html_marker_missing_file_is_an_error() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("app.jet"),
-        "#Target(Web)\n#HTML(\"does_not_exist.html\")\nfn run() {}\n",
+        "#[Target(Web), HTML(\"does_not_exist.html\")]\nfn run() {}\n",
     )
     .unwrap();
 
@@ -974,7 +974,7 @@ fn run() {}
     let wasm = &out.web.expect("web artifacts").wasm_rust;
     assert!(wasm.contains("fn jet_wasm_tick()"));
     assert!(wasm.contains("jet_wasm_tick();"), "void body side effect was dropped:\n{wasm}");
-    assert!(wasm.contains("fn jet_wasm_twice(user_n: i64) => i64"));
+    assert!(wasm.contains("fn jet_wasm_twice(user_n: i64) -> i64"));
     assert!(wasm.contains("jet_wasm_twice(user_n)"), "export did not call internal helper:\n{wasm}");
 }
 
@@ -1060,6 +1060,23 @@ fn sum_to(n: Int) => Int {
     return total
 }
 #Target(JS)
+fn sum_while(n: Int) => Int {
+    total := 0
+    i := 0
+    loop i < n {
+        i += 1
+        if i == 2 { next }
+        total += i
+    }
+    return total
+}
+#Target(JS)
+fn sum_counted(n: Int) => Int {
+    total := 0
+    loop i := 0; i < n; i += 1 { total += i }
+    return total
+}
+#Target(JS)
 fn bump(n: Int) => Int {
     xs := [n]
     xs[0] = 9
@@ -1074,6 +1091,23 @@ fn wasm_sum_to(n: Int) => Int {
         total = total + i
         i = i + 1
     }
+    return total
+}
+#WasmExport
+fn wasm_sum_while(n: Int) => Int {
+    total := 0
+    i := 0
+    loop i < n {
+        i += 1
+        if i == 2 { next }
+        total += i
+    }
+    return total
+}
+#WasmExport
+fn wasm_sum_counted(n: Int) => Int {
+    total := 0
+    loop i := 0; i < n; i += 1 { total += i }
     return total
 }
 #WasmExport
@@ -1098,6 +1132,13 @@ fn run() {}
         web.js_app
     );
     assert!(
+        web.js_app.contains("while ((i < n))")
+            && web.js_app.contains("continue;")
+            && web.js_app.contains("_jet_loop_first"),
+        "JS While/Continue/CountedLoop forms were not all emitted:\n{}",
+        web.js_app
+    );
+    assert!(
         web.js_app.contains("] = ") || web.js_app.contains("[0] ="),
         "JS IndexAssign must emit array write:\n{}",
         web.js_app
@@ -1113,6 +1154,13 @@ fn run() {}
         web.wasm_rust
     );
     assert!(
+        web.wasm_rust.contains("while (user_i < user_n)")
+            && web.wasm_rust.contains("continue;")
+            && web.wasm_rust.contains("_jet_loop_first"),
+        "Wasm While/Continue/CountedLoop forms were not all emitted:\n{}",
+        web.wasm_rust
+    );
+    assert!(
         web.wasm_rust.contains("as usize] ="),
         "Wasm IndexAssign must emit list write:\n{}",
         web.wasm_rust
@@ -1122,6 +1170,8 @@ fn run() {}
 #[test]
 fn web_fallible_match_and_option_if_emit_on_js_and_wasm() {
     let src = r#"#Target(Web)
+enum Toggle { On Off }
+
 #Target(JS)
 fn make_result(flag: Bool) => Int ? String {
     if flag return .Ok(7)
@@ -1146,6 +1196,18 @@ fn maybe(flag: Bool) => Int {
     if x == .None { return 0 }
     if x == .Val(n) { return n }
     return -1
+}
+#Target(JS)
+fn js_make_toggle(flag: Bool) => Toggle {
+    if flag { return .On }
+    return .Off
+}
+#Target(JS)
+fn js_matches_and(flag: Bool) => Int {
+    x :: make_opt(flag)
+    toggle :: js_make_toggle(flag)
+    if x == .Val(n) && toggle == .On && flag { return n }
+    return 0
 }
 #Target(Wasm)
 fn wasm_make_result(flag: Bool) => Int ? String {
@@ -1172,19 +1234,36 @@ fn wasm_maybe(flag: Bool) => Int {
     if x == .Val(n) { return n }
     return -1
 }
+#Target(Wasm)
+fn wasm_make_toggle(flag: Bool) => Toggle {
+    if flag { return .On }
+    return .Off
+}
+#WasmExport
+fn wasm_matches_and(flag: Bool) => Int {
+    x :: wasm_make_opt(flag)
+    toggle :: wasm_make_toggle(flag)
+    if x == .Val(n) && toggle == .On && flag { return n }
+    return 0
+}
 fn run() {}
 "#;
     let out = jet::compile_web_with_path(src, "tests/fixtures/web_fallible_match.jet")
         .expect("Result/Option match must compile on web");
     let web = out.web.expect("web artifacts");
     assert!(
-        web.js_app.contains("case \"Ok\"") || web.js_app.contains("case \"Ok\":"),
-        "JS EnumMatch must emit Ok case:\n{}",
+        web.js_app.contains("tag === \"Ok\"") && web.js_app.contains("tag === \"Err\""),
+        "JS EnumMatch must emit Ok and Err branches:\n{}",
         web.js_app
     );
     assert!(
         web.js_app.contains("tag: \"None\"") || web.js_app.contains("\"None\""),
         "JS must emit None tag:\n{}",
+        web.js_app
+    );
+    assert!(
+        web.js_app.contains("tag === \"On\"") && web.js_app.contains("if (flag)"),
+        "JS Matches + And must emit both short-circuit tests:\n{}",
         web.js_app
     );
     assert!(
@@ -1197,6 +1276,209 @@ fn run() {}
         "Wasm must emit Some/None:\n{}",
         web.wasm_rust
     );
+    assert!(
+        web.wasm_rust.contains("matches!(&(user_toggle), user_Toggle::user_On)")
+            && web.wasm_rust.contains("if user_flag"),
+        "Wasm Matches + And must emit both short-circuit tests:\n{}",
+        web.wasm_rust
+    );
+}
+
+#[test]
+fn web_js_iflet_evaluates_subject_once_and_checks_payload_ranges() {
+    let src = r#"#Target(Web)
+enum Packet {
+    Data(Int)
+    Empty
+}
+
+#Target(JS)
+fn make_packet(n: Int) => Packet = .Data(n)
+
+#Target(JS)
+fn make_opt(n: Int) => Int? = .Val(n)
+
+#Target(JS)
+fn bind_opt(n: Int) => Int {
+    if make_opt(n) == .Val(value) { return value }
+    return 0
+}
+
+#Target(JS)
+fn classify_range(n: Int) => Int {
+    packet :: make_packet(n)
+    if packet == {
+        .Data(1..3) -> return 1
+        else -> return 0
+    }
+}
+
+#Target(Wasm)
+fn wasm_packet(n: Int) => Packet = .Data(n)
+
+#WasmExport
+fn wasm_classify(n: Int) => Int {
+    packet :: wasm_packet(n)
+    if packet == {
+        .Data(1..3) -> return 1
+        else -> return 0
+    }
+}
+
+fn run() {}
+"#;
+    let out = jet::compile_web_with_path(src, "tests/fixtures/web_iflet_ranges.jet")
+        .expect("supported binding and range patterns must compile");
+    let web = out.web.expect("web artifacts");
+    assert_eq!(
+        web.js_app.matches("make_opt(n)").count(),
+        2,
+        "IfLet subject must be evaluated once:\n{}",
+        web.js_app
+    );
+    assert!(
+        web.js_app.contains("values[0] >= 1")
+            && web.js_app.contains("values[0] <= 3"),
+        "JS EnumMatch must test payload ranges:\n{}",
+        web.js_app
+    );
+    assert!(
+        web.wasm_rust.contains("_ @ 1..=3"),
+        "Wasm EnumMatch must retain payload range:\n{}",
+        web.wasm_rust
+    );
+}
+
+#[test]
+fn web_js_enum_match_break_targets_the_enclosing_loop() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping JS EnumMatch break test");
+        return;
+    }
+    let src = r#"#Target(Web)
+enum Choice { Stop Keep }
+
+#Target(JS)
+fn count(choice: Choice) => Int {
+    hits := 0
+    loop i := 0; i < 3; i += 1 {
+        if choice == {
+            .Stop -> { break }
+            .Keep -> {}
+        }
+        hits += 1
+    }
+    return hits
+}
+
+#Target(JS)
+fn run() { print(count(.Stop)) }
+"#;
+    let dir = build_web_fixture(
+        "enum_match_break",
+        src,
+        "tests/fixtures/web_enum_match_break.jet",
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert!(
+        !js.contains("switch (__jet_match.tag)"),
+        "EnumMatch switch captures an unlabeled Jet break:\n{js}"
+    );
+    assert_eq!(run_web_app(&dir), "0\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn web_for_in_preflight_rejects_unimplemented_iteration_fields() {
+    for (shown, src) in [
+        (
+            "tests/fixtures/web_for_in_step.jet",
+            r#"#Target(Web)
+#Target(JS)
+fn sum() => Int {
+    total := 0
+    loop value; [1, 2, 3]; 2 { total += value }
+    return total
+}
+fn run() {}
+"#,
+        ),
+        (
+            "tests/fixtures/web_for_in_method.jet",
+            r#"#Target(Web)
+#Target(JS)
+fn count_chars() => Int {
+    total := 0
+    loop ch; "abc".chars() { total += 1 }
+    return total
+}
+fn run() {}
+"#,
+        ),
+    ] {
+        let diags = jet::compile_web_with_path(src, shown)
+            .expect_err("JS must reject ForIn forms its emitter does not implement");
+        assert!(
+            diags.iter().any(|d| d.code == "E-WEB-TIR-UNSUPPORTED"),
+            "{shown}: {diags:?}"
+        );
+    }
+}
+
+#[test]
+fn web_if_expr_emits_safe_js_and_wasm_value_blocks() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping web IfExpr test");
+        return;
+    }
+    let src = r#"#Target(Web)
+#WasmExport
+fn wasm_pick(flag: Bool) => Int {
+    return if flag -> {
+        n :: 6
+        n + 1
+    } else -> 3
+}
+
+#Target(JS)
+fn js_pick(flag: Bool) => Int {
+    return if flag -> {
+        n :: 6
+        n + 2
+    } else -> 4
+}
+
+#Target(JS)
+fn run() {
+    print(js_pick(true))
+    print(if true -> wasm_pick(true) else -> 0)
+}
+"#;
+    let dir = build_web_fixture("if_expr", src, "tests/fixtures/web_if_expr.jet");
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
+    assert!(
+        js.contains("await (async () =>") && js.contains("let n = 6;"),
+        "JS IfExpr must retain branch statements and await bridge calls:\n{js}"
+    );
+    assert!(
+        wasm.contains("if user_flag {")
+            && (wasm.contains("let user_n = 6;") || wasm.contains("let mut user_n = 6;"))
+            && wasm.contains("(user_n + 1)"),
+        "Wasm IfExpr must retain branch statements and values:\n{wasm}"
+    );
+    let check = Command::new("node")
+        .arg("--check")
+        .arg(dir.join("build/app.js"))
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "node --check rejected JS:\n{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert_eq!(run_web_app(&dir), "8\n7\n");
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -1277,8 +1559,8 @@ fn run() { print(total()) }
 "#;
     let dir = build_web_fixture("wasm_module_identity", src, "tests/fixtures/web_wasm_module_identity.jet");
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
-    assert!(wasm.contains("fn jet_wasm_left__value() => i64"), "left Wasm identity was dropped:\n{wasm}");
-    assert!(wasm.contains("fn jet_wasm_right__value() => i64"), "right Wasm identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm_left__value() -> i64"), "left Wasm identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm_right__value() -> i64"), "right Wasm identity was dropped:\n{wasm}");
     assert!(wasm.contains("jet_wasm_left__value()"), "left qualified call was dropped:\n{wasm}");
     assert!(wasm.contains("jet_wasm_right__value()"), "right qualified call was dropped:\n{wasm}");
     assert_eq!(run_web_app(&dir), "3\n");
@@ -1333,8 +1615,8 @@ fn web_file_modules_emit_distinct_qualified_wasm_calls() {
         ],
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
-    assert!(wasm.contains("fn jet_wasm_left__value() => i64"), "left identity was dropped:\n{wasm}");
-    assert!(wasm.contains("fn jet_wasm_right__value() => i64"), "right identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm_left__value() -> i64"), "left identity was dropped:\n{wasm}");
+    assert!(wasm.contains("fn jet_wasm_right__value() -> i64"), "right identity was dropped:\n{wasm}");
     assert!(wasm.contains("jet_wasm_left__value()"), "left call was dropped:\n{wasm}");
     assert!(wasm.contains("jet_wasm_right__value()"), "right call was dropped:\n{wasm}");
     assert_eq!(run_web_app(&dir), "3\n");
@@ -1367,7 +1649,7 @@ fn web_file_module_wasm_export_uses_qualified_bridge() {
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("pub extern \"C\" fn jet_export_math__value() => i64"),
+        wasm.contains("pub extern \"C\" fn jet_export_math__value() -> i64"),
         "qualified export symbol was dropped:\n{wasm}"
     );
     assert_eq!(run_web_app(&dir), "7\n");
@@ -1531,7 +1813,7 @@ fn run() { print("hello, web") }
     let web = out.web.expect("web artifacts");
     let wasm = &web.wasm_rust;
     assert!(
-        wasm.contains("fn jet_wasm_tools__dev() => i64"),
+        wasm.contains("fn jet_wasm_tools__dev() -> i64"),
         "module tools.dev was not emitted:\n{wasm}"
     );
     assert!(
@@ -1566,7 +1848,9 @@ fn run() { print("hello") }
 fn module_local_dev_is_validated_as_web_runtime() {
     let src = r#"#Target(Web)
 module tools {
-    fn dev(name: String) { print("hello {name}") }
+    fn dev(name: String) {
+        #Unsafe("exercise the web TIR gate") { print("hello {name}") }
+    }
 }
 fn run() { print("hello") }
 "#;
@@ -1827,7 +2111,7 @@ fn codable_struct_wasm_bridge_reconstructs_typed_argument() {
     let src = include_str!("ui/web_abi_codable.jet");
     let dir = build_web_fixture("codable_struct", src, "tests/ui/web_abi_codable.jet");
     let wasm_rust = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
-    let signature = "fn jet_export_sum_point(user_p_x: i64, user_p_y: i64) => i64";
+    let signature = "fn jet_export_sum_point(user_p_x: i64, user_p_y: i64) -> i64";
     let reconstruction = "let user_p = user_Point { user_x: user_p_x, user_y: user_p_y };";
     let field_read = "((user_p).user_x + (user_p).user_y)";
     assert!(wasm_rust.contains(signature), "flattened ABI drifted:\n{wasm_rust}");
@@ -2010,7 +2294,7 @@ fn web_wasm_string_export_hostile_roundtrip() {
     let dir = build_web_fixture("wasm_string", src, "examples/features/web/web_wasm_string.jet");
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("fn jet_abi_string_ret(s: String) => u64"),
+        wasm.contains("fn jet_abi_string_ret(s: String) -> u64"),
         "string return helper missing:\n{wasm}"
     );
     assert!(
@@ -2064,11 +2348,11 @@ fn web_wasm_string_param_export_hostile_roundtrip() {
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("pub extern \"C\" fn jet_abi_string_alloc(len: u32) => u32"),
+        wasm.contains("pub extern \"C\" fn jet_abi_string_alloc(len: u32) -> u32"),
         "string alloc export missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("fn jet_abi_string_arg(packed: u64) => String"),
+        wasm.contains("fn jet_abi_string_arg(packed: u64) -> String"),
         "string arg helper missing:\n{wasm}"
     );
     assert!(
@@ -2117,15 +2401,15 @@ fn web_wasm_list_int_export_hostile_roundtrip() {
     let dir = build_web_fixture("wasm_list", src, "examples/features/web/web_wasm_list.jet");
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("fn jet_abi_list_i64_ret(v: Vec<i64>) => u64"),
+        wasm.contains("fn jet_abi_list_i64_ret(v: Vec<i64>) -> u64"),
         "list-int return helper missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("fn jet_abi_list_i64_arg(packed: u64) => Vec<i64>"),
+        wasm.contains("fn jet_abi_list_i64_arg(packed: u64) -> Vec<i64>"),
         "list-int arg helper missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("pub extern \"C\" fn jet_abi_list_i64_alloc(len: u32) => u32"),
+        wasm.contains("pub extern \"C\" fn jet_abi_list_i64_alloc(len: u32) -> u32"),
         "list-int alloc export missing:\n{wasm}"
     );
     assert!(
@@ -2193,15 +2477,15 @@ fn web_wasm_list_string_export_hostile_roundtrip() {
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
     assert!(
-        wasm.contains("fn jet_abi_list_string_ret(v: Vec<String>) => u64"),
+        wasm.contains("fn jet_abi_list_string_ret(v: Vec<String>) -> u64"),
         "list-string return helper missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("fn jet_abi_list_string_arg(packed: u64) => Vec<String>"),
+        wasm.contains("fn jet_abi_list_string_arg(packed: u64) -> Vec<String>"),
         "list-string arg helper missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("pub extern \"C\" fn jet_abi_list_string_alloc(byte_len: u32) => u32"),
+        wasm.contains("pub extern \"C\" fn jet_abi_list_string_alloc(byte_len: u32) -> u32"),
         "list-string alloc export missing:\n{wasm}"
     );
     assert!(
@@ -2266,7 +2550,7 @@ fn web_wasm_map_string_int_export_hostile_roundtrip() {
         "map-string-int ABI helpers missing:\n{wasm}"
     );
     assert!(
-        wasm.contains("pub extern \"C\" fn jet_abi_map_string_i64_alloc(byte_len: u32) => u32")
+        wasm.contains("pub extern \"C\" fn jet_abi_map_string_i64_alloc(byte_len: u32) -> u32")
             && wasm.contains(
                 "pub extern \"C\" fn jet_abi_map_string_i64_free(ptr: u32, byte_len: u32)"
             ),

@@ -684,6 +684,40 @@ fn web_wasm_expr_supported(
                     .iter()
                     .all(|a| web_wasm_expr_supported(&a.value, bundle, file_prefix, reconstructions))
         }
+        TIR::TExprKind::IfExpr {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+        } => {
+            web_wasm_if_cond_supported(cond, bundle, file_prefix, reconstructions)
+                && web_wasm_stmts_supported(
+                    then_body,
+                    bundle,
+                    file_prefix,
+                    reconstructions,
+                )
+                && web_wasm_expr_supported(
+                    then_value,
+                    bundle,
+                    file_prefix,
+                    reconstructions,
+                )
+                && web_wasm_stmts_supported(
+                    else_body,
+                    bundle,
+                    file_prefix,
+                    reconstructions,
+                )
+                && web_wasm_expr_supported(
+                    else_value,
+                    bundle,
+                    file_prefix,
+                    reconstructions,
+                )
+        }
+        TIR::TExprKind::Unit => true,
         _ => false,
     }
 }
@@ -703,7 +737,14 @@ fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
                 && else_body.as_deref().map(web_stmts_supported).unwrap_or(true)
         }
         TIR::TStmt::Range { start, end, step, body, .. } => web_expr_supported(start) && web_expr_supported(end) && step.as_ref().map(web_expr_supported).unwrap_or(true) && web_stmts_supported(body),
-        TIR::TStmt::ForIn { collection, body, .. } => web_expr_supported(collection) && web_stmts_supported(body),
+        TIR::TStmt::ForIn {
+            step: None,
+            method_kind: None,
+            columnar: false,
+            collection,
+            body,
+            ..
+        } => web_expr_supported(collection) && web_stmts_supported(body),
         TIR::TStmt::EnumMatch {
             scrutinee,
             arms,
@@ -790,6 +831,57 @@ fn web_lambda_supported(lam: &TIR::TLambda) -> bool {
     }
 }
 
+/// An IfExpr uses a JS IIFE. Outer-function control cannot cross that boundary.
+fn web_stmts_safe_in_js_iife(stmts: &[TIR::TStmt]) -> bool {
+    stmts.iter().all(|stmt| match stmt {
+        TIR::TStmt::Return(_) | TIR::TStmt::Break(_) | TIR::TStmt::Continue(_) => false,
+        TIR::TStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            web_stmts_safe_in_js_iife(then_body)
+                && else_body
+                    .as_deref()
+                    .is_none_or(web_stmts_safe_in_js_iife)
+        }
+        TIR::TStmt::Range { body, .. }
+        | TIR::TStmt::ForIn { body, .. }
+        | TIR::TStmt::Loop { body, .. }
+        | TIR::TStmt::While { body, .. }
+        | TIR::TStmt::CountedLoop { body, .. } => web_stmts_safe_in_js_iife(body),
+        TIR::TStmt::EnumMatch {
+            arms, else_body, ..
+        } => {
+            arms.iter()
+                .all(|arm| web_stmts_safe_in_js_iife(&arm.body))
+                && else_body
+                    .as_deref()
+                    .is_none_or(web_stmts_safe_in_js_iife)
+        }
+        TIR::TStmt::MixedSwitch {
+            arms, else_body, ..
+        } => {
+            arms.iter()
+                .all(|(_, body)| web_stmts_safe_in_js_iife(body))
+                && else_body
+                    .as_deref()
+                    .is_none_or(web_stmts_safe_in_js_iife)
+        }
+        TIR::TStmt::RangeSwitch {
+            arms, else_body, ..
+        } => {
+            arms.iter()
+                .all(|(_, _, body)| web_stmts_safe_in_js_iife(body))
+                && web_stmts_safe_in_js_iife(else_body)
+        }
+        TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) | TIR::TStmt::Impure(body) => {
+            web_stmts_safe_in_js_iife(body)
+        }
+        _ => true,
+    })
+}
+
 /// JS DOM backend methods with a `jetDom.*` lowering (must match `tir_js_expr`).
 fn web_js_ui_backend_method_supported(method: &str, argc: usize) -> bool {
     matches!(
@@ -857,6 +949,21 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         }
         E::NumericMethod { recv, op: TIR::TNumericOp::CastAs { .. } | TIR::TNumericOp::FloatToInt { .. } } => web_expr_supported(recv),
         E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => web_expr_supported(value) && web_expr_supported(fallback),
+        E::IfExpr {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+        } => {
+            web_if_cond_supported(cond)
+                && web_stmts_supported(then_body)
+                && web_stmts_safe_in_js_iife(then_body)
+                && web_expr_supported(then_value)
+                && web_stmts_supported(else_body)
+                && web_stmts_safe_in_js_iife(else_body)
+                && web_expr_supported(else_value)
+        }
         E::Lambda(lam) => web_lambda_supported(lam),
         E::CoreClosureCall { kind: TIR::TCoreClosureKind::UiReactiveRender { executable, .. } | TIR::TCoreClosureKind::ReactiveEffect { executable, .. } } => web_lambda_supported(executable),
         _ => false,
@@ -1772,6 +1879,9 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
     let mut emitted_structs = std::collections::HashSet::new();
     for f in &wasm_funcs {
         for reconstruction in &f.tir.web_param_reconstructions {
+            if matches!(&reconstruction.ty, Type::Named(_)) {
+                continue;
+            }
             let rust_type = web_recon_rust_type(&reconstruction.ty);
             if !emitted_structs.insert(rust_type.clone()) {
                 continue;
@@ -2189,7 +2299,7 @@ fn emit_wasm_if_head(
                 wasm_match_arm_pattern(pattern)?
             )
         }
-        TIR::TIfCond::And { .. } => unreachable!("And heads are nested, not headed"),
+        TIR::TIfCond::And { .. } => return Err(()),
     };
     out.push_str(&format!("{pad}{head}\n"));
     Ok(())
@@ -2469,9 +2579,7 @@ fn emit_wasm_body(
                     )?;
                     out.push_str(&format!("{pad}    }},\n"));
                 } else if *fallthrough {
-                    out.push_str(&format!(
-                        "{pad}    _ => unreachable!(\"jet: exhaustiveness bug\"),\n"
-                    ));
+                    out.push_str(&format!("{pad}    _ => std::process::abort(),\n"));
                 }
                 out.push_str(&format!("{pad}}}\n"));
             }
@@ -2586,6 +2694,94 @@ fn emit_wasm_body(
     Ok(())
 }
 
+fn emit_wasm_if_value(
+    cond: &TIR::TIfCond,
+    then_body: &[TIR::TStmt],
+    then_value: &TIR::TExpr,
+    else_body: &[TIR::TStmt],
+    else_value: &TIR::TExpr,
+    out: &mut String,
+    indent: usize,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> Result<(), ()> {
+    let pad = "    ".repeat(indent);
+    if let TIR::TIfCond::And { left, right } = cond {
+        emit_wasm_if_head(
+            left,
+            out,
+            indent,
+            funcs,
+            file_prefix,
+            reconstructions,
+        )?;
+        emit_wasm_if_value(
+            right,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            out,
+            indent + 1,
+            funcs,
+            file_prefix,
+            reconstructions,
+        )?;
+        out.push_str(&format!("{pad}}} else {{\n"));
+        emit_wasm_body(
+            else_body,
+            out,
+            indent + 1,
+            funcs,
+            file_prefix,
+            reconstructions,
+        )?;
+        out.push_str(&format!(
+            "{}{}\n{pad}}}",
+            "    ".repeat(indent + 1),
+            wasm_emit_expr(else_value, funcs, file_prefix, reconstructions)?
+        ));
+        return Ok(());
+    }
+
+    emit_wasm_if_head(
+        cond,
+        out,
+        indent,
+        funcs,
+        file_prefix,
+        reconstructions,
+    )?;
+    emit_wasm_body(
+        then_body,
+        out,
+        indent + 1,
+        funcs,
+        file_prefix,
+        reconstructions,
+    )?;
+    out.push_str(&format!(
+        "{}{}\n{pad}}} else {{\n",
+        "    ".repeat(indent + 1),
+        wasm_emit_expr(then_value, funcs, file_prefix, reconstructions)?
+    ));
+    emit_wasm_body(
+        else_body,
+        out,
+        indent + 1,
+        funcs,
+        file_prefix,
+        reconstructions,
+    )?;
+    out.push_str(&format!(
+        "{}{}\n{pad}}}",
+        "    ".repeat(indent + 1),
+        wasm_emit_expr(else_value, funcs, file_prefix, reconstructions)?
+    ));
+    Ok(())
+}
+
 fn wasm_emit_expr(
     expr: &TIR::TExpr,
     funcs: &[FuncWeb],
@@ -2596,6 +2792,7 @@ fn wasm_emit_expr(
         TIR::TExprKind::IntLit(n, _) => n.to_string(),
         TIR::TExprKind::FloatLit(n) => n.to_string(),
         TIR::TExprKind::BoolLit(b) => b.to_string(),
+        TIR::TExprKind::Unit => "()".to_string(),
         TIR::TExprKind::StrLit(parts) => {
             if parts.len() == 1 {
                 if let TIR::TStrPart::Lit(text) = &parts[0] {
@@ -2774,6 +2971,28 @@ fn wasm_emit_expr(
             if callees.next().is_some() { return Err(()); }
             format!("jet_wasm_{key}({})", args.iter().map(|a| wasm_emit_call_arg(a, funcs, file_prefix, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
         }
+        TIR::TExprKind::IfExpr {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+        } => {
+            let mut rendered = String::new();
+            emit_wasm_if_value(
+                cond,
+                then_body,
+                then_value,
+                else_body,
+                else_value,
+                &mut rendered,
+                0,
+                funcs,
+                file_prefix,
+                reconstructions,
+            )?;
+            rendered
+        }
         _ => return Err(()),
     })
 }
@@ -2931,16 +3150,6 @@ fn emit_js_fn(
     // the same first key every call, so its one box is reused in place; an
     // entry point that internally paints several distinct nodes in one call
     // (197_ui_showcase.jet's `initApp`) gets one distinct key per node.
-    out.push_str(&format!(
-        "export function {}({}) {{\n",
-        f.key,
-        param_names(&f.params)
-    ));
-    out.push_str(&format!(
-        "  jetDom.enterRenderScope({});\n",
-        json_quote(&f.key)
-    ));
-    out.push_str("  try {\n");
     let mut body = String::new();
     body.push_str(&format!(
         "    {} file {}\n",
@@ -2949,6 +3158,21 @@ fn emit_js_fn(
     ));
     emit_tir_js_body(&f.tir.body, &mut body, all, f.file_prefix.as_deref(), 2)
         .map_err(|()| web_emit_error(f))?;
+    let async_kw = if body.contains("await bridge_") {
+        "async "
+    } else {
+        ""
+    };
+    out.push_str(&format!(
+        "export {async_kw}function {}({}) {{\n",
+        f.key,
+        param_names(&f.params)
+    ));
+    out.push_str(&format!(
+        "  jetDom.enterRenderScope({});\n",
+        json_quote(&f.key)
+    ));
+    out.push_str("  try {\n");
     out.push_str(&bind_inline_handler_symbols(&body, f, handlers));
     out.push_str("  } finally {\n    jetDom.exitRenderScope();\n  }\n");
     out.push_str("}\n\n");
@@ -3180,13 +3404,80 @@ fn js_match_tag(pattern: &crate::AST::Pattern) -> Result<&'static str, ()> {
     }
 }
 
+fn js_pattern_test(pattern: &crate::AST::Pattern, subject: &str) -> Result<String, ()> {
+    let mut tests = match pattern {
+        crate::AST::Pattern::Variant {
+            variant, bindings, ..
+        } => {
+            let mut tests = vec![format!(
+                "({subject}).tag === {}",
+                json_quote(variant)
+            )];
+            for (index, slot) in bindings.iter().enumerate() {
+                if let crate::AST::PatSlot::Range { lo, hi } = slot {
+                    tests.push(format!(
+                        "({subject}).values[{index}] >= {lo} && ({subject}).values[{index}] <= {hi}"
+                    ));
+                }
+            }
+            tests
+        }
+        crate::AST::Pattern::Absent(_) => {
+            vec![format!("({subject}).tag === \"None\"")]
+        }
+        other => vec![format!(
+            "({subject}).tag === \"{}\"",
+            js_match_tag(other)?
+        )],
+    };
+    if tests.len() == 1 {
+        Ok(tests.pop().expect("one pattern test"))
+    } else {
+        Ok(tests.join(" && "))
+    }
+}
+
+fn emit_js_pattern_bindings(
+    pattern: &crate::AST::Pattern,
+    subject: &str,
+    out: &mut String,
+    indent: usize,
+) {
+    let pad = "  ".repeat(indent);
+    match pattern {
+        crate::AST::Pattern::Variant { bindings, .. } => {
+            for (index, slot) in bindings.iter().enumerate() {
+                if let crate::AST::PatSlot::Bind { name, .. } = slot {
+                    if name != "_" {
+                        out.push_str(&format!(
+                            "{pad}const {} = ({subject}).values[{index}];\n",
+                            web_name(name)
+                        ));
+                    }
+                }
+            }
+        }
+        crate::AST::Pattern::Ok { binding, .. }
+        | crate::AST::Pattern::Err { binding, .. }
+        | crate::AST::Pattern::Present { binding, .. }
+            if binding != "_" =>
+        {
+            out.push_str(&format!(
+                "{pad}const {} = ({subject}).values[0];\n",
+                web_name(binding)
+            ));
+        }
+        _ => {}
+    }
+}
+
 fn emit_js_if_head(
     cond: &TIR::TIfCond,
     out: &mut String,
     funcs: &[FuncWeb],
     file_prefix: Option<&str>,
     indent: usize,
-) -> Result<(), ()> {
+) -> Result<usize, ()> {
     let pad = "  ".repeat(indent);
     match cond {
         TIR::TIfCond::Plain(expr) => {
@@ -3194,73 +3485,40 @@ fn emit_js_if_head(
                 "{pad}if ({}) {{\n",
                 tir_js_expr(expr, funcs, file_prefix)?
             ));
+            Ok(0)
         }
         TIR::TIfCond::IsNone { subj } => {
             out.push_str(&format!(
                 "{pad}if (({}).tag === \"None\") {{\n",
                 tir_js_expr(subj, funcs, file_prefix)?
             ));
+            Ok(0)
         }
         TIR::TIfCond::IfLet { pattern, subj } => {
             let subj = tir_js_expr(subj, funcs, file_prefix)?;
-            match &pattern.pattern {
-                crate::AST::Pattern::Ok { binding, .. }
-                | crate::AST::Pattern::Err { binding, .. }
-                | crate::AST::Pattern::Present { binding, .. } => {
-                    let tag = js_match_tag(&pattern.pattern)?;
-                    out.push_str(&format!("{pad}if (({subj}).tag === \"{tag}\") {{\n"));
-                    if binding != "_" {
-                        out.push_str(&format!(
-                            "{pad}  const {} = ({subj}).values[0];\n",
-                            web_name(binding)
-                        ));
-                    }
-                }
-                crate::AST::Pattern::Variant {
-                    variant, bindings, ..
-                } => {
-                    out.push_str(&format!(
-                        "{pad}if (({subj}).tag === {}) {{\n",
-                        json_quote(variant)
-                    ));
-                    for (index, slot) in bindings.iter().enumerate() {
-                        if let crate::AST::PatSlot::Bind { name, .. } = slot {
-                            if name != "_" {
-                                out.push_str(&format!(
-                                    "{pad}  const {} = ({subj}).values[{index}];\n",
-                                    web_name(name)
-                                ));
-                            }
-                        }
-                    }
-                }
-                crate::AST::Pattern::Absent(_) => {
-                    out.push_str(&format!("{pad}if (({subj}).tag === \"None\") {{\n"));
-                }
-                _ => return Err(()),
-            }
+            let inner = "  ".repeat(indent + 1);
+            out.push_str(&format!(
+                "{pad}{{\n{inner}const __jet_if_subject = {subj};\n{inner}if ({}) {{\n",
+                js_pattern_test(&pattern.pattern, "__jet_if_subject")?
+            ));
+            emit_js_pattern_bindings(
+                &pattern.pattern,
+                "__jet_if_subject",
+                out,
+                indent + 2,
+            );
+            Ok(1)
         }
         TIR::TIfCond::Matches { pattern, subj } => {
             let subj = tir_js_expr(subj, funcs, file_prefix)?;
-            match &pattern.pattern {
-                crate::AST::Pattern::Variant { variant, .. } => {
-                    out.push_str(&format!(
-                        "{pad}if (({subj}).tag === {}) {{\n",
-                        json_quote(variant)
-                    ));
-                }
-                crate::AST::Pattern::Absent(_) => {
-                    out.push_str(&format!("{pad}if (({subj}).tag === \"None\") {{\n"));
-                }
-                other => {
-                    let tag = js_match_tag(other)?;
-                    out.push_str(&format!("{pad}if (({subj}).tag === \"{tag}\") {{\n"));
-                }
-            }
+            out.push_str(&format!(
+                "{pad}if ({}) {{\n",
+                js_pattern_test(&pattern.pattern, &subj)?
+            ));
+            Ok(0)
         }
-        TIR::TIfCond::And { .. } => unreachable!("And heads are nested"),
+        TIR::TIfCond::And { .. } => return Err(()),
     }
-    Ok(())
 }
 
 fn emit_js_if(
@@ -3274,7 +3532,9 @@ fn emit_js_if(
 ) -> Result<(), ()> {
     let pad = "  ".repeat(indent);
     if let TIR::TIfCond::And { left, right } = cond {
-        emit_js_if_head(left, out, funcs, file_prefix, indent)?;
+        let extra = emit_js_if_head(left, out, funcs, file_prefix, indent)?;
+        let head_indent = indent + extra;
+        let head_pad = "  ".repeat(head_indent);
         emit_js_if(
             right,
             then_body,
@@ -3282,22 +3542,127 @@ fn emit_js_if(
             out,
             funcs,
             file_prefix,
-            indent + 1,
+            head_indent + 1,
         )?;
         if let Some(else_body) = else_body {
-            out.push_str(&format!("{pad}}} else {{\n"));
-            emit_tir_js_body(else_body, out, funcs, file_prefix, indent + 1)?;
+            out.push_str(&format!("{head_pad}}} else {{\n"));
+            emit_tir_js_body(
+                else_body,
+                out,
+                funcs,
+                file_prefix,
+                head_indent + 1,
+            )?;
         }
-        out.push_str(&format!("{pad}}}\n"));
+        out.push_str(&format!("{head_pad}}}\n"));
+        if extra != 0 {
+            out.push_str(&format!("{pad}}}\n"));
+        }
         return Ok(());
     }
-    emit_js_if_head(cond, out, funcs, file_prefix, indent)?;
-    emit_tir_js_body(then_body, out, funcs, file_prefix, indent + 1)?;
+    let extra = emit_js_if_head(cond, out, funcs, file_prefix, indent)?;
+    let head_indent = indent + extra;
+    let head_pad = "  ".repeat(head_indent);
+    emit_tir_js_body(
+        then_body,
+        out,
+        funcs,
+        file_prefix,
+        head_indent + 1,
+    )?;
     if let Some(else_body) = else_body {
-        out.push_str(&format!("{pad}}} else {{\n"));
-        emit_tir_js_body(else_body, out, funcs, file_prefix, indent + 1)?;
+        out.push_str(&format!("{head_pad}}} else {{\n"));
+        emit_tir_js_body(
+            else_body,
+            out,
+            funcs,
+            file_prefix,
+            head_indent + 1,
+        )?;
     }
-    out.push_str(&format!("{pad}}}\n"));
+    out.push_str(&format!("{head_pad}}}\n"));
+    if extra != 0 {
+        out.push_str(&format!("{pad}}}\n"));
+    }
+    Ok(())
+}
+
+fn emit_js_if_value(
+    cond: &TIR::TIfCond,
+    then_body: &[TIR::TStmt],
+    then_value: &TIR::TExpr,
+    else_body: &[TIR::TStmt],
+    else_value: &TIR::TExpr,
+    out: &mut String,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    indent: usize,
+) -> Result<(), ()> {
+    let pad = "  ".repeat(indent);
+    if let TIR::TIfCond::And { left, right } = cond {
+        let extra = emit_js_if_head(left, out, funcs, file_prefix, indent)?;
+        let head_indent = indent + extra;
+        let head_pad = "  ".repeat(head_indent);
+        emit_js_if_value(
+            right,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+            out,
+            funcs,
+            file_prefix,
+            head_indent + 1,
+        )?;
+        out.push_str(&format!("{head_pad}}} else {{\n"));
+        emit_tir_js_body(
+            else_body,
+            out,
+            funcs,
+            file_prefix,
+            head_indent + 1,
+        )?;
+        out.push_str(&format!(
+            "{}return {};\n{head_pad}}}\n",
+            "  ".repeat(head_indent + 1),
+            tir_js_expr(else_value, funcs, file_prefix)?
+        ));
+        if extra != 0 {
+            out.push_str(&format!("{pad}}}\n"));
+        }
+        return Ok(());
+    }
+
+    let extra = emit_js_if_head(cond, out, funcs, file_prefix, indent)?;
+    let head_indent = indent + extra;
+    let head_pad = "  ".repeat(head_indent);
+    emit_tir_js_body(
+        then_body,
+        out,
+        funcs,
+        file_prefix,
+        head_indent + 1,
+    )?;
+    out.push_str(&format!(
+        "{}return {};\n{head_pad}}} else {{\n",
+        "  ".repeat(head_indent + 1),
+        tir_js_expr(then_value, funcs, file_prefix)?
+    ));
+    emit_tir_js_body(
+        else_body,
+        out,
+        funcs,
+        file_prefix,
+        head_indent + 1,
+    )?;
+    out.push_str(&format!(
+        "{}return {};\n{head_pad}}}\n",
+        "  ".repeat(head_indent + 1),
+        tir_js_expr(else_value, funcs, file_prefix)?
+    ));
+    if extra != 0 {
+        out.push_str(&format!("{pad}}}\n"));
+    }
     Ok(())
 }
 
@@ -3449,7 +3814,15 @@ fn emit_tir_js_body(
             } => {
                 let b = tir_js_expr(base, funcs, file_prefix)?;
                 let i = tir_js_expr(index, funcs, file_prefix)?;
-                let v = tir_js_expr(value, funcs, file_prefix)?;
+                let v = if matches!(
+                    &base.ty,
+                    Type::Map { value, .. }
+                        if matches!(**value, Type::Int | Type::IntN { .. })
+                ) {
+                    tir_js_abi_int_expr(value, funcs, file_prefix)?
+                } else {
+                    tir_js_expr(value, funcs, file_prefix)?
+                };
                 if *is_map {
                     out.push_str(&format!("{pad}{b}.set({i}, {v});\n"));
                 } else {
@@ -3464,59 +3837,43 @@ fn emit_tir_js_body(
                 ..
             } => {
                 out.push_str(&format!(
-                    "{pad}{{\n{pad}  const __jet_match = {};\n{pad}  switch (__jet_match.tag) {{\n",
+                    "{pad}{{\n{pad}  const __jet_match = {};\n",
                     tir_js_expr(scrutinee, funcs, file_prefix)?
                 ));
-                for arm in arms {
-                    match &arm.pattern.pattern {
-                        crate::AST::Pattern::Variant {
-                            variant, bindings, ..
-                        } => {
-                            out.push_str(&format!(
-                                "{pad}    case {}: {{\n",
-                                json_quote(variant)
-                            ));
-                            for (index, slot) in bindings.iter().enumerate() {
-                                if let crate::AST::PatSlot::Bind { name, .. } = slot {
-                                    if name != "_" {
-                                        out.push_str(&format!(
-                                            "{pad}      const {} = __jet_match.values[{index}];\n",
-                                            web_name(name)
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                        crate::AST::Pattern::Ok { binding, .. }
-                        | crate::AST::Pattern::Err { binding, .. }
-                        | crate::AST::Pattern::Present { binding, .. } => {
-                            let tag = js_match_tag(&arm.pattern.pattern)?;
-                            out.push_str(&format!("{pad}    case \"{tag}\": {{\n"));
-                            if binding != "_" {
-                                out.push_str(&format!(
-                                    "{pad}      const {} = __jet_match.values[0];\n",
-                                    web_name(binding)
-                                ));
-                            }
-                        }
-                        crate::AST::Pattern::Absent(_) => {
-                            out.push_str(&format!("{pad}    case \"None\": {{\n"));
-                        }
-                        _ => return Err(()),
-                    }
-                    emit_tir_js_body(&arm.body, out, funcs, file_prefix, indent + 3)?;
-                    out.push_str(&format!("{pad}      break;\n{pad}    }}\n"));
-                }
-                if let Some(body) = else_body {
-                    out.push_str(&format!("{pad}    default: {{\n"));
-                    emit_tir_js_body(body, out, funcs, file_prefix, indent + 3)?;
-                    out.push_str(&format!("{pad}      break;\n{pad}    }}\n"));
-                } else if *fallthrough {
+                let inner = "  ".repeat(indent + 1);
+                for (index, arm) in arms.iter().enumerate() {
+                    let keyword = if index == 0 { "if" } else { "} else if" };
                     out.push_str(&format!(
-                        "{pad}    default: throw new Error(\"jet: exhaustiveness bug\");\n"
+                        "{inner}{keyword} ({}) {{\n",
+                        js_pattern_test(&arm.pattern.pattern, "__jet_match")?
                     ));
+                    emit_js_pattern_bindings(
+                        &arm.pattern.pattern,
+                        "__jet_match",
+                        out,
+                        indent + 2,
+                    );
+                    emit_tir_js_body(&arm.body, out, funcs, file_prefix, indent + 2)?;
                 }
-                out.push_str(&format!("{pad}  }}\n{pad}}}\n"));
+                match (arms.is_empty(), else_body, *fallthrough) {
+                    (true, Some(body), _) => {
+                        emit_tir_js_body(body, out, funcs, file_prefix, indent + 1)?;
+                    }
+                    (true, None, true) => out.push_str(&format!(
+                        "{inner}throw new Error(\"jet: exhaustiveness bug\");\n"
+                    )),
+                    (true, None, false) => {}
+                    (false, Some(body), _) => {
+                        out.push_str(&format!("{inner}}} else {{\n"));
+                        emit_tir_js_body(body, out, funcs, file_prefix, indent + 2)?;
+                        out.push_str(&format!("{inner}}}\n"));
+                    }
+                    (false, None, true) => out.push_str(&format!(
+                        "{inner}}} else {{\n{inner}  throw new Error(\"jet: exhaustiveness bug\");\n{inner}}}\n"
+                    )),
+                    (false, None, false) => out.push_str(&format!("{inner}}}\n")),
+                }
+                out.push_str(&format!("{pad}}}\n"));
             }
             // Value / mixed arm tables — if/else-if chain (native MixedSwitch parity).
             TIR::TStmt::MixedSwitch {
@@ -3655,8 +4012,7 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
         E::CharLit(c) => json_quote(&c.to_string()),
         E::StrLit(parts) => tir_js_string(parts, funcs, file_prefix)?,
         E::Local(local) => web_local(local),
-        E::Unit => "()".to_string(),
-        E::DefaultLit => "undefined".to_string(),
+        E::Unit | E::DefaultLit => "void 0".to_string(),
         E::CtLit(value) => value.serialize(),
         E::Uninit | E::HostCall(_) => return Err(()),
         E::Binary { op, lhs, rhs, .. } => format!("({} {} {})", tir_js_expr(lhs, funcs, file_prefix)?, binop(op), tir_js_expr(rhs, funcs, file_prefix)?),
@@ -3700,22 +4056,29 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             "{{ tag: \"Err\", values: [{}] }}",
             tir_js_expr(inner, funcs, file_prefix)?
         ),
-        E::MapLit(entries) => format!(
-            "new Map([{}])",
-            entries
-                .iter()
-                .map(|(key, value)| Ok(format!(
-                    "[{}, {}]",
-                    tir_js_expr(key, funcs, file_prefix)?,
-                    if matches!(&value.ty, Type::Int) {
-                        tir_js_abi_int_expr(value, funcs, file_prefix)?
-                    } else {
-                        tir_js_expr(value, funcs, file_prefix)?
-                    },
-                )))
-                .collect::<Result<Vec<_>, ()>>()?
-                .join(", ")
-        ),
+        E::MapLit(entries) => {
+            let abi_int_values = matches!(
+                &expr.ty,
+                Type::Map { value, .. }
+                    if matches!(**value, Type::Int | Type::IntN { .. })
+            );
+            format!(
+                "new Map([{}])",
+                entries
+                    .iter()
+                    .map(|(key, value)| Ok(format!(
+                        "[{}, {}]",
+                        tir_js_expr(key, funcs, file_prefix)?,
+                        if abi_int_values {
+                            tir_js_abi_int_expr(value, funcs, file_prefix)?
+                        } else {
+                            tir_js_expr(value, funcs, file_prefix)?
+                        },
+                    )))
+                    .collect::<Result<Vec<_>, ()>>()?
+                    .join(", ")
+            )
+        }
         E::Index {
             base,
             index,
@@ -3805,6 +4168,31 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 tir_js_expr(value, funcs, file_prefix)?
             )
         },
+        E::IfExpr {
+            cond,
+            then_body,
+            then_value,
+            else_body,
+            else_value,
+        } => {
+            let mut rendered = String::new();
+            emit_js_if_value(
+                cond,
+                then_body,
+                then_value,
+                else_body,
+                else_value,
+                &mut rendered,
+                funcs,
+                file_prefix,
+                1,
+            )?;
+            if rendered.contains("await bridge_") {
+                format!("await (async () => {{\n{rendered}}})()")
+            } else {
+                format!("(() => {{\n{rendered}}})()")
+            }
+        }
         E::Lambda(lam) => tir_js_lambda(lam, funcs, file_prefix)?,
         E::CoreClosureCall { kind: TIR::TCoreClosureKind::UiReactiveRender { executable, .. } } => format!("jetDom.reactiveRender({})", tir_js_lambda(executable, funcs, file_prefix)?),
         E::CoreClosureCall { kind: TIR::TCoreClosureKind::ReactiveEffect { executable, .. } } => format!("jetDom.makeEffect({})", tir_js_lambda(executable, funcs, file_prefix)?),

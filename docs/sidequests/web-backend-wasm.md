@@ -67,7 +67,7 @@ artifacts (browser DOM) use `*.web.out` or `*.harness.out` suffixes.
 ## Scoped verification (card #705)
 
 ```sh
-scripts/agent/jet-env cargo test --test web_build      # 48
+scripts/agent/jet-env cargo test --test web_build      # 58
 scripts/agent/jet-env cargo test --test web_partition  # 15
 scripts/agent/jet-env cargo test --test web_browser    # 1
 scripts/agent/jet-env cargo test --test web_tir_contract # 2
@@ -92,15 +92,23 @@ a test proves otherwise:
 - Wasm `#Target(Browser)` / DOM from Wasm → `E-WEB-TARGET-BROWSER`.
 - Full `core.ui` backend matrix on web (GTK/TUI/native mobile rows in
   `core-library.md` stay unsupported).
-- Still gated (Tower #1288): `break value`, HostCall-backed pattern arms
-  (struct/str/bin match), `Unsafe`/`DeferClose`/index-field/hook/swizzle
-  assigns, Wasm `MapLit` and broader HostCall/CoreCall exprs.
+- Still gated: `break value`, HostCall-backed pattern arms (struct/str/bin
+  match), `Unsafe`/`DeferClose`/index-field/hook/swizzle assigns, Wasm
+  `MapLit`, and broader HostCall/CoreCall expressions.
+- Plain `ForIn` over a supported collection is covered. Step, iterator-method,
+  and columnar forms remain gated because the current emitters do not implement
+  those fields.
+- Value-form `if` is covered on JS and Wasm. JS rejects branch statements that
+  would target the surrounding function or loop (`return`, `break`, or `next`)
+  because its value-form lowering uses an IIFE. Unit values emit valid target
+  syntax.
 - Covered control flow (parity with native for these shapes): Plain `If`,
-  non-Plain `TIfCond` (`IsNone` / `IfLet` / `Matches` / `And`), value/range
-  arm tables (`MixedSwitch`/`RangeSwitch`), `Loop`/`While`/`CountedLoop`/
-  `Break`/`Continue`, `Range`/`ForIn`, variant + Ok/Err/Present/Absent
-  `EnumMatch`, `Index`/`IndexAssign` (JS + Wasm list; JS Map), tagged
-  JS Option/Result literals.
+  non-Plain `TIfCond` (`IsNone` / `IfLet` / `Matches` / `And`), `IfExpr`,
+  value/range arm tables (`MixedSwitch`/`RangeSwitch`), `Loop`/`While`/
+  `CountedLoop`/`Break`/`Continue`, `Range`/plain `ForIn`, variant +
+  Ok/Err/Present/Absent `EnumMatch`, `Index`/`IndexAssign` (JS + Wasm list;
+  JS Map), and tagged JS Option/Result literals. JS variant matches include
+  payload range checks and do not capture an outer Jet `break`.
 
 ## Architecture (ratified, unchanged)
 
