@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1265,
-    "rev": 18294,
+    "rev": 18297,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58798,12 +58798,22 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
-      "plan": "Reproduce with a minimal program that interpolates a core IOError with the Debug marker. Decide the correct law: either core error types gain the Debug capability, or sema rejects the interpolation with a registered diagnostic. Follow the diagnostics spec: a new code needs what/why/fix text and a UI snapshot (I4). Add the failing case to the sema tests so the path cannot regress. blockedBy: none.",
+      "plan": "S55 and D-DISPLAYDBG1 settle the law: IOError is a core enum whose IOContext fields are debuggable, so #Debug must work without ceremony. Add the missing JetDebug bridge beside IOError JetShow, reusing the existing derived Rust Debug representation used by other core types. Extend core_ioerror_preserves_kind_operation_and_resource with a stable constructed error debug interpolation and prove byte-identical AOT and default-dev output. No new diagnostic or sema exception: is_debuggable is already correct once the runtime capability exists. blockedBy: none.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "e3-1252-ioerror-debug",
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "e3-1252-ioerror-debug",
+          "text": "Implementation started on the missing core JetDebug bridge and the existing two-lens IOError regression."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "burndown-root",
+          "text": "Authority check resolved the card choice without a ballot: S55 auto-derives Debug for qualifying core values. IOError derives Rust Debug and sema correctly admits it; codegen/runtime omitted its JetDebug bridge. Fix capability parity, not rejection."
+        },
         {
           "at": "2026-07-28",
           "by": "burndown-orch",
@@ -58812,13 +58822,15 @@
       ],
       "criteria": [],
       "refs": [
-        "docs/spec/diagnostics.md",
-        "crates/jet-sema/src/Sema"
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs",
+        "tests/corelib.rs"
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T04:21:36.454Z",
-      "updated": "2026-07-28T10:03:27.536Z",
-      "updatedBy": "burndown-orch"
+      "updated": "2026-07-28T11:56:32.978Z",
+      "updatedBy": "e3-1252-ioerror-debug",
+      "claimedAt": "2026-07-28T11:56:32.978Z"
     },
     {
       "id": "c0ndi2ss",
@@ -75317,6 +75329,27 @@
   ],
   "events": [
     {
+      "at": "2026-07-28T11:56:32.978Z",
+      "by": "e3-1252-ioerror-debug",
+      "action": "card.update",
+      "ref": "c0gvdqxf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T11:56:32.707Z",
+      "by": "e3-1252-ioerror-debug",
+      "action": "card.claim",
+      "ref": "c0gvdqxf",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T11:56:22.388Z",
+      "by": "burndown-root",
+      "action": "card.update",
+      "ref": "c0gvdqxf",
+      "note": "plan,logEntry,refs"
+    },
+    {
       "at": "2026-07-28T11:54:42.165Z",
       "by": "burndown-root",
       "action": "card.update",
@@ -78790,27 +78823,6 @@
     },
     {
       "at": "2026-07-27T21:51:26.798Z",
-      "by": "e3-1190-grok",
-      "action": "card.claim",
-      "ref": "c055r4xc",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T21:51:05.239Z",
-      "by": "e3-1190-grok",
-      "action": "card.update",
-      "ref": "c055r4xc",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-27T21:51:05.021Z",
-      "by": "e3-1190-grok",
-      "action": "card.claim",
-      "ref": "c055r4xc",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T21:50:59.156Z",
       "by": "e3-1190-grok",
       "action": "card.claim",
       "ref": "c055r4xc",
