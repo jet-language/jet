@@ -13,6 +13,7 @@
 #![deny(clippy::std_instead_of_core)]
 #![deny(unused_extern_crates)]
 #![allow(non_snake_case)]
+#![allow(clippy::upper_case_acronyms)] // Jet S66 requires canonical `JSON`.
 
 extern crate alloc;
 
