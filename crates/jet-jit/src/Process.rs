@@ -38,6 +38,9 @@ pub(crate) struct JitProcessSpec {
     stderr: StreamMode,
     timeout_ms: Option<i64>,
     output_limit: Option<i64>,
+    env_clear: bool,
+    detached: bool,
+    terminal: bool,
 }
 
 impl JitProcessSpec {
@@ -48,6 +51,9 @@ impl JitProcessSpec {
             stderr: StreamMode::Capture,
             timeout_ms: None,
             output_limit: None,
+            env_clear: false,
+            detached: false,
+            terminal: false,
         }
     }
 }
@@ -161,6 +167,16 @@ fn build_command(spec: &JitProcessSpec) -> Result<std::process::Command, String>
     if spec.cmd.is_empty() {
         return Err("process command needs at least one word".to_string());
     }
+    // D-PROCESS-SESSION1=A: same refusal as `jet_process_terminal_backend_check`
+    // in the AOT prelude, and the same text `IOError::jet_show` prints there, so
+    // both lenses report one message. No PTY/ConPTY backend exists in either.
+    if spec.terminal {
+        return Err(format!(
+            "I/O error during resolve `{}`: \
+             terminal sessions need a PTY or ConPTY backend, and this build has none",
+            spec.cmd[0]
+        ));
+    }
     let first = &spec.cmd[0];
     let mut command = if first.ends_with(".jet") {
         // Resident/interpreter runs name the current program via argv[0]=.jet;
@@ -185,10 +201,24 @@ fn build_command(spec: &JitProcessSpec) -> Result<std::process::Command, String>
         command.args(&spec.cmd[1..]);
         command
     };
+    if spec.env_clear {
+        command.env_clear();
+    }
     command.stdin(std::process::Stdio::null());
     command.stdout(spec.stdout.stdio());
     command.stderr(spec.stderr.stdio());
     Ok(command)
+}
+
+/// `jet_process_spec_spawn` in the AOT prelude drops every stream for a
+/// detached child. Same rule here, so `run()` and `spawn()` report the same
+/// empty output under both lenses.
+fn apply_detached(spec: &JitProcessSpec, command: &mut std::process::Command) {
+    if spec.detached {
+        command.stdin(std::process::Stdio::null());
+        command.stdout(std::process::Stdio::null());
+        command.stderr(std::process::Stdio::null());
+    }
 }
 
 fn drain_reader<R: Read + Send + 'static>(
@@ -218,6 +248,7 @@ fn join_drain(
 
 fn run_spec(spec: &JitProcessSpec) -> Result<RunOutcome, String> {
     let mut command = build_command(spec)?;
+    apply_detached(spec, &mut command);
     let mut child = command
         .spawn()
         .map_err(|e| format!("spawn {}: {e}", spec.cmd.first().cloned().unwrap_or_default()))?;
@@ -392,6 +423,7 @@ extern "C" fn jet_jit_process_spec_spawn(spec: i64) -> i64 {
         Ok(c) => c,
         Err(e) => return result_err_msg(&e),
     };
+    apply_detached(&s, &mut command);
     let mut child = match command.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -414,6 +446,33 @@ extern "C" fn jet_jit_process_spec_spawn(spec: i64) -> i64 {
         rt.process_children.len() as i64
     });
     result_ok_bits(handle as u64)
+}
+
+extern "C" fn jet_jit_process_spec_env_clear(spec: i64) -> i64 {
+    match with_spec_mut(spec, |s| {
+        s.env_clear = true;
+    }) {
+        Some(()) => spec,
+        None => 0,
+    }
+}
+
+extern "C" fn jet_jit_process_spec_detached(spec: i64) -> i64 {
+    match with_spec_mut(spec, |s| {
+        s.detached = true;
+    }) {
+        Some(()) => spec,
+        None => 0,
+    }
+}
+
+extern "C" fn jet_jit_process_spec_terminal(spec: i64) -> i64 {
+    match with_spec_mut(spec, |s| {
+        s.terminal = true;
+    }) {
+        Some(()) => spec,
+        None => 0,
+    }
 }
 
 extern "C" fn jet_jit_process_spec_stdin(spec: i64, _mode: i64) -> i64 {
@@ -627,6 +686,9 @@ pub(crate) struct ProcessHostFns {
     pub spec_timeout: cranelift_module::FuncId,
     pub spec_output_limit: cranelift_module::FuncId,
     pub spec_cwd: cranelift_module::FuncId,
+    pub spec_env_clear: cranelift_module::FuncId,
+    pub spec_detached: cranelift_module::FuncId,
+    pub spec_terminal: cranelift_module::FuncId,
     pub spec_run: cranelift_module::FuncId,
     pub spec_spawn: cranelift_module::FuncId,
     pub child_id: cranelift_module::FuncId,
@@ -648,6 +710,18 @@ pub(crate) fn register_process_symbols(builder: &mut cranelift_jit::JITBuilder) 
         jet_jit_process_spec_output_limit as *const u8,
     );
     builder.symbol("jet_jit_process_spec_cwd", jet_jit_process_spec_cwd as *const u8);
+    builder.symbol(
+        "jet_jit_process_spec_env_clear",
+        jet_jit_process_spec_env_clear as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_process_spec_detached",
+        jet_jit_process_spec_detached as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_process_spec_terminal",
+        jet_jit_process_spec_terminal as *const u8,
+    );
     builder.symbol("jet_jit_process_spec_run", jet_jit_process_spec_run as *const u8);
     builder.symbol("jet_jit_process_spec_spawn", jet_jit_process_spec_spawn as *const u8);
     builder.symbol("jet_jit_process_child_id", jet_jit_process_child_id as *const u8);
@@ -687,6 +761,9 @@ pub(crate) fn declare_process_host_fns(
         spec_timeout: import("jet_jit_process_spec_timeout", &sig_binary)?,
         spec_output_limit: import("jet_jit_process_spec_output_limit", &sig_binary)?,
         spec_cwd: import("jet_jit_process_spec_cwd", &sig_binary)?,
+        spec_env_clear: import("jet_jit_process_spec_env_clear", &sig_unary)?,
+        spec_detached: import("jet_jit_process_spec_detached", &sig_unary)?,
+        spec_terminal: import("jet_jit_process_spec_terminal", &sig_unary)?,
         spec_run: import("jet_jit_process_spec_run", &sig_unary)?,
         spec_spawn: import("jet_jit_process_spec_spawn", &sig_unary)?,
         child_id: import("jet_jit_process_child_id", &sig_unary)?,

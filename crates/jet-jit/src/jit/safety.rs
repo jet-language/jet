@@ -3128,7 +3128,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             matches!(
                 (method.as_str(), args.len()),
                 ("stdout" | "stderr" | "stdin" | "timeout" | "output_limit" | "cwd", 1)
-                    | ("run" | "spawn", 0)
+                    | ("env_clear" | "detached" | "terminal" | "run" | "spawn", 0)
             )
         }
         THandleOp::ProcessChildMethod { method } => {
