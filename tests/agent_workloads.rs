@@ -463,7 +463,7 @@ fn manifest_is_complete_frozen_and_non_vacuous() {
 }
 
 #[test]
-fn checksum_closure_rejects_an_extra_fixture() {
+fn checksum_closure_rejects_drift_and_hostile_sums() {
     let scratch = Scratch::new("jet_agent_checksum_closure");
     fs::create_dir_all(scratch.path.join("inputs")).unwrap();
     fs::create_dir_all(scratch.path.join("expected")).unwrap();
@@ -478,6 +478,52 @@ fn checksum_closure_rejects_an_extra_fixture() {
     fs::write(scratch.path.join("inputs/unhashed.txt"), "extra").unwrap();
     let error = verify_checksum_closure(&scratch.path, &sums).unwrap_err();
     assert!(error.contains("unhashed") && error.contains("inputs/unhashed.txt"), "{error}");
+    fs::remove_file(scratch.path.join("inputs/unhashed.txt")).unwrap();
+
+    let input_hash = jet::SHA256::sha256_hex(b"input");
+    let output_hash = jet::SHA256::sha256_hex(b"output");
+
+    // A drifted byte in a declared fixture names the fixture.
+    fs::write(scratch.path.join("inputs/task.txt"), "drifted").unwrap();
+    let error = verify_checksum_closure(&scratch.path, &sums).unwrap_err();
+    assert_eq!(error, "fixture drift: inputs/task.txt");
+    fs::write(scratch.path.join("inputs/task.txt"), "input").unwrap();
+
+    // A removed declared fixture is reported as missing, never as a pass.
+    fs::remove_file(scratch.path.join("expected/task.out")).unwrap();
+    let error = verify_checksum_closure(&scratch.path, &sums).unwrap_err();
+    assert!(error.contains("missing") && error.contains("expected/task.out"), "{error}");
+    fs::write(scratch.path.join("expected/task.out"), "output").unwrap();
+    assert_eq!(verify_checksum_closure(&scratch.path, &sums), Ok(2));
+
+    // A hostile SHA256SUMS cannot smuggle a path out of the corpus root, hide a
+    // fixture behind a duplicate row, or pass a row the reader cannot split.
+    for (hostile, reason) in [
+        (
+            format!("{input_hash}  /etc/passwd\n{output_hash}  expected/task.out\n"),
+            "invalid checksum path: /etc/passwd".to_string(),
+        ),
+        (
+            format!("{input_hash}  ../outside.txt\n{output_hash}  expected/task.out\n"),
+            "invalid checksum path: ../outside.txt".to_string(),
+        ),
+        (
+            format!("{input_hash}  inputs//task.txt\n{output_hash}  expected/task.out\n"),
+            "invalid checksum path: inputs//task.txt".to_string(),
+        ),
+        (
+            format!(
+                "{input_hash}  inputs/task.txt\n{output_hash}  inputs/task.txt\n{output_hash}  expected/task.out\n"
+            ),
+            "duplicate checksum path: inputs/task.txt".to_string(),
+        ),
+        (
+            format!("{input_hash} inputs/task.txt\n{output_hash}  expected/task.out\n"),
+            format!("bad SHA256SUMS row: {input_hash} inputs/task.txt"),
+        ),
+    ] {
+        assert_eq!(verify_checksum_closure(&scratch.path, &hostile), Err(reason));
+    }
 }
 
 #[test]
