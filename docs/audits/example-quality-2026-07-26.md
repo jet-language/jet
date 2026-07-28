@@ -215,6 +215,106 @@ The 20 failures are existing product gaps:
 The generated-binding group contains six top-level interop projects, the
 programmable-build example, and four low-level polyglot projects.
 
+## Owner map for the 20 standalone failures
+
+Card #1210 measured each failure against a freshly built compiler and assigned
+one owner. Fifteen are closed.
+
+| File | Owner | State |
+| --- | --- | --- |
+| `examples/interop/cobol/main.jet` | project step | closed |
+| `examples/interop/lua/main.jet` | generator + project step | closed |
+| `examples/interop/perl/main.jet` | project step | closed |
+| `examples/interop/php/main.jet` | project step | closed |
+| `examples/interop/r/main.jet` | project step | closed |
+| `examples/interop/ruby/main.jet` | project step | closed |
+| `examples/features/lowlevel/polyglot_go/main.jet` | generator + project step | closed |
+| `examples/features/lowlevel/polyglot_java/main.jet` | project step | closed |
+| `examples/features/lowlevel/polyglot_dotnet/main.jet` | project step | closed |
+| `examples/features/lowlevel/polyglot_fortran/main.jet` | generator + project step | closed |
+| `examples/features/tooling/programmable_build/main.jet` | compiler | open |
+| `examples/features/comptime/comptime_block.jet` | compiler | closed |
+| `examples/features/comptime/embed.jet` | compiler | open |
+| `examples/features/comptime/embed_bytes.jet` | compiler | open |
+| `examples/features/comptime/find.jet` | compiler | open |
+| `examples/features/comptime/find_empty.jet` | compiler | open |
+| `examples/features/devloop/persist.jet` | fixture | closed |
+| `examples/features/crypto/crypto_suite.jet` | Core | closed |
+| `examples/features/types/generic_constructor_inference.jet` | fixture | closed |
+| `examples/features/modules/generic_modules.jet` | fixture | closed |
+
+### What each owner meant
+
+**Project step.** Ten example projects call a foreign module that
+`jet inspect bind <language> <source> --pkg <name>` generates. The generated
+`*.jet` binding is deterministic Jet source, so each project now carries the
+exact file its real bind step produced, and `main.jet` checks on a host without
+that foreign toolchain. The machine-specific output beside it (native archives,
+class files, worker scripts, provenance, resolved host paths) stays ignored.
+
+**Generator.** The Lua, Go, Fortran, and Pascal binders wrote `->` for callable
+results in the Jet they generate. Every generated binding failed the front end
+with E0070 as soon as its project step ran. All four now write `=>`.
+
+**Core.** D-API-LEN1 retired `crypto.constant_time_eq`, but only its teaching
+diagnostic was updated. The retired name stayed registered and pointed at a
+codegen target that does not exist, while `constant_time_equal_bytes` existed in
+the runtime prelude and was unreachable from Jet. The registered item, its
+signature, and its codegen target now use the current name.
+
+**Fixture.** `persist.jet` used a retired `const` binding. The generic
+constructor example passed a bare `[]` that nothing could type.
+`generic_modules.jet` treated a type parameter as a struct name, wrapped single
+expressions in fixed-size list literals, and asked a marker argument to read a
+module value parameter. Marker facts are recorded against the template source
+before a module is specialized, so a module parameter never reaches them; the
+example states that rule and uses a fixed category.
+
+**Compiler, closed.** A `comptime name = expr` written inside a
+`comptime { … }` block is resolved by the interpreter, not by the sema pass that
+pre-resolves ordinary comptime bindings. Lowering still treated it as
+pre-resolved and substituted a default, so the name held nothing. An unresolved
+comptime local now lowers as an ordinary binding whose init runs where it
+stands.
+
+### Remaining compiler work
+
+Two coherent features remain. Neither is stubbed and neither weakens a gate.
+
+1. **Build-time I/O builtins in the canonical TIR evaluator** — `embed.jet`,
+   `embed_bytes.jet`, `find.jet`, `find_empty.jet`. `embed_file`, `embed_bytes`,
+   and `find` are implemented in the legacy interpreter but not in the canonical
+   TIR evaluator, which now serves comptime. D-CTIO1 requires the path or glob
+   to be a string literal, and the lowered call does not carry the literal, so
+   the evaluator cannot enforce that rule from evaluated arguments alone. The
+   minimal fix adds a source-literal field to the lowered call, mirroring the
+   field lowered method calls already carry, and routes the three names to the
+   existing embed and find helpers.
+
+2. **Build-plan-aware checking** — `programmable_build/main.jet`. A root
+   `fn build` selects the program to compile, and its generated sources join the
+   bundle only on the build path. A single-file check never sees them, and
+   `jet build` fails the same way: the perf-budget gate re-checks the entry file
+   alone after a successful build and reports the generated call as unknown. The
+   check that follows a programmable build must read the planned program, not
+   the pre-build entry.
+
+### Corpus health after this work
+
+A standalone `jet check` sweep of every authored example passes 421 of 426. All
+five remaining failures belong to the two features above. The strict JIT/AOT
+differential corpus gate moves `comptime/comptime_block` and
+`modules/generic_modules` to resident JIT, and `crypto/crypto_suite` and
+`types/generic_constructor_inference` to deopt-interpreted.
+
+The five streaming encoder examples wrote their scratch file to a bare relative
+path and left an artifact in whatever directory launched them. Each now writes
+into a fresh temp directory.
+
+A debug-profile `jet check` overflows the main-thread stack on the four largest
+generated interop bindings. A larger stack passes. This is a debug-build stack
+budget, not a front-end failure.
+
 The deeper valid-corpus-to-rustc test remains red on 11 existing frontend,
 code-generation, and stale-mirror failures. The final full golden run also
 remains red on existing compile-time evaluation, generic struct construction,
