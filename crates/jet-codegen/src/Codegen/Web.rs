@@ -3511,11 +3511,12 @@ fn emit_js_if_head(
         }
         TIR::TIfCond::Matches { pattern, subj } => {
             let subj = tir_js_expr(subj, funcs, file_prefix)?;
+            let inner = "  ".repeat(indent + 1);
             out.push_str(&format!(
-                "{pad}if ({}) {{\n",
-                js_pattern_test(&pattern.pattern, &subj)?
+                "{pad}{{\n{inner}const __jet_match_subject = {subj};\n{inner}if ({}) {{\n",
+                js_pattern_test(&pattern.pattern, "__jet_match_subject")?
             ));
-            Ok(0)
+            Ok(1)
         }
         TIR::TIfCond::And { .. } => return Err(()),
     }

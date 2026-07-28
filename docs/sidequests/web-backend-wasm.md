@@ -67,7 +67,7 @@ artifacts (browser DOM) use `*.web.out` or `*.harness.out` suffixes.
 ## Scoped verification (card #705)
 
 ```sh
-scripts/agent/jet-env cargo test --test web_build      # 58
+scripts/agent/jet-env cargo test --test web_build      # 59
 scripts/agent/jet-env cargo test --test web_partition  # 15
 scripts/agent/jet-env cargo test --test web_browser    # 1
 scripts/agent/jet-env cargo test --test web_tir_contract # 2

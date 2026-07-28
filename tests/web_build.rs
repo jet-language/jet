@@ -1350,6 +1350,52 @@ fn run() {}
 }
 
 #[test]
+fn web_js_matches_binds_subject_once() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping JS Matches single-evaluation test");
+        return;
+    }
+    let src = r#"#Target(Web)
+enum Toggle { On Off }
+
+#Target(JS)
+fn make_opt(n: Int) => Int? = .Val(n)
+
+#Target(JS)
+fn make_toggle() => Toggle = .On
+
+#Target(JS)
+fn classify(n: Int) => Int {
+    opt :: make_opt(n)
+    toggle :: make_toggle()
+    if opt == .Val(value) && toggle == .On { return value }
+    return 0
+}
+
+#Target(JS)
+fn run() { print(classify(2)) }
+"#;
+    let dir = build_web_fixture(
+        "matches_once",
+        src,
+        "tests/fixtures/web_matches_once.jet",
+    );
+    let js = fs::read_to_string(dir.join("build/app.js")).unwrap();
+    assert_eq!(
+        js.matches("const __jet_match_subject = toggle;").count(),
+        1,
+        "Matches subject must be bound once before its predicate:\n{js}"
+    );
+    assert_eq!(
+        js.matches("(__jet_match_subject)").count(),
+        1,
+        "the predicate must read only the bound subject:\n{js}"
+    );
+    assert_eq!(run_web_app(&dir), "2\n");
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn web_js_enum_match_break_targets_the_enclosing_loop() {
     if !have_tool("rustc") || !have_tool("node") {
         eprintln!("note: skipping JS EnumMatch break test");
