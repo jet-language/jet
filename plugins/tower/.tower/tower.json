@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1264,
-    "rev": 18285,
+    "nextNum": 1265,
+    "rev": 18292,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59302,7 +59302,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T11:06:01.800Z",
-      "updated": "2026-07-28T11:22:24.070Z",
+      "updated": "2026-07-28T11:48:12.388Z",
       "updatedBy": "owner"
     },
     {
@@ -59444,6 +59444,38 @@
       "created": "2026-07-28T11:32:37.080Z",
       "updated": "2026-07-28T11:41:56.724Z",
       "updatedBy": "burndown-root"
+    },
+    {
+      "id": "c0rxqxwb",
+      "num": 1264,
+      "title": "Persist unit test adds two bare panic macros",
+      "body": "Full verification now reaches tests/ban_bare_panic.rs and fails the compiler-crate I2 gate. crates/jet-foundation/src/Persist.rs, introduced by ac8de36dd for #765, contains two bare panic! mismatch arms in its unit test. They are test assertions, not compiler ICEs, and should not enter the production allowlist.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P1",
+      "plan": "Rewrite the two unit-test checks as direct assert!(matches!(...)) predicates that prove both the expected variant and payload/reason facts. Do not add allowlist entries, ice! calls, helpers, or production changes. Run the Persist unit test and ban_bare_panic target. blockedBy: none.",
+      "blockedBy": [],
+      "assignee": "e3-1264-persist-panic",
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "e3-1264-persist-panic",
+          "text": "Fix started on the two test-only panic macros. The production panic allowlist remains unchanged."
+        }
+      ],
+      "criteria": [],
+      "refs": [
+        "crates/jet-foundation/src/Persist.rs",
+        "tests/ban_bare_panic.rs"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T11:51:05.279Z",
+      "updated": "2026-07-28T11:51:11.901Z",
+      "updatedBy": "e3-1264-persist-panic",
+      "claimedAt": "2026-07-28T11:51:11.901Z"
     }
   ],
   "decisions": [
@@ -74180,31 +74212,34 @@
         {
           "key": "C",
           "name": "Single AST node from the parser",
-          "detail": "Parser always builds arm-table nodes. Maximum unity; larger parser and fmt churn.",
-          "code": "only SwitchArm IR from parse"
+          "detail": "Parser always builds the arm-table node. One IR from parse through sema and codegen. No desugar pass to maintain. Same runtime forms as B once lowering runs. Up-front cost is parser, formatter, and IDE churn.",
+          "code": "if ready start() else wait()\n# parse IR: arms [ready->start, else->wait]\n# no later desugar step",
+          "technical": "Stmt::If goes away or becomes sugar only at parse. Spans attach to arms directly. Classic one-line if still parses; it builds the same arm list."
         }
       ],
       "comparisons": [],
-      "rec": "B",
+      "rec": "C",
       "recommendation": {
-        "why": "One mechanism in the middle end without a full parser rewrite.",
+        "why": "You asked to spend more up front for a better long-term path. Option C removes a permanent dual-shape seam. Runtime speed still comes from the ratified classifier on D-BRANCH-CODEGEN1, not from parse shape.",
         "whyNot": [
           {
             "key": "A",
-            "reason": "Leaves duplicate paths for every new branch opt."
+            "reason": "Keeps two IR shapes forever. Every new branch opt can miss one path."
           },
           {
-            "key": "C",
-            "reason": "Pays full parser and fmt cost up front."
+            "key": "B",
+            "reason": "Reaches the same middle-end IR, but leaves a desugar layer that can drift from the parser over time."
           }
         ],
-        "tradeoff": "Desugar must keep spans accurate for lints and IDE."
+        "tradeoff": "Larger first parser and formatter pass. No extra runtime win versus a correct B desugar."
       },
       "hybrid": null,
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-28T11:08:17.532Z"
+      "status": "ratified",
+      "created": "2026-07-28T11:08:17.532Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-28"
     },
     {
       "id": "D-BRANCH-CODEGEN1",
@@ -74885,6 +74920,19 @@
       "created": "2026-07-28T09:39:27.921Z",
       "answeredAt": "2026-07-28",
       "answeredBy": "tower-prep-e3"
+    },
+    {
+      "id": "q19e7ic6",
+      "cardId": "c0tc1fgq",
+      "decisionId": "D-BRANCH-AST1",
+      "by": "owner",
+      "kind": "question",
+      "text": "We are ALWAYS looking to spend more time and effort up front to have a better long term experience, both from a dx perspective, but also to get better performance and ergonomics at the end of the day. What kind of benefits do we get from option C? Since it sounds like it costs more up front but doesnt seem to have other negatives listed does that mean performance is better?",
+      "status": "answered",
+      "answer": "No. Option C does not make runtime branches faster than option B.\n\nB and C can feed the same middle-end arm-table IR. After that, D-BRANCH-CODEGEN1 (already ratified as B) picks select, match, data table, jump table, or ordered compares. That classifier is where bare-metal wins live.\n\nWhat C buys instead:\n\n1. One IR from the parser onward. No classic If tree beside Switch arms.\n2. No desugar pass that can drift from parse or forget a path.\n3. Every future lint, IDE walk, and lowering sees one shape.\n4. Long-term simpler compiler DX, at higher up-front parser, formatter, and IDE cost.\n\nWhat C does not buy:\n\n- Faster user programs than a correct early desugar (B)\n- Different user syntax (still one if)\n\nSo: spend more up front on C for a cleaner long-term compiler. Spend the performance effort on the classifier and subject binding, which you already locked in CODEGEN1.\n\nI updated D-BRANCH-AST1: option C detail is clearer, and the recommendation now points to C given your up-front investment rule. You can still pick B if you want the smaller first patch with a desugar bridge.",
+      "created": "2026-07-28T11:45:55.055Z",
+      "answeredAt": "2026-07-28",
+      "answeredBy": "cursor-branch-track"
     }
   ],
   "ideas": [
@@ -75259,6 +75307,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-28T11:51:11.901Z",
+      "by": "e3-1264-persist-panic",
+      "action": "card.update",
+      "ref": "c0rxqxwb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T11:51:11.641Z",
+      "by": "e3-1264-persist-panic",
+      "action": "card.claim",
+      "ref": "c0rxqxwb",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T11:51:05.280Z",
+      "by": "burndown-root",
+      "action": "card.add",
+      "ref": "c0rxqxwb",
+      "note": "Persist unit test adds two bare panic macros"
+    },
+    {
+      "at": "2026-07-28T11:48:12.388Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-BRANCH-AST1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-28T11:47:13.478Z",
+      "by": "cursor-branch-track",
+      "action": "question.answer",
+      "ref": "q19e7ic6",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T11:47:13.286Z",
+      "by": "cursor-branch-track",
+      "action": "decision.update",
+      "ref": "D-BRANCH-AST1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T11:45:55.055Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q19e7ic6",
+      "note": ""
+    },
     {
       "at": "2026-07-28T11:41:56.724Z",
       "by": "burndown-root",
@@ -78709,55 +78806,6 @@
       "action": "card.criteria-verify",
       "ref": "c0wtwjly",
       "note": "#3"
-    },
-    {
-      "at": "2026-07-27T21:50:24.713Z",
-      "by": "e3-1189-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0wtwjly",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T21:50:24.453Z",
-      "by": "e3-1189-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0wtwjly",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T21:50:24.257Z",
-      "by": "e3-1189-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0wtwjly",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T21:50:24.066Z",
-      "by": "e3-1189-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0wtwjly",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T21:50:23.875Z",
-      "by": "e3-1189-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0wtwjly",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T21:50:23.294Z",
-      "by": "e3-1243-grok",
-      "action": "card.update",
-      "ref": "c0yavfup",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T21:50:15.747Z",
-      "by": "e3-1243-grok",
-      "action": "card.claim",
-      "ref": "c0yavfup",
-      "note": ""
     }
   ],
   "nextNum": 368,
