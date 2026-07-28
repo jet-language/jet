@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1265,
-    "rev": 18315,
+    "nextNum": 1266,
+    "rev": 18321,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59125,10 +59125,22 @@
       "milestoneId": null,
       "phase": "building",
       "priority": "P1",
-      "plan": "Determine whether ModuleCall can be lowered for the JIT the way #1253 and #1255 handled the ProcessSpec builders, following the two-table pattern in crates/jet-jit/src/jit/safety.rs and lower_ctx.rs. If it can, fix it here and prove both lenses give byte-identical output. If it genuinely needs the tier-0 law from #1254, say so with evidence and block this card on #1254 rather than half-building it. Do not grow tests/jit_gaps.txt; it is shrink-only. blockedBy: none.",
-      "blockedBy": [],
-      "assignee": "e3-1258-modulecall",
+      "plan": "The concrete two-table patch is not valid yet. The generated Fortran binding produces Qualified target user___fortran_matrix::user_probe, while JitProgram contains only entry-module resident key run. Safety admission would therefore false-admit a call that lower_ctx cannot resolve. #1254 must first supply the cross-module/full-runtime tier-0 law; then add both safety and lowering arms and prove all polyglot goldens. tests/jit_gaps.txt remains shrink-only. blockedBy: #1254.",
+      "blockedBy": [
+        "#1254"
+      ],
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "e3-1258-modulecall",
+          "text": "[handoff] No patch. Repro: filtered Fortran golden E0956 ModuleCall. Qualified target user___fortran_matrix::user_probe; resident keys only run. Resume after #1254 gives cross-module/full-runtime coverage; then use paired safety/lower_ctx tables and rerun polyglot parity. Owned paths and jit_gaps are clean."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-1258-modulecall",
+          "text": "Blocked with measured proof: lowlevel/polyglot_fortran default golden fails E0956 ModuleCall; target user___fortran_matrix::user_probe is absent from resident keys [run]. AOT prints expected 302.0. Root independently reproduced the filtered golden red. No source edits; jit_gaps unchanged."
+        },
         {
           "at": "2026-07-28",
           "by": "e3-1258-modulecall",
@@ -59180,9 +59192,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T10:09:11.328Z",
-      "updated": "2026-07-28T12:35:03.406Z",
-      "updatedBy": "e3-1258-modulecall",
-      "claimedAt": "2026-07-28T12:35:02.465Z"
+      "updated": "2026-07-28T12:43:06.228Z",
+      "updatedBy": "e3-1258-modulecall"
     },
     {
       "id": "c0q4t3oj",
@@ -59579,6 +59590,71 @@
       "created": "2026-07-28T11:51:05.279Z",
       "updated": "2026-07-28T11:54:42.165Z",
       "updatedBy": "burndown-root"
+    },
+    {
+      "id": "c0heu1qh",
+      "num": 1265,
+      "title": "Unify domain text + pattern modes",
+      "body": "Kill sql/html/sh prefixes and silent typed-text rewrite. Sole spelling Type.{\"…\"} (+ .raw). Byte patterns become [U8].{\"…\"}; kill b\". Amend D-TYPEDTEXT1/2, supersede D-LITERAL-PREFIX1, amend D-BINPAT1.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P1",
+      "plan": "1. Spec/Syntax 2. Parser+sema 3. Corpus+verify",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "cursor-grok",
+          "text": "ratified D-UNIFYLIT1=A; starting implement"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T12:38:53.447Z"
+        },
+        {
+          "n": 2,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T12:38:53.447Z"
+        },
+        {
+          "n": 3,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T12:38:53.447Z"
+        },
+        {
+          "n": 4,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T12:38:53.447Z"
+        }
+      ],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-28T12:38:05.753Z",
+      "updated": "2026-07-28T12:38:53.694Z",
+      "updatedBy": "cursor-grok"
     }
   ],
   "decisions": [
@@ -74411,6 +74487,91 @@
       "created": "2026-07-28T11:08:17.729Z",
       "outcome": "B",
       "ratifiedAt": "2026-07-28"
+    },
+    {
+      "id": "D-UNIFYLIT1",
+      "cardId": "c0heu1qh",
+      "group": "syntax",
+      "title": "One spelling for domain text and byte patterns",
+      "gist": "How writers mark SQL, HTML, shell commands, and byte patterns so each recipe stays explicit.",
+      "lesson": "Some quoted text is not a normal string. It is a recipe in another language.\n\nSQL recipes become checked queries. HTML recipes escape inserts. Shell recipes become argv lists. Byte recipes match bit fields in a buffer.\n\nA typed head names the language. The body is the recipe. Example: SQL.{\"select id={id}\"} builds a query. [U8].{\"{len:U16be}{rest:...}\"} matches bytes.\n\nPlain quotes alone stay for ordinary String values and for text-match convenience. Runtime String values still cannot fill a SQL, HTML, or Sh slot.\n\nThe choice is whether Jet also keeps short prefixes and silent rewrites, or whether the typed head is the only spelling.",
+      "explainer": "",
+      "story": "Nate reviews safety examples and sees sql\"…\", html\"…\", Sh.{\"…\"}, and b\"…\" side by side. He wants one intentional shape so a typo cannot pick the wrong language.",
+      "inWild": "id :: 42\nq :: SQL.{\"select * from incidents where id = {id}\"}\nname :: \"<script>alert(1)</script>\"\npage :: HTML.{\"<p>{name}</p>\"}\ncmd :: Sh.{\"printf <%s> {name}\"}\n\npacket :: [U8].{0x45, 0x00, 0x00, 0x28}\nif packet == {\n    [U8].{\"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}\"} -> print(\"ok\")\n    else -> print(\"no\")\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed head only",
+          "detail": "Domain text uses only Type.{\"…\"} plus Type.raw. Byte patterns use only [U8].{\"…\"}. Kill sql\"/html\"/sh\" and silent rewrite of bare quotes into those types. Keep plain quotes for String and for text-pattern convenience. Optional String.{\"…\"} matches the same text pattern.",
+          "technical": "Amends D-TYPEDTEXT1/2 and D-BINPAT1. Supersedes D-LITERAL-PREFIX1 prefix surface. Sema elaborates typed-text only from typed-literal heads. Bare String into SQL/HTML/Sh remains E0149. Lexer BinStr and hardcoded typed-text prefixes retire.",
+          "code": "q :: SQL.{\"select * from t where id = {id}\"}\npage :: HTML.{\"<p>{name}</p>\"}\ncmd :: Sh.{\"echo {name}\"}\nif buf == {\n  [U8].{\"{x:U8}{rest:...}\"} -> print(x)\n  else -> {}\n}\n\n// rejected\nbad :: sql\"select 1\"\nrun_query(\"select 1\")  // E0149 when param is SQL"
+        },
+        {
+          "key": "B",
+          "name": "Typed head plus silent expected-type rewrite",
+          "detail": "Keep Type.{\"…\"} as the clear form. Also let a bare quote elaborate when the slot already expects SQL, HTML, or Sh. Kill only the lowercase prefixes. Call sites stay shorter when a parameter is already typed.",
+          "technical": "Keeps D-TYPEDTEXT1 expected-type path. Removes D-TYPEDTEXT2 prefixes. Byte patterns still move to [U8].{\"…\"}.",
+          "code": "fn run_query(q: SQL) { print(q.template()) }\nrun_query(\"select * from t where id = {id}\")  // still elaborates\nq :: SQL.{\"select 1\"}  // bindings still use the head"
+        },
+        {
+          "key": "C",
+          "name": "Keep prefixes as sugar",
+          "detail": "Document Type.{\"…\"} as preferred, but keep sql\"/html\"/sh\" and silent rewrite. Clean example drift only. Byte patterns stay b\"…\" or switch alone.",
+          "technical": "Status quo for typed text. Optional D-BINPAT1 spelling change only.",
+          "code": "q :: sql\"select * from t where id = {id}\"\npage :: html\"<p>{name}</p>\"\ncmd :: sh\"echo {name}\""
+        },
+        {
+          "key": "D",
+          "name": "Type-owned prefixes via derive",
+          "detail": "Honor D-LITERAL-PREFIX1. Libraries own prefixes like sql\" through a derive contract. Typed heads remain available. Hardcoded parser list goes away by becoming type-owned.",
+          "technical": "Implements ratified D-LITERAL-PREFIX1=A. Opposite of removing prefixes.",
+          "code": "derive SQL.Literal(prefix: \"sql\") {\n  comptime fn build(input: TypedLiteral) -> SQL ? LiteralError\n}\nq :: sql\"select * from t where id = {id}\""
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "b\"…\" builds a byte string value. Jet's old b\"…\" was a pattern mode, not a value.",
+          "code": "let bytes: &[u8] = b\"hello\";"
+        },
+        {
+          "lang": "Scala / interpolators",
+          "note": "s\"…\", f\"…\", and raw\"…\" are prefix languages. Jet is choosing typed heads instead of growing that prefix set.",
+          "code": "val q = sql\"select * from t where id = $id\""
+        },
+        {
+          "lang": "Jet today",
+          "note": "Sh examples already prefer Sh.{\"…\"}. SQL/HTML examples still show prefixes. That split is the inconsistency this ballot closes.",
+          "code": "cmd :: Sh.{\"printf <%s> {value}\"}\nq :: sql\"select 1\""
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One head names one language. Writers see the type at the recipe. Typos and silent quote rewrites cannot pick SQL, HTML, Sh, or byte-match by accident.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Bare quotes at typed call sites still look like String while meaning another language."
+          },
+          {
+            "key": "C",
+            "reason": "Leaves the three spellings and the sql\"/b\" visual family that caused the review."
+          },
+          {
+            "key": "D",
+            "reason": "Expands prefixes after the owner asked for fewer hidden spellings and more Type.{\"…\"}."
+          }
+        ],
+        "tradeoff": "Bindings and untyped slots must write the typed head. Call sites lose bare-quote sugar into SQL, HTML, and Sh."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-28T12:38:53.206Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-28"
     }
   ],
   "questions": [
@@ -75410,6 +75571,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-28T12:43:06.228Z",
+      "by": "e3-1258-modulecall",
+      "action": "card.release",
+      "ref": "c02cun0p",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-28T12:43:05.999Z",
+      "by": "e3-1258-modulecall",
+      "action": "card.update",
+      "ref": "c02cun0p",
+      "note": "plan,logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-28T12:38:53.694Z",
+      "by": "cursor-grok",
+      "action": "card.update",
+      "ref": "c0heu1qh",
+      "note": "phase,plan,logEntry"
+    },
+    {
+      "at": "2026-07-28T12:38:53.448Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-UNIFYLIT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-28T12:38:53.447Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0heu1qh",
+      "note": "#4 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-28T12:38:53.447Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0heu1qh",
+      "note": "#3 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-28T12:38:53.447Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0heu1qh",
+      "note": "#2 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-28T12:38:53.447Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0heu1qh",
+      "note": "#1 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-28T12:38:53.207Z",
+      "by": "cursor-grok",
+      "action": "decision.add",
+      "ref": "D-UNIFYLIT1",
+      "note": "One spelling for domain text and byte patterns"
+    },
+    {
+      "at": "2026-07-28T12:38:05.753Z",
+      "by": "cursor-grok",
+      "action": "card.add",
+      "ref": "c0heu1qh",
+      "note": "Unify domain text + pattern modes"
+    },
     {
       "at": "2026-07-28T12:35:03.406Z",
       "by": "e3-1258-modulecall",
@@ -78839,76 +79070,6 @@
       "action": "card.update",
       "ref": "c0fm6twq",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-07-27T22:22:34.812Z",
-      "by": "e3-1245-grok",
-      "action": "card.update",
-      "ref": "c0fm6twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-27T22:18:05.136Z",
-      "by": "e3-1245-grok",
-      "action": "card.update",
-      "ref": "c0fm6twq",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T22:17:59.774Z",
-      "by": "e3-1245-grok",
-      "action": "card.claim",
-      "ref": "c0fm6twq",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T22:17:35.913Z",
-      "by": "e3-1245-grok",
-      "action": "card.update",
-      "ref": "c0fm6twq",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-27T22:17:35.614Z",
-      "by": "e3-1245-grok",
-      "action": "card.claim",
-      "ref": "c0fm6twq",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T22:17:10.590Z",
-      "by": "e3-1243-grok",
-      "action": "card.update",
-      "ref": "c0fm6twq",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-27T22:17:10.369Z",
-      "by": "e3-1243-grok",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-27T22:16:59.541Z",
-      "by": "e3-1243-grok",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "blockedBy,log"
-    },
-    {
-      "at": "2026-07-27T22:16:59.319Z",
-      "by": "e3-1243-grok",
-      "action": "card.update",
-      "ref": "c0yavfup",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T22:16:40.092Z",
-      "by": "e3-1243-grok",
-      "action": "card.update",
-      "ref": "c0fm6twq",
-      "note": "title,body,plan,phase,priority,track,epoch,assignee"
     }
   ],
   "nextNum": 368,
