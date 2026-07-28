@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1259,
-    "rev": 18198,
+    "rev": 18205,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26260,10 +26260,16 @@
       "priority": "P0",
       "plan": "## Goal\nShip D-AGENT-EXEC1=A: one `ProcessAuthority` model on `core.process` with safe workspace defaults, exact expert grants, dry-run plans, and redacted receipts. Application-facing consumer of #398/#893 native isolation — not a second sandbox.\n\n## Law (ratified)\n- Extend `ProcessSpec` / `ProcessChild`; no parallel agent executor or shell DSL.\n- Workspace constructor: useful read-only repo + private build writes; deny network, home, secrets, devices, inherited handles by default.\n- Experts widen exact rights on the same object (write paths, hosts, secrets, executables, limits).\n- Resolve executable identity before review; bind identity + policy + inputs + backend into one launch transaction.\n- Plan and receipt share a policy digest; unsupported enforcement fails closed before spawn.\n- CLI (`jet self exec --workspace …`) and MCP tools use the same engine.\n- Integrate D-WD1 grant graph and D-WD2 dossier facts for denied attempts, descendants, limits, outputs, redaction.\n\n## Scope\nIn: `ProcessAuthority` API, workspace defaults, plan/receipt, CLI parity, grant/dossier wiring, hostile tests once #893 corpus is available.\nOut: building the isolation engine itself (#398 family); MCP protocol SDK (#768+); interactive terminal naming (#771 / D-PROCESS-SESSION2).\n\n## Owned paths\n- process corelib + jetpack runtime policy seams referenced on the card\n- CLI exec surface\n- hostile corpus consumption from #893 / #398\n- docs/reference/core-library.md, architecture notes, diagnostics as needed\n- focused success/failure/hostile/integration tests\n\n## Steps\n1. Confirm #398 engine + #893 shared hostile corpus are the only enforcement backends; fail closed when a grant cannot be enforced on the host.\n2. Add `ProcessAuthority.workspace` and exact grant builders on `ProcessSpec.under(policy)`.\n3. Implement dry-run `plan()` and final receipt with shared digest; redact secrets.\n4. Wire denied-attempt and tree facts into the existing grant/dossier path.\n5. CLI parity for workspace and expert grants.\n6. Hostile tests: ambient authority denied; TOCTOU bind; full-tree cleanup; API/CLI parity.\n7. Independent review against criteria.\n\n## Acceptance / proof\nExisting criteria 1–3. Proof: focused process/authority tests + hostile corpus cases; dossier facts visible via `jet inspect` where applicable.\n\n## Blockers\nblockedBy: #893 (and through it the #398 isolation delivery). D-AGENT-EXEC1 ratified (=A) — decision id kept for audit trail only; it does not block.\n",
       "blockedBy": [
-        "c0pq060v"
+        "c0pq060v",
+        "D-AGENT-EXEC2"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-ballots",
+          "text": "prep correction: raised D-AGENT-EXEC2 naming ballot (SESSION2-style follow-on to D-AGENT-EXEC1)"
+        },
         {
           "at": "2026-07-28",
           "by": "tower-prep-e3",
@@ -26324,9 +26330,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:04.053Z",
-      "updated": "2026-07-28T10:26:03.507Z",
+      "updated": "2026-07-28T10:35:49.398Z",
       "workOrder": 3770,
-      "updatedBy": "tower-prep-e3"
+      "updatedBy": "tower-prep-ballots"
     },
     {
       "id": "c0ft6gme",
@@ -54057,12 +54063,19 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul1-safety",
-      "phase": "ready",
+      "phase": "deciding",
       "priority": "P0",
       "plan": "## Goal\nClose field-audit G4 under D-PIN1=A: `mem.pin(&place) -> Pin<T>` as a tracked write view that blocks move/replace while live.\n\n## Law (ratified)\n- Pin reuses the owner/provenance graph; no second memory model.\n- Structural field projection is declared by the type implementation.\n- Dropping the final pin ends the no-move loan.\n- Unsafe construction stays local; safe callers use `Pin<T>` APIs.\n- Support stack, Fixed, arena, and owned heap places.\n\n## Scope\nIn: `Pin<T>` type, `mem.pin`, move/replace rejection, projection rules, cleanup/cancel/panic paths, self-referential + intrusive examples.\nOut: Pool/Shared as substitutes; Cell (#1201); Shared guards (#1202).\n\n## Owned paths\n- foundation/core `mem` surface + Syntax.rs if `Pin` is user-typeable\n- sema move/replace/projection checks for pinned places\n- tests (`tests/arena.rs`, `tests/resource_close.rs`, new pin tests)\n- examples: zero-allocation queue node / intrusive list\n- docs/spec memory + syntax-decisions\n\n## Steps\n1. Add `Pin<T>` as expert tracked view; `mem.pin(&place)` entry point.\n2. While any pin is live: reject move, replace, and resize of the pinned storage.\n3. Declare structural pin projection on implementing types; reject undeclared projections.\n4. Ensure drop/cancel/panic/owner destruction preserve the contract.\n5. Example: audited unsafe constructor + safe `Pin` use at call sites.\n6. No-allocation / caller-storage parity cases where Rust Pin can; independent review.\n\n## Acceptance / proof\nCriteria 1–5. Proof: focused pin tests + examples; verify skill syntax chores if new names land.\n\n## Owner gates\n`Pin` / `mem.pin` names were chosen by D-PIN1=A. If additional user-typeable keywords beyond that ruling appear, raise a syntax ballot before shipping. Otherwise blockedBy: none.\n",
-      "blockedBy": [],
+      "blockedBy": [
+        "D-PIN2"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-ballots",
+          "text": "prep correction: raised D-PIN2 for pin field-projection declaration left open by D-PIN1"
+        },
         {
           "at": "2026-07-28",
           "by": "tower-prep-e3",
@@ -54126,8 +54139,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:00.888Z",
-      "updated": "2026-07-28T10:26:02.775Z",
-      "updatedBy": "tower-prep-e3"
+      "updated": "2026-07-28T10:35:49.617Z",
+      "updatedBy": "tower-prep-ballots"
     },
     {
       "id": "c0wpp6cz",
@@ -54209,12 +54222,19 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul1-safety",
-      "phase": "ready",
+      "phase": "deciding",
       "priority": "P1",
       "plan": "## Goal\nShip D-SHAREDGUARD1=A: expert `guard_read` / `guard_edit` and `Condition` on `Shared<T>`, keeping beginner `read`/`edit` closures unchanged.\n\n## Law (ratified)\n- Short closures remain the default.\n- Guards are owned lock tokens with safe cleanup on return/error/panic/cancel.\n- Wait atomically registers, releases, parks, reacquires, and rechecks the predicate.\n- Cancellation unregisters before guard release.\n- Lock-order receipts cover nested guards; dossier/audit integration where grant graph already exists.\n\n## Scope\nIn: Shared guard APIs, Condition, map/split, wait protocols, diagnostics for long lock scopes.\nOut: Mutex/RwLock/Condvar family; changing beginner Shared surface; Cell (#1201) except parallel teaching.\n\n## Owned paths\n- `Shared` corelib + runtime wait/park\n- sema cleanup tracking for guards\n- `tests/ownership.rs`, `tests/concurrency_boundaries.rs`\n- example: bounded work queue with full/empty wait\n- docs + lock-order audit output\n\n## Steps\n1. Add `guard_read` / `guard_edit` without changing `read`/`edit`.\n2. Map/split guards preserve lock + provenance.\n3. Add `Condition` with `wait` / `notify_one` / `notify_all` semantics as ratified.\n4. Prove no lost wakeups; cancel/panic/return always release and unregister.\n5. Lock-order / nested-guard audit facts; diagnostics for long scopes.\n6. Independent review.\n\n## Acceptance / proof\nCriteria 1–5. Proof: concurrency stress for wait; cancellation races; beginner API unchanged snapshot/tests.\n\n## Blockers\nblockedBy: none. D-SHAREDGUARD1 ratified (=A).\n",
-      "blockedBy": [],
+      "blockedBy": [
+        "D-SHAREDGUARD2"
+      ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-ballots",
+          "text": "prep correction: raised D-SHAREDGUARD2 for SharedGuard/Condition names left open by D-SHAREDGUARD1"
+        },
         {
           "at": "2026-07-28",
           "by": "tower-prep-e3",
@@ -54277,8 +54297,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:01.283Z",
-      "updated": "2026-07-28T10:26:03.271Z",
-      "updatedBy": "tower-prep-e3"
+      "updated": "2026-07-28T10:36:13.012Z",
+      "updatedBy": "tower-prep-ballots"
     },
     {
       "id": "c0kyjd7a",
@@ -58933,27 +58953,34 @@
     {
       "id": "c0y89goo",
       "num": 1257,
-      "title": "Twelve examples are not jet fmt --check clean",
-      "body": "Twelve examples fail `jet fmt --check`. All twelve were last touched by d5f4e0964, the bulk 'chore: sync local master WIP' commit.\n\nThat same commit has already caused two other defects this week: it deleted docs/agent-workload-corpus.md as collateral, and it left three call sites on the retired '#Persist const' spelling, which made the JIT parity gate red on master.\n\nFormatting is a gate, so unformatted examples in the tree mean the gate is not being run on this path.",
+      "title": "jet fmt on a directory formats pkg.jet manifests",
+      "body": "Eleven `jet fmt --check` failures are `pkg.jet` package manifests. They are not unformatted authored examples. `collect_jet_files` in `crates/jet-driver/src/ProjectParts.rs` already excludes `Syntax::PAYLOAD_FILE`, so project file collection is correct. The defect is specific to `jet fmt <dir>`: directory formatting takes a different file-walk path that does not apply the payload-file filter and tries to format package manifests as Jet source.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
-      "plan": "Run jet fmt over the twelve files and confirm the reformatting is purely formatting, with no semantic change, by diffing the goldens before and after. If any file changes behavior, that is a separate defect, so stop and card it. Then find why these twelve escaped the formatting gate and close that hole, because reformatting alone leaves the gap open. blockedBy: none.",
+      "plan": "Trace the directory path for `jet fmt` and reuse the existing `Syntax::PAYLOAD_FILE` exclusion at the shared file-selection boundary. Do not reformat or change any `pkg.jet` manifest. Add a focused regression test with a directory that contains ordinary `.jet` source plus `pkg.jet`: the source is checked or formatted, and the manifest is ignored. Confirm direct formatting behavior stays explicit and existing source formatting still runs. blockedBy: none.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "burndown-root",
+          "text": "Corrected stale diagnosis before implementation: all eleven failures are `pkg.jet` manifests. `collect_jet_files` already filters `Syntax::PAYLOAD_FILE`; `jet fmt <dir>` uses another walk without that filter."
+        }
+      ],
       "criteria": [],
       "refs": [
-        "examples",
-        "tests/golden.rs"
+        "crates/jet-driver/src/ProjectParts.rs",
+        "crates/jet-cli",
+        "tests"
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T10:09:11.078Z",
-      "updated": "2026-07-28T10:09:11.078Z",
-      "updatedBy": "burndown-orch"
+      "updated": "2026-07-28T10:36:43.977Z",
+      "updatedBy": "burndown-root"
     },
     {
       "id": "c02cun0p",
@@ -73016,6 +73043,250 @@
       "created": "2026-07-28T04:21:17.139Z",
       "outcome": "D",
       "ratifiedAt": "2026-07-28"
+    },
+    {
+      "id": "D-AGENT-EXEC2",
+      "cardId": "c0vrs94y",
+      "group": "stdlib",
+      "title": "Names for the process authority surface",
+      "gist": "What the authority, plan, and receipt types are called, and how the CLI spells the same grants.",
+      "lesson": "An agent or a Jet program can start another program. That child may read files, talk on the network, or use secrets. Authority is the exact set of rights the child is allowed to use.\n\nJet already chose the model. Authority sits on the ordinary process API. Beginners get one safe workspace default. Experts widen exact grants. A dry-run plan shows what would happen. A final receipt records what did happen.\n\nThe model ballot sketched names such as `ProcessAuthority`, `Host`, `SecretRef`, `.under(policy)`, `.plan()`, and `jet self exec --workspace`. It did not lock the full public name set.\n\nIt never named the plan type, the receipt type, or the grant builders as Syntax-backed spellings. It never said whether network grants take a `Host` type or plain strings. It never fixed how the CLI mirrors the typed API.\n\nThose are user-typeable names and flags. This ballot chooses the public spelling before code lands.",
+      "explainer": "",
+      "story": "Sam lets an agent run tests in a workspace. Later a release job grants one registry host and one signing key by name. Sam wants the typed API and the CLI to use the same words, so a reviewed plan matches the command that ships.",
+      "inWild": "// typed path Sam wants to write\npolicy :: ProcessAuthority.workspace(\".\")\n  .write([\"dist\"])\n  .network([Host.https(\"registry.example.com\")])\n  .secret([SecretRef.signing(\"release\")])\n\nplan :: process.cmd([\"cargo\", \"test\"]).under(policy).plan()\nprint(plan)\n\nreceipt :: process.cmd([\"cargo\", \"test\"]).under(policy).run()?\n\n// CLI path that must mean the same grants\n// jet self exec --workspace . --write dist -- \\\n//   --network https://registry.example.com -- cargo test\n\n// open: exact type names for plan/receipt, Host vs string, CLI flag set",
+      "detail": "Follow-on to D-AGENT-EXEC1=A, same pattern as D-PROCESS-SESSION2 after D-PROCESS-SESSION1. Mechanism is fixed. This ballot locks names only.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Named types for authority, plan, receipt, host, and secret",
+          "detail": "Every major idea gets its own public name. `ProcessAuthority` holds grants. `ProcessPlan` and `ProcessReceipt` are distinct types. Network and secret grants use `Host` and `SecretRef`. The CLI mirrors the same words as flags. Readers can jump to each type. This is the largest name set.",
+          "technical": "Ships `ProcessAuthority`, `ProcessPlan`, `ProcessReceipt`, `Host`, and `SecretRef` with Syntax.rs decision ids where user-typeable. `.under`, `.plan`, `.run` stay methods. CLI: `--workspace`, `--write`, `--network`, `--secret`, `--executable`, `--limits`.",
+          "code": "policy :: ProcessAuthority.workspace(\".\")\n  .write([\"dist\"])\n  .network([Host.https(\"registry.example.com\")])\n  .secret([SecretRef.signing(\"release\")])\n\nplan : ProcessPlan :: process.cmd(args).under(policy).plan()\nreceipt : ProcessReceipt :: process.cmd(args).under(policy).run()?\n\n// jet self exec --workspace . --write dist \\\n//   --network https://registry.example.com -- cargo test"
+        },
+        {
+          "key": "B",
+          "name": "Authority type only; plan and receipt stay plain data",
+          "detail": "`ProcessAuthority` is the one new named type. Plan and receipt are ordinary records or strings you print. Hosts and secrets are plain strings on the grant methods. Fewer names to learn. Weaker jump-to-definition on plan and receipt fields.",
+          "technical": "One Syntax-backed type: `ProcessAuthority`. `.plan()` returns a structured but unnamed record. `.run()` returns a receipt record. CLI flags still mirror grant verbs.",
+          "code": "policy :: ProcessAuthority.workspace(\".\")\n  .write([\"dist\"])\n  .network([\"https://registry.example.com\"])\n\nprint(process.cmd(args).under(policy).plan())\nreceipt :: process.cmd(args).under(policy).run()?\nprint(receipt.digest)\n\n// jet self exec --workspace . --write dist -- cargo test"
+        },
+        {
+          "key": "C",
+          "name": "Reuse existing process config names",
+          "detail": "Fold grants into types Jet already has for process limits and environment. No `ProcessAuthority` name. Experts extend the existing process config record. Smallest addition, but authority and ordinary config blur together at the call site.",
+          "technical": "Extend current `ProcessSpec` config/limits records with grant fields. No new authority type. CLI keeps today's process flags plus grant flags without a parallel type vocabulary.",
+          "code": "child :: process.cmd(args)\n  .limits(limits)\n  .grants(.{ workspace: \".\", write: [\"dist\"] })\n  .spawn()?\n\n// no ProcessAuthority in source"
+        },
+        {
+          "key": "D",
+          "name": "Typed authority; stringly CLI",
+          "detail": "The Jet API gets the full named types from option A. The CLI stays a thin stringly wrapper with fewer curated flags. Experts script the typed API for exact grants. Beginners still get `--workspace`. The two surfaces can drift unless docs bind them.",
+          "technical": "`ProcessAuthority`, `ProcessPlan`, `ProcessReceipt`, `Host`, `SecretRef` in Jet. CLI guarantees only `--workspace` parity; other grants documented as Jet-first.",
+          "code": "policy :: ProcessAuthority.workspace(\".\")\n  .network([Host.https(\"registry.example.com\")])\nreceipt :: process.cmd(args).under(policy).run()?\n\n// beginner CLI only:\n// jet self exec --workspace . -- cargo test\n// expert grants: write Jet, not more flags"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Deno",
+          "note": "Permissions use explicit allow flags. There is no separate plan type; denial is runtime.",
+          "code": "deno run --allow-read=. --allow-net=registry.example.com task.ts"
+        },
+        {
+          "lang": "Bubblewrap",
+          "note": "CLI flags name each grant. There is no typed twin inside ordinary application code.",
+          "code": "bwrap --ro-bind . /src --chdir /src -- cargo test"
+        },
+        {
+          "lang": "Rust cargo",
+          "note": "Config and credentials use several file formats. Authority is not one typed process object.",
+          "code": "# cargo config and credential providers are separate surfaces"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A makes the typed API and the CLI speak the same words. Plan and receipt stay searchable types, which matters when agents review a dry-run before launch.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Plain strings for hosts and secrets lose checked construction, and unnamed plan or receipt types hide fields from ordinary navigation."
+          },
+          {
+            "key": "C",
+            "reason": "Mixing authority with ordinary process config hides the trust boundary the feature exists to show."
+          },
+          {
+            "key": "D",
+            "reason": "A stringly CLI breaks the ratified API and CLI parity rule from D-AGENT-EXEC1."
+          }
+        ],
+        "tradeoff": "More public names ship on day one. The workspace constructor still hides that list from beginner call sites."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T10:35:48.923Z"
+    },
+    {
+      "id": "D-PIN2",
+      "cardId": "c0tfvwqu",
+      "group": "safety",
+      "title": "How a pinned type declares field projection",
+      "gist": "How library authors mark which fields stay pinned when you pin the whole value.",
+      "lesson": "Some values must not move in memory once they become address-sensitive. A pin is Jet's promise that safe code will not move or replace that storage while the pin is live.\n\nJet already chose the contract. You write `mem.pin(&place)` and get a `Pin<T>`. Safe callers can read or edit through the pin. They cannot move the place.\n\nReal libraries often need a field, not only the whole value. An intrusive list node may pin the node and still hand out a pinned link field. That is projection: reaching a field without ending the no-move promise.\n\nThe model ballot said projection is declared by the type implementation. It did not say how authors write that declaration. It did not say whether every field projects, or only marked fields, or none until unsafe code builds a field pin.\n\nThis ballot chooses the author-facing spelling for safe field projection under `Pin`.",
+      "explainer": "",
+      "story": "Noah builds a zero-allocation event queue. Each node is pinned in caller storage. The queue needs a pinned `next` field view without letting callers move the node. He needs one clear way to mark that field in the type.",
+      "inWild": "node := Node.{ next: None, payload: event }\npinned :: mem.pin(&node)\nqueue.attach(pinned)\n\n// Noah wants something like:\n// link :: pinned.next   // still Pin, still no-move\n// what does Node declare so `.next` is allowed and `.payload` rules are clear?",
+      "detail": "Follow-on to D-PIN1=A. `Pin` and `mem.pin` stay. This ballot only locks projection declaration.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Mark pin-projected fields on the type",
+          "detail": "Authors mark each field that may be reached as `Pin`. Unmarked fields are not safely reachable through a pin, or are reachable only as ordinary views when the rules allow. The marks make the contract visible in the type. Readers see which links are address-sensitive.",
+          "technical": "Field attribute or field-level pin marker registered in Syntax.rs under this decision. Sema allows `Pin` projection only to marked structural fields. Unmarked field access through `Pin` is a typed error with a fix that names the mark.",
+          "code": "struct Node {\n  #Pin next: PinLink<Node>?,\n  payload: Event\n}\n\npinned :: mem.pin(&node)\nlink :: pinned.next          // ok: marked\n// pinned.payload            // error: field is not pin-projected"
+        },
+        {
+          "key": "B",
+          "name": "Project every field by default",
+          "detail": "Once a value is pinned, every field is reachable under the same no-move promise. Authors write no marks. Easy to start. Easy to project a field that should never have been address-sensitive, unless a second opt-out mark exists.",
+          "technical": "Default structural projection for all fields of a pinned place. Optional `#UnpinField` or similar opt-out if needed. Larger safe surface; libraries must audit every field.",
+          "code": "struct Node {\n  next: PinLink<Node>?,\n  payload: Event\n}\n\npinned :: mem.pin(&node)\nlink :: pinned.next       // ok\ndata :: pinned.payload    // also ok by default"
+        },
+        {
+          "key": "C",
+          "name": "No safe field projection",
+          "detail": "Safe code pins only whole values. Field-level pins stay inside `#Unsafe` constructors that libraries expose as safe APIs. The beginner pin surface stays tiny. Intrusive structures need more unsafe inside the library boundary.",
+          "technical": "Sema rejects field access that would reborrow `Pin<T>` as `Pin<Field>`. Libraries mint field pins only in audited `#Unsafe` blocks and return safe handles.",
+          "code": "pinned :: mem.pin(&node)\nqueue.attach(pinned)\n// pinned.next  // error: Pin does not project fields\n\n// inside the queue library:\n#Unsafe(\"next is structurally pinned with the node\") {\n  link :: pin_next(pinned)\n}"
+        },
+        {
+          "key": "D",
+          "name": "Projection methods written by the author",
+          "detail": "No field marks and no default projection. Authors implement methods such as `fn next(self: Pin<Node>) -> Pin<Link>`. Control is exact. Every pinned structure needs boilerplate methods, and forgotten methods block callers.",
+          "technical": "Sema treats projection as ordinary methods on `Pin<T>`. No structural field sugar through `Pin`. Method return types carry pin provenance.",
+          "code": "impl Node {\n  fn next(self: Pin<Node>) -> Pin<PinLink<Node>>? { /* ... */ }\n}\n\npinned :: mem.pin(&node)\nlink :: pinned.next()?"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "pin-project macros generate safe projections from field marks. Manual projection is unsafe.",
+          "code": "#[pin_project]\nstruct Node { #[pin] next: Link, payload: Event }"
+        },
+        {
+          "lang": "C++",
+          "note": "No standard pin projection. Libraries keep addresses stable by convention and documentation.",
+          "code": "auto* next = &node.next; // caller must not move node"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps whole-value `mem.pin` simple and makes address-sensitive fields visible on the type. Callers get safe field pins without a second projection style.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Default projection treats every field as address-sensitive and hides the real risk surface."
+          },
+          {
+            "key": "C",
+            "reason": "It pushes routine intrusive patterns back into unsafe code that Pin exists to wrap once."
+          },
+          {
+            "key": "D",
+            "reason": "Method-only projection repeats the same boilerplate on every type and still needs a convention for which methods are structural."
+          }
+        ],
+        "tradeoff": "Authors must mark projected fields. That is accepted because unmarked fields fail closed with a clear diagnostic."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T10:35:49.116Z"
+    },
+    {
+      "id": "D-SHAREDGUARD2",
+      "cardId": "c0zywkq7",
+      "group": "stdlib",
+      "title": "Names for Shared guards and conditions",
+      "gist": "What the long-lived Shared lock token and wait object are called, and how you build them.",
+      "lesson": "Shared values use a lock so many tasks can take turns. The beginner path locks for one short closure. The lock releases when the closure ends.\n\nSome protocols need the lock across several helper calls. A guard is the owned token that means the lock is still held. When the guard is dropped, the lock releases.\n\nSome protocols also wait until a condition becomes true. One example is \"the queue is not full.\" A correct wait must release the lock, sleep, wake, and take the lock again. It must not miss the signal.\n\nJet already chose expert guards and a condition object. Short closures stay the default. The model ballot sketched `guard_edit`, `guard.wait(...)`, and `Condition` with `notify_one`.\n\nIt did not lock whether the guard type is named. It did not lock where `Condition` lives or how you construct one. It did not lock whether wait hangs on the guard, on the condition, or on Shared.\n\nThose names decide what beginners never see and what experts type every day.",
+      "explainer": "",
+      "story": "Sam builds a bounded work queue on `Shared`. Producers must wait while the queue is full. Sam wants one spelling he can teach in a short expert note, without inventing a second lock family.",
+      "inWild": "queue :: Shared.new(WorkQueue.new())\nspace_ready :: /* how do you build the wait object? */\n\nguard :: queue.guard_edit()\nguard.wait(space_ready, q => q.len() < limit)?\nguard.value.push(job)\nspace_ready.notify_one()\n\n// open: Condition.new vs Shared.condition vs other\n// open: is `guard` a named SharedGuard type?",
+      "detail": "Follow-on to D-SHAREDGUARD1=A. Beginner `read`/`edit` stay unchanged. This ballot locks expert names and constructors.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Named SharedGuard plus Condition.new",
+          "detail": "`guard_read` and `guard_edit` return a named `SharedGuard`. Waiting uses a separate `Condition` you construct with `Condition.new()`. Wait is a method on the guard. Notify methods sit on the condition. The roles stay obvious: guard holds the lock, condition wakes waiters.",
+          "technical": "Public types `SharedGuard` and `Condition`. `guard.wait(cond, pred)` atomically releases and reacquires. `Condition.notify_one` / `notify_all`. Syntax.rs entries for both type names.",
+          "code": "space_ready :: Condition.new()\nguard : SharedGuard :: queue.guard_edit()\nguard.wait(space_ready, q => q.len() < limit)?\nguard.value.push(job)\nspace_ready.notify_one()"
+        },
+        {
+          "key": "B",
+          "name": "Condition is created from Shared",
+          "detail": "Guards stay as today. You build a condition from the shared value, such as `queue.condition()`, so the wait object is visibly tied to that lock. Fewer free-floating conditions. Harder to share one condition across several Shared values on purpose.",
+          "technical": "`Shared.condition()` returns `Condition` bound to that Shared's lock identity. Guard type may stay unnamed. Wait remains on the guard or on Shared with a guard argument.",
+          "code": "space_ready :: queue.condition()\nguard :: queue.guard_edit()\nguard.wait(space_ready, q => q.len() < limit)?\nguard.value.push(job)\nspace_ready.notify_one()"
+        },
+        {
+          "key": "C",
+          "name": "No Condition type; wait methods on Shared",
+          "detail": "Do not ship a `Condition` name. Experts call `guard.wait_until(pred)`. Notification uses `queue.notify_one()`. One fewer type. Wait and notify must still agree on an internal wait queue.",
+          "technical": "Wait queues live inside Shared. APIs: `guard.wait_until(pred)` and `Shared.notify_one` / `notify_all`. No public `Condition` type.",
+          "code": "guard :: queue.guard_edit()\nguard.wait_until(q => q.len() < limit)?\nguard.value.push(job)\nqueue.notify_one()"
+        },
+        {
+          "key": "D",
+          "name": "Match Rust MutexGuard and Condvar names",
+          "detail": "Use familiar systems names: mutex-style guards and `Condvar`. Experts from Rust feel at home. Jet would then teach two vocabularies: Shared for beginners and Mutex or Condvar words for experts.",
+          "technical": "Alias or rename expert surface toward `Condvar` and guard names that read like mutex guards, while beginner methods stay `read`/`edit` on Shared.",
+          "code": "space_ready :: Condvar.new()\nguard :: queue.lock_edit()\nguard.wait(space_ready, q => q.len() < limit)?\nspace_ready.notify_one()"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Mutex guards are named. Condvar is a separate type. Wait takes the guard and returns it.",
+          "code": "let mut g = cv.wait_while(g, |q| q.len() == limit)?;"
+        },
+        {
+          "lang": "Go",
+          "note": "sync.Cond binds to a locker. Notify methods sit on Cond.",
+          "code": "cond.L.Lock()\nfor full() { cond.Wait() }\ncond.L.Unlock()"
+        },
+        {
+          "lang": "Python",
+          "note": "threading.Condition wraps a lock and owns wait/notify.",
+          "code": "with cond:\n    while full:\n        cond.wait()\n    cond.notify()"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps Shared as the one beginner lock type, gives experts a named guard they can pass, and keeps Condition as the ordinary wait object without renaming the whole model after Mutex.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Binding Condition construction to one Shared value blocks common multi-lock wake patterns without adding power for the common queue case."
+          },
+          {
+            "key": "C",
+            "reason": "Hiding Condition inside Shared makes notify targets less explicit and harder to share across related structures."
+          },
+          {
+            "key": "D",
+            "reason": "Rust Mutex/Condvar words split the teaching surface after Jet already chose Shared as the public name."
+          }
+        ],
+        "tradeoff": "Two expert type names ship beside Shared. Short closures still hide them from beginners."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T10:36:12.794Z"
     }
   ],
   "questions": [
@@ -74002,6 +74273,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-28T10:36:43.977Z",
+      "by": "burndown-root",
+      "action": "card.update",
+      "ref": "c0y89goo",
+      "note": "title,body,plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-28T10:36:13.012Z",
+      "by": "tower-prep-ballots",
+      "action": "card.update",
+      "ref": "c0zywkq7",
+      "note": "blockedBy,phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:36:12.795Z",
+      "by": "tower-prep-ballots",
+      "action": "decision.add",
+      "ref": "D-SHAREDGUARD2",
+      "note": "Names for Shared guards and conditions"
+    },
+    {
+      "at": "2026-07-28T10:35:49.617Z",
+      "by": "tower-prep-ballots",
+      "action": "card.update",
+      "ref": "c0tfvwqu",
+      "note": "blockedBy,phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:35:49.398Z",
+      "by": "tower-prep-ballots",
+      "action": "card.update",
+      "ref": "c0vrs94y",
+      "note": "blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:35:49.116Z",
+      "by": "tower-prep-ballots",
+      "action": "decision.add",
+      "ref": "D-PIN2",
+      "note": "How a pinned type declares field projection"
+    },
+    {
+      "at": "2026-07-28T10:35:48.924Z",
+      "by": "tower-prep-ballots",
+      "action": "decision.add",
+      "ref": "D-AGENT-EXEC2",
+      "note": "Names for the process authority surface"
+    },
     {
       "at": "2026-07-28T10:32:25.567Z",
       "by": "owner",
@@ -77451,55 +77771,6 @@
       "by": "cursor",
       "action": "milestone.update",
       "ref": "e3-ul13-boundaries",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:26.484Z",
-      "by": "cursor",
-      "action": "milestone.update",
-      "ref": "e3-ul11-interop",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:26.282Z",
-      "by": "cursor",
-      "action": "milestone.update",
-      "ref": "e3-ul10-compute",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:26.082Z",
-      "by": "cursor",
-      "action": "milestone.update",
-      "ref": "e3-ul9-ui",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:25.887Z",
-      "by": "cursor",
-      "action": "milestone.update",
-      "ref": "e3-ul8-web",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:25.693Z",
-      "by": "cursor",
-      "action": "milestone.update",
-      "ref": "e3-ul7-tooling",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:25.507Z",
-      "by": "cursor",
-      "action": "milestone.update",
-      "ref": "e3-ul6-dev-loop",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:25.315Z",
-      "by": "cursor",
-      "action": "milestone.update",
-      "ref": "e3-ul5-interactive",
       "note": ""
     }
   ],
