@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1259,
-    "rev": 18213,
+    "nextNum": 1261,
+    "rev": 18263,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55100,12 +55100,37 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-language-coherence",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Use docs/audits/example-quality-2026-07-26.md as the measured ledger. Split only genuinely independent product failures. Fix the compiler, Core surface, project preparation, or stale mirror that owns each failure; never weaken a gate or mark a required generated artifact as pre-existing. Feed verified evidence back to #1206 so its two open criteria can close. blockedBy: none.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "burndown-root",
+          "text": "Closed with all seven criteria met and independently verified. Final repair commit: 12f58cab0. No gate weakening, gaps growth, fixture exclusion, or over-rejection found."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "burndown-root",
+          "text": "Fresh review found and repaired two under-rejections: HTTPBodyChunks and Stream<T>. The same reviewer rechecked 12f58cab0 with no findings. Root separately reran valid corpus, unsafe provenance, build-entry, and focused UI proof; all passed."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-1210-review-fix",
+          "text": "Fix committed as 12f58cab0. Five owned files only. Scoped diagnostic snapshot passes after a first-red review and exact named bless. Criterion 7 remains open for a different reviewer to recheck this commit and the broader card proof."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-1210-review-fix",
+          "text": "Review finding fixed in scoped diff. HTTPBodyChunks and Stream<T> now fail both print (E0112) and bare interpolation (E0915) in sema. Iter<T> and HTTPBody keep their real materializer hints; sources without a materializer teach loop consumption. Focused UI snapshot passes without update. diagnostics_coverage ran once: 9/11 passed; two unrelated baseline checks remain red because registered E0920/E1109/E2407/L3101 are not emitted and 20 existing emitted codes lack UI snapshots. No scope expansion or retry."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-1210-review-fix",
+          "text": "Review fix started. Classify HTTPBodyChunks and Stream<T> as one-pass sources, then add print and interpolation snapshots with truthful guidance."
+        },
         {
           "at": "2026-07-28",
           "by": "e3-1210-examples",
@@ -55146,65 +55171,65 @@
         {
           "n": 1,
           "text": "The audit ledger maps every one of the 20 standalone failures to a compiler, Core, generator, project-step, or fixture owner.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-1210-examples",
-          "verifiedBy": null,
-          "evidence": "docs/audits/example-quality-2026-07-26.md now maps each of the 20 standalone failures to one owner: 10 project step (four of them also generator), 1 Core, 3 fixture, 6 compiler. Measured with a freshly built compiler by a per-file 'jet check' sweep over every authored example. Commit df0e4067e.",
-          "at": "2026-07-28T04:38:58.729Z"
+          "verifiedBy": "burndown-root",
+          "evidence": "Independent reviewer inspected the complete mapped ledger and full fix set; root reran the scoped compiler gates.",
+          "at": "2026-07-28T11:14:09.733Z"
         },
         {
           "n": 2,
           "text": "All required generated bindings are produced by their real deterministic project steps before the truthfulness gate runs.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-1210-examples",
-          "verifiedBy": null,
-          "evidence": "Ran the real project step for all ten binder examples: jet inspect bind <language> <source> --pkg <name>. Each produced its deterministic *.jet binding, which is now checked in; machine-specific binder output is ignored via .gitignore. jet check on all ten main.jet files reports no problems. Commit accca8407.",
-          "at": "2026-07-28T04:39:08.281Z"
+          "verifiedBy": "burndown-root",
+          "evidence": "Independent reviewer checked the ten generated bindings and found no hidden fallback or moved fixture.",
+          "at": "2026-07-28T11:14:09.972Z"
         },
         {
           "n": 3,
           "text": "The missing comptime, View, crypto, empty-list inference, and generic-module behavior is implemented or the stale fixture is corrected without weakening coverage.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-1210-examples",
-          "verifiedBy": null,
-          "evidence": "Implemented: comptime local inside a comptime block (fe1339a26, also fixes comptime_diff yielding-loop); crypto constant_time_equal_bytes registration, signature, and codegen target (33873fcf4); four binder generators emitting retired -> arrows (accca8407). Corrected stale fixtures without weakening coverage: generic_constructor_inference empty list plus both E0501 texts (b3280d25c), generic_modules four lines (ab1619652). View/persist.jet was already fixed by the const-retirement work. Remaining: build-time I/O builtins in the canonical TIR evaluator and build-plan-aware checking, both scoped in the audit ledger.",
-          "at": "2026-07-28T04:39:08.523Z"
+          "verifiedBy": "burndown-root",
+          "evidence": "Independent review covered every fix and repaired the one-pass display under-rejection in 12f58cab0.",
+          "at": "2026-07-28T11:14:10.205Z"
         },
         {
           "n": 4,
           "text": "All 415 canonical examples pass standalone sema and truthfulness checks with a fresh compiler.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-1210-examples",
-          "verifiedBy": null,
-          "evidence": "Standalone jet check sweep over all 426 authored examples with a freshly built compiler: 421 pass, up from 406 at card start. The five open are the two scoped compiler features named in the audit ledger (build-time I/O builtins in the canonical TIR evaluator: embed.jet, embed_bytes.jet, find.jet, find_empty.jet; build-plan-aware checking: programmable_build/main.jet). Every valid and differential fuzz mirror also passes. Commits accca8407 through 471089041.",
-          "at": "2026-07-28T10:05:58.394Z"
+          "verifiedBy": "burndown-root",
+          "evidence": "Independent review accepted the recorded standalone corpus result and root reran valid_corpus_reaches_rustc successfully.",
+          "at": "2026-07-28T11:14:10.443Z"
         },
         {
           "n": 5,
           "text": "Valid-corpus-to-rustc, changed-example default and AOT goldens, and build-entry proof pass without hidden fallback.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-1210-examples",
-          "verifiedBy": null,
-          "evidence": "valid-corpus-to-rustc GREEN (scripts/agent/jet-env full cargo test --test sema_soundness valid_corpus_reaches_rustc, RUST_MIN_STACK=33554432); four pre-existing I2 violations closed at root, none filtered. generated_rust_has_no_unaudited_unsafe GREEN. build-entry GREEN 31/31. Goldens GREEN for all nine changed example families. No hidden fallback: no test weakened, no fixture excluded, no stem moved to a gaps list. Residual red is named and attributed on the card log: a codegen unreachable from b30168788 and the #1254 deopt/comptime coverage family. Commits accca8407 f57441382 33873fcf4 b3280d25c ab1619652 fe1339a26 df0e4067e 14bf735ab d37ec796b 471089041.",
-          "at": "2026-07-28T10:06:22.080Z"
+          "verifiedBy": "burndown-root",
+          "evidence": "Root independently reran valid_corpus_reaches_rustc, generated_rust_has_no_unaudited_unsafe, build_entry 31/31, and the focused UI snapshot; all passed.",
+          "at": "2026-07-28T11:14:10.680Z"
         },
         {
           "n": 6,
           "text": "#1206 criteria 5 and 6 receive exact fresh evidence and can close.",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-1210-examples",
-          "verifiedBy": null,
-          "evidence": "Logged the exact fresh measurements on #1206 for its criteria 5 and 6: standalone sweep 421/426 with the two remaining features named, sema_soundness valid-corpus and unsafe-provenance green, build_entry 31/31, and goldens green for all nine changed example families in default and AOT paths. #1206 left open for its own owner to close.",
-          "at": "2026-07-28T10:06:37.556Z"
+          "verifiedBy": "burndown-root",
+          "evidence": "Independent review confirmed the exact evidence handoff to #1206 remains present and scoped.",
+          "at": "2026-07-28T11:14:10.916Z"
         },
         {
           "n": 7,
           "text": "A fresh independent reviewer approves every fix and reruns the scoped proof.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T21:33:13.317Z"
+          "status": "verified",
+          "metBy": "e3-1210-review",
+          "verifiedBy": "burndown-root",
+          "evidence": "Root separately reran all four required review gates after repair 12f58cab0; all passed.",
+          "at": "2026-07-28T11:14:11.151Z"
         }
       ],
       "refs": [
@@ -55216,8 +55241,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T21:32:31.859Z",
-      "updated": "2026-07-28T10:46:51.780Z",
-      "updatedBy": "e3-1210-examples"
+      "updated": "2026-07-28T11:14:11.690Z",
+      "updatedBy": "burndown-root"
     },
     {
       "id": "c0nv1ivk",
@@ -58918,12 +58943,32 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "Follow the pattern proved by c485d5f17 and 534a49fbd: a ProcessSpec method needs an entry in the safety.rs residency list and in the lower_ctx.rs dispatch, plus a host shim that reuses the existing launch behavior. Store the environment edits and the working directory on JitProcessSpec and apply them at launch exactly as jet_process_command does. Reuse the existing runtime; never a second copy. Prove a program that sets cwd and edits the environment gives byte-identical stdout, stderr and exit under jet run and jet run --release, and add a test that fails if either table entry is removed. Do not grow tests/jit_gaps.txt. blockedBy: none.",
       "blockedBy": [],
-      "assignee": "e3-1255-fix",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "burndown-root",
+          "text": "Closed after independent review and a separate root rerun. ProcessSpec env, env_remove, and cwd now match default and release lenses, share the locked logical environment, preserve raw values, validate child input, and do not mutate the host environment. Commits: 7813d1166, cbf0ba8a7."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "burndown-root",
+          "text": "Independent reviewer found no issues in 7813d1166 plus cbf0ba8a7. Root independently reran jit_run (4/4) and the focused env_overlay codegen law test (1/1); tests/jit_gaps.txt is unchanged."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-1255-fix",
+          "text": "[handoff] Commit cbf0ba8a7 is ready for independent review and verification. Re-run cargo test --test jit_run -- --nocapture without RUST_MIN_STACK. Inspect the logical environment lock, raw OsString preservation, Windows key identity, child composition, and direct default-versus-release proof. The broad env_overlay target has a pre-existing default-stack overflow; its focused codegen law-shape test passes."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-1255-fix",
+          "text": "Repair commit cbf0ba8a7 replaces the JIT host environment with one raw, locked logical snapshot. core.env get, set, unset, vars, and ProcessSpec launches now share it. Child launch validates names and values, uses platform-aware key identity, and never changes the host environment. Proof: cargo test --test jit_run -- --nocapture passed 4/4 on the default Rust stack. The focused env-overlay law-shape test passed 1/1. The broad env_overlay target remains out of scope because its existing mutation_enumeration_and_child_snapshot_run test overflows the default Rust test-thread stack before assertions."
+        },
         {
           "at": "2026-07-28",
           "by": "e3-1255-fix",
@@ -58944,9 +58989,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T10:03:20.477Z",
-      "updated": "2026-07-28T10:42:48.340Z",
-      "updatedBy": "e3-1255-fix",
-      "claimedAt": "2026-07-28T10:42:48.340Z"
+      "updated": "2026-07-28T11:14:09.254Z",
+      "updatedBy": "burndown-root"
     },
     {
       "id": "c0wxnoo3",
@@ -59030,6 +59074,221 @@
       "created": "2026-07-28T10:09:11.328Z",
       "updated": "2026-07-28T10:09:11.328Z",
       "updatedBy": "burndown-orch"
+    },
+    {
+      "id": "c0q4t3oj",
+      "num": 1259,
+      "title": "Branch surface: prefer arm tables (lint + teaching)",
+      "body": "Make multi-line braced if/else and else-if chains teach the ordered arm-table form. Keep one-line short forms. Align value if with the same law. Examples and diagnostics must match S68.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-language-coherence",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "1. Owner ratifies surface ballots on this card (PREF1, ONELINE1, ELSEIF1, LINT1, VALUE1, FMT1, TEACH1).\n2. Add lint for multi-line braced if/else and else-if toward arm tables; skip one-line forms.\n3. Register diagnostic + ui_lint snapshots; update diagnostics.md.\n4. Apply TEACH1 to examples (or allow-list if softer option wins).\n5. Fmt stays within-shape only unless FMT1 says otherwise.\n6. Proof: ui_lint green; touched examples compile; independent review.",
+      "blockedBy": [
+        "D-BRANCH-PREF1",
+        "D-BRANCH-ONELINE1",
+        "D-BRANCH-ELSEIF1",
+        "D-BRANCH-LINT1",
+        "D-BRANCH-VALUE1",
+        "D-BRANCH-FMT1",
+        "D-BRANCH-TEACH1"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "cursor-branch-track",
+          "text": "Owner decide queue: seven surface ballots. Recs: PREF1=A ONELINE1=A ELSEIF1=A LINT1=A VALUE1=A FMT1=C TEACH1=A."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "cursor-branch-track",
+          "text": "Tracked: surface prefer-arm-table work + owner ballots."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Owner ballots on this card are ratified",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T11:06:28.000Z"
+        },
+        {
+          "n": 2,
+          "text": "Lint + ui_lint snapshot match the ratified triggers",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T11:06:28.188Z"
+        },
+        {
+          "n": 3,
+          "text": "Examples and docs match TEACH1 / house style",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T11:06:28.378Z"
+        },
+        {
+          "n": 4,
+          "text": "Independent review closes; no owned worktree left",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T11:06:28.581Z"
+        },
+        {
+          "n": 5,
+          "text": "Syntax.rs entry updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T11:10:08.524Z"
+        },
+        {
+          "n": 6,
+          "text": "syntax-decisions.md log entry",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T11:10:08.525Z"
+        },
+        {
+          "n": 7,
+          "text": "jet devtools grammars regenerated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T11:10:08.525Z"
+        },
+        {
+          "n": 8,
+          "text": "snapshots re-blessed",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T11:10:08.525Z"
+        }
+      ],
+      "refs": [
+        "docs/spec/syntax-decisions.md",
+        "docs/audits/isomorphic-ontology-audit-2026-07-27.md",
+        "examples/features/basics/if_universal.jet",
+        "examples/features/io/dir_entry.jet",
+        "crates/jet-sema/src/Sema/CheckerCore/statements.rs",
+        "tests/ui_lint"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T11:06:01.607Z",
+      "updated": "2026-07-28T11:13:58.594Z",
+      "updatedBy": "owner"
+    },
+    {
+      "id": "c0tc1fgq",
+      "num": 1260,
+      "title": "Branch lowering: classify arms and emit best machine form",
+      "body": "One user if mechanism; backend classifies each arm table (bool2, enum, dense int, sparse int, ordered predicates, mixed) and emits the fastest safe shape (select, match/switch, data table, jump table, or ordered compares). Bind subject once. Avoid needless clone. Measure with benches. Goal: bare-metal branch dispatch that matches or beats careful Rust/C.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-language-coherence",
+      "phase": "planning",
+      "priority": "P1",
+      "plan": "Depends on #1259 surface law so one IR story stays coherent.\n\n1. Owner ratifies AST1 and CODEGEN1 on this card.\n2. Early-desugar or unify classic if into arm-table IR when AST1 says so.\n3. Implement classifier: bool2, enum, dense int, sparse int, ordered, mixed.\n4. Emit best form per class: select/cmov, match/switch, data table, jump table, ordered compares.\n5. Bind subject once; remove needless scrutinee clone.\n6. Add microbenches (dense/sparse/enum/ordered/biased) and record baselines.\n7. Proof: benches + golden/codegen spot checks; independent review.",
+      "blockedBy": [
+        "c0q4t3oj",
+        "D-BRANCH-AST1",
+        "D-BRANCH-CODEGEN1"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "cursor-branch-track",
+          "text": "Fix blocker ref to card id c0q4t3oj (#1259)."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "cursor-branch-track",
+          "text": "Blockers: #1259 surface pack; D-BRANCH-AST1; D-BRANCH-CODEGEN1."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "cursor-branch-track",
+          "text": "Tracked: branch lowering classifier for bare-metal dispatch. Blocked on #1259 surface ballots + AST1/CODEGEN1."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "AST1 and CODEGEN1 ratified",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T11:06:28.989Z"
+        },
+        {
+          "n": 2,
+          "text": "Classifier covers the agreed arm classes",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T11:06:29.181Z"
+        },
+        {
+          "n": 3,
+          "text": "Subject bound once; no needless clone on hot match path",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T11:06:29.381Z"
+        },
+        {
+          "n": 4,
+          "text": "Benches exist for dense, sparse, enum, ordered, biased",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T11:06:29.599Z"
+        },
+        {
+          "n": 5,
+          "text": "Independent review closes; no owned worktree left",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T11:06:29.794Z"
+        }
+      ],
+      "refs": [
+        "crates/jet-codegen/src/Codegen/TIR/lower/control_flow.rs",
+        "crates/jet-codegen/src/Codegen/TIR/lower/patterns.rs",
+        "crates/jet-codegen/src/Codegen/TIR/emit/statements.rs",
+        "docs/audits/isomorphic-ontology-audit-2026-07-27.md",
+        "docs/spec/architecture.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T11:06:01.800Z",
+      "updated": "2026-07-28T11:08:56.757Z",
+      "updatedBy": "cursor-branch-track"
     }
   ],
   "decisions": [
@@ -73316,6 +73575,547 @@
       "created": "2026-07-28T10:36:12.794Z",
       "outcome": "A",
       "ratifiedAt": "2026-07-28"
+    },
+    {
+      "id": "D-BRANCH-PREF1",
+      "cardId": "c0q4t3oj",
+      "group": "syntax",
+      "title": "Preferred multi-line branch spelling",
+      "gist": "Multi-line branches should prefer arm tables over braced if and else.",
+      "lesson": "Jet has one branch keyword: if. A branch chooses which arm runs.\n\nAn arm table lists heads and bodies. The first true or matching head wins. You write if { head -> body } or if subject == { head -> body }.\n\nA classic braced form looks like other C-family languages: if cond { … } else { … }. It means the same two-arm choice.\n\nThis decision picks the house style for multi-line code. It does not add a second keyword.",
+      "explainer": "",
+      "story": "Maya lists directory entries. She writes a multi-line if and else with braces. She wants the same shape the docs teach for three or more arms.",
+      "inWild": "loop entry; entries {\n    if entry.is_dir {\n        print(\"dir: {entry.name}\")\n    } else {\n        print(\"file: {entry.name}\")\n    }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Arm table is the house style",
+          "detail": "Docs, examples, and lints push arm tables for multi-line branches. Braced classic stays legal but secondary.",
+          "code": "if {\n    entry.is_dir -> print(\"dir: {entry.name}\")\n    else -> print(\"file: {entry.name}\")\n}"
+        },
+        {
+          "key": "B",
+          "name": "Both forms stay equal",
+          "detail": "No preference lint. Braced classic and arm tables stay first-class forever.",
+          "code": "if entry.is_dir {\n    print(\"dir: {entry.name}\")\n} else {\n    print(\"file: {entry.name}\")\n}"
+        },
+        {
+          "key": "C",
+          "name": "Braced classic stays the beginner default",
+          "detail": "Arm tables are taught as advanced. Beginner docs keep braced if and else.",
+          "code": "if entry.is_dir {\n    print(\"dir\")\n} else {\n    print(\"file\")\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "if/else and match are different keywords.",
+          "code": "match x { A => …, _ => … }"
+        },
+        {
+          "lang": "Jet S68",
+          "note": "One keyword; arm tables are the multi-branch model.",
+          "code": "if x == { .A -> … else -> … }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One ontology for two or more arms. Matches S68 and the dir_entry intent.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Equal forms hide which shape Jet wants people to learn."
+          },
+          {
+            "key": "C",
+            "reason": "Keeps a second beginner costume for the same mechanism."
+          }
+        ],
+        "tradeoff": "Beginners learn arrow arms earlier when a branch spans lines."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-28T11:06:59.914Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-28"
+    },
+    {
+      "id": "D-BRANCH-ONELINE1",
+      "cardId": "c0q4t3oj",
+      "group": "syntax",
+      "title": "One-line short if stays first-class",
+      "gist": "When a two-arm branch fits one line, keep the short if form.",
+      "lesson": "A short effect form writes the condition and the statement on one line. Example: if n > 5 print(\"big\") else print(\"small\").\n\nA short value form uses arrows on one line. Example: m :: if a > b -> a else -> b.\n\nArm tables stay available. This decision only sets when the short form needs no lint.",
+      "explainer": "",
+      "story": "Leo clamps a score in one line. He does not want a four-line table for a tiny choice.",
+      "inWild": "n :: 7\nif n > 5 print(\"big\") else print(\"small\")\nm :: if a > b -> a else -> b",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One-line forms stay preferred when they fit",
+          "detail": "No lint when the whole branch is one simple source line.",
+          "code": "if n > 5 print(\"big\") else print(\"small\")"
+        },
+        {
+          "key": "B",
+          "name": "Always prefer arm tables",
+          "detail": "Even tiny two-arm choices should use if { … }.",
+          "code": "if {\n    n > 5 -> print(\"big\")\n    else -> print(\"small\")\n}"
+        },
+        {
+          "key": "C",
+          "name": "Width-based only",
+          "detail": "Lint and fmt use column width, not author line breaks.",
+          "code": "if n > 5 print(\"big\") else print(\"small\")"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "One-line guards stay common for tiny branches.",
+          "code": "print(\"big\") if n > 5 else print(\"small\")"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Keeps short scripts dense. Arm tables cover multi-line clarity.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Forces ceremony on the smallest branches."
+          },
+          {
+            "key": "C",
+            "reason": "Fights author line breaks already used by the formatter law."
+          }
+        ],
+        "tradeoff": "Two spellings remain. The lint must check layout, not only AST shape."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-28T11:07:00.127Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-28"
+    },
+    {
+      "id": "D-BRANCH-ELSEIF1",
+      "cardId": "c0q4t3oj",
+      "group": "syntax",
+      "title": "Fate of else if chains",
+      "gist": "Decide whether else if stays quiet, gets a lint, or retires.",
+      "lesson": "else if chains another test after a failed if. Many languages teach this as the main multi-test form.\n\nJet already has ordered arm tables for the same job. S68 says else if stays legal, but docs should not teach it as the normal form.\n\nThis decision picks how hard the tools push people off else if.",
+      "explainer": "",
+      "story": "Priya ports a status classifier with four else if arms. She wants to know if Jet will warn or break that code.",
+      "inWild": "if n < 0 {\n    print(\"neg\")\n} else if n < 10 {\n    print(\"small\")\n} else {\n    print(\"big\")\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep legal; lint toward arm table",
+          "detail": "Soft warning. Code still runs. Fix points at the arm-table spelling.",
+          "code": "if {\n    n < 0 -> print(\"neg\")\n    n < 10 -> print(\"small\")\n    else -> print(\"big\")\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep legal; no lint",
+          "detail": "Only docs discourage else if. Tools stay silent.",
+          "code": "if n < 0 {\n    print(\"neg\")\n} else if n < 10 {\n    print(\"small\")\n} else {\n    print(\"big\")\n}"
+        },
+        {
+          "key": "C",
+          "name": "Retire with a migration diagnostic",
+          "detail": "else if becomes an error with a clear fix to an arm table.",
+          "code": "Error: use an arm table instead of else if"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "S68",
+          "note": "else if remains legal; rarely prefer it.",
+          "code": "if { n < 0 -> … n < 10 -> … else -> … }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Finishes S68 teaching without a hard break for existing code.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Leaves a second multi-test costume without tool pressure."
+          },
+          {
+            "key": "C",
+            "reason": "Breaks ports and old examples in one step."
+          }
+        ],
+        "tradeoff": "Dual spellings remain until codebases migrate."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-28T11:07:28.643Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-28"
+    },
+    {
+      "id": "D-BRANCH-LINT1",
+      "cardId": "c0q4t3oj",
+      "group": "tooling",
+      "title": "Prefer-arm-table lint triggers",
+      "gist": "Pick exact warning cases for braced if and else if.",
+      "lesson": "A lint warns. It does not stop the build by default.\n\nThis lint teaches the preferred branch spelling. It must skip forms we still want, such as a one-line short if.\n\nA fixit can rewrite code later. That is a separate choice from when to warn.",
+      "explainer": "",
+      "story": "Chris runs jet check on an old module full of braced if and else. He needs a predictable warning rule, not surprise rewrites.",
+      "inWild": "if ready {\n    start()\n} else {\n    wait()\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Warn multi-line braced if/else and any else if",
+          "detail": "Skip one-line adjacent and one-line value forms. Warn only.",
+          "code": "Warning: prefer if { ready -> start() else -> wait() }"
+        },
+        {
+          "key": "B",
+          "name": "Warn only else if chains",
+          "detail": "Two-arm braced if and else stay quiet.",
+          "code": "Warning only when else if appears"
+        },
+        {
+          "key": "C",
+          "name": "Warn plus machine fixit",
+          "detail": "Same triggers as A, and tools can rewrite to an arm table.",
+          "code": "Warning + autofix to if { … }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Jet L0503",
+          "note": "Style lint with snapshot tests.",
+          "code": "prefer += instead of repeating the left side"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Matches the preferred multi-line house style without shipping rewrite risk first.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Leaves the common two-arm braced form untaught."
+          },
+          {
+            "key": "C",
+            "reason": "Fixit can wait until the warn rule is stable."
+          }
+        ],
+        "tradeoff": "Old examples may warn until updated."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-28T11:07:28.828Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-28"
+    },
+    {
+      "id": "D-BRANCH-VALUE1",
+      "cardId": "c0q4t3oj",
+      "group": "syntax",
+      "title": "Value if follows the same preference law",
+      "gist": "Value branches use the same one-line versus arm-table preference.",
+      "lesson": "An effect if runs statements. A value if yields a value.\n\nBoth are the same branch mechanism. Only the result differs.\n\nThis decision asks whether value forms share the house style with effect forms.",
+      "explainer": "",
+      "story": "Ana picks a display string with a value if. She wants one rule, not a special style for expressions.",
+      "inWild": "note :: if a > b -> {\n    d :: a - b\n    \"a leads by {d}\"\n} else -> \"b leads\"",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Same preference matrix for effect and value",
+          "detail": "One teaching story. One-line value forms stay fine when they fit.",
+          "code": "m :: if a > b -> a else -> b\nsize :: if {\n    n < 5 -> \"small\"\n    else -> \"large\"\n}"
+        },
+        {
+          "key": "B",
+          "name": "Value braced arrows stay freer",
+          "detail": "Expression style can keep braced value branches without the same lint.",
+          "code": "m :: if (a > b) -> {\n    a\n} else -> {\n    b\n}"
+        },
+        {
+          "key": "C",
+          "name": "Value multi-arm must use tables",
+          "detail": "Stricter than effect form for multi-arm values.",
+          "code": "size :: if {\n    n < 5 -> \"small\"\n    n < 10 -> \"medium\"\n    else -> \"large\"\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "Effect versus value is only whether the branch yields. The ontology stays one.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Splits house style by expression versus statement."
+          },
+          {
+            "key": "C",
+            "reason": "Adds a stricter costume without a new meaning."
+          }
+        ],
+        "tradeoff": "Some value braces in examples may get the same lint."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-28T11:07:29.033Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-28"
+    },
+    {
+      "id": "D-BRANCH-FMT1",
+      "cardId": "c0q4t3oj",
+      "group": "tooling",
+      "title": "May formatter rewrite branch shape?",
+      "gist": "Decide whether jet fmt may turn braced if into an arm table.",
+      "lesson": "The formatter reprints code in one style. Jet law keeps author intent for many shapes. It does not treat format as a full rewrite engine.\n\nChanging braced if into an arm table changes the written mechanism costume. A lint or fixit can do that on purpose.\n\nThis decision sets the formatter boundary for branches only.",
+      "explainer": "",
+      "story": "Sam hits save and expects spaces and indents to settle. Sam does not want silent rewrites of every if into a table.",
+      "inWild": "if ready {\n    start()\n} else {\n    wait()\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Fmt never changes mechanism; lint only",
+          "detail": "Formatter keeps braced if as braced if. Preference stays in lint and docs.",
+          "code": "jet fmt  # still braced if/else"
+        },
+        {
+          "key": "B",
+          "name": "Fmt may rewrite when the lint would fire",
+          "detail": "Lossless rewrites to arm tables become part of format.",
+          "code": "jet fmt  # becomes if { ready -> start() else -> wait() }"
+        },
+        {
+          "key": "C",
+          "name": "Fmt only normalizes within one shape",
+          "detail": "Spaces, arrows, and indent settle. No If to table rewrite. Matches today.",
+          "code": "if {\n    ready ->start()\n}\n# fmt -> ready -> start()"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "S44",
+          "note": "Author intent preserved; not AST-canonical.",
+          "code": "jet fmt"
+        }
+      ],
+      "rec": "C",
+      "recommendation": {
+        "why": "Keeps format honest. Shape change belongs to lint or fixit, not silent save.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "Almost the same as C; C also locks within-shape cleanup."
+          },
+          {
+            "key": "B",
+            "reason": "Turns format into a migrator and fights author-intent law."
+          }
+        ],
+        "tradeoff": "Preferred style still needs lint or manual edits."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-28T11:08:17.148Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-28"
+    },
+    {
+      "id": "D-BRANCH-TEACH1",
+      "cardId": "c0q4t3oj",
+      "group": "tooling",
+      "title": "Example corpus after the prefer lint",
+      "gist": "Choose how hard examples must match the new branch house style.",
+      "lesson": "Jet examples are executable specs. Readers copy them.\n\nAfter a prefer lint lands, the corpus can move with it, stay grandfathered, or silence the lint in-tree.\n\nThis decision sets that bar for feature examples.",
+      "explainer": "",
+      "story": "The docs owner opens basics examples after the lint ships. They need a clear pass or allow-list rule.",
+      "inWild": "examples/features/basics/if_universal.jet\nexamples/features/io/dir_entry.jet",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "All feature examples must pass the lint",
+          "detail": "Strong teaching. Corpus matches house style.",
+          "code": "examples/** pass prefer-arm-table lint"
+        },
+        {
+          "key": "B",
+          "name": "Only branch basics and new code",
+          "detail": "Softer landing. Legacy examples can wait.",
+          "code": "update if_universal + new files first"
+        },
+        {
+          "key": "C",
+          "name": "No example churn; allow in tree",
+          "detail": "Lint exists for users; repo examples may warn or allow.",
+          "code": "allow(prefer_arm_table) in examples"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "Examples teach the ontology. They should show the preferred form.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Leaves mixed costumes in the feature corpus."
+          },
+          {
+            "key": "C",
+            "reason": "Undercuts the lint as a teaching tool."
+          }
+        ],
+        "tradeoff": "One-time example pass across touched features."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-28T11:08:17.340Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-28"
+    },
+    {
+      "id": "D-BRANCH-AST1",
+      "cardId": "c0tc1fgq",
+      "group": "architecture",
+      "title": "One semantic IR for branches",
+      "gist": "Choose whether classic if stays a separate AST node or desugars into arm-table IR.",
+      "lesson": "Users type if. Inside the compiler, Jet today has two shapes. Stmt::If is a nested then and else tree. Stmt::Switch is a flat arm list used for tables.\n\nBoth mean ordered choice. Dual nodes force duplicate walks in sema, ownership, and codegen helpers.\n\nThis decision picks the internal law. User spelling can still include short if forms.",
+      "explainer": "",
+      "story": "A codegen engineer adds a new branch optimization. They must special-case If and Switch or forget one path.",
+      "inWild": "// classic\nif ready { start() } else { wait() }\n// table\nif {\n    ready -> start()\n    else -> wait()\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Keep dual AST; share helpers",
+          "detail": "Least churn. Document that both mean one mechanism.",
+          "technical": "Stmt::If and Stmt::Switch remain. Shared lower/check helpers.",
+          "code": "check_if(…)\ncheck_switch(…)"
+        },
+        {
+          "key": "B",
+          "name": "Early-desugar classic if into arm-table IR",
+          "detail": "Parser may build If. A desugar pass makes one arm-table IR for sema and codegen.",
+          "technical": "Classic two-arm becomes arms + optional else. Spans preserved for diagnostics.",
+          "code": "if ready start() else wait()\n# IR: arms [ready->start, else->wait]"
+        },
+        {
+          "key": "C",
+          "name": "Single AST node from the parser",
+          "detail": "Parser always builds arm-table nodes. Maximum unity; larger parser and fmt churn.",
+          "code": "only SwitchArm IR from parse"
+        }
+      ],
+      "comparisons": [],
+      "rec": "B",
+      "recommendation": {
+        "why": "One mechanism in the middle end without a full parser rewrite.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "Leaves duplicate paths for every new branch opt."
+          },
+          {
+            "key": "C",
+            "reason": "Pays full parser and fmt cost up front."
+          }
+        ],
+        "tradeoff": "Desugar must keep spans accurate for lints and IDE."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T11:08:17.532Z"
+    },
+    {
+      "id": "D-BRANCH-CODEGEN1",
+      "cardId": "c0tc1fgq",
+      "group": "runtime",
+      "title": "Branch lowering classifier and machine forms",
+      "gist": "Lock how Jet picks select, match, tables, or compare chains for each arm table.",
+      "lesson": "On modern optimizers, source if and match often become the same machine code for equality cases. Timing wins come from the right shape: branchless select, data table, jump table, or ordered compares.\n\nA classifier labels each arm table. Then codegen emits the best safe form.\n\nClasses include two-way bool, enum patterns, dense ints, sparse ints, ordered predicates, and mixed heads.",
+      "explainer": "",
+      "story": "Remy ships a hot protocol demux. Random dense codes want a table. A biased Ok path wants a predicted compare. One blunt always-match rule loses on the biased path.",
+      "inWild": "if code == {\n    0 -> handle0()\n    1 -> handle1()\n    // … dense …\n    else -> fallback()\n}\n\nif {\n    n < 0 -> neg()\n    n < 10 -> small()\n    else -> big()\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Codify today only",
+          "detail": "Enum and Result or Option pattern tables become match. Everything else stays an if-chain.",
+          "technical": "Matches current lower_enum_match / fallible / guard_switch paths.",
+          "code": "enum table -> Rust match\nbool table -> if/else chain"
+        },
+        {
+          "key": "B",
+          "name": "Full classifier; best form per class",
+          "detail": "Bool2 may select. Enum uses match. Dense ints use data or jump tables. Sparse uses search or hash. Ordered stays compares. Mixed falls back safely. Bind subject once. Avoid needless clone.",
+          "technical": "Classes: C-BOOL2, C-ENUM, C-DENSE-INT, C-SPARSE-INT, C-ORDERED, C-MIXED. PGO weights later.",
+          "code": "dense value arms -> static table load\nordered guards -> compare chain\nenum payloads -> match"
+        },
+        {
+          "key": "C",
+          "name": "Always if-chain",
+          "detail": "Simplest codegen. Never rely on match or tables.",
+          "code": "all branches -> if/else if"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "LLVM",
+          "note": "Dense equality often becomes a table load; jump tables can lose when one arm dominates.",
+          "code": "switch / lookup / cmov"
+        },
+        {
+          "lang": "Rust",
+          "note": "match helps the backend see a switch; if chains often optimize to the same code.",
+          "code": "match x { … }"
+        }
+      ],
+      "rec": "B",
+      "recommendation": {
+        "why": "This is the path to beat careful C and Rust on dispatch: classify, then emit the winning machine form.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "Leaves dense int and select wins on the table."
+          },
+          {
+            "key": "C",
+            "reason": "Gives up match and table shapes on purpose."
+          }
+        ],
+        "tradeoff": "More lowering cases to test and bench. Syntax stays one if."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T11:08:17.729Z"
     }
   ],
   "questions": [
@@ -74302,6 +75102,384 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-28T11:14:11.690Z",
+      "by": "burndown-root",
+      "action": "card.update",
+      "ref": "c0jlp4u3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T11:14:11.422Z",
+      "by": "burndown-root",
+      "action": "card.update",
+      "ref": "c0jlp4u3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T11:14:11.151Z",
+      "by": "burndown-root",
+      "action": "card.criteria-verify",
+      "ref": "c0jlp4u3",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-28T11:14:10.916Z",
+      "by": "burndown-root",
+      "action": "card.criteria-verify",
+      "ref": "c0jlp4u3",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-28T11:14:10.680Z",
+      "by": "burndown-root",
+      "action": "card.criteria-verify",
+      "ref": "c0jlp4u3",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-28T11:14:10.444Z",
+      "by": "burndown-root",
+      "action": "card.criteria-verify",
+      "ref": "c0jlp4u3",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-28T11:14:10.205Z",
+      "by": "burndown-root",
+      "action": "card.criteria-verify",
+      "ref": "c0jlp4u3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-28T11:14:09.972Z",
+      "by": "burndown-root",
+      "action": "card.criteria-verify",
+      "ref": "c0jlp4u3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T11:14:09.733Z",
+      "by": "burndown-root",
+      "action": "card.criteria-verify",
+      "ref": "c0jlp4u3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T11:14:09.476Z",
+      "by": "e3-1210-review",
+      "action": "card.criteria-meet",
+      "ref": "c0jlp4u3",
+      "note": "#7"
+    },
+    {
+      "at": "2026-07-28T11:14:09.254Z",
+      "by": "burndown-root",
+      "action": "card.update",
+      "ref": "c0vxecje",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T11:14:08.992Z",
+      "by": "burndown-root",
+      "action": "card.update",
+      "ref": "c0vxecje",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T11:13:58.594Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-BRANCH-TEACH1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-28T11:13:52.620Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-BRANCH-FMT1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-28T11:12:53.153Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-BRANCH-VALUE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-28T11:12:11.114Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-BRANCH-LINT1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-28T11:11:14.207Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-BRANCH-ELSEIF1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-28T11:10:59.319Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-BRANCH-ONELINE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-28T11:10:08.525Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-BRANCH-PREF1",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-28T11:10:08.525Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0q4t3oj",
+      "note": "#8 snapshots re-blessed"
+    },
+    {
+      "at": "2026-07-28T11:10:08.525Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0q4t3oj",
+      "note": "#7 jet devtools grammars regenerated"
+    },
+    {
+      "at": "2026-07-28T11:10:08.525Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0q4t3oj",
+      "note": "#6 syntax-decisions.md log entry"
+    },
+    {
+      "at": "2026-07-28T11:10:08.525Z",
+      "by": "owner",
+      "action": "card.criteria-add",
+      "ref": "c0q4t3oj",
+      "note": "#5 Syntax.rs entry updated"
+    },
+    {
+      "at": "2026-07-28T11:08:56.758Z",
+      "by": "cursor-branch-track",
+      "action": "card.update",
+      "ref": "c0tc1fgq",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-28T11:08:37.009Z",
+      "by": "cursor-branch-track",
+      "action": "card.update",
+      "ref": "c0q4t3oj",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-28T11:08:36.784Z",
+      "by": "cursor-branch-track",
+      "action": "card.update",
+      "ref": "c0tc1fgq",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-28T11:08:17.729Z",
+      "by": "cursor-branch-track",
+      "action": "decision.add",
+      "ref": "D-BRANCH-CODEGEN1",
+      "note": "Branch lowering classifier and machine forms"
+    },
+    {
+      "at": "2026-07-28T11:08:17.532Z",
+      "by": "cursor-branch-track",
+      "action": "decision.add",
+      "ref": "D-BRANCH-AST1",
+      "note": "One semantic IR for branches"
+    },
+    {
+      "at": "2026-07-28T11:08:17.342Z",
+      "by": "cursor-branch-track",
+      "action": "decision.add",
+      "ref": "D-BRANCH-TEACH1",
+      "note": "Example corpus after the prefer lint"
+    },
+    {
+      "at": "2026-07-28T11:08:17.148Z",
+      "by": "cursor-branch-track",
+      "action": "decision.add",
+      "ref": "D-BRANCH-FMT1",
+      "note": "May formatter rewrite branch shape?"
+    },
+    {
+      "at": "2026-07-28T11:07:29.033Z",
+      "by": "cursor-branch-track",
+      "action": "decision.add",
+      "ref": "D-BRANCH-VALUE1",
+      "note": "Value if follows the same preference law"
+    },
+    {
+      "at": "2026-07-28T11:07:28.833Z",
+      "by": "cursor-branch-track",
+      "action": "decision.add",
+      "ref": "D-BRANCH-LINT1",
+      "note": "Prefer-arm-table lint triggers"
+    },
+    {
+      "at": "2026-07-28T11:07:28.643Z",
+      "by": "cursor-branch-track",
+      "action": "decision.add",
+      "ref": "D-BRANCH-ELSEIF1",
+      "note": "Fate of else if chains"
+    },
+    {
+      "at": "2026-07-28T11:07:00.127Z",
+      "by": "cursor-branch-track",
+      "action": "decision.add",
+      "ref": "D-BRANCH-ONELINE1",
+      "note": "One-line short if stays first-class"
+    },
+    {
+      "at": "2026-07-28T11:06:59.915Z",
+      "by": "cursor-branch-track",
+      "action": "decision.add",
+      "ref": "D-BRANCH-PREF1",
+      "note": "Preferred multi-line branch spelling"
+    },
+    {
+      "at": "2026-07-28T11:06:29.795Z",
+      "by": "cursor-branch-track",
+      "action": "card.criteria-add",
+      "ref": "c0tc1fgq",
+      "note": "#5 Independent review closes; no owned worktree left"
+    },
+    {
+      "at": "2026-07-28T11:06:29.599Z",
+      "by": "cursor-branch-track",
+      "action": "card.criteria-add",
+      "ref": "c0tc1fgq",
+      "note": "#4 Benches exist for dense, sparse, enum, ordered, biased"
+    },
+    {
+      "at": "2026-07-28T11:06:29.382Z",
+      "by": "cursor-branch-track",
+      "action": "card.criteria-add",
+      "ref": "c0tc1fgq",
+      "note": "#3 Subject bound once; no needless clone on hot match path"
+    },
+    {
+      "at": "2026-07-28T11:06:29.181Z",
+      "by": "cursor-branch-track",
+      "action": "card.criteria-add",
+      "ref": "c0tc1fgq",
+      "note": "#2 Classifier covers the agreed arm classes"
+    },
+    {
+      "at": "2026-07-28T11:06:28.989Z",
+      "by": "cursor-branch-track",
+      "action": "card.criteria-add",
+      "ref": "c0tc1fgq",
+      "note": "#1 AST1 and CODEGEN1 ratified"
+    },
+    {
+      "at": "2026-07-28T11:06:28.803Z",
+      "by": "cursor-branch-track",
+      "action": "card.update",
+      "ref": "c0tc1fgq",
+      "note": "phase,plan,logEntry,blockedBy,refs"
+    },
+    {
+      "at": "2026-07-28T11:06:28.581Z",
+      "by": "cursor-branch-track",
+      "action": "card.criteria-add",
+      "ref": "c0q4t3oj",
+      "note": "#4 Independent review closes; no owned worktree left"
+    },
+    {
+      "at": "2026-07-28T11:06:28.378Z",
+      "by": "cursor-branch-track",
+      "action": "card.criteria-add",
+      "ref": "c0q4t3oj",
+      "note": "#3 Examples and docs match TEACH1 / house style"
+    },
+    {
+      "at": "2026-07-28T11:06:28.188Z",
+      "by": "cursor-branch-track",
+      "action": "card.criteria-add",
+      "ref": "c0q4t3oj",
+      "note": "#2 Lint + ui_lint snapshot match the ratified triggers"
+    },
+    {
+      "at": "2026-07-28T11:06:28.000Z",
+      "by": "cursor-branch-track",
+      "action": "card.criteria-add",
+      "ref": "c0q4t3oj",
+      "note": "#1 Owner ballots on this card are ratified"
+    },
+    {
+      "at": "2026-07-28T11:06:27.809Z",
+      "by": "cursor-branch-track",
+      "action": "card.update",
+      "ref": "c0q4t3oj",
+      "note": "phase,plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-28T11:06:01.801Z",
+      "by": "cursor-branch-track",
+      "action": "card.add",
+      "ref": "c0tc1fgq",
+      "note": "Branch lowering: classify arms and emit best machine form"
+    },
+    {
+      "at": "2026-07-28T11:06:01.607Z",
+      "by": "cursor-branch-track",
+      "action": "card.add",
+      "ref": "c0q4t3oj",
+      "note": "Branch surface: prefer arm tables (lint + teaching)"
+    },
+    {
+      "at": "2026-07-28T11:03:24.867Z",
+      "by": "e3-1255-fix",
+      "action": "card.release",
+      "ref": "c0vxecje",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-28T11:03:08.809Z",
+      "by": "e3-1255-fix",
+      "action": "card.update",
+      "ref": "c0vxecje",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:54:21.444Z",
+      "by": "e3-1210-review-fix",
+      "action": "card.update",
+      "ref": "c0jlp4u3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T10:53:52.363Z",
+      "by": "e3-1210-review-fix",
+      "action": "card.update",
+      "ref": "c0jlp4u3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T10:48:15.753Z",
+      "by": "e3-1210-review-fix",
+      "action": "card.update",
+      "ref": "c0jlp4u3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:48:06.503Z",
+      "by": "e3-1210-review-fix",
+      "action": "card.claim",
+      "ref": "c0jlp4u3",
+      "note": ""
+    },
     {
       "at": "2026-07-28T10:46:51.780Z",
       "by": "e3-1210-examples",
@@ -77423,384 +78601,6 @@
       "action": "card.claim",
       "ref": "c0wtwjly",
       "note": ""
-    },
-    {
-      "at": "2026-07-27T21:41:56.814Z",
-      "by": "e3-1230-orch",
-      "action": "card.update",
-      "ref": "c073hnzc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-27T21:41:56.596Z",
-      "by": "e3-1230-orch",
-      "action": "card.update",
-      "ref": "c0yavfup",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-27T21:41:50.539Z",
-      "by": "e3-1242-grok",
-      "action": "card.add",
-      "ref": "c01nsow8",
-      "note": "JIT/AOT: io/log three-way timestamp drift"
-    },
-    {
-      "at": "2026-07-27T21:41:48.159Z",
-      "by": "e3-1230-orch",
-      "action": "card.add",
-      "ref": "c0yavfup",
-      "note": "JIT/AOT: io/log three-way stderr timestamp drift"
-    },
-    {
-      "at": "2026-07-27T21:41:31.202Z",
-      "by": "e3-1189-grok",
-      "action": "card.claim",
-      "ref": "c0wtwjly",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T21:41:09.093Z",
-      "by": "e3-1188-verify",
-      "action": "card.update",
-      "ref": "c0oni671",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T21:41:08.877Z",
-      "by": "e3-1188-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0oni671",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T21:41:08.692Z",
-      "by": "e3-1188-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0oni671",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T21:41:08.509Z",
-      "by": "e3-1188-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0oni671",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T21:38:22.978Z",
-      "by": "e3-1188-grok",
-      "action": "card.update",
-      "ref": "c0oni671",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T21:38:22.757Z",
-      "by": "e3-1188-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0oni671",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T21:38:22.565Z",
-      "by": "e3-1188-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0oni671",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T21:38:22.370Z",
-      "by": "e3-1188-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0oni671",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T21:36:11.595Z",
-      "by": "e3-1164-sol-verify",
-      "action": "card.update",
-      "ref": "c0kje71m",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T21:36:11.350Z",
-      "by": "e3-1164-sol-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0kje71m",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T21:36:11.156Z",
-      "by": "e3-1164-sol-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0kje71m",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T21:36:10.949Z",
-      "by": "e3-1164-sol-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0kje71m",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T21:36:10.753Z",
-      "by": "e3-1164-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0kje71m",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T21:36:10.563Z",
-      "by": "e3-1164-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0kje71m",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T21:36:10.353Z",
-      "by": "e3-1164-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0kje71m",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T21:36:10.151Z",
-      "by": "e3-1164-grok",
-      "action": "card.update",
-      "ref": "c0kje71m",
-      "note": "phase,logEntry,refs"
-    },
-    {
-      "at": "2026-07-27T21:29:07.107Z",
-      "by": "e3-1188-grok",
-      "action": "card.update",
-      "ref": "c0oni671",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T21:27:31.080Z",
-      "by": "e3-1164-grok",
-      "action": "card.update",
-      "ref": "c0kje71m",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T21:27:27.241Z",
-      "by": "e3-1188-grok",
-      "action": "card.claim",
-      "ref": "c0oni671",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T21:27:24.481Z",
-      "by": "e3-1164-grok",
-      "action": "card.claim",
-      "ref": "c0kje71m",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T21:26:58.488Z",
-      "by": "e3-1188-grok",
-      "action": "card.claim",
-      "ref": "c0oni671",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T21:26:58.290Z",
-      "by": "e3-1164-grok",
-      "action": "card.claim",
-      "ref": "c0kje71m",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T21:26:11.888Z",
-      "by": "e3-1163-review",
-      "action": "card.update",
-      "ref": "c0bp1vi1",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T21:26:11.672Z",
-      "by": "e3-1163-review",
-      "action": "card.criteria-verify",
-      "ref": "c0bp1vi1",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T21:26:11.485Z",
-      "by": "e3-1163-review",
-      "action": "card.criteria-verify",
-      "ref": "c0bp1vi1",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T21:26:11.298Z",
-      "by": "e3-1163-review",
-      "action": "card.criteria-verify",
-      "ref": "c0bp1vi1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T21:24:54.042Z",
-      "by": "e3-1163-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0bp1vi1",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T21:24:53.857Z",
-      "by": "e3-1163-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0bp1vi1",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T21:24:53.670Z",
-      "by": "e3-1163-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0bp1vi1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T21:24:53.479Z",
-      "by": "e3-1163-grok",
-      "action": "card.update",
-      "ref": "c0bp1vi1",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T21:23:23.664Z",
-      "by": "e3-1187-verify",
-      "action": "card.update",
-      "ref": "c0fv3bcg",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T21:23:18.087Z",
-      "by": "e3-1187-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0fv3bcg",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T21:23:17.866Z",
-      "by": "e3-1187-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0fv3bcg",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T21:23:17.681Z",
-      "by": "e3-1187-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0fv3bcg",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T21:19:27.117Z",
-      "by": "e3-1187-grok",
-      "action": "card.update",
-      "ref": "c0fv3bcg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-27T21:19:09.703Z",
-      "by": "e3-1187-grok",
-      "action": "card.update",
-      "ref": "c0fv3bcg",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T21:19:09.471Z",
-      "by": "e3-1187-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0fv3bcg",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T21:19:09.269Z",
-      "by": "e3-1187-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0fv3bcg",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T21:19:09.079Z",
-      "by": "e3-1187-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0fv3bcg",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T21:15:00.327Z",
-      "by": "e3-1242-grok",
-      "action": "card.update",
-      "ref": "c073hnzc",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T21:14:29.897Z",
-      "by": "e3-1242-grok",
-      "action": "card.claim",
-      "ref": "c073hnzc",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T21:14:29.686Z",
-      "by": "e3-1230-orch",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-27T21:14:29.466Z",
-      "by": "e3-1230-orch",
-      "action": "card.update",
-      "ref": "c073hnzc",
-      "note": "phase,plan"
-    },
-    {
-      "at": "2026-07-27T21:14:23.044Z",
-      "by": "e3-1230-orch",
-      "action": "card.add",
-      "ref": "c073hnzc",
-      "note": "JIT/AOT: io/files_depth show drift (FileKind/Bool print as 0)"
-    },
-    {
-      "at": "2026-07-27T21:13:42.077Z",
-      "by": "e3-1241-grok",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-27T21:13:33.171Z",
-      "by": "e3-1241-grok",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-27T21:13:26.223Z",
-      "by": "e3-1241-grok",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-27T21:13:25.985Z",
-      "by": "e3-1241-grok",
-      "action": "card.update",
-      "ref": "c01h50x5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T21:03:28.343Z",
-      "by": "e3-1187-grok",
-      "action": "card.update",
-      "ref": "c0fv3bcg",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
