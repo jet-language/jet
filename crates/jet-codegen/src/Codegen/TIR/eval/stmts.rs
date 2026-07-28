@@ -761,14 +761,14 @@ impl<'a> EvalCtx<'a> {
                 start,
                 end,
                 single,
-                write: _,
+                write,
                 elem_ty: _,
                 line: _,
             } => {
                 // D-SHAPE-PLACE1=A: mirror AOT `split_at_mut` planning with absolute
-                // region handles. User bindings materialize to List / element values
-                // (CtValue has no distinct View type); intermediate plan temps keep
-                // `__JetViewMut { base, start, end }` so later splits chain correctly.
+                // region handles. Mutable user windows stay as `__JetViewMut` so
+                // IndexAssign writes through to the owner (AOT emits real slices).
+                // Read-only / single-element user bindings still materialize.
                 if let Some(owner_expr) = owner {
                     let base_name = raw_place_local(owner_expr)
                         .map(|local| local.name.clone())
@@ -836,21 +836,26 @@ impl<'a> EvalCtx<'a> {
                         place_region(&base_name, after_start, *end),
                     );
                 }
-                let CtValue::List(items) = scope
-                    .get(&base_name)
-                    .cloned()
-                    .ok_or_else(|| unsupported("split views owner", self.span()))?
-                else {
-                    return Err(unsupported("split views owner", self.span()));
-                };
-                let window = items[*start as usize..=*end as usize].to_vec();
-                if *single {
-                    scope.insert(
-                        name.clone(),
-                        window.into_iter().next().unwrap_or(CtValue::Unit),
-                    );
+                if *write && !*single {
+                    // Write-through handle — same shape as plan temps / ViewNew.
+                    scope.insert(name.clone(), place_region(&base_name, *start, *end));
                 } else {
-                    scope.insert(name.clone(), CtValue::List(window));
+                    let CtValue::List(items) = scope
+                        .get(&base_name)
+                        .cloned()
+                        .ok_or_else(|| unsupported("split views owner", self.span()))?
+                    else {
+                        return Err(unsupported("split views owner", self.span()));
+                    };
+                    let window = items[*start as usize..=*end as usize].to_vec();
+                    if *single {
+                        scope.insert(
+                            name.clone(),
+                            window.into_iter().next().unwrap_or(CtValue::Unit),
+                        );
+                    } else {
+                        scope.insert(name.clone(), CtValue::List(window));
+                    }
                 }
                 Ok(Flow::Normal)
             }
@@ -1020,7 +1025,7 @@ fn strip_user(name: &str) -> String {
 
 /// Bind a match-arm pattern against `value`. Returns `true` when the arm matches
 /// (and payload locals were inserted into `scope`).
-fn bind_match_pattern(
+pub(super) fn bind_match_pattern(
     pattern: &crate::AST::Pattern,
     value: &CtValue,
     scope: &mut HashMap<String, CtValue>,

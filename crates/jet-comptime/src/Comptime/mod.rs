@@ -23,6 +23,7 @@ pub mod Builtins;
 pub mod CollectionEval;
 mod AmbientRuntime;
 mod ArgsLite;
+mod EventLite;
 mod CryptoLite;
 mod ArchiveLite;
 mod ZstdEntropy;
@@ -45,6 +46,11 @@ pub mod TirBridge;
 
 pub use AmbientRuntime::{try_core_call as try_ambient_core_call, try_handle as try_ambient_handle, with_ambient};
 pub use ArgsLite::{core_args_spec, eval_handle as eval_args_handle};
+pub use EventLite::{
+    core_event_async_result, core_event_decision_hook, core_event_hook, core_event_new,
+    core_event_policy_sync, core_event_scope, core_event_with_policy,
+    eval_method as eval_event_method, reset as reset_event_lite,
+};
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;

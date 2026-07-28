@@ -1156,6 +1156,18 @@ pub fn apply_core_call(
         }
         // D-ARGS1 / runtime-tier: empty ArgsSpec builder (same as AOT jet_args_spec).
         ("core.args", "spec") => Ok(crate::Comptime::core_args_spec()),
+        // --- core.event (shared TIR evaluator / deopt; mirrors AOT JetEvent*) ---
+        ("core.event", "scope") => Ok(crate::Comptime::core_event_scope()),
+        ("core.event", "policy_sync") => Ok(crate::Comptime::core_event_policy_sync()),
+        ("core.event", "new") => Ok(crate::Comptime::core_event_new()),
+        ("core.event", "with_policy") => Ok(crate::Comptime::core_event_with_policy(one(0)?.clone())),
+        ("core.event", "hook") => Ok(crate::Comptime::core_event_hook(one(0)?.clone())),
+        ("core.event", "decision_hook") => {
+            Ok(crate::Comptime::core_event_decision_hook(one(0)?.clone()))
+        }
+        ("core.event", "async_result") => {
+            crate::Comptime::core_event_async_result(one(0)?, one(1)?, span)
+        }
         ("core.path", "parent") => {
             let p = as_string(one(0)?, span)?;
             Ok(CtValue::Str(

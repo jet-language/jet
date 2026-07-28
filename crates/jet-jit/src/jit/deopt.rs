@@ -216,6 +216,75 @@ fn rewrite_runtime_tier_diag(d: Diagnostic) -> Diagnostic {
     )
 }
 
+#[cfg(test)]
+mod rewrite_tests {
+    use super::*;
+
+    fn assert_quick_run_voice(d: &Diagnostic) {
+        assert!(
+            d.what.contains("quick-run"),
+            "what must name quick-run, got: {:?}",
+            d.what
+        );
+        assert!(
+            d.why.contains("gap in Jet") && d.why.contains("not a mistake"),
+            "why must blame Jet's gap, got: {:?}",
+            d.why
+        );
+        assert!(
+            d.fix.contains("jet run --release"),
+            "fix must point at jet run --release, got: {:?}",
+            d.fix
+        );
+        for (label, text) in [("what", d.what.as_str()), ("why", d.why.as_str()), ("fix", d.fix.as_str())]
+        {
+            let lower = text.to_ascii_lowercase();
+            assert!(
+                !lower.contains("comptime") && !lower.contains("compile time"),
+                "runtime-tier {label} must not mention comptime/compile time, got: {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rewrite_e3412_uses_quick_run_voice() {
+        let d = Diagnostic::error(
+            "E3412",
+            "core.net.listen() is not available at comptime".to_string(),
+            "only fetch is Tier-1".to_string(),
+            "use fetch".to_string(),
+            None,
+        );
+        let out = rewrite_runtime_tier_diag(d);
+        assert_eq!(out.code, "E3412");
+        assert!(
+            out.what.contains("core.net.listen()"),
+            "construct must survive rewrite, got: {:?}",
+            out.what
+        );
+        assert_quick_run_voice(&out);
+    }
+
+    #[test]
+    fn rewrite_e0951_uses_quick_run_voice() {
+        let d = Diagnostic::error(
+            "E0951",
+            "core.files.read is not allowed in comptime code".to_string(),
+            "impure".to_string(),
+            "gate it".to_string(),
+            None,
+        );
+        let out = rewrite_runtime_tier_diag(d);
+        assert_eq!(out.code, "E0951");
+        assert!(
+            out.what.contains("core.files.read"),
+            "construct must survive rewrite, got: {:?}",
+            out.what
+        );
+        assert_quick_run_voice(&out);
+    }
+}
+
 /// Whole-program interpreter deopt — same evaluator as `--interpret` / comptime.
 pub(crate) fn run_whole_interp(bundle: &ProgramBundle, plan: &TierPlan) -> RunOutcome {
     TIR::install_comptime_bridge();

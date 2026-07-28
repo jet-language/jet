@@ -4,6 +4,7 @@ mod builtins;
 mod browser;
 mod closure_ops;
 mod data_calls;
+mod event_ops;
 mod exprs;
 mod handles;
 mod stmts;
@@ -342,7 +343,7 @@ impl<'a> EvalCtx<'a> {
         })
     }
 
-    fn call_callable(
+    pub(super) fn call_callable(
         &mut self,
         value: &CtValue,
         args: Vec<CtValue>,
@@ -586,6 +587,8 @@ pub fn run_program_with_structs(
     struct_fields: HashMap<String, Vec<(String, bool)>>,
     struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
 ) -> Result<CtValue, Diagnostic> {
+    // Fresh EventLite stores per whole-program run (REPL / warm cache / workers).
+    crate::Comptime::reset_event_lite();
     let _browser_session = browser::SessionGuard::new();
     let funcs = program_funcs(program);
     let entry = funcs.get(&program.entry).copied().ok_or_else(|| {

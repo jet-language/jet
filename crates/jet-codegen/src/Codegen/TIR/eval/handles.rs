@@ -463,7 +463,11 @@ pub(super) fn eval_handle(
         THandleOp::ReactiveEffectMethod { .. } => {
             Err(unsupported("handle `ReactiveEffectMethod`", span))
         }
-        THandleOp::EventMethod { .. } => Err(unsupported("handle `EventMethod`", span)),
+        THandleOp::EventMethod { .. } => {
+            // Unreachable: exprs.rs HandleCall intercepts EventMethod and routes
+            // through EvalCtx::eval_event_method (needs callables) before eval_handle.
+            unreachable!("EventMethod dispatched in exprs.rs before eval_handle");
+        }
         THandleOp::WatchMethod { .. } => Err(unsupported("handle `WatchMethod`", span)),
         THandleOp::LayoutMethod { .. } => Err(unsupported("handle `LayoutMethod`", span)),
         THandleOp::LoadableMethod { method } => apply_method(recv, method, args.to_vec(), span),

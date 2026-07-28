@@ -7258,6 +7258,20 @@ fn example_corpus_strict_jit_aot_differential_gate() {
             "corpus gate must classify every discovered example"
         );
     }
+    // Hard floor: run_tier_broken must stay empty. A regression that moves an
+    // AOT-green example into that class must fail even if the manifest is
+    // regenerated (D-VERDICT-1254-1 / D-LENS-RUN1).
+    let broken: Vec<&str> = records
+        .iter()
+        .filter(|r| r.class == CorpusGateClass::RunTierBroken)
+        .map(|r| r.stem.as_str())
+        .collect();
+    assert!(
+        broken.is_empty(),
+        "JIT/AOT run-tier parity regression: AOT-green example(s) fail under default \
+         `jet run` (run_tier_broken must stay empty): {}",
+        broken.join(", ")
+    );
     assert_eq!(
         records, expected,
         "corpus gate manifest drifted; update tests/jit_corpus_gate.txt only for an intentional \

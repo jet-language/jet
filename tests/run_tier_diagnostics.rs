@@ -47,16 +47,16 @@ fn jet_run_e0956_uses_quick_run_voice() {
     }
     let dir = common::unique_tmp("run_tier_e0956");
     fs::create_dir_all(&dir).unwrap();
-    let file = dir.join("events_gap.jet");
-    // Minimal stand-in for examples/features/ui/events.jet — hits the same
-    // unsupported `event.scope()` seam under whole-program deopt.
+    let file = dir.join("watcher_gap.jet");
+    // Stand-in unsupported Core call under whole-program deopt — proves runtime-tier
+    // E0956 voice rewrite (was `event.scope` before EventLite closed that gap).
     fs::write(
         &file,
-        r#"use core.event as event
+        r#"use core.watcher as watcher
 
 fn run() {
-    scope :: event.scope()
-    print(scope)
+    w :: watcher.files(".") ?? panic("x")
+    print(w)
 }
 "#,
     )
@@ -64,7 +64,7 @@ fn run() {
 
     let path = file.to_str().unwrap();
     let RunOutcome::Problems(diags) = run_jit_once(path) else {
-        panic!("expected RunOutcome::Problems for unsupported event.scope under jet run");
+        panic!("expected RunOutcome::Problems for unsupported watcher.files under jet run");
     };
     let d = diags
         .iter()
@@ -72,7 +72,7 @@ fn run() {
         .unwrap_or_else(|| panic!("expected E0956, got: {diags:?}"));
 
     assert!(
-        d.what.contains("event.scope") || d.what.contains("core.event.scope"),
+        d.what.contains("watcher.files") || d.what.contains("core.watcher.files"),
         "what must name the construct, got: {:?}",
         d.what
     );
@@ -111,6 +111,48 @@ fn comptime_e0956_keeps_original_voice() {
     assert!(
         text.contains("can't run at compile time yet"),
         "comptime E0956 what must stay original, got:\n{text}"
+    );
+    assert!(
+        !text.contains("quick-run"),
+        "comptime E0956 must not use runtime quick-run voice, got:\n{text}"
+    );
+}
+
+/// Same unsupported construct as the runtime-voice test, but evaluated at
+/// comptime — must keep the comptime voice (dual-role pin).
+#[test]
+fn comptime_watcher_files_keeps_comptime_voice() {
+    let dir = common::unique_tmp("run_tier_e0956_ct");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("watcher_gap_ct.jet");
+    fs::write(
+        &file,
+        r#"use core.watcher as watcher
+
+comptime w = watcher.files(".") ?? panic("x")
+
+fn run() {
+    print(w)
+}
+"#,
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["check", file.to_str().unwrap()])
+        .output()
+        .expect("jet check");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let text = format!("{stdout}{stderr}");
+    assert!(
+        text.contains("E0956"),
+        "expected comptime-role E0956 for watcher.files, got:\n{text}"
+    );
+    assert!(
+        text.contains("can't run at compile time yet")
+            || text.contains("compile time"),
+        "comptime E0956 must keep comptime voice, got:\n{text}"
     );
     assert!(
         !text.contains("quick-run"),

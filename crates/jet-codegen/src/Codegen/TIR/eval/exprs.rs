@@ -442,6 +442,9 @@ impl<'a> EvalCtx<'a> {
                     };
                     return Ok(result);
                 }
+                if let crate::Codegen::TIR::THandleOp::EventMethod { method } = op {
+                    return self.eval_event_method(method, &mut r, &argv);
+                }
                 if matches!(
                     op,
                     crate::Codegen::TIR::THandleOp::ExpiringMethod { .. }
@@ -718,6 +721,24 @@ impl<'a> EvalCtx<'a> {
                     }
                 } else {
                     let idx = as_int(&i, self.span())?;
+                    // Mutable place-window (`__JetViewMut`) — index into the owner.
+                    if let CtValue::Struct {
+                        type_name,
+                        fields,
+                    } = &b
+                    {
+                        if type_name == "__JetViewMut" {
+                            let window =
+                                materialize_view_mut_window(fields, scope, self.span())?;
+                            let CtValue::List(xs) = window else {
+                                return Err(unsupported("view-mut window", self.span()));
+                            };
+                            if idx < 0 || idx as usize >= xs.len() {
+                                return Err(unsupported("list index oob", self.span()));
+                            }
+                            return Ok(xs[idx as usize].clone());
+                        }
+                    }
                     match b {
                         CtValue::List(xs) => {
                             if idx < 0 || idx as usize >= xs.len() {
@@ -1898,9 +1919,9 @@ impl<'a> EvalCtx<'a> {
             }
             TExprKind::StaticCall {
                 owner,
+                owner_type,
                 method,
                 args,
-                ..
             } => {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
@@ -1966,12 +1987,24 @@ impl<'a> EvalCtx<'a> {
                                 self.repl_mode,
                             );
                         }
-                        let candidates = [
+                        // Match Cranelift JIT `static_method_key`: mono methods are
+                        // keyed by the concrete owner (`Box<Int>::new`). When a
+                        // concrete owner_type is present, never fall back to a bare
+                        // method name — an unrelated same-name fn could bind wrong.
+                        let concrete = owner_type
+                            .as_ref()
+                            .map(|ty| ty.name())
+                            .unwrap_or_else(|| type_name.clone());
+                        let mut candidates = vec![
+                            format!("{concrete}::{}", method.name),
+                            format!("{concrete}.{}", method.name),
                             format!("{type_name}::{}", method.name),
                             format!("{type_name}.{}", method.name),
-                            method.name.clone(),
-                            format!("user_{}", method.name),
                         ];
+                        if owner_type.is_none() {
+                            candidates.push(method.name.clone());
+                            candidates.push(format!("user_{}", method.name));
+                        }
                         for name in candidates {
                             if let Some(func) = self.funcs.get(&name).copied() {
                                 let mut child = HashMap::new();
@@ -2055,8 +2088,15 @@ impl<'a> EvalCtx<'a> {
                 lambda,
                 captured: scope.clone(),
             })),
-            TExprKind::PatternMatches { .. } => {
-                Err(unsupported("expr `PatternMatches`", self.span()))
+            TExprKind::PatternMatches { subj, pattern } => {
+                let value = self.eval_expr(subj, scope)?;
+                // Binding-free `x == .Variant` — reuse match-arm binder, discard locals.
+                let mut scratch = HashMap::new();
+                Ok(CtValue::Bool(super::stmts::bind_match_pattern(
+                    &pattern.pattern,
+                    &value,
+                    &mut scratch,
+                )?))
             }
             TExprKind::OptionLift2 { .. } => Err(unsupported("expr `OptionLift2`", self.span())),
             TExprKind::ClosureMethod { recv, op, args } => {
