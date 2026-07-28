@@ -33,6 +33,13 @@ fn dev_diff_lock() -> &'static Mutex<()> {
 fn skip_if_cranelift_host_unsupported() -> bool {
     if jet_jit::cranelift_host_supported() {
         false
+    } else if std::env::var("JET_REQUIRE_CRANELIFT_HOST").as_deref() == Ok("1") {
+        // c730: CI parity must never green-skip on an unsupported host.
+        panic!(
+            "cranelift-jit host path unsupported on this architecture \
+             (JET_REQUIRE_CRANELIFT_HOST=1); remove the host from the parity \
+             matrix or restore native JIT support"
+        );
     } else {
         eprintln!("note: cranelift-jit host path unsupported on this architecture; skipping resident JIT assertion");
         true
@@ -7110,12 +7117,16 @@ fn print_corpus_gate_manifest(records: &[CorpusGateRecord]) {
 
 /// c727 C1–C4: discover every top-level example, classify it, and ratchet the
 /// manifest. AOT-oracle examples (exit 0) must resident-JIT or deopt-interp
-/// with backend attribution — never silent fallback.
+/// with backend attribution — never silent fallback. Each AOT-oracle case
+/// compares pure-interpreter, default tiered, and optimized AOT
+/// stdout/stderr/exit byte-for-byte (D-ONECORE1=A).
 ///
-/// c727 C5: wired into `.github/workflows/ci.yml` `jetpack-platform` matrix
-/// (Linux, macOS, Windows) via `cargo test --test dev example_corpus_strict_jit_aot_differential_gate`.
+/// c730: CI runs this via `tools/ci/jit-aot-parity.sh` on every supported
+/// native x86_64 host (Linux/macOS/Windows). Set `JET_CORPUS_GATE_REPORT_DIR`
+/// to write the canonical report bundle.
 #[test]
 fn example_corpus_strict_jit_aot_differential_gate() {
+    let started = std::time::Instant::now();
     if skip_if_cranelift_host_unsupported() {
         return;
     }
@@ -7182,6 +7193,57 @@ fn example_corpus_strict_jit_aot_differential_gate() {
             .filter(|r| r.class == CorpusGateClass::DeoptInterp)
             .count(),
     );
+    write_corpus_gate_report(&records, started.elapsed());
+}
+
+/// c730 report bundle: case list + backend attribution + timing for CI upload.
+fn write_corpus_gate_report(records: &[CorpusGateRecord], elapsed: std::time::Duration) {
+    let Ok(dir) = std::env::var("JET_CORPUS_GATE_REPORT_DIR") else {
+        return;
+    };
+    let dir = PathBuf::from(dir);
+    fs::create_dir_all(&dir).expect("create JET_CORPUS_GATE_REPORT_DIR");
+    fs::write(
+        dir.join("cases.txt"),
+        corpus_gate_manifest_from_records(records),
+    )
+    .expect("write cases.txt");
+    let mut backend_trace = String::from(
+        "# backend attribution (c727/c730)\n\
+         # resident_jit = native Cranelift; deopt_interp = tiered deopt to tier-0\n\
+         # parity = pure-interpreter + default tiered + optimized AOT identity\n",
+    );
+    for record in records {
+        let backend = match record.class {
+            CorpusGateClass::ResidentJit => "resident_jit",
+            CorpusGateClass::DeoptInterp => "deopt_interp",
+            CorpusGateClass::FrontendRejected => "frontend_rejected",
+            CorpusGateClass::GateExcluded => "gate_excluded",
+            CorpusGateClass::NonRunnable => "non_runnable",
+            CorpusGateClass::ExpectedExit => "expected_exit",
+        };
+        if record.detail.is_empty() {
+            backend_trace.push_str(&format!("{}\t{}\n", record.stem, backend));
+        } else {
+            backend_trace.push_str(&format!(
+                "{}\t{}\t{}\n",
+                record.stem, backend, record.detail
+            ));
+        }
+    }
+    fs::write(dir.join("backend_trace.txt"), backend_trace).expect("write backend_trace.txt");
+    fs::write(
+        dir.join("timing.txt"),
+        format!(
+            "elapsed_ms={}\nelapsed_s={:.3}\n",
+            elapsed.as_millis(),
+            elapsed.as_secs_f64()
+        ),
+    )
+    .expect("write timing.txt");
+    fs::write(dir.join("result.txt"), "ok\n").expect("write result.txt");
+    // Empty on success; failures leave cargo assert diffs in gate.log instead.
+    fs::write(dir.join("output_diff.txt"), "").expect("write output_diff.txt");
 }
 
 /// c139 M3: string interpolation builds the same stdout as the interpreter.

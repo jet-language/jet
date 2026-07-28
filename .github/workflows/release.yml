@@ -4,14 +4,52 @@ name: Release
 # common platforms, per docs/reference/versioning.md. `meta.platforms` on
 # the `jet` flake package is `unix`, so this covers Linux + macOS only —
 # no Windows artifact until that platform is supported by the nix build.
+# c730: tagged publication requires the same strict JIT/AOT parity gate on
+# the tagged commit (x86_64 native hosts where Cranelift JIT is supported).
 on:
   push:
     tags:
       - "v*.*.*"
 
 jobs:
+  jit-aot-parity:
+    name: JIT/AOT parity (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x86_64
+          - os: macos-13
+            label: macos-x86_64
+          - os: windows-latest
+            label: windows-x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Strict JIT/AOT differential gate (#727)
+        shell: bash
+        env:
+          JET_REQUIRE_RUSTC: "1"
+          JET_REQUIRE_CRANELIFT_HOST: "1"
+          JET_CORPUS_GATE_REPORT_DIR: ${{ github.workspace }}/jit-aot-parity-report
+        run: bash tools/ci/jit-aot-parity.sh
+
+      - name: Upload parity report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-jit-aot-parity-${{ matrix.label }}-${{ github.sha }}
+          path: jit-aot-parity-report/
+          retention-days: 30
+          if-no-files-found: error
+
   build:
     name: Build (${{ matrix.os }})
+    needs: jit-aot-parity
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -48,7 +86,7 @@ jobs:
 
   release:
     name: Publish GitHub release
-    needs: build
+    needs: [jit-aot-parity, build]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -61,12 +99,15 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: jet-*
+          merge-multiple: false
 
       - name: Attach artifacts to release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" dist/*/*.tar.gz \
+          # Only attach build tarballs (parity reports are separate artifacts).
+          gh release create "${{ github.ref_name }}" dist/jet-*/*.tar.gz \
             --title "${{ github.ref_name }}" \
             --generate-notes \
             --repo "${{ github.repository }}"
