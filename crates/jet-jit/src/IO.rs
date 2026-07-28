@@ -3,6 +3,7 @@
 //! the process harness (real stdio would bypass capture).
 
 use super::Concurrency;
+use super::CoreHost::{jit_env_key_eq, jit_env_snapshot_raw};
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
@@ -41,8 +42,20 @@ fn list_from_lines(lines: Vec<String>) -> i64 {
     })
 }
 
+fn env_value(name: &str) -> Option<std::ffi::OsString> {
+    let name = std::ffi::OsStr::new(name);
+    jit_env_snapshot_raw()
+        .into_iter()
+        .find(|(candidate, _)| jit_env_key_eq(candidate.as_os_str(), name))
+        .map(|(_, value)| value)
+}
+
 fn env_int(name: &str) -> Option<i64> {
-    std::env::var(name).ok()?.parse::<i64>().ok().filter(|n| *n > 0)
+    env_value(name)?
+        .to_str()?
+        .parse::<i64>()
+        .ok()
+        .filter(|n| *n > 0)
 }
 
 fn style_code(name: &str) -> Option<&'static str> {
@@ -62,8 +75,11 @@ fn style_code(name: &str) -> Option<&'static str> {
 }
 
 fn style_enabled() -> bool {
-    std::env::var_os("NO_COLOR").is_none()
-        && std::env::var("TERM").map(|t| t != "dumb").unwrap_or(true)
+    env_value("NO_COLOR").is_none()
+        && env_value("TERM")
+            .and_then(|term| term.into_string().ok())
+            .map(|term| term != "dumb")
+            .unwrap_or(true)
         && std::io::stdout().is_terminal()
 }
 

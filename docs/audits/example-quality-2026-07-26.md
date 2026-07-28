@@ -7,11 +7,12 @@ Date: 2026-07-26
 Jet's authored example corpus now uses the current language surface more
 consistently and with less ceremony.
 
-The audit reviewed all 415 authored `.jet` files under `examples/`, all 11
-`pkg.jet` manifests, and all three generated `.jet` files under hidden `.jet`
-directories. It changed 231 authored files. Authored source fell from 11,304
-lines to 10,751 lines, a reduction of 553 lines or 4.9%. No example or
-demonstrated behavior was removed to reach that number.
+The audit reviewed all 416 authored `.jet` files under `examples/`, including
+the root `examples/canon.jet` file. It also reviewed all 11 `pkg.jet` manifests
+and all three generated `.jet` files under hidden `.jet` directories. It changed
+231 authored files. Authored source fell from 11,323 lines to 10,770 lines, a
+reduction of 553 lines or 4.9%. No example or demonstrated behavior was removed
+to reach that number.
 
 The pass made these broad corrections:
 
@@ -39,7 +40,7 @@ already present.
 
 | Surface | Reviewed | Changed | Result |
 | --- | ---: | ---: | --- |
-| Authored example source | 415 files | 231 files | 553 fewer lines |
+| Authored example source | 416 files | 231 files | 553 fewer lines |
 | Package manifests | 11 files | 0 files | Already current |
 | Hidden generated Jet source | 3 files | 0 files | Accounted for; generator-owned |
 | Differential example mirrors | 64 files | 42 files | 61 fewer lines |
@@ -54,6 +55,10 @@ The hidden generated files are:
 
 They were inspected but not hand-edited. Generated source must remain owned by
 its generator.
+
+The original recursive inventory covered the 415 authored files below
+`examples/`. It omitted the root `examples/canon.jet` file from the count.
+That canonical file was reviewed and changed in the same pass.
 
 ## Quality changes
 
@@ -198,8 +203,10 @@ Deleting these forms would make examples shorter but less truthful.
 
 ## Corpus health found by the audit
 
-Every authored file is formatter-clean. A standalone `jet check` sweep passes
-395 of 415 files.
+Every authored file is formatter-clean. The original standalone `jet check`
+sweep covered 415 of the 416 authored files and passed 395. It omitted
+`examples/canon.jet`; a fresh standalone check passes that file. The complete
+result is 396 of 416 files.
 
 The 20 failures are existing product gaps:
 
@@ -301,9 +308,11 @@ Two coherent features remain. Neither is stubbed and neither weakens a gate.
 
 ### Corpus health after this work
 
-A standalone `jet check` sweep of every authored example passes 421 of 426. All
-five remaining failures belong to the two features above. The strict JIT/AOT
-differential corpus gate moves `comptime/comptime_block` and
+A standalone `jet check` sweep passes 421 of the 426 authored files below
+`examples/`. A fresh standalone check also passes the root `examples/canon.jet`
+file. The complete result is 422 of 427 authored files. All five remaining
+failures belong to the two features above. The strict JIT/AOT differential
+corpus gate moves `comptime/comptime_block` and
 `modules/generic_modules` to resident JIT, and `crypto/crypto_suite` and
 `types/generic_constructor_inference` to deopt-interpreted.
 
@@ -324,14 +333,15 @@ effect-callback failures reproduce with their original binding and callback
 spellings. These failures are not formatting failures, and they must not be
 hidden by weakening the tests.
 
-The example corpus should ultimately reach 415 of 415 standalone checks and a
+The example corpus should ultimately reach 427 of 427 standalone checks and a
 clean golden run. This pass makes that remaining compiler backlog explicit.
 
 ## Verification record
 
 Passed:
 
-- all 415 authored files: `jet fmt --check`;
+- the 415-file recursive authored corpus and the root `examples/canon.jet` file:
+  `jet fmt --check`;
 - formatter suite: 142 tests;
 - strict default-JIT/AOT differential example gate;
 - focused `jet check` on every semantically rewritten example;

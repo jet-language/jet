@@ -409,8 +409,10 @@ fn jet_style_code(name: &str) -> Option<&'static str> {
 }
 fn jet_style_enabled() -> bool {
     use std::io::IsTerminal;
-    std::env::var_os("NO_COLOR").is_none()
-        && std::env::var("TERM").map(|t| t != "dumb").unwrap_or(true)
+    jet_std_env_get(&"NO_COLOR".to_string()).is_none()
+        && jet_std_env_get(&"TERM".to_string())
+            .map(|term| term != "dumb")
+            .unwrap_or(true)
         && std::io::stdout().is_terminal()
 }
 fn jet_std_io_style(style: &String, text: &String) -> String {
