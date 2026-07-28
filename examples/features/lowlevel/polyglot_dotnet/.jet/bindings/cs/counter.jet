@@ -1,0 +1,52 @@
+#Extern module c.jet_cs_counter {
+    fn new(arg0: Int) => Int = "jet_cs_counter_new"
+    fn take_error() => Int = "jet_cs_counter_take_error"
+    fn close(handle: Int) = "jet_cs_counter_close"
+    fn add(handle: Int, arg0: Int) => Int = "jet_cs_counter_add"
+    fn explode(handle: Int, arg0: Int) => Int = "jet_cs_counter_explode"
+    fn twice(arg0: Float) => Float = "jet_cs_counter_twice"
+}
+use c.jet_cs_counter as abi
+
+pub struct Handle { value: Int }
+pub enum DotNetError { Exception InvalidHandle ResourceLimit }
+
+fn error(code: Int) => DotNetError { if code == 2 { return DotNetError.InvalidHandle } if code == 3 { return DotNetError.ResourceLimit } return DotNetError.Exception }
+
+pub fn new(arg0: Int) => Handle ? DotNetError {
+    value :: abi.new(arg0)
+    code :: abi.take_error()
+    if code != 0 { return Err(error(code)) }
+    return Ok(Handle.{ value: value })
+}
+
+pub fn close(^handle: Handle) {}
+
+impl Handle.Close {
+    fn close(^self) {
+        abi.close(self.value)
+        if abi.take_error() != 0 { panic(".NET handle close failed") }
+    }
+}
+
+pub fn add(handle: Handle, arg0: Int) => Int ? DotNetError {
+    value :: abi.add(handle.value, arg0)
+    code :: abi.take_error()
+    if code != 0 { return Err(error(code)) }
+    return Ok(value)
+}
+
+pub fn explode(handle: Handle, arg0: Int) => Int ? DotNetError {
+    value :: abi.explode(handle.value, arg0)
+    code :: abi.take_error()
+    if code != 0 { return Err(error(code)) }
+    return Ok(value)
+}
+
+pub fn twice(arg0: Float) => Float ? DotNetError {
+    value :: abi.twice(arg0)
+    code :: abi.take_error()
+    if code != 0 { return Err(error(code)) }
+    return Ok(value)
+}
+

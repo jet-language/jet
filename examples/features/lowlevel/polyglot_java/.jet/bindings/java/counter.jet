@@ -1,0 +1,43 @@
+#Extern module c.jet_java_counter {
+    fn new(arg0: Int) => Int = "jet_java_counter_new"
+    fn take_error() => Int = "jet_java_counter_take_error"
+    fn close(handle: Int) = "jet_java_counter_close"
+    fn add(handle: Int, arg0: Int) => Int = "jet_java_counter_add"
+    fn explode(handle: Int, arg0: Int) => Int = "jet_java_counter_explode"
+    fn twice(arg0: Float) => Float = "jet_java_counter_twice"
+}
+use c.jet_java_counter as abi
+
+pub struct Handle { value: Int }
+pub enum JavaError { Exception }
+
+pub fn new(arg0: Int) => Handle ? JavaError {
+    value :: abi.new(arg0)
+    if abi.take_error() != 0 { return Err(JavaError.Exception) }
+    return Ok(Handle.{ value: value })
+}
+
+pub fn close(^handle: Handle) {}
+
+impl Handle.Close {
+    fn close(^self) { abi.close(self.value) }
+}
+
+pub fn add(handle: Handle, arg0: Int) => Int ? JavaError {
+    value :: abi.add(handle.value, arg0)
+    if abi.take_error() != 0 { return Err(JavaError.Exception) }
+    return Ok(value)
+}
+
+pub fn explode(handle: Handle, arg0: Int) => Int ? JavaError {
+    value :: abi.explode(handle.value, arg0)
+    if abi.take_error() != 0 { return Err(JavaError.Exception) }
+    return Ok(value)
+}
+
+pub fn twice(arg0: Float) => Float ? JavaError {
+    value :: abi.twice(arg0)
+    if abi.take_error() != 0 { return Err(JavaError.Exception) }
+    return Ok(value)
+}
+

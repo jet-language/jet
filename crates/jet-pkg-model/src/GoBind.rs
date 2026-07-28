@@ -119,13 +119,13 @@ fn render(lib: &str, functions: &[Function]) -> String {
         out.push_str("    fn ");
         out.push_str(&function.name);
         render_params(&mut out, &function.params);
-        if let Some(result) = function.result { out.push_str(" -> "); out.push_str(result.jet()); }
+        if let Some(result) = function.result { out.push_str(" => "); out.push_str(result.jet()); }
         out.push_str(" = \""); out.push_str(&function.name); out.push_str("\"\n");
     }
     out.push_str("}\nuse c."); out.push_str(&abi); out.push_str(" as abi\n\npub struct Handle { value: Int }\n\n");
     for function in functions {
         out.push_str("pub fn "); out.push_str(&function.name); render_public_params(&mut out, &function.params);
-        if let Some(result) = function.result { out.push_str(" -> "); out.push_str(if matches!(result, Scalar::Handle) { "Handle" } else { result.jet() }); }
+        if let Some(result) = function.result { out.push_str(" => "); out.push_str(if matches!(result, Scalar::Handle) { "Handle" } else { result.jet() }); }
         out.push_str(" {\n    ");
         if function.result.is_some() { out.push_str("return "); }
         if matches!(function.result, Some(Scalar::Handle)) { out.push_str("Handle.{ value: "); }

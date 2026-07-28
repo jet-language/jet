@@ -1,0 +1,11 @@
+#Bindgen module c.jet_fortran_matrix.__bindgen__ {
+    // fortran-layout probe.a: column-major 2x3
+    fn probe(a_0: Float, a_1: Float, a_2: Float, a_3: Float, a_4: Float, a_5: Float) => Float = "jet_fortran_matrix_probe"
+}
+use c.jet_fortran_matrix as abi
+
+pub fn probe(a: [Float]) =[Fortran]=> Float {
+    if a.len() != 6 { panic("a must contain exactly 6 column-major values") }
+    return abi.probe(a[0], a[1], a[2], a[3], a[4], a[5])
+}
+

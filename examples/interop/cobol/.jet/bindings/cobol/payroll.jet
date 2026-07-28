@@ -1,0 +1,21 @@
+// cobol-layout payroll_record: 29 bytes
+// cobol-field employee_id: offset=0 width=4 type=Int encoding=COMP-5
+// cobol-field employee_name: offset=4 width=20 type=String encoding=fixed-text
+// cobol-field gross_pay: offset=24 width=5 type=Decimal scale=2 encoding=COMP-3
+#Codable
+pub struct PayrollRecord {
+    employee_id: Int;
+    employee_name: String;
+    gross_pay: Decimal;
+}
+
+#Extern module c.jet_cobol_payroll {
+    fn apply_minor(record_id: Int, gross_pay_minor: Int) => Int = "jet_cobol_payroll_apply_minor"
+}
+use c.jet_cobol_payroll as abi
+
+pub fn apply_minor(record_id: Int, gross_pay_minor: Int) => Int {
+    if gross_pay_minor < -999999999 || gross_pay_minor > 999999999 { panic("gross_pay_minor exceeds the 9-digit COMP-3 field") }
+    if record_id < 0 || record_id > 999999 { panic("record_id exceeds the 6-digit COMP-5 field") }
+    return abi.apply_minor(record_id, gross_pay_minor)
+}

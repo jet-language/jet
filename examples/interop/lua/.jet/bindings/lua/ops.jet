@@ -1,0 +1,218 @@
+#Extern module c.jet_lua_ops {
+    fn open() => Int = "jet_lua_ops_open"
+    fn take_error() => Int = "jet_lua_ops_take_error"
+    fn cancel(handle: Int) = "jet_lua_ops_cancel"
+    fn close(handle: Int) = "jet_lua_ops_close"
+    fn view_get_int(handle: Int, table: Int, key: String) => Int = "jet_lua_ops_view_get_int"
+    fn view_set_int(handle: Int, table: Int, key: String, value: Int) = "jet_lua_ops_view_set_int"
+    fn view_release(handle: Int, table: Int) = "jet_lua_ops_view_release"
+    fn counters(handle: Int, input: String, deadline_ms: Int) => String = "jet_lua_ops_invoke_counters"
+    fn counters_view(handle: Int, deadline_ms: Int) => Int = "jet_lua_ops_view_counters"
+    fn transform(handle: Int, input: String, deadline_ms: Int) => String = "jet_lua_ops_invoke_transform"
+    fn transform_view(handle: Int, deadline_ms: Int) => Int = "jet_lua_ops_view_transform"
+    fn echo(handle: Int, input: String, deadline_ms: Int) => String = "jet_lua_ops_invoke_echo"
+    fn echo_view(handle: Int, deadline_ms: Int) => Int = "jet_lua_ops_view_echo"
+    fn fail_call(handle: Int, input: String, deadline_ms: Int) => String = "jet_lua_ops_invoke_fail_call"
+    fn fail_call_view(handle: Int, deadline_ms: Int) => Int = "jet_lua_ops_view_fail_call"
+    fn spin(handle: Int, input: String, deadline_ms: Int) => String = "jet_lua_ops_invoke_spin"
+    fn spin_view(handle: Int, deadline_ms: Int) => Int = "jet_lua_ops_view_spin"
+}
+use c.jet_lua_ops as abi
+use core.encoding.json as json
+
+pub struct Session { value: Int }
+pub struct TableView { session: Int, table: Int }
+pub enum LuaError { NotRunning Timeout Cancelled Protocol CommandFailed Limit }
+
+impl Session.Close {
+    fn close(^self) { abi.close(self.value) }
+}
+
+impl TableView.Close {
+    fn close(^self) { abi.view_release(self.session, self.table) }
+}
+
+pub fn open() => Session ? LuaError {
+    handle :: abi.open()
+    if abi.take_error() != 0 { return Err(LuaError.NotRunning) }
+    return Ok(Session.{ value: handle })
+}
+
+pub fn cancel(session: Session) { abi.cancel(session.value) }
+
+pub fn view_get_int(view: TableView, key: String) => Int ? LuaError {
+    value :: abi.view_get_int(view.session, view.table, key)
+    code :: abi.take_error()
+    if code == 1 { return Err(LuaError.NotRunning) }
+    if code != 0 { return Err(LuaError.Protocol) }
+    return Ok(value)
+}
+
+pub fn view_set_int(view: TableView, key: String, value: Int) => Bool ? LuaError {
+    abi.view_set_int(view.session, view.table, key, value)
+    code :: abi.take_error()
+    if code == 1 { return Err(LuaError.NotRunning) }
+    if code != 0 { return Err(LuaError.Protocol) }
+    return Ok(true)
+}
+
+pub fn counters(session: Session, input: DataTree, deadline_ms: Int) => DataTree ? LuaError {
+    raw :: abi.counters(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(LuaError.NotRunning) }
+    if code == 2 { return Err(LuaError.Timeout) }
+    if code == 3 { return Err(LuaError.Cancelled) }
+    if code == 5 { return Err(LuaError.Limit) }
+    if code == 4 { return Err(LuaError.CommandFailed) }
+    if code != 0 { return Err(LuaError.Protocol) }
+    value := json.parse(raw) ?? return Err(LuaError.Protocol)
+    return Ok(value)
+}
+
+pub fn counters_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) => T ? LuaError {
+    tree := json.parse(json.to_string(input)) ?? return Err(LuaError.Protocol)
+    value := counters(session, tree, deadline_ms)?
+    decoded := json.decode<T>(json.to_string(value)) ?? return Err(LuaError.Protocol)
+    return Ok(decoded)
+}
+
+pub fn counters_view(session: Session, deadline_ms: Int) => TableView ? LuaError {
+    table :: abi.counters_view(session.value, deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(LuaError.NotRunning) }
+    if code == 2 { return Err(LuaError.Timeout) }
+    if code == 3 { return Err(LuaError.Cancelled) }
+    if code == 5 { return Err(LuaError.Limit) }
+    if code == 4 { return Err(LuaError.CommandFailed) }
+    if code != 0 { return Err(LuaError.Protocol) }
+    return Ok(TableView.{ session: session.value, table: table })
+}
+
+pub fn transform(session: Session, input: DataTree, deadline_ms: Int) => DataTree ? LuaError {
+    raw :: abi.transform(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(LuaError.NotRunning) }
+    if code == 2 { return Err(LuaError.Timeout) }
+    if code == 3 { return Err(LuaError.Cancelled) }
+    if code == 5 { return Err(LuaError.Limit) }
+    if code == 4 { return Err(LuaError.CommandFailed) }
+    if code != 0 { return Err(LuaError.Protocol) }
+    value := json.parse(raw) ?? return Err(LuaError.Protocol)
+    return Ok(value)
+}
+
+pub fn transform_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) => T ? LuaError {
+    tree := json.parse(json.to_string(input)) ?? return Err(LuaError.Protocol)
+    value := transform(session, tree, deadline_ms)?
+    decoded := json.decode<T>(json.to_string(value)) ?? return Err(LuaError.Protocol)
+    return Ok(decoded)
+}
+
+pub fn transform_view(session: Session, deadline_ms: Int) => TableView ? LuaError {
+    table :: abi.transform_view(session.value, deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(LuaError.NotRunning) }
+    if code == 2 { return Err(LuaError.Timeout) }
+    if code == 3 { return Err(LuaError.Cancelled) }
+    if code == 5 { return Err(LuaError.Limit) }
+    if code == 4 { return Err(LuaError.CommandFailed) }
+    if code != 0 { return Err(LuaError.Protocol) }
+    return Ok(TableView.{ session: session.value, table: table })
+}
+
+pub fn echo(session: Session, input: DataTree, deadline_ms: Int) => DataTree ? LuaError {
+    raw :: abi.echo(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(LuaError.NotRunning) }
+    if code == 2 { return Err(LuaError.Timeout) }
+    if code == 3 { return Err(LuaError.Cancelled) }
+    if code == 5 { return Err(LuaError.Limit) }
+    if code == 4 { return Err(LuaError.CommandFailed) }
+    if code != 0 { return Err(LuaError.Protocol) }
+    value := json.parse(raw) ?? return Err(LuaError.Protocol)
+    return Ok(value)
+}
+
+pub fn echo_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) => T ? LuaError {
+    tree := json.parse(json.to_string(input)) ?? return Err(LuaError.Protocol)
+    value := echo(session, tree, deadline_ms)?
+    decoded := json.decode<T>(json.to_string(value)) ?? return Err(LuaError.Protocol)
+    return Ok(decoded)
+}
+
+pub fn echo_view(session: Session, deadline_ms: Int) => TableView ? LuaError {
+    table :: abi.echo_view(session.value, deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(LuaError.NotRunning) }
+    if code == 2 { return Err(LuaError.Timeout) }
+    if code == 3 { return Err(LuaError.Cancelled) }
+    if code == 5 { return Err(LuaError.Limit) }
+    if code == 4 { return Err(LuaError.CommandFailed) }
+    if code != 0 { return Err(LuaError.Protocol) }
+    return Ok(TableView.{ session: session.value, table: table })
+}
+
+pub fn fail_call(session: Session, input: DataTree, deadline_ms: Int) => DataTree ? LuaError {
+    raw :: abi.fail_call(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(LuaError.NotRunning) }
+    if code == 2 { return Err(LuaError.Timeout) }
+    if code == 3 { return Err(LuaError.Cancelled) }
+    if code == 5 { return Err(LuaError.Limit) }
+    if code == 4 { return Err(LuaError.CommandFailed) }
+    if code != 0 { return Err(LuaError.Protocol) }
+    value := json.parse(raw) ?? return Err(LuaError.Protocol)
+    return Ok(value)
+}
+
+pub fn fail_call_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) => T ? LuaError {
+    tree := json.parse(json.to_string(input)) ?? return Err(LuaError.Protocol)
+    value := fail_call(session, tree, deadline_ms)?
+    decoded := json.decode<T>(json.to_string(value)) ?? return Err(LuaError.Protocol)
+    return Ok(decoded)
+}
+
+pub fn fail_call_view(session: Session, deadline_ms: Int) => TableView ? LuaError {
+    table :: abi.fail_call_view(session.value, deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(LuaError.NotRunning) }
+    if code == 2 { return Err(LuaError.Timeout) }
+    if code == 3 { return Err(LuaError.Cancelled) }
+    if code == 5 { return Err(LuaError.Limit) }
+    if code == 4 { return Err(LuaError.CommandFailed) }
+    if code != 0 { return Err(LuaError.Protocol) }
+    return Ok(TableView.{ session: session.value, table: table })
+}
+
+pub fn spin(session: Session, input: DataTree, deadline_ms: Int) => DataTree ? LuaError {
+    raw :: abi.spin(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(LuaError.NotRunning) }
+    if code == 2 { return Err(LuaError.Timeout) }
+    if code == 3 { return Err(LuaError.Cancelled) }
+    if code == 5 { return Err(LuaError.Limit) }
+    if code == 4 { return Err(LuaError.CommandFailed) }
+    if code != 0 { return Err(LuaError.Protocol) }
+    value := json.parse(raw) ?? return Err(LuaError.Protocol)
+    return Ok(value)
+}
+
+pub fn spin_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) => T ? LuaError {
+    tree := json.parse(json.to_string(input)) ?? return Err(LuaError.Protocol)
+    value := spin(session, tree, deadline_ms)?
+    decoded := json.decode<T>(json.to_string(value)) ?? return Err(LuaError.Protocol)
+    return Ok(decoded)
+}
+
+pub fn spin_view(session: Session, deadline_ms: Int) => TableView ? LuaError {
+    table :: abi.spin_view(session.value, deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(LuaError.NotRunning) }
+    if code == 2 { return Err(LuaError.Timeout) }
+    if code == 3 { return Err(LuaError.Cancelled) }
+    if code == 5 { return Err(LuaError.Limit) }
+    if code == 4 { return Err(LuaError.CommandFailed) }
+    if code != 0 { return Err(LuaError.Protocol) }
+    return Ok(TableView.{ session: session.value, table: table })
+}
+

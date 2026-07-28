@@ -448,7 +448,7 @@ fn render(lib: &str, routines: &[Routine]) -> String {
         out.push_str("    fn ");
         out.push_str(&routine.jet_name);
         render_abi_params(&mut out, &routine.params);
-        out.push_str(" -> ");
+        out.push_str(" => ");
         out.push_str(routine.result.jet());
         out.push_str(" = \"");
         if routine.has_arrays() {

@@ -1,0 +1,86 @@
+#Extern module c.jet_php_ops {
+    fn open() => Int = "jet_php_ops_open"
+    fn take_error() => Int = "jet_php_ops_take_error"
+    fn cancel(handle: Int) = "jet_php_ops_cancel"
+    fn close(handle: Int) = "jet_php_ops_close"
+    fn transform(handle: Int, input: String, deadline_ms: Int) => String = "jet_php_ops_invoke_transform"
+    fn fail_call(handle: Int, input: String, deadline_ms: Int) => String = "jet_php_ops_invoke_fail_call"
+    fn sleep_call(handle: Int, input: String, deadline_ms: Int) => String = "jet_php_ops_invoke_sleep_call"
+    fn pooled_sleep(handle: Int, input: String, deadline_ms: Int) => String = "jet_php_ops_invoke_pooled_sleep"
+}
+use c.jet_php_ops as abi
+use core.encoding.json as json
+
+pub struct PhpPool { value: Int }
+pub enum PhpError { NotRunning Timeout Cancelled Protocol CommandFailed Limit }
+
+impl PhpPool.Close {
+    fn close(^self) { abi.close(self.value) }
+}
+
+pub fn close(^pool: PhpPool) { abi.close(pool.value) }
+
+pub fn open() => PhpPool ? PhpError {
+    handle :: abi.open()
+    if abi.take_error() != 0 { return Err(PhpError.NotRunning) }
+    return Ok(PhpPool.{ value: handle })
+}
+
+pub fn cancel(pool: PhpPool) { abi.cancel(pool.value) }
+
+pub fn transform(pool: PhpPool, input: DataTree, deadline_ms: Int) => DataTree ? PhpError {
+    raw :: abi.transform(pool.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(PhpError.NotRunning) }
+    if code == 2 { return Err(PhpError.Timeout) }
+    if code == 3 { return Err(PhpError.Cancelled) }
+    if code == 5 { return Err(PhpError.Limit) }
+    if code != 0 { return Err(PhpError.Protocol) }
+    response := json.parse(raw) ?? return Err(PhpError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(PhpError.CommandFailed) }
+    return Ok(response.field("value") ?? DataTree.Null)
+}
+
+pub fn fail_call(pool: PhpPool, input: DataTree, deadline_ms: Int) => DataTree ? PhpError {
+    raw :: abi.fail_call(pool.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(PhpError.NotRunning) }
+    if code == 2 { return Err(PhpError.Timeout) }
+    if code == 3 { return Err(PhpError.Cancelled) }
+    if code == 5 { return Err(PhpError.Limit) }
+    if code != 0 { return Err(PhpError.Protocol) }
+    response := json.parse(raw) ?? return Err(PhpError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(PhpError.CommandFailed) }
+    return Ok(response.field("value") ?? DataTree.Null)
+}
+
+pub fn sleep_call(pool: PhpPool, input: DataTree, deadline_ms: Int) => DataTree ? PhpError {
+    raw :: abi.sleep_call(pool.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(PhpError.NotRunning) }
+    if code == 2 { return Err(PhpError.Timeout) }
+    if code == 3 { return Err(PhpError.Cancelled) }
+    if code == 5 { return Err(PhpError.Limit) }
+    if code != 0 { return Err(PhpError.Protocol) }
+    response := json.parse(raw) ?? return Err(PhpError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(PhpError.CommandFailed) }
+    return Ok(response.field("value") ?? DataTree.Null)
+}
+
+pub fn pooled_sleep(pool: PhpPool, input: DataTree, deadline_ms: Int) => DataTree ? PhpError {
+    raw :: abi.pooled_sleep(pool.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(PhpError.NotRunning) }
+    if code == 2 { return Err(PhpError.Timeout) }
+    if code == 3 { return Err(PhpError.Cancelled) }
+    if code == 5 { return Err(PhpError.Limit) }
+    if code != 0 { return Err(PhpError.Protocol) }
+    response := json.parse(raw) ?? return Err(PhpError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(PhpError.CommandFailed) }
+    return Ok(response.field("value") ?? DataTree.Null)
+}
+

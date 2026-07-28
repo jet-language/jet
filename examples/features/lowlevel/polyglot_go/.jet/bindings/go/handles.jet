@@ -1,0 +1,16 @@
+#Extern module c.jet_go_handles {
+    fn new_handle(value: Int) => Int = "new_handle"
+    fn consume_handle(handle: Int) => Int = "consume_handle"
+}
+use c.jet_go_handles as abi
+
+pub struct Handle { value: Int }
+
+pub fn new_handle(value: Int) => Handle {
+    return Handle.{ value: abi.new_handle(value) }
+}
+
+pub fn consume_handle(handle: Handle) => Int {
+    return abi.consume_handle(handle.value)
+}
+

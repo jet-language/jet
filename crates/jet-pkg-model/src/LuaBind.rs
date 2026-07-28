@@ -75,11 +75,11 @@ pub fn bind(path: &Path, source: &str, lib: &str, cache: &Path) -> Result<BindRe
 }
 
 const GENERATED_FIXED_FUNCTIONS: &[(&str, &str)] = &[
-    ("open", "() -> Int"),
-    ("take_error", "() -> Int"),
+    ("open", "() => Int"),
+    ("take_error", "() => Int"),
     ("cancel", "(handle: Int)"),
     ("close", "(handle: Int)"),
-    ("view_get_int", "(handle: Int, table: Int, key: String) -> Int"),
+    ("view_get_int", "(handle: Int, table: Int, key: String) => Int"),
     ("view_set_int", "(handle: Int, table: Int, key: String, value: Int)"),
     ("view_release", "(handle: Int, table: Int)"),
 ];

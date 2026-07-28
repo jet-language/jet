@@ -1,0 +1,315 @@
+#Extern module c.jet_r_ops {
+    fn open() => Int = "jet_r_ops_open"
+    fn take_error() => Int = "jet_r_ops_take_error"
+    fn cancel(handle: Int) = "jet_r_ops_cancel"
+    fn close(handle: Int) = "jet_r_ops_close"
+    fn transform(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_transform"
+    fn transform_table(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_transform_table"
+    fn transform_plot(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_transform_plot"
+    fn double_values(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_double_values"
+    fn double_values_table(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_double_values_table"
+    fn double_values_plot(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_double_values_plot"
+    fn scale_table(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_scale_table"
+    fn scale_table_table(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_scale_table_table"
+    fn scale_table_plot(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_scale_table_plot"
+    fn plot_scores(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_plot_scores"
+    fn plot_scores_table(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_plot_scores_table"
+    fn plot_scores_plot(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_plot_scores_plot"
+    fn fail_call(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_fail_call"
+    fn fail_call_table(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_fail_call_table"
+    fn fail_call_plot(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_fail_call_plot"
+    fn sleep_call(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_sleep_call"
+    fn sleep_call_table(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_sleep_call_table"
+    fn sleep_call_plot(handle: Int, input: String, deadline_ms: Int) => String = "jet_r_ops_invoke_sleep_call_plot"
+}
+use c.jet_r_ops as abi
+use core.encoding.json as json
+use core.data as data
+
+pub struct Session { value: Int }
+pub enum RError { NotRunning Timeout Cancelled Protocol CommandFailed Limit }
+
+impl Session.Close {
+    fn close(^self) { abi.close(self.value) }
+}
+
+pub fn close(^session: Session) { abi.close(session.value) }
+
+pub fn open() => Session ? RError {
+    handle :: abi.open()
+    if abi.take_error() != 0 { return Err(RError.NotRunning) }
+    return Ok(Session.{ value: handle })
+}
+
+pub fn cancel(session: Session) { abi.cancel(session.value) }
+
+pub fn transform(session: Session, input: DataTree, deadline_ms: Int) => DataTree ? RError {
+    raw :: abi.transform(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    return Ok(response.field("value") ?? DataTree.Null)
+}
+
+pub fn transform_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) => Table<T> ? RError {
+    raw :: abi.transform_table(session.value, json.to_string(data.rows(~table)), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    value := response.field("value") ?? return Err(RError.Protocol)
+    rows := json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol)
+    return Ok(data.table(~rows))
+}
+
+pub fn transform_plot(session: Session, input: DataTree, deadline_ms: Int) => String ? RError {
+    raw :: abi.transform_plot(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    value := (response.field("value") ?? DataTree.Null).text() ?? return Err(RError.Protocol)
+    return Ok(value)
+}
+
+pub fn double_values(session: Session, input: DataTree, deadline_ms: Int) => DataTree ? RError {
+    raw :: abi.double_values(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    return Ok(response.field("value") ?? DataTree.Null)
+}
+
+pub fn double_values_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) => Table<T> ? RError {
+    raw :: abi.double_values_table(session.value, json.to_string(data.rows(~table)), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    value := response.field("value") ?? return Err(RError.Protocol)
+    rows := json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol)
+    return Ok(data.table(~rows))
+}
+
+pub fn double_values_plot(session: Session, input: DataTree, deadline_ms: Int) => String ? RError {
+    raw :: abi.double_values_plot(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    value := (response.field("value") ?? DataTree.Null).text() ?? return Err(RError.Protocol)
+    return Ok(value)
+}
+
+pub fn scale_table(session: Session, input: DataTree, deadline_ms: Int) => DataTree ? RError {
+    raw :: abi.scale_table(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    return Ok(response.field("value") ?? DataTree.Null)
+}
+
+pub fn scale_table_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) => Table<T> ? RError {
+    raw :: abi.scale_table_table(session.value, json.to_string(data.rows(~table)), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    value := response.field("value") ?? return Err(RError.Protocol)
+    rows := json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol)
+    return Ok(data.table(~rows))
+}
+
+pub fn scale_table_plot(session: Session, input: DataTree, deadline_ms: Int) => String ? RError {
+    raw :: abi.scale_table_plot(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    value := (response.field("value") ?? DataTree.Null).text() ?? return Err(RError.Protocol)
+    return Ok(value)
+}
+
+pub fn plot_scores(session: Session, input: DataTree, deadline_ms: Int) => DataTree ? RError {
+    raw :: abi.plot_scores(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    return Ok(response.field("value") ?? DataTree.Null)
+}
+
+pub fn plot_scores_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) => Table<T> ? RError {
+    raw :: abi.plot_scores_table(session.value, json.to_string(data.rows(~table)), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    value := response.field("value") ?? return Err(RError.Protocol)
+    rows := json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol)
+    return Ok(data.table(~rows))
+}
+
+pub fn plot_scores_plot(session: Session, input: DataTree, deadline_ms: Int) => String ? RError {
+    raw :: abi.plot_scores_plot(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    value := (response.field("value") ?? DataTree.Null).text() ?? return Err(RError.Protocol)
+    return Ok(value)
+}
+
+pub fn fail_call(session: Session, input: DataTree, deadline_ms: Int) => DataTree ? RError {
+    raw :: abi.fail_call(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    return Ok(response.field("value") ?? DataTree.Null)
+}
+
+pub fn fail_call_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) => Table<T> ? RError {
+    raw :: abi.fail_call_table(session.value, json.to_string(data.rows(~table)), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    value := response.field("value") ?? return Err(RError.Protocol)
+    rows := json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol)
+    return Ok(data.table(~rows))
+}
+
+pub fn fail_call_plot(session: Session, input: DataTree, deadline_ms: Int) => String ? RError {
+    raw :: abi.fail_call_plot(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    value := (response.field("value") ?? DataTree.Null).text() ?? return Err(RError.Protocol)
+    return Ok(value)
+}
+
+pub fn sleep_call(session: Session, input: DataTree, deadline_ms: Int) => DataTree ? RError {
+    raw :: abi.sleep_call(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    return Ok(response.field("value") ?? DataTree.Null)
+}
+
+pub fn sleep_call_table<T: [Encode, Decode]>(session: Session, table: Table<T>, deadline_ms: Int) => Table<T> ? RError {
+    raw :: abi.sleep_call_table(session.value, json.to_string(data.rows(~table)), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    value := response.field("value") ?? return Err(RError.Protocol)
+    rows := json.decode<[T]>(json.to_string(value)) ?? return Err(RError.Protocol)
+    return Ok(data.table(~rows))
+}
+
+pub fn sleep_call_plot(session: Session, input: DataTree, deadline_ms: Int) => String ? RError {
+    raw :: abi.sleep_call_plot(session.value, json.to_string(input), deadline_ms)
+    code :: abi.take_error()
+    if code == 1 { return Err(RError.NotRunning) }
+    if code == 2 { return Err(RError.Timeout) }
+    if code == 3 { return Err(RError.Cancelled) }
+    if code == 5 { return Err(RError.Limit) }
+    if code != 0 { return Err(RError.Protocol) }
+    response := json.parse(raw) ?? return Err(RError.Protocol)
+    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    if !succeeded { return Err(RError.CommandFailed) }
+    value := (response.field("value") ?? DataTree.Null).text() ?? return Err(RError.Protocol)
+    return Ok(value)
+}
+
