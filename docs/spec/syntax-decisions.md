@@ -393,9 +393,10 @@ graph itself. Protocol transport arrows are retired.
 ### Patterns & matching
 
 **S31 — Pattern tests**: `==` with a pattern RHS when the LHS is an enum or
-`T?` — `if s == Rect(w, h)`, `x == .None` — yields Bool. Patterns nest to any
-depth (`r == .Ok(Rect(w, h))`). Guards are plain `&&`: a pattern-bound name is
-in scope for the rest of the same condition. No `is`, no Rust `match`.
+`T?` — `if s == .Rect(w, h)`, `x == .None` — yields Bool. Patterns nest to any
+depth (`r == .Ok(.Rect(w, h))`). Guards are plain `&&`: a pattern-bound name is
+in scope for the rest of the same condition. No `is`, no Rust `match`. Bare
+variant names without a leading `.` are E0367 (D-ENUMDOT1).
 
 **D-FLOWTYPE1=A — Optional narrowing after presence checks** *(ratified
 2026-07-24, card #746)*: for a direct immutable local or parameter of type
@@ -408,9 +409,10 @@ binding for typed IR; codegen stays mechanical. Documentation teaches the
 `None` check for a direct stable name and the binding pattern for every other
 case.
 
-**D-ENUMDOT1 / D-ENUMDOT2 — Leading-dot variants**: match-arm patterns take a
-leading dot (`.Circle(r)`, `.Empty`); value position too when the expected
-type is known (`.Red`; E0330 fallback). `Color.Red` always valid.
+**D-ENUMDOT1 / D-ENUMDOT2 — Leading-dot variants**: match-arm patterns require a
+leading dot (`.Circle(r)`, `.Empty`); bare `Circle(r)` / `Empty` is E0367.
+Value position too when the expected type is known (`.Red`; E0330 fallback).
+`Color.Red` always valid.
 
 **D-TAG1 — Nested variant groups** *(ratified 2026-07-03, card #181)*: a
 variant may enclose sub-variants in `{ }` to any depth (`enum Damage {
@@ -5060,7 +5062,7 @@ second sum mechanism. Nested unions flatten, duplicates drop, and identity is
 order-insensitive with a deterministic canonical spelling and codegen enum.
 `T ? E1 | E2` parses as `T ? (E1 | E2)`. A member widens into its union only at
 binding, argument, return, Codable field, and `?` error-propagation boundaries.
-Match arms name member types (`Int(n)`, `String(s)`). Codable decode dispatches
+Match arms name member types (`.Int(n)`, `.String(s)`). Codable decode dispatches
 by primary wire shape and rejects ambiguous shapes (E2415). Named enums stay the
 documenting form; union↔named-enum crossings stay explicit match conversions.
 D-ANY-JAI1 stays intact — no Any or cast escape. Implemented on card #744.

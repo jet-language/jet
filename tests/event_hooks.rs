@@ -15,9 +15,9 @@ use core.event as event
 
 fn show(outcome: HookOutcome<String, String>) {
     if outcome == {
-        Continue(value) -> print("continue {value}")
-        Cancel -> print("cancel")
-        Fail(error) -> print("fail {error}")
+        .Continue(value) -> print("continue {value}")
+        .Cancel -> print("cancel")
+        .Fail(error) -> print("fail {error}")
     }
 }
 

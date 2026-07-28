@@ -228,7 +228,7 @@ fn expand_builtin_enum_serde(
                         match &v.payload {
                             crate::AST::VariantPayload::Single(t, _) => {
                                 let decoded = format!("decoded_{variant_index}");
-                                object_arms.push_str(&format!("{decoded} := {candidate}.decode<{}>()\nif {decoded} == Ok(decoded_value) {{ return Ok({target}.{}(decoded_value)) }}\n", serde_type_source(t), v.name));
+                                object_arms.push_str(&format!("{decoded} := {candidate}.decode<{}>()\nif {decoded} == .Ok(decoded_value) {{ return Ok({target}.{}(decoded_value)) }}\n", serde_type_source(t), v.name));
                             }
                             crate::AST::VariantPayload::Named(_) => {
                                 object_arms.push_str(&format!("{}\n", serde_enum_decode_return(&target, v, &candidate)));
@@ -374,7 +374,7 @@ fn serde_enum_named_pairs(fs: &[crate::AST::VariantField]) -> String {
 }
 
 fn serde_enum_decode_attempt(target: &str, v: &crate::AST::Variant, src: &str, guarded: bool) -> String {
-    if guarded { format!("if {src}.decode<{}>() == Ok(v0) {{ {} }}\n", serde_enum_payload_type(v), serde_enum_decode_return(target, v, src)) }
+    if guarded { format!("if {src}.decode<{}>() == .Ok(v0) {{ {} }}\n", serde_enum_payload_type(v), serde_enum_decode_return(target, v, src)) }
     else { serde_enum_decode_return(target, v, src) }
 }
 

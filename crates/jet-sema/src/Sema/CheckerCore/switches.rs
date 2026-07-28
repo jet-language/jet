@@ -385,12 +385,20 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            let all_pattern = subj_ty.is_some()
-                && !arms.is_empty()
-                && arms.iter().all(|a| {
-                    self.switch_arm_pattern(&a.cond, subj_name.as_deref(), subj_ty.as_ref().unwrap())
-                        .is_some()
-                });
+            let all_pattern = if let Some(st) = subj_ty.as_ref() {
+                // Probe without retaining E0367 from bare-variant recovery —
+                // those fire once when each arm is checked below.
+                let diag_len = self.diags.len();
+                let ok = !arms.is_empty()
+                    && arms.iter().all(|a| {
+                        self.switch_arm_pattern(&a.cond, subj_name.as_deref(), st)
+                            .is_some()
+                    });
+                self.diags.truncate(diag_len);
+                ok
+            } else {
+                false
+            };
             let mut covered = HashSet::new();
             let move_before = self.moved.clone();
             let mut move_after = move_before.clone();

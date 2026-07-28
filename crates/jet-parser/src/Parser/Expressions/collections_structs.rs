@@ -407,12 +407,13 @@ impl<'a> Parser<'a> {
             Ok((args, end))
         }
     
-        /// S31: try to parse a pattern on the right of `==`.
+        /// S31 / D-ENUMDOT1: try to parse a pattern on the right of `==`.
         ///
-        /// Only unambiguous pattern spellings: `None`, `Val(n)`, and
-        /// `Variant(bindings)`. A bare identifier is ordinary value equality
-        /// (`a == b`); unit-variant tests like `light == Red` are resolved in
-        /// sema when `Red` is not a variable but is a variant on the subject.
+        /// Leading-dot `.Variant` / `.Variant(...)`, optional `None` / `Val(n)`,
+        /// and bare `Variant(...)` (E0367 + recover). A lone bare unit Ident is
+        /// ordinary value equality — sema emits E0367 only when that Ident is a
+        /// known variant. Bare unit Ident followed by `|` starts an or-pattern
+        /// (E0367 + recover) so `.Red | Green` and `Red | Green` teach the dot.
         pub(in crate::Parser) fn try_pattern_rhs(&mut self) -> Result<Option<Pattern>, Diagnostic> {
             // D-UNIFYLIT1=A: typed pattern heads before bare tokens.
             if let Some(pat) = self.try_bin_match_pattern()? {
@@ -459,14 +460,72 @@ impl<'a> Parser<'a> {
                 {
                     return self.struct_pattern_rhs().map(Some);
                 }
+                // D-ENUMDOT1: bare unit `Variant | …` starts an or-pattern (lone
+                // `Variant` stays value equality so typos don't get a fake E0367).
                 TokKind::Ident(variant)
-                    if matches!(
-                        self.toks.get(self.pos + 1).map(|t| &t.kind),
-                        Some(TokKind::LParen)
-                    ) =>
+                    if variant.chars().next().is_some_and(|c| c.is_uppercase())
+                        && !matches!(
+                            self.toks.get(self.pos + 1).map(|t| &t.kind),
+                            Some(TokKind::LParen)
+                        )
+                        && matches!(
+                            self.toks.get(self.pos + 1).map(|t| &t.kind),
+                            Some(TokKind::Pipe)
+                        ) =>
+                {
+                    let variant = variant.clone();
+                    let span = self.bump().span;
+                    self.diags.push(Diagnostic::error(
+                        "E0367",
+                        format!("pattern `{variant}` needs a leading `.`"),
+                        "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)"
+                            .to_string(),
+                        format!("write `.{variant}`"),
+                        Some(span),
+                    ));
+                    let base = Pattern::Variant {
+                        variant,
+                        bindings: Vec::new(),
+                        span,
+                    };
+                    let or_start = span;
+                    let mut alts = vec![base];
+                    while matches!(self.peek().kind, TokKind::Pipe) {
+                        self.bump();
+                        if let Some(alt) = self.try_or_pattern_alt()? {
+                            alts.push(alt);
+                        } else {
+                            return Err(Diagnostic::error(
+                                "E0003",
+                                "expected a variant pattern after `|` in an or-pattern"
+                                    .to_string(),
+                                "or-patterns join two variant patterns: `.A | .B`".to_string(),
+                                "write a leading-dot variant after `|`".to_string(),
+                                Some(self.peek().span),
+                            ));
+                        }
+                    }
+                    let or_end = self.toks[self.pos.saturating_sub(1)].span.end;
+                    return Ok(Some(Pattern::Or(alts, Span::new(or_start.start, or_end))));
+                }
+                // D-ENUMDOT1: bare `Variant(...)` needs a leading `.`.
+                TokKind::Ident(variant)
+                    if variant.chars().next().is_some_and(|c| c.is_uppercase())
+                        && matches!(
+                            self.toks.get(self.pos + 1).map(|t| &t.kind),
+                            Some(TokKind::LParen)
+                        ) =>
                 {
                     let variant = variant.clone();
                     let span = self.peek().span;
+                    self.diags.push(Diagnostic::error(
+                        "E0367",
+                        format!("pattern `{variant}` needs a leading `.`"),
+                        "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)"
+                            .to_string(),
+                        format!("write `.{variant}(…)`"),
+                        Some(span),
+                    ));
                     self.bump();
                     self.bump();
                     let mut bindings: Vec<crate::AST::PatSlot> = Vec::new();
@@ -533,14 +592,14 @@ impl<'a> Parser<'a> {
                         while matches!(self.peek().kind, TokKind::Pipe) {
                             self.bump(); // consume `|`
                                          // Parse the next alternative (must be a Variant pattern).
-                            if let Some(alt) = self.try_pattern_rhs()? {
+                            if let Some(alt) = self.try_or_pattern_alt()? {
                                 alts.push(alt);
                             } else {
                                 return Err(Diagnostic::error(
                                     "E0003",
                                     "expected a variant pattern after `|` in an or-pattern".to_string(),
-                                    "or-patterns join two variant patterns: `A(x) | B(x)`".to_string(),
-                                    "write a variant name with bindings after `|`".to_string(),
+                                    "or-patterns join two variant patterns: `.A(x) | .B(x)`".to_string(),
+                                    "write a leading-dot variant with bindings after `|`".to_string(),
                                     Some(self.peek().span),
                                 ));
                             }
@@ -638,14 +697,14 @@ impl<'a> Parser<'a> {
                         let mut alts = vec![base];
                         while matches!(self.peek().kind, TokKind::Pipe) {
                             self.bump(); // consume `|`
-                            if let Some(alt) = self.try_pattern_rhs()? {
+                            if let Some(alt) = self.try_or_pattern_alt()? {
                                 alts.push(alt);
                             } else {
                                 return Err(Diagnostic::error(
                                     "E0003",
                                     "expected a variant pattern after `|` in an or-pattern".to_string(),
-                                    "or-patterns join two variant patterns: `A(x) | B(x)`".to_string(),
-                                    "write a variant name with bindings after `|`".to_string(),
+                                    "or-patterns join two variant patterns: `.A(x) | .B(x)`".to_string(),
+                                    "write a leading-dot variant with bindings after `|`".to_string(),
                                     Some(self.peek().span),
                                 ));
                             }
@@ -657,6 +716,42 @@ impl<'a> Parser<'a> {
                 }
                 _ => Ok(None),
             }
+        }
+
+        /// D-ENUMDOT1 / D-PATO: one alternative after `|` in an or-pattern.
+        /// Accepts a normal pattern RHS, or a bare unit PascalCase Ident (E0367).
+        fn try_or_pattern_alt(&mut self) -> Result<Option<Pattern>, Diagnostic> {
+            if let Some(alt) = self.try_pattern_rhs()? {
+                return Ok(Some(alt));
+            }
+            let TokKind::Ident(name) = &self.peek().kind else {
+                return Ok(None);
+            };
+            if !name.chars().next().is_some_and(|c| c.is_uppercase()) {
+                return Ok(None);
+            }
+            if matches!(
+                self.toks.get(self.pos + 1).map(|t| &t.kind),
+                Some(TokKind::LParen)
+            ) {
+                // Payload shape belongs to try_pattern_rhs (already tried).
+                return Ok(None);
+            }
+            let variant = name.clone();
+            let span = self.bump().span;
+            self.diags.push(Diagnostic::error(
+                "E0367",
+                format!("pattern `{variant}` needs a leading `.`"),
+                "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)"
+                    .to_string(),
+                format!("write `.{variant}`"),
+                Some(span),
+            ));
+            Ok(Some(Pattern::Variant {
+                variant,
+                bindings: Vec::new(),
+                span,
+            }))
         }
     
 }

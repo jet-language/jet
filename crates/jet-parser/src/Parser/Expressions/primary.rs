@@ -207,10 +207,10 @@ impl<'a> Parser<'a> {
                     self.diags.push(Diagnostic::error(
                         "E0024",
                         format!("{} doesn't use `{}`", Syntax::LANG_NAME, foreign),
-                        "handle a failure with `or` for a fallback, or test with `== Err(...)`"
+                        "handle a failure with `or` for a fallback, or test with `== .Err(...)`"
                             .to_string(),
                         format!(
-                            "write `parse(x) or 0` or `if x == Err(e) {{ ... }}` instead of `{}`",
+                            "write `parse(x) or 0` or `if x == .Err(e) {{ ... }}` instead of `{}`",
                             foreign
                         ),
                         Some(t.span),

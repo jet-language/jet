@@ -1,0 +1,22 @@
+// E0367: bare payload variant patterns need a leading `.` (D-ENUMDOT1).
+enum Light {
+    Fade(Int)
+}
+
+fn show(light: Light, result: Int ? String, value: Int | String) {
+    if light == {
+        Fade(n) -> { print(n) }
+    }
+    if result == {
+        Ok(n) -> { print(n) }
+        Err(e) -> { print(e) }
+    }
+    if value == {
+        Int(n) -> { print(n) }
+        String(s) -> { print(s) }
+    }
+}
+
+fn run() {
+    show(Light.Fade(1), Ok(1), 2)
+}

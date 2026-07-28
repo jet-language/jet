@@ -426,63 +426,46 @@ pub(crate) fn pattern_variant_name(pattern: &Pattern) -> Option<String> {
 pub(crate) fn missing_arms_text(
     subj_ty: &Type,
     missing: &[String],
-    subj_name: Option<&str>,
+    _subj_name: Option<&str>,
 ) -> String {
-    let subj = subj_name.unwrap_or("it");
     let arms: Vec<String> = missing
         .iter()
         .map(|v| match subj_ty {
-            // Named enum: `(subject == VariantName) -> {};`
-            Type::Named(_) => {
-                format!(
-                    "    ({} == {}) {} {{}};",
-                    subj,
-                    v,
-                    crate::Syntax::OP_ARM_ARROW
-                )
+            // D-ENUMDOT1: leading-dot arm heads in `if subject == { … }`.
+            Type::Named(_) | Type::Apply { .. } | Type::Union(_) => {
+                format!("    .{} {} {{}}", v, crate::Syntax::OP_ARM_ARROW)
             }
-            // Option: `value(inner) -> {};`  or  `null -> {};`
             Type::Option(_) => {
                 if v == crate::Syntax::LIT_VALUE {
                     format!(
-                        "    ({} is {}(inner)) {} {{}};",
-                        subj,
+                        "    .{}(inner) {} {{}}",
                         crate::Syntax::LIT_VALUE,
                         crate::Syntax::OP_ARM_ARROW
                     )
                 } else {
                     format!(
-                        "    ({} == {}) {} {{}};",
-                        subj,
+                        "    .{} {} {{}}",
                         crate::Syntax::LIT_NULL,
                         crate::Syntax::OP_ARM_ARROW
                     )
                 }
             }
-            // Result: `Ok(v) -> {};` or `Err(e) -> {};`
             Type::Result { .. } => {
                 if v.starts_with(crate::Syntax::LIT_OK) {
                     format!(
-                        "    ({} is {}(v)) {} {{}};",
-                        subj,
+                        "    .{}(v) {} {{}}",
                         crate::Syntax::LIT_OK,
                         crate::Syntax::OP_ARM_ARROW
                     )
                 } else {
                     format!(
-                        "    ({} is {}(e)) {} {{}};",
-                        subj,
+                        "    .{}(e) {} {{}}",
                         crate::Syntax::LIT_ERR,
                         crate::Syntax::OP_ARM_ARROW
                     )
                 }
             }
-            _ => format!(
-                "    ({} == {}) {} {{}};",
-                subj,
-                v,
-                crate::Syntax::OP_ARM_ARROW
-            ),
+            _ => format!("    .{} {} {{}}", v, crate::Syntax::OP_ARM_ARROW),
         })
         .collect();
     format!("\n{}", arms.join("\n"))

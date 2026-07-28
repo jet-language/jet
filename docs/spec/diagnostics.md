@@ -327,6 +327,7 @@ renumbered, and no new `W` code may be allocated.
 | E0363 | sema  | anonymous-union member is not a concrete closed type (D-UNIONTYPE1) |
 | E0364 | sema  | inclusive `0..xs.len()` indexes that same `xs` (D-RANGE-EXCL1=C) |
 | E0365 | sema  | repeated anonymous-union match member (D-UNIONTYPE1) |
+| E0367 | parse/sema | bare variant pattern needs a leading `.` (D-ENUMDOT1) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | a closed-enum arm table would be clearer with a named subject (lint) |
 | E0401 | sema  | fallible value used where plain `T` expected |
@@ -1279,6 +1280,7 @@ already-freed arena), these track the views themselves.
 | E0363 | `{Type}` can't be a union member. | Anonymous unions (D-UNIONTYPE1=A) hold concrete closed member types only — not type parameters, trait objects, or function types. | Use a named enum when a member needs an open shape. |
 | E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop i, item; xs` — or `loop i; xs.indexes()` — or `0..<xs.len()`. |
 | E0365 | Arm `{Type}` is unreachable — that case is already handled. | Every earlier arm already covers this pattern. | Remove this arm or merge it with the one above. |
+| E0367 | Pattern `{name}` needs a leading `.`. | Match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1). | Write `.{name}` or `.{name}(…)`. |
 
 ## Statement switch attribute diagnostics (D-CANVASSTATE1)
 

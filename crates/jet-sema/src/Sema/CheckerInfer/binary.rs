@@ -5,7 +5,7 @@
 use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{substitute_type, COMPARABLE};
-use crate::AST::{BinOp, Dimension, Expr, Pattern, Type};
+use crate::AST::{BinOp, Dimension, Expr, Type};
 use std::collections::HashMap;
 
 impl<'a> Checker<'a> {
@@ -229,19 +229,6 @@ impl<'a> Checker<'a> {
                 if let Some(pattern) = self.eq_unit_variant_pattern(lhs, rhs, subj_name, lt) {
                     self.validate_pattern(lt, &pattern, span);
                     return Some(Type::Bool);
-                }
-                if let Expr::Ident(name, rhs_span) = rhs.as_ref() {
-                    if self.lookup(name).is_none() && !self.consts.contains_key(name) {
-                        if matches!(lt, Type::Option(_) | Type::Named(_)) {
-                            let pattern = Pattern::Variant {
-                                variant: name.clone(),
-                                bindings: Vec::new(),
-                                span: *rhs_span,
-                            };
-                            self.validate_pattern(lt, &pattern, span);
-                            return Some(Type::Bool);
-                        }
-                    }
                 }
             }
         }

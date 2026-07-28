@@ -1728,9 +1728,11 @@ impl<'a> Checker<'a> {
         ty
     }
 
-    /// S31: `subject == Red` when `Red` is a unit variant, not a variable.
+    /// S31 / D-ENUMDOT1: bare `subject == Red` for a unit variant is E0367 —
+    /// patterns need a leading `.`. Still return the pattern so recovery can
+    /// typecheck the rest of the table.
     pub(crate) fn eq_unit_variant_pattern(
-        &self,
+        &mut self,
         lhs: &Expr,
         rhs: &Expr,
         subject_name: Option<&str>,
@@ -1759,6 +1761,14 @@ impl<'a> Checker<'a> {
         if !variant_known {
             return None;
         }
+        self.diags.push(Diagnostic::error(
+            "E0367",
+            format!("pattern `{variant}` needs a leading `.`"),
+            "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)"
+                .to_string(),
+            format!("write `.{variant}`"),
+            Some(*rhs_span),
+        ));
         Some(Pattern::Variant {
             variant: variant.clone(),
             bindings: Vec::new(),
@@ -1766,9 +1776,10 @@ impl<'a> Checker<'a> {
         })
     }
 
-    /// S31: pattern carried as `PatternTest` or as `subject == UnitVariant`.
+    /// S31: pattern carried as `PatternTest` or as bare `subject == UnitVariant`
+    /// (the latter is accepted only to emit E0367 and recover).
     pub(crate) fn switch_arm_pattern(
-        &self,
+        &mut self,
         cond: &Expr,
         subject_name: Option<&str>,
         subj_ty: &Type,
@@ -1795,14 +1806,9 @@ impl<'a> Checker<'a> {
             Expr::Binary(BinOp::Eq, lhs, rhs, _) => {
                 self.eq_unit_variant_pattern(lhs, rhs, subject_name, subj_ty)
             }
-            // D-TERM1 (ratified 2026-06-22): `Key` arm heads written as bare
-            // variant name (unit: `Enter`, `Up`, …) or call-like (payload:
-            // `Char(c)`, `F(n)`, `Ctrl(c)`). The parser produces a Call node
-            // for `Variant(binding)` arms and an Ident node for unit variants.
-            // Recognise them as patterns when the subject is a `Key`.
-            //
-            // Also handles JSON patterns written in the arm-head position
-            // (the same call-as-pattern reuse JSON already relies on).
+            // D-ENUMDOT1: bare unit / call-shaped arm heads are the old S31
+            // spelling. Accept only to emit E0367 and recover — canonical form
+            // is `.Variant` / `.Variant(binding)`.
             Expr::Ident(variant, span) if subject_name.is_some() => {
                 let enum_name = match subj_ty {
                     Type::Named(name) | Type::Apply { name, .. } => name,
@@ -1823,6 +1829,14 @@ impl<'a> Checker<'a> {
                 if self.lookup(variant).is_some() {
                     return None;
                 }
+                self.diags.push(Diagnostic::error(
+                    "E0367",
+                    format!("pattern `{variant}` needs a leading `.`"),
+                    "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)"
+                        .to_string(),
+                    format!("write `.{variant}`"),
+                    Some(*span),
+                ));
                 Some(Pattern::Variant {
                     variant: variant.clone(),
                     bindings: vec![],
@@ -1842,6 +1856,28 @@ impl<'a> Checker<'a> {
                 } // it's a real local
                 let enum_name = match subj_ty {
                     Type::Named(name) | Type::Apply { name, .. } => name,
+                    Type::Union(members)
+                        if members
+                            .iter()
+                            .any(|m| crate::AST::union_member_tag(m) == call.name) =>
+                    {
+                        self.diags.push(Diagnostic::error(
+                            "E0367",
+                            format!("pattern `{}` needs a leading `.`", call.name),
+                            "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)"
+                                .to_string(),
+                            format!("write `.{}(…)`", call.name),
+                            Some(call.name_span),
+                        ));
+                        return Some(Pattern::Variant {
+                            variant: call.name.clone(),
+                            bindings: vec![crate::AST::PatSlot::Bind {
+                                name: binding.clone(),
+                                span: *binding_span,
+                            }],
+                            span: call.name_span,
+                        });
+                    }
                     _ => return None,
                 };
                 let variants = self.resolve_enum_variants_cloned(enum_name)?;
@@ -1849,6 +1885,14 @@ impl<'a> Checker<'a> {
                 if !matches!(payload, crate::AST::VariantPayload::Single(..)) {
                     return None;
                 }
+                self.diags.push(Diagnostic::error(
+                    "E0367",
+                    format!("pattern `{}` needs a leading `.`", call.name),
+                    "match patterns take a leading dot so the name isn't read as a variable or call (D-ENUMDOT1)"
+                        .to_string(),
+                    format!("write `.{}(…)`", call.name),
+                    Some(call.name_span),
+                ));
                 Some(Pattern::Variant {
                     variant: call.name.clone(),
                     bindings: vec![crate::AST::PatSlot::Bind {
@@ -2031,9 +2075,9 @@ impl<'a> Checker<'a> {
                         "this pattern belongs to an optional value, not {}",
                         subject_ty.name()
                     ),
-                    "use `== Ok(...)` or `== Err(...)` on a fallible result".to_string(),
+                    "use `== .Ok(...)` or `== .Err(...)` on a fallible result".to_string(),
                     format!(
-                        "write `== {}(...)` or `== {}(...)` instead",
+                        "write `== .{}(...)` or `== .{}(...)` instead",
                         Syntax::LIT_OK,
                         Syntax::LIT_ERR
                     ),
@@ -2084,7 +2128,7 @@ impl<'a> Checker<'a> {
                             bindings.len()
                         ),
                         "each union member arm binds the member value once".to_string(),
-                        format!("write `{}(v)`", variant),
+                        format!("write `.{}(v)`", variant),
                         Some(span),
                     ));
                 }

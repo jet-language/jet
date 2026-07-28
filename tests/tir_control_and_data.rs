@@ -338,8 +338,8 @@ fn run() {
     decoded :: json.decode<Row>(wire) ?? panic("row")
     decoded_value :: decoded.value
     if decoded_value == {
-        Usd(value) -> print(value.raw())
-        String(value) -> print(value)
+        .Usd(value) -> print(value.raw())
+        .String(value) -> print(value)
     }
 }
 "#;
@@ -796,16 +796,16 @@ enum Light {
 }
 fn next(light: Light) => Light {
     if light == {
-        Red -> { return Light.Yellow }
-        Yellow -> { return Light.Green }
-        Green -> { return Light.Red }
+        .Red -> { return Light.Yellow }
+        .Yellow -> { return Light.Green }
+        .Green -> { return Light.Red }
     }
 }
 fn label(light: Light) => String {
     if light == {
-        Red -> { return \"stop\" }
-        Yellow -> { return \"caution\" }
-        Green -> { return \"go\" }
+        .Red -> { return \"stop\" }
+        .Yellow -> { return \"caution\" }
+        .Green -> { return \"go\" }
     }
 }
 fn run() {
@@ -836,9 +836,9 @@ enum Conn {
 }
 fn describe(c: Conn) => String {
     if c == {
-        Active(id) | Reconnecting(id) -> { return \"live:{id}\" }
-        Idle(_) -> { return \"idle\" }
-        Closed -> { return \"closed\" }
+        .Active(id) | .Reconnecting(id) -> { return \"live:{id}\" }
+        .Idle(_) -> { return \"idle\" }
+        .Closed -> { return \"closed\" }
     }
     return \"unknown\"
 }
@@ -868,10 +868,10 @@ enum HTTP {
 }
 fn classify(r: HTTP) => String {
     if r == {
-        Good(200..299) -> { return \"success\" }
-        Good(400..499) -> { return \"client error\" }
-        Good(_) -> { return \"other\" }
-        Fail(_) -> { return \"network error\" }
+        .Good(200..299) -> { return \"success\" }
+        .Good(400..499) -> { return \"client error\" }
+        .Good(_) -> { return \"other\" }
+        .Fail(_) -> { return \"network error\" }
     }
     return \"unknown\"
 }
