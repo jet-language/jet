@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1266,
-    "rev": 18321,
+    "rev": 18327,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59051,21 +59051,68 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P0",
-      "plan": "Establish the correct ordering law first: lowering must not run on a program sema rejected. Fix the ordering rather than adding a guard at the panic site, unless the ordering is deliberate and the panic site is genuinely reachable for a valid reason. Prove it with the existing fixture, and add the case to the checking tests so a rejected program can never reach lowering again. blockedBy: none.",
+      "plan": "Reproduce the existing E0103 fixture through the real jet check CLI with a backtrace. Find the first post-sema lowering call and gate that consumer on error-severity diagnostics; do not guard the unreachable site or change E0103. Add a CLI/check regression proving exit 1 with the registered E0103 and no panic/internal codegen text, plus a valid-check control. blockedBy: none.",
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [],
+      "assignee": "e3-1256-check-order",
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "e3-1256-check-order",
+          "text": "Claimed after #1258 blocked. I3 settles ordering: sema owns rejection; invalid programs must not enter lowering. No owner choice or new diagnostic."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet check on ui_fixed_dynamic_size.E0103.jet exits as a user error, renders E0103, and contains no panic, unreachable, or generated-code failure.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T12:44:43.107Z"
+        },
+        {
+          "n": 2,
+          "text": "A sema-error bundle cannot reach TIR/codegen lowering through the check path; the unreachable site is not papered over.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T12:44:43.347Z"
+        },
+        {
+          "n": 3,
+          "text": "Focused CLI/check tests include the invalid fixture and a valid control, with existing diagnostic text/snapshot unchanged.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T12:44:43.596Z"
+        },
+        {
+          "n": 4,
+          "text": "A fresh reviewer checks ordering, false-green risk, diagnostic fidelity, and targeted proof.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T12:44:43.827Z"
+        }
+      ],
       "refs": [
+        "docs/spec/diagnostics.md",
+        "Source/CmdCompile.rs",
+        "crates/jet-driver/src/QueryService.rs",
         "crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs",
-        "tests/fuzz/sema/invalid"
+        "tests/fuzz/sema/invalid/ui_fixed_dynamic_size.E0103.jet"
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T10:08:20.934Z",
-      "updated": "2026-07-28T10:08:20.934Z",
-      "updatedBy": "burndown-orch"
+      "updated": "2026-07-28T12:44:43.828Z",
+      "updatedBy": "e3-1256-check-order",
+      "claimedAt": "2026-07-28T12:44:42.868Z"
     },
     {
       "id": "c0y89goo",
@@ -75572,6 +75619,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-28T12:44:43.828Z",
+      "by": "e3-1256-check-order",
+      "action": "card.criteria-add",
+      "ref": "c0wxnoo3",
+      "note": "#4 A fresh reviewer checks ordering, false-green risk, diagnost"
+    },
+    {
+      "at": "2026-07-28T12:44:43.596Z",
+      "by": "e3-1256-check-order",
+      "action": "card.criteria-add",
+      "ref": "c0wxnoo3",
+      "note": "#3 Focused CLI/check tests include the invalid fixture and a va"
+    },
+    {
+      "at": "2026-07-28T12:44:43.348Z",
+      "by": "e3-1256-check-order",
+      "action": "card.criteria-add",
+      "ref": "c0wxnoo3",
+      "note": "#2 A sema-error bundle cannot reach TIR/codegen lowering throug"
+    },
+    {
+      "at": "2026-07-28T12:44:43.107Z",
+      "by": "e3-1256-check-order",
+      "action": "card.criteria-add",
+      "ref": "c0wxnoo3",
+      "note": "#1 jet check on ui_fixed_dynamic_size.E0103.jet exits as a user"
+    },
+    {
+      "at": "2026-07-28T12:44:42.868Z",
+      "by": "e3-1256-check-order",
+      "action": "card.update",
+      "ref": "c0wxnoo3",
+      "note": "phase,plan,logEntry,refs"
+    },
+    {
+      "at": "2026-07-28T12:44:42.590Z",
+      "by": "e3-1256-check-order",
+      "action": "card.claim",
+      "ref": "c0wxnoo3",
+      "note": ""
+    },
+    {
       "at": "2026-07-28T12:43:06.228Z",
       "by": "e3-1258-modulecall",
       "action": "card.release",
@@ -79028,48 +79117,6 @@
       "action": "card.criteria-verify",
       "ref": "c0d8o43a",
       "note": "#2"
-    },
-    {
-      "at": "2026-07-27T22:24:36.538Z",
-      "by": "e3-1191-verify",
-      "action": "card.criteria-verify",
-      "ref": "c0d8o43a",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T22:24:19.234Z",
-      "by": "e3-1191-grok",
-      "action": "card.update",
-      "ref": "c0d8o43a",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T22:24:19.011Z",
-      "by": "e3-1191-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0d8o43a",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T22:24:18.824Z",
-      "by": "e3-1191-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0d8o43a",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T22:24:18.636Z",
-      "by": "e3-1191-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0d8o43a",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T22:22:43.857Z",
-      "by": "e3-1245-grok",
-      "action": "card.update",
-      "ref": "c0fm6twq",
-      "note": "logEntry"
     }
   ],
   "nextNum": 368,
