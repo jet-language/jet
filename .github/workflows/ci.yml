@@ -1,16 +1,12 @@
 name: CI
 
-# CI paused during active development churn (2026-07-22).
-# Automatic push/PR/schedule triggers removed; workflow kept for later restore.
-# To re-enable, restore:
-#   on:
-#     push:
-#     pull_request:
-#     schedule:
-#       - cron: "0 3 * * *"
-# Previous policy (D-CI3=A): full suite on every push (flags red, never
-# blocks). Nightly lane adds rotating-seed fuzzing (N>=1000) and perf ratchet.
+# D-CI3=A: full suite on every push (flags red). Nightly lane adds rotating-seed
+# fuzzing (N>=1000) and perf ratchet. c730 adds the named JIT/AOT parity job.
 on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 jobs:
@@ -77,11 +73,6 @@ jobs:
       - name: Platform audit
         run: cargo test --test jetpack_platform
 
-      - name: JIT/AOT example corpus gate (c727)
-        run: |
-          cargo test --test dev example_corpus_strict_jit_aot_differential_gate -- --exact
-          cargo test --test dev jit_try_compile_manifest_matches -- --exact
-
       - name: Native core.os facts and interrupt lifecycle
         run: cargo test --test os_native -- --nocapture
 
@@ -94,6 +85,45 @@ jobs:
         run: |
           cargo test -p jet-codegen iocp_wake_cancel_deadline_stale_scale_and_cleanup -- --nocapture
           cargo test --test scheduler_native -- --nocapture
+
+  # c730: named strict JIT↔AOT parity job. Matrix = every host where native
+  # Cranelift JIT is supported today (x86_64 only). aarch64 / Apple Silicon /
+  # Windows ARM leave the matrix with named reason in the report artifact
+  # (cranelift_host_supported is x86_64-only).
+  jit-aot-parity:
+    name: JIT/AOT parity (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x86_64
+          - os: macos-13
+            label: macos-x86_64
+          - os: windows-latest
+            label: windows-x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Strict JIT/AOT differential gate (#727)
+        shell: bash
+        env:
+          JET_REQUIRE_RUSTC: "1"
+          JET_REQUIRE_CRANELIFT_HOST: "1"
+          JET_CORPUS_GATE_REPORT_DIR: ${{ github.workspace }}/jit-aot-parity-report
+        run: bash tools/ci/jit-aot-parity.sh
+
+      - name: Upload parity report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jit-aot-parity-${{ matrix.label }}-${{ github.sha }}
+          path: jit-aot-parity-report/
+          retention-days: 30
+          if-no-files-found: error
 
   verify:
     name: Full verify suite
