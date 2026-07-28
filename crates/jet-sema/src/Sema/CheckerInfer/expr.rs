@@ -657,12 +657,14 @@ impl<'a> Checker<'a> {
                                             ));
                                             continue;
                                         }
-                                        if crate::Sema::Diagnostics::is_lazy_view(&t) {
+                                        if let Some(call) =
+                                            crate::Sema::Diagnostics::one_pass_materializer(&t)
+                                        {
                                             self.diags.push(Diagnostic::error(
                                                 "E0915",
-                                                format!("the lazy view {} has no `Display` implementation", t.show()),
-                                                "an iterator adapter hands back a one-pass view, and showing it would consume it".to_string(),
-                                                "materialize it first: add `.to_list()` before the interpolation".to_string(),
+                                                format!("the one-pass source {} has no `Display` implementation", t.show()),
+                                                "reading this value consumes it, so showing it would spend the only pass".to_string(),
+                                                format!("materialize it first: add `{call}` before the interpolation"),
                                                 Some(inner.span()),
                                             ));
                                             continue;

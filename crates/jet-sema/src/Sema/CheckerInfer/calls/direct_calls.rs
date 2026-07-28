@@ -274,12 +274,14 @@ impl<'a> Checker<'a> {
                                 "print a public operation label or key identifier instead".to_string(),
                                 Some(arg.expr.span()),
                             ));
-                        } else if crate::Sema::Diagnostics::is_lazy_view(&t) {
+                        } else if let Some(call) =
+                            crate::Sema::Diagnostics::one_pass_materializer(&t)
+                        {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
-                                format!("`{}` cannot show the lazy view {}", Syntax::BUILTIN_PRINT, t.show()),
-                                "an iterator adapter hands back a one-pass view, and showing it would consume it".to_string(),
-                                "materialize it first: add `.to_list()` before printing".to_string(),
+                                format!("`{}` cannot show the one-pass source {}", Syntax::BUILTIN_PRINT, t.show()),
+                                "reading this value consumes it, so showing it would spend the only pass".to_string(),
+                                format!("materialize it first: add `{call}` before printing"),
                                 Some(arg.expr.span()),
                             ));
                         } else {

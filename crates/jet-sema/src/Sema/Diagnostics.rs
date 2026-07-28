@@ -770,16 +770,21 @@ pub(crate) fn is_secret_bearing_crypto_type(ty: &Type) -> bool {
     }
 }
 
-/// D-ITERTOOLS1=A: an iterator adapter hands back a lazy one-pass view. The
-/// runtime value is a boxed iterator that every operation consumes, so it can
-/// never be shown from a read. Showing one is refused here (I3) and the author
-/// materializes with `.to_list()`, exactly as the examples do.
-pub(crate) fn is_lazy_view(ty: &Type) -> bool {
-    matches!(ty, Type::Apply { name, .. } if name == Syntax::TYPE_ITER)
+/// Some Core values are one-pass sources: an iterator adapter view
+/// (D-ITERTOOLS1=A) and an HTTP body. Reading one consumes it, so neither can
+/// be shown from a read, and codegen has no `jet_show` to call. Sema refuses
+/// showing them (I3) and names the call that materializes the value, exactly
+/// as the examples already do.
+pub(crate) fn one_pass_materializer(ty: &Type) -> Option<&'static str> {
+    match ty {
+        Type::Apply { name, .. } if name == Syntax::TYPE_ITER => Some(".to_list()"),
+        Type::Named(n) if n == "HTTPBody" => Some(".text(limit)"),
+        _ => None,
+    }
 }
 
 pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
-    if is_secret_bearing_crypto_type(ty) {
+    if is_secret_bearing_crypto_type(ty) || one_pass_materializer(ty).is_some() {
         return false;
     }
     match ty {
@@ -791,7 +796,6 @@ pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Map { value, .. } => is_printable(value, registry),
         Type::Named(n) => registry.contains(n) || core_type_known(n),
         Type::Apply { name, .. } if name == "KeyRef" => true,
-        Type::Apply { name, .. } if name == Syntax::TYPE_ITER => false,
         Type::Apply { name, args } => {
             (name == "View"
                 && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))
@@ -811,7 +815,7 @@ pub(crate) fn is_displayable(
     type_reg: &TypeRegistry,
     trait_reg: &crate::Traits::TraitRegistry,
 ) -> bool {
-    if is_secret_bearing_crypto_type(ty) {
+    if is_secret_bearing_crypto_type(ty) || one_pass_materializer(ty).is_some() {
         return false;
     }
     match ty {
@@ -836,7 +840,6 @@ pub(crate) fn is_displayable(
                 )
         }
         Type::Apply { name, .. } if name == "KeyRef" => true,
-        Type::Apply { name, .. } if name == Syntax::TYPE_ITER => false,
         Type::Apply { name, args } => {
             (name == "View"
                 && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))
