@@ -251,14 +251,11 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
         Concurrency::set_active_runtime(None);
         Concurrency::clear_http_shared_runtime();
         if let Some(rendered) = runtime.deadline_exceeded.take() {
-            // Match AOT `#Context(deadline:)` ProgramOutput: keep prior stdout,
-            // emit the rendered E3003, then the join-fatal line, exit 70.
+            // Match AOT `#Context(deadline:)`: keep prior stdout and emit the
+            // compiler-owned E3003 without reclassifying it as a task panic.
             let mut stderr = rendered;
             if !stderr.ends_with('\n') {
                 stderr.push('\n');
-            }
-            if !stderr.contains("panic: a task panicked") {
-                stderr.push_str("panic: a task panicked\n");
             }
             let stdout = runtime.stdout.clone();
             reset_run_heap(runtime);

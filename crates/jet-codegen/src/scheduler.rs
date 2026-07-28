@@ -1204,6 +1204,15 @@ pub enum JetSchedulerResult<T> {
     Value(T),
     Panicked,
     Cancelled,
+    Deadline(String),
+}
+
+fn jet_scheduler_propagate_deadline(rendered: String) -> ! {
+    if jet_scheduler_panic_should_unwind() {
+        std::panic::panic_any(JetDeadlineUnwind { rendered });
+    }
+    eprintln!("{rendered}");
+    std::process::exit(70);
 }
 
 pub struct JetSchedulerJoin<T> {
@@ -1226,6 +1235,9 @@ impl<T> JetSchedulerJoin<T> {
                 // a task this unwinds as Cancelled, on the host it stops the program.
                 jet_task_deliver_cancel();
                 jet_scheduler_fatal("a task was cancelled");
+            }
+            Ok(JetSchedulerResult::Deadline(rendered)) => {
+                jet_scheduler_propagate_deadline(rendered);
             }
         }
     }
@@ -1297,6 +1309,16 @@ pub fn jet_scheduler_all<T: Send + 'static>(
                     jet_scheduler_drain();
                     jet_scheduler_fatal("a task was cancelled");
                 }
+                JetSchedulerResult::Deadline(rendered) => {
+                    for (_, ctrl) in &entries {
+                        ctrl.cancel();
+                    }
+                    for (join, _) in entries {
+                        join.drain();
+                    }
+                    jet_scheduler_drain();
+                    jet_scheduler_propagate_deadline(rendered);
+                }
             }
         }
         thread::sleep(Duration::from_micros(50));
@@ -1311,6 +1333,7 @@ pub fn jet_scheduler_race<T: Send + 'static>(
     let n = entries.len();
     let mut settled = vec![false; n];
     let mut settled_count = 0usize;
+    let mut deadline = None;
     loop {
         let next = entries
             .iter()
@@ -1344,10 +1367,18 @@ pub fn jet_scheduler_race<T: Send + 'static>(
                         settled[i] = true;
                         settled_count += 1;
                     }
+                    JetSchedulerResult::Deadline(rendered) => {
+                        deadline.get_or_insert(rendered);
+                        settled[i] = true;
+                        settled_count += 1;
+                    }
                 }
             }
         }
         if settled_count == n {
+            if let Some(rendered) = deadline {
+                jet_scheduler_propagate_deadline(rendered);
+            }
             jet_scheduler_fatal("a task panicked");
         }
         thread::sleep(Duration::from_micros(50));
@@ -1390,6 +1421,9 @@ pub fn jet_scheduler_any<T: Send + 'static>(
                 JetSchedulerResult::Value(v) => v,
                 JetSchedulerResult::Panicked | JetSchedulerResult::Cancelled => {
                     jet_scheduler_fatal("a task panicked");
+                }
+                JetSchedulerResult::Deadline(rendered) => {
+                    jet_scheduler_propagate_deadline(rendered);
                 }
             };
         }
@@ -1486,6 +1520,12 @@ where F:FnOnce()->T+Send+'static,T:Send+'static,
             // D-CANCELMODEL1=C: a `JetCancelUnwind` payload is a task that unwound at
             // a wait point because it was cancelled — report Cancelled, not Panicked.
             Err(e) if e.is::<JetCancelUnwind>() => JetSchedulerResult::Cancelled,
+            Err(e) if e.is::<JetDeadlineUnwind>() => {
+                let deadline = e
+                    .downcast::<JetDeadlineUnwind>()
+                    .expect("deadline payload type checked");
+                JetSchedulerResult::Deadline(deadline.rendered)
+            }
             Err(_) => JetSchedulerResult::Panicked,
         };
         task_completion_order
@@ -1523,6 +1563,21 @@ pub fn jet_scheduler_drain() {
 #[cfg(test)]
 mod interrupt_boundary_tests {
     use super::*;
+
+    #[test]
+    fn spawned_deadline_keeps_its_rendered_diagnostic() {
+        let join = jet_scheduler_spawn(|| -> i64 {
+            std::panic::panic_any(JetDeadlineUnwind {
+                rendered: "deadline detail".to_string(),
+            })
+        });
+        match join.rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+            JetSchedulerResult::Deadline(rendered) => {
+                assert_eq!(rendered, "deadline detail");
+            }
+            _ => panic!("spawned deadline must stay distinct from a task panic"),
+        }
+    }
 
     #[test]
     fn zero_capacity_channel_is_a_rendezvous() {
@@ -1942,6 +1997,7 @@ mod interrupt_boundary_tests {
                         JetSchedulerResult::Value(_) => "Value",
                         JetSchedulerResult::Panicked => "Panicked",
                         JetSchedulerResult::Cancelled => unreachable!(),
+                        JetSchedulerResult::Deadline(_) => "Deadline",
                     }
                 ),
                 None => {

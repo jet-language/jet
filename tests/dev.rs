@@ -4656,7 +4656,6 @@ fn assert_concurrency_and_game_three_way(file: &str, stem: &str) {
         if !stderr.ends_with('\n') {
             stderr.push('\n');
         }
-        stderr.push_str("panic: a task panicked\n");
         ProgramOutput::ran(golden_stdout(stem), stderr, 70)
     } else {
         ProgramOutput::ran(golden_stdout(stem), String::new(), 0)

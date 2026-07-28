@@ -427,14 +427,15 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
             String::from_utf8_lossy(&run.stderr)
         );
         let out_path = env.ex_dir.join("expected").join(format!("{}.out", stem));
-        assert!(
-            out_path.is_file(),
-            "missing examples/features/expected/{stem}.out; update mode never creates a new channel"
-        );
         let actual = String::from_utf8_lossy(&run.stdout);
         if env.update_expected {
+            fs::create_dir_all(out_path.parent().unwrap()).unwrap();
             fs::write(&out_path, actual.as_bytes()).unwrap();
         } else {
+            assert!(
+                out_path.is_file(),
+                "missing examples/features/expected/{stem}.out; run with JET_UPDATE_GOLDEN=1 and a scoped JET_GOLDEN_FILTER to create it"
+            );
             let expected = fs::read_to_string(&out_path).unwrap();
             if actual != expected {
                 panic!(

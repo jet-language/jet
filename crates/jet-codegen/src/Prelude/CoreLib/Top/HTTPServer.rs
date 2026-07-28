@@ -4479,7 +4479,15 @@ fn jet_http_mw_timeout(duration: &jet_std::Duration, next: JetHTTPHandler) -> Je
                 return match result {
                     JetSchedulerResult::Value(response) => response,
                     JetSchedulerResult::Cancelled => Ok(jet_http_srv_empty_response(504)),
-                    JetSchedulerResult::Panicked => Ok(jet_http_srv_internal_response()),
+                    JetSchedulerResult::Panicked | JetSchedulerResult::Deadline(_) => {
+                        Ok(jet_http_srv_internal_response())
+                    }
+                    // The emitted scheduler also has RuntimeExit. The JIT
+                    // scheduler does not because native hosts return status.
+                    #[allow(unreachable_patterns)]
+                    _ => {
+                        Ok(jet_http_srv_internal_response())
+                    }
                 };
             }
             if std::time::Instant::now() >= deadline {
