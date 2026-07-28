@@ -2774,18 +2774,30 @@ impl LowerCtx<'_, '_> {
                 // Match AOT evaluation order: the assignment value is evaluated
                 // before the collection place is acquired.
                 let rhs = self.lower_expr(&assign.value)?;
-                let list = self.lower_expr(&assign.base)?;
+                let base = self.lower_expr(&assign.base)?;
                 let index = self.lower_expr(&assign.index)?;
+                // ViewMut write-through: absolute index = window.start + idx.
+                let (list, abs_index) = if Self::is_view_mut_ty(&assign.base.ty) {
+                    let (list, start, _) = self.unpack_view_mut(base)?;
+                    (list, self.b.ins().iadd(start, index))
+                } else {
+                    (base, index)
+                };
                 let line = self.b.ins().iconst(types::I32, assign.line as i64);
                 let get_ref = self
                     .module
                     .declare_func_in_func(self.host.coll.list_get, self.b.func);
-                let get_call = self.b.ins().call(get_ref, &[list, index, line]);
+                let get_call = self.b.ins().call(get_ref, &[list, abs_index, line]);
                 let handle = self.b.inst_results(get_call)[0];
                 self.emit_trap_check()?;
 
                 let elem_ty = match &assign.base.ty {
                     Type::List(elem) | Type::FixedList { elem, .. } => elem.as_ref(),
+                    Type::Apply { name, args }
+                        if name == "ViewMut" && args.len() == 1 =>
+                    {
+                        &args[0]
+                    }
                     other => {
                         return Err(format!(
                             "jit indexed field assignment collection type unsupported: {other:?}"

@@ -2050,9 +2050,18 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
             }
         }
         TStmt::IndexFieldAssign(assign) => {
+            let base_ok = jit_list_record_type(&assign.base.ty)
+                || matches!(
+                    &assign.base.ty,
+                    Type::Apply { name, args }
+                        if name == "ViewMut"
+                            && args.len() == 1
+                            && (record_type_key(&args[0]).is_some()
+                                || matches!(&args[0], Type::TraitObject(_)))
+                );
             !assign.is_map
                 && !assign.clone_value
-                && jit_list_record_type(&assign.base.ty)
+                && base_ok
                 && matches!(&assign.index.ty, Type::Int)
                 && assign
                     .op
