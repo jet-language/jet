@@ -446,7 +446,7 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "sha256_bytes",
             "sha512_bytes",
             "blake3_bytes",
-            "constant_time_eq",
+            "constant_time_equal_bytes",
             "hkdf_sha256",
             "x25519_public",
             "x25519_shared",

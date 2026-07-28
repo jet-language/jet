@@ -1659,9 +1659,9 @@ pub(crate) fn emit_tir_core_call(
         ("jet.crypto", "blake3_bytes") => {
             format!("{}(&({}))", regex_fn("jet_crypto_blake3_impl"), arg(0))
         }
-        ("jet.crypto", "constant_time_eq") => format!(
+        ("jet.crypto", "constant_time_equal_bytes") => format!(
             "{}(&({}), &({}))",
-            regex_fn("jet_crypto_constant_time_eq_impl"),
+            regex_fn("jet_crypto_constant_time_equal_bytes_impl"),
             arg(0),
             arg(1)
         ),

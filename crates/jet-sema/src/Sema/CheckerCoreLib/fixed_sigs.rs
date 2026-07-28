@@ -931,7 +931,7 @@ pub fn core_fixed_sig(
             vec![(read, Type::List(Box::new(u8_ty())))],
             Some(Type::String),
         )),
-        ("jet.crypto", "constant_time_eq") => Some((
+        ("jet.crypto", "constant_time_equal_bytes") => Some((
             vec![
                 (read, Type::List(Box::new(u8_ty()))),
                 (read, Type::List(Box::new(u8_ty()))),
