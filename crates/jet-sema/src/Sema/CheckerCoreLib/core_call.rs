@@ -910,17 +910,15 @@ impl<'a> Checker<'a> {
                         if valid {
                             self.check_encodable(&t, a.expr.span());
                         } else {
-                            let rows = Type::List(Box::new(Type::List(Box::new(Type::String))));
                             self.diags.push(Diagnostic::error(
                                 "E0112",
                                 format!(
-                                    "`{}` wants {} for argument 1, but this is {}",
+                                    "`{}` wants [[String]] rows or a list of #Codable records for argument 1, but this is {}",
                                     name,
-                                    rows.show(),
                                     t.show()
                                 ),
-                                "every argument must match its parameter's type".to_string(),
-                                type_fix_hint(&rows, &t),
+                                "CSV output accepts string rows or typed records".to_string(),
+                                "use [[String]] rows or a list of #Codable records here".to_string(),
                                 Some(a.expr.span()),
                             ));
                         }

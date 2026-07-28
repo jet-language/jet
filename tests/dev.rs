@@ -5155,6 +5155,7 @@ thread_local! {
 fn raw_no_color_is_present_even_when_its_value_is_not_unicode() {
     assert!(jet_env_value_raw("NO_COLOR").is_some());
     assert!(jet_std_env_get(&"NO_COLOR".to_string()).is_none());
+    assert!(!jet_style_env_enabled());
 }
 "#;
             fs::write(&rust, format!("{}{}", compiled.rust, probe)).unwrap();
