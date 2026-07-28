@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1255,
-    "rev": 18137,
+    "nextNum": 1256,
+    "rev": 18163,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58629,7 +58629,13 @@
       "plan": "Reproduce with a minimal program that interpolates a core IOError with the Debug marker. Decide the correct law: either core error types gain the Debug capability, or sema rejects the interpolation with a registered diagnostic. Follow the diagnostics spec: a new code needs what/why/fix text and a UI snapshot (I4). Add the failing case to the sema tests so the path cannot regress. blockedBy: none.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "burndown-orch",
+          "text": "Scope is wider than first recorded. Confirmed independently while building #1253: '{e#Debug}' on an IOError does not only break the dev lens. It ICEs under AOT as well, with 'no method jet_debug found for enum IOError'. So both lenses reject generated code from ordinary Jet source, which is an I2 violation on the shipped path, not a JIT-only defect."
+        }
+      ],
       "criteria": [],
       "refs": [
         "docs/spec/diagnostics.md",
@@ -58637,7 +58643,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T04:21:36.454Z",
-      "updated": "2026-07-28T04:21:36.454Z",
+      "updated": "2026-07-28T10:03:27.536Z",
       "updatedBy": "burndown-orch"
     },
     {
@@ -58649,13 +58655,74 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Add the missing zero-argument ProcessSpec builders to the JIT host table so they lower like their siblings. Reuse the existing runtime implementations; do not write a second copy. Prove the repro passes under default jet run and under jet build with identical output, and keep the shrink-only gap ratchet from growing. blockedBy: none.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
-      "criteria": [],
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "burndown-orch-verify",
+          "text": "Closed after independent verification (verifier did not build). jet_run suite re-run green at 534a49fbd. The fix follows the c485d5f17 pattern: a ProcessSpec method is gated by two tables, and the missing safety.rs residency entry was the actual E0956 cause, since the planner deopted before lowering ran.\n\nCorrection to the gap-set reading I gave in the brief. The jit_try_compile_manifest_matches red is currently 372 covered against a 370-entry manifest, with extras comptime/comptime_block and modules/generic_modules. It is no longer crypto_suite and generic_constructor_inference. Card #1210's frontend fixes are landing new coverage faster than the manifest is moved. #1254 owns that.\n\nTwo defects found while fixing this and carded rather than absorbed: #1255 (env, env_remove and cwd missing or silently ignored in the JIT host table) and #1252 (Debug interpolation on IOError, now confirmed to ICE under AOT as well as failing under dev)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "process.cmd([...]).env_clear() / .detached() / .terminal() each lower to a JIT host call: entries exist in lower_ctx.rs and in safety.rs resident_safe_call_arg",
+          "status": "verified",
+          "metBy": "e3-1253-procjit",
+          "verifiedBy": "burndown-orch-verify",
+          "evidence": "Independent verification by orchestrator (did not build). Re-ran 'RUST_MIN_STACK=16777216 JET_NIX_TMP_CLEANED=1 scripts/agent/jet-env cargo test --test jit_run' at 534a49fbd: ok, 2 passed, 0 failed, 0 ignored, 0 filtered. zero_arg_process_spec_builders_run_resident passes and asserts the exact AOT stdout plus jit_executed and !fallback_invoked, so the parity and residency claims are enforced by the test rather than only observed. Reviewed the diff: entries land in both gating tables (safety.rs resident_safe_call_arg and lower_ctx.rs dispatch) with host shims in Process.rs reusing the existing launch behaviour, no second copy of process logic. tests/jit_gaps.txt unchanged.",
+          "at": "2026-07-28T10:02:59.804Z"
+        },
+        {
+          "n": 2,
+          "text": "A program using all three builders gives the same stdout, stderr, and exit code under jet run and under jet run --release",
+          "status": "verified",
+          "metBy": "e3-1253-procjit",
+          "verifiedBy": "burndown-orch-verify",
+          "evidence": "Independent verification by orchestrator (did not build). Re-ran 'RUST_MIN_STACK=16777216 JET_NIX_TMP_CLEANED=1 scripts/agent/jet-env cargo test --test jit_run' at 534a49fbd: ok, 2 passed, 0 failed, 0 ignored, 0 filtered. zero_arg_process_spec_builders_run_resident passes and asserts the exact AOT stdout plus jit_executed and !fallback_invoked, so the parity and residency claims are enforced by the test rather than only observed. Reviewed the diff: entries land in both gating tables (safety.rs resident_safe_call_arg and lower_ctx.rs dispatch) with host shims in Process.rs reusing the existing launch behaviour, no second copy of process logic. tests/jit_gaps.txt unchanged.",
+          "at": "2026-07-28T10:03:00.042Z"
+        },
+        {
+          "n": 3,
+          "text": "true",
+          "status": "verified",
+          "metBy": "e3-1253-procjit",
+          "verifiedBy": "burndown-orch-verify",
+          "evidence": "Independent verification by orchestrator (did not build). Re-ran 'RUST_MIN_STACK=16777216 JET_NIX_TMP_CLEANED=1 scripts/agent/jet-env cargo test --test jit_run' at 534a49fbd: ok, 2 passed, 0 failed, 0 ignored, 0 filtered. zero_arg_process_spec_builders_run_resident passes and asserts the exact AOT stdout plus jit_executed and !fallback_invoked, so the parity and residency claims are enforced by the test rather than only observed. Reviewed the diff: entries land in both gating tables (safety.rs resident_safe_call_arg and lower_ctx.rs dispatch) with host shims in Process.rs reusing the existing launch behaviour, no second copy of process logic. tests/jit_gaps.txt unchanged.",
+          "at": "2026-07-28T10:03:00.294Z"
+        },
+        {
+          "n": 4,
+          "text": "A test covers all three builders and fails if either host table entry is removed",
+          "status": "verified",
+          "metBy": "e3-1253-procjit",
+          "verifiedBy": "burndown-orch-verify",
+          "evidence": "Independent verification by orchestrator (did not build). Re-ran 'RUST_MIN_STACK=16777216 JET_NIX_TMP_CLEANED=1 scripts/agent/jet-env cargo test --test jit_run' at 534a49fbd: ok, 2 passed, 0 failed, 0 ignored, 0 filtered. zero_arg_process_spec_builders_run_resident passes and asserts the exact AOT stdout plus jit_executed and !fallback_invoked, so the parity and residency claims are enforced by the test rather than only observed. Reviewed the diff: entries land in both gating tables (safety.rs resident_safe_call_arg and lower_ctx.rs dispatch) with host shims in Process.rs reusing the existing launch behaviour, no second copy of process logic. tests/jit_gaps.txt unchanged.",
+          "at": "2026-07-28T10:03:00.550Z"
+        },
+        {
+          "n": 5,
+          "text": "tests/jit_gaps.txt is unchanged and the JIT covered set is identical before and after",
+          "status": "verified",
+          "metBy": "e3-1253-procjit",
+          "verifiedBy": "burndown-orch-verify",
+          "evidence": "Independent verification by orchestrator (did not build). Re-ran 'RUST_MIN_STACK=16777216 JET_NIX_TMP_CLEANED=1 scripts/agent/jet-env cargo test --test jit_run' at 534a49fbd: ok, 2 passed, 0 failed, 0 ignored, 0 filtered. zero_arg_process_spec_builders_run_resident passes and asserts the exact AOT stdout plus jit_executed and !fallback_invoked, so the parity and residency claims are enforced by the test rather than only observed. Reviewed the diff: entries land in both gating tables (safety.rs resident_safe_call_arg and lower_ctx.rs dispatch) with host shims in Process.rs reusing the existing launch behaviour, no second copy of process logic. tests/jit_gaps.txt unchanged.",
+          "at": "2026-07-28T10:03:00.802Z"
+        },
+        {
+          "n": 6,
+          "text": "Tier trace reports the entry resident (tier1 native), not a deopt. Restates criterion 3, whose text the CLI flag parser swallowed because it began with a double dash.",
+          "status": "verified",
+          "metBy": "e3-1253-procjit",
+          "verifiedBy": "burndown-orch-verify",
+          "evidence": "Independent verification by orchestrator (did not build). Re-ran 'RUST_MIN_STACK=16777216 JET_NIX_TMP_CLEANED=1 scripts/agent/jet-env cargo test --test jit_run' at 534a49fbd: ok, 2 passed, 0 failed, 0 ignored, 0 filtered. zero_arg_process_spec_builders_run_resident passes and asserts the exact AOT stdout plus jit_executed and !fallback_invoked, so the parity and residency claims are enforced by the test rather than only observed. Reviewed the diff: entries land in both gating tables (safety.rs resident_safe_call_arg and lower_ctx.rs dispatch) with host shims in Process.rs reusing the existing launch behaviour, no second copy of process logic. tests/jit_gaps.txt unchanged.",
+          "at": "2026-07-28T10:03:01.063Z"
+        }
+      ],
       "refs": [
         "crates/jet-jit/src/Process.rs",
         "crates/jet-jit/src/jit/lower_ctx.rs",
@@ -58663,8 +58730,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T04:21:45.554Z",
-      "updated": "2026-07-28T04:21:45.554Z",
-      "updatedBy": "burndown-orch"
+      "updated": "2026-07-28T10:03:09.895Z",
+      "updatedBy": "burndown-orch-verify"
     },
     {
       "id": "c07z598z",
@@ -58691,6 +58758,33 @@
       "needsAcceptance": false,
       "created": "2026-07-28T04:30:44.465Z",
       "updated": "2026-07-28T04:30:44.465Z",
+      "updatedBy": "burndown-orch"
+    },
+    {
+      "id": "c0vxecje",
+      "num": 1255,
+      "title": "JIT: ProcessSpec env, env_remove and cwd missing or silently ignored",
+      "body": "The JIT host table has no working entry for the argument-taking ProcessSpec builders. `env` and `env_remove` are absent. `jet_jit_process_spec_cwd` exists but silently ignores its argument.\n\nThe silent case is the worse one. A program that sets a working directory under `jet run` runs in the wrong directory and reports no error, so the failure surfaces later as a missing file or a wrong result. A missing entry at least fails loudly.\n\nSame lens-gap class as #1253, which fixed the zero-argument builders `env_clear`, `detached` and `terminal`. These need real environment and path storage on JitProcessSpec, so they did not fit that card.\n\nFound while building #1253.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Follow the pattern proved by c485d5f17 and 534a49fbd: a ProcessSpec method needs an entry in the safety.rs residency list and in the lower_ctx.rs dispatch, plus a host shim that reuses the existing launch behavior. Store the environment edits and the working directory on JitProcessSpec and apply them at launch exactly as jet_process_command does. Reuse the existing runtime; never a second copy. Prove a program that sets cwd and edits the environment gives byte-identical stdout, stderr and exit under jet run and jet run --release, and add a test that fails if either table entry is removed. Do not grow tests/jit_gaps.txt. blockedBy: none.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "crates/jet-jit/src/Process.rs",
+        "crates/jet-jit/src/jit/lower_ctx.rs",
+        "crates/jet-jit/src/jit/safety.rs",
+        "tests/jit_run.rs"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T10:03:20.477Z",
+      "updated": "2026-07-28T10:03:20.477Z",
       "updatedBy": "burndown-orch"
     }
   ],
@@ -73698,6 +73792,188 @@
   ],
   "events": [
     {
+      "at": "2026-07-28T10:03:27.536Z",
+      "by": "burndown-orch",
+      "action": "card.update",
+      "ref": "c0gvdqxf",
+      "note": "priority,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:03:20.477Z",
+      "by": "burndown-orch",
+      "action": "card.add",
+      "ref": "c0vxecje",
+      "note": "JIT: ProcessSpec env, env_remove and cwd missing or silently ignored"
+    },
+    {
+      "at": "2026-07-28T10:03:09.895Z",
+      "by": "burndown-orch-verify",
+      "action": "card.update",
+      "ref": "c0ndi2ss",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T10:03:09.611Z",
+      "by": "burndown-orch-verify",
+      "action": "card.update",
+      "ref": "c0ndi2ss",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-28T10:03:01.063Z",
+      "by": "burndown-orch-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0ndi2ss",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-28T10:03:00.802Z",
+      "by": "burndown-orch-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0ndi2ss",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-28T10:03:00.550Z",
+      "by": "burndown-orch-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0ndi2ss",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-28T10:03:00.294Z",
+      "by": "burndown-orch-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0ndi2ss",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-28T10:03:00.042Z",
+      "by": "burndown-orch-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0ndi2ss",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T10:02:59.804Z",
+      "by": "burndown-orch-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0ndi2ss",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T10:01:39.589Z",
+      "by": "e3-1253-procjit",
+      "action": "card.criteria-meet",
+      "ref": "c0ndi2ss",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-28T10:01:39.335Z",
+      "by": "e3-1253-procjit",
+      "action": "card.criteria-add",
+      "ref": "c0ndi2ss",
+      "note": "#6 Tier trace reports the entry resident (tier1 native), not a "
+    },
+    {
+      "at": "2026-07-28T10:00:57.549Z",
+      "by": "e3-1253-procjit",
+      "action": "card.claim",
+      "ref": "c0ndi2ss",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T10:00:39.282Z",
+      "by": "e3-1253-procjit",
+      "action": "card.update",
+      "ref": "c0ndi2ss",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-28T10:00:32.645Z",
+      "by": "e3-1253-procjit",
+      "action": "card.criteria-meet",
+      "ref": "c0ndi2ss",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-28T10:00:32.396Z",
+      "by": "e3-1253-procjit",
+      "action": "card.criteria-meet",
+      "ref": "c0ndi2ss",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-28T10:00:24.517Z",
+      "by": "e3-1253-procjit",
+      "action": "card.criteria-meet",
+      "ref": "c0ndi2ss",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-28T10:00:24.253Z",
+      "by": "e3-1253-procjit",
+      "action": "card.criteria-meet",
+      "ref": "c0ndi2ss",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T10:00:24.016Z",
+      "by": "e3-1253-procjit",
+      "action": "card.criteria-meet",
+      "ref": "c0ndi2ss",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T10:00:15.691Z",
+      "by": "e3-1253-procjit",
+      "action": "card.criteria-add",
+      "ref": "c0ndi2ss",
+      "note": "#5 tests/jit_gaps.txt is unchanged and the JIT covered set is i"
+    },
+    {
+      "at": "2026-07-28T10:00:15.342Z",
+      "by": "e3-1253-procjit",
+      "action": "card.criteria-add",
+      "ref": "c0ndi2ss",
+      "note": "#4 A test covers all three builders and fails if either host ta"
+    },
+    {
+      "at": "2026-07-28T10:00:15.061Z",
+      "by": "e3-1253-procjit",
+      "action": "card.criteria-add",
+      "ref": "c0ndi2ss",
+      "note": "#3 true"
+    },
+    {
+      "at": "2026-07-28T10:00:14.834Z",
+      "by": "e3-1253-procjit",
+      "action": "card.criteria-add",
+      "ref": "c0ndi2ss",
+      "note": "#2 A program using all three builders gives the same stdout, st"
+    },
+    {
+      "at": "2026-07-28T10:00:09.206Z",
+      "by": "e3-1253-procjit",
+      "action": "card.criteria-add",
+      "ref": "c0ndi2ss",
+      "note": "#1 process.cmd([...]).env_clear() / .detached() / .terminal() e"
+    },
+    {
+      "at": "2026-07-28T09:44:52.329Z",
+      "by": "e3-1253-procjit",
+      "action": "card.update",
+      "ref": "c0ndi2ss",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-28T09:43:41.342Z",
+      "by": "e3-1253-procjit",
+      "action": "card.claim",
+      "ref": "c0ndi2ss",
+      "note": ""
+    },
+    {
       "at": "2026-07-28T09:42:19.013Z",
       "by": "burndown-orch-verify",
       "action": "card.update",
@@ -77014,188 +77290,6 @@
       "action": "card.criteria-verify",
       "ref": "c03722fl",
       "note": "#2"
-    },
-    {
-      "at": "2026-07-27T20:43:04.535Z",
-      "by": "e3-1213-sol",
-      "action": "card.criteria-verify",
-      "ref": "c03722fl",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T20:43:04.346Z",
-      "by": "e3-1213-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03722fl",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T20:43:04.157Z",
-      "by": "e3-1213-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03722fl",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T20:43:03.955Z",
-      "by": "e3-1213-grok",
-      "action": "card.criteria-meet",
-      "ref": "c03722fl",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T20:28:08.912Z",
-      "by": "e3-1213-grok",
-      "action": "card.update",
-      "ref": "c03722fl",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:28:08.699Z",
-      "by": "e3-1213-grok",
-      "action": "card.claim",
-      "ref": "c03722fl",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:27:48.713Z",
-      "by": "e3-760-grok",
-      "action": "card.update",
-      "ref": "c0gj9wjj",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-27T20:27:05.058Z",
-      "by": "e3-760-grok",
-      "action": "card.claim",
-      "ref": "c0gj9wjj",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:27:04.851Z",
-      "by": "e3-1213-grok",
-      "action": "card.claim",
-      "ref": "c03722fl",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:26:18.569Z",
-      "by": "e3-765-grok",
-      "action": "card.update",
-      "ref": "c09f5jk7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:26:18.352Z",
-      "by": "e3-765-check",
-      "action": "card.criteria-verify",
-      "ref": "c09f5jk7",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T20:26:18.161Z",
-      "by": "e3-765-grok",
-      "action": "card.update",
-      "ref": "c09f5jk7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:26:17.937Z",
-      "by": "e3-765-grok",
-      "action": "card.criteria-meet",
-      "ref": "c09f5jk7",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T20:20:13.922Z",
-      "by": "e3-1241-grok",
-      "action": "card.update",
-      "ref": "c01h50x5",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:19:38.038Z",
-      "by": "e3-1241-grok",
-      "action": "card.claim",
-      "ref": "c01h50x5",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:19:37.829Z",
-      "by": "e3-1230-orch",
-      "action": "card.update",
-      "ref": "c01h50x5",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-27T20:19:07.445Z",
-      "by": "e3-1230-c3-grok",
-      "action": "card.release",
-      "ref": "c08rt6iw",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-27T20:19:07.256Z",
-      "by": "e3-1230-c3-grok",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-27T20:19:07.047Z",
-      "by": "e3-1230-c3-grok",
-      "action": "card.claim",
-      "ref": "c08rt6iw",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:19:06.858Z",
-      "by": "e3-1230-c3-grok",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-27T20:18:36.125Z",
-      "by": "e3-1230-c3-grok",
-      "action": "card.release",
-      "ref": "c08rt6iw",
-      "note": "[handoff] logged"
-    },
-    {
-      "at": "2026-07-27T20:18:23.196Z",
-      "by": "e3-1230-c3-grok",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-27T20:18:22.972Z",
-      "by": "e3-1230-c3-grok",
-      "action": "card.update",
-      "ref": "c01h50x5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-27T20:18:22.759Z",
-      "by": "e3-1230-c3-grok",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-27T20:18:22.495Z",
-      "by": "e3-1230-c3-grok",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-27T20:18:10.868Z",
-      "by": "e3-1230-c3-grok",
-      "action": "card.add",
-      "ref": "c01h50x5",
-      "note": "JIT/AOT: collections/lazy_iter JetIter missing Clone (blocks #1230 c3)"
     }
   ],
   "nextNum": 368,
