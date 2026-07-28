@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1256,
-    "rev": 18163,
+    "nextNum": 1259,
+    "rev": 18198,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25,7 +25,7 @@
         "radar:e4"
       ]
     },
-    "digestCursor": "2026-07-28T01:40:12.539Z"
+    "digestCursor": "2026-07-28T10:32:27.775Z"
   },
   "epochs": [
     {
@@ -1897,14 +1897,19 @@
       "track": "epoch",
       "epoch": "e9",
       "milestoneId": "e9-self-host-port",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": "Complete “Self-hosting: compiler seam inventory and retained-host boundary” through the existing production path for #218. Ship the behavior end to end with focused failure tests, docs, diagnostics, and audit output. Do not add a parallel mechanism or absorb a sibling slice.",
+      "plan": "## Goal\nInventory every compiler seam the self-host port must preserve, and name the retained-host boundary: what stays Rust/host-only versus what must become Jet-authored behind a stable internal ABI.\n\n## Scope\nIn: seam catalog (driver, lexer, parser, sema, TIR lower, codegen lenses, queries, diagnostics, CLI); retained-host list with reasons; ABI/ownership rules for crossing the boundary; proof that no third lens or parallel front-end is introduced.\nOut: actual port work (#808–#816, #671+); TIR freeze prose (#668); speed bets (#669); behavioral comparator (#670).\n\n## Law\n- R12 / D-ONECORE1=A: one semantic core, exhaustive consumers, no third lens.\n- I2: rustc stays hidden; host seams must not leak as user diagnostics.\n- I6: compiler seams stay path-dependency clean.\n\n## Owned paths\n- `docs/spec/architecture.md` (seam inventory section or linked table)\n- `Source/lib.rs`, `crates/jet-driver/src/Driver/mod.rs`\n- crate roots under `crates/jet-*` as cited evidence\n- focused inventory test or lint that fails when a new seam appears undocumented (if practical); otherwise checklist criteria + review\n\n## Steps\n1. Wait for owner reopen of frozen #217 (bootstrap readiness gate).\n2. Walk driver → lexer → parser → sema → TIR → JIT/AOT lenses → queries → diagnostics → CLI; record each public/internal seam.\n3. Mark each seam: Jet-portable now / later / retained-host forever (with reason).\n4. Specify ownership, panic containment, and version lock rules for any C-ABI or host call.\n5. Diff against sibling port cards so no seam is owned twice or left orphaned.\n6. Independent review against criteria.\n\n## Acceptance / proof\nCriteria 1–3. Proof: architecture doc table + review; no implementation of ports on this card.\n\n## Blockers\nblockedBy: #217 (frozen — owner must reopen). blockedBy: none beyond that.\n",
       "blockedBy": [
         "c0949cz5"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-e9",
+          "text": "prep: thorough seam-inventory plan; waits on frozen #217 reopen"
+        },
         {
           "at": "2026-07-26",
           "by": "codex-rebalance",
@@ -1932,7 +1937,7 @@
         }
       ],
       "created": "2026-07-06T13:54:05.195Z",
-      "updated": "2026-07-26",
+      "updated": "2026-07-28T10:28:17.149Z",
       "criteria": [
         {
           "n": 1,
@@ -1976,7 +1981,8 @@
         "tests/decisions.rs",
         "scripts/agent/verify-full.sh"
       ],
-      "workOrder": 128
+      "workOrder": 128,
+      "updatedBy": "tower-prep-e9"
     },
     {
       "id": "c6q02qhw",
@@ -17561,15 +17567,20 @@
       "track": "epoch",
       "epoch": "e9",
       "milestoneId": "e9-compiler-contract",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "Amended 2026-07-24 after D-ONECORE1=A: the contract this card freezes is the semantic-core TIR produced by sidequest #776, not the emission-shaped TIR that predates it. Blocked by frozen #217 and now also by #776. After explicit reopen: document the core contract in docs/spec/tir.md without a second source of truth (crates/jet-codegen/src/Codegen/TIR/mod.rs and its exhaustive consumers stay canonical). R12 is restated per D-ONECORE1=A: one semantic core, every engine an exhaustive consumer, interpreter as reference semantics. Strengthen exhaustive-match and differential tests so a new executable node cannot land without every engine handling it (interpreter coverage mandatory at compile time; tier-1 via transparent deopt). No serialization, version tags, or migration machinery.",
+      "plan": "## Goal\nFreeze the semantic-core TIR contract that self-hosting must produce and that every engine must consume exhaustively (D-ONECORE1=A / R12).\n\n## Law\n- One semantic-core TIR (post-#776 / D-ONECORE1=A), not emission-shaped legacy TIR.\n- Exactly two feature-identical lenses: JIT and optimized AOT; interpreter is reference semantics.\n- No serialization, version tags, or migration machinery on this card.\n- `crates/jet-codegen/src/Codegen/TIR/mod.rs` and exhaustive consumers stay canonical; `docs/spec/tir.md` documents without a second source of truth.\n\n## Scope\nIn: `docs/spec/tir.md` totality/sema-ownership/lowering/consumer laws; strengthen exhaustive-match and differential tests so a new executable node cannot land without every engine handling it.\nOut: porting front ends; speed corpus (#666/#669); byte-identical stage builds (#814/#815).\n\n## Owned paths\n- `docs/spec/tir.md` (create or extend)\n- `crates/jet-codegen/src/Codegen/TIR/{mod,lower,emit,subset}.rs`\n- exhaustive-match / differential tests for interpreter + lenses\n- architecture cross-links\n\n## Steps\n1. Owner reopens #217.\n2. Document semantic-core TIR laws in `docs/spec/tir.md` pointing at the Rust types as canon.\n3. Restate R12 per D-ONECORE1=A in that doc.\n4. Strengthen compile-time exhaustive coverage (interpreter mandatory; tier-1 via transparent deopt where applicable).\n5. Differential tests: same TIR → identical observable semantics across lenses for the frozen subset.\n6. Independent review; meet reopen + doc + test criteria.\n\n## Acceptance / proof\nCard criteria (reopen gate, tir.md laws, exhaustive consumer enforcement). Proof: tests fail if a node is added without all consumers.\n\n## Blockers\nblockedBy: #217. Semantic-core prerequisite #776 is already incorporated via D-ONECORE1=A (card retired); do not re-block on a missing id.\n",
       "blockedBy": [
         "c0949cz5"
       ],
       "workOrder": 129,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-e9",
+          "text": "prep: thorough TIR freeze plan under D-ONECORE1=A; waits on #217"
+        },
         {
           "at": "2026-07-24",
           "by": "fable",
@@ -17651,7 +17662,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-16T04:46:15.449Z",
-      "updated": "2026-07-26"
+      "updated": "2026-07-28T10:28:17.401Z",
+      "updatedBy": "tower-prep-e9"
     },
     {
       "id": "c08olnwg",
@@ -17662,9 +17674,9 @@
       "track": "epoch",
       "epoch": "e9",
       "milestoneId": "e9-compiler-contract",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "Blocked by frozen #217, #668, and #666's compiler-speed foundation. After reopen, keep docs/plans/compiler-speed.md as the one architecture plan: add a current-source evidence table for its six self-hosting bets (sema-only verification, jet-queries invalidation, per-module fan-out, monomorphization control, one-TIR two-lens parity, perf-role optimization budget). Extend #666's checked self-speed corpus and PhaseTiming harness with self-host-sized cases and stage identity; do not create another corpus, runner, epoch-9 architecture doc, or competing performance gate. The existing harness records warmups, samples, tool/machine/cache identities, clean/incremental JIT and optimized AOT medians, Cargo baselines, variance, and parity.",
+      "plan": "## Goal\nBake the six self-hosting compile-speed bets from `docs/plans/compiler-speed.md` into current-source evidence and extend #666's harness with self-host-sized cases — without a second architecture doc or performance gate.\n\n## Law\n- `docs/plans/compiler-speed.md` is the one architecture plan.\n- #666 owns checked corpus, PhaseTiming, and final performance evidence; this card only extends it.\n- Six bets: sema-only verification; jet-queries invalidation; per-module fan-out; monomorphization control; one-TIR two-lens parity; perf-role optimization budget.\n\n## Scope\nIn: evidence table mapping each bet → source mechanism/owner; self-host-sized corpus cases; stage identity in timing records.\nOut: new runners; competing epoch-9 speed docs; claiming final perf closeout (#666).\n\n## Owned paths\n- `docs/plans/compiler-speed.md`\n- `crates/jet-driver/src/PhaseTiming.rs`, `Driver/mod.rs`\n- `crates/jet-queries`\n- TIR mod as parity evidence link\n- extensions to #666 corpus only\n\n## Steps\n1. Owner reopens #217; #668 TIR freeze and #666 foundation complete.\n2. Add current-source evidence table for all six bets.\n3. Extend PhaseTiming / corpus with self-host-representative sizes and stage identity (warmups, samples, tool/machine/cache, clean/incremental JIT and optimized AOT medians, Cargo baselines, variance, parity) — reuse #666 fields.\n4. No duplicate gate; point final numbers at #666.\n5. Independent review.\n\n## Acceptance / proof\nCard criteria. Proof: doc table + harness fields populated on extended cases.\n\n## Blockers\nblockedBy: #217, #668, #666.\n",
       "blockedBy": [
         "c0949cz5",
         "c0xty2bs",
@@ -17673,6 +17685,11 @@
       "workOrder": 130,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-e9",
+          "text": "prep: thorough speed-bets plan; blockedBy #217+#668+#666"
+        },
         {
           "at": "2026-07-26",
           "by": "codex-rebalance",
@@ -17759,7 +17776,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-16T04:46:16.105Z",
-      "updated": "2026-07-26"
+      "updated": "2026-07-28T10:28:17.660Z",
+      "updatedBy": "tower-prep-e9"
     },
     {
       "id": "c0j678mt",
@@ -17770,9 +17788,9 @@
       "track": "epoch",
       "epoch": "e9",
       "milestoneId": "e9-bootstrap-validation",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "Blocked directly by frozen #217 and #669. After reopen, build one generic two-binary behavioral comparator over the existing golden examples, tests/ui snapshots, and sema differential corpus. Given reference and candidate compiler paths, run identical public commands in deterministic roots and compare diagnostics, stdout, stderr, exit codes, panics, and observable side effects appropriate to each case. This proves behavior only; #218 separately owns byte-identical stage1/stage2 compiler artifacts. Add a permanent controlled canary fixture that proves first-divergence reporting, then wire the comparator into the existing full verification entrypoint once a real candidate exists.",
+      "plan": "## Goal\nOne reusable two-binary behavioral comparator: same public cases through reference and candidate compilers; report first observable semantic divergence.\n\n## Law\n- Behavior only — not byte-identical artifacts (#218/#814/#815 own those).\n- Reuse golden examples, UI snapshots, and sema differential corpus; no parallel corpus.\n- Deterministic roots; compare diagnostics, stdout, stderr, exit codes, panics, and case-appropriate side effects.\n\n## Scope\nIn: comparator runner CLI/API; canary fixture proving first-divergence reporting; wire into full verification once a real candidate exists.\nOut: implementing Jet lexer/parser; stage1/stage2 identity.\n\n## Owned paths\n- new comparator under `scripts/agent/` or `tests/` (choose one permanent home; no second)\n- `tests/golden.rs`, `tests/diagnostic_snapshots.rs`, `tests/fuzz_sema.rs` / differential inputs as workloads\n- docs note in architecture / compiler-speed pointing at the runner\n\n## Steps\n1. Owner reopens #217; #669 complete.\n2. Specify runner inputs: pinned reference path, candidate path, case set.\n3. Implement identical-command execution in deterministic roots with stable env.\n4. Diff observables; stop at first divergence with actionable report.\n5. Permanent canary that forces a known divergence and proves detection.\n6. Hook into `verify-full` only when a candidate binary exists (feature/flag), else keep as standalone.\n7. Independent review.\n\n## Acceptance / proof\nCard criteria. Proof: canary green; sample golden subset comparison against two copies of stage0 shows equality.\n\n## Blockers\nblockedBy: #217, #669.\n",
       "blockedBy": [
         "c0949cz5",
         "c08olnwg"
@@ -17780,6 +17798,11 @@
       "workOrder": 131,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-e9",
+          "text": "prep: thorough comparator plan; blockedBy #217+#669"
+        },
         {
           "at": "2026-07-16",
           "by": "e9-plan-builder",
@@ -17856,7 +17879,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-16T04:46:16.739Z",
-      "updated": "2026-07-26"
+      "updated": "2026-07-28T10:28:17.923Z",
+      "updatedBy": "tower-prep-e9"
     },
     {
       "id": "c0tpn16q",
@@ -17867,9 +17891,9 @@
       "track": "epoch",
       "epoch": "e9",
       "milestoneId": "e9-self-host-port",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": "Blocked directly by frozen #217 plus #669 and #670; #218 remains the umbrella but is not a dependency cycle. After those gates clear: port the current public lexer contract exactly—lex, lex_raw, TokKind/Token/StrTokPart, byte spans, interpolation, nested comments, terminator insertion, recovery, and Jet-owned diagnostics—using existing Syntax constants rather than a second keyword table. Specify and add the smallest internal C ABI needed for the Rust driver to invoke the Jet lexer: owned input/output buffers, token and diagnostic serialization, panic/error containment, allocation/free ownership, version lock to the same toolchain, and no exported user surface. Keep one selectable comparison seam until parity is proven, then make the Jet path authoritative with no facade. Driver/module orchestration owns jet-queries and fan-out; do not invent lexer-local parallelism. Run corpus and seeded fuzz differential comparisons against the Rust lexer, then file only concrete next-port gaps.",
+      "plan": "## Goal\nFirst Jet-in-Jet front-end milestone: port the public lexer contract to Jet, add the smallest internal C ABI for the Rust driver, prove token/span/diagnostic parity, then make the Jet path authoritative.\n\n## Law\n- Exact port of current public lexer contract (`lex`, `lex_raw`, TokKind/Token/StrTokPart, byte spans, interpolation, nested comments, terminator insertion, recovery, Jet-owned diagnostics).\n- Use existing Syntax constants — no second keyword table (I7).\n- ABI is internal only: owned buffers, token/diagnostic serialization, panic containment, alloc/free ownership, version lock; no user-facing export.\n- One selectable comparison seam until parity; then Jet path authoritative with no facade.\n- Driver owns jet-queries and fan-out; no lexer-local parallelism invention.\n\n## Scope\nIn: Jet lexer sources; internal ABI; differential corpus + seeded fuzz vs Rust lexer; cutover.\nOut: parser/sema ports (#809/#810); umbrella inventory (#218) except consuming its seam list.\n\n## Owned paths\n- new Jet lexer tree (location TBD under self-host layout from #218 inventory)\n- `crates/jet-lexer` comparison seam / ABI bridge\n- `crates/jet-foundation/src/Syntax.rs` (consume, do not fork)\n- fuzz/differential harnesses\n- diagnostics remain I4-compliant (no new user codes unless behavior differs — should not)\n\n## Steps\n1. Gates: #217 reopened; #669 and #670 complete.\n2. Port lexer to Jet against Syntax constants.\n3. Specify and implement minimal internal C ABI; contain panics; lock versions.\n4. Selectable seam: Rust vs Jet lexer; corpus + seeded fuzz differentials.\n5. On parity, switch driver to Jet path; remove facade.\n6. File only concrete next-port gaps; independent review.\n\n## Acceptance / proof\nCriteria: byte-identical kinds/payloads/spans/terminators/order vs Rust on corpus; fuzz clean; cutover done.\n\n## Blockers\nblockedBy: #217, #669, #670. #218 informs seams but is not a cycle dependency.\n",
       "blockedBy": [
         "c0949cz5",
         "c08olnwg",
@@ -17878,6 +17902,11 @@
       "workOrder": 132,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-e9",
+          "text": "prep: thorough lexer-port plan; blockedBy #217+#669+#670"
+        },
         {
           "at": "2026-07-16",
           "by": "codex-root",
@@ -17973,7 +18002,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-16T04:46:17.376Z",
-      "updated": "2026-07-26"
+      "updated": "2026-07-28T10:28:18.189Z",
+      "updatedBy": "tower-prep-e9"
     },
     {
       "id": "c0cqh9xs",
@@ -18295,15 +18325,18 @@
       "track": "epoch",
       "epoch": "e9",
       "milestoneId": "e9-run-onboarding",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "Complete “run.jet default: scaffold and template” through the existing production path for #678. Ship the behavior end to end with focused failure tests, docs, diagnostics, and audit output. Do not add a parallel mechanism or absorb a sibling slice.",
-      "blockedBy": [
-        "c0949cz5"
-      ],
+      "plan": "## Goal\nScaffold and template emit `run.jet` as the canonical default program entry (D-VERDICT-678-1), matching `jet run` and `fn run`.\n\n## Law\n- Default entry file is `run.jet`.\n- Explicit file targets remain available.\n- Sibling cards own resolver (#1031), migration (#1032), and specs/help/examples/AOT proof (#1033) — do not absorb them.\n\n## Scope\nIn: `jet new` / scaffold templates; default bare-project file creation; template contents with `fn run`.\nOut: bare-project resolution algorithm; migrating existing `main.jet` trees; full onboarding curriculum (#679+).\n\n## Owned paths\n- `Source/CmdCompile.rs` / scaffold command paths\n- template files used by `jet new`\n- `tests/jet_test.rs` (and related CLI tests)\n- short docs pointers (philosophy / getting started) only as needed for scaffold behavior\n\n## Steps\n1. Audit current scaffold output; replace default entry with `run.jet` + `fn run`.\n2. Keep explicit `--file` / path targets working unchanged.\n3. Focused tests: new project runs with `jet run`; template compiles; no `main.jet` default.\n4. Do not fight #1031–#1033 ownership; coordinate names only.\n5. Independent review.\n\n## Acceptance / proof\nCriteria 1–3. Proof: CLI/scaffold tests + manual `jet new` smoke.\n\n## Blockers\nblockedBy: none. Verdict ratified. Cleared stale #217 freeze link — scaffold is not gated on the bootstrap dogfood campaign (siblings already proceeded).\n",
+      "blockedBy": [],
       "workOrder": 133,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-e9",
+          "text": "prep: thorough run.jet scaffold plan under D-VERDICT-678-1; cleared stale #217 blocker"
+        },
         {
           "at": "2026-07-26",
           "by": "codex-rebalance",
@@ -18360,7 +18393,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-17T14:49:29.497Z",
-      "updated": "2026-07-26"
+      "updated": "2026-07-28T10:28:18.437Z",
+      "updatedBy": "tower-prep-e9"
     },
     {
       "id": "c0q08oaj",
@@ -18371,16 +18405,20 @@
       "track": "epoch",
       "epoch": "e9",
       "milestoneId": "e9-run-onboarding",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": "Complete “Beginner onboarding: supported-host install to first run” through the existing production path for #679. Ship the behavior end to end with focused failure tests, docs, diagnostics, and audit output. Do not add a parallel mechanism or absorb a sibling slice.",
+      "plan": "## Goal\nBeginner path from supported-host install to first successful `jet run`, without absorbing lesson curriculum, recovery exercises, or editor matrix siblings.\n\n## Law\n- Beginner pass: safe useful defaults, minimal ceremony.\n- Expert pass: explicit targets and flags remain reachable.\n- D-VERDICT-678-1: onboarding uses `run.jet` by default.\n- Sibling ownership: #1034 ordered lessons; #1035 diagnostic recovery; #1036 terminal/editor matrix; #1037 capstones/metrics — this card is the install→first-run spine only.\n\n## Scope\nIn: README / install docs for supported hosts; first-run instructions that create or use a `run.jet` project; measured “hello” success path; failure messages that point into #1035 exercises without duplicating them.\nOut: full lesson catalog; editor plugin work; self-host bootstrap.\n\n## Owned paths\n- `README.md` install/first-run sections\n- onboarding docs under `docs/` as needed\n- smoke tests or scripted first-run check where harness-friendly\n- links to examples/features\n\n## Steps\n1. Document supported hosts and install commands that match reality.\n2. First-run: install → new project (`run.jet`) → `jet run` success.\n3. Point stuck users to diagnostic-led recovery (#1035) and lessons (#1034).\n4. Keep expert escapes (explicit file, check, test) visible but secondary.\n5. Independent review; coordinate with #678 scaffold landing.\n\n## Acceptance / proof\nCriteria 1–3. Proof: doc walkthrough + smoke; no false-green skips.\n\n## Blockers\nblockedBy: #1033 (specs/help/examples proof for run.jet default). Cleared stale #217 freeze link — onboarding is not the bootstrap soundness gate.\n",
       "blockedBy": [
-        "c0949cz5",
         "c0vyvog6"
       ],
       "workOrder": 134,
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-e9",
+          "text": "prep: thorough first-run onboarding plan; blocker #1033; cleared stale #217"
+        },
         {
           "at": "2026-07-26",
           "by": "codex-rebalance",
@@ -18432,7 +18470,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-17T14:50:01.217Z",
-      "updated": "2026-07-26"
+      "updated": "2026-07-28T10:28:18.697Z",
+      "updatedBy": "tower-prep-e9"
     },
     {
       "id": "c0dbcwz5",
@@ -25948,14 +25987,17 @@
       "track": "epoch",
       "epoch": "e9",
       "milestoneId": "e9-mcp-sdk",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "Complete “MCP SDK: protocol types, negotiation, and lifecycle” through the existing production path for #768. Ship the behavior end to end with focused failure tests, docs, diagnostics, and audit output. Do not add a parallel mechanism or absorb a sibling slice.",
-      "blockedBy": [
-        "D-MCP-SURFACE1"
-      ],
+      "plan": "## Goal\nFirst MCP SDK slice under D-MCP-SURFACE1=A: protocol types, revision negotiation, and lifecycle over one protocol core. Typed builders for beginners; same engine for experts.\n\n## Law (ratified)\n- Layered typed SDK over one revisioned protocol core — not marker syntax, not low-level-only.\n- Stable revisions negotiate by default; preview revisions need explicit policy until final.\n- Per-revision codecs; `2025-11-25` session behavior; `2026-07-28` RC as separate codec when enabled.\n- Bounded schema depth, message size, validation time, deadlines, redirects, origins, tokens, extension sets; audited.\n- No token passthrough; unified grant graph; redacted traces; `jet inspect dossier` facts.\n- Compiler seams stay dependency-free (I6); MCP lives in stdlib/tooling packages, not compiler crates.\n\n## Scope\nIn: message/codec/peer lifecycle types; version policy; initialize/initialized (stable) and RC profile hooks; negotiation errors; audit facts for this slice.\nOut: client convenience (#1061); server tools/resources/prompts (#1062); stdio (#1063); HTTP (#1064); OAuth (#1065); schema/reflection bridge (#1066); interop examples (#1067); hostile proof (#1068).\n\n## Owned paths\n- new `core.mcp` (or ratified package path) protocol modules\n- docs/reference/core-library.md MCP section (protocol slice only)\n- focused protocol/negotiation tests\n- dossier fact keys for version negotiation and lifecycle\n\n## Steps\n1. Add revision registry + codecs for stable `2025-11-25`; stub/gate RC `2026-07-28` behind explicit policy.\n2. Public types: messages, capabilities, peer lifecycle, `McpPolicy` version field.\n3. Negotiation: stable-by-default; preview opt-in; downgrade refusal with clear error.\n4. Emit grant/dossier facts for negotiated version and lifecycle stage.\n5. Tests: success, incompatible peer, preview without opt-in, bounds.\n6. Leave transports and tool registration to sibling cards; independent review.\n\n## Acceptance / proof\nCriteria 1–3 for this slice only. Proof: protocol unit/integration tests; no transport false-green.\n\n## Blockers\nblockedBy: none. D-MCP-SURFACE1 ratified (=A).\n",
+      "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-e9",
+          "text": "prep: thorough MCP protocol/lifecycle plan under D-MCP-SURFACE1=A; cleared ratified decision blocker"
+        },
         {
           "at": "2026-07-26",
           "by": "codex-rebalance",
@@ -26005,8 +26047,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:55:54.737Z",
-      "updated": "2026-07-26",
-      "workOrder": 9768
+      "updated": "2026-07-28T10:28:18.948Z",
+      "workOrder": 9768,
+      "updatedBy": "tower-prep-e9"
     },
     {
       "id": "c0h9cjc7",
@@ -26023,6 +26066,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "burndown-orch",
+          "text": "CORRECTION to my own earlier diagnosis, now fixed at 17cc1aa9d.\n\nI told the worker that docs/agent-workload-corpus.md was deleted as collateral damage in d5f4e0964. That was wrong. The commit RENAMED it to docs/audits/agent-workload-corpus.md, byte-identical (git records it as R100). The move was intentional, putting the corpus reference in the audits section with the other audit documents.\n\nActing on my bad brief, the worker restored the old path, so the tree carried two copies. The restored copy held all the real improvements: the tests section, the 23-row checksum count and the reader rejection rules, the corrected claim that three of four Jet adapters fail the default lens rather than all four, and the coverage table routing domains to #1165-#1173 instead of pointing everything at #769.\n\nFixed by moving that improved content to the audits path and deleting the duplicate. No code referenced either path, so nothing else needed updating. Card refs updated to the audits path.\n\nThe card's substance stands and it remains done. The three criteria were about the schema, runner, scoring, frozen inputs, tests, and documentation accuracy, and all of that was proved. Only the file location was wrong, and only because I misread the commit."
+        },
         {
           "at": "2026-07-28",
           "by": "burndown-orch-verify",
@@ -26189,15 +26237,15 @@
         }
       ],
       "refs": [
-        "docs/archive/field-audit-2026-07-23.md",
-        "docs/spec/philosophy.md",
-        "docs/spec/architecture.md"
+        "docs/audits/agent-workload-corpus.md",
+        "tests/agent_workloads.rs",
+        "docs/spec/philosophy.md"
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:00.999Z",
-      "updated": "2026-07-28T09:42:19.013Z",
+      "updated": "2026-07-28T10:12:03.155Z",
       "workOrder": 3769,
-      "updatedBy": "burndown-orch-verify"
+      "updatedBy": "burndown-orch"
     },
     {
       "id": "c0vrs94y",
@@ -26208,15 +26256,19 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-agent-execution",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nD-AGENT-EXEC1 must choose the API and CLI spelling. Extend core.process and consume #398's native isolation engine. Keep argv execution canonical. The policy must deny ambient authority, describe exact grants, and produce one dry-run plan plus one final receipt. After ratification, block implementation on #398 and reuse its Linux, macOS, and Windows hostile proof. Add no second sandbox, process API, shell DSL, or container fallback.",
+      "plan": "## Goal\nShip D-AGENT-EXEC1=A: one `ProcessAuthority` model on `core.process` with safe workspace defaults, exact expert grants, dry-run plans, and redacted receipts. Application-facing consumer of #398/#893 native isolation — not a second sandbox.\n\n## Law (ratified)\n- Extend `ProcessSpec` / `ProcessChild`; no parallel agent executor or shell DSL.\n- Workspace constructor: useful read-only repo + private build writes; deny network, home, secrets, devices, inherited handles by default.\n- Experts widen exact rights on the same object (write paths, hosts, secrets, executables, limits).\n- Resolve executable identity before review; bind identity + policy + inputs + backend into one launch transaction.\n- Plan and receipt share a policy digest; unsupported enforcement fails closed before spawn.\n- CLI (`jet self exec --workspace …`) and MCP tools use the same engine.\n- Integrate D-WD1 grant graph and D-WD2 dossier facts for denied attempts, descendants, limits, outputs, redaction.\n\n## Scope\nIn: `ProcessAuthority` API, workspace defaults, plan/receipt, CLI parity, grant/dossier wiring, hostile tests once #893 corpus is available.\nOut: building the isolation engine itself (#398 family); MCP protocol SDK (#768+); interactive terminal naming (#771 / D-PROCESS-SESSION2).\n\n## Owned paths\n- process corelib + jetpack runtime policy seams referenced on the card\n- CLI exec surface\n- hostile corpus consumption from #893 / #398\n- docs/reference/core-library.md, architecture notes, diagnostics as needed\n- focused success/failure/hostile/integration tests\n\n## Steps\n1. Confirm #398 engine + #893 shared hostile corpus are the only enforcement backends; fail closed when a grant cannot be enforced on the host.\n2. Add `ProcessAuthority.workspace` and exact grant builders on `ProcessSpec.under(policy)`.\n3. Implement dry-run `plan()` and final receipt with shared digest; redact secrets.\n4. Wire denied-attempt and tree facts into the existing grant/dossier path.\n5. CLI parity for workspace and expert grants.\n6. Hostile tests: ambient authority denied; TOCTOU bind; full-tree cleanup; API/CLI parity.\n7. Independent review against criteria.\n\n## Acceptance / proof\nExisting criteria 1–3. Proof: focused process/authority tests + hostile corpus cases; dossier facts visible via `jet inspect` where applicable.\n\n## Blockers\nblockedBy: #893 (and through it the #398 isolation delivery). D-AGENT-EXEC1 ratified (=A) — decision id kept for audit trail only; it does not block.\n",
       "blockedBy": [
-        "D-AGENT-EXEC1",
         "c0pq060v"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-e3",
+          "text": "prep: thorough plan under D-AGENT-EXEC1=A; still waits on #893 isolation corpus; cleared ratified decision from blockedBy"
+        },
         {
           "at": "2026-07-26",
           "by": "codex-e3-rebalance",
@@ -26272,8 +26324,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:04.053Z",
-      "updated": "2026-07-26",
-      "workOrder": 3770
+      "updated": "2026-07-28T10:26:03.507Z",
+      "workOrder": 3770,
+      "updatedBy": "tower-prep-e3"
     },
     {
       "id": "c0ft6gme",
@@ -26372,7 +26425,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:07.441Z",
-      "updated": "2026-07-28T09:39:27.921Z",
+      "updated": "2026-07-28T10:32:25.567Z",
       "workOrder": 3771,
       "updatedBy": "owner"
     },
@@ -53763,12 +53816,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul1-safety",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "Extend the existing provenance graph instead of adding raw references. Model bounded source sets and owner relations in public APIs. Keep lifetime syntax hidden. Prepare any required semantic ballot. blockedBy: none.",
+      "plan": "## Goal\nClose field-audit G1 under D-MEMPROVENANCE2=A: keep `View<T>` unchanged, and let sema track a bounded set of possible owners for each live view.\n\n## Law (ratified)\n- Public source stays free of lifetime syntax.\n- Sema records a bounded owner-path union per view slot.\n- Every possible owner stays live while the view is live.\n- Lists, tuples, options, results, enums, callbacks, and trait values carry the same hidden relation.\n- API metadata publishes the union; breaking provenance changes are visible in public API snapshots.\n\n## Scope\nIn: provenance algebra in sema; return/store/callback/trait paths; API facts; examples and tests for multi-owner returns and aggregates.\nOut: disjoint mutable proofs (#1198), taskgroup borrows (#1199), pin (#1200), Cell/Shared polish (#1201/#1202).\n\n## Owned paths\n- `crates/jet-sema/src/Sema/CheckerOwnership.rs`\n- `crates/jet-sema/src/Sema/CheckerInfer/calls/lambdas.rs`\n- `crates/jet-sema/src/Sema/CheckerCore/statements.rs`\n- `crates/jet-sema/src/Sema/CheckerItems.rs`\n- public API / dossier fact emission for source unions\n- `tests/ownership.rs`\n- `examples/features/memory/returned_views.jet` (extend) plus a zero-copy multi-buffer parser example\n- `docs/spec/spec.md` provenance section; audit cross-links\n\n## Steps\n1. Model `SourceSet` / owner-union on tracked views; keep single-owner as the common case.\n2. Allow return and rebinding when every path's owner is in the declared or inferred union.\n3. Carry unions through aggregates (list/tuple/option/result/enum fields) and through function values / lambdas / trait dispatch contracts.\n4. Publish API facts (`one_of(owners…)`) and fail closed on incompatible dynamic dispatch.\n5. Keep E2305/E2307 for true escapes; retarget wording where a union is legal.\n6. Golden + ownership tests for `longer`, tokenize-across-two-buffers, aggregate-carried views, and trait-backed lending APIs.\n7. Independent review against criteria; no owner ballot remains.\n\n## Acceptance / proof\nMeet card criteria 1–5. Proof: `scripts/agent/jet-env cargo test --test ownership` plus new focused cases; example goldens; API snapshot diffs that show provenance unions.\n\n## Blockers\nblockedBy: none. D-MEMPROVENANCE2 ratified (=A). Prefer landing after or with #1196 checker unification if overlapping place paths are still open.\n",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-e3",
+          "text": "prep: thorough plan under ratified ballot; advancing planning → ready"
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -53827,7 +53886,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:00.294Z",
-      "updated": "2026-07-26"
+      "updated": "2026-07-28T10:26:02.041Z",
+      "updatedBy": "tower-prep-e3"
     },
     {
       "id": "c0muyoc2",
@@ -53838,12 +53898,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul1-safety",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "Add runtime-checked disjointness to the existing view mechanism. Start with slice splits and distinct indexed entries. Then support lending mutable iteration. Reject overlap before any write. blockedBy: none.",
+      "plan": "## Goal\nClose field-audit G2 under D-MEMDISJOINT1=A: one checked disjointness proof with beginner `edit_disjoint`, expert `get_disjoint_write` / `split_write`, and lending mutable iteration.\n\n## Law (ratified)\n- Ordinary range syntax stays compile-time only; never hide runtime overlap failure in bare loans.\n- All forms lower to one sema-visible proof for one owner.\n- Normalize regions and finish every bounds/duplicate/overlap check before any view is created.\n- Explicit forms return tracked `ViewMut` under existing loan rules.\n- One typed bounds-or-overlap error family.\n\n## Scope\nIn: slice split, multi-index/key disjoint APIs, lending mutable iterators, JIT/dev/AOT parity.\nOut: multi-owner provenance (#1197) except consuming its aggregate-view ability; taskgroup (#1199); pin/Cell/Shared.\n\n## Owned paths\n- ownership checker + corelib method lowering for collections/slices\n- codegen/TIR paths that mint multiple `ViewMut`s\n- `tests/ownership.rs` and differential cases vs Rust `split_at_mut` / `get_disjoint_mut`\n- examples under `examples/features/memory/`\n- docs for the three entry points (teach closure first)\n\n## Steps\n1. Add runtime region normalization + pairwise overlap/duplicate checks as one proof helper.\n2. Ship `split_write(mid)` (one bounds check → two views).\n3. Ship `edit_disjoint(targets, closure)` as beginner default; auto-release loans on all exits.\n4. Ship `get_disjoint_write` for views that cross helpers.\n5. Extend lending mutable iteration to one exclusive element loan at a time.\n6. Reject overlap before mutation; shared error type; identical behavior across JIT/dev/AOT.\n7. Differential tests against Rust class programs; independent review.\n\n## Acceptance / proof\nCriteria 1–5. Proof: ownership + concurrency tests; runtime overlap/duplicate cases; example that updates two physics bodies by index.\n\n## Blockers\nblockedBy: none. D-MEMDISJOINT1 ratified (=A). Natural dependency: #1197 if disjoint results must live in tuples/lists.\n",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-e3",
+          "text": "prep: thorough plan under ratified ballot; advancing planning → ready"
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -53899,7 +53965,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:00.490Z",
-      "updated": "2026-07-26"
+      "updated": "2026-07-28T10:26:02.283Z",
+      "updatedBy": "tower-prep-e3"
     },
     {
       "id": "c0q59qu0",
@@ -53910,12 +53977,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul1-safety",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "Amend taskgroup capture law without weakening tasks.spawn or detach. Tie child loans to group scope. Prove disjoint writes and all exit paths. Prepare the required semantic ballot. blockedBy: none.",
+      "plan": "## Goal\nClose field-audit G3 under D-TASKBORROW1=A: taskgroup children may borrow reads freely and borrow writes only when sema proves disjoint places. Keep `tasks.spawn` / detach ownership-only.\n\n## Law (ratified)\n- Keep `g.task` spelling; no second borrowed-task form.\n- Loans start before launch and end after join or group cleanup.\n- Cancellation, panic, return, and error paths join before owner invalidation.\n- Detached tasks, channels, and `tasks.spawn` still reject borrowed captures (E1101/E1102).\n\n## Scope\nIn: taskgroup capture checking; scheduler/loan lifetime across group edges; nested groups; stress tests.\nOut: provenance unions except as needed for borrowed views (#1197); disjoint APIs (#1198) as the proof source for write splits; pin/Cell/Shared.\n\n## Owned paths\n- `crates/jet-sema` task/lambda capture paths (`E1101`/`E1102` context flags)\n- taskgroup lowering / runtime join and cancellation\n- `tests/concurrency_boundaries.rs` + ownership interaction tests\n- examples showing banded parallel filters over one image\n- docs/spec concurrency + syntax-decisions notes\n\n## Steps\n1. Distinguish taskgroup child capture from `tasks.spawn` capture in sema.\n2. Admit shared read borrows of stack/owner data tied to group scope.\n3. Admit mutable borrows only with compile-time disjoint places (reuse #1198 proof where ranges are dynamic only if already available; otherwise constant/field disjoint first).\n4. Prove every exceptional exit joins before owner move/drop.\n5. Keep detach/channel/`tasks.spawn` rejection identical to today.\n6. Nested group + cancellation stress; independent review.\n\n## Acceptance / proof\nCriteria 1–5. Proof: concurrency_boundaries + new scoped-borrow cases; no regression on detached-task rejects.\n\n## Blockers\nblockedBy: none. D-TASKBORROW1 ratified (=A). Coordinate with #1198 for dynamic disjoint write bands.\n",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-e3",
+          "text": "prep: thorough plan under ratified ballot; advancing planning → ready"
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -53972,7 +54045,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:00.689Z",
-      "updated": "2026-07-26"
+      "updated": "2026-07-28T10:26:02.524Z",
+      "updatedBy": "tower-prep-e3"
     },
     {
       "id": "c0tfvwqu",
@@ -53983,12 +54057,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul1-safety",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P0",
-      "plan": "Define address stability through the existing ownership and view graph. Keep unsafe construction local and safe use auditable. Support stack, fixed, arena, and owned heap storage. Prepare any required owner ballot. blockedBy: none.",
+      "plan": "## Goal\nClose field-audit G4 under D-PIN1=A: `mem.pin(&place) -> Pin<T>` as a tracked write view that blocks move/replace while live.\n\n## Law (ratified)\n- Pin reuses the owner/provenance graph; no second memory model.\n- Structural field projection is declared by the type implementation.\n- Dropping the final pin ends the no-move loan.\n- Unsafe construction stays local; safe callers use `Pin<T>` APIs.\n- Support stack, Fixed, arena, and owned heap places.\n\n## Scope\nIn: `Pin<T>` type, `mem.pin`, move/replace rejection, projection rules, cleanup/cancel/panic paths, self-referential + intrusive examples.\nOut: Pool/Shared as substitutes; Cell (#1201); Shared guards (#1202).\n\n## Owned paths\n- foundation/core `mem` surface + Syntax.rs if `Pin` is user-typeable\n- sema move/replace/projection checks for pinned places\n- tests (`tests/arena.rs`, `tests/resource_close.rs`, new pin tests)\n- examples: zero-allocation queue node / intrusive list\n- docs/spec memory + syntax-decisions\n\n## Steps\n1. Add `Pin<T>` as expert tracked view; `mem.pin(&place)` entry point.\n2. While any pin is live: reject move, replace, and resize of the pinned storage.\n3. Declare structural pin projection on implementing types; reject undeclared projections.\n4. Ensure drop/cancel/panic/owner destruction preserve the contract.\n5. Example: audited unsafe constructor + safe `Pin` use at call sites.\n6. No-allocation / caller-storage parity cases where Rust Pin can; independent review.\n\n## Acceptance / proof\nCriteria 1–5. Proof: focused pin tests + examples; verify skill syntax chores if new names land.\n\n## Owner gates\n`Pin` / `mem.pin` names were chosen by D-PIN1=A. If additional user-typeable keywords beyond that ruling appear, raise a syntax ballot before shipping. Otherwise blockedBy: none.\n",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-e3",
+          "text": "prep: thorough plan under ratified ballot; advancing planning → ready"
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -54046,7 +54126,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:00.888Z",
-      "updated": "2026-07-26"
+      "updated": "2026-07-28T10:26:02.775Z",
+      "updatedBy": "tower-prep-e3"
     },
     {
       "id": "c0wpp6cz",
@@ -54057,12 +54138,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul1-safety",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": "Keep Shared<T> as the cross-task default. Add one coherent local dynamic-borrow tier and guard protocol only where closures cannot express the use. Avoid duplicate lock families. blockedBy: none.",
+      "plan": "## Goal\nShip D-LOCALCELL1=A: one non-sendable `Cell<T>` family for local interior mutability, with value ops and runtime-checked guards.\n\n## Law (ratified)\n- Keep `Shared<T>` as the cross-task synchronized default.\n- One local `Cell<T>`: get/set/replace/init plus read/edit/guard methods.\n- Runtime borrow state: many readers or one writer; guards carry view provenance.\n- Sema rejects task, channel, Shared, and parallel crossings of `Cell`.\n\n## Scope\nIn: `Cell<T>` type and methods; guard map/split; diagnostics; local cache examples.\nOut: Shared guards/Condition (#1202); pin (#1200); second BorrowCell type.\n\n## Owned paths\n- corelib `Cell` implementation + sema sendability / crossing checks\n- `tests/ownership.rs`, `tests/concurrency_boundaries.rs`\n- example: lazy line-index cache on a local syntax tree\n- docs/reference/core-library.md + spec notes\n\n## Steps\n1. Add `Cell<T>.new` and value methods (`get`/`set`/`replace`/`get_or_set` as needed).\n2. Add `read`/`edit` closures and `guard_read`/`guard_edit` with runtime conflict checks.\n3. Guard mapping/splitting preserves the dynamic loan; release on all exits.\n4. Sema: reject Cell across tasks/channels/Shared/parallel.\n5. Teach value access vs guard access clearly in docs.\n6. Independent review.\n\n## Acceptance / proof\nCriteria 1–4. Proof: ownership + concurrency reject tests; local-cache example golden.\n\n## Blockers\nblockedBy: none. D-LOCALCELL1 ratified (=A). Syntax chores if `Cell` needs Syntax.rs entry.\n",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-e3",
+          "text": "prep: thorough plan under ratified ballot; advancing planning → ready"
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -54110,7 +54197,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:01.086Z",
-      "updated": "2026-07-26"
+      "updated": "2026-07-28T10:26:03.024Z",
+      "updatedBy": "tower-prep-e3"
     },
     {
       "id": "c0zywkq7",
@@ -54121,12 +54209,18 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul1-safety",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P1",
-      "plan": "Keep closure-scoped access as the beginner default. Define one expert guard and wait protocol. Preserve cancellation safety and fixed lock order. Prepare the required API-shape ballot. blockedBy: none.",
+      "plan": "## Goal\nShip D-SHAREDGUARD1=A: expert `guard_read` / `guard_edit` and `Condition` on `Shared<T>`, keeping beginner `read`/`edit` closures unchanged.\n\n## Law (ratified)\n- Short closures remain the default.\n- Guards are owned lock tokens with safe cleanup on return/error/panic/cancel.\n- Wait atomically registers, releases, parks, reacquires, and rechecks the predicate.\n- Cancellation unregisters before guard release.\n- Lock-order receipts cover nested guards; dossier/audit integration where grant graph already exists.\n\n## Scope\nIn: Shared guard APIs, Condition, map/split, wait protocols, diagnostics for long lock scopes.\nOut: Mutex/RwLock/Condvar family; changing beginner Shared surface; Cell (#1201) except parallel teaching.\n\n## Owned paths\n- `Shared` corelib + runtime wait/park\n- sema cleanup tracking for guards\n- `tests/ownership.rs`, `tests/concurrency_boundaries.rs`\n- example: bounded work queue with full/empty wait\n- docs + lock-order audit output\n\n## Steps\n1. Add `guard_read` / `guard_edit` without changing `read`/`edit`.\n2. Map/split guards preserve lock + provenance.\n3. Add `Condition` with `wait` / `notify_one` / `notify_all` semantics as ratified.\n4. Prove no lost wakeups; cancel/panic/return always release and unregister.\n5. Lock-order / nested-guard audit facts; diagnostics for long scopes.\n6. Independent review.\n\n## Acceptance / proof\nCriteria 1–5. Proof: concurrency stress for wait; cancellation races; beginner API unchanged snapshot/tests.\n\n## Blockers\nblockedBy: none. D-SHAREDGUARD1 ratified (=A).\n",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-e3",
+          "text": "prep: thorough plan under ratified ballot; advancing planning → ready"
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -54183,7 +54277,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:01.283Z",
-      "updated": "2026-07-26"
+      "updated": "2026-07-28T10:26:03.271Z",
+      "updatedBy": "tower-prep-e3"
     },
     {
       "id": "c0kyjd7a",
@@ -54504,6 +54599,11 @@
       "assignee": "codex-root",
       "log": [
         {
+          "at": "2026-07-28",
+          "by": "e3-1210-examples",
+          "text": "Fresh evidence for criteria 5 and 6, measured on master with a freshly built compiler by card #1210. Criterion 5: the standalone jet check sweep is 421 of 426 authored examples, up from 395 of 415 at your close; every valid and differential fuzz mirror also passes; sema_soundness valid_corpus_reaches_rustc and generated_rust_has_no_unaudited_unsafe are green under scripts/agent/jet-env full with RUST_MIN_STACK=33554432; tests/build_entry.rs passes 31 of 31. The five remaining standalone failures are two scoped compiler features recorded in docs/audits/example-quality-2026-07-26.md: build-time I/O builtins in the canonical TIR evaluator, and build-plan-aware checking. Criterion 6: goldens pass for every changed example family (serde/encoding_, types/generic_constructor_inference, modules/generic_modules, crypto/crypto_suite, comptime/comptime_block, net/http_, collections/iter_, basics/closures, functions/lambda_) in both default and AOT paths. Commits accca8407 f57441382 33873fcf4 b3280d25c ab1619652 fe1339a26 df0e4067e 14bf735ab d37ec796b 471089041."
+        },
+        {
           "at": "2026-07-26",
           "by": "codex-root",
           "text": "Integrated reviewed cleanup as commit 87be3d865. Card remains in verify behind #1210; criteria 5 and 6 are still open."
@@ -54620,8 +54720,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T14:11:06.229Z",
-      "updated": "2026-07-27T03:13:11.215Z",
-      "updatedBy": "codex-root",
+      "updated": "2026-07-28T10:06:31.500Z",
+      "updatedBy": "e3-1210-examples",
       "claimedAt": "2026-07-27T03:13:11.215Z"
     },
     {
@@ -54980,6 +55080,21 @@
       "log": [
         {
           "at": "2026-07-28",
+          "by": "burndown-orch",
+          "text": "Criteria 1-6 met by the builder. Criterion 7 (fresh independent reviewer) is in flight with a reviewer that did not build this card, briefed to probe the is_printable/is_displayable predicate change in both directions (over-rejection and under-rejection), to confirm no gate was weakened or fixture moved, to check the ten newly tracked generated bindings are deterministic, and to rerun valid_corpus_reaches_rustc, generated_rust_has_no_unaudited_unsafe and build_entry.\n\nFour out-of-scope items the builder surfaced are now carded rather than left in a report: #1256 (codegen reaches unreachable! during jet check on a sema-rejected program, a P0 panic), #1257 (twelve examples not jet fmt --check clean), #1258 (polyglot binder goldens fail the default JIT lens on E0956 ModuleCall). The remaining five of the twenty measured failures are two coherent compiler features, scoped in the ledger and deliberately not stubbed."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-1210-examples",
+          "text": "Criterion 7 is the only one left: a fresh independent reviewer must approve the fixes and rerun the scoped proof. Handoff for that reviewer. Commits to read: accca8407 binder arrows plus ten checked-in bindings, f57441382 encoding stream scratch paths, 33873fcf4 crypto constant_time_equal_bytes, b3280d25c empty-list spelling and E0501 texts, ab1619652 generic module fixture, fe1339a26 comptime local inside a comptime block, df0e4067e audit ledger owner map, 14bf735ab lazy view and router clone, d37ec796b one-pass source rule, 471089041 http server tasks mirror. Rerun: scripts/agent/jet-env full cargo test --test sema_soundness valid_corpus_reaches_rustc with RUST_MIN_STACK=33554432; cargo test --test build_entry; JET_GOLDEN_FILTER per changed family; and the standalone sweep."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-1210-examples",
+          "text": "Criterion 5 detail. valid_corpus_reaches_rustc is GREEN: RUST_MIN_STACK=33554432 scripts/agent/jet-env full cargo test --test sema_soundness valid_corpus_reaches_rustc, all cases pass. The four I2 violations the coordinator found were pre-existing and are closed at their roots, not silenced. generated_rust_has_no_unaudited_unsafe is green too. tests/build_entry.rs passes 31 of 31. Goldens pass for every changed example family: serde/encoding_, types/generic_constructor_inference, modules/generic_modules, crypto/crypto_suite, comptime/comptime_block, net/http_, collections/iter_, basics/closures, functions/lambda_. Two sema_soundness tests stay red on work that is not this card: exact_invalid_corpus_rejects_in_jet hits a codegen unreachable while checking ui_fixed_dynamic_size.E0103, added with that fixture on 2026-07-17 in b30168788, where sema reports E0103 correctly but a lowering path still runs and panics; executable_corpus_matches_aot_and_default_dev has five cases, of which ex_collections_dynamic-array-view, ex_io_args_audit, and ex_ui_events are the tier-0 deopt and comptime-evaluator coverage already carded as #1254, ex_basics_loop_values has no .out fixture, and ex_concurrency_parallel_scan reads the harness argv because the test passes its own arguments through. ex_io_archive fails only outside the full shell, where the linker cannot find bz2."
+        },
+        {
+          "at": "2026-07-28",
           "by": "e3-1210-examples",
           "text": "Coordinator's criterion 5 red was two pre-existing I2 violations, not a regression from today. Evidence: the four fixtures were last touched by 4940466c8, and each live example already carries the current shape the mirror lacks — .to_list() after a lazy adapter (D-ITERTOOLS1=A) and server.mux() instead of the retired http.router(). No commit from today touches iterator lowering or the HTTP router. Both violations are real and reachable from ordinary Jet, so both are fixed at the root: is_printable and is_displayable blessed any generic type whose arguments were showable, which swept Iter<T> in with real containers, and JetHTTPRouter had no Clone although everything it holds is cloneable. Seven stale mirrors refreshed from their live examples. Commit 14bf735ab plus the differential refresh."
         },
@@ -55025,29 +55140,29 @@
         {
           "n": 4,
           "text": "All 415 canonical examples pass standalone sema and truthfulness checks with a fresh compiler.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-1210-examples",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T21:33:13.317Z"
+          "evidence": "Standalone jet check sweep over all 426 authored examples with a freshly built compiler: 421 pass, up from 406 at card start. The five open are the two scoped compiler features named in the audit ledger (build-time I/O builtins in the canonical TIR evaluator: embed.jet, embed_bytes.jet, find.jet, find_empty.jet; build-plan-aware checking: programmable_build/main.jet). Every valid and differential fuzz mirror also passes. Commits accca8407 through 471089041.",
+          "at": "2026-07-28T10:05:58.394Z"
         },
         {
           "n": 5,
           "text": "Valid-corpus-to-rustc, changed-example default and AOT goldens, and build-entry proof pass without hidden fallback.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-1210-examples",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T21:33:13.317Z"
+          "evidence": "valid-corpus-to-rustc GREEN (scripts/agent/jet-env full cargo test --test sema_soundness valid_corpus_reaches_rustc, RUST_MIN_STACK=33554432); four pre-existing I2 violations closed at root, none filtered. generated_rust_has_no_unaudited_unsafe GREEN. build-entry GREEN 31/31. Goldens GREEN for all nine changed example families. No hidden fallback: no test weakened, no fixture excluded, no stem moved to a gaps list. Residual red is named and attributed on the card log: a codegen unreachable from b30168788 and the #1254 deopt/comptime coverage family. Commits accca8407 f57441382 33873fcf4 b3280d25c ab1619652 fe1339a26 df0e4067e 14bf735ab d37ec796b 471089041.",
+          "at": "2026-07-28T10:06:22.080Z"
         },
         {
           "n": 6,
           "text": "#1206 criteria 5 and 6 receive exact fresh evidence and can close.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-1210-examples",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T21:33:13.317Z"
+          "evidence": "Logged the exact fresh measurements on #1206 for its criteria 5 and 6: standalone sweep 421/426 with the two remaining features named, sema_soundness valid-corpus and unsafe-provenance green, build_entry 31/31, and goldens green for all nine changed example families in default and AOT paths. #1206 left open for its own owner to close.",
+          "at": "2026-07-28T10:06:37.556Z"
         },
         {
           "n": 7,
@@ -55068,9 +55183,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T21:32:31.859Z",
-      "updated": "2026-07-28T09:31:24.144Z",
-      "updatedBy": "e3-1210-examples",
-      "claimedAt": "2026-07-28T09:31:24.144Z"
+      "updated": "2026-07-28T10:09:23.632Z",
+      "updatedBy": "burndown-orch",
+      "claimedAt": "2026-07-28T10:06:46.530Z"
     },
     {
       "id": "c0nv1ivk",
@@ -57641,8 +57756,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-27T00:40:59.005Z",
-      "updated": "2026-07-28T00:56:24.390Z",
-      "updatedBy": "e3-1230-close"
+      "updated": "2026-07-28T10:24:34.106Z",
+      "updatedBy": "tower-prep-e3"
     },
     {
       "id": "c0fdcyi6",
@@ -58027,15 +58142,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-language-coherence",
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
-      "plan": "D-FANOUT3 is ratified (=C): `tasks.join_all(handles)` ships on `core.tasks`.\n\nOwner still decides:\n1. D-EACH1 — does a fenced line expand to several, and do multiple fences step together\n\nThen implement:\n2. `tasks.join_all([Task<T>]) => [T]` per D-FANOUT3=C, waiting in list order and consuming each handle; docs say when to use it over `g.all`\n3. If D-EACH1 lands: lexer digraphs (`:>` into `suppresses_terminator`, neither into `ends_statement`), parser-level expansion, per-copy spans naming the original line and its entry, formatter emission + fmt stability test, diagnostics with codes and UI snapshots (I4)\n4. Rewrite `examples/features/memory/shared_transact.jet` lines 31-49; add an example for each new form (I5)\n5. Verify; close",
-      "blockedBy": [
-        "D-EACH1",
-        "D-FANOUT3"
-      ],
+      "plan": "## Goal\nImplement both ratified rulings on this card:\n- D-FANOUT3=C: ship `tasks.join_all(handles)` on `core.tasks`.\n- D-EACH1=C: fenced-name expansion plus numbered names from a range (`<: t1..t8 :>`).\n\nThen rewrite `examples/features/memory/shared_transact.jet` to stop pasting eight spawn/wait lines.\n\n## Law (ratified)\n### join_all\n- `tasks.join_all([Task<T>]) => [T]`: wait in list order; consume each handle.\n- Docs state when to use it vs `g.all` inside a taskgroup.\n- Does not replace taskgroups for structured ownership.\n\n### fenced names (D-EACH1=C)\n- `<: … :>` expands a statement once per entry; lock-step when multiple fences appear.\n- Range form `<: t1..t8 :>` in a binding target generates `t1`…`t8`.\n- Not a list value; not S75 fan-out; not destructuring.\n- Lexer: `<:` / `:>` longest-match digraphs; `:>` in `suppresses_terminator`; neither in `ends_statement`.\n- Allowed in binding targets and expression statements; not in if/loop/switch headers or item decls in this pass.\n- Diagnostics (I4): empty fence; duplicate name; disagreeing fence counts; rejected position; double-bind; each with UI snapshot.\n- Spans: every expanded copy points at original line + entry.\n- Formatter emission + fmt stability; wrapping rule for wide fences.\n- Tooling: jump-to-definition / search must understand generated range names.\n\n## Scope\nIn: lexer/parser expansion, sema, fmt, diagnostics+snapshots, `join_all`, example rewrite, Syntax.rs + syntax-decisions + grammar regen.\nOut: changing S75; adding `g.borrow`; reopening D-FANOUT3 to drop join_all.\n\n## Owned paths\n- `crates/jet-foundation` Syntax + lexer/terminator tables\n- parser expansion + span mapping\n- `core.tasks` `join_all`\n- formatter + grammar packages\n- `examples/features/memory/shared_transact.jet`\n- dedicated fence + join_all examples (I5)\n- diagnostic registry + UI snapshots\n- `docs/spec/syntax-decisions.md`\n\n## Steps\n1. Syntax.rs entries + syntax-decisions log for fence digraphs, range form, and `join_all` library surface as required by verify skill.\n2. Lexer digraphs + terminator behavior; parser expansion with lock-step and range binding; per-copy spans.\n3. Implement `tasks.join_all`; tests for order, consumption, L1101 interaction.\n4. Diagnostics + UI snapshots for every fence error class.\n5. Formatter + grammar regen + snapshot bless.\n6. Rewrite shared_transact: prefer either range fences + expanded waits, or list + `join_all` (both legal; pick the form that best teaches the demo’s `#Transact` point without eight pasted lines). Add a second small example if one form would otherwise go unshown.\n7. Verify skill closeout; independent review.\n\n## Acceptance / proof\nExisting syntax criteria plus behavioral proof: shared_transact golden unchanged in output; fence and join_all tests green; grammars regenerated.\n\n## Blockers\nblockedBy: none. D-EACH1 and D-FANOUT3 both ratified (=C).\n",
+      "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "tower-prep-e3",
+          "text": "prep: plan rewritten for D-EACH1=C and D-FANOUT3=C; cleared ratified blockers; planning → ready"
+        },
         {
           "at": "2026-07-27",
           "by": "cursor-grok",
@@ -58099,8 +58216,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-27T19:32:53.509Z",
-      "updated": "2026-07-28T01:40:09.645Z",
-      "updatedBy": "owner"
+      "updated": "2026-07-28T10:26:03.744Z",
+      "updatedBy": "tower-prep-e3"
     },
     {
       "id": "c0ahqhoi",
@@ -58769,11 +58886,11 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Follow the pattern proved by c485d5f17 and 534a49fbd: a ProcessSpec method needs an entry in the safety.rs residency list and in the lower_ctx.rs dispatch, plus a host shim that reuses the existing launch behavior. Store the environment edits and the working directory on JitProcessSpec and apply them at launch exactly as jet_process_command does. Reuse the existing runtime; never a second copy. Prove a program that sets cwd and edits the environment gives byte-identical stdout, stderr and exit under jet run and jet run --release, and add a test that fails if either table entry is removed. Do not grow tests/jit_gaps.txt. blockedBy: none.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "e3-1255-procenv",
       "log": [],
       "criteria": [],
       "refs": [
@@ -58784,7 +58901,84 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T10:03:20.477Z",
-      "updated": "2026-07-28T10:03:20.477Z",
+      "updated": "2026-07-28T10:05:48.235Z",
+      "updatedBy": "e3-1255-procenv",
+      "claimedAt": "2026-07-28T10:05:48.234Z"
+    },
+    {
+      "id": "c0wxnoo3",
+      "num": 1256,
+      "title": "Codegen panics during jet check on a sema-rejected program",
+      "body": "`jet check` on `ui_fixed_dynamic_size.E0103.jet` reaches `unreachable!()` at crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs:944 and panics.\n\nSema reports E0103 correctly, so the program is already rejected. A lowering path still runs afterwards and crashes on it. The user sees a compiler panic instead of the diagnostic that sema already produced.\n\nThe underlying question is ordering: why does lowering run at all on a program sema has rejected? That is a design call, not a guess, which is why the worker who found it did not patch it.\n\nPresent since b30168788 (2026-07-17), which added the fixture. Found while building #1210.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Establish the correct ordering law first: lowering must not run on a program sema rejected. Fix the ordering rather than adding a guard at the panic site, unless the ordering is deliberate and the panic site is genuinely reachable for a valid reason. Prove it with the existing fixture, and add the case to the checking tests so a rejected program can never reach lowering again. blockedBy: none.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "crates/jet-codegen/src/Codegen/TIR/lower/method_calls.rs",
+        "tests/fuzz/sema/invalid"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T10:08:20.934Z",
+      "updated": "2026-07-28T10:08:20.934Z",
+      "updatedBy": "burndown-orch"
+    },
+    {
+      "id": "c0y89goo",
+      "num": 1257,
+      "title": "Twelve examples are not jet fmt --check clean",
+      "body": "Twelve examples fail `jet fmt --check`. All twelve were last touched by d5f4e0964, the bulk 'chore: sync local master WIP' commit.\n\nThat same commit has already caused two other defects this week: it deleted docs/agent-workload-corpus.md as collateral, and it left three call sites on the retired '#Persist const' spelling, which made the JIT parity gate red on master.\n\nFormatting is a gate, so unformatted examples in the tree mean the gate is not being run on this path.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": "Run jet fmt over the twelve files and confirm the reformatting is purely formatting, with no semantic change, by diffing the goldens before and after. If any file changes behavior, that is a separate defect, so stop and card it. Then find why these twelve escaped the formatting gate and close that hole, because reformatting alone leaves the gap open. blockedBy: none.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "examples",
+        "tests/golden.rs"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T10:09:11.078Z",
+      "updated": "2026-07-28T10:09:11.078Z",
+      "updatedBy": "burndown-orch"
+    },
+    {
+      "id": "c02cun0p",
+      "num": 1258,
+      "title": "Polyglot binder goldens fail under the default JIT lens on E0956 ModuleCall",
+      "body": "The polyglot binder goldens run correctly under AOT and fail under the default `jet run` lens with E0956 on `ModuleCall`.\n\nThis is the lens gap D-LENS-RUN1 forbids: a program that succeeds under `jet build` must succeed under default `jet run` with byte-identical output.\n\nSame family as #1254, which owns the general problem that tier-0 is the comptime evaluator and runs only a pure subset of Jet. This card is the concrete ModuleCall instance, which may be fixable on its own without waiting for the tier-0 law.\n\nFound while building #1210.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Determine whether ModuleCall can be lowered for the JIT the way #1253 and #1255 handled the ProcessSpec builders, following the two-table pattern in crates/jet-jit/src/jit/safety.rs and lower_ctx.rs. If it can, fix it here and prove both lenses give byte-identical output. If it genuinely needs the tier-0 law from #1254, say so with evidence and block this card on #1254 rather than half-building it. Do not grow tests/jit_gaps.txt; it is shrink-only. blockedBy: none.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "crates/jet-jit/src/jit/lower_ctx.rs",
+        "crates/jet-jit/src/jit/safety.rs",
+        "examples/features/lowlevel"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T10:09:11.328Z",
+      "updated": "2026-07-28T10:09:11.328Z",
       "updatedBy": "burndown-orch"
     }
   ],
@@ -72728,18 +72922,18 @@
       "group": "stdlib",
       "title": "Names for the expert terminal surface",
       "gist": "What the expert terminal controls are called, and how many new public names ship.",
-      "lesson": "A program that starts another program normally talks to it through pipes. A pipe is a plain byte channel. It carries output, and nothing else.\n\nSome programs refuse to behave on a pipe. A debugger, a shell, and a password prompt all check whether they are attached to a terminal. On a pipe they turn off colour, drop their prompt, or refuse to read a password at all.\n\nA pseudo-terminal fixes this. It is a fake terminal supplied by the operating system. The child believes a person is typing at a real screen. Unix calls this a PTY, and Windows calls it a ConPTY.\n\nOnce a terminal exists, three facts about it matter. Its size, measured in character columns and rows, because programs redraw when it changes. Its mode, meaning whether the operating system pre-processes typed keys or hands them over untouched. Raw mode is the untouched kind, and an editor needs it to see a single arrow key.\n\nThe third fact is what the host actually supports. Not every machine offers every control. A container may have no terminal at all. So a program asks first, then adapts, rather than failing halfway.\n\nJet already ratified the beginner half of this. Writing `.terminal()` asks for safe portable defaults, and that ships today. The ratified text also sketched the expert half, and it used names like `TerminalPolicy`, `mode`, `size`, and `capabilities()`.\n\nIt did not say what those names are attached to. It never named the type holding columns and rows. It never named the mode that is not raw. It never named what `capabilities()` hands back, nor the terminal handle on the started child.\n\nThose are user-typeable names, so Jet requires the owner to ratify them before code exists. This ballot chooses how many such names ship and what shape they take.",
+      "lesson": "A program that starts another program normally talks through pipes. A pipe is a plain byte channel. It carries output, and nothing else.\n\nSome programs refuse to behave on a pipe. A debugger, a shell, and a password prompt all check whether they are attached to a terminal. On a pipe they turn off colour, drop their prompt, or refuse to read a password at all.\n\nA pseudo-terminal fixes this. It is a fake terminal supplied by the operating system. The child believes a person is typing at a real screen. Unix calls this a PTY. Windows calls it a ConPTY.\n\nOnce a terminal exists, three kinds of detail matter. Size is columns and rows, because programs redraw when it changes. Mode says whether the operating system pre-processes keys or hands them over untouched. Raw mode is the untouched kind. An editor needs it to see a single arrow key.\n\nThe third kind is the host report. Call it the capability report, or host facts for short. It answers: can this machine give me a terminal at all? Can I resize it? Can I enter raw mode? A stripped container may have no terminal. So the program asks first, then adapts, rather than failing halfway.\n\nHost facts are not settings you choose. They are answers the machine gives back. That is why their shape may differ from the types you use when you set size and mode.\n\nJet already ratified the beginner half. Writing `.terminal()` asks for safe portable defaults, and that ships today. The ratified text also sketched the expert half with names like `TerminalPolicy`, `mode`, `size`, and `capabilities()`.\n\nIt did not say what those names attach to. It never named the type holding columns and rows. It never named the mode that is not raw. It never named what `capabilities()` hands back, nor the terminal handle on the started child.\n\nThose are user-typeable names, so Jet requires the owner to ratify them before code exists. This ballot chooses how many such names ship and what shape they take.",
       "explainer": "",
       "story": "Priya maintains a test runner that drives a debugger. On a pipe the debugger prints no prompt, so her runner hangs waiting for text that never comes. She wants a terminal, raw key handling, and a size she sets herself. She also runs the same suite inside a stripped container, where no terminal exists, and she needs that to fail clearly rather than hang again.",
-      "inWild": "// Priya's runner, as she would like to write it\nplan :: process.cmd([\"lldb\", app])\n  .terminal(TerminalPolicy.{ size, mode: .Raw })\n  .limits(limits)\n\n// ask before committing, because the container has no terminal\nfacts :: plan.capabilities()\nif !facts.terminal {\n  return Err(\"this host cannot give the debugger a terminal\")\n}\n\nchild :: plan.spawn()?\nchild.terminal.resize(120, 40)\n\n// what are the types of `size`, `facts`, and `child.terminal`?\n// and what is the mode that is not `.Raw` called?",
-      "detail": "",
+      "inWild": "// Priya's runner, as she would like to write it\nplan :: process.cmd([\"lldb\", app])\n  .terminal(TerminalPolicy.{ size, mode: .Raw })\n  .limits(limits)\n\n// ask before committing, because the container has no terminal\nreport :: plan.capabilities()\nif !report.has(TerminalFact.terminal) {\n  return Err(\"this host cannot give the debugger a terminal\")\n}\n\nchild :: plan.spawn()?\nchild.terminal.resize(120, 40)\n\n// what are the types of `size`, `report`, and `child.terminal`?\n// and what is the mode that is not `.Raw` called?",
+      "detail": "Owner follow-up: \"facts\" means the host capability report from `capabilities()`, not a second settings object. Exploration needs a short ask-then-adapt path. Safety needs typed controls on the request side. Option D below keeps growing reports without a breaking struct change, and uses named fact keys so ordinary typos fail at compile time.",
       "options": [
         {
           "key": "A",
           "name": "A named type for each idea",
           "detail": "Every concept gets its own public name. Size, mode, the support report, and the child's terminal handle are four separate named types. Each one can be searched for, jumped to, and documented on its own page. This is the largest number of new names, and the most that a reader must learn before writing expert code.",
           "technical": "Ships `TerminalSize.{ cols: Int, rows: Int }`, `TerminalMode` with variants `.Raw` and `.Cooked`, `TerminalReport` returned by `capabilities()`, and `TerminalSession` as the handle on `ProcessChild`. Four Syntax.rs entries with decision ids. Field names are fixed by the type, so a wrong field is a compile error naming the type.",
-          "code": "size :: TerminalSize.{ cols: 120, rows: 40 }\n\nplan :: process.cmd([\"lldb\", app])\n  .terminal(TerminalPolicy.{ size, mode: .Cooked })\n\nfacts : TerminalReport :: plan.capabilities()\nprint(facts.resize)      // true\n\nchild :: plan.spawn()?\nsession : TerminalSession :: child.terminal\nsession.resize(TerminalSize.{ cols: 80, rows: 24 })"
+          "code": "size :: TerminalSize.{ cols: 120, rows: 40 }\n\nplan :: process.cmd([\"lldb\", app])\n  .terminal(TerminalPolicy.{ size, mode: .Cooked })\n\nreport : TerminalReport :: plan.capabilities()\nprint(report.resize)      // true\n\nchild :: plan.spawn()?\nsession : TerminalSession :: child.terminal\nsession.resize(TerminalSize.{ cols: 80, rows: 24 })"
         },
         {
           "key": "B",
@@ -72753,14 +72947,21 @@
           "name": "Borrow the shapes Core already has",
           "detail": "Jet already ships types for a width-and-height pair and for reporting what a host supports. This option reuses them instead of minting terminal-only twins. Only the mode needs a new name. The smallest addition to the language, at the cost of types whose names never say the word terminal.",
           "technical": "Size reuses Core's existing two-field extent type; `capabilities()` reuses the existing host-facts record used elsewhere in Core, keyed by fact name. `ProcessChild.terminal` is an existing stream handle. One new public name, `TerminalMode`. Requires an audit that the reused types are a genuine fit and not a coincidence of shape.",
-          "code": "plan :: process.cmd([\"lldb\", app])\n  .terminal(TerminalPolicy.{ size: Extent.{ 120, 40 }, mode: .Cooked })\n\nfacts :: plan.capabilities()          // the same record kind used by core.os\nif !facts.has(\"terminal\") { return Err(\"no terminal here\") }\n\nchild :: plan.spawn()?\nchild.terminal.resize(Extent.{ 80, 24 })"
+          "code": "plan :: process.cmd([\"lldb\", app])\n  .terminal(TerminalPolicy.{ size: Extent.{ 120, 40 }, mode: .Cooked })\n\nreport :: plan.capabilities()          // the same record kind used by core.os\nif !report.has(\"terminal\") { return Err(\"no terminal here\") }\n\nchild :: plan.spawn()?\nchild.terminal.resize(Extent.{ 80, 24 })"
         },
         {
           "key": "D",
-          "name": "Controls are typed, facts are data",
-          "detail": "The things you set are named types, because setting a wrong field should be caught while writing. The things you merely read back are plain data, because host facts vary by machine and grow over time. A new fact can appear without a new release breaking anyone's code.",
-          "technical": "Ships `TerminalSize` and `TerminalMode` as named types on the request side. `capabilities()` returns a keyed fact record, not a fixed struct, so unknown keys read as absent rather than failing to compile. `ProcessChild.terminal` is `TerminalSession`. Three new names. Fact keys are documented but not type-checked.",
-          "code": "plan :: process.cmd([\"lldb\", app])\n  .terminal(TerminalPolicy.{ size: TerminalSize.{ cols: 120, rows: 40 }, mode: .Cooked })\n\nfacts :: plan.capabilities()\nif !facts.bool(\"terminal\") { return Err(\"no terminal here\") }\nprint(facts.bool(\"resize\"))\n\nchild :: plan.spawn()?\nchild.terminal.resize(TerminalSize.{ cols: 80, rows: 24 })"
+          "name": "Typed controls, keyed host report with named facts",
+          "detail": "The things you set are named types, because a wrong field should fail while writing. The things you read back are a host report that can grow. Known facts use named keys such as `TerminalFact.terminal`, so a typo on a known fact fails to compile. Preview facts may use a string form with a nearest-key diagnostic. This keeps strong typing on everyday paths and still lets a new host answer appear without a breaking type change.",
+          "technical": "Ships `TerminalSize`, `TerminalMode`, `TerminalSession`, and `TerminalFact` key constants. `capabilities()` returns a keyed report. `report.has(TerminalFact.resize)` is compile-checked. `report.has(\"preview_x\")` stays open for growth. Documented keys get Syntax.rs entries. String typos suggest the nearest known key.",
+          "code": "plan :: process.cmd([\"lldb\", app])\n  .terminal(TerminalPolicy.{\n    size: TerminalSize.{ cols: 120, rows: 40 },\n    mode: .Cooked\n  })\n\nreport :: plan.capabilities()\nif !report.has(TerminalFact.terminal) {\n  return Err(\"no terminal here\")\n}\nprint(report.has(TerminalFact.resize))\n\nchild :: plan.spawn()?\nchild.terminal.resize(TerminalSize.{ cols: 80, rows: 24 })"
+        },
+        {
+          "key": "E",
+          "name": "Typed stable report plus open preview bag",
+          "detail": "Controls stay named types. The host report also has typed fields for the stable answers every backend must give today: terminal present, resize, raw mode. A separate preview bag holds experimental answers. Everyday exploration uses field access with full type checking. New stable fields still need a release that extends the public type.",
+          "technical": "`TerminalReport.{ terminal: Bool, resize: Bool, raw: Bool, preview: FactBag }`. Stable fields are required. Preview keys are strings with nearest-key diagnostics. More names than D, and each new stable fact is a type change.",
+          "code": "plan :: process.cmd([\"lldb\", app])\n  .terminal(TerminalPolicy.{\n    size: TerminalSize.{ cols: 120, rows: 40 },\n    mode: .Cooked\n  })\n\nreport :: plan.capabilities()\nif !report.terminal { return Err(\"no terminal here\") }\nprint(report.resize)\nprint(report.preview.has(\"future_fact\"))\n\nchild :: plan.spawn()?\nchild.terminal.resize(TerminalSize.{ cols: 80, rows: 24 })"
         }
       ],
       "comparisons": [
@@ -72787,28 +72988,34 @@
       ],
       "rec": "D",
       "recommendation": {
-        "why": "It puts strictness where mistakes are expensive and looseness where the world is genuinely variable. A wrong field on a control you set is caught while writing. Host facts differ per machine and grow over time, so a keyed record lets a new fact ship without breaking code that never asked for it.",
+        "why": "D keeps request-side mistakes compile-time hard, keeps ask-then-adapt exploration short, and lets host answers grow without breaking everyday code. Named fact keys remove the old string-typo trap on the known set.",
         "whyNot": [
           {
             "key": "A",
-            "reason": "A fixed report type makes every new host fact a breaking change to a public type. It also costs a fourth name for no gain, since callers read facts by name rather than destructure them."
+            "reason": "A fixed report type makes every new host answer a breaking change to a public type. Callers still read answers by name rather than destructure them."
           },
           {
             "key": "B",
-            "reason": "One type meaning both the request and the grant reads wrong at the call site. `granted.cols == 0` as the test for no terminal is a sentinel value, which is the failure mode Jet avoids elsewhere."
+            "reason": "One type meaning both the request and the grant reads wrong at the call site. Using `granted.cols == 0` as \"no terminal\" is a sentinel, which Jet avoids elsewhere."
           },
           {
             "key": "C",
-            "reason": "Reuse is right only when the shapes mean the same thing. A terminal size is characters, not pixels or generic extent, and fusing them now blocks adding terminal-only fields later without touching unrelated code."
+            "reason": "Reuse is right only when the shapes mean the same thing. A terminal size is characters, not pixels or generic extent."
+          },
+          {
+            "key": "E",
+            "reason": "E wins on typed everyday fields, but every new stable host answer becomes a public type change. D gives the same safety on known facts through named keys without that churn."
           }
         ],
-        "tradeoff": "Fact keys are strings, so a typo in `facts.bool(\"terminl\")` reads as absent instead of failing to compile. That must be answered with documented keys and a diagnostic that suggests the nearest known key."
+        "tradeoff": "Preview facts still use strings, so a typo there reads as absent. That is limited to experimental keys. Known keys stay named constants. Docs and a nearest-key diagnostic cover the preview path."
       },
       "hybrid": null,
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-28T04:21:17.139Z"
+      "status": "ratified",
+      "created": "2026-07-28T04:21:17.139Z",
+      "outcome": "D",
+      "ratifiedAt": "2026-07-28"
     }
   ],
   "questions": [
@@ -73403,9 +73610,11 @@
       "by": "e3-1230-close",
       "kind": "question",
       "text": "JIT closeout complete (#1230/#729 done). Three-way battery green; ledger reconciled. Now continuing remaining epoch 3 burndown.",
-      "status": "open",
-      "answer": "",
-      "created": "2026-07-28T00:56:24.390Z"
+      "status": "answered",
+      "answer": "Noted. Epoch 3 prep continues from remaining planning cards; no owner action needed on this note.",
+      "created": "2026-07-28T00:56:24.390Z",
+      "answeredAt": "2026-07-28",
+      "answeredBy": "tower-prep-e3"
     },
     {
       "id": "q0s2ah7h",
@@ -73414,9 +73623,11 @@
       "by": "owner",
       "kind": "question",
       "text": "I dont understand what the \"facts\" things is. Also, we want to ensure an excellent exploration experience for quick prototyping and architecting, but also want to have strong typing & safety. Is there a way to erradicate the negative tradeoffs of option D?",
-      "status": "open",
-      "answer": "",
-      "created": "2026-07-28T09:39:27.921Z"
+      "status": "answered",
+      "answer": "\"Facts\" here means the host capability report from `plan.capabilities()` — answers about what this machine can do (terminal present? resize? raw mode?), not settings you choose.\n\nYes on the tradeoff: option D is revised. Known facts now use named keys like `TerminalFact.terminal`, so ordinary typos fail at compile time. Exploration stays ask-then-adapt. Preview-only keys may still use strings with a nearest-key diagnostic. Option E is also on the ballot if you prefer typed fields for every stable answer today (at the cost of a type change when a new stable fact ships).",
+      "created": "2026-07-28T09:39:27.921Z",
+      "answeredAt": "2026-07-28",
+      "answeredBy": "tower-prep-e3"
     }
   ],
   "ideas": [
@@ -73791,6 +74002,244 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-28T10:32:25.567Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PROCESS-SESSION2",
+      "note": "D"
+    },
+    {
+      "at": "2026-07-28T10:28:18.948Z",
+      "by": "tower-prep-e9",
+      "action": "card.update",
+      "ref": "c0lpd9yg",
+      "note": "plan,phase,blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:28:18.697Z",
+      "by": "tower-prep-e9",
+      "action": "card.update",
+      "ref": "c0q08oaj",
+      "note": "plan,phase,blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:28:18.438Z",
+      "by": "tower-prep-e9",
+      "action": "card.update",
+      "ref": "c05e21g2",
+      "note": "plan,phase,blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:28:18.189Z",
+      "by": "tower-prep-e9",
+      "action": "card.update",
+      "ref": "c0tpn16q",
+      "note": "plan,phase,blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:28:17.923Z",
+      "by": "tower-prep-e9",
+      "action": "card.update",
+      "ref": "c0j678mt",
+      "note": "plan,phase,blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:28:17.660Z",
+      "by": "tower-prep-e9",
+      "action": "card.update",
+      "ref": "c08olnwg",
+      "note": "plan,phase,blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:28:17.401Z",
+      "by": "tower-prep-e9",
+      "action": "card.update",
+      "ref": "c0xty2bs",
+      "note": "plan,phase,blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:28:17.149Z",
+      "by": "tower-prep-e9",
+      "action": "card.update",
+      "ref": "c0p12web",
+      "note": "plan,phase,blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:26:03.744Z",
+      "by": "tower-prep-e3",
+      "action": "card.update",
+      "ref": "c0pbnytf",
+      "note": "plan,phase,blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:26:03.507Z",
+      "by": "tower-prep-e3",
+      "action": "card.update",
+      "ref": "c0vrs94y",
+      "note": "plan,phase,blockedBy,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:26:03.271Z",
+      "by": "tower-prep-e3",
+      "action": "card.update",
+      "ref": "c0zywkq7",
+      "note": "plan,phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:26:03.024Z",
+      "by": "tower-prep-e3",
+      "action": "card.update",
+      "ref": "c0wpp6cz",
+      "note": "plan,phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:26:02.775Z",
+      "by": "tower-prep-e3",
+      "action": "card.update",
+      "ref": "c0tfvwqu",
+      "note": "plan,phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:26:02.524Z",
+      "by": "tower-prep-e3",
+      "action": "card.update",
+      "ref": "c0q59qu0",
+      "note": "plan,phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:26:02.283Z",
+      "by": "tower-prep-e3",
+      "action": "card.update",
+      "ref": "c0muyoc2",
+      "note": "plan,phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:26:02.042Z",
+      "by": "tower-prep-e3",
+      "action": "card.update",
+      "ref": "c0jm15qp",
+      "note": "plan,phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T10:24:34.505Z",
+      "by": "tower-prep-e3",
+      "action": "question.answer",
+      "ref": "q0s2ah7h",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T10:24:34.303Z",
+      "by": "tower-prep-e3",
+      "action": "decision.update",
+      "ref": "D-PROCESS-SESSION2",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T10:24:34.106Z",
+      "by": "tower-prep-e3",
+      "action": "question.answer",
+      "ref": "q0dukq6f",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T10:12:03.155Z",
+      "by": "burndown-orch",
+      "action": "card.update",
+      "ref": "c0h9cjc7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T10:12:02.868Z",
+      "by": "burndown-orch",
+      "action": "card.update",
+      "ref": "c0h9cjc7",
+      "note": "refs"
+    },
+    {
+      "at": "2026-07-28T10:09:23.632Z",
+      "by": "burndown-orch",
+      "action": "card.update",
+      "ref": "c0jlp4u3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T10:09:11.328Z",
+      "by": "burndown-orch",
+      "action": "card.add",
+      "ref": "c02cun0p",
+      "note": "Polyglot binder goldens fail under the default JIT lens on E0956 ModuleCall"
+    },
+    {
+      "at": "2026-07-28T10:09:11.079Z",
+      "by": "burndown-orch",
+      "action": "card.add",
+      "ref": "c0y89goo",
+      "note": "Twelve examples are not jet fmt --check clean"
+    },
+    {
+      "at": "2026-07-28T10:08:20.934Z",
+      "by": "burndown-orch",
+      "action": "card.add",
+      "ref": "c0wxnoo3",
+      "note": "Codegen panics during jet check on a sema-rejected program"
+    },
+    {
+      "at": "2026-07-28T10:06:46.531Z",
+      "by": "e3-1210-examples",
+      "action": "card.update",
+      "ref": "c0jlp4u3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T10:06:37.556Z",
+      "by": "e3-1210-examples",
+      "action": "card.criteria-meet",
+      "ref": "c0jlp4u3",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-28T10:06:31.500Z",
+      "by": "e3-1210-examples",
+      "action": "card.update",
+      "ref": "c07pjh6w",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T10:06:22.080Z",
+      "by": "e3-1210-examples",
+      "action": "card.criteria-meet",
+      "ref": "c0jlp4u3",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-28T10:06:11.622Z",
+      "by": "e3-1210-examples",
+      "action": "card.update",
+      "ref": "c0jlp4u3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T10:05:58.394Z",
+      "by": "e3-1210-examples",
+      "action": "card.criteria-meet",
+      "ref": "c0jlp4u3",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-28T10:05:48.235Z",
+      "by": "e3-1255-procenv",
+      "action": "card.update",
+      "ref": "c0vxecje",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-28T10:04:19.668Z",
+      "by": "e3-1255-procenv",
+      "action": "card.claim",
+      "ref": "c0vxecje",
+      "note": ""
+    },
     {
       "at": "2026-07-28T10:03:27.536Z",
       "by": "burndown-orch",
@@ -77052,244 +77501,6 @@
       "action": "milestone.update",
       "ref": "e3-ul5-interactive",
       "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:25.129Z",
-      "by": "cursor",
-      "action": "milestone.update",
-      "ref": "e3-ul4-services",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:24.936Z",
-      "by": "cursor",
-      "action": "milestone.update",
-      "ref": "e3-ul3-core",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:24.751Z",
-      "by": "cursor",
-      "action": "milestone.update",
-      "ref": "e3-ul2-tier-parity",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:24.559Z",
-      "by": "cursor",
-      "action": "milestone.update",
-      "ref": "e3-language-coherence",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:24.371Z",
-      "by": "cursor",
-      "action": "milestone.update",
-      "ref": "e3-ul1-safety",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:24.188Z",
-      "by": "cursor",
-      "action": "milestone.update",
-      "ref": "e3-ul0-evidence",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:08.788Z",
-      "by": "cursor",
-      "action": "milestone.delete",
-      "ref": "e3-ul14-capstones",
-      "note": "UL14 · Production capstones"
-    },
-    {
-      "at": "2026-07-27T20:55:08.601Z",
-      "by": "cursor",
-      "action": "milestone.delete",
-      "ref": "e3-ul12-game",
-      "note": "UL12 · Game and media product"
-    },
-    {
-      "at": "2026-07-27T20:55:08.411Z",
-      "by": "cursor",
-      "action": "card.update",
-      "ref": "c0chacj5",
-      "note": "epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:55:08.193Z",
-      "by": "cursor",
-      "action": "card.update",
-      "ref": "c09v51cb",
-      "note": "epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:55:07.965Z",
-      "by": "cursor",
-      "action": "card.update",
-      "ref": "ccq07pav",
-      "note": "epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:55:07.747Z",
-      "by": "owner",
-      "action": "card.update",
-      "ref": "c00uhxes",
-      "note": "epoch,milestoneId,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:55:07.521Z",
-      "by": "cursor",
-      "action": "milestone.add",
-      "ref": "e9-ul14-capstones",
-      "note": "UL14 · Production capstones"
-    },
-    {
-      "at": "2026-07-27T20:55:07.324Z",
-      "by": "cursor",
-      "action": "milestone.add",
-      "ref": "e9-ul12-game",
-      "note": "UL12 · Game and media product"
-    },
-    {
-      "at": "2026-07-27T20:51:10.672Z",
-      "by": "e3-760-grok",
-      "action": "card.update",
-      "ref": "c0gj9wjj",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:51:10.437Z",
-      "by": "e3-760-grok",
-      "action": "card.update",
-      "ref": "c0gj9wjj",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:51:10.209Z",
-      "by": "e3-760-review",
-      "action": "card.criteria-verify",
-      "ref": "c0gj9wjj",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-27T20:51:10.013Z",
-      "by": "e3-760-review",
-      "action": "card.criteria-verify",
-      "ref": "c0gj9wjj",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-27T20:51:09.822Z",
-      "by": "e3-760-review",
-      "action": "card.criteria-verify",
-      "ref": "c0gj9wjj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-27T20:51:09.632Z",
-      "by": "e3-760-review",
-      "action": "card.criteria-verify",
-      "ref": "c0gj9wjj",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-27T20:51:09.447Z",
-      "by": "e3-760-review",
-      "action": "card.criteria-verify",
-      "ref": "c0gj9wjj",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T20:51:09.261Z",
-      "by": "e3-760-review",
-      "action": "card.criteria-verify",
-      "ref": "c0gj9wjj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T20:51:09.076Z",
-      "by": "e3-760-review",
-      "action": "card.criteria-verify",
-      "ref": "c0gj9wjj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T20:51:08.886Z",
-      "by": "e3-760-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0gj9wjj",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-27T20:51:08.698Z",
-      "by": "e3-760-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0gj9wjj",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-27T20:51:08.509Z",
-      "by": "e3-760-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0gj9wjj",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-27T20:51:08.317Z",
-      "by": "e3-760-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0gj9wjj",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-27T20:51:08.136Z",
-      "by": "e3-760-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0gj9wjj",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T20:51:07.950Z",
-      "by": "e3-760-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0gj9wjj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T20:51:07.750Z",
-      "by": "e3-760-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0gj9wjj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T20:43:05.359Z",
-      "by": "e3-1213-grok",
-      "action": "card.update",
-      "ref": "c03722fl",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:43:05.139Z",
-      "by": "e3-1213-grok",
-      "action": "card.update",
-      "ref": "c03722fl",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:43:04.913Z",
-      "by": "e3-1213-sol",
-      "action": "card.criteria-verify",
-      "ref": "c03722fl",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T20:43:04.725Z",
-      "by": "e3-1213-sol",
-      "action": "card.criteria-verify",
-      "ref": "c03722fl",
-      "note": "#2"
     }
   ],
   "nextNum": 368,
