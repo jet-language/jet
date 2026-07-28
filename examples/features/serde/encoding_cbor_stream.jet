@@ -2,6 +2,7 @@
 use core.encoding as encoding
 use core.encoding.cbor as cbor
 use core.files as files
+use core.path as path
 
 fn write_catalog(path: String) {
     output :: files.create(path) ?? panic("create")
@@ -15,7 +16,10 @@ fn write_catalog(path: String) {
 }
 
 fn run() {
-    path :: "encoding_cbor_stream_out.cbor"
+    // Scratch output belongs in a fresh temp directory, never the working
+    // directory the example happens to run from.
+    scratch :: files.temp_dir("jet-encoding-cbor") ?? panic("temp_dir")
+    path :: path.join(scratch.path, "catalog.cbor")
     write_catalog(path)
     input :: files.open(path) ?? panic("open")
     reader :: cbor.reader(^input) ?? panic("reader")
