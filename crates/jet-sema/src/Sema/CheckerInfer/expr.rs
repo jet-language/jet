@@ -1797,9 +1797,8 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0501",
                 "an empty list needs a type".to_string(),
-                "write `[]` only where the list type is already known, like `xs: [Int] :: []`"
-                    .to_string(),
-                "add a type annotation on the binding".to_string(),
+                "write `[]` only where the list type is already known from around it".to_string(),
+                "name the element type on the literal: `[Int].{}`".to_string(),
                 Some(span),
             ));
             return None;
@@ -2189,9 +2188,8 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0501",
                 "an empty map needs a type".to_string(),
-                "write `[]` only where the map type is already known, like `var m: [String: Int] = []`"
-                    .to_string(),
-                "add a type annotation on the binding".to_string(),
+                "write `[]` only where the map type is already known from around it".to_string(),
+                "name the key and value types on the literal: `[String: Int].{}`".to_string(),
                 Some(span),
             ));
             return None;

@@ -13,7 +13,8 @@ impl Box {
 fn run() {
     inferred :: Box.new(7)
     nested :: Box.new(Box.new("jet"))
-    expected :: Box.new([])
+    // A bare `[]` determines nothing, so the element type rides the literal.
+    listed :: Box.new([Int].{4, 5})
     explicit :: Box<Int>.new(9)
-    print("{inferred.value} {nested.value.value} {explicit.value}")
+    print("{inferred.value} {nested.value.value} {listed.value.len()} {explicit.value}")
 }
