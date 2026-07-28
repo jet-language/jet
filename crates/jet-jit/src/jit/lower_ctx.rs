@@ -8498,10 +8498,15 @@ impl LowerCtx<'_, '_> {
                                 if matches!(cell.as_ref(), Type::String)))
                     });
                     if method == "to_string" && args.len() == 1 && !rows_arg {
-                        return self.lower_typed_tree_to_string(
-                            &args[0],
+                        let tree = self.lower_serde_encode(&args[0])?;
+                        let host_ref = self.module.declare_func_in_func(
                             self.host.encoding.csv_tree_to_string,
+                            self.b.func,
                         );
+                        let call = self.b.ins().call(host_ref, &[tree]);
+                        let rendered = self.b.inst_results(call)[0];
+                        self.emit_trap_check()?;
+                        return Ok(rendered);
                     }
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "parse" if args.len() == 1 => {

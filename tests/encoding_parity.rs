@@ -436,6 +436,24 @@ fn typed_csv_encode_matches_aot_and_default_dev() {
     );
 }
 
+#[test]
+fn csv_to_string_rejects_values_that_are_not_rows_or_records() {
+    for (name, value) in [("scalar", "42"), ("scalar-list", "[1, 2]")] {
+        let src = format!(
+            "use core.encoding.csv as csv\nfn run() {{\n    print(csv.to_string({value}))\n}}\n"
+        );
+        let Err(diags) =
+            jet::Driver::compile_generated_src(&src, name, jet::Sema::CompileMode::Run)
+        else {
+            panic!("{name} reached a CSV runtime lens");
+        };
+        assert!(
+            diags.iter().any(|diag| diag.code == "E0112"),
+            "{name} missed existing argument mismatch: {diags:?}"
+        );
+    }
+}
+
 fn stream_fixture(format: &str, body: &str) -> String {
     format!(
         r#"

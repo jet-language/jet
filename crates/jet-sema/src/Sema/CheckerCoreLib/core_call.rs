@@ -873,9 +873,62 @@ impl<'a> Checker<'a> {
                 // `JSON` / `[[String]]` / `Map` forms AND a `#[Codable]` value); the
                 // codegen routes by the lowered arg type. `decode<T>` is the typed decode
                 // (→ `T`, or `[T]` for CSV) keyed by the call-site type argument.
+                ("core.encoding.csv", "to_string") => {
+                    if args.len() != 1 {
+                        self.diags.push(wrong_core_arity(name, 1, args.len(), span));
+                    }
+                    for a in args.iter_mut() {
+                        self.borrow_ctx = true;
+                        let Some(t) = self.infer(&mut a.expr) else {
+                            continue;
+                        };
+                        let valid = match &t {
+                            Type::List(elem)
+                                if matches!(elem.as_ref(), Type::List(cell) if matches!(cell.as_ref(), Type::String)) =>
+                            {
+                                true
+                            }
+                            Type::List(elem) => {
+                                let type_name = match elem.as_ref() {
+                                    Type::Named(name) => Some(name.as_str()),
+                                    Type::Apply { name, .. } => Some(name.as_str()),
+                                    _ => None,
+                                };
+                                type_name.is_some_and(|name| {
+                                    let (namespace, leaf) = name
+                                        .rsplit_once('.')
+                                        .map_or((None, name), |(namespace, leaf)| {
+                                            (Some(namespace), leaf)
+                                        });
+                                    self.struct_owner_module(leaf, namespace)
+                                        .and_then(|owner| self.struct_fields_of(owner, leaf))
+                                        .is_some()
+                                })
+                            }
+                            _ => false,
+                        };
+                        if valid {
+                            self.check_encodable(&t, a.expr.span());
+                        } else {
+                            let rows = Type::List(Box::new(Type::List(Box::new(Type::String))));
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!(
+                                    "`{}` wants {} for argument 1, but this is {}",
+                                    name,
+                                    rows.show(),
+                                    t.show()
+                                ),
+                                "every argument must match its parameter's type".to_string(),
+                                type_fix_hint(&rows, &t),
+                                Some(a.expr.span()),
+                            ));
+                        }
+                    }
+                    return Some(Type::String);
+                }
                 (
-                    "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml"
-                    | "core.encoding.yaml",
+                    "core.encoding.json" | "core.encoding.toml" | "core.encoding.yaml",
                     "to_string" | "to_string_pretty",
                 ) => {
                     if args.len() != 1 {

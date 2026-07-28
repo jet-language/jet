@@ -486,10 +486,23 @@ fn jet_enc_csv_to_string<T: user_Encode>(values: &Vec<T>) -> String {
     let mut header: Vec<String> = Vec::new();
     if let Some(jet_std::DataTree::Object(entries)) = trees.first() {
         header = entries.iter().map(|(k, _)| k.clone()).collect();
+    } else if !trees.is_empty() {
+        jet_panic(
+            "<core.encoding.csv>",
+            0,
+            "csv.to_string needs rows or records",
+        );
     }
     let mut rows: Vec<Vec<String>> = Vec::new();
     rows.push(header.clone());
     for tree in &trees {
+        if !matches!(tree, jet_std::DataTree::Object(_)) {
+            jet_panic(
+                "<core.encoding.csv>",
+                0,
+                "csv.to_string needs rows or records",
+            );
+        }
         let mut record = Vec::with_capacity(header.len());
         for key in &header {
             let cell = match jet_std::datatree_get(tree, key) {

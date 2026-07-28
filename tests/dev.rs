@@ -5127,6 +5127,71 @@ fn io_cli_terminal_and_time_match_interpreter_jit_and_aot() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn io_style_raw_nonunicode_no_color_uses_presence_semantics() {
+    use std::os::unix::ffi::OsStringExt;
+
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
+            let src =
+                "use core.io as io\nfn run() {\n    print(io.style(\"red\", \"plain\"))\n}\n";
+            let dir = common::unique_tmp("jet_raw_no_color");
+            fs::create_dir_all(&dir).unwrap();
+            let input = dir.join("raw_no_color.jet");
+            fs::write(&input, src).unwrap();
+            let compiled = jet::compile_with_path(src, input.to_str().unwrap())
+                .expect("raw NO_COLOR fixture must compile");
+            let rust = dir.join("raw_no_color.rs");
+            let bin = dir.join("raw_no_color_test");
+            let probe = r#"
+
+thread_local! {
+    static TEST_DEADLINE_EXCEEDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[test]
+fn raw_no_color_is_present_even_when_its_value_is_not_unicode() {
+    assert!(jet_env_value_raw("NO_COLOR").is_some());
+    assert!(jet_std_env_get(&"NO_COLOR".to_string()).is_none());
+}
+"#;
+            fs::write(&rust, format!("{}{}", compiled.rust, probe)).unwrap();
+            let built = Command::new("rustc")
+                .args([
+                    "--edition",
+                    "2021",
+                    "--test",
+                    rust.to_str().unwrap(),
+                    "-o",
+                    bin.to_str().unwrap(),
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                built.status.success(),
+                "rustc rejected raw NO_COLOR probe:\n{}",
+                String::from_utf8_lossy(&built.stderr)
+            );
+            let run = Command::new(&bin)
+                .arg("--exact")
+                .arg("raw_no_color_is_present_even_when_its_value_is_not_unicode")
+                .env("NO_COLOR", std::ffi::OsString::from_vec(vec![0xff]))
+                .output()
+                .unwrap();
+            assert!(
+                run.status.success(),
+                "raw NO_COLOR presence probe failed:\n{}",
+                String::from_utf8_lossy(&run.stdout)
+            );
+            let _ = fs::remove_dir_all(dir);
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
 fn golden_stderr(stem: &str) -> String {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let path = root.join(format!("examples/features/expected/{stem}.stderr.out"));
