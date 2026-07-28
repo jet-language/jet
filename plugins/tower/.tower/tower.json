@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1252,
-    "rev": 18084,
+    "nextNum": 1255,
+    "rev": 18122,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25,7 +25,7 @@
         "radar:e4"
       ]
     },
-    "digestCursor": "2026-07-27T23:06:06.754Z"
+    "digestCursor": "2026-07-28T01:40:12.539Z"
   },
   "epochs": [
     {
@@ -18534,17 +18534,59 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul2-tier-parity",
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": "Close only from existing child-card evidence. Do not absorb child implementation scope.\nAmended 2026-07-24 after D-ONECORE1=A and D-LENS-RUN2=A: parity is delivered structurally by the sidequest chain #776 (semantic-core TIR) -> #777 (canonical interpreter) -> #778 (tiered jet run) -> #779 (core shrink), not by hand-writing every Cranelift gap.\n1. Keep the #727 differential corpus gate green (criterion 1, verified) — it is the safety net for the whole rework.\n2. The E2211 burn-down steps of the old plan are superseded; tier-1 widening continues later as perf work on the new structured TIR.\n3. This card closes when #778 lands: every AOT-runnable corpus program runs under default jet run with byte-identical output via tiered execution, and the CI gate (#730) enforces it.\n4. Shared SoT rule stands: host shims call jet-foundation / existing runtime; never a third algorithm copy.",
       "blockedBy": [
-        "c0qpkp2h",
-        "c0twzcdi",
-        "c0xdsvm9",
-        "c00t02hw"
+        "#1254"
       ],
       "assignee": "e3-688-parity",
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "burndown-orch",
+          "text": "CORRECTION to my earlier verification of criterion 2, and #688 cannot close yet.\n\nI verified criterion 2 on the tripwire and the named deopt reasons. Both of those hold. I did not test the rest of the criterion text, the clause requiring deopt to produce identical observable behavior. That clause fails.\n\nMeasured at c485d5f17 with a fresh build. examples/features/crypto/crypto_suite.jet exits 0 under jet run --release and exits 1 under default jet run. examples/features/types/generic_constructor_inference.jet does the same; AOT prints '7 jet 2 9' and JIT prints an error. Both are byte-different, which is the exact condition this card exists to eliminate.\n\nMechanism: --trace-tiers confirms the deopt happens as designed ('run tier0 interp (body stmt 6: Let[0] init=OtherExpr)'). The problem is the target. Tier-0 is the comptime evaluator, and its own E0956 text says it evaluates a pure subset of Jet. So the deopt target cannot run what Cranelift could not compile.\n\nThis means the compile-gap ratchet drift the JIT worker reported is not manifest bookkeeping. Each entry is a real lens violation. Growing tests/jit_gaps.txt to absorb them would have recorded two parity failures as normal, so the worker was right to stop and ask.\n\nCarded as #1254 and this card now blocks on it. Criteria 2 and 3 must be re-proved after #1254 lands. The JIT worker's tier-1 additions at c485d5f17 are correct and stay: sha512_bytes and blake3_bytes now compile resident and match AOT byte for byte."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-688-parity",
+          "text": "STOP AND REPORT on the gap ratchet, as instructed. The gap set cannot return to zero inside this card, and I did not grow tests/jit_gaps.txt. Fresh JET_DUMP_JIT_GAPS=1 jit_coverage_audit at c485d5f17 shows covered 371 against a manifest of 370, and two gaps against a manifest of none. Gap one: 'crypto/crypto_suite: run: jit core call unsupported: jet.crypto.hkdf_sha256'. Behind it sit at least constant_time_equal, constant_time_equal_bytes, x25519_shared and file_seal, plus the Secret.from_bytes, X25519SecretKey.new_random, public_key and text method calls, none of which the JIT host table carries. Gap two: 'types/generic_constructor_inference: run: jit string interp type unsupported: Named(\"T\")'. That one needs the lowerer to resolve a generic field type through monomorphisation before it can print it, which no host shim can supply. Gap two alone puts a zero gap set out of reach whatever I do to crypto. All three movements come from other workers' frontend fixes landing today and admitting three previously rejected examples into the compile attempt: crypto_suite from #1210, plus generic_constructor_inference and generic_modules. Criterion #3 assigns Cranelift completeness to the #778 ratchet and excludes it here. Card #771's example is not landed: its precondition, an empty gap set, is unmet, and it would add a third gap."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-688-parity",
+          "text": "JIT hash coverage landed at c485d5f17: jet.crypto.sha512_bytes and jet.crypto.blake3_bytes now compile. A core call needs an entry in two tables, and both were missing: crates/jet-jit/src/jit/lower_ctx.rs picks the Cranelift host function, and crates/jet-jit/src/jit/safety.rs decides whether the function stays resident. With only the lowering entry the planner still deopted the whole program before lowering ran, and tier-0 then refused the call with E0956. Both host shims reuse the shared jet_crypto_sha512_impl and jet_crypto_blake3_impl that the AOT bridge uses, so there is no second algorithm copy. A program printing both digests now reports 'run tier1 native' and matches jet run --release byte for byte. Three-way differential stays green for crypto/hash and crypto/typed_crypto. The gap ratchet is still red for two reasons that belong to other work; details in the next log."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "burndown-orch-verify",
+          "text": "Orchestrator verification at HEAD: criteria 2 and 4 verified independently. Criterion 3 is NOT verified — the compile-gap ratchet is red again. 'cargo test --test dev jit_try_compile_manifest_matches' fails at tests/dev.rs:6690 with drift ['crypto/crypto_suite: run: jit core call unsupported: jet.crypto.sha512_bytes'] against an expected empty set. Cause traced: commit 33873fcf4 (card #1210) repaired crypto.constant_time_eq, whose registered item pointed at a codegen target that did not exist. With that call fixed, crypto_suite.jet compiles further than before and reaches the next unsupported core call. This is a pre-existing JIT coverage hole that an earlier failure was masking, not a regression in 33873fcf4. Fix is assigned back to the JIT worker: give jet.crypto.sha512_bytes a core-call handler reusing the existing runtime implementation. tests/jit_gaps.txt must not grow; the ratchet is shrink-only."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-688-parity",
+          "text": "Criteria 2, 3 and 4 met from fresh runs; card moves to verify for an independent check. One item stays open and belongs to card #771, not here: examples/features/io/process_terminal.jet is still untracked, is in neither tests/jit_corpus_gate.txt nor tests/jit_gaps.txt, and carries a real Cranelift gap, 'run: jit handle method unsupported'. Adding it grows the shrink-only gap ratchet from 0 to 1, which is card #771's call to make, so this agent left both manifests alone. Until #771 commits the example with its two ratchet entries, a local gate run in a dirty tree fails on that file alone, while a CI checkout stays green."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-688-parity",
+          "text": "Persist migration committed at a5e21ff9d: examples/features/devloop/persist.jet, tests/dev.rs, tests/fuzz/sema/differential/ex_devloop_persist.jet, Source/JitBackend.rs. Targeted proof, all green: cargo test --test dev persist_ (2 passed, both were red before), cargo test --test dev jit_try_compile_manifest_matches (passed), JET_CORPUS_GATE_FILTER=devloop/ corpus gate (3 classified, 3 resident JIT), SEMA_SOUNDNESS_CASE=tests/fuzz/sema/differential/ex_devloop_persist.jet executable_corpus_matches_aot_and_default_dev (passed), JET_GOLDEN_FILTER=devloop/persist golden (passed), jet fmt --check on the example (clean). The earlier lowlevel/inline_asm drift was transient: it came from a second worker's half-applied codegen edits, which have since landed as 0bebf36ca and accca8407, and the example now runs and prints 42. The only file still outside any commit is their examples/features/io/process_terminal.jet, which CI never sees."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-688-parity",
+          "text": "Re-run after the persist migration hit a second, foreign blocker. Another active stream created an untracked example, examples/features/io/process_terminal.jet, timestamped 21:41 today, alongside uncommitted edits in crates/jet-codegen Prelude Process.rs and crates/jet-sema CheckerCoreLib process_ui.rs. That example is in neither tests/jit_corpus_gate.txt nor tests/jit_gaps.txt, and it has a real JIT compile gap, 'run: jit handle method unsupported'. The gate now fails on that file alone. Per shared-tree rules this agent does not stage or repair another stream's paths; the owning card owes the two manifest ratchet entries when it lands its example."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-688-parity",
+          "text": "Gate was RED on master, not green. The full differential gate at 648800cf9 failed twice: example_corpus_strict_jit_aot_differential_gate and jit_try_compile_manifest_matches, both exit 101. Single drift: devloop/persist observed FrontendRejected 'E0003: #Persist marks a bare binding, not const' where both manifests expect ResidentJit. Root cause is commit d5f4e0964, which made the parser reject '#Persist const' per D-PERSIST1 and D-BIND-BARE1 but left three call sites on the retired spelling: examples/features/devloop/persist.jet and two tests in tests/dev.rs. Both persist tests were also red on master. Fixed by migrating to the spec spelling '#Persist counter := 0'. persist_marker_is_codegen_inert could no longer diff marker against no-marker, because '#Persist name := ...' is the only legal module-level bare binding, so it now proves the release Rust lowers to a plain static and emits no persist-store hook. Also removed a dead cfg(test) guard on the AOT fallback tripwire in Source/JitBackend.rs: integration tests link the crate without cfg(test), so every '!fallback_invoked_for_test()' assertion in tests/dev.rs passed without proving anything."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-688-parity",
+          "text": "Closeout audit in progress. Structural check: no AotFallbackBackend exists anywhere; Source/Interpreter.rs dev_run_bundle routes default jet run straight to CraneliftBackend, and InterpreterBackend is reachable only from explicit --interpret. E2211 is never emitted; jet-jit only detects it as a tripwire. --trace-tiers prints named per-function reasons: examples/features/basics/loop_values.jet shows 'first_over tier0 interp (whole-program deopt)' and 'run tier0 interp (body stmt 5: ForIn[0])'. tests/jit_gaps.txt has 370 covered and 0 gaps. tests/jit_corpus_gate.txt classifies 394 examples: 336 resident_jit, 15 deopt_interp, 10 expected_exit, 9 gate_excluded, 8 frontend_rejected. CI job jit-aot-parity in .github/workflows/ci.yml runs tools/ci/jit-aot-parity.sh on push and pull_request across linux/macos/windows x86_64. Full gate run under way."
+        },
         {
           "at": "2026-07-28",
           "by": "e3-1230-close",
@@ -18629,29 +18671,29 @@
         {
           "n": 2,
           "text": "No AOT fallback on default jet run. Missing tier-1 coverage deopts per function to the canonical tier-0 interpreter with identical observable behavior (D-LENS-RUN2=A). Named gap reasons stay visible via --trace-tiers and tests/jit_gaps.txt.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-21T13:54:10.052Z"
+          "status": "verified",
+          "metBy": "e3-688-parity",
+          "verifiedBy": "burndown-orch-verify",
+          "evidence": "Independent check by orchestrator at HEAD. Source/JitBackend.rs calls jet_jit::note_fallback_invoked_for_test() unconditionally at all three InterpreterBackend entry points (run, hot-swap, restart); the cfg(test) guard is gone, so the ~40 !fallback_invoked_for_test() assertions in tests/dev.rs are now load-bearing. Re-ran 'cargo test --test dev persist_': 2 passed, 0 failed. Re-ran 'jet run examples/features/basics/loop_values.jet --trace-tiers': prints 'first_over tier0 interp (whole-program deopt)' and 'run tier0 interp (body stmt 5: ForIn[0])', so deopt reasons are named per function as required.",
+          "at": "2026-07-28T04:17:29.413Z"
         },
         {
           "n": 3,
           "text": "Every executable TIR construct runs under default jet run: native Cranelift where covered, interpreter deopt otherwise (D-ONECORE1=A). Cranelift completeness moves to the #778 performance ratchet and is not a close condition here.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-688-parity",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-21T13:54:10.176Z"
+          "evidence": "Fresh full differential gate at a5e21ff9d: JET_NIX_TMP_CLEANED=1 JET_CORPUS_GATE_REPORT_DIR=... scripts/agent/jet-env bash tools/ci/jit-aot-parity.sh. Every one of the 377 committed corpus entries classified exactly as tests/jit_corpus_gate.txt expects, 336 of them resident Cranelift and the rest deopt-interp or outside the AOT oracle. For each AOT-oracle case the gate compares pure interpreter, default tiered jet run, and optimized AOT stdout, stderr, and exit byte for byte, and asserts no E2211 and no fallback. The compile ratchet jit_try_compile_manifest_matches showed no drift in the covered set, so all 370 covered stems still lower and compile. devloop/persist was the one committed program that did not run under default jet run; commit a5e21ff9d fixes it and it is now resident JIT. The single remaining gate failure is io/process_terminal, an untracked example from card #771 slice 1: git ls-files does not know the file, so a CI checkout never sees it.",
+          "at": "2026-07-28T04:13:41.193Z"
         },
         {
           "n": 4,
           "text": "CI/enforcement: automated JIT↔AOT differential suite over the AOT-runnable example corpus (fail build on drift).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-21T13:54:10.288Z"
+          "status": "verified",
+          "metBy": "e3-688-parity",
+          "verifiedBy": "burndown-orch-verify",
+          "evidence": "Independent check by orchestrator. .github/workflows/ci.yml declares job jit-aot-parity across ubuntu-latest, macos-13 and windows-latest with no schedule-only guard, so it runs on every push and pull_request; it invokes tools/ci/jit-aot-parity.sh with JET_REQUIRE_RUSTC=1 and JET_REQUIRE_CRANELIFT_HOST=1 and uploads the report with if-no-files-found: error. tools/ci/jit-aot-parity.sh exports RUST_MIN_STACK=16777216 itself, so the local stack-overflow trap on the ratchet test does not reach CI. The gate is proven to fail rather than pass silently: it caught two real regressions during this card and it is red again at HEAD on a third (see card log).",
+          "at": "2026-07-28T04:17:33.978Z"
         },
         {
           "n": 5,
@@ -18672,10 +18714,10 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-21T13:54:01.789Z",
-      "updated": "2026-07-28T01:29:42.870Z",
+      "updated": "2026-07-28T04:30:55.243Z",
       "workOrder": 43,
-      "updatedBy": "e3-688-parity",
-      "claimedAt": "2026-07-28T01:29:42.870Z"
+      "updatedBy": "burndown-orch",
+      "claimedAt": "2026-07-28T04:27:41.091Z"
     },
     {
       "id": "c0xui422",
@@ -25979,8 +26021,13 @@
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nblockedBy: none — corpus design and baseline capture are leaf work. Freeze task inputs, expected outcomes, allowed dependencies, machines, and scoring before comparing languages. Prefer executable fixtures and hostile cases over prose. Use existing cards as the canonical implementation owners. Every Jet loss must link one live canonical card, reopen a falsely closed card, or record a ratified non-goal; never add a duplicate mechanism. The corpus is a gate and evidence source, not another test runner or benchmark framework when existing harnesses suffice.",
       "blockedBy": [],
-      "assignee": "e3-769-corpus",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "burndown-orch",
+          "text": "[handoff] Reclaimed by burndown orchestrator 2026-07-27: claim by e3-769-corpus idle since 2026-07-26 with no log advance. Slice work integrated at 906b60def, 79be29d10, 2638c8f35; the three broad criteria remain open and need evidence reconciliation."
+        },
         {
           "at": "2026-07-26",
           "by": "codex-e3-rebalance",
@@ -26128,9 +26175,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:00.999Z",
-      "updated": "2026-07-26",
-      "claimedAt": "2026-07-26T09:51:19.812Z",
-      "workOrder": 3769
+      "updated": "2026-07-28T01:36:59.163Z",
+      "workOrder": 3769,
+      "updatedBy": "burndown-orch"
     },
     {
       "id": "c0vrs94y",
@@ -26217,14 +26264,44 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-automation-apis",
-      "phase": "planning",
+      "phase": "building",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nD-PROCESS-SESSION1 must choose the public extension to ProcessSpec and ProcessChild. Keep non-interactive argv execution as the safe default. Use native Unix PTYs and Windows ConPTY, with one byte-stream and lifecycle model. Make interrupt, terminate, kill, wait, timeout, and drop control the full process tree. Reuse core.io, core.watcher, core.event, task cancellation, and native job or process-group controls. Add no terminal emulator or sibling process module.",
       "blockedBy": [
-        "D-PROCESS-SESSION1"
+        "D-PROCESS-SESSION2"
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "burndown-orch",
+          "text": "Beginner half shipped and criteria 1 and 2 are met: ProcessSpec.terminal() at 0bebf36ca, docs and corelib tests at 9666446ae. A launch that asks for a terminal now fails with a named IOError instead of running the child on plain pipes.\n\nExpert half is stopped at an owner gate. The ratified D-PROCESS-SESSION1=A text names TerminalPolicy, size, mode, .Raw, transcript, limits and capabilities(), but it never names the size type, the mode that is not raw, the capabilities() return type, or the terminal handle on ProcessChild. Those are user-typeable names, so I7 requires ratification before code. The worker correctly minted none. Ballot D-PROCESS-SESSION2 is queued on this card with four options and a recommendation.\n\nCriterion 3 stays open. The I5 example is written and AOT-verified but not landed, because adding an example forces a refresh of tests/jit_gaps.txt and tests/jit_corpus_gate.txt, which the live JIT worker owns. That landing is assigned to the JIT worker to avoid two writers in the same manifests.\n\nTwo defects next door were found and carded rather than fixed here: #1252 (Debug interpolation on core IOError makes rustc reject generated code, an I2 violation) and #1253 (JIT host table missing zero-arg ProcessSpec builders, so jet run and jet build disagree)."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-771-session",
+          "text": "[handoff] Shipped and committed: ProcessSpec.terminal() opt-in plus the launch refusal while no PTY or ConPTY backend exists (0bebf36ca), tests and reference docs (9666446ae). Criteria 1 and 2 met, 3 open. NEXT, in order: (1) ballot the public names the ratified text does not give, namely the nested terminal size type, the mode enum and its non-raw variant, the capabilities() return type and its fields, and the ProcessChild terminal handle; nothing more of the expert half can be built until that lands. (2) after the ballot, build TerminalPolicy and the child handle here. (3) I5 example still owed: a written fixture is parked outside the repo, and landing any new example needs a refresh of tests/jit_gaps.txt and tests/jit_corpus_gate.txt. Verify command for the shipped part: RUST_MIN_STACK=33554432 JET_NIX_TMP_CLEANED=1 scripts/agent/jet-env cargo test --test corelib core_process_terminal"
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-771-session",
+          "text": "Criterion 3 stays open on purpose. docs/reference/core-library.md now documents terminal() and what it refuses, but invariant I5 still owes an example, and that needs the two JIT manifest files. Also seen while testing: core_process_builder_pipeline_and_spawn_run overflows the test thread stack in a debug build and passes under RUST_MIN_STACK=33554432. The fixture and the code path are untouched by this slice; other workers have edits in the same binary."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-771-session",
+          "text": "Two defects found next door, neither in this slice. 1) jet run deopts to the interpreter for any zero-argument ProcessSpec builder, because crates/jet-jit host table lacks env_clear, detached, and now terminal; the interpreter then raises E0956 on process.cmd. Repro: process.cmd([\"echo\",\"x\"]).detached().run() under jet run, unchanged code. 2) Interpolating a core IOError with {e#Debug} passes sema and emits Rust that calls jet_debug, which IOError does not implement, so rustc rejects generated code (I2). No example ships yet: a new example forces a refresh of tests/jit_gaps.txt and tests/jit_corpus_gate.txt, both owned by the live JIT worker."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-771-session",
+          "text": "OWNER GATE, blocks the rest of this slice. The ratified text names only TerminalPolicy, its size and mode fields, cols, rows, and .Raw. Building the expert half needs public names the ruling does not give: the nested size type, the mode enum plus its non-raw variant, the capabilities() return type and its field names, and the ProcessChild terminal handle. I minted none of them. A follow-up ballot must name them before slice 1 can finish. Sibling slices #1181 to #1186 stay untouched."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-771-session",
+          "text": "Shipped the ratified beginner half of the public session model: ProcessSpec.terminal() (D-PROCESS-SESSION1=A, verbatim spelling). The flag lives on the one ProcessSpec, and jet_process_command refuses every launch path (run, spawn, pipeline) while no PTY or ConPTY backend exists, so a child never runs on plain pipes with the requested terminal dropped. Commits 0bebf36ca and 9666446ae. Proof: cargo test --test corelib core_process_terminal, 2 passed; AOT build plus run of a terminal fixture printed the refusal."
+        },
         {
           "at": "2026-07-26",
           "by": "codex-e3-rebalance",
@@ -26240,20 +26317,20 @@
         {
           "n": 1,
           "text": "Process sessions: public session model works end to end through the existing production path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-771-session",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T10:49:41.408Z"
+          "evidence": "Scoped to the shipped surface: ProcessSpec.terminal(). Ran RUST_MIN_STACK=33554432 scripts/agent/jet-env cargo test --test corelib core_process_terminal, 2 passed 0 failed. Also built and ran an AOT fixture through the production path: scripts/agent/jet-env jet build <fixture>.jet then ./build/t7 printed 'terminal session unavailable'. Commit 0bebf36ca. The expert TerminalPolicy half and the ProcessChild handle are owner-gated on names, see the gate log.",
+          "at": "2026-07-28T04:17:53.712Z"
         },
         {
           "n": 2,
           "text": "Focused success, failure, hostile, and integration tests cover Process sessions: public session model without fallback or skip paths.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-771-session",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T10:49:41.408Z"
+          "evidence": "tests/corelib.rs adds core_process_terminal_opt_in_refuses_every_launch_without_a_backend (success: default argv run still works; failure: run, spawn and pipeline all refuse; hostile: empty argv still fails first with InvalidInput, and the refusal text names the missing backend) and core_process_terminal_takes_no_arguments_yet (E0104 arity). Command: RUST_MIN_STACK=33554432 scripts/agent/jet-env cargo test --test corelib core_process_terminal, 2 passed 0 failed. No skip or fallback path. Commit 9666446ae.",
+          "at": "2026-07-28T04:17:59.036Z"
         },
         {
           "n": 3,
@@ -26275,8 +26352,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:07.441Z",
-      "updated": "2026-07-26",
-      "workOrder": 3771
+      "updated": "2026-07-28T04:22:07.847Z",
+      "workOrder": 3771,
+      "updatedBy": "burndown-orch"
     },
     {
       "id": "c0dixxk4",
@@ -54879,34 +54957,45 @@
       "plan": "Use docs/audits/example-quality-2026-07-26.md as the measured ledger. Split only genuinely independent product failures. Fix the compiler, Core surface, project preparation, or stale mirror that owns each failure; never weaken a gate or mark a required generated artifact as pre-existing. Feed verified evidence back to #1206 so its two open criteria can close. blockedBy: none.",
       "blockedBy": [],
       "assignee": "e3-1210-examples",
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "e3-1210-examples",
+          "text": "Standalone sweep with a freshly built compiler: 421 of 426 authored examples pass jet check, up from 406. The five remaining are the two scoped compiler features (build-time I/O builtins in the canonical TIR evaluator; build-plan-aware checking). Refreshed five stale valid-corpus mirrors from their live examples: ex_collections_index_hook, ex_effects_effect_levers, ex_errors_errors, ex_net_http_rest_service, ex_tooling_data_pipeline. tests/build_entry.rs passes 31 of 31. Two findings outside this card: twelve examples last touched by commit d5f4e0964 are not formatter-clean, and the four polyglot binder goldens fail in the default JIT lens on an E0956 ModuleCall gap while the AOT lens runs them correctly."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-1210-examples",
+          "text": "Owner map for the 20 standalone failures: 11 generated-binding (10 binder projects plus programmable_build), 5 comptime evaluator, 1 View/devloop fixture, 1 crypto Core item, 1 empty-list inference, 1 generic module. Ten binder projects are fixed: the Lua, Go, Fortran, and Pascal binders emitted retired '->' callable arrows, so their generated Jet failed E0070 as soon as the real 'jet inspect bind' step ran. Commit accca8407 corrects the four generators, checks in the ten deterministic generated bindings, and ignores machine-specific binder output. Commit f57441382 stops the five encoding stream examples writing scratch files into the working directory."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "The audit ledger maps every one of the 20 standalone failures to a compiler, Core, generator, project-step, or fixture owner.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-1210-examples",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T21:33:13.317Z"
+          "evidence": "docs/audits/example-quality-2026-07-26.md now maps each of the 20 standalone failures to one owner: 10 project step (four of them also generator), 1 Core, 3 fixture, 6 compiler. Measured with a freshly built compiler by a per-file 'jet check' sweep over every authored example. Commit df0e4067e.",
+          "at": "2026-07-28T04:38:58.729Z"
         },
         {
           "n": 2,
           "text": "All required generated bindings are produced by their real deterministic project steps before the truthfulness gate runs.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-1210-examples",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T21:33:13.317Z"
+          "evidence": "Ran the real project step for all ten binder examples: jet inspect bind <language> <source> --pkg <name>. Each produced its deterministic *.jet binding, which is now checked in; machine-specific binder output is ignored via .gitignore. jet check on all ten main.jet files reports no problems. Commit accca8407.",
+          "at": "2026-07-28T04:39:08.281Z"
         },
         {
           "n": 3,
           "text": "The missing comptime, View, crypto, empty-list inference, and generic-module behavior is implemented or the stale fixture is corrected without weakening coverage.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-1210-examples",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T21:33:13.317Z"
+          "evidence": "Implemented: comptime local inside a comptime block (fe1339a26, also fixes comptime_diff yielding-loop); crypto constant_time_equal_bytes registration, signature, and codegen target (33873fcf4); four binder generators emitting retired -> arrows (accca8407). Corrected stale fixtures without weakening coverage: generic_constructor_inference empty list plus both E0501 texts (b3280d25c), generic_modules four lines (ab1619652). View/persist.jet was already fixed by the const-retirement work. Remaining: build-time I/O builtins in the canonical TIR evaluator and build-plan-aware checking, both scoped in the audit ledger.",
+          "at": "2026-07-28T04:39:08.523Z"
         },
         {
           "n": 4,
@@ -54954,9 +55043,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T21:32:31.859Z",
-      "updated": "2026-07-28T01:31:09.830Z",
+      "updated": "2026-07-28T04:52:22.332Z",
       "updatedBy": "e3-1210-examples",
-      "claimedAt": "2026-07-28T01:31:09.830Z"
+      "claimedAt": "2026-07-28T04:52:22.332Z"
     },
     {
       "id": "c0nv1ivk",
@@ -57985,8 +58074,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-27T19:32:53.509Z",
-      "updated": "2026-07-28T01:25:50.907Z",
-      "updatedBy": "claude"
+      "updated": "2026-07-28T01:40:09.645Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0ahqhoi",
@@ -58500,6 +58589,84 @@
       "created": "2026-07-28T00:22:27.800Z",
       "updated": "2026-07-28T00:45:18.268Z",
       "updatedBy": "e3-1251-grok"
+    },
+    {
+      "id": "c0gvdqxf",
+      "num": 1252,
+      "title": "I2 violation: Debug interpolation on core IOError breaks generated Rust",
+      "body": "Writing `\"{e#Debug}\"` where `e` is a core `IOError` passes sema, then emits Rust that calls `jet_debug` on a type that does not implement it. rustc rejects the generated code.\n\nThis breaks invariant I2: rustc rejection of generated code is an internal compiler error, never something a user can reach from ordinary Jet source. Sema must own this check.\n\nFound while building card #771 slice 1; not caused by it.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Reproduce with a minimal program that interpolates a core IOError with the Debug marker. Decide the correct law: either core error types gain the Debug capability, or sema rejects the interpolation with a registered diagnostic. Follow the diagnostics spec: a new code needs what/why/fix text and a UI snapshot (I4). Add the failing case to the sema tests so the path cannot regress. blockedBy: none.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/spec/diagnostics.md",
+        "crates/jet-sema/src/Sema"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T04:21:36.454Z",
+      "updated": "2026-07-28T04:21:36.454Z",
+      "updatedBy": "burndown-orch"
+    },
+    {
+      "id": "c0ndi2ss",
+      "num": 1253,
+      "title": "JIT: zero-arg ProcessSpec builders missing from the host table",
+      "body": "Default `jet run` deopts to the interpreter for any zero-argument ProcessSpec builder, because the JIT host table has no entry for `env_clear`, `detached`, or `terminal`. The interpreter then raises E0956 on `process.cmd`, so the program fails under `jet run` while it works under `jet build`.\n\nRepro on untouched code: `process.cmd([\"echo\", \"x\"]).detached().run()`.\n\nThis is a JIT/AOT lens gap of the kind D-LENS-RUN1 forbids: a program must not succeed under AOT and fail under default `jet run`. Found while building card #771 slice 1.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": "Add the missing zero-argument ProcessSpec builders to the JIT host table so they lower like their siblings. Reuse the existing runtime implementations; do not write a second copy. Prove the repro passes under default jet run and under jet build with identical output, and keep the shrink-only gap ratchet from growing. blockedBy: none.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "crates/jet-jit/src/Process.rs",
+        "crates/jet-jit/src/jit/lower_ctx.rs",
+        "tests/jit_gaps.txt"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T04:21:45.554Z",
+      "updated": "2026-07-28T04:21:45.554Z",
+      "updatedBy": "burndown-orch"
+    },
+    {
+      "id": "c07z598z",
+      "num": 1254,
+      "title": "Tier-0 deopt target runs only a pure subset, so jet run fails where jet build succeeds",
+      "body": "D-LENS-RUN2=A says missing tier-1 coverage deopts per function to the canonical tier-0 interpreter with identical observable behavior. It does not hold. The tier-0 target is the comptime evaluator, which by its own diagnostic evaluates only a pure subset of Jet. Any construct Cranelift cannot compile and comptime does not implement fails under default jet run while jet build succeeds.\n\nTwo live repros, both exit 0 under jet build and exit 1 under jet run:\n\nexamples/features/crypto/crypto_suite.jet — trace shows 'run tier0 interp (body stmt 6: Let[0] init=OtherExpr)', then E0956 'jet.crypto.sha512_bytes() at comptime can't run at compile time yet'.\n\nexamples/features/types/generic_constructor_inference.jet — E0956 'static Box.new can't run at compile time yet'. AOT prints '7 jet 2 9'.\n\nThe diagnostic text is also wrong for this path. A user who typed jet run is told the work cannot happen at compile time, and is advised to compute the value at runtime, which is what they asked for.\n\nBoth examples reached the compile attempt only after frontend fixes landed on 2026-07-28, so the defect was previously masked rather than introduced.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": "Decide the correct law first: either the tier-0 deopt target must cover every executable construct, or deopt must route to a full runtime interpreter rather than the comptime evaluator. Then close the gap so a program that succeeds under jet build succeeds under default jet run with byte-identical output. Separate the user-facing diagnostic fix: E0956 must not tell a jet run user that their work cannot happen at compile time. blockedBy: none.",
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "crates/jet-codegen/src/Codegen/TIR/eval",
+        "docs/spec/diagnostics.md",
+        "tests/jit_gaps.txt",
+        "examples/features/crypto/crypto_suite.jet"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T04:30:44.465Z",
+      "updated": "2026-07-28T04:30:44.465Z",
+      "updatedBy": "burndown-orch"
     }
   ],
   "decisions": [
@@ -72431,8 +72598,98 @@
       "hybrid": null,
       "checkInstructions": null,
       "draft": false,
+      "status": "ratified",
+      "created": "2026-07-27T22:49:34.679Z",
+      "outcome": "C",
+      "ratifiedAt": "2026-07-28"
+    },
+    {
+      "id": "D-PROCESS-SESSION2",
+      "cardId": "c0ft6gme",
+      "group": "stdlib",
+      "title": "Names for the expert terminal surface",
+      "gist": "What the expert terminal controls are called, and how many new public names ship.",
+      "lesson": "A program that starts another program normally talks to it through pipes. A pipe is a plain byte channel. It carries output, and nothing else.\n\nSome programs refuse to behave on a pipe. A debugger, a shell, and a password prompt all check whether they are attached to a terminal. On a pipe they turn off colour, drop their prompt, or refuse to read a password at all.\n\nA pseudo-terminal fixes this. It is a fake terminal supplied by the operating system. The child believes a person is typing at a real screen. Unix calls this a PTY, and Windows calls it a ConPTY.\n\nOnce a terminal exists, three facts about it matter. Its size, measured in character columns and rows, because programs redraw when it changes. Its mode, meaning whether the operating system pre-processes typed keys or hands them over untouched. Raw mode is the untouched kind, and an editor needs it to see a single arrow key.\n\nThe third fact is what the host actually supports. Not every machine offers every control. A container may have no terminal at all. So a program asks first, then adapts, rather than failing halfway.\n\nJet already ratified the beginner half of this. Writing `.terminal()` asks for safe portable defaults, and that ships today. The ratified text also sketched the expert half, and it used names like `TerminalPolicy`, `mode`, `size`, and `capabilities()`.\n\nIt did not say what those names are attached to. It never named the type holding columns and rows. It never named the mode that is not raw. It never named what `capabilities()` hands back, nor the terminal handle on the started child.\n\nThose are user-typeable names, so Jet requires the owner to ratify them before code exists. This ballot chooses how many such names ship and what shape they take.",
+      "explainer": "",
+      "story": "Priya maintains a test runner that drives a debugger. On a pipe the debugger prints no prompt, so her runner hangs waiting for text that never comes. She wants a terminal, raw key handling, and a size she sets herself. She also runs the same suite inside a stripped container, where no terminal exists, and she needs that to fail clearly rather than hang again.",
+      "inWild": "// Priya's runner, as she would like to write it\nplan :: process.cmd([\"lldb\", app])\n  .terminal(TerminalPolicy.{ size, mode: .Raw })\n  .limits(limits)\n\n// ask before committing, because the container has no terminal\nfacts :: plan.capabilities()\nif !facts.terminal {\n  return Err(\"this host cannot give the debugger a terminal\")\n}\n\nchild :: plan.spawn()?\nchild.terminal.resize(120, 40)\n\n// what are the types of `size`, `facts`, and `child.terminal`?\n// and what is the mode that is not `.Raw` called?",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "A named type for each idea",
+          "detail": "Every concept gets its own public name. Size, mode, the support report, and the child's terminal handle are four separate named types. Each one can be searched for, jumped to, and documented on its own page. This is the largest number of new names, and the most that a reader must learn before writing expert code.",
+          "technical": "Ships `TerminalSize.{ cols: Int, rows: Int }`, `TerminalMode` with variants `.Raw` and `.Cooked`, `TerminalReport` returned by `capabilities()`, and `TerminalSession` as the handle on `ProcessChild`. Four Syntax.rs entries with decision ids. Field names are fixed by the type, so a wrong field is a compile error naming the type.",
+          "code": "size :: TerminalSize.{ cols: 120, rows: 40 }\n\nplan :: process.cmd([\"lldb\", app])\n  .terminal(TerminalPolicy.{ size, mode: .Cooked })\n\nfacts : TerminalReport :: plan.capabilities()\nprint(facts.resize)      // true\n\nchild :: plan.spawn()?\nsession : TerminalSession :: child.terminal\nsession.resize(TerminalSize.{ cols: 80, rows: 24 })"
+        },
+        {
+          "key": "B",
+          "name": "One policy record carries everything",
+          "detail": "Only `TerminalPolicy` is public. Columns and rows sit directly on it as ordinary numbers, so no size type exists. The support report comes back as another `TerminalPolicy` describing what the host would actually grant. Fewer names to learn, but the same type means two different things depending on where it appears.",
+          "technical": "`TerminalPolicy.{ cols: Int, rows: Int, mode: TerminalMode, ... }`. `capabilities()` returns `TerminalPolicy` holding granted values rather than requested ones. `ProcessChild.terminal` is typed as the child itself, with resize and mode methods hung directly on `ProcessChild`. One new type plus the mode enum.",
+          "code": "plan :: process.cmd([\"lldb\", app])\n  .terminal(TerminalPolicy.{ cols: 120, rows: 40, mode: .Cooked })\n\n// same type coming back, now meaning \"what you would get\"\ngranted :: plan.capabilities()\nif granted.cols == 0 { return Err(\"no terminal here\") }\n\nchild :: plan.spawn()?\nchild.resize(80, 24)"
+        },
+        {
+          "key": "C",
+          "name": "Borrow the shapes Core already has",
+          "detail": "Jet already ships types for a width-and-height pair and for reporting what a host supports. This option reuses them instead of minting terminal-only twins. Only the mode needs a new name. The smallest addition to the language, at the cost of types whose names never say the word terminal.",
+          "technical": "Size reuses Core's existing two-field extent type; `capabilities()` reuses the existing host-facts record used elsewhere in Core, keyed by fact name. `ProcessChild.terminal` is an existing stream handle. One new public name, `TerminalMode`. Requires an audit that the reused types are a genuine fit and not a coincidence of shape.",
+          "code": "plan :: process.cmd([\"lldb\", app])\n  .terminal(TerminalPolicy.{ size: Extent.{ 120, 40 }, mode: .Cooked })\n\nfacts :: plan.capabilities()          // the same record kind used by core.os\nif !facts.has(\"terminal\") { return Err(\"no terminal here\") }\n\nchild :: plan.spawn()?\nchild.terminal.resize(Extent.{ 80, 24 })"
+        },
+        {
+          "key": "D",
+          "name": "Controls are typed, facts are data",
+          "detail": "The things you set are named types, because setting a wrong field should be caught while writing. The things you merely read back are plain data, because host facts vary by machine and grow over time. A new fact can appear without a new release breaking anyone's code.",
+          "technical": "Ships `TerminalSize` and `TerminalMode` as named types on the request side. `capabilities()` returns a keyed fact record, not a fixed struct, so unknown keys read as absent rather than failing to compile. `ProcessChild.terminal` is `TerminalSession`. Three new names. Fact keys are documented but not type-checked.",
+          "code": "plan :: process.cmd([\"lldb\", app])\n  .terminal(TerminalPolicy.{ size: TerminalSize.{ cols: 120, rows: 40 }, mode: .Cooked })\n\nfacts :: plan.capabilities()\nif !facts.bool(\"terminal\") { return Err(\"no terminal here\") }\nprint(facts.bool(\"resize\"))\n\nchild :: plan.spawn()?\nchild.terminal.resize(TerminalSize.{ cols: 80, rows: 24 })"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "The standard library exposes raw file descriptors and leaves naming to the caller. Size is an unnamed four-number packed struct. Readers must know the layout by heart.",
+          "code": "import pty, struct, fcntl, termios\npid, fd = pty.fork()\nfcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack(\"HHHH\", 40, 120, 0, 0))"
+        },
+        {
+          "lang": "Rust",
+          "note": "portable-pty names every concept, including a size struct with named fields and pixel dimensions most callers ignore.",
+          "code": "let pair = pty_system.openpty(PtySize {\n    rows: 40, cols: 120,\n    pixel_width: 0, pixel_height: 0,\n})?;"
+        },
+        {
+          "lang": "Node",
+          "note": "node-pty takes a plain options object. Columns and rows are loose fields, and a misspelled key silently falls back to a default.",
+          "code": "const p = pty.spawn(\"lldb\", [app], { cols: 120, rows: 40 });\np.resize(80, 24);"
+        },
+        {
+          "lang": "Go",
+          "note": "creack/pty names the size type but keeps mode as raw operating-system flags, so callers reach for a second package to turn raw mode on.",
+          "code": "pty.Setsize(f, &pty.Winsize{Rows: 40, Cols: 120})\noldState, _ := term.MakeRaw(int(os.Stdin.Fd()))"
+        }
+      ],
+      "rec": "D",
+      "recommendation": {
+        "why": "It puts strictness where mistakes are expensive and looseness where the world is genuinely variable. A wrong field on a control you set is caught while writing. Host facts differ per machine and grow over time, so a keyed record lets a new fact ship without breaking code that never asked for it.",
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "A fixed report type makes every new host fact a breaking change to a public type. It also costs a fourth name for no gain, since callers read facts by name rather than destructure them."
+          },
+          {
+            "key": "B",
+            "reason": "One type meaning both the request and the grant reads wrong at the call site. `granted.cols == 0` as the test for no terminal is a sentinel value, which is the failure mode Jet avoids elsewhere."
+          },
+          {
+            "key": "C",
+            "reason": "Reuse is right only when the shapes mean the same thing. A terminal size is characters, not pixels or generic extent, and fusing them now blocks adding terminal-only fields later without touching unrelated code."
+          }
+        ],
+        "tradeoff": "Fact keys are strings, so a typo in `facts.bool(\"terminl\")` reads as absent instead of failing to compile. That must be answered with documented keys and a diagnostic that suggests the nearest known key."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
       "status": "open",
-      "created": "2026-07-27T22:49:34.679Z"
+      "created": "2026-07-28T04:21:17.139Z"
     }
   ],
   "questions": [
@@ -73404,6 +73661,265 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-28T04:52:22.332Z",
+      "by": "e3-1210-examples",
+      "action": "card.update",
+      "ref": "c0jlp4u3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T04:39:08.523Z",
+      "by": "e3-1210-examples",
+      "action": "card.criteria-meet",
+      "ref": "c0jlp4u3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-28T04:39:08.281Z",
+      "by": "e3-1210-examples",
+      "action": "card.criteria-meet",
+      "ref": "c0jlp4u3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T04:38:58.729Z",
+      "by": "e3-1210-examples",
+      "action": "card.criteria-meet",
+      "ref": "c0jlp4u3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T04:30:55.244Z",
+      "by": "burndown-orch",
+      "action": "card.update",
+      "ref": "c02hbqjf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T04:30:54.963Z",
+      "by": "burndown-orch",
+      "action": "card.update",
+      "ref": "c02hbqjf",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-28T04:30:44.465Z",
+      "by": "burndown-orch",
+      "action": "card.add",
+      "ref": "c07z598z",
+      "note": "Tier-0 deopt target runs only a pure subset, so jet run fails where jet build succeeds"
+    },
+    {
+      "at": "2026-07-28T04:27:41.092Z",
+      "by": "e3-688-parity",
+      "action": "card.update",
+      "ref": "c02hbqjf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T04:27:05.699Z",
+      "by": "e3-688-parity",
+      "action": "card.update",
+      "ref": "c02hbqjf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T04:22:07.847Z",
+      "by": "burndown-orch",
+      "action": "card.update",
+      "ref": "c0ft6gme",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T04:22:07.550Z",
+      "by": "burndown-orch",
+      "action": "card.update",
+      "ref": "c0ft6gme",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-28T04:21:45.555Z",
+      "by": "burndown-orch",
+      "action": "card.add",
+      "ref": "c0ndi2ss",
+      "note": "JIT: zero-arg ProcessSpec builders missing from the host table"
+    },
+    {
+      "at": "2026-07-28T04:21:36.454Z",
+      "by": "burndown-orch",
+      "action": "card.add",
+      "ref": "c0gvdqxf",
+      "note": "I2 violation: Debug interpolation on core IOError breaks generated Rust"
+    },
+    {
+      "at": "2026-07-28T04:21:17.139Z",
+      "by": "burndown-orch",
+      "action": "decision.add",
+      "ref": "D-PROCESS-SESSION2",
+      "note": "Names for the expert terminal surface"
+    },
+    {
+      "at": "2026-07-28T04:18:37.338Z",
+      "by": "e3-771-session",
+      "action": "card.release",
+      "ref": "c0ft6gme",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-28T04:18:11.445Z",
+      "by": "e3-771-session",
+      "action": "card.update",
+      "ref": "c0ft6gme",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T04:17:59.036Z",
+      "by": "e3-771-session",
+      "action": "card.criteria-meet",
+      "ref": "c0ft6gme",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T04:17:53.712Z",
+      "by": "e3-771-session",
+      "action": "card.criteria-meet",
+      "ref": "c0ft6gme",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T04:17:48.454Z",
+      "by": "e3-771-session",
+      "action": "card.update",
+      "ref": "c0ft6gme",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T04:17:42.506Z",
+      "by": "burndown-orch-verify",
+      "action": "card.update",
+      "ref": "c02hbqjf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T04:17:41.460Z",
+      "by": "e3-771-session",
+      "action": "card.update",
+      "ref": "c0ft6gme",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T04:17:34.806Z",
+      "by": "e3-771-session",
+      "action": "card.update",
+      "ref": "c0ft6gme",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T04:17:33.978Z",
+      "by": "burndown-orch-verify",
+      "action": "card.criteria-verify",
+      "ref": "c02hbqjf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-28T04:17:29.413Z",
+      "by": "burndown-orch-verify",
+      "action": "card.criteria-verify",
+      "ref": "c02hbqjf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T04:13:55.887Z",
+      "by": "e3-688-parity",
+      "action": "card.update",
+      "ref": "c02hbqjf",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T04:13:49.233Z",
+      "by": "e3-688-parity",
+      "action": "card.criteria-meet",
+      "ref": "c02hbqjf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-28T04:13:41.193Z",
+      "by": "e3-688-parity",
+      "action": "card.criteria-meet",
+      "ref": "c02hbqjf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-28T04:13:24.585Z",
+      "by": "e3-688-parity",
+      "action": "card.criteria-meet",
+      "ref": "c02hbqjf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T04:10:53.671Z",
+      "by": "e3-1210-examples",
+      "action": "card.update",
+      "ref": "c0jlp4u3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T04:08:52.506Z",
+      "by": "e3-688-parity",
+      "action": "card.update",
+      "ref": "c02hbqjf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T01:44:39.679Z",
+      "by": "e3-688-parity",
+      "action": "card.update",
+      "ref": "c02hbqjf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T01:40:19.316Z",
+      "by": "e3-688-parity",
+      "action": "card.update",
+      "ref": "c02hbqjf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T01:40:09.645Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-EACH1",
+      "note": "C"
+    },
+    {
+      "at": "2026-07-28T01:40:04.453Z",
+      "by": "e3-771-session",
+      "action": "card.update",
+      "ref": "c0ft6gme",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-28T01:36:59.163Z",
+      "by": "burndown-orch",
+      "action": "card.release",
+      "ref": "c0h9cjc7",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-28T01:33:56.679Z",
+      "by": "e3-688-parity",
+      "action": "card.update",
+      "ref": "c02hbqjf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T01:32:51.342Z",
+      "by": "e3-771-session",
+      "action": "card.claim",
+      "ref": "c0ft6gme",
+      "note": ""
+    },
     {
       "at": "2026-07-28T01:31:09.830Z",
       "by": "e3-1210-examples",
@@ -76644,265 +77160,6 @@
       "action": "card.criteria-meet",
       "ref": "c0j80rjg",
       "note": "#9"
-    },
-    {
-      "at": "2026-07-27T20:17:19.776Z",
-      "by": "e3-746-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0j80rjg",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-27T20:17:19.581Z",
-      "by": "e3-746-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0j80rjg",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-27T20:17:19.386Z",
-      "by": "e3-746-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0j80rjg",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-27T20:17:19.188Z",
-      "by": "e3-746-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0j80rjg",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-27T20:17:18.979Z",
-      "by": "e3-746-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0j80rjg",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-27T20:17:18.782Z",
-      "by": "e3-746-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0j80rjg",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T20:17:18.584Z",
-      "by": "e3-746-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0j80rjg",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T20:17:18.371Z",
-      "by": "e3-746-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0j80rjg",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T20:13:34.695Z",
-      "by": "e3-746-grok",
-      "action": "card.update",
-      "ref": "c0j80rjg",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:13:30.995Z",
-      "by": "e3-765-grok",
-      "action": "card.update",
-      "ref": "c09f5jk7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:13:29.966Z",
-      "by": "e3-765-grok",
-      "action": "card.claim",
-      "ref": "c09f5jk7",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:13:28.247Z",
-      "by": "e3-746-grok",
-      "action": "card.claim",
-      "ref": "c0j80rjg",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:13:21.998Z",
-      "by": "e3-1230-c3-grok",
-      "action": "card.claim",
-      "ref": "c08rt6iw",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:12:32.963Z",
-      "by": "e3-746-grok",
-      "action": "card.claim",
-      "ref": "c0j80rjg",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:12:32.761Z",
-      "by": "e3-765-grok",
-      "action": "card.claim",
-      "ref": "c09f5jk7",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:11:31.741Z",
-      "by": "e3-747-grok",
-      "action": "card.update",
-      "ref": "c0ltlh8u",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:11:31.518Z",
-      "by": "e3-747-grok",
-      "action": "card.update",
-      "ref": "c0ltlh8u",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:11:31.299Z",
-      "by": "e3-747-review",
-      "action": "card.criteria-verify",
-      "ref": "c0ltlh8u",
-      "note": "#9"
-    },
-    {
-      "at": "2026-07-27T20:11:31.114Z",
-      "by": "e3-747-review",
-      "action": "card.criteria-verify",
-      "ref": "c0ltlh8u",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-27T20:11:30.916Z",
-      "by": "e3-747-review",
-      "action": "card.criteria-verify",
-      "ref": "c0ltlh8u",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-27T20:11:30.722Z",
-      "by": "e3-747-review",
-      "action": "card.criteria-verify",
-      "ref": "c0ltlh8u",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-27T20:11:30.532Z",
-      "by": "e3-747-review",
-      "action": "card.criteria-verify",
-      "ref": "c0ltlh8u",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-27T20:11:30.343Z",
-      "by": "e3-747-review",
-      "action": "card.criteria-verify",
-      "ref": "c0ltlh8u",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-27T20:11:30.156Z",
-      "by": "e3-747-review",
-      "action": "card.criteria-verify",
-      "ref": "c0ltlh8u",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T20:11:29.965Z",
-      "by": "e3-747-review",
-      "action": "card.criteria-verify",
-      "ref": "c0ltlh8u",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T20:11:29.789Z",
-      "by": "e3-747-review",
-      "action": "card.criteria-verify",
-      "ref": "c0ltlh8u",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T20:11:21.087Z",
-      "by": "e3-747-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0ltlh8u",
-      "note": "#9"
-    },
-    {
-      "at": "2026-07-27T20:11:20.899Z",
-      "by": "e3-747-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0ltlh8u",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-27T20:11:20.710Z",
-      "by": "e3-747-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0ltlh8u",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-27T20:11:20.525Z",
-      "by": "e3-747-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0ltlh8u",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-27T20:11:20.336Z",
-      "by": "e3-747-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0ltlh8u",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-27T20:11:20.150Z",
-      "by": "e3-747-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0ltlh8u",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-27T20:11:19.957Z",
-      "by": "e3-747-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0ltlh8u",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T20:11:19.773Z",
-      "by": "e3-747-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0ltlh8u",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T20:11:19.590Z",
-      "by": "e3-747-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0ltlh8u",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T20:08:15.600Z",
-      "by": "e3-747-grok",
-      "action": "card.update",
-      "ref": "c0ltlh8u",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:06:32.057Z",
-      "by": "e3-747-grok",
-      "action": "card.claim",
-      "ref": "c0ltlh8u",
-      "note": ""
     }
   ],
   "nextNum": 368,
