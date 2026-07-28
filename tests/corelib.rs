@@ -5719,6 +5719,107 @@ fn run() {{
     assert!(stdout.contains("line-one\n"), "{stdout}");
 }
 
+/// D-PROCESS-SESSION1=A (#771): `.terminal()` is the one opt-in for a
+/// terminal-backed session, and it lives on the same `ProcessSpec`. Argv
+/// execution with no terminal stays the default. Every launch path that asks
+/// for a terminal fails while no PTY or ConPTY backend is present, because a
+/// child that runs on plain pipes is not the session the caller asked for.
+#[cfg(unix)]
+#[test]
+fn core_process_terminal_opt_in_refuses_every_launch_without_a_backend() {
+    let dir = std::env::temp_dir().join(format!("jet_core_process_terminal_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.process as process
+
+fn run() {
+    plain :: process.cmd(["echo", "plain-ok"]).stdout(.Capture).run() ?? panic("default run failed")
+    print(plain.output.trim())
+
+    if process.cmd(["echo", "session"]).stdout(.Capture).terminal().run() == {
+        .Ok(_) -> { print("run: terminal launch unexpectedly succeeded") }
+        .Err(e) -> {
+            if e == {
+                .Other(_) -> { print("run: refused") }
+                else -> { print("run: wrong error") }
+            }
+        }
+    }
+    if process.cmd(["echo", "session"]).stdout(.Capture).terminal().spawn() == {
+        .Ok(_) -> { print("spawn: terminal launch unexpectedly succeeded") }
+        .Err(e) -> {
+            if e == {
+                .Other(_) -> { print("spawn: refused") }
+                else -> { print("spawn: wrong error") }
+            }
+        }
+    }
+    if process.pipeline([process.cmd(["echo", "a"]), process.cmd(["cat"]).terminal()]) == {
+        .Ok(_) -> { print("pipeline: terminal launch unexpectedly succeeded") }
+        .Err(e) -> {
+            if e == {
+                .Other(_) -> { print("pipeline: refused") }
+                else -> { print("pipeline: wrong error") }
+            }
+        }
+    }
+    if process.cmd([]).terminal().run() == {
+        .Ok(_) -> { print("empty: terminal launch unexpectedly succeeded") }
+        .Err(e) -> {
+            if e == {
+                .InvalidInput(_) -> { print("empty: invalid input") }
+                else -> { print("empty: wrong error") }
+            }
+        }
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "process_terminal", src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert!(stdout.starts_with("plain-ok\n"), "{stdout}");
+    for stage in ["run", "spawn", "pipeline"] {
+        assert!(
+            stdout.contains(&format!("{stage}: refused")),
+            "{stage} must refuse the terminal launch:\n{stdout}"
+        );
+    }
+    // Hostile: an empty argv is still the first failure, so a terminal request
+    // never hides a malformed command.
+    assert!(stdout.contains("empty: invalid input"), "{stdout}");
+    // The refusal names the missing backend, so the reason is not a bare
+    // "other" error at the terminal.
+    let compiled = compile_temp("process_terminal_text.jet", src);
+    assert!(
+        compiled
+            .rust
+            .contains("terminal sessions need a PTY or ConPTY backend, and this build has none"),
+        "the refusal must name the missing PTY/ConPTY backend"
+    );
+}
+
+/// D-PROCESS-SESSION1=A (#771): the beginner form takes no arguments. The
+/// expert `TerminalPolicy` form is a later slice, so an argument is an arity
+/// error today, not a silently ignored value.
+#[test]
+fn core_process_terminal_takes_no_arguments_yet() {
+    let src = r#"
+use core.process as process
+
+fn run() {
+    result :: process.cmd(["echo", "hi"]).terminal(1).run() ?? panic("run failed")
+    print(result.success)
+}
+"#;
+    let diags = jet::compile(src).expect_err("terminal() takes no arguments");
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.code == "E0104" && d.what.contains("`terminal` expects 0 arguments")),
+        "{diags:?}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn core_process_sh_typed_text_keeps_each_hole_one_argv_item() {

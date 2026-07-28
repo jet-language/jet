@@ -1085,7 +1085,8 @@ fn run() {
 
 `ProcessSpec` builder methods are value-returning: `cwd(path)`, `env(key,
 value)`, `env_remove(key)`, `env_clear()`, `stdin(mode)`, `stdout(mode)`,
-`stderr(mode)`, `timeout(duration)`, `output_limit(bytes)`, and `detached()`.
+`stderr(mode)`, `timeout(duration)`, `output_limit(bytes)`, `detached()`, and
+`terminal()`.
 `mode` is one of the three stream-mode dot-literals: `.Stream` (pipe it —
 drain live via `child.stdout.lines()`), `.Inherit` (pass through to the
 parent's stream), or `.Capture` (pipe it — collect into `ProcessResult` at
@@ -1093,6 +1094,25 @@ parent's stream), or `.Capture` (pipe it — collect into `ProcessResult` at
 child gets no stdin at all, never the parent's terminal by accident).
 `timeout` takes a `Duration` (e.g. `Duration.seconds(30)?`). A spec can
 `run()` to collect a `ProcessResult` or `spawn()` to return a `ProcessChild`.
+
+**Terminal sessions (D-PROCESS-SESSION1=A).** Argv execution with no terminal
+is the default and stays the safe path. Interactive programs — a debugger, a
+REPL, a shell — often need a real terminal, and they print different output
+without one. `terminal()` is the one opt-in that asks for a terminal session,
+and it stays on the same `ProcessSpec`, so cwd, environment, streams, timeout,
+and the child lifecycle keep one model:
+
+```jet
+child :: process.cmd(["lldb", app]).terminal().spawn()?
+```
+
+A terminal session needs a Unix PTY or a Windows ConPTY. While no such backend
+is present, every launch path that asks for a terminal — `run()`, `spawn()`,
+and `pipeline()` — fails with an `IOError` that names the missing backend. The
+child never runs on plain pipes with the requested terminal silently dropped.
+The expert `TerminalPolicy` form (size, raw mode, transcript), the terminal
+handle on `ProcessChild`, and the PTY and ConPTY backends are later slices of
+the same decision.
 
 `ProcessChild` exposes `id()`, `wait()`, `kill()`, `terminate()`,
 `interrupt()`, a `.stdin` writer (`child.stdin.write(text)`), and `.stdout`/
