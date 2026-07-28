@@ -16,6 +16,29 @@ fn jet_process_spec_detached(mut spec: jet_std::ProcessSpec) -> jet_std::Process
     spec.detached = true;
     spec
 }
+// D-PROCESS-SESSION1=A: one opt-in for a terminal-backed session. It stays on
+// the same `ProcessSpec`, so cwd, environment, streams, timeout, and the child
+// lifecycle keep one model.
+fn jet_process_spec_terminal(mut spec: jet_std::ProcessSpec) -> jet_std::ProcessSpec {
+    spec.terminal = true;
+    spec
+}
+// D-PROCESS-SESSION1=A: a terminal session needs a Unix PTY or a Windows
+// ConPTY. Report the missing backend at launch. Running the child on plain
+// pipes instead would change what an interactive program prints, so the launch
+// fails rather than silently drop the terminal the caller asked for.
+fn jet_process_terminal_backend_check(
+    spec: &jet_std::ProcessSpec,
+) -> Result<(), jet_std::IOError> {
+    if !spec.terminal {
+        return Ok(());
+    }
+    Err(jet_std::IOError::other(
+        jet_std::IOOperation::Resolve,
+        spec.cmd.first().cloned(),
+        "terminal sessions need a PTY or ConPTY backend, and this build has none",
+    ))
+}
 fn jet_process_stdio(mode: &jet_std::ProcessStreamMode) -> std::process::Stdio {
     match mode {
         // `Stream` and `Capture` both pipe — they differ only in which Jet API
@@ -37,6 +60,7 @@ fn jet_process_command(
             Some("process command needs at least one word".to_string()),
         )));
     }
+    jet_process_terminal_backend_check(spec)?;
     let mut command = std::process::Command::new(&spec.cmd[0]);
     command.args(&spec.cmd[1..]);
     if let Some(cwd) = &spec.cwd {

@@ -823,6 +823,7 @@ fn jet_std_process_cmd(cmd: &Vec<String>) -> jet_std::ProcessSpec {
         timeout_ms: None,
         output_limit: None,
         detached: false,
+        terminal: false,
     }
 }
 fn jet_std_process_run(cmd: &Vec<String>) -> Result<jet_std::ProcessResult, jet_std::IOError> {

@@ -249,7 +249,10 @@ pub(crate) fn process_spec_method_return(
     match (method, n_args) {
         ("cwd" | "env_remove" | "stdin" | "stdout" | "stderr", 1) => Some(Some(spec_ty)),
         ("env", 2) => Some(Some(spec_ty)),
-        ("env_clear" | "detached", 0) => Some(Some(spec_ty)),
+        // D-PROCESS-SESSION1=A: `.terminal()` asks for a terminal-backed
+        // session on the same spec. Argv execution with no terminal remains the
+        // default; the expert `TerminalPolicy` form is a later slice.
+        ("env_clear" | "detached" | "terminal", 0) => Some(Some(spec_ty)),
         ("timeout" | "output_limit", 1) => Some(Some(spec_ty)),
         ("run", 0) => Some(Some(result_ty(
             Type::Named("ProcessResult".to_string()),
@@ -267,7 +270,7 @@ pub(crate) fn process_spec_method_return(
             diags.push(wrong_core_arity(method, 2, n_args, span));
             Some(None)
         }
-        ("env_clear" | "detached" | "run" | "spawn", _) => {
+        ("env_clear" | "detached" | "terminal" | "run" | "spawn", _) => {
             diags.push(wrong_core_arity(method, 0, n_args, span));
             Some(None)
         }

@@ -284,6 +284,11 @@
         pub timeout_ms: Option<i64>,
         pub output_limit: Option<i64>,
         pub detached: bool,
+        // D-PROCESS-SESSION1=A: `.terminal()` asks for a terminal-backed
+        // session. Argv execution with no terminal stays the default, so this
+        // flag is the one opt-in. A launch that asks for a terminal never runs
+        // without one: it fails when no PTY/ConPTY backend is available.
+        pub terminal: bool,
     }
 
     #[derive(Clone, Debug)]
