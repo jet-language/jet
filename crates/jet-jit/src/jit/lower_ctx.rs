@@ -7806,6 +7806,12 @@ impl LowerCtx<'_, '_> {
                             ("sha256", [data]) => {
                                 (self.host.crypto.sha256, vec![self.lower_expr(data)?])
                             }
+                            ("sha512_bytes", [data]) => {
+                                (self.host.crypto.sha512_bytes, vec![self.lower_expr(data)?])
+                            }
+                            ("blake3_bytes", [data]) => {
+                                (self.host.crypto.blake3_bytes, vec![self.lower_expr(data)?])
+                            }
                             ("seal", [recipients, plaintext, aad]) => (
                                 self.host.crypto.seal,
                                 vec![

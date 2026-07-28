@@ -310,6 +310,16 @@ extern "C" fn jet_jit_crypto_sha256(data_handle: i64) -> i64 {
     push(CryptoValue::Digest256(digest))
 }
 
+extern "C" fn jet_jit_crypto_sha512_bytes(data_handle: i64) -> i64 {
+    let text = runtime::jet_crypto_sha512_impl(&clone_bytes(data_handle));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+}
+
+extern "C" fn jet_jit_crypto_blake3_bytes(data_handle: i64) -> i64 {
+    let text = runtime::jet_crypto_blake3_impl(&clone_bytes(data_handle));
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(text))
+}
+
 extern "C" fn jet_jit_crypto_digest256_hex(handle: i64) -> i64 {
     match with_crypto(handle, |value| match value {
         CryptoValue::Digest256(digest) => Some(runtime::jet_crypto_digest256_hex_impl(digest)),
@@ -1220,6 +1230,8 @@ pub(crate) struct CryptoHostFns {
     pub sign: FuncId,
     pub verify: FuncId,
     pub sha256: FuncId,
+    pub sha512_bytes: FuncId,
+    pub blake3_bytes: FuncId,
     pub digest256_hex: FuncId,
     pub digest256_bytes: FuncId,
     pub signature_bytes: FuncId,
@@ -1281,6 +1293,8 @@ pub(crate) fn register_crypto_symbols(builder: &mut JITBuilder) {
         ("jet_jit_crypto_sign", jet_jit_crypto_sign as *const u8),
         ("jet_jit_crypto_verify", jet_jit_crypto_verify as *const u8),
         ("jet_jit_crypto_sha256", jet_jit_crypto_sha256 as *const u8),
+        ("jet_jit_crypto_sha512_bytes", jet_jit_crypto_sha512_bytes as *const u8),
+        ("jet_jit_crypto_blake3_bytes", jet_jit_crypto_blake3_bytes as *const u8),
         ("jet_jit_crypto_digest256_hex", jet_jit_crypto_digest256_hex as *const u8),
         ("jet_jit_crypto_digest256_bytes", jet_jit_crypto_digest256_bytes as *const u8),
         ("jet_jit_crypto_signature_bytes", jet_jit_crypto_signature_bytes as *const u8),
@@ -1366,6 +1380,8 @@ pub(crate) fn declare_crypto_host_fns(module: &mut JITModule) -> Result<CryptoHo
         sign: import("jet_jit_crypto_sign", &binary)?,
         verify: import("jet_jit_crypto_verify", &ternary)?,
         sha256: import("jet_jit_crypto_sha256", &unary)?,
+        sha512_bytes: import("jet_jit_crypto_sha512_bytes", &unary)?,
+        blake3_bytes: import("jet_jit_crypto_blake3_bytes", &unary)?,
         digest256_hex: import("jet_jit_crypto_digest256_hex", &unary)?,
         digest256_bytes: import("jet_jit_crypto_digest256_bytes", &unary)?,
         signature_bytes: import("jet_jit_crypto_signature_bytes", &unary)?,

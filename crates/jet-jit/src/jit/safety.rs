@@ -447,6 +447,8 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                         "__signing_public"
                         | "__x25519_public"
                         | "sha256"
+                        | "sha512_bytes"
+                        | "blake3_bytes"
                         | "__digest256_hex"
                         | "__digest256_bytes"
                         | "__signature_bytes"
