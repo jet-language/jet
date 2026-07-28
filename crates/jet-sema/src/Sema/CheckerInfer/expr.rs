@@ -657,6 +657,16 @@ impl<'a> Checker<'a> {
                                             ));
                                             continue;
                                         }
+                                        if crate::Sema::Diagnostics::is_lazy_view(&t) {
+                                            self.diags.push(Diagnostic::error(
+                                                "E0915",
+                                                format!("the lazy view {} has no `Display` implementation", t.show()),
+                                                "an iterator adapter hands back a one-pass view, and showing it would consume it".to_string(),
+                                                "materialize it first: add `.to_list()` before the interpolation".to_string(),
+                                                Some(inner.span()),
+                                            ));
+                                            continue;
+                                        }
                                         // Migration: auto-printable structs without Display get a lint
                                         // and still compile via jet_show fallback in codegen.
                                         if let Type::Named(n) = &t {

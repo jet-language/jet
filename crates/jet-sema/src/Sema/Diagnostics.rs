@@ -770,6 +770,14 @@ pub(crate) fn is_secret_bearing_crypto_type(ty: &Type) -> bool {
     }
 }
 
+/// D-ITERTOOLS1=A: an iterator adapter hands back a lazy one-pass view. The
+/// runtime value is a boxed iterator that every operation consumes, so it can
+/// never be shown from a read. Showing one is refused here (I3) and the author
+/// materializes with `.to_list()`, exactly as the examples do.
+pub(crate) fn is_lazy_view(ty: &Type) -> bool {
+    matches!(ty, Type::Apply { name, .. } if name == Syntax::TYPE_ITER)
+}
+
 pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
     if is_secret_bearing_crypto_type(ty) {
         return false;
@@ -783,6 +791,7 @@ pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::Map { value, .. } => is_printable(value, registry),
         Type::Named(n) => registry.contains(n) || core_type_known(n),
         Type::Apply { name, .. } if name == "KeyRef" => true,
+        Type::Apply { name, .. } if name == Syntax::TYPE_ITER => false,
         Type::Apply { name, args } => {
             (name == "View"
                 && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))
@@ -827,6 +836,7 @@ pub(crate) fn is_displayable(
                 )
         }
         Type::Apply { name, .. } if name == "KeyRef" => true,
+        Type::Apply { name, .. } if name == Syntax::TYPE_ITER => false,
         Type::Apply { name, args } => {
             (name == "View"
                 && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))

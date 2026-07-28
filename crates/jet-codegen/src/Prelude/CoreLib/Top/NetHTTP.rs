@@ -447,6 +447,9 @@ pub struct JetTLSPeerIdentity {
 // D-HTTP-ROUTE-SYNTAX2=A: both HTTP front doors use the shared route grammar.
 type RouteSegment = JetHTTPRouteSegment;
 
+// A router is an ordinary owned value: a task that captures one takes its own
+// copy, so both halves stay cloneable. Handlers are already shared `Arc`s.
+#[derive(Clone)]
 struct JetHTTPRoute {
     method: String,
     template: String,
@@ -454,6 +457,7 @@ struct JetHTTPRoute {
     handler: JetHTTPHandler,
 }
 
+#[derive(Clone)]
 pub struct JetHTTPRouter {
     routes: Vec<JetHTTPRoute>,
 }

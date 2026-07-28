@@ -274,6 +274,14 @@ impl<'a> Checker<'a> {
                                 "print a public operation label or key identifier instead".to_string(),
                                 Some(arg.expr.span()),
                             ));
+                        } else if crate::Sema::Diagnostics::is_lazy_view(&t) {
+                            self.diags.push(Diagnostic::error(
+                                "E0112",
+                                format!("`{}` cannot show the lazy view {}", Syntax::BUILTIN_PRINT, t.show()),
+                                "an iterator adapter hands back a one-pass view, and showing it would consume it".to_string(),
+                                "materialize it first: add `.to_list()` before printing".to_string(),
+                                Some(arg.expr.span()),
+                            ));
                         } else {
                             self.diags.push(Diagnostic::error(
                                 "E0112",
