@@ -74,7 +74,6 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/marker_tested_at.jet",
     "tests/ui/marker_tested_hash.jet",
     "tests/ui/marker_wrong_at_plane.jet",
-    "tests/ui/matcharm_mixing_needs_parens.jet",
     "tests/ui/meta_bad_maturity.jet",
     "tests/ui/meta_duplicate_field.jet",
     "tests/ui/meta_on_expression.jet",

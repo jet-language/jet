@@ -100,6 +100,27 @@ pub(crate) fn data_renamed_to_datatree(span: Span) -> Diagnostic {
     )
 }
 
+/// D-LAYOUT-CTOR1: the constraint-layout container is named `Layout`. The old
+/// `LayoutHandle` spelling is retired (no alias, I8).
+pub(crate) fn layout_handle_renamed_to_layout(span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E2936",
+        format!(
+            "the constraint-layout type is named `{}`, not `{}`",
+            Syntax::LAYOUT_TYPE,
+            Syntax::LAYOUT_HANDLE_TYPE_RETIRED
+        ),
+        format!(
+            "`{}` is the solver/container value constructed by `name {} {}.{{ … }}`",
+            Syntax::LAYOUT_TYPE,
+            Syntax::SIGIL_BIND_IMMUT,
+            Syntax::LAYOUT_TYPE
+        ),
+        format!("write `{}` instead of `{}`", Syntax::LAYOUT_TYPE, Syntax::LAYOUT_HANDLE_TYPE_RETIRED),
+        Some(span),
+    )
+}
+
 /// D-ACRO-CASE1=A / D-ACRO-LEX1=A: a retired word-cased acronym spelling.
 pub(crate) fn retired_acronym_spelling_diag(old: &str, canonical: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
@@ -213,7 +234,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Vec2" | "Vec3" | "Vec4" | "Mat3" | "Mat4"
         // D-LAYOUT1 / D-LAYOUT-GATES1 (GATE 2, ratified 2026-06-28/29): the
         // built-in constraint-layout value types.
-        | "HVar" | "VVar" | "LengthVar" | "Constraint" | "LayoutHandle"
+        | "HVar" | "VVar" | "LengthVar" | "Constraint" | "Layout"
         // D-REACT1=B: opt-in reactive handle types (used bare as `Signal<T>`/`Derived<T>`).
         | "Signal" | "Derived" | "Computed" | "Effect"
         // D-EVENT1=D: first-party typed Event/Hook family.

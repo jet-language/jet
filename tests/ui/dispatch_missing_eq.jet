@@ -1,8 +1,9 @@
-// E0992 (D-IF3): a multi-arm `if` dispatch needs `==` between the subject and
-// the `{`. The old implicit form (no `==`) is a teaching error; the parser
-// recovers by reading the body as arms so the rest of the file still checks.
+// E0992 (D-IF3 / D-IFDIST1): a multi-arm `if` dispatch needs a comparison
+// between the subject and the `{`. The old implicit form (no marker) is a
+// teaching error; the parser recovers by reading the body as arms so the rest
+// of the file still checks.
 fn classify(code: Int) => String {
-    if code == {
+    if code {
         200 -> { return "ok" }
         404 -> { return "not found" }
         else -> {

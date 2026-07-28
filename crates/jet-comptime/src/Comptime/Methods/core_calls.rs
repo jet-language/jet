@@ -699,6 +699,10 @@ pub fn apply_core_call(
     if let Some(result) = core_pure_parity::evaluate(module, method, &args, span) {
         return result;
     }
+    if let Some(result) = crate::Comptime::try_ambient_core_call(module, method, args.clone(), span)
+    {
+        return result;
+    }
 
     if repl_mode {
         if let Some(_) = repl_native_only_module(module) {
@@ -1150,6 +1154,8 @@ pub fn apply_core_call(
                 .into_owned();
             Ok(CtValue::Str(joined))
         }
+        // D-ARGS1 / runtime-tier: empty ArgsSpec builder (same as AOT jet_args_spec).
+        ("core.args", "spec") => Ok(crate::Comptime::core_args_spec()),
         ("core.path", "parent") => {
             let p = as_string(one(0)?, span)?;
             Ok(CtValue::Str(
@@ -2190,6 +2196,10 @@ pub fn apply_impure_core_call(
     if let Some(result) = core_pure_parity::evaluate(module, method, &args, span) {
         return result;
     }
+    if let Some(result) = crate::Comptime::try_ambient_core_call(module, method, args.clone(), span)
+    {
+        return result;
+    }
     let one = |i: usize| {
         args.get(i).ok_or_else(|| {
             unsupported(
@@ -2262,6 +2272,60 @@ pub fn apply_impure_core_call(
             let path = base_dir.join(path_str);
             match std::fs::create_dir_all(&path) {
                 Ok(()) => Ok(CtValue::ResOk(Box::new(CtValue::Unit))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(
+                    &path.to_string_lossy(),
+                    e,
+                )))),
+            }
+        }
+        // D-LSDIR1: mirror AOT jet_std_fs_list_dir (sorted by name).
+        ("core.files", "list_dir") => {
+            let path_str = as_string(one(0)?, span)?;
+            let path = base_dir.join(path_str);
+            match std::fs::read_dir(&path) {
+                Ok(rd) => {
+                    let mut entries = Vec::new();
+                    let mut err: Option<std::io::Error> = None;
+                    for entry in rd {
+                        match entry {
+                            Ok(entry) => {
+                                let name = entry.file_name().to_string_lossy().to_string();
+                                let full_path = path
+                                    .join(&name)
+                                    .to_string_lossy()
+                                    .to_string();
+                                let is_dir =
+                                    entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+                                entries.push((name, full_path, is_dir));
+                            }
+                            Err(e) => {
+                                err = Some(e);
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(e) = err {
+                        Ok(CtValue::ResErr(Box::new(io_error_value(
+                            &path.to_string_lossy(),
+                            e,
+                        ))))
+                    } else {
+                        entries.sort_by(|a, b| a.0.cmp(&b.0));
+                        Ok(CtValue::ResOk(Box::new(CtValue::List(
+                            entries
+                                .into_iter()
+                                .map(|(name, full_path, is_dir)| CtValue::Struct {
+                                    type_name: "DirEntry".to_string(),
+                                    fields: vec![
+                                        ("name".to_string(), CtValue::Str(name)),
+                                        ("path".to_string(), CtValue::Str(full_path)),
+                                        ("is_dir".to_string(), CtValue::Bool(is_dir)),
+                                    ],
+                                })
+                                .collect(),
+                        ))))
+                    }
+                }
                 Err(e) => Ok(CtValue::ResErr(Box::new(io_error_value(
                     &path.to_string_lossy(),
                     e,

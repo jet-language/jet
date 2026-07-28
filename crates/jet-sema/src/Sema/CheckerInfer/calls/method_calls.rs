@@ -3206,7 +3206,7 @@ impl<'a> Checker<'a> {
                 if is_layout_type(tn) {
                     if let Some(ret) = layout_method_return(tn, method, args.len()) {
                         for (i, arg) in args.iter_mut().enumerate() {
-                            let axis_arg = (tn == "LayoutHandle"
+                            let axis_arg = (tn == "Layout"
                                 && ((method == "value" && i == 0) || (method == "suggest" && i == 0)))
                                 .then_some(());
                             let want = layout_method_arg_ty(method, i);

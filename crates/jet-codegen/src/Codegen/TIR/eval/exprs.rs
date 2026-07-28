@@ -1764,7 +1764,20 @@ impl<'a> EvalCtx<'a> {
                     },
                 })
             }
-            TExprKind::DBValueLit { .. } => Err(unsupported("expr `DBValueLit`", self.span())),
+            TExprKind::DBValueLit { variant, arg } => {
+                let payload = match arg {
+                    Some(inner) => Some(self.eval_expr(&inner.0, scope)?),
+                    None => None,
+                };
+                Ok(CtValue::Enum {
+                    type_name: "DBValue".to_string(),
+                    variant: variant.clone(),
+                    args: match payload {
+                        Some(v) => vec![(None, v)],
+                        None => Vec::new(),
+                    },
+                })
+            }
             TExprKind::ListSpread { parts } => {
                 let mut values = Vec::new();
                 for part in parts {

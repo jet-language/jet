@@ -253,9 +253,10 @@ pub fn is_layout_axis_type(name: &str) -> bool {
 }
 
 /// D-LAYOUT1: the full closed layout-value family (axis types + the
-/// `Constraint`/`LayoutHandle` handles).
+/// `Constraint`/`Layout` handles).
 pub fn is_layout_type(name: &str) -> bool {
-    is_layout_axis_type(name) || matches!(name, "Constraint" | "LayoutHandle")
+    is_layout_axis_type(name)
+        || matches!(name, "Constraint" | "Layout")
 }
 
 /// D-LAYOUT1: the axis a value belongs to, for cross-axis checking. Plain
@@ -336,12 +337,12 @@ pub fn layout_binop_result(
     }
 }
 
-/// D-LAYOUT1: type-check an instance method on `LayoutHandle`/`Constraint`.
+/// D-LAYOUT1: type-check an instance method on `Layout`/`Constraint`.
 /// Mirrors `math_method_return`'s pattern (a plain match table, not a
 /// HashMap — this family is tiny).
 pub fn layout_method_return(name: &str, method: &str, n_args: usize) -> Option<Type> {
     match name {
-        "LayoutHandle" => match (method, n_args) {
+        "Layout" => match (method, n_args) {
             ("h", 2) => Some(Type::Named("HVar".to_string())),
             ("v", 2) => Some(Type::Named("VVar".to_string())),
             ("value", 1) => Some(Type::Float),
@@ -360,7 +361,7 @@ pub fn layout_method_return(name: &str, method: &str, n_args: usize) -> Option<T
     }
 }
 
-/// D-LAYOUT1: the fixed argument type a `LayoutHandle` method expects, by
+/// D-LAYOUT1: the fixed argument type a `Layout` method expects, by
 /// position. `None` means "no plain fixed type" — `.value(v)`/`.suggest(v, _)`'s
 /// first argument accepts ANY of `HVar`/`VVar`/`LengthVar` (checked by the
 /// caller via `is_layout_axis_type`, not a single `Type`).

@@ -1,7 +1,7 @@
 use super::*;
 use crate::AST::{
-    AccessConvention, Call, CallArg, EnumLitArg, Expr, ForKind, OrFallback, Pattern, StrPart, Type,
-    UnOp,
+    AccessConvention, BinOp, Call, CallArg, EnumLitArg, Expr, ForKind, OrFallback, Pattern, StrPart,
+    Type, UnOp,
 };
 
 impl<'a> Fmt<'a> {
@@ -54,15 +54,118 @@ impl<'a> Fmt<'a> {
     }
 
     fn is_guard_expr(&self, expr: &Expr) -> bool {
-        let Expr::If { span, .. } = expr else { return false };
-        self.src
-            .get(span.start + Syntax::KW_IF.len()..span.end)
-            .is_some_and(|tail| tail.trim_start().starts_with('{'))
+        let Expr::If { span, .. } = expr else {
+            return false;
+        };
+        let Some(text) = self.src.get(span.start..span.end) else {
+            return false;
+        };
+        let Some(rest) = text.strip_prefix(Syntax::KW_IF) else {
+            return false;
+        };
+        let rest = rest.trim_start();
+        if rest.starts_with('{') {
+            return true;
+        }
+        // D-IFDIST1: `if subject OP { … }` value tables share the guard surface.
+        self.dispatch_value_head(expr).is_some()
+    }
+
+    /// Recover `(subject, table_op)` from a nested value-dispatch `Expr::If` chain.
+    fn dispatch_value_head<'b>(&self, expr: &'b Expr) -> Option<(&'b Expr, BinOp)> {
+        let Expr::If { cond, span, .. } = expr else {
+            return None;
+        };
+        let text = self.src.get(span.start..span.end)?;
+        let rest = text.strip_prefix(Syntax::KW_IF)?.trim_start();
+        if rest.starts_with('{') {
+            return None;
+        }
+        let table_op = Self::cmp_op_before_brace(rest)?;
+        match cond.as_ref() {
+            Expr::Binary(op, lhs, _, _) if *op == table_op => Some((lhs.as_ref(), table_op)),
+            _ => None,
+        }
+    }
+
+    fn cmp_op_before_brace(rest: &str) -> Option<BinOp> {
+        let brace = rest.find('{')?;
+        let between = rest[..brace].trim_end();
+        if between.ends_with("==") {
+            Some(BinOp::Eq)
+        } else if between.ends_with("!=") {
+            Some(BinOp::Ne)
+        } else if between.ends_with("<=") {
+            Some(BinOp::Le)
+        } else if between.ends_with(">=") {
+            Some(BinOp::Ge)
+        } else if between.ends_with('<') {
+            Some(BinOp::Lt)
+        } else if between.ends_with('>') {
+            Some(BinOp::Gt)
+        } else {
+            None
+        }
     }
 
     fn fmt_guard_expr(&mut self, expr: &Expr) {
-        let Expr::If { span, .. } = expr else { unreachable!() };
+        let Expr::If { span, .. } = expr else {
+            unreachable!()
+        };
         let table_span = *span;
+        if let Some((subject, table_op)) = self.dispatch_value_head(expr) {
+            self.write(Syntax::KW_IF);
+            self.write(" ");
+            self.fmt_expr(subject, Prec::OrFallback);
+            self.write(" ");
+            self.write(table_op.spell());
+            self.write(" {");
+            self.newline();
+            self.with_indent(|f| {
+                let mut arm = expr;
+                loop {
+                    let Expr::If {
+                        cond,
+                        then_body,
+                        then_value,
+                        else_body,
+                        else_value,
+                        span,
+                    } = arm
+                    else {
+                        unreachable!()
+                    };
+                    f.fmt_dispatch_value_cond(subject, table_op, cond);
+                    f.write(" ");
+                    f.write(Syntax::OP_ARM_ARROW);
+                    f.write(" ");
+                    if then_body.is_empty() {
+                        f.fmt_expr(then_value, Prec::OrFallback);
+                    } else {
+                        f.fmt_value_block(then_body, then_value, false);
+                    }
+                    f.newline();
+                    if else_body.is_empty()
+                        && matches!(else_value.as_ref(), Expr::If { span: next, .. } if *next == *span && *span == table_span)
+                    {
+                        arm = else_value;
+                        continue;
+                    }
+                    f.write(Syntax::KW_ELSE);
+                    f.write(" ");
+                    f.write(Syntax::OP_ARM_ARROW);
+                    f.write(" ");
+                    if else_body.is_empty() {
+                        f.fmt_expr(else_value, Prec::OrFallback);
+                    } else {
+                        f.fmt_value_block(else_body, else_value, false);
+                    }
+                    break;
+                }
+            });
+            self.end_block();
+            return;
+        }
         self.write(Syntax::KW_IF);
         self.write(" {");
         self.newline();
@@ -76,7 +179,10 @@ impl<'a> Fmt<'a> {
                     else_body,
                     else_value,
                     span,
-                } = arm else { unreachable!() };
+                } = arm
+                else {
+                    unreachable!()
+                };
                 f.fmt_expr(cond, Prec::OrFallback);
                 f.write(" ");
                 f.write(Syntax::OP_ARM_ARROW);
@@ -106,6 +212,80 @@ impl<'a> Fmt<'a> {
             }
         });
         self.end_block();
+    }
+
+    /// Print a value-dispatch arm head, stripping `subject table_op` atoms.
+    fn fmt_dispatch_value_cond(&mut self, subject: &Expr, table_op: BinOp, cond: &Expr) {
+        if self.is_all_value_alts(subject, table_op, cond) {
+            self.fmt_value_alts(subject, table_op, cond);
+            return;
+        }
+        match cond {
+            Expr::Binary(op @ (BinOp::And | BinOp::Or), lhs, rhs, _) => {
+                self.fmt_dispatch_value_cond(subject, table_op, lhs);
+                self.write(" ");
+                self.write(op.spell());
+                self.write(" ");
+                self.fmt_dispatch_value_cond(subject, table_op, rhs);
+            }
+            Expr::Binary(op, lhs, rhs, _)
+                if *op == table_op && self.same_dispatch_subject(lhs, subject) =>
+            {
+                self.fmt_expr(rhs, Prec::Cmp);
+            }
+            _ => self.fmt_expr(cond, Prec::OrFallback),
+        }
+    }
+
+    fn is_all_value_alts(&self, subject: &Expr, table_op: BinOp, e: &Expr) -> bool {
+        match e {
+            Expr::Binary(BinOp::Or, lhs, rhs, _) => {
+                self.is_value_alt_leaf(subject, table_op, lhs)
+                    && self.is_value_alt_leaf(subject, table_op, rhs)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_value_alt_leaf(&self, subject: &Expr, table_op: BinOp, e: &Expr) -> bool {
+        match e {
+            Expr::Binary(op, lhs, _, _) if *op == table_op => {
+                self.same_dispatch_subject(lhs, subject)
+            }
+            Expr::Binary(BinOp::Or, lhs, rhs, _) => {
+                self.is_value_alt_leaf(subject, table_op, lhs)
+                    && self.is_value_alt_leaf(subject, table_op, rhs)
+            }
+            _ => false,
+        }
+    }
+
+    fn fmt_value_alts(&mut self, subject: &Expr, table_op: BinOp, e: &Expr) {
+        match e {
+            Expr::Binary(BinOp::Or, lhs, rhs, _) => {
+                self.fmt_value_alts(subject, table_op, lhs);
+                self.write(" | ");
+                self.fmt_value_alts(subject, table_op, rhs);
+            }
+            Expr::Binary(op, _, rhs, _) if *op == table_op => {
+                self.fmt_expr(rhs, Prec::Cmp);
+            }
+            _ => unreachable!("is_all_value_alts should guard this path"),
+        }
+    }
+
+    fn same_dispatch_subject(&self, a: &Expr, subject: &Expr) -> bool {
+        if let Expr::Ident(name, _) = a {
+            if name == Syntax::KW_IT {
+                return true;
+            }
+        }
+        if a.span() == subject.span() {
+            return true;
+        }
+        let a_src = self.src.get(a.span().start..a.span().end);
+        let subj_src = self.src.get(subject.span().start..subject.span().end);
+        matches!((a_src, subj_src), (Some(x), Some(y)) if x == y)
     }
 
     /// D-FMT1: every branch of an `if`-expression chain is inline-eligible (gates

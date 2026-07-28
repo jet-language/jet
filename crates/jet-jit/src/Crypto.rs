@@ -60,6 +60,24 @@ pub(crate) mod runtime {
     pub fn clone_x25519_secret(key: &JetX25519SecretKey) -> JetX25519SecretKey {
         JetX25519SecretKey(jet_crypto_expert_x25519_secret_bytes_impl(key))
     }
+
+    /// Interpreter ambient: rebuild a secret key from raw bytes.
+    pub(crate) fn x25519_secret_from_bytes(bytes: Vec<u8>) -> Result<JetX25519SecretKey, String> {
+        if bytes.len() != 32 {
+            return Err("X25519SecretKey needs exactly 32 bytes".into());
+        }
+        Ok(JetX25519SecretKey(bytes))
+    }
+
+    /// Interpreter ambient: rebuild a password hash PHC string.
+    pub(crate) fn password_hash_from_text(text: String) -> JetPasswordHash {
+        JetPasswordHash(text)
+    }
+}
+
+/// Interpreter ambient: rebuild X25519SecretKey without a Cranelift heap.
+pub(crate) fn x25519_secret_from_vec(bytes: Vec<u8>) -> Result<runtime::JetX25519SecretKey, String> {
+    runtime::x25519_secret_from_bytes(bytes)
 }
 
 pub(crate) enum CryptoValue {

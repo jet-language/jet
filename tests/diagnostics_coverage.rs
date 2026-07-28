@@ -869,6 +869,7 @@ fn registered_unimplemented_codes_are_expected() {
         "L2901", // E2-M11 — staged
         "E0958", // retired (D-CTEFFECT1): replaced by E3410 (Tier-2 without #Impure gate)
         "E0993", // retired (D-MATCHARM1=A): predicate/Bool arm heads now allowed
+        "E0328", // retired (D-IFDIST1=A): `|` binds tighter than `&&`/`||`; mixing needs no parens
         "E0954", // retired by D-S14-PAUSE: was two-keyword comptime binding teaching
         "E1229", // D-JPK-MODBODY1: retired role-module body form — parse recovery only, not stable
         "E0410", // retired by D-MARK-DISCARD1=A (was `#Suppress` unknown argument); registry row

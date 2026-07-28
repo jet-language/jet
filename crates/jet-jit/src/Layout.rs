@@ -1,4 +1,5 @@
-//! D-LAYOUT1: resident-JIT host for `layout { }` / `LayoutHandle` — `include!`
+//! D-LAYOUT1 / D-LAYOUT-CTOR1: resident-JIT host for `name :: Layout.{ … }` /
+//! `Layout` — `include!`
 //! canonical `jet_layout` (Prelude/Layout.rs). No third algorithm.
 
 use super::Concurrency;

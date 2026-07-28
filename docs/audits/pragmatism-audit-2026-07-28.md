@@ -260,13 +260,15 @@ Filed after this run at the owner's request (2026-07-28):
   - #1274 `D-WEBAPP-SERVE1`, `D-WEB-CLICK-OWN1`.
   - #1275 `D-UI-MOUNT1`. #1276 `D-GAME-LOOP1`.
   - #1277 `D-CLI-FIELD-MARKERS1`. #1278 `D-FMT-INTERP1`.
+  - #1279 `D-ARGS-EXIT1`. #1280 `D-PROCESS-CHECKED1`.
+  - #1281 `D-IO-PROMPT1`. #1282 `D-TASKS-LIST1`.
+  - #1283 `D-REGEX-LIT1`. #1284 `D-BINREAD-LEN1`.
+  - #1285 `D-EXAMPLES-SHORTPATH1` (first-hour → `#CLI`, parallel scan →
+    `taskgroup`, streaming text reads, composed log/MMIO/math examples).
 - Defect cards, no gate, ready for a burndown: #1269 (CSV encode empty
   under `jet run`), #1270 (`user_` name leak in derived print), #1271
   (panic prints beside diagnostics), #1272 (import-aware and
-  stdlib-aware fix hints).
-- Not yet filed — ungated stdlib/API ideas: `parse_or_exit`,
-  `process.run_checked`, prompt helpers, `jet tasks` listing,
-  comptime-checked literal regex.
-- Not yet filed — example re-pointing: first-hour → `#CLI`; parallel
-  scan → `taskgroup`; one composed log-parsing example; one MMIO board
-  example; one flagship math example.
+  stdlib-aware fix hints), #1286 (help usage line prints an absolute
+  path), #1287 (finish uninit fixed-array buffer fill through TIR).
+- Everything from this audit is now on the board; nothing is left
+  report-only.

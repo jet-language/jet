@@ -46,7 +46,10 @@ impl Scratch {
         )
         .unwrap();
         let path = self.dir.join("run.jet");
-        fs::write(&path, body).unwrap();
+        // The AOT tier runs the built binary with `current_dir(scratch)`, but the
+        // dev/JIT tier runs in-process at the cargo-test cwd (the repo root). Fixtures
+        // must therefore name absolute paths, or dev-tier output litters the repo.
+        fs::write(&path, body.replace("@DIR@", &self.dir.display().to_string())).unwrap();
         path
     }
 
@@ -461,7 +464,7 @@ fn assert_aot_dev_stream_parity(label: &str, source: &str) {
 fn json_stream_reader_writer_matches_aot_and_default_dev() {
     let body = r#"
 fn run() {
-    path := "json_stream_out.json"
+    path := "@DIR@/json_stream_out.json"
     output :: files.create(path) ?? panic("create")
     writer :: fmt.writer(^output, encoding.EncodingLimits.safe(), false) ?? panic("writer")
     writer.write(encoding.DataEvent.ObjectStart) ?? panic("write")
@@ -488,7 +491,7 @@ fn run() {
 fn jsonl_csv_xml_cbor_streams_match_aot_and_default_dev() {
     let jsonl = r#"
 fn run() {
-    path := "rows.jsonl"
+    path := "@DIR@/rows.jsonl"
     output :: files.create(path) ?? panic("create")
     writer :: fmt.writer(^output) ?? panic("writer")
     writer.write(DataTree.Object(["a": DataTree.Int(1)])) ?? panic("write")
@@ -507,7 +510,7 @@ fn run() {
 
     let csv = r#"
 fn run() {
-    path := "rows.csv"
+    path := "@DIR@/rows.csv"
     output :: files.create(path) ?? panic("create")
     writer :: fmt.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
     writer.write(["ok", "true"]) ?? panic("write")
@@ -535,7 +538,7 @@ fn xml_name(local: String) => DataTree {
 }
 
 fn run() {
-    path := "doc.xml"
+    path := "@DIR@/doc.xml"
     output :: files.create(path) ?? panic("create")
     writer :: fmt.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
     writer.write(DataTree.Object([
@@ -576,7 +579,7 @@ fn run() {
 
     let cbor = r#"
 fn run() {
-    path := "packet.cbor"
+    path := "@DIR@/packet.cbor"
     output :: files.create(path) ?? panic("create")
     writer :: fmt.writer(^output) ?? panic("writer")
     writer.write(encoding.DataEvent.ObjectStart) ?? panic("start")
@@ -613,7 +616,7 @@ use core.files as files
 fn run() {
     whole := json.parse("{{\"a\":1,\"b\":2}}") ?? panic("json")
     canon := json.to_string(whole)
-    path := "round.json"
+    path := "@DIR@/round.json"
     output :: files.create(path) ?? panic("create")
     writer :: json.writer(^output, encoding.EncodingLimits.safe(), false) ?? panic("writer")
     writer.write(encoding.DataEvent.ObjectStart) ?? panic("os")
@@ -627,7 +630,7 @@ fn run() {
     print(json.to_string(collected) == canon)
     print(json.to_string(collected))
 
-    cbor_path := "round.cbor"
+    cbor_path := "@DIR@/round.cbor"
     cbor_out :: files.create(cbor_path) ?? panic("cbor create")
     cbor_writer :: cbor.writer(^cbor_out) ?? panic("cbor writer")
     cbor_writer.write(encoding.DataEvent.ObjectStart) ?? panic("cs")
@@ -734,7 +737,7 @@ use core.encoding.json as json
 use core.files as files
 
 fn terminal_limit_probe() => String {
-    bad_path := "bad.json"
+    bad_path := "@DIR@/bad.json"
     limits := encoding.EncodingLimits.safe()
     limits.max_total_bytes = Val(5)
     fs_write := files.create(bad_path) ?? panic("create")
@@ -755,8 +758,8 @@ fn terminal_limit_probe() => String {
 }
 
 fn malformed_reader_probe() => String {
-    files.write("malformed.json", "{{\"a\":") ?? panic("write malformed")
-    input :: files.open("malformed.json") ?? panic("open")
+    files.write("@DIR@/malformed.json", "{{\"a\":") ?? panic("write malformed")
+    input :: files.open("@DIR@/malformed.json") ?? panic("open")
     reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
     if reader.next() == {
         Err(error) -> {

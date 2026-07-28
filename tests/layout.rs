@@ -1,4 +1,4 @@
-//! D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29): `layout NAME { … }`,
+//! D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29): `NAME :: Layout.{ … }`,
 //! the Cassowary-style constraint solver (`crates/jet-codegen/src/Prelude/
 //! Layout.rs`, `jet_layout`). Covers: solver convergence on common patterns
 //! (equal split, min/max bounds, proportional split via addition — layout
@@ -87,11 +87,11 @@ fn equal_split_compiles_and_runs() {
     // a.width == b.width, a.width + b.width == 200 → both 100.
     let src = r#"
 fn run() {
-    layout form {
+    form :: Layout.{
         a.width == b.width
         a.width + b.width == 200.0
     }
-    aw.{ form.value(form.h("a", "width"))
+    aw :: form.value(form.h("a", "width"))
     bw :: form.value(form.h("b", "width"))
     print("a={aw} b={bw}")
 }
@@ -102,7 +102,7 @@ fn run() {
         error_codes(src)
     );
     if let Some(out) = build_and_run("equal_split", src) {
-        assert_eq!(out, "a=100.0 b=100.0 }\n");
+        assert_eq!(out, "a=100.0 b=100.0\n");
     }
 }
 
@@ -113,7 +113,7 @@ fn min_max_bounds_clamp() {
     // over the soft preference, not the other way around.
     let src = r#"
 fn run() {
-    layout form {
+    form :: Layout.{
         x.width >= 50.0
         x.width <= 80.0
     }
@@ -139,7 +139,7 @@ fn proportional_split_via_addition() {
     // b" is expressed as repeated addition: a == b + b.
     let src = r#"
 fn run() {
-    layout form {
+    form :: Layout.{
         a.width == b.width + b.width
         a.width + b.width == 300.0
     }
@@ -162,7 +162,7 @@ fn run() {
 fn cross_axis_width_vs_height_is_e2932() {
     let src = r#"
 fn run() {
-    layout form {
+    form :: Layout.{
         a.width >= a.height
     }
 }
@@ -175,7 +175,7 @@ fn non_comparison_line_is_e2933() {
     let src = r#"
 fn run() {
     x :: 1
-    layout form {
+    form :: Layout.{
         x == 1
     }
 }
@@ -189,7 +189,7 @@ fn duplicate_constraint_is_lint_not_error() {
     // still compile clean.
     let src = r#"
 fn run() {
-    layout form {
+    form :: Layout.{
         a.width >= 80.0
         a.width >= 80.0
     }
@@ -220,7 +220,7 @@ fn infeasible_required_constraints_report_conflict() {
     // simplex-derived trace, not a canned message).
     let src = r#"
 fn run() {
-    layout form {
+    form :: Layout.{
         a.width >= 100.0
         a.width <= 50.0
     }
@@ -251,7 +251,7 @@ fn infeasible_value_read_panics_loudly() {
     // wrong number) rather than returning a made-up 0.
     let src = r#"
 fn run() {
-    layout form {
+    form :: Layout.{
         a.width >= 100.0
         a.width <= 50.0
     }

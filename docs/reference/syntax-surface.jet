@@ -230,17 +230,9 @@ enum Shape {
 }
 
 //<<< Owner Enum Dispatch: Enum variants syntax cleanup
-// HAVE:
+// Leading-dot patterns are required (D-ENUMDOT1 / E0367).
 fn describe(s: Shape) => String {
-    return if s {
-        Circle(r) -> "circle {r}"             // binds `r`
-        Rect(w, h) -> "rect {w}x{h}"
-        Empty -> "nothing"
-    }
-}
-// WANT:
-fn describe(s: Shape) => String {
-    return if s {
+    return if s == {
         .Circle(r) -> "circle {r}"             // binds `r`
         .Rect(w, h) -> "rect {w}x{h}"
         .Empty -> "nothing"
@@ -250,8 +242,8 @@ fn describe(s: Shape) => String {
 
 // Nested patterns + guards via `&&` on freshly-bound names (D-PAT1/D-PAT2).
 fn nested(r: Shape ? Error) => Bool {
-    return if r {
-        Ok(Rect(w, h)) && w > h -> true
+    return if r == {
+        .Ok(.Rect(w, h)) && w > h -> true
         else -> false
     }
 }

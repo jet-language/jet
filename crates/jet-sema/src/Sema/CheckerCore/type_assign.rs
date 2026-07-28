@@ -2,7 +2,10 @@ use crate::AST::Type;
 use crate::Collections::is_map_key_type;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{e0905, e0909, generic_depth_exceeded, substitute_type, COMPARABLE};
-use crate::Sema::CheckerCoreLib::{core_type_known, data_renamed_to_datatree, retired_acronym_spelling_diag};
+use crate::Sema::CheckerCoreLib::{
+    core_type_known, data_renamed_to_datatree, layout_handle_renamed_to_layout,
+    retired_acronym_spelling_diag,
+};
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::{
     option_used_where_plain_expected, result_used_where_plain_expected, soft_public_use,
@@ -141,6 +144,11 @@ impl<'a> Checker<'a> {
                     // D-SERDE13=B: the retired `Data` spelling points at `DataTree`.
                     if n == "Data" {
                         self.diags.push(data_renamed_to_datatree(span));
+                        return;
+                    }
+                    // D-LAYOUT-CTOR1: the retired `LayoutHandle` spelling points at `Layout`.
+                    if n == Syntax::LAYOUT_HANDLE_TYPE_RETIRED {
+                        self.diags.push(layout_handle_renamed_to_layout(span));
                         return;
                     }
                     // D-ACRO-CASE1=A / D-ACRO-LEX1=A: retired word-cased acronym spellings.

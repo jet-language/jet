@@ -53,12 +53,13 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-IF3: `if subject == { … }` is multi-arm value/pattern dispatch; a plain
-    /// `if cond { … }` is a conventional boolean test. The `==` marker between
-    /// the subject and `{` is *required* to enter dispatch (Q2); an old-style
-    /// `if subject { head -> body }` with no `==` is teaching error E0992, which
-    /// recovers by parsing the body as arms so the rest of the file still checks.
-    /// Multi-arm `if` lowers to the same `Stmt::Switch` IR the former `when` used.
+    /// D-IF3 / D-IFDIST1: `if subject OP { … }` is multi-arm value/pattern
+    /// dispatch (`OP` is any comparison); a plain `if cond { … }` is a
+    /// conventional boolean test. The comparison marker between the subject and
+    /// `{` is *required* to enter dispatch; an old-style `if subject { head ->
+    /// body }` with no marker is teaching error E0992, which recovers by parsing
+    /// the body as arms so the rest of the file still checks. Multi-arm `if`
+    /// lowers to the same `Stmt::Switch` IR the former `when` used.
     pub(super) fn if_or_dispatch(&mut self) -> Result<Stmt, Diagnostic> {
         let span = self.bump().span; // `if`
 
@@ -70,18 +71,16 @@ impl<'a> Parser<'a> {
             return self.guard_arms(span);
         }
 
-        // Parse the subject below comparison precedence so a trailing `==` marker
-        // is left in the token stream (`expr_cmp` would eat it). If `== {`
-        // follows, this is explicit dispatch.
+        // Parse the subject below comparison precedence so a trailing compare
+        // marker is left in the token stream (`expr_cmp` would eat it). If
+        // `OP {` follows, this is explicit dispatch (D-IFDIST1).
         let probe = self.pos;
         let probe_diags = self.diags.len();
         if let Ok(subject) = self.expr_no_struct_lit_no_cmp() {
-            if matches!(self.peek().kind, TokKind::EqEq)
-                && matches!(self.peek2().kind, TokKind::LBrace)
-            {
-                self.bump(); // `==`
+            if let Some(op) = self.peek_dispatch_op() {
+                self.bump(); // comparison marker
                 self.expect(TokKind::LBrace, "to open the `if` dispatch body")?;
-                return self.if_arms(subject, span);
+                return self.if_arms(subject, span, op);
             }
         }
         // Not dispatch — rewind and parse the full boolean condition.
@@ -125,24 +124,24 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open the `if` body")?;
 
         // D-IF3 / E0992: an old implicit-dispatch body (first item is `head ->`)
-        // with no `==` marker. Teach the explicit form, then recover by parsing
-        // the body as arms so the rest of the file's errors still surface (S14).
+        // with no comparison marker. Teach the explicit form, then recover by
+        // parsing the body as arms so the rest of the file's errors still surface (S14).
         if self.if_body_is_arms() {
             self.diags.push(Diagnostic::error(
                 "E0992",
                 format!(
-                    "a multi-arm `{}` needs `==` between the subject and `{{`",
+                    "a multi-arm `{}` needs a comparison between the subject and `{{`",
                     Syntax::KW_IF
                 ),
                 format!(
-                    "`{} subject == {{ … }}` marks value dispatch explicitly, so a plain `{} cond {{ … }}` body is always statements",
+                    "`{} subject == {{ … }}` (or `<`, `>`, `!=`, `<=`, `>=`) marks value dispatch explicitly, so a plain `{} cond {{ … }}` body is always statements",
                     Syntax::KW_IF,
                     Syntax::KW_IF
                 ),
                 format!("write `{} subject == {{ … }}`", Syntax::KW_IF),
                 Some(span),
             ));
-            return self.if_arms(cond, span);
+            return self.if_arms(cond, span, BinOp::Eq);
         }
 
         // Conventional `if`: the condition gates a statement body.
@@ -339,15 +338,20 @@ impl<'a> Parser<'a> {
         is_arm
     }
 
-    /// D-IF3: parse the arms of an `if subject == { … }` dispatch (cursor just
-    /// past `{`), lowering to `Stmt::Switch`. Each arm is `head -> body` where
-    /// `head` is a bare value (`200`, `"sat" || "sun"`) compared against the
-    /// subject, a bare range (`400..499`), a bare pattern (`Active(id)`,
-    /// `value(n)`, `Ok(n)`, `null`), or a Boolean expression evaluated as
-    /// written. The leading `subject ==` is dropped (Q4) and re-bound here.
-    /// A leftover `subject ==` prefix gets E0994. `body` is a braceless single
-    /// statement or a `{ … }` block (D-IF2 Q2). `else -> body` is the catch-all.
-    pub(super) fn if_arms(&mut self, subject: Expr, span: Span) -> Result<Stmt, Diagnostic> {
+    /// D-IF3 / D-IFDIST1: parse the arms of an `if subject OP { … }` dispatch
+    /// (cursor just past `{`), lowering to `Stmt::Switch`. Each arm is
+    /// `head -> body` where `head` is a bare value compared with `OP`, a bare
+    /// range (`400..499`), a bare pattern (`Active(id)`, … — `==` only), or a
+    /// Boolean expression evaluated as written. The leading `subject OP` is
+    /// dropped and re-bound here. A leftover `subject ==` prefix gets E0994.
+    /// `body` is a braceless single statement or a `{ … }` block (D-IF2 Q2).
+    /// `else -> body` is the catch-all.
+    pub(super) fn if_arms(
+        &mut self,
+        subject: Expr,
+        span: Span,
+        op: BinOp,
+    ) -> Result<Stmt, Diagnostic> {
         let mut arms: Vec<SwitchArm> = Vec::new();
         let mut else_body: Option<Vec<Stmt>> = None;
         // The scrutinee a pattern arm binds to: a simple ident subject is named
@@ -469,10 +473,10 @@ impl<'a> Parser<'a> {
                                 ));
                             }
                         } else {
-                            self.if_arm_head(&subject, &pat_subject)?
+                            self.if_arm_head(&subject, &pat_subject, op)?
                         }
                     } else {
-                        self.if_arm_head(&subject, &pat_subject)?
+                        self.if_arm_head(&subject, &pat_subject, op)?
                     };
                     self.expect(TokKind::Arrow, "after an `if` arm value or condition")?;
                     let body = self.arm_body()?;
@@ -497,21 +501,46 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// D-IF3 / D-MATCHARM1: parse one bare arm head (no leading `subject ==`) and
-    /// bind it to the subject.
-    /// - A pattern head (`.Active(id)`, `A(x) | B(x)`) becomes a `PatternTest`.
-    /// - Values use the D-MATCHARM1 grammar: `|` alternates values, `&&`/`||`
-    ///   combine booleans, parens group. E0328 (D-MATCHARM2=B) fires for
-    ///   unparenthesized mixing of `|` with `&&`/`||`.
+    /// D-IF3 / D-MATCHARM1 / D-IFDIST1: parse one bare arm head (no leading
+    /// `subject OP`) and bind it to the subject with the table's comparison.
+    /// - A pattern head (`.Active(id)`, `A(x) | B(x)`) becomes a `PatternTest`
+    ///   (`==` marker only).
+    /// - Values use the D-MATCHARM1 grammar: `|` unions distributed atoms,
+    ///   `&&`/`||` combine booleans, parens group.
     /// - A leftover redundant `subject ==` prefix emits E0994 and recovers.
-    pub(super) fn if_arm_head(&mut self, subject: &Expr, pat_subject: &Expr) -> Result<Expr, Diagnostic> {
+    pub(super) fn if_arm_head(
+        &mut self,
+        subject: &Expr,
+        pat_subject: &Expr,
+        op: BinOp,
+    ) -> Result<Expr, Diagnostic> {
         // A bare pattern head: parse it standalone and attach the subject.
         let save = self.pos;
+        let save_diags = self.diags.len();
         if let Some(pattern) = self.try_pattern_rhs()? {
             // Only a pattern if it consumed up to the `->`; otherwise it was an
             // ordinary value — rewind and re-parse as the value grammar.
             if matches!(self.peek().kind, TokKind::Arrow) {
                 let span = pat_span(&pattern);
+                if op != BinOp::Eq {
+                    self.diags.push(Diagnostic::error(
+                        "E0366",
+                        format!(
+                            "pattern arms need `==` — this table uses `{}`",
+                            op.spell()
+                        ),
+                        "structural patterns compare by shape under `if subject == { … }` only"
+                            .to_string(),
+                        format!(
+                            "write `{} subject == {{ … }}` for pattern arms, or use a Bool head",
+                            Syntax::KW_IF
+                        ),
+                        Some(span),
+                    ));
+                    // Recover with a Bool false head so the rest of the table
+                    // (and a later `else`) can still parse.
+                    return Ok(Expr::Bool(false, span));
+                }
                 return Ok(Expr::PatternTest {
                     subject: Box::new(pat_subject.clone()),
                     pattern,
@@ -519,6 +548,7 @@ impl<'a> Parser<'a> {
                 });
             }
             self.pos = save;
+            self.diags.truncate(save_diags);
         }
         // E0994: peek for a redundant `subject ==` prefix before entering the
         // new grammar (parse-and-rewind so diagnostics don't leak).
@@ -532,7 +562,9 @@ impl<'a> Parser<'a> {
                     self.diags.push(Self::redundant_subject_diag(*span));
                     return Ok(raw);
                 }
-                Expr::Binary(BinOp::Eq, lhs, _, span) if Self::same_subject(lhs, subject) => {
+                Expr::Binary(binop, lhs, _, span)
+                    if binop.is_comparison() && Self::same_subject(lhs, subject) =>
+                {
                     self.diags.push(Self::redundant_subject_diag(*span));
                     return Ok(raw);
                 }
@@ -543,77 +575,43 @@ impl<'a> Parser<'a> {
         self.pos = save_pos;
         self.diags.truncate(save_diags);
         // D-MATCHARM1: value-alternates grammar.
-        self.parse_arm_value_cond(subject)
+        self.parse_arm_value_cond(subject, op)
     }
 
     pub(super) fn redundant_subject_diag(span: Span) -> Diagnostic {
         Diagnostic::error(
             "E0994",
             format!(
-                "drop the `subject ==` — the `==` on the `{}` already applies it to every arm",
+                "drop the `subject OP` — the comparison on the `{}` already applies it to every arm",
                 Syntax::KW_IF
             ),
             format!(
-                "`{} subject == {{ … }}` matches each arm head against the subject, so repeating `subject ==` on an arm is redundant",
+                "`{} subject OP {{ … }}` matches each arm head against the subject, so repeating `subject OP` on an arm is redundant",
                 Syntax::KW_IF
             ),
-            "delete the `subject ==` prefix; write just the value or pattern".to_string(),
+            "delete the `subject OP` prefix; write just the value or pattern".to_string(),
             Some(span),
         )
     }
 
     // ── D-MATCHARM1 arm-head grammar ─────────────────────────────────────────
 
-    /// Entry point: `arm_bool_expr = arm_and_expr ("||" arm_and_expr)*`
-    pub(super) fn parse_arm_value_cond(&mut self, subject: &Expr) -> Result<Expr, Diagnostic> {
-        let lhs = self.parse_arm_and_cond(subject)?;
-        if !matches!(self.peek().kind, TokKind::OrOr) {
-            return Ok(lhs);
-        }
-        let mut parts = vec![lhs];
-        while matches!(self.peek().kind, TokKind::OrOr) {
-            self.bump();
-            parts.push(self.parse_arm_and_cond(subject)?);
-        }
-        Ok(parts
-            .into_iter()
-            .reduce(|a, b| {
-                let span = Span::new(a.span().start, b.span().end);
-                Expr::Binary(BinOp::Or, Box::new(a), Box::new(b), span)
-            })
-            .unwrap())
-    }
-
-    /// `arm_and_expr = arm_alternates ("&&" arm_alternates)*`
-    /// D-MATCHARM2=B: if LHS has >1 alternates and `&&` follows → E0328.
-    pub(super) fn parse_arm_and_cond(&mut self, subject: &Expr) -> Result<Expr, Diagnostic> {
-        let (lhs_cond, lhs_count) = self.parse_arm_alternates_cond(subject)?;
+    /// `arm_and_expr = arm_alternates ("&&" arm_bool_operand)*`
+    /// D-IFDIST1: after `&&`, a single Ident/field/call is a Bool predicate
+    /// (not `subject OP ident`); `|` unions still distribute.
+    pub(super) fn parse_arm_and_cond(
+        &mut self,
+        subject: &Expr,
+        op: BinOp,
+    ) -> Result<Expr, Diagnostic> {
+        let (lhs_cond, _) = self.parse_arm_alternates_cond(subject, op, false)?;
         if !matches!(self.peek().kind, TokKind::AndAnd) {
-            return Ok(lhs_cond);
-        }
-        if lhs_count > 1 {
-            let span = self.peek().span;
-            self.diags.push(Diagnostic::error(
-                "E0328",
-                "value alternates mixed with `&&` without grouping parentheses".to_string(),
-                "`|` and `&&` at the same arm-head level are ambiguous to read (D-MATCHARM2)".to_string(),
-                "group the alternates: `(400 | 404) && condition` instead of `400 | 404 && condition`".to_string(),
-                Some(span),
-            ));
-            // Sync to arm body delimiter for recovery.
-            while !matches!(
-                self.peek().kind,
-                TokKind::Arrow | TokKind::LBrace | TokKind::RBrace | TokKind::Eof
-            ) {
-                self.bump();
-            }
             return Ok(lhs_cond);
         }
         let mut parts = vec![lhs_cond];
         while matches!(self.peek().kind, TokKind::AndAnd) {
             self.bump();
-            let (rhs_cond, _) = self.parse_arm_alternates_cond(subject)?;
-            parts.push(rhs_cond);
+            parts.push(self.parse_arm_bool_operand(subject, op)?);
         }
         Ok(parts
             .into_iter()
@@ -624,10 +622,57 @@ impl<'a> Parser<'a> {
             .unwrap())
     }
 
+    /// Entry point: `arm_bool_expr = arm_and_expr ("||" arm_bool_operand)*`
+    pub(super) fn parse_arm_value_cond(
+        &mut self,
+        subject: &Expr,
+        op: BinOp,
+    ) -> Result<Expr, Diagnostic> {
+        let lhs = self.parse_arm_and_cond(subject, op)?;
+        if !matches!(self.peek().kind, TokKind::OrOr) {
+            return Ok(lhs);
+        }
+        let mut parts = vec![lhs];
+        while matches!(self.peek().kind, TokKind::OrOr) {
+            self.bump();
+            parts.push(self.parse_arm_bool_operand(subject, op)?);
+        }
+        Ok(parts
+            .into_iter()
+            .reduce(|a, b| {
+                let span = Span::new(a.span().start, b.span().end);
+                Expr::Binary(BinOp::Or, Box::new(a), Box::new(b), span)
+            })
+            .unwrap())
+    }
+
+    /// Operand after `&&` / `||`: a `|` union still distributes; a lone
+    /// predicate (Ident/field/call/…) is left as a Bool expression.
+    pub(super) fn parse_arm_bool_operand(
+        &mut self,
+        subject: &Expr,
+        op: BinOp,
+    ) -> Result<Expr, Diagnostic> {
+        if matches!(self.peek().kind, TokKind::LParen) {
+            self.bump();
+            let inner = self.parse_arm_value_cond(subject, op)?;
+            self.expect(TokKind::RParen, "to close the arm head group")?;
+            return Ok(inner);
+        }
+        let (cond, _) = self.parse_arm_alternates_cond(subject, op, true)?;
+        Ok(cond)
+    }
+
     /// `arm_alternates = arm_atom ("|" arm_atom)*`
     /// Returns `(condition_expr, alternate_count)`.
-    pub(super) fn parse_arm_alternates_cond(&mut self, subject: &Expr) -> Result<(Expr, usize), Diagnostic> {
-        let first = self.parse_arm_atom_cond(subject)?;
+    /// `prefer_predicate` is true for a single atom after `&&`/`||`.
+    pub(super) fn parse_arm_alternates_cond(
+        &mut self,
+        subject: &Expr,
+        op: BinOp,
+        prefer_predicate: bool,
+    ) -> Result<(Expr, usize), Diagnostic> {
+        let first = self.parse_arm_atom_cond(subject, op, prefer_predicate)?;
         let mut alts = vec![first];
         // Consume single `|` but not `||` (peek at the token after `|`).
         while matches!(self.peek().kind, TokKind::Pipe)
@@ -637,14 +682,13 @@ impl<'a> Parser<'a> {
             )
         {
             self.bump(); // consume `|`
-            alts.push(self.parse_arm_atom_cond(subject)?);
+            // Values in a `|` union always distribute.
+            alts.push(self.parse_arm_atom_cond(subject, op, false)?);
         }
         let n = alts.len();
         if n == 1 {
             return Ok((alts.into_iter().next().unwrap(), 1));
         }
-        // Each alt is already a condition (Eq(subject, value) or a comparison
-        // from `parse_arm_atom_cond`). Just Or them together.
         let combined = alts
             .into_iter()
             .reduce(|a, b| {
@@ -656,30 +700,64 @@ impl<'a> Parser<'a> {
     }
 
     /// `arm_atom = "(" arm_bool_expr ")" | single_value`
-    /// Paren groups recurse with full arm semantics (inner `|` = alternation).
-    pub(super) fn parse_arm_atom_cond(&mut self, subject: &Expr) -> Result<Expr, Diagnostic> {
+    pub(super) fn parse_arm_atom_cond(
+        &mut self,
+        subject: &Expr,
+        op: BinOp,
+        prefer_predicate: bool,
+    ) -> Result<Expr, Diagnostic> {
         if matches!(self.peek().kind, TokKind::LParen) {
             self.bump(); // consume `(`
-            let inner = self.parse_arm_value_cond(subject)?;
+            let inner = self.parse_arm_value_cond(subject, op)?;
             self.expect(TokKind::RParen, "to close the arm head group")?;
             return Ok(inner);
         }
-        // Single value: parse at comparison level so `|`, `&&`, and `||` are
-        // left for the outer arm-head grammar.
         let raw = self.expr_cmp(false)?;
-        Ok(Self::arm_atom_to_cond(subject.clone(), raw))
+        Ok(Self::arm_atom_to_cond(subject.clone(), raw, op, prefer_predicate))
     }
 
     /// Wrap a single value as a condition. Comparisons / PatternTest / Bool are
-    /// kept as-is; plain values get `subject == value` wrapping.
-    pub(super) fn arm_atom_to_cond(subject: Expr, value: Expr) -> Expr {
+    /// kept as-is; plain values get `subject OP value` wrapping (D-IFDIST1).
+    /// After `&&`/`||`, Ident/field/call predicates stay unwrapped.
+    pub(super) fn arm_atom_to_cond(
+        subject: Expr,
+        value: Expr,
+        op: BinOp,
+        prefer_predicate: bool,
+    ) -> Expr {
         match &value {
-            Expr::Binary(op, ..) if op.is_comparison() => value,
+            Expr::Binary(binop, ..)
+                if binop.is_comparison() || matches!(binop, BinOp::And | BinOp::Or) =>
+            {
+                value
+            }
             Expr::PatternTest { .. } | Expr::Bool(_, _) => value,
+            Expr::Unary(crate::AST::UnOp::Not, ..) => value,
+            Expr::Ident(..) | Expr::Field { .. } | Expr::Call { .. } | Expr::MethodCall { .. }
+                if prefer_predicate =>
+            {
+                value
+            }
             _ => {
                 let span = Span::new(subject.span().start, value.span().end);
-                Expr::Binary(BinOp::Eq, Box::new(subject), Box::new(value), span)
+                Expr::Binary(op, Box::new(subject), Box::new(value), span)
             }
+        }
+    }
+
+    /// D-IFDIST1: a comparison token followed by `{` is the dispatch marker.
+    pub(super) fn peek_dispatch_op(&self) -> Option<BinOp> {
+        if !matches!(self.peek2().kind, TokKind::LBrace) {
+            return None;
+        }
+        match self.peek().kind {
+            TokKind::EqEq => Some(BinOp::Eq),
+            TokKind::NotEq => Some(BinOp::Ne),
+            TokKind::Lt => Some(BinOp::Lt),
+            TokKind::Gt => Some(BinOp::Gt),
+            TokKind::Le => Some(BinOp::Le),
+            TokKind::Ge => Some(BinOp::Ge),
+            _ => None,
         }
     }
 
@@ -740,6 +818,19 @@ impl<'a> Parser<'a> {
             self.bump();
             return self.parse_guard_expr(start);
         }
+        // D-IFDIST1: `if subject OP { value-arms }` in expression position.
+        let probe = self.pos;
+        let probe_diags = self.diags.len();
+        if let Ok(subject) = self.expr_no_struct_lit_no_cmp() {
+            if let Some(op) = self.peek_dispatch_op() {
+                self.bump(); // comparison marker
+                self.expect(TokKind::LBrace, "to open the `if` dispatch body")?;
+                return self.parse_dispatch_expr(subject, op, start);
+            }
+        }
+        self.pos = probe;
+        self.diags.truncate(probe_diags);
+
         let cond = self.expr_no_struct_lit()?;
         self.expect(TokKind::Arrow, "after the condition of a value-producing `if`")?;
         let (then_body, then_value) = self.parse_selected_value()?;
@@ -769,6 +860,89 @@ impl<'a> Parser<'a> {
             else_value: Box::new(else_value),
             span,
         })
+    }
+
+    /// D-IFDIST1: value-producing `if subject OP { head -> value … else -> value }`.
+    /// Desugars to a nested `Expr::If` chain (same shape as subjectless value guards).
+    fn parse_dispatch_expr(
+        &mut self,
+        subject: Expr,
+        op: BinOp,
+        start: Span,
+    ) -> Result<Expr, Diagnostic> {
+        let pat_subject = match &subject {
+            Expr::Ident(..) => subject.clone(),
+            _ => Expr::Ident(Syntax::KW_IT.to_string(), subject.span()),
+        };
+        let mut arms: Vec<(Expr, Vec<Stmt>, Expr)> = Vec::new();
+        let (else_body, else_value, end) = loop {
+            while matches!(self.peek().kind, TokKind::Semi) {
+                self.bump();
+            }
+            match self.peek().kind {
+                TokKind::KwElse => {
+                    self.bump();
+                    self.expect(TokKind::Arrow, "after `else` in a value dispatch")?;
+                    let (body, value) = self.guard_value_body()?;
+                    while matches!(self.peek().kind, TokKind::Semi) {
+                        self.bump();
+                    }
+                    let close = self.peek().span;
+                    self.expect(TokKind::RBrace, "after the final `else` value dispatch arm")?;
+                    break (body, value, close.end);
+                }
+                TokKind::RBrace => {
+                    let close = self.bump().span;
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "a value dispatch needs a final `else` arm".to_string(),
+                        "open comparison tables cannot prove that one arm always matches"
+                            .to_string(),
+                        "add `else -> value` so every path produces a value".to_string(),
+                        Some(close),
+                    ));
+                }
+                TokKind::Eof => {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        "expected a final `else` arm and `}` for this value dispatch".to_string(),
+                        "a value dispatch must produce a value on every path".to_string(),
+                        "add `else -> value` and a closing `}`".to_string(),
+                        Some(self.peek().span),
+                    ));
+                }
+                _ => {
+                    let cond = self.if_arm_head(&subject, &pat_subject, op)?;
+                    self.expect(TokKind::Arrow, "after a value dispatch arm head")?;
+                    let (body, value) = self.guard_value_body()?;
+                    arms.push((cond, body, value));
+                }
+            }
+        };
+        if arms.is_empty() {
+            return Err(Diagnostic::error(
+                "E0003",
+                "a value dispatch needs at least one arm before `else`".to_string(),
+                "`else` is a fallback, not a condition".to_string(),
+                "add a `value -> result` arm before `else`".to_string(),
+                Some(start),
+            ));
+        }
+        let span = Span::new(start.start, end);
+        let mut fallback_body = else_body;
+        let mut fallback_value = else_value;
+        for (cond, then_body, then_value) in arms.into_iter().rev() {
+            fallback_value = Expr::If {
+                cond: Box::new(cond),
+                then_body,
+                then_value: Box::new(then_value),
+                else_body: fallback_body,
+                else_value: Box::new(fallback_value),
+                span,
+            };
+            fallback_body = Vec::new();
+        }
+        Ok(fallback_value)
     }
 
     fn parse_selected_value(&mut self) -> Result<(Vec<Stmt>, Expr), Diagnostic> {
@@ -957,7 +1131,7 @@ impl<'a> Parser<'a> {
                         }
                         else_body = Some(body);
                     } else {
-                        let cond = self.parse_arm_value_cond(&subject)?;
+                        let cond = self.parse_arm_value_cond(&subject, BinOp::Eq)?;
                         self.expect(TokKind::LBrace, "to open the arm's body")?;
                         let body = self.block_stmts();
                         let end = self.peek().span.end;

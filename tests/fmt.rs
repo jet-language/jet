@@ -321,6 +321,34 @@ fn fmt_preserves_concise_dispatch_arms() {
 }
 
 #[test]
+fn fmt_preserves_predicate_arms_under_eq_table() {
+    // D-IFDIST1: only the table marker is stripped. A predicate like
+    // `code >= 500` under `if code == { … }` must round-trip verbatim.
+    let src = r#"fn handle(code: Int) {
+    if code == {
+        200 -> print("ok")
+        code >= 500 -> print("retry")
+        else -> print("other")
+    }
+}
+
+fn run() {
+    handle(503)
+}
+"#;
+    let out = jet::format_source(src).expect("predicate arm dispatch should format");
+    assert!(
+        out.contains("if code =="),
+        "table marker lost or rewritten:\n{out}"
+    );
+    assert!(
+        out.contains("code >= 500"),
+        "predicate arm stripped to a bare atom:\n{out}"
+    );
+    assert_fmt_stable(&out, "predicate arms under == table");
+}
+
+#[test]
 fn fmt_keeps_trailing_dispatch_arm_comments_attached() {
     let src = r#"fn run() {
     value :: 1
@@ -2053,17 +2081,17 @@ fn run() {
 #[test]
 fn fmt_layout_block_round_trips_byte_for_byte() {
     // D-LAYOUT1: the parser desugars every `box.anchor` read inside
-    // `layout NAME { … }` into a `NAME.h(box, anchor)`/`NAME.v(box, anchor)`
+    // `NAME :: Layout.{ … }` into a `NAME.h(box, anchor)`/`NAME.v(box, anchor)`
     // method call (a purely structural rewrite, `Parser/Statements.rs`); the
     // formatter must re-sugar those calls back to `box.anchor` so `layout`
     // round-trips STABILITY, not just idempotence (memory: a prior formatter
     // change silently dropped tokens while only idempotence was checked).
     let src = "\
 fn run() {
-    layout form {
+    form :: Layout.{
         label.width >= 80.0
         label.right + 16.0 == input.left
-        label.width + 16.0 + input.width == form.width
+        label.width + 16.0 + input.width == self.width
     }
     w :: form.value(form.h(\"label\", \"width\"))
     print(w)

@@ -1412,7 +1412,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             env.bind(
                 name,
                 handle.clone(),
-                Some(Type::Named(Syntax::LAYOUT_HANDLE_TYPE.to_string())),
+                Some(Type::Named(Syntax::LAYOUT_TYPE.to_string())),
             );
             let lowered_body = lower_stmts(body, cx, env);
             TStmt::Layout {

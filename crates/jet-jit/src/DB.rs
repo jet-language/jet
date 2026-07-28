@@ -455,6 +455,40 @@ extern "C" fn jet_jit_dbvalue_is_null(handle: i64) -> i8 {
     }
 }
 
+/// Open in-memory SQLite (interpreter ambient host).
+pub(crate) fn runtime_open_memory() -> u64 {
+    runtime::jet_db_open_memory()
+}
+
+/// Open SQLite file (interpreter ambient host).
+pub(crate) fn runtime_open(path: &str) -> u64 {
+    runtime::jet_db_open(path)
+}
+
+pub(crate) fn runtime_close(handle: u64) -> bool {
+    runtime::jet_db_close(handle)
+}
+
+pub(crate) fn runtime_begin(handle: u64) -> bool {
+    runtime::jet_db_begin(handle)
+}
+
+pub(crate) fn runtime_commit(handle: u64) -> bool {
+    runtime::jet_db_commit(handle)
+}
+
+pub(crate) fn runtime_rollback(handle: u64) -> bool {
+    runtime::jet_db_rollback(handle)
+}
+
+pub(crate) fn runtime_execute(handle: u64, sql: &str, params_wire: &str) -> String {
+    runtime::jet_db_execute(handle, sql, params_wire)
+}
+
+pub(crate) fn runtime_query(handle: u64, sql: &str, params_wire: &str) -> String {
+    runtime::jet_db_query(handle, sql, params_wire)
+}
+
 pub(crate) struct DBHostFns {
     pub open_memory: FuncId,
     pub open: FuncId,

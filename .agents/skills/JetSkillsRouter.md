@@ -25,6 +25,7 @@ File id: `<skill>-YYYY-MM-DD`. Never overwrite another day's note.
 | Spec Compliance Audit | `spec-compliance-audit` | Codebase vs ratified syntax/spec |
 | Mission Audit | `mission-audit` | Language and experience vs philosophy/mission |
 | Pragmatism Audit | `pragmatism-audit` | Finish real jobs across domains; default magic + reject/override |
+| Type-Unification Audit | `type-unification-audit` | Traits/tags/markers/keywords as types; phantom types, fact fragmentation, closed tables |
 | Field Audit | `field-audit` | Leave/stay pressure + peer-strength gaps (one report) |
 | Surface Research | `surface-research` | Mine other languages for surface ideas |
 | Lessons Learned | `lessons-learned` | Peer failures Jet must not repeat |
@@ -46,6 +47,7 @@ are opt-in and outside this table.
 | Ratified syntax/spec vs source | **Spec Compliance Audit** |
 | Philosophy / mission alignment | **Mission Audit** |
 | Getting work done / domain friction / missing defaults / reject+override | **Pragmatism Audit** |
+| "Should X be a type?", marker/type disjointedness, phantom types, meta-type forward-compat | **Type-Unification Audit** |
 | Leave language X / peer strengths Jet lacks | **Field Audit** |
 | Mine languages for surface ideas | **Surface Research** |
 | Lineage / regrets / do-not-repeat | **Lessons Learned** |

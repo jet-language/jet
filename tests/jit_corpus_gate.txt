@@ -1,12 +1,15 @@
 # c727: differential example-corpus gate manifest.
 # Every top-level examples/features/<topic>/*.jet appears in exactly one section.
 # Update only for intentional ratchet moves.
+# D-VERDICT-1254-1 / D-LENS-RUN1: run_tier_broken may only shrink — AOT-green
+# examples that fail default jet run. Record stem + diagnostic code only.
 
 frontend_rejected:
   comptime/embed: E0956: call `embed_file` can't run at compile time yet; E0956: unbound `motd` can't run at compile time yet; E0107: nothing named `motd` exists here
   comptime/embed_bytes: E0956: call `embed_bytes` can't run at compile time yet; E0956: unbound `logo` can't run at compile time yet; E0956: unbound `logo` can't run at compile time yet; E0956: unbound `logo` can't run at compile time yet; E0107: nothing named `size` exists here; E0107: nothing named `fifth` exists here
   comptime/find: E0956: call `find` can't run at compile time yet; E0107: nothing named `paths` exists here
   comptime/find_empty: E0956: call `find` can't run at compile time yet; E0107: nothing named `paths` exists here
+  types/dimensional_quantities: E0112: `print` doesn't know how to show Length (a physical quantity)
 
 gate_excluded:
   game/raylib_window: interactive display required
@@ -29,7 +32,6 @@ expected_exit:
   concurrency/deadline_context: golden expects non-zero exit
   errors/error_context: golden expects non-zero exit
   errors/panic: golden expects non-zero exit
-  io/archive: AOT compile or run failed
   memory/pool_stale_id: golden expects non-zero exit
   tooling/panic_report: golden expects non-zero exit
 
@@ -153,6 +155,7 @@ resident_jit:
   functions/lambda_bare_params
   functions/lambda_inference
   game/core_game_headless
+  io/archive
   io/cli
   io/cli_args
   io/compress_gzip
@@ -174,7 +177,6 @@ resident_jit:
   io/stdin_filter
   io/stream
   io/terminal
-  io/terminal_parity
   io/watcher
   lowlevel/ffi
   lowlevel/freestanding
@@ -315,7 +317,6 @@ resident_jit:
   types/associated_types
   types/capability_bundles
   types/computed_field
-  types/dimensional_quantities
   types/display_debug
   types/distinct_types
   types/dot_construction
@@ -376,12 +377,11 @@ resident_jit:
 deopt_interp:
   basics/loop_values
   basics/range_step
-  collections/dynamic-array-view: E0956: split views can't run at compile time yet
-  crypto/crypto_suite: E0956: `jet.crypto.sha512_bytes()` at comptime can't run at compile time yet
-  io/args_audit: E0956: `core.args.spec()` at comptime can't run at compile time yet
-  io/args_spec: E0956: `core.args.spec()` at comptime can't run at compile time yet
-  io/db: E0956: `jet.db.open_memory()` at comptime can't run at compile time yet
-  io/dir_entry: E0956: `core.files.list_dir()` at comptime (impure tier) can't run at compile time yet
+  crypto/crypto_suite
+  io/args_audit
+  io/args_spec
+  io/db
+  io/dir_entry
   math/random_audit
   memory/uninit
   memory/uninit_buffer
@@ -389,6 +389,10 @@ deopt_interp:
   serde/encoding
   serde/validate
   tooling/statement_attributes
-  types/generic_constructor_inference: E0956: static `Box.new` can't run at compile time yet
-  ui/events: E0956: `core.event.scope()` at comptime can't run at compile time yet
+
+run_tier_broken:
+  collections/dynamic-array-view: E0956
+  io/terminal_parity: parity
+  types/generic_constructor_inference: E0956
+  ui/events: E0956
 

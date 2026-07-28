@@ -937,8 +937,8 @@ fn load(id: U64) => Record ? String {
 fn run() {
     print((load(7) ?? panic("success expected")).id)
     if load(8) == {
-        Ok(v) -> { print("unexpected {v.id}") }
-        Err(e) -> { print(e) }
+        .Ok(v) -> { print("unexpected {v.id}") }
+        .Err(e) -> { print(e) }
     }
 }
 "#; fs::write(&main,src).unwrap();

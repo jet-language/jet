@@ -164,35 +164,91 @@ fn native_call_hook(name: &str, args: &[CtValue]) -> Option<Result<CtValue, Diag
     )
 }
 
+/// Strip call-site "at comptime" framing baked into evaluator `what` strings
+/// before surfacing them as a runtime-tier diagnostic (D-VERDICT-1254-1).
+fn strip_comptime_framing(what: &str) -> String {
+    let mut s = what
+        .strip_suffix(" can't run at compile time yet")
+        .unwrap_or(what)
+        .to_string();
+    if let Some(rest) = s.strip_suffix(" (impure tier)") {
+        s = rest.to_string();
+    }
+    s = s.replace(" at comptime", "");
+    s = s.replace(" at compile time", "");
+    while s.contains("  ") {
+        s = s.replace("  ", " ");
+    }
+    s.trim().to_string()
+}
+
+/// Rewrite shared-evaluator diagnostics that leaked comptime voice into the
+/// default `jet run` / whole-program deopt path. Keeps the code; only what /
+/// why / fix change. Comptime callers never hit this (D-VERDICT-1254-1).
+fn rewrite_runtime_tier_diag(d: Diagnostic) -> Diagnostic {
+    let construct = match d.code.as_str() {
+        "E0956" => strip_comptime_framing(&d.what),
+        "E0951" => d
+            .what
+            .strip_suffix(" is not allowed in comptime code")
+            .unwrap_or(&d.what)
+            .to_string(),
+        "E3412" => d
+            .what
+            .strip_suffix(" is not available at comptime")
+            .unwrap_or(&d.what)
+            .to_string(),
+        "E3410" => d
+            .what
+            .split(" is a Tier-2")
+            .next()
+            .unwrap_or(&d.what)
+            .to_string(),
+        _ => return d,
+    };
+    Diagnostic::error(
+        d.code.clone(),
+        format!("{construct} isn't supported in Jet's quick-run mode yet"),
+        "Jet's quick-run mode doesn't cover this yet — that's a gap in Jet, not a mistake in your program"
+            .to_string(),
+        "run with `jet run --release <file>` (full build), which supports everything".to_string(),
+        d.span,
+    )
+}
+
 /// Whole-program interpreter deopt — same evaluator as `--interpret` / comptime.
 pub(crate) fn run_whole_interp(bundle: &ProgramBundle, plan: &TierPlan) -> RunOutcome {
     TIR::install_comptime_bridge();
     let started = Instant::now();
     let mut sink = DevSink::new();
-    let outcome = match Comptime::TirBridge::run_bundle(bundle, &mut sink, true) {
-        Ok(CtValue::ResErr(error)) => {
-            sink.stderr.push_str(&error.jet_show());
-            sink.stderr.push('\n');
-            RunOutcome::Ran {
+    let outcome = jet_codegen::Comptime::with_ambient(
+        Some(crate::ambient_interp::ambient_core_call),
+        Some(crate::ambient_interp::ambient_handle),
+        || match Comptime::TirBridge::run_bundle(bundle, &mut sink, true) {
+            Ok(CtValue::ResErr(error)) => {
+                sink.stderr.push_str(&error.jet_show());
+                sink.stderr.push('\n');
+                RunOutcome::Ran {
+                    stdout: sink.stdout,
+                    stderr: sink.stderr,
+                    exit_code: 1,
+                }
+            }
+            Ok(_) => RunOutcome::Ran {
                 stdout: sink.stdout,
                 stderr: sink.stderr,
-                exit_code: 1,
-            }
-        }
-        Ok(_) => RunOutcome::Ran {
-            stdout: sink.stdout,
-            stderr: sink.stderr,
-            exit_code: sink.exit_code.unwrap_or(0),
+                exit_code: sink.exit_code.unwrap_or(0),
+            },
+            Err(d) if sink.exit_code.is_some() || d.code == "SOFT_EXIT" => RunOutcome::Ran {
+                stdout: sink.stdout,
+                stderr: sink.stderr,
+                exit_code: sink
+                    .exit_code
+                    .unwrap_or_else(|| d.what.parse().unwrap_or(0)),
+            },
+            Err(d) => RunOutcome::Problems(vec![rewrite_runtime_tier_diag(d)]),
         },
-        Err(d) if sink.exit_code.is_some() || d.code == "SOFT_EXIT" => RunOutcome::Ran {
-            stdout: sink.stdout,
-            stderr: sink.stderr,
-            exit_code: sink
-                .exit_code
-                .unwrap_or_else(|| d.what.parse().unwrap_or(0)),
-        },
-        Err(d) => RunOutcome::Problems(vec![d]),
-    };
+    );
     let ms = started.elapsed().as_secs_f64() * 1000.0;
     let mut rows = plan.rows.clone();
     for row in &mut rows {

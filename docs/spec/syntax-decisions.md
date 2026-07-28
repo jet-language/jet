@@ -327,10 +327,10 @@ is control; write `?? (next)` for a same-named fallback value.
 removed; E0115).
 
 **S68 — `if`: effect, value, and ordered arm tables** *(D-IF1 +
-D-IF3 + D-MATCHARM1/2 + D-IFGUARD1=A + D-ARROW-CONTROL1=A)*: `if` is the only
+D-IF3 + D-MATCHARM1/2 + D-IFGUARD1=A + D-ARROW-CONTROL1=A + D-IFDIST1=A)*: `if` is the only
 branching keyword. The canonical multi-branch surface is one ordered arm-table
-model. Write `if subject == { head -> body }` when a named subject improves
-clarity, or `if { head -> body }` without one. A head may be a value or
+model. Write `if subject OP { head -> body }` when a named subject improves
+clarity (`OP` is any comparison), or `if { head -> body }` without one. A head may be a value or
 structural pattern against the subject, or any `Bool` expression evaluated as
 written; one table may mix unrelated expressions. The first matching or true
 head wins. Chained `else if` remains legal, but there should rarely be a reason
@@ -341,25 +341,40 @@ to prefer it and docs and diagnostics do not teach it as Jet's normal form.
   strips them.
 - Value form marks each selected value: `m :: if a > b -> a else -> b`.
   `else` is required (E0003), and branch types must match (E0124). A returned
-  multiline arm uses `-> { ... }`.
-- **Dispatch form** — `==` between subject and `{` is required (bare
-  `if subject { arm -> … }` is E0992, auto-fixed):
+  multiline arm uses `-> { ... }`. The same arm-table spelling works in
+  expression position and yields `Void` or one unified value type (D-IFDIST1).
+- **Dispatch form** — a comparison between subject and `{` is required (bare
+  `if subject { arm -> … }` is E0992, auto-fixed). Any of `== != < > <= >=`
+  distributes over bare arm atoms (D-IFDIST1=A):
 
 ```jet
 if code == {
     200 -> print("ok")
-    301 | 302 -> redirect()          // `|` alternates values
-    .Error(e) && e.fatal -> die(e)   // pattern + boolean guard
+    301 | 302 -> redirect()          // `|` unions distributed atoms
+    .Error(e) && e.fatal -> die(e)   // pattern + boolean guard (== only)
     code >= 500 -> retry()           // predicate arm
     else -> log(code)
 }
+
+return if n < {
+    16 -> 0
+    48 | 45 && ready -> 2            // `((n < 48 || n < 45) && ready)`
+    else -> 15
+}
 ```
 
-Arms: bare values (compared to the subject), leading-dot enum patterns, and any
-`Bool` expression evaluated as written. Guards use `&&`/`||` (booleans only —
-no comparison distribution); `|` binds tighter than `&&`/`||`, mixing without
-parens is E0328. Catch-all is `else ->`. Braceless single-expression bodies
+Arms: bare values (compared with the table's `OP`), leading-dot enum patterns
+(only with `==`), and any `Bool` expression evaluated as written. `|` binds
+tighter than `&&`/`||` and mixes without requiring parens (D-IFDIST1 amends
+D-MATCHARM2). Catch-all is `else ->`. Braceless single-expression bodies
 are allowed. Exhaustive pattern arms may omit `else`.
+
+**D-IFDIST1=A — distributed compare markers + Void-or-value tables** *(ratified
+2026-07-28, card #1305)*: amends D-IF3 / D-MATCHARM2 / S68. The dispatch marker
+is any comparison operator. Each bare atom desugars to `subject OP atom`; `|`
+is OR of those atoms (including for `!=`); `&&`/`||` combine further Bool
+heads. Pattern heads remain `==`-only. Statement and expression position share
+one table spelling; expression tables unify arm values or yield `Void`.
 
 **D-IFGUARD1=A — ordered subjectless guards** *(ratified 2026-07-18, card
 #680; amended by D-ARROW-CONTROL1)*: `if cond statement` is the one-line
@@ -3015,7 +3030,7 @@ D-ADAPT-PROVIDER1=A).
 
 **Reactive, events & UI stack** *(D-REACT1, D-REACTCORE1, D-SIGNAL1, D-EVENT1,
 D-DATARACE1=C, D-RENDERTGT1/2, D-UITREE1, D-STYLESHAPE1, D-MOTIONTIME1, D-LAYOUT1,
-D-OWNCOMP1, D-A11Y1, D-NATIVEUI1/2)*: reactivity is a library + explicit
+D-LAYOUT-CTOR1, D-OWNCOMP1, D-A11Y1, D-NATIVEUI1/2)*: reactivity is a library + explicit
 `#Reactive` scope marker (E2914) lowering onto `core.reactive` — `Signal<T>`
 (`.get()/.set(v)`), `Computed<T>`, `Effect`; explicit-by-read subscription;
 pure std runtime (E2910–E2913). D-DATARACE1=C: reactive boxes use lock-ordered
@@ -3028,8 +3043,9 @@ in `core.event`: `Event<T>`, `Hook<T, R>`, `Subscription`, `EventScope`,
 `EventPolicy`, and `EventTrace`. Render backends implement measure/layout/paint
 (`JetBackend`; `NullBackend`/`TuiBackend` shipped). UI trees are typed dot-construction
 (`.Button.{ label: "OK" }`); `Style` is one flat record; motion uses the
-injectable `Clock`; constraint layout is a `layout { }` block over
-`Constraint` handles with a first-party simplex solver (E2932–E2934).
+injectable `Clock`; constraint layout is `name :: Layout.{ … }` (D-DOTCTOR3
+element body of `Constraint` handles; D-LAYOUT-CTOR1) with a first-party
+simplex solver (E2932–E2936).
 Components distribute copy-in-and-own: `jetpack add <Component>` copies
 source into `./components/` (no version lock). Native UI wraps platform
 widget FFI, all three desktop platforms against one trait seam *(gated)*.

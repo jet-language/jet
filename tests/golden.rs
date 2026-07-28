@@ -169,22 +169,30 @@ fn examples_compile_and_run() {
         let jobs = Arc::clone(&jobs);
         let failures = Arc::clone(&failures);
         let checked = Arc::clone(&checked);
-        handles.push(std::thread::spawn(move || loop {
-            let Some(entry) = jobs.lock().unwrap().pop_front() else {
-                break;
-            };
-            let stem = entry.stem.clone();
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                check_golden_entry(&entry, &env)
-            }));
-            match result {
-                Ok(()) => *checked.lock().unwrap() += 1,
-                Err(payload) => failures
-                    .lock()
-                    .unwrap()
-                    .push(format!("{stem}: {}", panic_message(payload))),
-            }
-        }));
+        // Match `scripts/agent/jet-env` / nix RUST_MIN_STACK (~60MiB). Default
+        // worker stacks (~2–8MiB) overflow on large `if subject OP { … }` tables
+        // (D-IFDIST1 value/statement dispatch) during sema.
+        handles.push(
+            std::thread::Builder::new()
+                .stack_size(64 * 1024 * 1024)
+                .spawn(move || loop {
+                    let Some(entry) = jobs.lock().unwrap().pop_front() else {
+                        break;
+                    };
+                    let stem = entry.stem.clone();
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        check_golden_entry(&entry, &env)
+                    }));
+                    match result {
+                        Ok(()) => *checked.lock().unwrap() += 1,
+                        Err(payload) => failures
+                            .lock()
+                            .unwrap()
+                            .push(format!("{stem}: {}", panic_message(payload))),
+                    }
+                })
+                .expect("golden worker thread"),
+        );
     }
     for handle in handles {
         handle.join().expect("golden worker panicked outside harness");

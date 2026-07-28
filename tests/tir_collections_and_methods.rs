@@ -769,18 +769,18 @@ fn classify(x: Int) => Int ? Error {
 }
 fn run() {
     if classify(5) == {
-        Ok(n) -> {
+        .Ok(n) -> {
             print(n)
         }
-        Err(e) -> {
+        .Err(e) -> {
             print(e)
         }
     }
     if classify(0) == {
-        Ok(n) -> {
+        .Ok(n) -> {
             print(n)
         }
-        Err(e) -> {
+        .Err(e) -> {
             print(e)
         }
     }

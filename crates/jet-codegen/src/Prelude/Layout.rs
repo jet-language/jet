@@ -1,6 +1,6 @@
 mod jet_layout {
-    // D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29): a Cassowary-style
-    // linear constraint solver backing `layout NAME { … }`. I6: zero external
+    // D-LAYOUT1 / D-LAYOUT-GATES1 / D-LAYOUT-CTOR1: a Cassowary-style
+    // linear constraint solver backing `name :: Layout.{ … }`. I6: zero external
     // crates — a hand-rolled two-phase primal simplex, plain std Rust only.
     //
     // Design (the sema/codegen half lives in Sema/CheckerCoreLib.rs,
@@ -8,9 +8,9 @@ mod jet_layout {
     //   * `HVar`/`VVar`/`LengthVar` all erase to `LinExpr` here — the
     //     horizontal/vertical/neutral axis distinction is checked entirely at
     //     compile time (GATE 1/2); there is nothing to represent at runtime.
-    //   * A `layout NAME { … }` block's `box.anchor` reads desugar (parser,
-    //     D-LAYOUT1) to `NAME.h(box, anchor)` / `NAME.v(box, anchor)` — both
-    //     call the SAME internal `var()`, since the axis distinction is erased.
+    //   * A `Layout.{ … }` body's `box.anchor` / `self.anchor` reads desugar
+    //     (parser, D-LAYOUT-CTOR1) to `NAME.h(box, anchor)` / `NAME.v(box, anchor)`
+    //     — both call the SAME internal `var()`, since the axis distinction is erased.
     //   * `>=`/`<=`/`==` between layout values (GATE 1) lower to the free
     //     functions `ge`/`le`/`eq_` below (Rust operator overloading can't
     //     return a non-`bool` type via `>=`/`==` syntax).

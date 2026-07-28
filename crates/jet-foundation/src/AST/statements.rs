@@ -171,15 +171,17 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
-    /// D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29): `layout NAME { … }`
-    /// — a Cassowary-style constraint block. Unlike `region`/`taskgroup`, `name`
-    /// is declared in the ENCLOSING scope and outlives the block (solved values
-    /// are read after the layout is defined). The parser desugars each
-    /// `box.anchor` read inside `body` into a `NAME.h(box, anchor)` /
-    /// `NAME.v(box, anchor)` method call before sema ever sees it, so every line
-    /// is an ordinary `Stmt::Expr`/`Stmt::Bind` comparison expression checked by
-    /// the general GATE-1/GATE-2 machinery — `body` carries no layout-specific
-    /// AST shape of its own.
+    /// D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29) + D-LAYOUT-CTOR1
+    /// (D-VERDICT-1306-1): `name :: Layout.{ … }` — a Cassowary-style
+    /// constraint typed-literal. Unlike `region`/`taskgroup`, `name` is declared
+    /// in the ENCLOSING scope and outlives the literal (solved values are read
+    /// after the layout is defined). The parser desugars each `box.anchor` /
+    /// `self.anchor` read inside `body` into a `name.h(box, anchor)` /
+    /// `name.v(box, anchor)` method call before sema ever sees it, so every
+    /// element is an ordinary `Stmt::Expr`/`Stmt::Val` comparison expression
+    /// checked by the general GATE-1/GATE-2 machinery — `body` carries no
+    /// layout-specific AST shape of its own. Formatter canonical container
+    /// spelling is `self.anchor` when the box id equals the binding name.
     Layout {
         name: String,
         name_span: Span,

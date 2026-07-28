@@ -224,9 +224,10 @@ impl<'a> Fmt<'a> {
                 };
                 self.fmt_effect_loop_body(body, header_end);
             }
-            // D-IF3: multi-arm dispatch renders as `if subject == { head -> body }`
-            // (the `Stmt::Switch` IR is shared with the retired `when`). The `==`
-            // marker enters dispatch; arm heads carry no repeated `subject ==`.
+            // D-IF3 / D-IFDIST1: multi-arm dispatch renders as
+            // `if subject OP { head -> body }` (the `Stmt::Switch` IR is shared
+            // with the retired `when`). The comparison marker enters dispatch;
+            // arm heads carry no repeated `subject OP`.
             Stmt::Switch {
                 subject,
                 arms,
@@ -396,12 +397,15 @@ impl<'a> Fmt<'a> {
             // D-LAYOUT1: `layout form { … }`. The parser desugared every
             // `box.anchor` read into a `name.h(box, anchor)`/`name.v(box,
             // anchor)` method call at parse time (D-LAYOUT1, `Parser/
-            // Statements.rs`); re-sugar those calls back to `box.anchor`
-            // before formatting so `layout` round-trips byte-for-byte
-            // (original spans are reused end-to-end, so leading/trailing
-            // trivia lookups on the re-sugared clone still land correctly).
+            // D-LAYOUT-CTOR1: `name :: Layout.{ … }` — print the typed-literal
+            // surface; re-sugar `h`/`v` calls back to `box.anchor` / `self.anchor`.
             Stmt::Layout { name, body, .. } => {
-                self.write(&format!("{} {} {{", Syntax::KW_LAYOUT, name));
+                self.write(&format!(
+                    "{} {} {}.{{",
+                    name,
+                    Syntax::SIGIL_BIND_IMMUT,
+                    Syntax::LAYOUT_TYPE
+                ));
                 self.newline();
                 let resugared: Vec<Stmt> =
                     body.iter().map(|s| resugar_layout_stmt(name, s)).collect();
@@ -731,15 +735,19 @@ impl<'a> Fmt<'a> {
     }
 
     /// D-IF1/D-FMT1: render one dispatch arm. A bare-value arm
-    /// (`subject == value`) prints just the value; a full condition prints as
+    /// (`subject OP value`) prints just the value; a full condition prints as
     /// written. Preserve an author-written braceless simple body when it fits.
-    /// D-IF3 / D-OSTARGET2=B: render a dispatch body `== { arm -> … [else -> …] }`
-    /// (the caller has already written the `if` / `comptime if` lead and subject
-    /// keyword). Shared verbatim by `Stmt::Switch` and `Stmt::ComptimeSwitch` so
-    /// both render byte-for-byte identically.
+    /// D-IF3 / D-OSTARGET2=B / D-IFDIST1: render a dispatch body
+    /// `OP { arm -> … [else -> …] }` (the caller has already written the `if` /
+    /// `comptime if` lead). Shared by `Stmt::Switch` and `Stmt::ComptimeSwitch`.
     fn fmt_dispatch(&mut self, subject: &Expr, arms: &[SwitchArm], else_body: Option<&[Stmt]>) {
+        let table_op = self
+            .dispatch_op_from_source(subject)
+            .unwrap_or_else(|| self.dispatch_op(subject, arms));
         self.fmt_expr(subject, Prec::OrFallback);
-        self.write(" == {");
+        self.write(" ");
+        self.write(table_op.spell());
+        self.write(" {");
         self.newline();
         self.with_indent(|f| {
             for (index, arm) in arms.iter().enumerate() {
@@ -749,7 +757,7 @@ impl<'a> Fmt<'a> {
                 let next_starts_with_dot = arms
                     .get(index + 1)
                     .is_some_and(|next| Self::arm_head_starts_with_dot(&next.cond));
-                f.fmt_switch_arm(subject, arm, next_starts_with_dot);
+                f.fmt_switch_arm(subject, table_op, arm, next_starts_with_dot);
             }
             if let Some(else_b) = else_body {
                 if !arms.is_empty() {
@@ -790,8 +798,14 @@ impl<'a> Fmt<'a> {
         self.end_block();
     }
 
-    fn fmt_switch_arm(&mut self, subject: &Expr, arm: &SwitchArm, force_braces: bool) {
-        self.fmt_switch_cond(subject, &arm.cond, Prec::OrFallback);
+    fn fmt_switch_arm(
+        &mut self,
+        subject: &Expr,
+        table_op: BinOp,
+        arm: &SwitchArm,
+        force_braces: bool,
+    ) {
+        self.fmt_switch_cond(subject, table_op, &arm.cond, Prec::OrFallback);
         self.write(" ");
         self.write(Syntax::OP_ARM_ARROW);
         self.fmt_arm_body(&arm.body, force_braces);
@@ -887,16 +901,16 @@ impl<'a> Fmt<'a> {
             && !self.span_has_comment(arrow + Syntax::OP_ARM_ARROW.len(), line_end)
     }
 
-    fn fmt_switch_cond(&mut self, subject: &Expr, cond: &Expr, prec: Prec) {
-        // D-MATCHARM1: if the whole expression is an Or of subject-equalities,
-        // emit it with `|` alternation syntax instead of `||`.
-        if self.is_all_subject_alts(subject, cond) {
-            // D-MATCHARM2=B: parens required when inside && or || context.
+    fn fmt_switch_cond(&mut self, subject: &Expr, table_op: BinOp, cond: &Expr, prec: Prec) {
+        // D-MATCHARM1 / D-IFDIST1: if the whole expression is an Or of
+        // subject-table_op atoms, emit it with `|` alternation syntax instead of `||`.
+        if self.is_all_subject_alts(subject, table_op, cond) {
+            // Parens required when inside && or || context.
             let needs_paren = prec > Prec::OrFallback;
             if needs_paren {
                 self.write("(");
             }
-            self.fmt_arm_alternates(subject, cond);
+            self.fmt_arm_alternates(subject, table_op, cond);
             if needs_paren {
                 self.write(")");
             }
@@ -909,16 +923,20 @@ impl<'a> Fmt<'a> {
                 if needs_paren {
                     self.write("(");
                 }
-                self.fmt_switch_cond(subject, lhs, my_prec);
+                self.fmt_switch_cond(subject, table_op, lhs, my_prec);
                 self.write(" ");
                 self.write(op.spell());
                 self.write(" ");
-                self.fmt_switch_cond(subject, rhs, my_prec.add_rhs());
+                self.fmt_switch_cond(subject, table_op, rhs, my_prec.add_rhs());
                 if needs_paren {
                     self.write(")");
                 }
             }
-            Expr::Binary(BinOp::Eq, lhs, rhs, _) if self.same_subject(lhs, subject) => {
+            // Only strip the table's distributed marker — predicate arms like
+            // `code >= 500` under `if code == { … }` must print in full.
+            Expr::Binary(op, lhs, rhs, _)
+                if *op == table_op && self.same_subject(lhs, subject) =>
+            {
                 self.fmt_expr(rhs, Prec::Cmp);
             }
             Expr::PatternTest {
@@ -926,9 +944,8 @@ impl<'a> Fmt<'a> {
                 pattern,
                 ..
             } => {
-                // D-IF3: a pattern arm head is bare — the `==` marker on the `if`
-                // already binds it to the subject, so the head prints just the
-                // pattern (`Active(id)`, `Ok(n)`, `null`), no repeated `subject ==`.
+                // D-IF3: a pattern arm head is bare — the comparison marker on
+                // the `if` already binds it to the subject.
                 let _ = lhs;
                 self.fmt_pattern(pattern);
             }
@@ -936,37 +953,90 @@ impl<'a> Fmt<'a> {
         }
     }
 
-    /// True when `e` is an Or tree whose every leaf is Eq(subject, value).
-    /// A bare single Eq is NOT matched here — the existing `fmt_switch_cond`
-    /// match arm already strips the `subject ==` prefix for that case.
-    fn is_all_subject_alts(&self, subject: &Expr, e: &Expr) -> bool {
+    /// Read the comparison marker from source between the subject and `{`.
+    fn dispatch_op_from_source(&self, subject: &Expr) -> Option<BinOp> {
+        let rest = self.src.get(subject.span().end..)?;
+        let trimmed = rest.trim_start();
+        if trimmed.starts_with("==") {
+            Some(BinOp::Eq)
+        } else if trimmed.starts_with("!=") {
+            Some(BinOp::Ne)
+        } else if trimmed.starts_with("<=") {
+            Some(BinOp::Le)
+        } else if trimmed.starts_with(">=") {
+            Some(BinOp::Ge)
+        } else if trimmed.starts_with('<') {
+            Some(BinOp::Lt)
+        } else if trimmed.starts_with('>') {
+            Some(BinOp::Gt)
+        } else {
+            None
+        }
+    }
+
+    /// Infer the table's distributed comparison from subject-`table_op` leaves.
+    /// Prefers a consistent OP across pure distributed leaves; defaults to `==`.
+    fn dispatch_op(&self, subject: &Expr, arms: &[SwitchArm]) -> BinOp {
+        let mut found: Option<BinOp> = None;
+        for arm in arms {
+            self.collect_dispatch_ops(subject, &arm.cond, &mut found);
+        }
+        found.unwrap_or(BinOp::Eq)
+    }
+
+    fn collect_dispatch_ops(&self, subject: &Expr, e: &Expr, found: &mut Option<BinOp>) {
+        match e {
+            Expr::Binary(op, lhs, _, _)
+                if op.is_comparison() && self.same_subject(lhs, subject) =>
+            {
+                match *found {
+                    None => *found = Some(*op),
+                    Some(prev) if prev != *op => {
+                        // Mixed predicate + distributed leaves: keep the first
+                        // distributed OP only when source was unavailable.
+                    }
+                    _ => {}
+                }
+            }
+            Expr::Binary(BinOp::And | BinOp::Or, lhs, rhs, _) => {
+                self.collect_dispatch_ops(subject, lhs, found);
+                self.collect_dispatch_ops(subject, rhs, found);
+            }
+            _ => {}
+        }
+    }
+
+    /// True when `e` is an Or tree whose every leaf is `subject table_op value`.
+    fn is_all_subject_alts(&self, subject: &Expr, table_op: BinOp, e: &Expr) -> bool {
         match e {
             Expr::Binary(BinOp::Or, lhs, rhs, _) => {
-                self.is_subject_alt_leaf(subject, lhs) && self.is_subject_alt_leaf(subject, rhs)
+                self.is_subject_alt_leaf(subject, table_op, lhs)
+                    && self.is_subject_alt_leaf(subject, table_op, rhs)
             }
             _ => false,
         }
     }
 
-    fn is_subject_alt_leaf(&self, subject: &Expr, e: &Expr) -> bool {
+    fn is_subject_alt_leaf(&self, subject: &Expr, table_op: BinOp, e: &Expr) -> bool {
         match e {
-            Expr::Binary(BinOp::Eq, lhs, _, _) => self.same_subject(lhs, subject),
+            Expr::Binary(op, lhs, _, _) if *op == table_op => self.same_subject(lhs, subject),
             Expr::Binary(BinOp::Or, lhs, rhs, _) => {
-                self.is_subject_alt_leaf(subject, lhs) && self.is_subject_alt_leaf(subject, rhs)
+                self.is_subject_alt_leaf(subject, table_op, lhs)
+                    && self.is_subject_alt_leaf(subject, table_op, rhs)
             }
             _ => false,
         }
     }
 
     /// Emit alternates with `|` separators (caller adds outer parens if needed).
-    fn fmt_arm_alternates(&mut self, subject: &Expr, e: &Expr) {
+    fn fmt_arm_alternates(&mut self, subject: &Expr, table_op: BinOp, e: &Expr) {
         match e {
             Expr::Binary(BinOp::Or, lhs, rhs, _) => {
-                self.fmt_arm_alternates(subject, lhs);
+                self.fmt_arm_alternates(subject, table_op, lhs);
                 self.write(" | ");
-                self.fmt_arm_alternates(subject, rhs);
+                self.fmt_arm_alternates(subject, table_op, rhs);
             }
-            Expr::Binary(BinOp::Eq, _, rhs, _) => {
+            Expr::Binary(op, _, rhs, _) if *op == table_op => {
                 self.fmt_expr(rhs, Prec::Cmp);
             }
             _ => unreachable!("is_all_subject_alts should guard this path"),
@@ -1118,14 +1188,12 @@ impl<'a> Fmt<'a> {
     }
 }
 
-/// D-LAYOUT1: the inverse of `Parser::desugar_layout_anchors` — turns a
-/// `name.h(box, anchor)` / `name.v(box, anchor)` call back into the
-/// `box.anchor` source spelling before formatting. Only fires on the EXACT
-/// shape the parser's desugar produces (receiver is a bare `Ident` equal to
-/// `layout_name`, method is `h`/`v`, exactly two single-literal `Str` args);
-/// anything else (a real user call, e.g. `form.h(a, b)` written by hand
-/// against an unrelated `form`, or any other method) is left as-is, so this
-/// never corrupts a program that merely happens to call `.h`/`.v`.
+/// D-LAYOUT1 / D-LAYOUT-CTOR1: the inverse of `Parser::desugar_layout_anchors`
+/// — turns a `name.h(box, anchor)` / `name.v(box, anchor)` call back into the
+/// `box.anchor` / `self.anchor` source spelling before formatting. Only fires
+/// on the EXACT shape the parser's desugar produces (receiver is a bare
+/// `Ident` equal to `layout_name`, method is `h`/`v`, exactly two
+/// single-literal `Str` args); anything else is left as-is.
 fn single_str_lit(e: &Expr) -> Option<&str> {
     if let Expr::Str(parts, _) = e {
         if let [StrPart::Lit(s)] = parts.as_slice() {
@@ -1162,8 +1230,13 @@ fn resugar_layout_expr(layout_name: &str, e: &Expr) -> Expr {
                     if let (Some(box_name), Some(anchor)) =
                         (single_str_lit(&args[0].expr), single_str_lit(&args[1].expr))
                     {
+                        let shown = if box_name == layout_name {
+                            Syntax::KW_SELF.to_string()
+                        } else {
+                            box_name.to_string()
+                        };
                         return Expr::Field(
-                            Box::new(Expr::Ident(box_name.to_string(), *recv_span)),
+                            Box::new(Expr::Ident(shown, *recv_span)),
                             anchor.to_string(),
                             *method_span,
                         );

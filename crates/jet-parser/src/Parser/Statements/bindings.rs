@@ -459,7 +459,7 @@ impl<'a> Parser<'a> {
             {
                 self.bump(); // `==`
                 self.expect(TokKind::LBrace, "to open the `comptime if` dispatch body")?;
-                let switch = self.if_arms(subject, start)?;
+                let switch = self.if_arms(subject, start, BinOp::Eq)?;
                 let Stmt::Switch {
                     subject,
                     arms,
@@ -577,10 +577,10 @@ fn typed_lit_uninit_head(init: &Expr) -> Option<(Type, Span, Span)> {
     Some((head.clone(), *span, marker_span))
 }
 
-/// D-LAYOUT1: is `field` one of the recognized box-anchor names? `left`/
-/// `right`/`width` are horizontal (`HVar`); `top`/`bottom`/`height` are
-/// vertical (`VVar`). Returns the `LayoutHandle` accessor method name (`h`/
-/// `v`) or `None` if `field` isn't an anchor (an ordinary field access,
+/// D-LAYOUT1 / D-LAYOUT-CTOR1: is `field` one of the recognized box-anchor
+/// names? `left`/`right`/`width` are horizontal (`HVar`); `top`/`bottom`/
+/// `height` are vertical (`VVar`). Returns the `Layout` accessor method name
+/// (`h`/`v`) or `None` if `field` isn't an anchor (an ordinary field access,
 /// left untouched).
 fn layout_anchor_method(field: &str) -> Option<&'static str> {
     match field {
@@ -590,13 +590,15 @@ fn layout_anchor_method(field: &str) -> Option<&'static str> {
     }
 }
 
-/// D-LAYOUT1: purely structural, parse-time rewrite. Inside `layout NAME { … }`,
-/// a bare `box.anchor` read (`Expr::Field(Expr::Ident(box), anchor, _)`, where
-/// `anchor` is a recognized anchor name) becomes `NAME.h(box, anchor)` /
-/// `NAME.v(box, anchor)` — an ordinary `MethodCall` on the layout handle.
-/// Any other field access (unrecognized anchor name, non-`Ident` base) is left
-/// alone and falls through to normal resolution (and normal errors) in sema.
-/// No type information is used here (I3: all checking still lives in sema —
+/// D-LAYOUT1 / D-LAYOUT-CTOR1: purely structural, parse-time rewrite. Inside
+/// `name :: Layout.{ … }`, a bare `box.anchor` read
+/// (`Expr::Field(Expr::Ident(box), anchor, _)`, where `anchor` is a recognized
+/// anchor name) becomes `name.h(box, anchor)` / `name.v(box, anchor)` — an
+/// ordinary `MethodCall` on the layout handle. `self.anchor` vivifies the
+/// container box named after the binding (same box id as `name`). Any other
+/// field access (unrecognized anchor name, non-`Ident` base) is left alone
+/// and falls through to normal resolution (and normal errors) in sema. No
+/// type information is used here (I3: all checking still lives in sema —
 /// this only changes which AST shape sema sees, it decides nothing).
 pub(super) fn desugar_layout_anchors(layout_name: &str, stmt: &mut Stmt) {
     match stmt {
@@ -607,11 +609,15 @@ pub(super) fn desugar_layout_anchors(layout_name: &str, stmt: &mut Stmt) {
 }
 
 fn desugar_layout_expr(layout_name: &str, e: &mut Expr) {
-    // Rewrite this node in place if it's a `box.anchor` read.
+    // Rewrite this node in place if it's a `box.anchor` / `self.anchor` read.
     if let Expr::Field(base, field, field_span) = e {
         if let Expr::Ident(box_name, ident_span) = base.as_ref() {
             if let Some(method) = layout_anchor_method(field) {
-                let box_name = box_name.clone();
+                let box_name = if box_name == Syntax::KW_SELF {
+                    layout_name.to_string()
+                } else {
+                    box_name.clone()
+                };
                 let anchor = field.clone();
                 let span = *field_span;
                 let ident_span = *ident_span;

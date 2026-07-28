@@ -4,7 +4,46 @@ use crate::Codegen::TIR::{TForInMethod, TIfCond, TPatternPosition, TPlace, TStmt
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::CtValue;
 use crate::Diagnostics::Diagnostic;
-use super::{unsupported, EvalCtx, Flow};
+use super::{raw_place_local, unsupported, EvalCtx, Flow};
+
+/// Inclusive place-region handle used while evaluating `TStmt::SplitViews`.
+/// Reuses the `__JetViewMut` field shape so later splits can resolve absolute
+/// windows into the original owner list.
+fn place_region(base: &str, start: i64, end: i64) -> CtValue {
+    CtValue::Struct {
+        type_name: "__JetViewMut".into(),
+        fields: vec![
+            ("base".into(), CtValue::Str(base.to_string())),
+            ("start".into(), CtValue::Int(start)),
+            ("end".into(), CtValue::Int(end)),
+        ],
+    }
+}
+
+fn parse_place_region(value: &CtValue) -> Option<(String, i64, i64)> {
+    let CtValue::Struct {
+        type_name,
+        fields,
+    } = value
+    else {
+        return None;
+    };
+    if type_name != "__JetViewMut" {
+        return None;
+    }
+    let mut base = None;
+    let mut start = None;
+    let mut end = None;
+    for (name, v) in fields {
+        match (name.as_str(), v) {
+            ("base", CtValue::Str(s)) => base = Some(s.clone()),
+            ("start", CtValue::Int(n)) => start = Some(*n),
+            ("end", CtValue::Int(n)) => end = Some(*n),
+            _ => {}
+        }
+    }
+    Some((base?, start?, end?))
+}
 
 impl<'a> EvalCtx<'a> {
     pub(super) fn exec_loop_value(
@@ -708,7 +747,113 @@ impl<'a> EvalCtx<'a> {
             }
             TStmt::MathSwizzleAssign { .. } => Err(unsupported("math swizzle assign", self.span())),
             TStmt::GcEdit { .. } => Err(unsupported("gc edit", self.span())),
-            TStmt::SplitViews { .. } => Err(unsupported("split views", self.span())),
+            TStmt::SplitViews {
+                owner,
+                root,
+                len,
+                source,
+                source_start,
+                before,
+                split_tail,
+                segment,
+                after,
+                name,
+                start,
+                end,
+                single,
+                write: _,
+                elem_ty: _,
+                line: _,
+            } => {
+                // D-SHAPE-PLACE1=A: mirror AOT `split_at_mut` planning with absolute
+                // region handles. User bindings materialize to List / element values
+                // (CtValue has no distinct View type); intermediate plan temps keep
+                // `__JetViewMut { base, start, end }` so later splits chain correctly.
+                if let Some(owner_expr) = owner {
+                    let base_name = raw_place_local(owner_expr)
+                        .map(|local| local.name.clone())
+                        .ok_or_else(|| unsupported("split views owner", self.span()))?;
+                    let CtValue::List(items) = scope
+                        .get(&base_name)
+                        .cloned()
+                        .ok_or_else(|| unsupported("split views owner list", self.span()))?
+                    else {
+                        return Err(unsupported("split views owner list", self.span()));
+                    };
+                    let len_i = items.len() as i64;
+                    if *start < 0 || *end < *start || *end >= len_i {
+                        return Err(unsupported("split views bounds", self.span()));
+                    }
+                    let root_end = len_i - 1;
+                    scope.insert(root.clone(), place_region(&base_name, 0, root_end));
+                    scope.insert(len.clone(), CtValue::Int(len_i));
+                }
+                let len_i = match scope.get(len) {
+                    Some(CtValue::Int(n)) => *n,
+                    _ => return Err(unsupported("split views len", self.span())),
+                };
+                if *start < 0 || *end < *start || *end >= len_i {
+                    return Err(unsupported("split views bounds", self.span()));
+                }
+                let source_region = scope
+                    .get(source)
+                    .cloned()
+                    .ok_or_else(|| unsupported("split views source", self.span()))?;
+                let (base_name, _src_abs_start, src_abs_end) = parse_place_region(&source_region)
+                    .ok_or_else(|| unsupported("split views source region", self.span()))?;
+                let relative_start = *start - *source_start;
+                let width = *end - *start + 1;
+                if relative_start < 0 || width <= 0 {
+                    return Err(unsupported("split views range", self.span()));
+                }
+                // `(before, split_tail) = source.split_at(relative_start)`
+                if relative_start > 0 {
+                    scope.insert(
+                        before.clone(),
+                        place_region(&base_name, *source_start, *start - 1),
+                    );
+                } else {
+                    scope.insert(
+                        before.clone(),
+                        place_region(&base_name, *source_start, *source_start - 1),
+                    );
+                }
+                scope.insert(
+                    split_tail.clone(),
+                    place_region(&base_name, *start, src_abs_end),
+                );
+                // `(segment, after) = split_tail.split_at(width)`
+                scope.insert(segment.clone(), place_region(&base_name, *start, *end));
+                let after_start = *end + 1;
+                if after_start <= src_abs_end {
+                    scope.insert(
+                        after.clone(),
+                        place_region(&base_name, after_start, src_abs_end),
+                    );
+                } else {
+                    scope.insert(
+                        after.clone(),
+                        place_region(&base_name, after_start, *end),
+                    );
+                }
+                let CtValue::List(items) = scope
+                    .get(&base_name)
+                    .cloned()
+                    .ok_or_else(|| unsupported("split views owner", self.span()))?
+                else {
+                    return Err(unsupported("split views owner", self.span()));
+                };
+                let window = items[*start as usize..=*end as usize].to_vec();
+                if *single {
+                    scope.insert(
+                        name.clone(),
+                        window.into_iter().next().unwrap_or(CtValue::Unit),
+                    );
+                } else {
+                    scope.insert(name.clone(), CtValue::List(window));
+                }
+                Ok(Flow::Normal)
+            }
             TStmt::Reactive { .. } => Err(unsupported("statement `Reactive`", self.span())),
             TStmt::Layout { .. } => Err(unsupported("statement `Layout`", self.span())),
             TStmt::ContextBlock { body, .. } => self.exec_stmts(body, scope),

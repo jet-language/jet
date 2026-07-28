@@ -457,8 +457,8 @@ fn double(raw: String) => Int ? ParseError {
 }
 fn run() {
     if double("") == {
-        Ok(n) -> { print(n) }
-        Err(e) -> { print("failed") }
+        .Ok(n) -> { print(n) }
+        .Err(e) -> { print("failed") }
     }
 }
 "#;
@@ -540,8 +540,8 @@ fn dive(n: Int) => Int ? {
 }
 fn run() {
     if dive(4) == {
-        Ok(v) -> { print(v) }
-        Err(e) -> { print("failed") }
+        .Ok(v) -> { print(v) }
+        .Err(e) -> { print("failed") }
     }
 }
 "#;

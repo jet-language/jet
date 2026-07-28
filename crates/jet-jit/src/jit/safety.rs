@@ -2847,7 +2847,7 @@ pub(crate) fn opaque_host_handle_ty(ty: &Type) -> bool {
                 | "HookDecision"
                 | "HookOutcome"
                 | "EventConfigError"
-                | "LayoutHandle"
+                | "Layout"
                 | "GameScene"
                 | "GameFrame"
                 | "GameBackend"

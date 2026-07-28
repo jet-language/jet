@@ -6750,6 +6750,25 @@ fn example_has_err_golden(stem: &str) -> bool {
         .is_file()
 }
 
+fn example_has_out_golden(stem: &str) -> bool {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("examples/features/expected/{stem}.out"))
+        .is_file()
+}
+
+/// Unique diagnostic codes in encounter order — run_tier_broken records codes only
+/// so concurrent E0956 wording churn does not thrash the manifest.
+fn corpus_gate_unique_codes<'a>(codes: impl IntoIterator<Item = &'a str>) -> String {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for code in codes {
+        if seen.insert(code) {
+            out.push(code);
+        }
+    }
+    out.join("; ")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum CorpusGateClass {
     FrontendRejected,
@@ -6758,6 +6777,9 @@ enum CorpusGateClass {
     ExpectedExit,
     ResidentJit,
     DeoptInterp,
+    /// AOT-green (oracle exit 0) but default tiered `jet run` fails — shrink-only
+    /// burndown (D-VERDICT-1254-1 / D-LENS-RUN1). Detail is diagnostic codes only.
+    RunTierBroken,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -6807,6 +6829,23 @@ fn classify_corpus_stem(
             .map(|d| format!("{}: {}", d.code, d.what))
             .collect::<Vec<_>>()
             .join("; ");
+        // Run-path frontend rejection of an AOT/golden-green example is a
+        // run-tier parity hole, not a true frontend reject (D-VERDICT-1254-1).
+        if have_rustc && example_has_out_golden(stem) && !example_has_err_golden(stem) {
+            let _ffi_lock = uses_ffi_bridge(stem).then(FfiBridgeLock::acquire);
+            let worker_dir = dir.join(format!("w{worker}"));
+            if let Some(aot) =
+                try_compiled_binary_output(&worker_dir, "corpus_gate_aot", 0, stem, &file)
+            {
+                if aot.exit_code == 0 {
+                    return CorpusGateRecord {
+                        stem: stem.to_string(),
+                        class: CorpusGateClass::RunTierBroken,
+                        detail: corpus_gate_unique_codes(errors.iter().map(|d| d.code.as_str())),
+                    };
+                }
+            }
+        }
         return CorpusGateRecord {
             stem: stem.to_string(),
             class: CorpusGateClass::FrontendRejected,
@@ -6865,15 +6904,12 @@ fn classify_corpus_stem(
                 !jet_jit::is_e2211(&diags),
                 "`{stem}` must not emit retired E2211: {diags:?}"
             );
-            let detail = diags
-                .iter()
-                .map(|d| format!("{}: {}", d.code, d.what))
-                .collect::<Vec<_>>()
-                .join("; ");
+            // AOT already green above — Problems under default tiered run is a
+            // shrink-only run_tier_broken entry, never an accepted deopt class.
             CorpusGateRecord {
                 stem: stem.to_string(),
-                class: CorpusGateClass::DeoptInterp,
-                detail,
+                class: CorpusGateClass::RunTierBroken,
+                detail: corpus_gate_unique_codes(diags.iter().map(|d| d.code.as_str())),
             }
         }
         RunOutcome::Ran {
@@ -6886,10 +6922,15 @@ fn classify_corpus_stem(
                 ProgramOutput::ran(stdout, stderr, exit_code),
             );
             let aot_out = normalize_for_parity(stem, aot);
-            assert_eq!(
-                jit_out, aot_out,
-                "`{stem}` tiered run must match AOT stdout/stderr/exit byte-for-byte"
-            );
+            // AOT-green but tiered output/exit differs → shrink-only burndown
+            // (D-VERDICT-1254-1). Detail is the stable token `parity` (no free text).
+            if jit_out != aot_out {
+                return CorpusGateRecord {
+                    stem: stem.to_string(),
+                    class: CorpusGateClass::RunTierBroken,
+                    detail: "parity".to_string(),
+                };
+            }
             // Criterion #5: tiered must match AOT (above). Pure-interpreter must
             // match too when the TIR evaluator covers the program; remaining
             // E2201/E0956 gaps are TIR coverage (tracked for follow-on), not
@@ -6999,7 +7040,9 @@ fn corpus_gate_manifest_from_records(records: &[CorpusGateRecord]) -> String {
     let mut out = String::from(
         "# c727: differential example-corpus gate manifest.\n\
          # Every top-level examples/features/<topic>/*.jet appears in exactly one section.\n\
-         # Update only for intentional ratchet moves.\n\n",
+         # Update only for intentional ratchet moves.\n\
+         # D-VERDICT-1254-1 / D-LENS-RUN1: run_tier_broken may only shrink — AOT-green\n\
+         # examples that fail default jet run. Record stem + diagnostic code only.\n\n",
     );
     let classes = [
         CorpusGateClass::FrontendRejected,
@@ -7008,6 +7051,7 @@ fn corpus_gate_manifest_from_records(records: &[CorpusGateRecord]) -> String {
         CorpusGateClass::ExpectedExit,
         CorpusGateClass::ResidentJit,
         CorpusGateClass::DeoptInterp,
+        CorpusGateClass::RunTierBroken,
     ];
     for class in classes {
         let section = corpus_gate_section_name(&class);
@@ -7044,6 +7088,7 @@ fn corpus_gate_section_name(class: &CorpusGateClass) -> &'static str {
         CorpusGateClass::ExpectedExit => "expected_exit",
         CorpusGateClass::ResidentJit => "resident_jit",
         CorpusGateClass::DeoptInterp => "deopt_interp",
+        CorpusGateClass::RunTierBroken => "run_tier_broken",
     }
 }
 
@@ -7056,6 +7101,7 @@ fn parse_corpus_gate_manifest() -> Vec<CorpusGateRecord> {
         ExpectedExit,
         ResidentJit,
         DeoptInterp,
+        RunTierBroken,
     }
 
     let mut section = Section::None;
@@ -7090,6 +7136,10 @@ fn parse_corpus_gate_manifest() -> Vec<CorpusGateRecord> {
                 section = Section::DeoptInterp;
                 continue;
             }
+            "run_tier_broken:" => {
+                section = Section::RunTierBroken;
+                continue;
+            }
             "e2211:" => {
                 section = Section::DeoptInterp;
                 continue;
@@ -7107,6 +7157,7 @@ fn parse_corpus_gate_manifest() -> Vec<CorpusGateRecord> {
             Section::ExpectedExit => CorpusGateClass::ExpectedExit,
             Section::ResidentJit => CorpusGateClass::ResidentJit,
             Section::DeoptInterp => CorpusGateClass::DeoptInterp,
+            Section::RunTierBroken => CorpusGateClass::RunTierBroken,
             Section::None => panic!("manifest entry outside a section: {trimmed}"),
         };
         records.push(CorpusGateRecord {
@@ -7127,6 +7178,7 @@ fn print_corpus_gate_manifest(records: &[CorpusGateRecord]) {
         CorpusGateClass::ExpectedExit,
         CorpusGateClass::ResidentJit,
         CorpusGateClass::DeoptInterp,
+        CorpusGateClass::RunTierBroken,
     ];
     for class in classes {
         let section = corpus_gate_section_name(&class);
@@ -7154,7 +7206,9 @@ fn print_corpus_gate_manifest(records: &[CorpusGateRecord]) {
 /// manifest. AOT-oracle examples (exit 0) must resident-JIT or deopt-interp
 /// with backend attribution — never silent fallback. Each AOT-oracle case
 /// compares pure-interpreter, default tiered, and optimized AOT
-/// stdout/stderr/exit byte-for-byte (D-ONECORE1=A).
+/// stdout/stderr/exit byte-for-byte (D-ONECORE1=A). AOT-green examples that
+/// fail default tiered run land in shrink-only `run_tier_broken`
+/// (D-VERDICT-1254-1 / D-LENS-RUN1).
 ///
 /// c730: CI runs this via `tools/ci/jit-aot-parity.sh` on every supported
 /// native x86_64 host (Linux/macOS/Windows). Set `JET_CORPUS_GATE_REPORT_DIR`
@@ -7178,7 +7232,7 @@ fn example_corpus_strict_jit_aot_differential_gate() {
             .expect("write tests/jit_corpus_gate.txt");
         }
         eprintln!(
-            "c727 corpus gate: {} examples ({} resident JIT, {} deopt-interp)",
+            "c727 corpus gate: {} examples ({} resident JIT, {} deopt-interp, {} run-tier-broken)",
             records.len(),
             records
                 .iter()
@@ -7187,6 +7241,10 @@ fn example_corpus_strict_jit_aot_differential_gate() {
             records
                 .iter()
                 .filter(|r| r.class == CorpusGateClass::DeoptInterp)
+                .count(),
+            records
+                .iter()
+                .filter(|r| r.class == CorpusGateClass::RunTierBroken)
                 .count(),
         );
         return;
@@ -7203,8 +7261,10 @@ fn example_corpus_strict_jit_aot_differential_gate() {
     }
     assert_eq!(
         records, expected,
-        "corpus gate manifest drifted; refresh tests/jit_corpus_gate.txt with \
-         JET_DUMP_CORPUS_GATE=1 cargo test --test dev example_corpus_strict_jit_aot_differential_gate -- --exact --nocapture"
+        "corpus gate manifest drifted; update tests/jit_corpus_gate.txt only for an intentional \
+         ratchet move (D-VERDICT-1254-1: run_tier_broken may only shrink). Refresh with \
+         JET_DUMP_CORPUS_GATE=1 JET_WRITE_CORPUS_GATE=1 cargo test --test dev \
+         example_corpus_strict_jit_aot_differential_gate -- --exact --nocapture"
     );
     let aot_oracle: Vec<_> = records
         .iter()
@@ -7216,7 +7276,7 @@ fn example_corpus_strict_jit_aot_differential_gate() {
         })
         .collect();
     eprintln!(
-        "c727 corpus gate: {} classified, {} AOT-oracle ({} resident JIT, {} deopt-interp)",
+        "c727 corpus gate: {} classified, {} AOT-oracle ({} resident JIT, {} deopt-interp), {} run-tier-broken",
         records.len(),
         aot_oracle.len(),
         records
@@ -7226,6 +7286,10 @@ fn example_corpus_strict_jit_aot_differential_gate() {
         records
             .iter()
             .filter(|r| r.class == CorpusGateClass::DeoptInterp)
+            .count(),
+        records
+            .iter()
+            .filter(|r| r.class == CorpusGateClass::RunTierBroken)
             .count(),
     );
     write_corpus_gate_report(&records, started.elapsed());
@@ -7246,12 +7310,14 @@ fn write_corpus_gate_report(records: &[CorpusGateRecord], elapsed: std::time::Du
     let mut backend_trace = String::from(
         "# backend attribution (c727/c730)\n\
          # resident_jit = native Cranelift; deopt_interp = tiered deopt to tier-0\n\
+         # run_tier_broken = AOT-green but default jet run fails (D-VERDICT-1254-1)\n\
          # parity = pure-interpreter + default tiered + optimized AOT identity\n",
     );
     for record in records {
         let backend = match record.class {
             CorpusGateClass::ResidentJit => "resident_jit",
             CorpusGateClass::DeoptInterp => "deopt_interp",
+            CorpusGateClass::RunTierBroken => "run_tier_broken",
             CorpusGateClass::FrontendRejected => "frontend_rejected",
             CorpusGateClass::GateExcluded => "gate_excluded",
             CorpusGateClass::NonRunnable => "non_runnable",

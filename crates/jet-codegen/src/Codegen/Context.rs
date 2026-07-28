@@ -470,7 +470,7 @@ pub(crate) fn layout_handle_rust_type(name: &str) -> Option<&'static str> {
         "VVar" => Some("jet_layout::LinExpr"),
         "LengthVar" => Some("jet_layout::LinExpr"),
         "Constraint" => Some("jet_layout::Constraint"),
-        "LayoutHandle" => Some("jet_layout::Handle"),
+        "Layout" => Some("jet_layout::Handle"),
         _ => None,
     }
 }

@@ -26,36 +26,46 @@ pub const LINALG_VEC4_TYPE: &str = "Vec4";
 pub const LINALG_MAT3_TYPE: &str = "Mat3";
 pub const LINALG_MAT4_TYPE: &str = "Mat4";
 
-/// D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29): the built-in
-/// constraint-layout value types. `HVar`/`VVar` are axis-typed layout
-/// variables (horizontal/vertical); `LengthVar` is an axis-neutral scalar
-/// length that combines with either axis. GATE 1: comparison operators
-/// (`>=`/`<=`/`==`) on these types produce a `Constraint`, not `Bool` — a
-/// closed-operator blessing on this family only (same category as D-SIMD2).
-/// GATE 2: all five names enter the compiler's closed type family
-/// (`core_type_known`). A closed compiler-provided family — no user `+`/
-/// comparison overload. Cross-axis combination (`HVar` with `VVar`) is
-/// E-LAYOUT-AXIS-MISMATCH (E2932). `LayoutHandle` is the `layout NAME { … }`
-/// container/solver value; `Constraint` is a registered, prioritizable
-/// constraint handle (`.required()`/`.strong()`/`.medium()`/`.weak()`).
+/// D-LAYOUT1 / D-LAYOUT-GATES1 (ratified 2026-06-28/29) + D-LAYOUT-CTOR1
+/// (D-VERDICT-1306-1, ratified 2026-07-28): the built-in constraint-layout
+/// value types. `HVar`/`VVar` are axis-typed layout variables
+/// (horizontal/vertical); `LengthVar` is an axis-neutral scalar length that
+/// combines with either axis. GATE 1: comparison operators (`>=`/`<=`/`==`)
+/// on these types produce a `Constraint`, not `Bool` — a closed-operator
+/// blessing on this family only (same category as D-SIMD2). GATE 2: all five
+/// names enter the compiler's closed type family (`core_type_known`). A
+/// closed compiler-provided family — no user `+`/comparison overload.
+/// Cross-axis combination (`HVar` with `VVar`) is E-LAYOUT-AXIS-MISMATCH
+/// (E2932). `Layout` is the solver/container value constructed by
+/// `name :: Layout.{ … }` (D-DOTCTOR3 element body of `Constraint`s);
+/// `Constraint` is a registered, prioritizable constraint handle
+/// (`.required()`/`.strong()`/`.medium()`/`.weak()`). Method API
+/// (`Layout.h`/`v`/`value`/`suggest`/`add`, `Constraint.gte`/…) is the
+/// desugar underlayment. The retired user spelling `LayoutHandle` is E2936.
 pub const LAYOUT_HVAR_TYPE: &str = "HVar";
 pub const LAYOUT_VVAR_TYPE: &str = "VVar";
 pub const LAYOUT_LENGTHVAR_TYPE: &str = "LengthVar";
 pub const LAYOUT_CONSTRAINT_TYPE: &str = "Constraint";
-pub const LAYOUT_HANDLE_TYPE: &str = "LayoutHandle";
+pub const LAYOUT_TYPE: &str = "Layout";
+/// Retired D-LAYOUT1 spelling of `Layout` — teaching error E2936 only.
+pub const LAYOUT_HANDLE_TYPE_RETIRED: &str = "LayoutHandle";
+/// Transitional alias — every consumer should migrate to `LAYOUT_TYPE`.
+pub const LAYOUT_HANDLE_TYPE: &str = LAYOUT_TYPE;
 
-/// D-LAYOUT1 (ratified 2026-06-28): `layout NAME { … }` — a lexical block
-/// that binds `NAME` (a `LayoutHandle`) in the enclosing scope (the handle
-/// outlives the block, unlike `taskgroup`/`region`, since solved values are
-/// read after layout is defined). Each line in the body must be a
+/// D-LAYOUT-CTOR1 (D-VERDICT-1306-1): `name :: Layout.{ … }` — a D-DOTCTOR3
+/// typed-literal construction whose body is a sequence of `Constraint`
+/// elements. Binds `name` (a `Layout`) in the enclosing scope (the handle
+/// outlives the literal, unlike `taskgroup`/`region`, since solved values
+/// are read after layout is defined). Each body line must be a
 /// `>=`/`<=`/`==` comparison of layout values (a `Constraint`); the parser
 /// desugars bare `box.anchor` reads (`left`/`right`/`top`/`bottom`/`width`/
-/// `height`) into `NAME.h(box, anchor)` / `NAME.v(box, anchor)` calls, which
-/// sema/codegen treat exactly like any other `LayoutHandle` method call — no
-/// parallel checking mechanism, GATE 1/2 do all the real work. A lowercase
-/// contextual block keyword (D-CASING1), recognized only when followed by
-/// `name {`.
-pub const KW_LAYOUT: &str = "layout";
+/// `height`) into `name.h(box, anchor)` / `name.v(box, anchor)` calls, and
+/// `self.anchor` vivifies the container box named after the binding.
+/// Sema/codegen treat those exactly like any other `Layout` method call —
+/// no parallel checking mechanism; GATE 1/2 do all the real work.
+///
+/// Retired `layout NAME { … }` keyword (D-LAYOUT1) is E2935 only.
+pub const FOREIGN_LAYOUT_KW: &str = "layout";
 /// `use core.term as term` — exposes `term.read_key() => Key`.
 pub const CORE_TERM_MODULE: &str = "core.term";
 

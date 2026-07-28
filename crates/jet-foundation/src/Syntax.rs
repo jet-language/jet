@@ -64,6 +64,10 @@
 // D-COMPREHENSION1 fixes yielding-loop results to eager List.
 // D-IFGUARD1=A adds no spelling: subjectless statement/value guard tables
 // reuse KW_IF, KW_ELSE, OP_ARM_ARROW, braces, and ordinary Bool expressions.
+// D-IFDIST1=A (ratified 2026-07-28, card #1305) adds no token: any comparison
+// (`== != < > <= >=`) may mark `if subject OP { … }` dispatch. Bare arm atoms
+// desugar to `subject OP atom`; `|` unions those atoms; `&&`/`||` combine.
+// The same table is a Void-or-value expression in expression position.
 // D-SHAPE-CONVERT1=A adds no punctuation: explicit conversion is always a
 // destination-owned `Target.from_source(value)` static method. Text remains
 // the existing `Target.parse(text)` operation; source-owned `to_*` aliases are

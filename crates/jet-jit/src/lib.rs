@@ -13,6 +13,7 @@
 
 mod Archive;
 mod Args;
+mod ambient_interp;
 mod CLI;
 mod Collections;
 mod Compress;

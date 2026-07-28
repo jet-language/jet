@@ -6,6 +6,108 @@ use crate::Codegen::TIR::THandleOp;
 use super::unsupported;
 use super::browser;
 
+fn handle_op_name(op: &THandleOp) -> &'static str {
+    match op {
+        THandleOp::ArgsSpecFlag => "ArgsSpecFlag",
+        THandleOp::ArgsSpecFlagShort => "ArgsSpecFlagShort",
+        THandleOp::ArgsSpecOption => "ArgsSpecOption",
+        THandleOp::ArgsSpecOptionShort => "ArgsSpecOptionShort",
+        THandleOp::ArgsSpecOptionDefault => "ArgsSpecOptionDefault",
+        THandleOp::ArgsSpecOptionEnv => "ArgsSpecOptionEnv",
+        THandleOp::ArgsSpecOptionInt => "ArgsSpecOptionInt",
+        THandleOp::ArgsSpecOptionFloat => "ArgsSpecOptionFloat",
+        THandleOp::ArgsSpecOptionChoice => "ArgsSpecOptionChoice",
+        THandleOp::ArgsSpecRepeat => "ArgsSpecRepeat",
+        THandleOp::ArgsSpecRequiredOption => "ArgsSpecRequiredOption",
+        THandleOp::ArgsSpecPositional => "ArgsSpecPositional",
+        THandleOp::ArgsSpecSubcommand => "ArgsSpecSubcommand",
+        THandleOp::ArgsSpecVersion => "ArgsSpecVersion",
+        THandleOp::ArgsSpecCompletion => "ArgsSpecCompletion",
+        THandleOp::ArgsSpecHelp => "ArgsSpecHelp",
+        THandleOp::ArgsSpecParse => "ArgsSpecParse",
+        THandleOp::ParsedArgsFlag => "ParsedArgsFlag",
+        THandleOp::ParsedArgsOption => "ParsedArgsOption",
+        THandleOp::ParsedArgsOptionInt => "ParsedArgsOptionInt",
+        THandleOp::ParsedArgsOptionFloat => "ParsedArgsOptionFloat",
+        THandleOp::ParsedArgsOptions => "ParsedArgsOptions",
+        THandleOp::ParsedArgsSubcommand => "ParsedArgsSubcommand",
+        THandleOp::ParsedArgsPositional => "ParsedArgsPositional",
+        THandleOp::DBQuery => "DBQuery",
+        THandleOp::DBQueryOne => "DBQueryOne",
+        THandleOp::DBExecute => "DBExecute",
+        THandleOp::DBBegin => "DBBegin",
+        THandleOp::DBCommit => "DBCommit",
+        THandleOp::DBRollback => "DBRollback",
+        THandleOp::DBClose => "DBClose",
+        THandleOp::PathFrom => "PathFrom",
+        THandleOp::PathWriteAtomic => "PathWriteAtomic",
+        THandleOp::PathToString => "PathToString",
+        THandleOp::PathJoin => "PathJoin",
+        THandleOp::DBValueInt => "DBValueInt",
+        THandleOp::DBValueFloat => "DBValueFloat",
+        THandleOp::DBValueText => "DBValueText",
+        THandleOp::DBValueBool => "DBValueBool",
+        THandleOp::DBValueIsNull => "DBValueIsNull",
+        _ => "",
+    }
+}
+
+fn path_string(recv: &CtValue) -> Option<String> {
+    match recv {
+        CtValue::Str(s) => Some(s.clone()),
+        CtValue::Struct { type_name, fields } if type_name == "Path" => fields
+            .iter()
+            .find_map(|(n, v)| match (n.as_str(), v) {
+                ("inner", CtValue::Str(s)) => Some(s.clone()),
+                _ => None,
+            }),
+        _ => None,
+    }
+}
+
+fn path_value(s: String) -> CtValue {
+    CtValue::Struct {
+        type_name: "Path".to_string(),
+        fields: vec![("inner".to_string(), CtValue::Str(s))],
+    }
+}
+
+fn db_value_result(
+    recv: &CtValue,
+    want: &str,
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    let CtValue::Enum {
+        type_name,
+        variant,
+        args,
+    } = recv
+    else {
+        return Err(unsupported("DBValue accessor receiver", span));
+    };
+    if type_name != "DBValue" {
+        return Err(unsupported("DBValue accessor receiver", span));
+    }
+    let ok = |v| Ok(CtValue::ResOk(Box::new(v)));
+    let err = |msg: String| Ok(CtValue::ResErr(Box::new(CtValue::Str(msg))));
+    match (want, variant.as_str(), args.as_slice()) {
+        ("is_null", "Null", _) => Ok(CtValue::Bool(true)),
+        ("is_null", _, _) => Ok(CtValue::Bool(false)),
+        ("int", "Int", [(_, CtValue::Int(n))]) => ok(CtValue::Int(*n)),
+        ("float", "Float", [(_, CtValue::Float(f))]) => ok(CtValue::Float(f.clone())),
+        ("float", "Int", [(_, CtValue::Int(n))]) => {
+            ok(CtValue::Float(crate::AST::CtFloat::f64(*n as f64)))
+        }
+        ("text", "Text", [(_, CtValue::Str(s))]) => ok(CtValue::Str(s.clone())),
+        ("bool", "Bool", [(_, CtValue::Bool(b))]) => ok(CtValue::Bool(*b)),
+        ("int", _, _) => err(format!("expected an int, got {variant}")),
+        ("float", _, _) => err(format!("expected a float, got {variant}")),
+        ("text", _, _) => err(format!("expected text, got {variant}")),
+        ("bool", _, _) => err(format!("expected a bool, got {variant}")),
+        _ => Err(unsupported("DBValue accessor", span)),
+    }
+}
+
 pub(super) fn eval_handle(
     op: &THandleOp,
     recv: &mut CtValue,
@@ -15,7 +117,73 @@ pub(super) fn eval_handle(
     if let Some(result) = browser::handle(op, recv, args, span) {
         return result;
     }
+    let op_name = handle_op_name(op);
+    if !op_name.is_empty() {
+        if let Some(result) = crate::Comptime::eval_args_handle(op_name, recv, args, span) {
+            return result;
+        }
+        if let Some(result) = crate::Comptime::try_ambient_handle(op_name, recv, args, span) {
+            return result;
+        }
+    }
     match op {
+        THandleOp::PathFrom => {
+            let s = path_string(recv)
+                .or_else(|| args.first().and_then(path_string))
+                .ok_or_else(|| unsupported("Path.from expects text", span))?;
+            Ok(path_value(s))
+        }
+        THandleOp::PathToString => {
+            let s = path_string(recv).ok_or_else(|| unsupported("Path.to_string", span))?;
+            Ok(CtValue::Str(s))
+        }
+        THandleOp::PathJoin => {
+            let base = path_string(recv).ok_or_else(|| unsupported("Path.join recv", span))?;
+            let part = match args.first() {
+                Some(CtValue::Str(s)) => s.clone(),
+                _ => return Err(unsupported("Path.join expects text", span)),
+            };
+            Ok(path_value(
+                std::path::Path::new(&base)
+                    .join(part)
+                    .to_string_lossy()
+                    .into_owned(),
+            ))
+        }
+        THandleOp::PathWriteAtomic => {
+            let path = path_string(recv).ok_or_else(|| unsupported("Path.write_atomic", span))?;
+            let bytes = match args.first() {
+                Some(CtValue::Bytes(b)) => b.clone(),
+                Some(CtValue::List(items)) => {
+                    let mut out = Vec::with_capacity(items.len());
+                    for item in items {
+                        match item {
+                            CtValue::Int(n) if (0..=255).contains(n) => out.push(*n as u8),
+                            _ => return Err(unsupported("Path.write_atomic bytes", span)),
+                        }
+                    }
+                    out
+                }
+                _ => return Err(unsupported("Path.write_atomic expects bytes", span)),
+            };
+            match std::fs::write(&path, bytes) {
+                Ok(()) => Ok(CtValue::ResOk(Box::new(CtValue::Unit))),
+                Err(e) => Ok(CtValue::ResErr(Box::new(CtValue::Str(e.to_string())))),
+            }
+        }
+        THandleOp::DBValueInt => db_value_result(recv, "int", span),
+        THandleOp::DBValueFloat => db_value_result(recv, "float", span),
+        THandleOp::DBValueText => db_value_result(recv, "text", span),
+        THandleOp::DBValueBool => db_value_result(recv, "bool", span),
+        THandleOp::DBValueIsNull => db_value_result(recv, "is_null", span),
+        // Runtime-tier only (jet-jit ambient); comptime has no SQLite host.
+        THandleOp::DBQuery => Err(unsupported("handle `DBQuery`", span)),
+        THandleOp::DBQueryOne => Err(unsupported("handle `DBQueryOne`", span)),
+        THandleOp::DBExecute => Err(unsupported("handle `DBExecute`", span)),
+        THandleOp::DBBegin => Err(unsupported("handle `DBBegin`", span)),
+        THandleOp::DBCommit => Err(unsupported("handle `DBCommit`", span)),
+        THandleOp::DBRollback => Err(unsupported("handle `DBRollback`", span)),
+        THandleOp::DBClose => Err(unsupported("handle `DBClose`", span)),
         THandleOp::DurationNew { unit, float } => duration_new(recv, unit, *float, span),
         THandleOp::ClockNow => apply_method(recv, "now", args.to_vec(), span),
         THandleOp::ClockTick => apply_mutating(recv, "tick", args.to_vec(), span),
@@ -320,29 +488,13 @@ pub(super) fn eval_handle(
         THandleOp::JSONText => Err(unsupported("handle `JSONText`", span)),
         THandleOp::JSONBool => Err(unsupported("handle `JSONBool`", span)),
         THandleOp::JSONFloat => Err(unsupported("handle `JSONFloat`", span)),
-        THandleOp::PathFrom => Err(unsupported("handle `PathFrom`", span)),
-        THandleOp::PathJoin => Err(unsupported("handle `PathJoin`", span)),
         THandleOp::PathParent => Err(unsupported("handle `PathParent`", span)),
         THandleOp::PathExtension => Err(unsupported("handle `PathExtension`", span)),
         THandleOp::PathStem => Err(unsupported("handle `PathStem`", span)),
-        THandleOp::PathToString => Err(unsupported("handle `PathToString`", span)),
-        THandleOp::PathWriteAtomic => Err(unsupported("handle `PathWriteAtomic`", span)),
         THandleOp::PathWalk => Err(unsupported("handle `PathWalk`", span)),
         THandleOp::UiBackendMethod { .. } => Err(unsupported("handle `UiBackendMethod`", span)),
         THandleOp::DevServerMethod { .. } => Err(unsupported("handle `DevServerMethod`", span)),
         THandleOp::WebAppMethod { .. } => Err(unsupported("handle `WebAppMethod`", span)),
-        THandleOp::DBQuery => Err(unsupported("handle `DBQuery`", span)),
-        THandleOp::DBQueryOne => Err(unsupported("handle `DBQueryOne`", span)),
-        THandleOp::DBExecute => Err(unsupported("handle `DBExecute`", span)),
-        THandleOp::DBBegin => Err(unsupported("handle `DBBegin`", span)),
-        THandleOp::DBCommit => Err(unsupported("handle `DBCommit`", span)),
-        THandleOp::DBRollback => Err(unsupported("handle `DBRollback`", span)),
-        THandleOp::DBClose => Err(unsupported("handle `DBClose`", span)),
-        THandleOp::DBValueInt => Err(unsupported("handle `DBValueInt`", span)),
-        THandleOp::DBValueFloat => Err(unsupported("handle `DBValueFloat`", span)),
-        THandleOp::DBValueText => Err(unsupported("handle `DBValueText`", span)),
-        THandleOp::DBValueBool => Err(unsupported("handle `DBValueBool`", span)),
-        THandleOp::DBValueIsNull => Err(unsupported("handle `DBValueIsNull`", span)),
         THandleOp::PluginCall => Err(unsupported("handle `PluginCall`", span)),
         THandleOp::PluginCallInt => Err(unsupported("handle `PluginCallInt`", span)),
         THandleOp::ReaderOver => Err(unsupported("handle `ReaderOver`", span)),

@@ -1,9 +1,35 @@
-// 37 — `if` as a value, and optional condition parens (S68, D-SG2).
+// 37 — `if` as a value, and optional condition parens (S68, D-SG2, D-IFDIST1).
 fn classify(n: Int) => String {
     // An ordered arm table produces one value; `else` makes it exhaustive.
     return if {
         n > 0 -> "positive"
         n < 0 -> "negative"
+        else -> "zero"
+    }
+}
+
+// D-IFDIST1: distributed comparison marker — bare atoms become `n < atom`.
+fn hi_band(n: Int) => Int {
+    return if n < {
+        16 -> 0
+        32 -> 1
+        else -> 2
+    }
+}
+
+// D-IFDIST1: `|` unions distributed atoms; `&&` combines Bools without parens.
+fn hex_nibble(n: Int) => String {
+    return if n == {
+        0 -> "0"
+        10 | 11 && true -> "a"
+        else -> "f"
+    }
+}
+
+fn is_nonzero(n: Int) => String {
+    // Distributed `!=`: a bare atom becomes `n != atom`.
+    return if n != {
+        0 -> "nonzero"
         else -> "zero"
     }
 }
@@ -18,12 +44,24 @@ fn run() {
     note :: if {
         a > b -> {
             diff :: (a - b)
-            "a leads by {diff}"}
-        else -> "b leads"}
+            "a leads by {diff}"
+        }
+        else -> "b leads"
+    }
     print(note)
     print(classify(7))
     print(classify((-4)))
     print(classify(0))
     // Optional parens around a condition are accepted (jet fmt removes them).
     if a > b { print("a is bigger") }
+    print("{hi_band(20)}")
+    print(hex_nibble(10))
+    print(is_nonzero(3))
+    band :: if n_val() < {
+        5 -> "tiny"
+        else -> "big"
+    }
+    print(band)
 }
+
+fn n_val() => Int = 3

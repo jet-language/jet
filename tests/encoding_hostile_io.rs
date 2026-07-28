@@ -140,15 +140,15 @@ fn run() {{
     loop count < 32 {{
         result :: reader.next()
         if result == {{
-            Ok(maybe) -> {{
+            .Ok(maybe) -> {{
                 if maybe == None {{ break }}
                 count++
             }}
-            Err(first) -> {{
+            .Err(first) -> {{
                 again :: reader.next()
                 if again == {{
-                    Ok(_) -> {{ print("not-latched") }}
-                    Err(second) -> {{
+                    .Ok(_) -> {{ print("not-latched") }}
+                    .Err(second) -> {{
                         print(first.byte_offset == second.byte_offset && first.reason == second.reason)
                     }}
                 }}
@@ -178,12 +178,12 @@ fn run() {{
     writer.write(encoding.DataEvent.Int(1)) ?? panic("int")
     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
     if writer.finish() == {{
-        Ok(_) -> {{ print("finish-ok") }}
-        Err(first) -> {{
+        .Ok(_) -> {{ print("finish-ok") }}
+        .Err(first) -> {{
             again :: writer.finish()
             if again == {{
-                Ok(_) -> {{ print("finish-not-latched") }}
-                    Err(second) -> {{
+                .Ok(_) -> {{ print("finish-not-latched") }}
+                    .Err(second) -> {{
                         print(first.byte_offset == second.byte_offset && first.reason == second.reason)
                     }}
             }}
@@ -245,14 +245,14 @@ fn run() {{
     loop {{
         result :: reader.next()
         if result == {{
-            Ok(maybe) -> {{
+            .Ok(maybe) -> {{
                 if maybe == None {{ print("eof-missed"); break }}
             }}
-            Err(first) -> {{
+            .Err(first) -> {{
                 again :: reader.next()
                 if again == {{
-                    Ok(_) -> {{ print("not-latched") }}
-                    Err(second) -> {{
+                    .Ok(_) -> {{ print("not-latched") }}
+                    .Err(second) -> {{
                         print(first.byte_offset == second.byte_offset && first.reason == second.reason)
                     }}
                 }}
@@ -335,15 +335,15 @@ fn run() {{
     loop count < 16 {{
         result :: reader.next()
         if result == {{
-            Ok(maybe) -> {{
+            .Ok(maybe) -> {{
                 if maybe == None {{ break }}
                 count++
             }}
-            Err(first) -> {{
+            .Err(first) -> {{
                 again :: reader.next()
                 if again == {{
-                    Ok(_) -> {{ print("not-latched") }}
-                    Err(second) -> {{
+                    .Ok(_) -> {{ print("not-latched") }}
+                    .Err(second) -> {{
                         print(first.byte_offset == second.byte_offset && first.reason == second.reason)
                     }}
                 }}
@@ -372,12 +372,12 @@ fn run() {{
     writer.write(encoding.DataEvent.Int(3)) ?? panic("int")
     writer.write(encoding.DataEvent.ArrayEnd) ?? panic("end")
     if writer.finish() == {{
-        Ok(_) -> {{ print("finish-ok") }}
-        Err(first) -> {{
+        .Ok(_) -> {{ print("finish-ok") }}
+        .Err(first) -> {{
             again :: writer.finish()
             if again == {{
-                Ok(_) -> {{ print("not-latched") }}
-                    Err(second) -> {{
+                .Ok(_) -> {{ print("not-latched") }}
+                    .Err(second) -> {{
                         print(first.byte_offset == second.byte_offset && first.reason == second.reason)
                     }}
             }}
@@ -510,12 +510,12 @@ fn run() {{
     directory_reader := cbor.reader(^directory_input) ?? panic("reader")
     result :: directory_reader.next()
     if result == {{
-        Ok(_) -> {{ print("read-ok-missed") }}
-        Err(first) -> {{
+        .Ok(_) -> {{ print("read-ok-missed") }}
+        .Err(first) -> {{
             again :: directory_reader.next()
             if again == {{
-                Ok(_) -> {{ print("not-latched") }}
-                Err(second) -> {{
+                .Ok(_) -> {{ print("not-latched") }}
+                .Err(second) -> {{
                     print(first.kind == encoding.EncodingErrorKind.IO)
                     print(first.reason == second.reason)
                 }}
@@ -545,8 +545,8 @@ use core.files as files
 fn writer_io(writer: &cbor.CBORWriter) => Bool {{
     repeated :: writer.flush()
     if repeated == {{
-        Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
-        Ok(_) -> return false
+        .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
+        .Ok(_) -> return false
     }}
     return false
 }}
@@ -556,19 +556,19 @@ fn run() {{
     full_writer := cbor.writer(^full_output) ?? panic("full writer")
     write_result :: full_writer.write(encoding.DataEvent.Null)
     if write_result == {{
-        Err(first) -> {{
+        .Err(first) -> {{
             print(first.kind == encoding.EncodingErrorKind.IO)
             flush_again :: full_writer.flush()
             if flush_again == {{
-                Err(second) -> print(first.reason == second.reason)
-                Ok(done) -> print(false)
+                .Err(second) -> print(first.reason == second.reason)
+                .Ok(done) -> print(false)
             }}
         }}
-        Ok(_) -> {{
+        .Ok(_) -> {{
             flush_result :: full_writer.flush()
             if flush_result == {{
-                Err(io_error) -> print(writer_io(&full_writer))
-                Ok(done) -> print(false)
+                .Err(io_error) -> print(writer_io(&full_writer))
+                .Ok(done) -> print(false)
             }}
         }}
     }}
@@ -611,12 +611,12 @@ fn run() {{
     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
     result :: writer.write(encoding.DataEvent.Text("ab"))
     if result == {{
-        Ok(_) -> {{ print("missed-limit") }}
-        Err(first) -> {{
+        .Ok(_) -> {{ print("missed-limit") }}
+        .Err(first) -> {{
             again :: writer.finish()
             if again == {{
-                Ok(_) -> {{ print("finish-after-limit-missed") }}
-                Err(second) -> {{
+                .Ok(_) -> {{ print("finish-after-limit-missed") }}
+                .Err(second) -> {{
                     print(first.kind == encoding.EncodingErrorKind.Limit)
                     print(first.reason == second.reason)
                 }}
@@ -746,8 +746,8 @@ use core.files as files
 fn reader_io(reader: &cbor.CBORReader) => Bool {{
     repeated :: reader.next()
     if repeated == {{
-        Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
-        Ok(_) -> return false
+        .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
+        .Ok(_) -> return false
     }}
     return false
 }}
@@ -755,8 +755,8 @@ fn reader_io(reader: &cbor.CBORReader) => Bool {{
 fn writer_io(writer: &cbor.CBORWriter) => Bool {{
     repeated :: writer.flush()
     if repeated == {{
-        Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
-        Ok(_) -> return false
+        .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
+        .Ok(_) -> return false
     }}
     return false
 }}
@@ -770,12 +770,12 @@ fn run() {{
     full_writer := cbor.writer(^full_output) ?? panic("writer")
     write_result :: full_writer.write(encoding.DataEvent.Null)
     if write_result == {{
-        Err(io_error) -> print(writer_io(&full_writer))
-        Ok(wrote) -> {{
+        .Err(io_error) -> print(writer_io(&full_writer))
+        .Ok(wrote) -> {{
             flush_result :: full_writer.flush()
             if flush_result == {{
-                Err(io_error) -> print(writer_io(&full_writer))
-                Ok(done) -> print(false)
+                .Err(io_error) -> print(writer_io(&full_writer))
+                .Ok(done) -> print(false)
             }}
         }}
     }}

@@ -173,9 +173,9 @@ renumbered, and no new `W` code may be allocated.
 | E0985 | parse | *retired by D-S14-PAUSE* (was: `val`/`var` binding teaching) |
 | E0986 | parse | callable `=>`, `=[Effects]=>`, `=`, or `{` split incorrectly from the declaration head (S6-R, D-ARROW-CONTROL1) |
 | E0998 | parse | teaching: retired explicit binding forms → `: Type ::` / `: Type :=` (D-BIND4) |
-| E0992 | parse | teaching: implicit dispatch — a multi-arm `if` needs `==` between the subject and `{` (D-IF3) |
+| E0992 | parse | teaching: implicit dispatch — a multi-arm `if` needs a comparison between the subject and `{` (D-IF3 / D-IFDIST1) |
 | E0993 | parse | ~~retired by D-MATCHARM1=A~~ — predicate/Bool arm heads are now allowed |
-| E0994 | parse | teaching: a redundant `subject ==` on an arm head — the `if`'s `==` already applies it (D-IF3) |
+| E0994 | parse | teaching: a redundant `subject OP` on an arm head — the `if`'s comparison already applies it (D-IF3 / D-IFDIST1) |
 | E0999 | parse | teaching: stacked `#[…]` rule lines → one `#[A, B]` list or lone `#A` (D-ATTR2) |
 | E0991 | parse | teaching: the old `copy` keyword → `~` sigil (D-SHAPE-COPY1=A, supersedes D-CAP2/S4) |
 | E0101 | sema  | no `run` function                         |
@@ -289,7 +289,7 @@ renumbered, and no new `W` code may be allocated.
 | E0325 | parse | teaching: external inherent method `~~` connector → `.` (D-EXTMETH1) |
 | E0326 | sema  | a partial struct destructure (`.{ … }`) with no trailing `..` (D-DESTRUCT1) |
 | E0327 | sema  | a redundant `..` on a destructure that already names every field (D-DESTRUCT1) |
-| E0328 | parse | value alternates (`\|`) mixed with `&&`/`\|\|` without grouping parens in an arm head (D-MATCHARM2=B) |
+| E0328 | parse | ~~retired by D-IFDIST1=A~~ — `|` binds tighter than `&&`/`||` in arm heads; mixing needs no parens |
 | E0329 | parse | direct braceless nesting in an arm table without a named subject (D-IFGUARD1=A) |
 | E0330 | sema  | leading-dot enum variant (`.Variant`) with no inferable type from context (D-ENUMDOT2=A) |
 | E0331 | parse | a payload on a variant group name (D-TAG1) |
@@ -327,6 +327,7 @@ renumbered, and no new `W` code may be allocated.
 | E0363 | sema  | anonymous-union member is not a concrete closed type (D-UNIONTYPE1) |
 | E0364 | sema  | inclusive `0..xs.len()` indexes that same `xs` (D-RANGE-EXCL1=C) |
 | E0365 | sema  | repeated anonymous-union match member (D-UNIONTYPE1) |
+| E0366 | parse | teaching: pattern arms need `==` — other distributed markers do not bind structural patterns (D-IFDIST1) |
 | E0367 | parse/sema | bare variant pattern needs a leading `.` (D-ENUMDOT1) |
 | L0301 | sema  | unreachable dispatch pattern arm (lint)   |
 | L0302 | sema  | a closed-enum arm table would be clearer with a named subject (lint) |
@@ -735,9 +736,11 @@ renumbered, and no new `W` code may be allocated.
 | E2914 | sema  | `#Reactive fn` must not return a value (D-REACTCORE1) |
 | E2930 | sema  | an interactive `UiAriaRole` node has an empty accessible label, lint-only (D-A11YGATE1) |
 | E2931 | sema  | two interactive nodes in an inline focus group share an accessible label, lint-only (D-A11YGATE1) |
-| E2932 | sema  | a `layout { … }` constraint mixes a horizontal and vertical value (D-LAYOUT1 / D-LAYOUT-GATES1) |
-| E2933 | sema  | a line inside `layout { … }` doesn't produce a `Constraint` (D-LAYOUT1) |
-| E2934 | sema  | a `layout { … }` constraint exactly duplicates an earlier one in the same block, lint-only (D-LAYOUT1) |
+| E2932 | sema  | a `Layout.{ … }` constraint mixes a horizontal and vertical value (D-LAYOUT1 / D-LAYOUT-GATES1) |
+| E2933 | sema  | an element inside `Layout.{ … }` doesn't produce a `Constraint` (D-LAYOUT1 / D-LAYOUT-CTOR1) |
+| E2934 | sema  | a `Layout.{ … }` constraint exactly duplicates an earlier one in the same body, lint-only (D-LAYOUT1) |
+| E2935 | parse | teaching: retired `layout NAME { … }` → `name :: Layout.{ … }` (D-LAYOUT-CTOR1) |
+| E2936 | sema  | teaching: retired `LayoutHandle` → `Layout` (D-LAYOUT-CTOR1) |
 
 ## Callable and control syntax diagnostics
 
@@ -760,6 +763,7 @@ D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 | E0987 | No enclosing loop is named `{name}`. | `break(name)` and `next(name)` can target only a visible `name :: loop`. Loop names are compile-time control targets. | Correct the name, or add `name ::` before the intended enclosing loop. |
 | E0988 | This uses a retired loop-label or dot-exit form. | Named exits are keyword-led: `break(name)`, `break(name, value)`, and `next(name)`. A loop name is not a runtime object. | Replace the dot or `@` form with the matching target-argument exit. Keep the declaration as `name :: loop`. |
 | E0335 | A bare `{ }` follows a call. | Code arguments are ordinary `() => { … }` lambdas inside the call's parentheses (D-TRAILBLOCK2). Trailing `{ }` sugar after a call is gone. | Write `callee(() => { … })`. Put each statement on its own line inside the block. |
+| E0366 | A pattern arm sits under a non-`==` distributed `if` table. | Structural patterns bind under `if subject == { … }` only. Other markers (`<`, `!=`, …) distribute bare values, not shapes. | Write `if subject == { … }` for pattern arms, or use a Bool head. |
 
 ## Editions and release policy (E2-M2)
 
@@ -1135,22 +1139,25 @@ runtime value it can't see.
 | E2930 | this {role} has no accessible label | Screen readers announce a control by its accessible label; an empty label is invisible to assistive tech. | Pass a real label, e.g. `ui.node_role("Submit", w, h, ui.aria_role_button())`. |
 | E2931 | two interactive nodes both have the label "{label}" | Assistive tech announces controls by their label — identical labels make them indistinguishable (WCAG 2.5.3). | Give each interactive node a distinct, descriptive label. |
 
-## Layout constraint diagnostics (D-LAYOUT1 / D-LAYOUT-GATES1)
+## Layout constraint diagnostics (D-LAYOUT1 / D-LAYOUT-GATES1 / D-LAYOUT-CTOR1)
 
-`layout NAME { … }` (D-LAYOUT1=A) is a Cassowary-style linear constraint
-block. GATE 1 lets `>=`/`<=`/`==` between the closed layout types
-(`HVar`/`VVar`/`LengthVar`) produce a `Constraint` instead of `Bool`; GATE 2
-puts those types (plus `Constraint`/`LayoutHandle`) in the compiler's closed
-type family. E2932/E2933 are ordinary compile errors (shown in `jet build`/
-`jet run`/`jet check` like any other); E2934 is an ordinary warning
-(non-blocking). All three are static — computed from the constraint
-expressions' shapes, not from solved values.
+`name :: Layout.{ … }` (D-LAYOUT-CTOR1) is a Cassowary-style linear constraint
+typed literal (D-DOTCTOR3 element body of `Constraint`s). GATE 1 lets
+`>=`/`<=`/`==` between the closed layout types (`HVar`/`VVar`/`LengthVar`)
+produce a `Constraint` instead of `Bool`; GATE 2 puts those types (plus
+`Constraint`/`Layout`) in the compiler's closed type family. E2932/E2933 are
+ordinary compile errors (shown in `jet build`/`jet run`/`jet check` like any
+other); E2934 is an ordinary warning (non-blocking). E2935 teaches the
+retired `layout NAME { … }` keyword; E2936 teaches the retired
+`LayoutHandle` type name. Method API (`Layout.h`/`v`/`value`/`suggest`, …)
+is the desugar underlayment. All of E2932–E2934 are static — computed from
+the constraint expressions' shapes, not from solved values.
 
 Infeasibility (two required constraints that can't both hold) is NOT one of
 these — it generally depends on values the solver only has at runtime, so it
-isn't a static diagnostic. `LayoutHandle.is_feasible()` / `.conflict()`
+isn't a static diagnostic. `Layout.is_feasible()` / `.conflict()`
 query it explicitly (`.conflict()` names the contradicting required
-constraints, straight from the simplex tableau); `LayoutHandle.value(v)`
+constraints, straight from the simplex tableau); `Layout.value(v)`
 panics with the same conflict list if the layout is infeasible when a value
 is read, rather than silently returning a wrong number (I1 — a loud failure
 beats a quiet wrong one). Detecting infeasibility from a WHOLLY
@@ -1161,8 +1168,10 @@ implemented.
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E2932 | layout constraint mixes a horizontal and vertical value (`{lt}` and `{rt}`) | `left`/`right`/`width` are horizontal (`HVar`); `top`/`bottom`/`height` are vertical (`VVar`) — combining or comparing across axes is caught at compile time instead of producing a nonsensical layout. | Compare or combine values from the same axis (a `LengthVar`, or a plain number, fits either axis). |
-| E2933 | this line inside `layout {name}` doesn't produce a constraint (found `{ty}`) | Every line directly inside a `layout { … }` block must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`). | Write a comparison, e.g. `label.width >= 80.0`, or capture it: `c :: label.width >= 80.0`. |
-| E2934 | this constraint repeats one already written in this `layout` block | An exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover. | Remove the duplicate line, or change it if a different constraint was meant. |
+| E2933 | this line inside `{name} :: Layout.{{ … }}` doesn't produce a constraint (found `{ty}`) | Every element directly inside a `Layout.{ … }` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`). | Write a comparison, e.g. `label.width >= 80.0`, or capture it: `c :: label.width >= 80.0`. |
+| E2934 | this constraint repeats one already written in this `Layout.{{ … }}` body | An exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover. | Remove the duplicate line, or change it if a different constraint was meant. |
+| E2935 | `` `layout` is retired `` | Constraint layouts use typed-literal construction. | Write `` `{name} :: Layout.{{ … }}` ``. |
+| E2936 | the constraint-layout type is named `Layout`, not `LayoutHandle` | One name for the solver/container value (I8). | Write `Layout` instead of `LayoutHandle`. |
 
 ## Debugging and observability diagnostics (E2-M12, D-OBS1–3)
 

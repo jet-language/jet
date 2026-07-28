@@ -2154,7 +2154,7 @@ impl<'a> Checker<'a> {
                         *name_span,
                         LocalInfo {
                             def_span: *name_span,
-                            ty: Type::Named(Syntax::LAYOUT_HANDLE_TYPE.to_string()),
+                            ty: Type::Named(Syntax::LAYOUT_TYPE.to_string()),
                             mutable: false,
                             param_conv: None,
                             decl_loop_depth: self.loop_depth,
@@ -2184,19 +2184,26 @@ impl<'a> Checker<'a> {
                                 self.diags.push(Diagnostic::error(
                                     "E2933",
                                     format!(
-                                        "this line inside `{} {}` doesn't produce a constraint (found `{}`)",
-                                        Syntax::KW_LAYOUT,
+                                        "this line inside `{} {} {}.{{ … }}` doesn't produce a constraint (found `{}`)",
                                         name,
+                                        Syntax::SIGIL_BIND_IMMUT,
+                                        Syntax::LAYOUT_TYPE,
                                         t.as_ref().map(|ty| ty.name()).unwrap_or_default()
                                     ),
-                                    "every line directly inside a `layout { … }` block must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`)".to_string(),
+                                    format!(
+                                        "every element inside a `{}.{{ … }}` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`)",
+                                        Syntax::LAYOUT_TYPE
+                                    ),
                                     "write a comparison, e.g. `label.width >= 80.0`, or capture it: `c :: label.width >= 80.0`".to_string(),
                                     Some(e.span()),
                                 ));
                             } else if is_constraint && !seen_constraints.insert(fp) {
                                 self.diags.push(Diagnostic::lint(
                                     "E2934",
-                                    "this constraint repeats one already written in this `layout` block".to_string(),
+                                    format!(
+                                        "this constraint repeats one already written in this `{}.{{ … }}` body",
+                                        Syntax::LAYOUT_TYPE
+                                    ),
                                     "an exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover".to_string(),
                                     "remove the duplicate line, or change it if a different constraint was meant".to_string(),
                                     Some(e.span()),
@@ -2222,18 +2229,25 @@ impl<'a> Checker<'a> {
                                     self.diags.push(Diagnostic::error(
                                         "E2933",
                                         format!(
-                                            "this binding inside `{} {}` doesn't capture a constraint",
-                                            Syntax::KW_LAYOUT,
-                                            name
+                                            "this binding inside `{} {} {}.{{ … }}` doesn't capture a constraint",
+                                            name,
+                                            Syntax::SIGIL_BIND_IMMUT,
+                                            Syntax::LAYOUT_TYPE
                                         ),
-                                        "every line directly inside a `layout { … }` block must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), optionally captured with `::`".to_string(),
+                                        format!(
+                                            "every element inside a `{}.{{ … }}` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), optionally captured with `::`",
+                                            Syntax::LAYOUT_TYPE
+                                        ),
                                         "bind a comparison: `c :: label.width >= 80.0`".to_string(),
                                         Some(name_span),
                                     ));
                                 } else if !seen_constraints.insert(fp) {
                                     self.diags.push(Diagnostic::lint(
                                         "E2934",
-                                        "this constraint repeats one already written in this `layout` block".to_string(),
+                                        format!(
+                                            "this constraint repeats one already written in this `{}.{{ … }}` body",
+                                            Syntax::LAYOUT_TYPE
+                                        ),
                                         "an exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover".to_string(),
                                         "remove the duplicate line, or change it if a different constraint was meant".to_string(),
                                         Some(name_span),
@@ -2244,11 +2258,13 @@ impl<'a> Checker<'a> {
                             self.diags.push(Diagnostic::error(
                                 "E2933",
                                 format!(
-                                    "only constraint lines belong directly inside a `{} {}` block",
-                                    Syntax::KW_LAYOUT,
-                                    name
+                                    "only constraint elements belong directly inside a `{}.{{ … }}` body",
+                                    Syntax::LAYOUT_TYPE
                                 ),
-                                "every line directly inside a `layout { … }` block must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), optionally captured with `::`".to_string(),
+                                format!(
+                                    "every element inside a `{}.{{ … }}` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), optionally captured with `::`",
+                                    Syntax::LAYOUT_TYPE
+                                ),
                                 "write a comparison, e.g. `label.width >= 80.0`".to_string(),
                                 Some(stmt.span()),
                             ));

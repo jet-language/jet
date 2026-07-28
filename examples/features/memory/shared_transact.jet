@@ -28,7 +28,7 @@ fn run() {
     // Eight concurrent transfers of 100 each. Whatever order the runtime picks,
     // every transfer is atomic, so the final balances are deterministic and the
     // grand total is conserved exactly.
-    // (t1, t2, t3, t4, t5, t6, t7, t8) :: tasks.spawn(() => transfer(from, to, 100))
+    // <: t1, t2, t3, t4, t5, t6, t7, t8 :> :: tasks.spawn(() => transfer(from, to, 100))
 
     t1 :: tasks.spawn(() => transfer(from, to, 100))
     t2 :: tasks.spawn(() => transfer(from, to, 100))
@@ -38,7 +38,7 @@ fn run() {
     t6 :: tasks.spawn(() => transfer(from, to, 100))
     t7 :: tasks.spawn(() => transfer(from, to, 100))
     t8 :: tasks.spawn(() => transfer(from, to, 100))
-    // (t1, t2, t3, t4, t5, t6, t7, t8).wait()
+    // <: t1, t2, t3, t4, t5, t6, t7, t8 :>.wait()
     t1.wait()
     t2.wait()
     t3.wait()

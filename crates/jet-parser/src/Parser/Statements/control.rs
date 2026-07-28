@@ -320,6 +320,99 @@ impl<'a> Parser<'a> {
             )
     }
 
+    /// D-LAYOUT-CTOR1: `name (::|:=) Layout .{` — typed-literal constraint body.
+    /// `:=` is recognized so we can teach immutable `::` (not silent TypedLit fallthrough).
+    fn looks_like_layout_ctor(&self) -> bool {
+        matches!(self.peek().kind, TokKind::Ident(_))
+            && matches!(
+                self.peek2().kind,
+                TokKind::ColonColon | TokKind::ColonEq
+            )
+            && matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::LAYOUT_TYPE)
+            && matches!(self.peek4().kind, TokKind::Dot)
+            && matches!(self.peek5().kind, TokKind::LBrace)
+    }
+
+    /// D-LAYOUT-CTOR1: parse `name :: Layout.{ … }` into `Stmt::Layout`.
+    fn layout_ctor_binding(&mut self) -> Result<Stmt, Diagnostic> {
+        let (name, name_span) = self.expect_ident("for the layout binding name")?;
+        let mutable = self.expect_bind_sigil()?;
+        if mutable {
+            return Err(Diagnostic::error(
+                "E0003",
+                format!(
+                    "a `{}.{{ … }}` binding is immutable",
+                    Syntax::LAYOUT_TYPE
+                ),
+                format!(
+                    "`{}` builds a solved layout handle once; mutate suggestions through `.suggest`, not the binding",
+                    Syntax::LAYOUT_TYPE
+                ),
+                format!(
+                    "write `{name} {} {}.{{ … }}`",
+                    Syntax::SIGIL_BIND_IMMUT,
+                    Syntax::LAYOUT_TYPE
+                ),
+                Some(name_span),
+            ));
+        }
+        let type_tok = self.bump(); // `Layout`
+        self.expect(TokKind::Dot, "before the layout constraint body")?;
+        self.expect(TokKind::LBrace, "to open a Layout typed literal")?;
+        self.in_layout_body += 1;
+        let mut body = self.block_stmts();
+        self.in_layout_body -= 1;
+        let end = self.toks[self.pos - 1].span.end;
+        for stmt in &mut body {
+            desugar_layout_anchors(&name, stmt);
+        }
+        Ok(Stmt::Layout {
+            name,
+            name_span,
+            body,
+            span: Span::new(name_span.start, end.max(type_tok.span.end)),
+        })
+    }
+
+    /// D-LAYOUT-CTOR1: retired `layout NAME { … }` — teaching error E2935.
+    fn retired_layout_keyword(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.bump().span; // `layout`
+        let mut name_hint = String::new();
+        let mut end = start.end;
+        if let TokKind::Ident(n) = &self.peek().kind {
+            name_hint = n.clone();
+            end = self.peek().span.end;
+            self.bump();
+        }
+        if matches!(self.peek().kind, TokKind::LBrace) {
+            end = self.peek().span.end;
+        }
+        let fix = if name_hint.is_empty() {
+            format!(
+                "write `name {} {}.{{ … }}`",
+                Syntax::SIGIL_BIND_IMMUT,
+                Syntax::LAYOUT_TYPE
+            )
+        } else {
+            format!(
+                "write `{name_hint} {} {}.{{ … }}`",
+                Syntax::SIGIL_BIND_IMMUT,
+                Syntax::LAYOUT_TYPE
+            )
+        };
+        Err(Diagnostic::error(
+            "E2935",
+            format!("`{}` is retired", Syntax::FOREIGN_LAYOUT_KW),
+            format!(
+                "constraint layouts use typed-literal construction — `name {} {}.{{ … }}` (D-DOTCTOR3 element body of `Constraint`s)",
+                Syntax::SIGIL_BIND_IMMUT,
+                Syntax::LAYOUT_TYPE
+            ),
+            fix,
+            Some(Span::new(start.start, end)),
+        ))
+    }
+
     /// D-UNINIT-SENTINEL1/2: `#Uninit name: Type` is retired — teaching error
     /// E0426 points at `name := Type.{ uninit }`.
     fn retired_uninit_marker(&mut self) -> Result<Stmt, Diagnostic> {
@@ -1710,6 +1803,12 @@ impl<'a> Parser<'a> {
                 self.finish_stmt()?;
                 Ok(Stmt::Val(binding))
             }
+            // D-LAYOUT-CTOR1: `name :: Layout.{ … }` before general sigil bindings.
+            _ if self.looks_like_layout_ctor() => {
+                let stmt = self.layout_ctor_binding()?;
+                self.finish_stmt()?;
+                Ok(stmt)
+            }
             // D-BIND-BARE1: a sigil binding `name (:: | :=) expr` — no leading
             // keyword. Detected before the general Ident statement path.
             _ if self.looks_like_sigil_binding() => {
@@ -1894,36 +1993,13 @@ impl<'a> Parser<'a> {
                     span: Span::new(start.start, end),
                 });
             }
-            // D-LAYOUT1 / D-LAYOUT-GATES1: `layout form { … }` — a Cassowary-
-            // style constraint block. `layout` is a lowercase contextual
-            // keyword (D-CASING1): recognized only when followed by `name {`,
-            // so a variable named `layout` still works everywhere else.
-            // `box.anchor` reads inside the body are desugared here (parse
-            // time, purely structural) into `NAME.h(box, anchor)` /
-            // `NAME.v(box, anchor)` method calls — GATE 1/2's general
-            // HVar/VVar/LengthVar/Constraint machinery does all real
-            // checking downstream; no parallel sema path.
+            // D-LAYOUT-CTOR1: retired `layout NAME { … }` — teaching error E2935.
             TokKind::Ident(n)
-                if n == Syntax::KW_LAYOUT
+                if n == Syntax::FOREIGN_LAYOUT_KW
                     && matches!(&self.peek2().kind, TokKind::Ident(_))
                     && matches!(self.peek3().kind, TokKind::LBrace) =>
             {
-                let start = self.bump().span; // `layout`
-                let (name, name_span) = self.expect_ident("for the layout name")?;
-                self.expect(TokKind::LBrace, "after the layout name")?;
-                self.in_layout_body += 1;
-                let mut body = self.block_stmts();
-                self.in_layout_body -= 1;
-                let end = self.toks[self.pos - 1].span.end;
-                for stmt in &mut body {
-                    desugar_layout_anchors(&name, stmt);
-                }
-                return Ok(Stmt::Layout {
-                    name,
-                    name_span,
-                    body,
-                    span: Span::new(start.start, end),
-                });
+                return self.retired_layout_keyword();
             }
             // `self.items.push(x);` — method bodies state effects on `self`
             // exactly like on any other name (S27).

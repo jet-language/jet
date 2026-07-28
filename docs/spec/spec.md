@@ -107,7 +107,11 @@ next     = "next" [ "(" ident ")" ] NL ;
 cond     = expr | "(" expr ")" ;                     // S68/D-SG2: optional parens, fmt strips them
 if-expr  = "if" cond "->" value-arm-body
            "else" ( "->" value-arm-body | if-expr )
-         | "if" "{" value-guard-arm { value-guard-arm } "else" "->" value-arm-body "}" ;
+         | "if" "{" value-guard-arm { value-guard-arm } "else" "->" value-arm-body "}"
+         | "if" subject cmp-op "{" value-dispatch-arm { value-dispatch-arm }
+           "else" "->" value-arm-body "}" ;   // D-IFDIST1
+value-dispatch-arm = arm-head "->" value-arm-body NL ;
+cmp-op   = "==" | "!=" | "<" | ">" | "<=" | ">=" ;
 value-guard-arm = cond "->" value-arm-body NL ;
 value-arm-body = expr | value-block ;
 value-block = "{" { stmt } expr "}" ;
