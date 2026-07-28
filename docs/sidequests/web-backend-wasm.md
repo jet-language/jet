@@ -92,10 +92,15 @@ a test proves otherwise:
 - Wasm `#Target(Browser)` / DOM from Wasm → `E-WEB-TARGET-BROWSER`.
 - Full `core.ui` backend matrix on web (GTK/TUI/native mobile rows in
   `core-library.md` stay unsupported).
-- Method/map/stride/columnar forms not wired in `web_expr_supported` /
-  `web_wasm_expr_supported` (see `crates/jet-codegen/src/Codegen/Web.rs`).
-- Exhaustive executable-TIR coverage for every future language construct —
-  tracked on umbrella #123 criterion 1 closure, not re-claimed here.
+- Still gated (Tower #1288): `break value`, HostCall-backed pattern arms
+  (struct/str/bin match), `Unsafe`/`DeferClose`/index-field/hook/swizzle
+  assigns, Wasm `MapLit` and broader HostCall/CoreCall exprs.
+- Covered control flow (parity with native for these shapes): Plain `If`,
+  non-Plain `TIfCond` (`IsNone` / `IfLet` / `Matches` / `And`), value/range
+  arm tables (`MixedSwitch`/`RangeSwitch`), `Loop`/`While`/`CountedLoop`/
+  `Break`/`Continue`, `Range`/`ForIn`, variant + Ok/Err/Present/Absent
+  `EnumMatch`, `Index`/`IndexAssign` (JS + Wasm list; JS Map), tagged
+  JS Option/Result literals.
 
 ## Architecture (ratified, unchanged)
 

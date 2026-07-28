@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1279,
-    "rev": 18389,
+    "nextNum": 1305,
+    "rev": 18469,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -16,16 +16,10 @@
         "epoch:e4",
         "epoch:e5",
         "radar-cards",
-        "radar:e5",
-        "radar:e6",
-        "radar:e7",
-        "radar:e8",
-        "radar:e9",
-        "board-ideas",
-        "radar:e4"
+        "board-ideas"
       ]
     },
-    "digestCursor": "2026-07-28T10:38:54.471Z"
+    "digestCursor": "2026-07-28T14:38:37.575Z"
   },
   "epochs": [
     {
@@ -59051,12 +59045,17 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Reproduce the existing E0103 fixture through the real jet check CLI with a backtrace. Find the first post-sema lowering call and gate that consumer on error-severity diagnostics; do not guard the unreachable site or change E0103. Add a CLI/check regression proving exit 1 with the registered E0103 and no panic/internal codegen text, plus a valid-check control. blockedBy: none.",
       "blockedBy": [],
-      "assignee": "e3-1256-check-order",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "e3-burndown-orch",
+          "text": "Closed. Lowering no longer runs on sema-rejected bindings; jet check on the E0103 fixture exits 1 with the diagnostic and no panic. Criteria verified independently; regression bisect shows no new comptime parity reds."
+        },
         {
           "at": "2026-07-28",
           "by": "e3-1256-check-order",
@@ -59067,38 +59066,38 @@
         {
           "n": 1,
           "text": "jet check on ui_fixed_dynamic_size.E0103.jet exits as a user error, renders E0103, and contains no panic, unreachable, or generated-code failure.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T12:44:43.107Z"
+          "status": "verified",
+          "metBy": "e3-1256-check-order",
+          "verifiedBy": "e3-burndown-orch",
+          "evidence": "Independent review, fresh context, did not build. Read all three commits. Ordering: gate is at the evaluate_constant entry, not at the unreachable site; unreachable! at method_calls.rs:944 untouched (last commits there are unrelated feature work); E0103 text unchanged. Purity: the new walker covers more expression forms than the old walk_calls, and lambda bodies were already skipped before, so comptime purity is not weakened. Fixed-type predicate matches existing precedent at bindings.rs:620. False-green: reverting the fix makes the process abort with a panic, so the test cannot pass without it. Proof: cargo test --test cli check_fixed_dynamic_size_reports_e0103_without_internal_failure 1/1. Regression bisect: comptime_core_pure_parity with RUST_MIN_STACK=33554432 gives the same 52 passed / 7 failed before and after the three commits (15 crates rebuilt), so the remaining reds are pre-existing full-env gaps, not caused here.",
+          "at": "2026-07-28T14:30:29.356Z"
         },
         {
           "n": 2,
           "text": "A sema-error bundle cannot reach TIR/codegen lowering through the check path; the unreachable site is not papered over.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T12:44:43.347Z"
+          "status": "verified",
+          "metBy": "e3-1256-check-order",
+          "verifiedBy": "e3-burndown-orch",
+          "evidence": "Independent review, fresh context, did not build. Read all three commits. Ordering: gate is at the evaluate_constant entry, not at the unreachable site; unreachable! at method_calls.rs:944 untouched (last commits there are unrelated feature work); E0103 text unchanged. Purity: the new walker covers more expression forms than the old walk_calls, and lambda bodies were already skipped before, so comptime purity is not weakened. Fixed-type predicate matches existing precedent at bindings.rs:620. False-green: reverting the fix makes the process abort with a panic, so the test cannot pass without it. Proof: cargo test --test cli check_fixed_dynamic_size_reports_e0103_without_internal_failure 1/1. Regression bisect: comptime_core_pure_parity with RUST_MIN_STACK=33554432 gives the same 52 passed / 7 failed before and after the three commits (15 crates rebuilt), so the remaining reds are pre-existing full-env gaps, not caused here.",
+          "at": "2026-07-28T14:30:29.609Z"
         },
         {
           "n": 3,
           "text": "Focused CLI/check tests include the invalid fixture and a valid control, with existing diagnostic text/snapshot unchanged.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T12:44:43.596Z"
+          "status": "verified",
+          "metBy": "e3-1256-check-order",
+          "verifiedBy": "e3-burndown-orch",
+          "evidence": "Independent review, fresh context, did not build. Read all three commits. Ordering: gate is at the evaluate_constant entry, not at the unreachable site; unreachable! at method_calls.rs:944 untouched (last commits there are unrelated feature work); E0103 text unchanged. Purity: the new walker covers more expression forms than the old walk_calls, and lambda bodies were already skipped before, so comptime purity is not weakened. Fixed-type predicate matches existing precedent at bindings.rs:620. False-green: reverting the fix makes the process abort with a panic, so the test cannot pass without it. Proof: cargo test --test cli check_fixed_dynamic_size_reports_e0103_without_internal_failure 1/1. Regression bisect: comptime_core_pure_parity with RUST_MIN_STACK=33554432 gives the same 52 passed / 7 failed before and after the three commits (15 crates rebuilt), so the remaining reds are pre-existing full-env gaps, not caused here.",
+          "at": "2026-07-28T14:30:29.883Z"
         },
         {
           "n": 4,
           "text": "A fresh reviewer checks ordering, false-green risk, diagnostic fidelity, and targeted proof.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T12:44:43.827Z"
+          "status": "verified",
+          "metBy": "e3-1256-check-order",
+          "verifiedBy": "e3-burndown-orch",
+          "evidence": "Independent review, fresh context, did not build. Read all three commits. Ordering: gate is at the evaluate_constant entry, not at the unreachable site; unreachable! at method_calls.rs:944 untouched (last commits there are unrelated feature work); E0103 text unchanged. Purity: the new walker covers more expression forms than the old walk_calls, and lambda bodies were already skipped before, so comptime purity is not weakened. Fixed-type predicate matches existing precedent at bindings.rs:620. False-green: reverting the fix makes the process abort with a panic, so the test cannot pass without it. Proof: cargo test --test cli check_fixed_dynamic_size_reports_e0103_without_internal_failure 1/1. Regression bisect: comptime_core_pure_parity with RUST_MIN_STACK=33554432 gives the same 52 passed / 7 failed before and after the three commits (15 crates rebuilt), so the remaining reds are pre-existing full-env gaps, not caused here.",
+          "at": "2026-07-28T14:30:30.138Z"
         }
       ],
       "refs": [
@@ -59110,9 +59109,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T10:08:20.934Z",
-      "updated": "2026-07-28T12:44:43.828Z",
-      "updatedBy": "e3-1256-check-order",
-      "claimedAt": "2026-07-28T12:44:42.868Z"
+      "updated": "2026-07-28T14:30:33.705Z",
+      "updatedBy": "e3-burndown-orch"
     },
     {
       "id": "c0y89goo",
@@ -59944,21 +59942,32 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "verify",
       "priority": "P1",
       "plan": null,
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "e3-burndown-orch",
+          "text": "[handoff] Criterion 1 met at commit 79d67f932; needs an independent agent --verify (E_CRITERIA_SELF: I built it). Reviewer dispatch is blocked right now because the working tree carries another agent's in-flight web/wasm work (Web.rs, tests/web_build.rs, examples/features/web/*.jet) and the clean-tree hook refuses delegation. Verify once that tree settles. What to check: enum_jet_render_body match arms for all three payload shapes; that removing the Debug-only guard in the JIT record renderer made #Redact stricter, not weaker; and whether the generic-struct paren form should be unified with the new brace form."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-burndown-orch",
+          "text": "Leak was in four render sites, not one: AOT struct JetShow, AOT enum JetShow/JetDebug, the JIT record renderer and packed-enum table, and the interpreter print fallback. All four now print Jet-source names and both lenses agree."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "derived debug print shows Jet-source names (Point { x: 1 }); affected snapshots and goldens updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-burndown-orch",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T14:13:45.181Z"
+          "evidence": "Commit 79d67f932. print(Point.{x:1,y:2}) now gives 'Point { x: 1, y: 2 }' and an enum gives 'Wrap(Num(1))' under both jet run and jet build; before, both lenses printed the user_ mangled form. Goldens printable, errors, gc_cyclic, recursive_enum updated. #Redact still hides the field and a user Display impl still wins (types/display_debug unchanged, byte-identical on both lenses). Proof: cargo test --test golden examples_compile_and_run has the same 7 failures before and after the change and none of them are these examples.",
+          "at": "2026-07-28T15:09:39.065Z"
         }
       ],
       "refs": [
@@ -59966,8 +59975,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:07:36.676Z",
-      "updated": "2026-07-28T14:13:45.181Z",
-      "updatedBy": "pragma-auditor"
+      "updated": "2026-07-28T15:10:05.505Z",
+      "updatedBy": "e3-burndown-orch"
     },
     {
       "id": "c0xx15b1",
@@ -60194,6 +60203,718 @@
       "created": "2026-07-28T14:08:13.524Z",
       "updated": "2026-07-28T14:13:30.351Z",
       "updatedBy": "pragma-auditor"
+    },
+    {
+      "id": "c0rsejxo",
+      "num": 1279,
+      "title": "core.args finishes --help by default",
+      "body": "Pragmatism audit 2026-07-28, finding 5. The core.args builder recognizes --help but never prints it or exits; every caller hand-rolls the branch (Args.rs:3-12,520-523; args_spec.jet:12-24). The #CLI path already finishes help. Ballot: D-ARGS-EXIT1.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/pragmatism-audit-2026-07-28.md",
+        "examples/features/io/args_spec.jet"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:38:02.823Z",
+      "updated": "2026-07-28T14:40:02.830Z",
+      "updatedBy": "pragma-auditor"
+    },
+    {
+      "id": "c0uyofkz",
+      "num": 1280,
+      "title": "Subprocess failure needs a checked default",
+      "body": "Pragmatism audit 2026-07-28, finding 7. process.run returns Ok with success=false on a nonzero exit (Process.rs:260-268); 'run or die' scripts silently continue. Ballot: D-PROCESS-CHECKED1.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/pragmatism-audit-2026-07-28.md",
+        "examples/features/io/process_builder.jet"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:38:03.015Z",
+      "updated": "2026-07-28T14:40:44.032Z",
+      "updatedBy": "pragma-auditor"
+    },
+    {
+      "id": "c0zmsead",
+      "num": 1281,
+      "title": "Interactive prompt helpers (confirm, choose, secret)",
+      "body": "Pragmatism audit 2026-07-28, smaller notes. core.io has one-line input, colors, progress, and raw keys, but no confirm/choose/input_secret; wizard-style CLIs reinvent yes/no and menus. Ballot: D-IO-PROMPT1.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/pragmatism-audit-2026-07-28.md",
+        "examples/features/io/terminal_parity.jet"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:38:03.297Z",
+      "updated": "2026-07-28T14:41:58.282Z",
+      "updatedBy": "pragma-auditor"
+    },
+    {
+      "id": "c01xexf7",
+      "num": 1282,
+      "title": "Task discovery: list declared tasks",
+      "body": "Pragmatism audit 2026-07-28, smaller notes. #Task tasks run via jet run --task NAME, but the only way to see what tasks exist is to typo one and read the E1294 error (Source/CmdCompile.rs:677-698 already computes the list). Ballot: D-TASKS-LIST1.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/pragmatism-audit-2026-07-28.md",
+        "examples/features/devloop/task_runner.jet"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:38:20.850Z",
+      "updated": "2026-07-28T14:41:45.687Z",
+      "updatedBy": "pragma-auditor"
+    },
+    {
+      "id": "c05051f9",
+      "num": 1283,
+      "title": "Compile-checked literal regex patterns",
+      "body": "Pragmatism audit 2026-07-28, smaller notes. Every one-shot regex call on a string literal pays a Result plus ?? panic tax (regex.jet:8-28), though the pattern is known at compile time and the engine is linear-time by construction. Ballot: D-REGEX-LIT1.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/pragmatism-audit-2026-07-28.md",
+        "examples/features/text/regex.jet"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:38:21.036Z",
+      "updated": "2026-07-28T14:42:59.937Z",
+      "updatedBy": "pragma-auditor"
+    },
+    {
+      "id": "c083yh6b",
+      "num": 1284,
+      "title": "Sized lengths in binary Reader.take",
+      "body": "Pragmatism audit 2026-07-28, smaller notes. The common wire shape count-then-payload forces an explicit widen every time: read_u16_le then r.take(Int.from_u16(count)) (binary-reader.jet:14-17). S42 keeps sized ints separate on purpose; the question is a narrow carve for lengths. Ballot: D-BINREAD-LEN1.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/pragmatism-audit-2026-07-28.md",
+        "examples/features/parsing/binary-reader.jet"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:38:21.224Z",
+      "updated": "2026-07-28T14:43:00.128Z",
+      "updatedBy": "pragma-auditor"
+    },
+    {
+      "id": "c0bda91w",
+      "num": 1285,
+      "title": "Flagship examples teach the short path",
+      "body": "Pragmatism audit 2026-07-28, finding 15 and 16 (example half). Flagships teach the long path first: first_hour.jet hand-walks raw io.args() instead of #CLI; parallel_scan.jet builds channels+spawn+join where taskgroup.all or para_map is one line; no example composes file → pattern → aggregate for the log job; text examples teach materializing String.lines() for file-scale work; MMIO lives only in tests, and examples/features/math/ hides the numeric floor. Examples are executable specs (I5), so what they teach is a product choice. Ballot: D-EXAMPLES-SHORTPATH1.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/pragmatism-audit-2026-07-28.md",
+        "examples/features/basics/first_hour.jet",
+        "examples/features/concurrency/parallel_scan.jet"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:38:21.421Z",
+      "updated": "2026-07-28T14:44:02.270Z",
+      "updatedBy": "pragma-auditor"
+    },
+    {
+      "id": "c02n9rz3",
+      "num": 1286,
+      "title": "Derived --help usage line prints the absolute binary path",
+      "body": "Pragmatism audit 2026-07-28, smaller notes. Derived #CLI help prints 'Usage: /home/nate/Projects/Github/jet/target/debug/jet [options]' — the full host binary path, not the program name. Standard CLIs print the basename (argv[0] basename, or the script name under jet run). Verified live with examples/features/cli/typed_entry_args.jet -- --help. Fix the usage line; update the affected golden.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "derived help prints the program basename, not an absolute path; golden updated",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T14:38:38.681Z"
+        }
+      ],
+      "refs": [
+        "docs/audits/pragmatism-audit-2026-07-28.md",
+        "examples/features/cli/typed_entry_args.jet"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:38:38.308Z",
+      "updated": "2026-07-28T14:44:14.967Z",
+      "updatedBy": "pragma-auditor"
+    },
+    {
+      "id": "c05p1lv8",
+      "num": 1287,
+      "title": "Finish uninit fixed-array buffer fill through TIR",
+      "body": "Pragmatism audit 2026-07-28, finding 16 (memory half). core.mem uninit documents large fixed I/O buffers as the canonical use (uninit.jet:6-8), but fixed-array index-assign through TIR is an acknowledged follow-up (uninit_buffer.jet:1-4) and the example stays scalar. The stated systems job does not ship. Fix: prove [T#N] index-write through TIR; extend the example to fill an uninit buffer and read it back; add a golden.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "uninit fixed-array fill+read golden passes under jet run and AOT",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T14:38:38.860Z"
+        }
+      ],
+      "refs": [
+        "docs/audits/pragmatism-audit-2026-07-28.md",
+        "examples/features/memory/uninit_buffer.jet",
+        "examples/features/memory/uninit.jet"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:38:38.492Z",
+      "updated": "2026-07-28T14:38:38.860Z",
+      "updatedBy": "pragma-auditor"
+    },
+    {
+      "id": "c0icnkbf",
+      "num": 1288,
+      "title": "Web TIR parity: emit every native-covered construct on JS+Wasm",
+      "body": "",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P0",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": "cursor-agent",
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "cursor-agent",
+          "text": "shipped fallible match + non-Plain TIfCond; remaining: BreakValue, HostCall pattern arms, Unsafe/defer/index-field/swizzle, Wasm MapLit — criterion 6 needs Sol review"
+        },
+        {
+          "at": "2026-07-28",
+          "by": "cursor-agent",
+          "text": "shipped: MixedSwitch/RangeSwitch + loops/index; showcase arm tables green; remaining: fallible match + non-Plain if + HostCall pattern arms"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Value/range arm tables (MixedSwitch/RangeSwitch) emit on JS and Wasm with focused web_build proof",
+          "status": "met",
+          "metBy": "cursor-agent",
+          "verifiedBy": null,
+          "evidence": "Web.rs MixedSwitch/RangeSwitch gates+emit; test web_value_and_range_arm_tables_emit_on_js_and_wasm green",
+          "at": "2026-07-28T14:43:50.893Z"
+        },
+        {
+          "n": 2,
+          "text": "ui_showcase.jet uses canonical if-arm tables and builds under jet build --target=web",
+          "status": "met",
+          "metBy": "cursor-agent",
+          "verifiedBy": null,
+          "evidence": "ui_showcase arm tables; jet build --target=web + jet run green",
+          "at": "2026-07-28T14:43:51.082Z"
+        },
+        {
+          "n": 3,
+          "text": "Remaining TStmt/TExpr holes inventoried; each emits or has honest unexpressible reason",
+          "status": "met",
+          "metBy": "cursor-agent",
+          "verifiedBy": null,
+          "evidence": "Remaining holes: BreakValue; non-Plain TIfCond; non-variant EnumMatch; HostCall MixedSwitch arms (struct/str/bin); Unsafe/DeferClose/IndexFieldAssign/IndexHookAssign/MathSwizzle*; Wasm MapLit + many HostCall/CoreCall exprs. Expressible gaps still open on #1288 criteria 5.",
+          "at": "2026-07-28T14:47:30.477Z"
+        },
+        {
+          "n": 4,
+          "text": "Loop/While/Break/Continue + IndexAssign covered on JS and Wasm",
+          "status": "met",
+          "metBy": "cursor-agent",
+          "verifiedBy": null,
+          "evidence": "Loop/While/CountedLoop/Break/Continue/IndexAssign + JS Index + Wasm ListLit; web_loops_and_index_assign_emit_on_js_and_wasm green",
+          "at": "2026-07-28T14:47:30.276Z"
+        },
+        {
+          "n": 5,
+          "text": "Non-variant EnumMatch and non-Plain TIfCond covered or desugared",
+          "status": "met",
+          "metBy": "cursor-agent",
+          "verifiedBy": null,
+          "evidence": "Ok/Err/Present/Absent EnumMatch + IsNone/IfLet/Matches/And TIfCond on JS+Wasm; tagged Option/Result JS; OrFallback/FloatToInt coherency; web_fallible_match_and_option_if_emit_on_js_and_wasm green",
+          "at": "2026-07-28T14:59:27.431Z"
+        },
+        {
+          "n": 6,
+          "text": "Independent Sol review: gate/emit alignment; no gate wider than emit",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T14:43:41.522Z"
+        }
+      ],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:43:17.886Z",
+      "updated": "2026-07-28T14:59:27.647Z",
+      "updatedBy": "cursor-agent",
+      "claimedAt": "2026-07-28T14:59:27.647Z"
+    },
+    {
+      "id": "c0smiy2v",
+      "num": 1289,
+      "title": "Undeclared value tag accepted in type position",
+      "body": "Type-unification audit 2026-07-28, F4a. An undeclared tag in type position compiles silently: fn f(x: #TotallyUndeclaredTag Int) passes sema with no tag declaration anywhere (live probe, 2026-07-28 binary). D-QUAL2 models tags as declared qualifiers; resolution never checks the declaration. Fix: undeclared tag in type position errors with did-you-mean against declared tags. Pure name resolution; no semantics change. Needs a diagnostic code + snapshot per I4.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/type-unification-audit-2026-07-28.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:48:12.372Z",
+      "updated": "2026-07-28T14:48:12.373Z",
+      "updatedBy": "type-auditor"
+    },
+    {
+      "id": "c0zdohbb",
+      "num": 1290,
+      "title": "E0107 says a type does not exist when it does",
+      "body": "Type-unification audit 2026-07-28, F5 evidence. With struct Machine and state Machine { Off, On } in scope, the expression Machine.Off fires E0107 'nothing named Machine exists here' — but Machine.make() resolves fine, so the name clearly exists. The diagnostic should say the member is missing (or that states are not values), not that the type is absent. Copy-only fix in the resolver's error path; snapshot update per I4. Note: whether states BECOME addressable is D-STATE-NS1 (separate ballot); this card only fixes the lying message.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/type-unification-audit-2026-07-28.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:48:25.841Z",
+      "updated": "2026-07-28T14:48:25.842Z",
+      "updatedBy": "type-auditor"
+    },
+    {
+      "id": "c00cz0ap",
+      "num": 1291,
+      "title": "Spec law: control constructs are never types; artifacts always are",
+      "body": "Type-unification audit 2026-07-28, F11. Add one ungated spec paragraph to the control-flow section: a control construct is an expression wherever it produces a value, and its runtime artifacts are types; the construct itself never is. Rationale in the audit (lambda duplication under I8, beginner top-to-bottom reading, zero-cost lowering, artifacts capture all the value). This paragraph is the standing answer to every future 'should loop/if/taskgroup be a type?' request.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/type-unification-audit-2026-07-28.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:48:54.199Z",
+      "updated": "2026-07-28T14:48:54.199Z",
+      "updatedBy": "type-auditor"
+    },
+    {
+      "id": "c03gs87j",
+      "num": 1292,
+      "title": "Open dimension algebra to user-declared dimensions",
+      "body": "Type-unification audit 2026-07-28, F1 (top-ranked). PHYSICAL_DIMENSIONS is a closed 5-row [i32;3] table (Syntax.rs:261-267); a user #UnitFamily(Mass) gets no algebra — kg * meter is plain E0109 while meter / second derives Speed (live probe). SI needs 7 base dimensions; real programs need domain axes. Fix: families opt in to minting a dimension; exponent vectors become open-length over declared bases; the 5 built-ins become prelude declarations. Pay-up-front: generalize the vector representation before it is serialized into unit facts and snapshots. Ballot D-DIMENSION-OPEN1 attached.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/type-unification-audit-2026-07-28.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:48:54.387Z",
+      "updated": "2026-07-28T14:57:51.582Z",
+      "updatedBy": "type-auditor"
+    },
+    {
+      "id": "c06k73ro",
+      "num": 1293,
+      "title": "Marker argument types become real prelude enums",
+      "body": "Type-unification audit 2026-07-28, F2. Policy::APPLIED_RULES types every #Rule signature over 14 parameter types (TaintKind, ObligationMode, InlineMode, Maturity, Layout, Target, ABI, FfiLanguage, NamingCase, PolicySetting...) that no user can name; E0930 renders them in type syntax; TypeInfo.markers is strings. Fix: declare them as ordinary enums in a reserved prelude namespace, generated from the registry with a drift-guard test; diagnostics, jet explain, LSP, and TypeInfo read the same declarations. No S26 contact — marker args are already comptime-evaluated values. Ballot D-RULEARG-TYPES1 attached.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/type-unification-audit-2026-07-28.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:48:54.574Z",
+      "updated": "2026-07-28T14:56:29.548Z",
+      "updatedBy": "type-auditor"
+    },
+    {
+      "id": "c09oa1up",
+      "num": 1294,
+      "title": "One fact model behind tags, states, taint kinds, effect leaves",
+      "body": "Type-unification audit 2026-07-28, F3. Four mechanisms spell one behavior (erased named facts with set/tree matching): tag, state, taint kinds, effect leaves. D-EFFTREE1 already reuses D-TAG1's subtree matching for effects. Fix layer 1 (ships regardless): one internal fact registry, one subsumption algorithm, one TypeInfo reflection surface. Fix layer 2 (owner picks): (a) facts are comptime-consumed enum declarations reusing D-TAG1 machinery, (b) tree-bodied tags (amends D-QUAL2 'exactly two qualifier kinds'), or (c) internal-only. User taint kinds stay gated on deferred IFC. Ballot D-FACTMODEL1 attached.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/type-unification-audit-2026-07-28.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:48:54.762Z",
+      "updated": "2026-07-28T14:57:51.786Z",
+      "updatedBy": "type-auditor"
+    },
+    {
+      "id": "c0cv24hu",
+      "num": 1295,
+      "title": "Strict tags: opt-in checked value tags with audited blessing",
+      "body": "Type-unification audit 2026-07-28, F4b. Tags are inert: plain String flows into #Reviewed String with no diagnostic (live probe); #Tainted String (checked) and #Reviewed String (inert) share one spelling plane. Fix: opt-in strict tags — a strict tag rejects untagged values at tagged positions; entry only through an audited blessing marker (working spelling #Blesses(Reviewed)), mirroring #Sanitizer. I8 rule included: distinct = new nominal identity with methods; strict tag = same type keeps flowing, only entry is controlled. Depends on card #1289 (declaration required). Ballot D-TAG-STRICT1 attached.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/type-unification-audit-2026-07-28.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:48:54.955Z",
+      "updated": "2026-07-28T14:57:51.981Z",
+      "updatedBy": "type-auditor"
+    },
+    {
+      "id": "c0ts6lkx",
+      "num": 1296,
+      "title": "States join the type's namespace and TypeInfo",
+      "body": "Type-unification audit 2026-07-28, F5. Typestate checking works (E0150 copy is excellent) but states live in no namespace: Machine.Off is E0107, no completion, no reflection, nothing for tooling. Fix: register the state set as comptime-only members at T.State.Off (qualified plane avoids collisions with synthesized members like D-PATCH1's T.Patch); #State/#Transition arguments resolve by ordinary lookup with did-you-mean; TypeInfo gains .states and .transitions so fn build tooling can render the machine. Erasure unchanged. Ballot D-STATE-NS1 attached.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/type-unification-audit-2026-07-28.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:49:15.569Z",
+      "updated": "2026-07-28T14:56:29.860Z",
+      "updatedBy": "type-auditor"
+    },
+    {
+      "id": "c0wr4ji9",
+      "num": 1297,
+      "title": "TaskGroup becomes a nameable parameter type",
+      "body": "Type-unification audit 2026-07-28, F6. fn f(g: TaskGroup) is E0119 and g.task outside the lexical block is E1110 — structured concurrency cannot be factored into helpers (live probe). Fix: publish TaskGroup as a nameable parameter type with a soundness rule priced honestly: spawns through a group received as a parameter require owned captures (~x moves/copies, no view captures), extending D-DETACH1. Jet has no lifetimes; the lexical rule is what makes view captures safe today, so the parameter path must close that hole itself. Typed Capability<E> handles were considered and demoted to a post-v1 note. Ballot D-TASKGROUP-PARAM1 attached.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/type-unification-audit-2026-07-28.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:49:15.749Z",
+      "updated": "2026-07-28T14:57:52.189Z",
+      "updatedBy": "type-auditor"
+    },
+    {
+      "id": "c0zut94q",
+      "num": 1298,
+      "title": "Ranges become values: one Range type in core",
+      "body": "Type-unification audit 2026-07-28, F7. a..b is legal in exactly five slots (loop source, arm head, slice, view arg, distinct constraint) and no Range type exists — bands :: [0..<10, 10..<100] has no type to be. Fix: one nominal Range over Int; both spellings construct it; the value carries end-exclusivity; .start/.end/.contains(x). No second RangeExclusive type. Loops keep specializing to jumps (zero-cost lowering is codegen, not surface). Accepted asymmetry stated in spec: distinct Int(0..10) stays literal-only. Ballot D-RANGE-VALUE1 attached.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/type-unification-audit-2026-07-28.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:49:15.936Z",
+      "updated": "2026-07-28T14:57:52.389Z",
+      "updatedBy": "type-auditor"
+    },
+    {
+      "id": "c0325rmi",
+      "num": 1299,
+      "title": "Optional effect-leaf declarations kill typo leaves",
+      "body": "Type-unification audit 2026-07-28, F8. Effect roots are a closed 10-set (right call) but leaves are freeform strings: =[FS.Raed]=> silently mints a new leaf; pkg.jet budgets compare the same undeclared strings. The effect keyword is reserved and unminted (D-EFF4/5) — the slot exists. Fix: effect FS.Read declarations; once any leaf is declared under a root, undeclared leaves under that root become resolution errors with did-you-mean; never-declared roots keep today's freedom; the prelude declares stdlib leaves so day-one users get typo protection free. Ballot D-EFFECT-DECL1 attached.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/type-unification-audit-2026-07-28.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:49:16.130Z",
+      "updated": "2026-07-28T14:57:52.584Z",
+      "updatedBy": "type-auditor"
+    },
+    {
+      "id": "c06cwjlo",
+      "num": 1300,
+      "title": "Marker/trait name-collision law",
+      "body": "Type-unification audit 2026-07-28, F10. Comparable is a trait, a #Comparable marker, and a capability bundle; #Codable = Encode+Decode; 'tag' means three things (tag keyword, serde #Tag, D-TAG1 enum groups); #Task fn vs Task<T>. Fix: spec states that a type-site PascalCase marker IS a trait/derive reference (one namespace — user derives already work this way), plus a rule for future markers: a rule that derives trait X is spelled #X; a non-derive rule may not take a trait's name. Optional renames for serde #Tag and scheduled #Task if the owner wants them. Ballot D-MARKER-NAME-HYGIENE1 attached.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P3",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [
+        "docs/audits/type-unification-audit-2026-07-28.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T14:49:16.329Z",
+      "updated": "2026-07-28T14:57:52.791Z",
+      "updatedBy": "type-auditor"
+    },
+    {
+      "id": "c0a31c6z",
+      "num": 1301,
+      "title": "Vec3 and builtin structs print a different shape on each lens",
+      "body": "print(Vec3(1.0, 2.0, 3.0)) gives 'Vec3([1.0, 2.0, 3.0])' under jet build and 'Vec3 { 0: 1.0, 1: 2.0, 2: 3.0 }' under jet run. The AOT spelling comes from a hand-written JetShow in the linalg prelude (Prelude/CoreLib/JetStd/MathTaskMem.rs); the interpreter has no declared fields for a builtin struct and falls back to a generic renderer. Card #1270 removed the user_ mangling from both, so only the shape now differs. Same class applies to Vec2/Vec4/Mat3/Mat4. Pick one spelling and make both lenses use it.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-28T15:10:12.558Z",
+      "updated": "2026-07-28T15:10:12.558Z",
+      "updatedBy": "e3-burndown-orch"
+    },
+    {
+      "id": "c0tsprkx",
+      "num": 1302,
+      "title": "Stale example goldens: parallel_scan, returned_views, deadline_context, browser_locked_provision",
+      "body": "cargo test --test golden examples_compile_and_run is red on four examples unrelated to any current change. concurrency/parallel_scan counts lines and chars of pipeline.jet, tasks.jet, and json.jet, and those sources were edited without reblessing the golden. memory/returned_views prints two extra lines. concurrency/deadline_context gained a trailing 'panic: a task panicked' on stderr. net/browser_locked_provision has no golden at all and update mode never creates one. Confirmed pre-existing: the same four fail with the compiler reverted to HEAD. The three web/web_wasm_* failures in the same run belong to the in-flight web backend work, not here.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-28T15:10:20.280Z",
+      "updated": "2026-07-28T15:10:20.281Z",
+      "updatedBy": "e3-burndown-orch"
+    },
+    {
+      "id": "c0yyvnqg",
+      "num": 1303,
+      "title": "Orphan test binary from a deleted worktree spins at 100% CPU",
+      "body": "PID 169312 runs target/debug/deps/jet-fcd0d638b91407a3 from .claude/worktrees/e3-1230-close, a worktree that no longer exists. Both its cwd and exe read as (deleted). It has burned a full core since 2026-07-27 13:57 (over 20 hours of CPU) and slows every build in this repo. Kill it. Then find why that test never terminated, because the same hang will strand the next worktree run: a test that cannot finish is a defect even when the worktree is gone.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-28T15:10:27.124Z",
+      "updated": "2026-07-28T15:10:27.124Z",
+      "updatedBy": "e3-burndown-orch"
+    },
+    {
+      "id": "c0b0tifp",
+      "num": 1304,
+      "title": "cffi_named_pure_callback_has_stable_c_symbol rejects I32 + 1",
+      "body": "tests/cffi.rs cffi_named_pure_callback_has_stable_c_symbol fails: its fixture writes 'fn increment(x: I32) =[]=> I32 { return x + 1 }' and sema answers E0109, refusing to combine I32 and Int. Either an integer literal should adopt the fixed-width type of the other operand here, or the fixture is stating the rule wrongly and should spell the literal. Decide which, then fix that side. Confirmed pre-existing: fails identically with the compiler reverted to HEAD. Found during #1270 closeout.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "needsAcceptance": false,
+      "created": "2026-07-28T15:10:34.383Z",
+      "updated": "2026-07-28T15:10:34.383Z",
+      "updatedBy": "e3-burndown-orch"
     }
   ],
   "decisions": [
@@ -75964,6 +76685,1084 @@
       "draft": false,
       "status": "open",
       "created": "2026-07-28T14:13:30.351Z"
+    },
+    {
+      "id": "D-ARGS-EXIT1",
+      "cardId": "c0rsejxo",
+      "group": "stdlib",
+      "title": "core.args finishes --help and exit",
+      "gist": "Whether the argument-parser library can print help and exit for you.",
+      "lesson": "Jet has two ways to read command-line flags. The high road is `#CLI` on a struct: the compiler derives the flags, prints `--help`, and exits. The floor under it is the `core.args` builder: the program declares flags one call at a time and then parses.\n\nThe floor recognizes `--help` but refuses to act on it. Parsing never prints and never exits; the caller must test `parsed.flag(\"help\")`, print the help text, and return. That is a deliberate property — a library that exits the process is hard to test and hard to embed. But it means the documented library path leaves the most common CLI behavior half-done, and every program that uses the builder hand-rolls the same three lines.\n\nThis decision picks whether the builder gains a convenience entry that finishes help and exits, while the pure non-exiting parse stays for tests and embedding.",
+      "explainer": "",
+      "story": "Ruth needs repeated flags, so `#CLI` does not fit and she drops to the builder. Her tool ships, a teammate runs `--help`, and gets a parse error output instead of help, because Ruth forgot the hand-rolled branch the docs example carries.",
+      "inWild": "spec :: args.spec().flag(\"verbose\").option(\"port\")\nparsed :: spec.parse(io.args()) ?? panic(spec.help())\n// Everyone must remember this branch:\nif parsed.flag(\"help\") {\n    print(spec.help())\n    return\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "parse_or_exit alongside parse",
+          "detail": "One new method: `spec.parse_or_exit(argv)` prints help and exits 0 on `--help`, prints the error and exits 2 on a bad flag, and returns parsed arguments otherwise. The existing pure `.parse` stays untouched for tests and embedding. Programs choose which behavior they want with one word.",
+          "technical": "Exit codes: 0 for help/version, 2 for usage errors (BSD convention). Uses the process-exit path already in core. Help text is the same spec.help() output.",
+          "code": "parsed :: spec.parse_or_exit(io.args())\n// --help now prints and exits; bad flags print the error and exit 2"
+        },
+        {
+          "key": "B",
+          "name": "parse result carries a handled action",
+          "detail": "Keep one parse method, but its result can say \"help was requested\" as a distinct case the caller matches on. Nothing ever exits for you. More explicit, still testable, but the three-line branch survives in every program — the ceremony this card exists to remove.",
+          "code": "match spec.parse(io.args()) {\n    .Help(text) => { print(text); return }\n    .Err(e) => { print(e); return }\n    .Ok(parsed) => { ... }\n}"
+        },
+        {
+          "key": "C",
+          "name": "Leave the floor as is",
+          "detail": "Point everyone at `#CLI` for finished behavior and keep the builder purely mechanical. But the builder is the only path when a tool needs features `#CLI` lacks. The gap lands on exactly the users with the least choice.",
+          "code": "// docs: \"handle --help yourself when using core.args\""
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python (argparse)",
+          "note": "parse_args() prints help and exits by default; the non-exiting form exists for tests. That split is option A's shape.",
+          "code": "args = parser.parse_args()   # --help prints and exits"
+        },
+        {
+          "lang": "Go (flag)",
+          "note": "flag.Parse() prints usage and exits 2 on error by default, with ContinueOnError as the library-friendly override.",
+          "code": "flag.Parse()"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One added word gives the finished behavior every interactive tool wants, while the pure parse keeps the library testable and embeddable. Both audiences get their path with no mode flags.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It renames the ceremony instead of removing it; every program still writes the help branch."
+          },
+          {
+            "key": "C",
+            "reason": "The builder is the only path for tools #CLI cannot express, so leaving it half-done taxes the users with no alternative."
+          }
+        ],
+        "tradeoff": "A library method that can exit the process is a small purity loss. That is acceptable because the name says so, and the non-exiting parse remains the default teaching form for tests."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T14:40:02.830Z"
+    },
+    {
+      "id": "D-PROCESS-CHECKED1",
+      "cardId": "c0uyofkz",
+      "group": "stdlib",
+      "title": "Checked subprocess runs: fail on nonzero exit",
+      "gist": "Whether a failed subprocess can stop the script by default.",
+      "lesson": "Scripts run other programs: a compiler, a copy, a deploy step. Every program reports success or failure through its exit code — zero means success, anything else means failure.\n\nIn Jet, `process.run` returns Ok whenever the child could start and finish, even when the child failed. The result carries a `success` field the caller must remember to test. The distinction is real: the run mechanism worked versus the command did its job. But the common script intent is to run a step and stop on failure. Today that intent needs an explicit if-check after every call. Forgetting the check does not error — the script continues on garbage, which is the worst failure mode.\n\nThis decision picks whether Jet adds a checked form where a nonzero exit is an error the `??` operator can catch, keeping today's inspect form for callers who want the full result.",
+      "explainer": "",
+      "story": "Dev writes a release script: build, sign, upload. The signing step fails on a expired key, returns exit 1, and the script uploads the unsigned build anyway, because `process.run` said Ok and Dev never tested `.success`.",
+      "inWild": "// Today: three chances to forget the same check\nbuild :: process.run(Sh.{jet build app.jet}) ?? return\nif !build.success { process.exit(1) }\nsign :: process.run(Sh.{sign build/app}) ?? return\n// forgot the check here — upload happens anyway\nupload :: process.run(Sh.{upload build/app}) ?? return",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "run_checked treats nonzero as an error",
+          "detail": "A sibling entry: `process.run_checked(cmd)` errors when the child exits nonzero, carrying the exit code and captured stderr in the error. `??` then does what scripts mean: stop or fall back. Today's `run` stays for callers who inspect the full result.",
+          "technical": "Error variant carries code, signal if any, and bounded captured stderr. run_checked is run + one branch; no new process machinery.",
+          "code": "process.run_checked(Sh.{jet build app.jet}) ?? return\nprocess.run_checked(Sh.{sign build/app}) ?? return\nprocess.run_checked(Sh.{upload build/app}) ?? return"
+        },
+        {
+          "key": "B",
+          "name": "A .ok() adapter on the result",
+          "detail": "Keep one run method; add `result.ok()` that converts a failed run into an error after the fact. Composable and small, but the call site reads as two steps, and forgetting `.ok()` is exactly as silent as forgetting the if-check today.",
+          "code": "process.run(Sh.{sign build/app}).ok() ?? return"
+        },
+        {
+          "key": "C",
+          "name": "Make run itself checked; opt out to inspect",
+          "detail": "Flip the default: `run` errors on nonzero, and a named option or sibling gives the raw result for callers who expect failure (test runners, linters that use exit codes as data). Strongest safety, but it changes the meaning of every existing run call and punishes the inspect use case with ceremony.",
+          "code": "process.run(Sh.{grep -q pattern file}) ?? return   // grep exit 1 = 'not found', now an error"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python (subprocess)",
+          "note": "check=True is the documented right default for scripts; the unchecked form exists for exit-code-as-data callers.",
+          "code": "subprocess.run([\"sign\", \"app\"], check=True)"
+        },
+        {
+          "lang": "Bash",
+          "note": "set -e makes nonzero exits fatal script-wide; its absence is the classic source of continue-on-failure bugs.",
+          "code": "set -e\nsign app   # script stops here on failure"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It gives scripts the stop-on-failure meaning in one word per call, with the error shape the `??` rail already handles, and changes nothing for existing code.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "The adapter is as forgettable as the if-check it replaces; the silent failure mode survives."
+          },
+          {
+            "key": "C",
+            "reason": "Flipping the default breaks the exit-code-as-data callers and every existing run call site."
+          }
+        ],
+        "tradeoff": "Two run entries exist where one could. That is acceptable because they express two genuinely different intents, and the names say which is which."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T14:40:44.032Z"
+    },
+    {
+      "id": "D-TASKS-LIST1",
+      "cardId": "c01xexf7",
+      "group": "tooling",
+      "title": "Listing declared project tasks",
+      "gist": "How a user discovers which #Task tasks a project declares.",
+      "lesson": "Jet projects can declare named tasks with the `#Task` marker: build steps, code generation, scheduled jobs. A task runs with `jet run --task NAME`.\n\nDiscovery is the gap. Nothing lists the declared tasks. The only way to see them is to ask for a task that does not exist: the unknown-task error (E1294) helpfully prints the declared names. So the working discovery method is deliberately typing a wrong name, and the compiler already computes the exact list the user wants.\n\nEvery task runner treats listing as a first-class verb, because \"what can I run here?\" is the first question in any inherited project. This decision picks the spelling: a top-level command, a bare flag form, or status quo.",
+      "explainer": "",
+      "story": "Ravi joins a team and clones their service. The README says \"run the usual tasks.\" He types `jet run --task help`, gets an error listing eleven task names, and bookmarks that error as his team's de facto documentation.",
+      "inWild": "$ jet run --task deploy-staging\n# works, because Ravi pair-programmed once and memorized it\n$ jet run --task hlep\n# error E1294: unknown task \"hlep\" — declared tasks: build-assets,\n# deploy-staging, deploy-prod, gen-docs, ...\n# ^ the only listing the toolchain offers",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "jet tasks lists them",
+          "detail": "A top-level verb: `jet tasks` prints each declared task with its doc line, marking scheduled ones. It reuses the same list the E1294 error already computes. Discoverable in `jet help` next to the other verbs.",
+          "technical": "Reuses list_task_names from the compile path; output is name, #Doc text, and #Every schedule when present. Non-project directory is the same error jet run gives.",
+          "code": "$ jet tasks\nbuild-assets     bundle css/js into build/\ndeploy-staging   push current build to staging\ngen-docs         regenerate API docs (every day 06:00)"
+        },
+        {
+          "key": "B",
+          "name": "Bare --task prints the list",
+          "detail": "`jet run --task` with no name lists tasks instead of erroring. No new verb, but the listing hides inside a flag form nobody would guess, and `jet help` gains nothing to point at.",
+          "code": "$ jet run --task\nbuild-assets, deploy-staging, deploy-prod, gen-docs"
+        },
+        {
+          "key": "C",
+          "name": "Keep the error as the listing",
+          "detail": "Change nothing; the unknown-task error keeps doubling as discovery. Zero surface growth, and the first question in every inherited project keeps requiring a deliberate mistake.",
+          "code": "$ jet run --task ?\n# error E1294 ... declared tasks: ..."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "npm",
+          "note": "npm run with no arguments lists the scripts; it is many developers' first move in a new repo.",
+          "code": "$ npm run\nScripts available via `npm run-script`: build, test, deploy"
+        },
+        {
+          "lang": "just",
+          "note": "just --list is the canonical answer and doubles as the project's task documentation.",
+          "code": "$ just --list\nAvailable recipes:\n    build\n    deploy env"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A visible verb answers the first question a newcomer asks, reuses a list the compiler already computes, and gives the docs and `jet help` something to name.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A no-argument flag form is undiscoverable — the exact problem this card exists to fix."
+          },
+          {
+            "key": "C",
+            "reason": "Discovery by deliberate mistake stays embarrassing and teaches users to rely on error text."
+          }
+        ],
+        "tradeoff": "The top-level command list grows by one verb. That is acceptable because task running is already a first-class jet run feature and the verb only reads."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T14:41:45.687Z"
+    },
+    {
+      "id": "D-IO-PROMPT1",
+      "cardId": "c0zmsead",
+      "group": "stdlib",
+      "title": "Interactive prompt helpers in core.io",
+      "gist": "Whether asking yes/no, picking from a list, and reading a password are built in.",
+      "lesson": "Interactive command-line tools ask the user things. Three asks cover almost every installer, setup wizard, and destructive command. A confirmation: proceed, yes or no. A choice: pick one option from a short list. A secret: type a password without echoing it to the screen.\n\nJet's `core.io` has the raw parts. `input(prompt)` reads one line. Styles, progress bars, and TTY detection ship. The `live` terminal surface can read raw keys. But the three everyday asks are missing, so each tool re-invents them. Each hand-rolls y/n parsing, re-prompts, and menu numbering. For secrets, each must figure out terminal echo control or leak the password to the screen.\n\nThe secret case is the sharp edge. Echo control is platform-fiddly, and a wrong hand-rolled version shows passwords in terminal history. This decision picks whether the stdlib owns these three prompts.",
+      "explainer": "",
+      "story": "Kim writes a database reset tool for her team. She wants one confirm before dropping data and a password prompt for the admin login. Her hand-rolled confirm accepts an empty line as yes, and her password prompt echoes in plain text during a screen-shared demo.",
+      "inWild": "// Today: every wizard re-invents this\nprint(\"Drop all tables? [y/N] \")\nanswer :: io.input(\"\")\nif answer == \"y\" || answer == \"Y\" || answer == \"yes\" {\n    // empty line? 'Yes'? locale? re-prompt? every tool differs\n}\npw :: io.input(\"admin password: \")   // echoes the password on screen",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Three helpers: confirm, choose, input_secret",
+          "detail": "`io.confirm(prompt)` returns a Bool with a safe default of no. `io.choose(prompt, items)` numbers the items, re-prompts on bad input, and returns the pick. `io.input_secret(prompt)` reads without echo and errors when there is no terminal. All three respect the existing TTY and NO_COLOR facts.",
+          "technical": "confirm default is no; Enter alone returns the default shown in brackets. choose returns the index (or the item) and re-prompts on out-of-range. input_secret uses termios echo-off on the existing terminal surface; non-TTY stdin is a typed error, never a silent echo.",
+          "code": "if io.confirm(\"Drop all tables?\") {\n    pw :: io.input_secret(\"admin password: \") ?? return\n    env :: io.choose(\"Which environment?\", [\"staging\", \"prod\"]) ?? return\n}"
+        },
+        {
+          "key": "B",
+          "name": "Secret input only",
+          "detail": "Ship only `input_secret`, since echo control is the part users cannot safely write themselves. Confirm and choose stay hand-rolled. Smallest addition, but the two most common asks keep differing tool to tool.",
+          "code": "pw :: io.input_secret(\"admin password: \") ?? return\n// confirm and choose: still DIY"
+        },
+        {
+          "key": "C",
+          "name": "Leave prompts to packages",
+          "detail": "Keep core.io as is and let a future package own interactive prompts. No stdlib growth, but the safe-echo primitive stays missing too, and today no such package exists — the friction stays for every current user.",
+          "code": "// future: use pkg.prompts as prompts"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python",
+          "note": "getpass.getpass is standard library precisely because echo control is unsafe to hand-roll; confirm/choose live in packages.",
+          "code": "from getpass import getpass\npw = getpass(\"admin password: \")"
+        },
+        {
+          "lang": "Rust (dialoguer)",
+          "note": "Confirm, Select, and Password are the three primitives the ecosystem standardized on — the same trio as option A.",
+          "code": "let ok = Confirm::new().with_prompt(\"Drop all tables?\").interact()?;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The trio covers nearly every interactive tool, the secret one is a safety primitive users cannot write correctly themselves, and all three sit on TTY facts core.io already owns.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It fixes the safety edge but leaves the two most common asks inconsistent across every tool."
+          },
+          {
+            "key": "C",
+            "reason": "No such package exists, and the echo-control primitive belongs where the terminal surface already lives."
+          }
+        ],
+        "tradeoff": "core.io grows three names with small policy choices baked in (default no, numbered menus). That is acceptable because the raw input and live-key paths stay for tools that want different policy."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T14:41:58.282Z"
+    },
+    {
+      "id": "D-REGEX-LIT1",
+      "cardId": "c05051f9",
+      "group": "stdlib",
+      "title": "Compile-checked literal regex patterns",
+      "gist": "Whether a regex written as a literal can fail at compile time instead of run time.",
+      "lesson": "A regular expression (regex) is a small pattern language for matching text: `\\d+` means one or more digits. A pattern can be malformed — an unclosed group, a bad escape — and then it cannot be used at all.\n\nWhen the pattern arrives at run time (typed by a user, read from a config), failure must be a runtime Result. But most patterns in real programs are literals written by the programmer. Their validity is knowable the moment the compiler sees them. Jet today treats both the same: every one-shot call like `re.find(\"\\\\d+\", line)` returns a Result, and example code answers it with `?? panic(\"bad pattern\")` on every line.\n\nThat tax teaches a bad habit — panic on a thing that cannot fail — and buries real error handling in noise. Jet already has compile-time machinery for literals; typed literal heads and binary patterns check their strings during compilation. This decision picks whether literal regex patterns join them.",
+      "explainer": "",
+      "story": "Elena writes a log filter with six small regexes, all literals. Her code has six `?? panic(\"bad pattern\")` arms that can never fire. During review a teammate asks which of the six can actually fail, and nobody can answer without reading the regex engine docs.",
+      "inWild": "// Today: every literal pattern pays the fallible ceremony\nids :: re.find_all(\"\\\\bID-\\\\d{4}\\\\b\", text) ?? panic(\"bad pattern\")\nwhen :: re.find(\"\\\\d{2}:\\\\d{2}\", line) ?? panic(\"bad pattern\")\nlevel :: re.find(\"ERROR|WARN\", line) ?? panic(\"bad pattern\")",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Literal patterns check at compile time",
+          "detail": "When the pattern argument is a string literal, the compiler validates it during compilation. A bad literal is a registered compile error pointing at the exact spot in the pattern. The call then returns the match directly, no Result. Runtime-built patterns keep the fallible path unchanged.",
+          "technical": "Sema validates the literal with the same linear-engine parser; diagnostic carries the pattern offset. The one-shot API becomes infallible only for literal arguments; a non-literal argument keeps today's Result signature via the existing compiled-pattern path.",
+          "code": "when :: re.find(\"\\\\d{2}:\\\\d{2}\", line)      // no ??, cannot fail\nbad :: re.find(\"(unclosed\", line)\n// error: this pattern has an unclosed group at position 1"
+        },
+        {
+          "key": "B",
+          "name": "A typed literal form Regex.{\"...\"}",
+          "detail": "Follow the typed-literal-head family: `Regex.{\"\\\\d+\"}` builds a checked pattern value at compile time, and the infallible methods live on that value. Consistent with SQL and HTML typed literals, but every call site grows a wrapper, and the one-shot string forms keep their tax.",
+          "code": "time_pat :: Regex.{\"\\\\d{2}:\\\\d{2}\"}\nwhen :: time_pat.find(line)   // infallible"
+        },
+        {
+          "key": "C",
+          "name": "Keep runtime Results everywhere",
+          "detail": "All patterns stay fallible regardless of origin. One uniform signature, and the `?? panic` noise stays on every literal call in every program, teaching that panic is normal error handling.",
+          "code": "when :: re.find(\"\\\\d{2}:\\\\d{2}\", line) ?? panic(\"bad pattern\")"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (regex + once_cell)",
+          "note": "The ecosystem's answer is a macro or lazy static with unwrap — acknowledged boilerplate that option A removes at the language level.",
+          "code": "static TIME: Lazy<Regex> = Lazy::new(|| Regex::new(r\"\\d{2}:\\d{2}\").unwrap());"
+        },
+        {
+          "lang": "JavaScript",
+          "note": "Regex literals /\\d+/ are parsed with the program; a bad literal is a syntax error at load, not a runtime branch.",
+          "code": "const when = line.match(/\\d{2}:\\d{2}/)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It moves an error the compiler can already see to compile time, deletes the panic ceremony from the common case, and leaves runtime patterns exactly as fallible as they truly are.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It adds a wrapper at every call site and leaves the one-shot string forms — the beginner path — still paying the tax."
+          },
+          {
+            "key": "C",
+            "reason": "It keeps teaching panic-on-impossible as normal style, which the audit called out in shipped examples."
+          }
+        ],
+        "tradeoff": "The same function is infallible for literals and fallible otherwise, which is a signature subtlety to document. That is acceptable because binary patterns and typed literal heads already set this precedent."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T14:42:59.936Z"
+    },
+    {
+      "id": "D-BINREAD-LEN1",
+      "cardId": "c083yh6b",
+      "group": "stdlib",
+      "title": "Sized lengths in binary Reader.take",
+      "gist": "Whether a length read from the wire can feed take without a manual widen.",
+      "lesson": "Binary formats often carry their own sizes: first a small count field, then that many bytes of payload. Reading one means two steps: read the count (say a 16-bit unsigned integer, `U16`), then take that many bytes.\n\nJet keeps sized integers (`U8`, `U16`, …) separate from the everyday `Int` on purpose (S42). Mixing widths silently is how overflow bugs hide, so conversions are explicit: `Int.from_u16(count)`. The cost shows up in the reader API: `r.take(n)` wants an `Int`, so every count-then-payload read writes `r.take(Int.from_u16(count))`. The widen is always safe in this direction — a `U16` always fits an `Int` — so the ceremony proves nothing.\n\nThis decision picks whether the reader accepts sized unsigned lengths directly, gains a combined take-counted step, or stays as is. It is a narrow API question, not a reopening of S42: no implicit mixing appears anywhere else.",
+      "explainer": "",
+      "story": "Marco decodes a sensor packet format: every field is a U16 count followed by payload. His decoder has nine take calls, each wrapped in Int.from_u16. A reviewer asks whether any wrap can fail; the answer is no, all nine are pure ceremony.",
+      "inWild": "count :: r.read_u16_le() ?? return\nname :: r.take(Int.from_u16(count)) ?? return\n\nlen2 :: r.read_u16_le() ?? return\nbody :: r.take(Int.from_u16(len2)) ?? return\n// ×9 in one decoder",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "take accepts unsigned sized lengths",
+          "detail": "Overload `take` (and friends like `skip`) to accept `U8`/`U16`/`U32` directly, widening internally. Only the always-safe direction is accepted; nothing else about sized-int separation changes. The nine wrappers disappear.",
+          "technical": "Accept unsigned widths ≤ platform Int only; U64 stays explicit because the widen can exceed Int on 32-bit targets. No implicit narrowing anywhere. S42 semantics elsewhere untouched.",
+          "code": "count :: r.read_u16_le() ?? return\nname :: r.take(count) ?? return"
+        },
+        {
+          "key": "B",
+          "name": "A combined take_counted step",
+          "detail": "One call reads the count and takes the payload: `r.take_counted(.U16le)`. Shortest for the classic shape, and it names the wire pattern. New API to learn, and mixed shapes (count here, payload later) still need the manual widen.",
+          "code": "name :: r.take_counted(.U16le) ?? return"
+        },
+        {
+          "key": "C",
+          "name": "Keep the explicit widen",
+          "detail": "The conversion stays visible at every call. Maximum uniformity with S42's everything-explicit rule, and the most common binary read shape keeps a wrapper that can never fail and proves nothing.",
+          "code": "name :: r.take(Int.from_u16(count)) ?? return"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Lengths convert with int(n) at every use — the same visible ceremony as option C, widely accepted but widely grumbled about.",
+          "code": "name := buf.Next(int(count))"
+        },
+        {
+          "lang": "Rust",
+          "note": "take(n: u64) chose one wide parameter type so all smaller counts flow in without a cast — option A's shape.",
+          "code": "let mut name = reader.take(count as u64);"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It deletes a wrapper that is always safe and proves nothing, exactly where the wire format dictates the width, while leaving every risky conversion as explicit as S42 demands.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It helps only the adjacent count-payload shape and adds a new API name; split shapes keep the ceremony."
+          },
+          {
+            "key": "C",
+            "reason": "The ceremony documents nothing — the widen cannot fail — so uniformity is buying no safety here."
+          }
+        ],
+        "tradeoff": "take gains accepted-width rules a reader must learn once (unsigned up, never down, U64 explicit). That is acceptable because the rules are one sentence and the compiler enforces them."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T14:43:00.128Z"
+    },
+    {
+      "id": "D-EXAMPLES-SHORTPATH1",
+      "cardId": "c0bda91w",
+      "group": "tooling",
+      "title": "Flagship examples teach the short path first",
+      "gist": "Which path — magic default or manual mechanics — the flagship examples teach first.",
+      "lesson": "In Jet, examples are executable specs (invariant I5): every feature ships with a golden-tested example, and those examples are what users copy. What the flagship examples teach effectively becomes the language's default style.\n\nThe 2026-07-28 pragmatism audit found several flagships teaching the long path where a ratified short path exists. The first-hour tour hand-walks raw `io.args()` although `#CLI` is the zero-ceremony entry. The parallel file-scan example builds channels and a join loop where `taskgroup.all` or `para_map` is one line. Text examples materialize whole files where the streaming reader is the bounded-memory path. Some jobs have no composed example at all: the log pipeline, and a board MMIO write that exists only in tests.\n\nEach case is small on its own. Together they decide whether a newcomer's first week looks like ceremony or magic. This ballot sets one policy so example authors stop deciding case by case.",
+      "explainer": "",
+      "story": "A blogger writes \"first impressions of Jet\" after one afternoon. Her post shows the raw argv walk and the hand-built channel scan, because those are the examples the tour gave her. Comments conclude Jet is verbose — for jobs where the one-line spelling existed all along.",
+      "inWild": "// examples/features/basics/first_hour.jet — the tour's CLI lesson today\nargs :: io.args()\nif args.len() > 1 { print(\"hello, {args.get(1) ?? \\\"?\\\"}\") }\n\n// while the ratified path sits in a different directory:\n#CLI\nstruct Args { #Doc(\"who to greet\") name: String? }\nfn run(args: Args) { print(\"hello, {(~args.name) ?? \\\"world\\\"}\") }",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Short path first, expert variant labeled",
+          "detail": "Policy: every flagship example teaches the magic default first. The manual mechanics stay as clearly labeled expert variants beside it, because the escape paths are ratified surface too. Fill the missing composed examples (log pipeline, MMIO board write, one math flagship) the same way. Goldens update accordingly.",
+          "technical": "Concretely: first_hour points at #CLI; parallel_scan shows taskgroup.all or para_map first with the channel pipeline as the labeled expert file; text parse examples open with the streaming reader; add composed log, MMIO, and math flagships.",
+          "code": "// first_hour.jet (after)\n#CLI\nstruct Args { #Doc(\"who to greet\") name: String? }\nfn run(args: Args) { print(\"hello, {(~args.name) ?? \\\"world\\\"}\") }\n// expert escape (see cli_args.jet): raw io.args() when you need argv itself"
+        },
+        {
+          "key": "B",
+          "name": "Add short-path twins, change nothing",
+          "detail": "Keep every current example untouched and add a parallel short-path example beside each. No golden churn and no history rewrite, but the tour still meets the long path first, and the example tree grows near-duplicates.",
+          "code": "examples/features/basics/first_hour.jet        // unchanged, raw argv\nexamples/features/basics/first_hour_typed.jet  // new twin"
+        },
+        {
+          "key": "C",
+          "name": "Leave examples as they are",
+          "detail": "Treat example order as historical accident not worth churn. Zero work, and the first-week impression keeps contradicting the language's own pitch of beginner magic.",
+          "code": "// no change"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (the Book)",
+          "note": "Teaches idiomatic Cargo and ? from the first chapters; manual mechanics come later as explicit deep dives. First impressions follow the teaching order.",
+          "code": "cargo new hello && cargo run"
+        },
+        {
+          "lang": "Go (tour)",
+          "note": "The tour shows goroutines and channels in their shortest idiomatic form first; long-form patterns live in blog posts, not the tour.",
+          "code": "go func() { ch <- work() }()"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Examples are the spec users actually read. Teaching the ratified default first makes the first week match the language's pitch, while labeled expert variants keep every escape path visible.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Twins double the tree and the tour still opens on the long path, so the first impression does not change."
+          },
+          {
+            "key": "C",
+            "reason": "It leaves the flagship surface contradicting the beginner-magic pitch the audit measured against."
+          }
+        ],
+        "tradeoff": "Golden outputs churn once and some example history rewrites. That is acceptable because goldens exist to be re-blessed when the taught behavior deliberately changes."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T14:44:02.270Z"
+    },
+    {
+      "id": "D-RULEARG-TYPES1",
+      "cardId": "c06k73ro",
+      "group": "stdlib",
+      "title": "Marker argument types become real prelude enums",
+      "gist": "Whether the types of marker arguments (like TaintKind in #Tainted) become real declarations users can read, or stay hidden inside the compiler.",
+      "lesson": "Markers are Jet's `#` rules: `#Unsafe(\"reason\")`, `#Tainted(.PII)`, `#Inline(.Always)`. Many take arguments, and every argument has a type. `.PII` is one value of a set the compiler calls TaintKind. `.Always` belongs to a set called InlineMode.\n\nThe compiler keeps a registry of all 73 active rules. Each row records the rule's name, where it may appear, and a typed signature — the same way a function declares its parameters. When you pass a bad argument, error E0930 prints that signature, in type syntax, naming types like TaintKind.\n\nHere is the odd part: those types do not exist. You cannot write `TaintKind` anywhere. You cannot ask what values it has. `jet explain` and the LSP can only print strings that mention it. Reflection (`T.reflect()`) reports a type's markers as bare strings too. The compiler reasons with a private vocabulary of about 14 types and shows you their names without ever letting you look at them.\n\nThe fix candidates all agree the values stay the same. The question is where the vocabulary lives. It could become real enum declarations in a reserved prelude namespace, generated from the registry so there is one source of truth. Then error text, `jet explain`, hovers, docs, and reflection all point at one readable declaration. Or the compiler can keep the vocabulary private and just write better prose about it.\n\nOne more thing this unlocks: a language whose own rule system is written in itself. You would learn what `#Tainted` accepts by reading ten lines of Jet, not by reading compiler source.",
+      "explainer": "",
+      "story": "Marco hits E0930: his `#Unsafe(obligations: .Trak)` has a typo. The error prints the signature `#Unsafe(reason: String, obligations: ObligationMode)`. He wants to see what ObligationMode allows, so he tries to jump to it in his editor. Nothing. He greps his project, then the docs. The values are listed in one prose paragraph of a spec page. He asks in chat why the type in the error message is not a type.",
+      "inWild": "struct Buffer {\n    #Unsafe(\"raw pointer arithmetic\", obligations: .Track)\n    fn poke(self, at: Int, value: U8) { ... }\n}\n\n// E0930 today prints: `#Unsafe(reason: String, obligations: ObligationMode)`\n// — but `ObligationMode` is a name with no declaration anywhere.\n// LSP: no hover, no completion for `.Track` / `.Skip` / `.None`.\n// TypeInfo.markers: [\"Unsafe\"] — a bare string, arguments lost.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Prelude enums, generated from the registry",
+          "detail": "The 14 argument types become ordinary enum declarations in a reserved prelude namespace. The registry generates them, and a drift-guard test keeps them in lock step. Errors, jet explain, hovers, docs, and reflection all read the same declarations. Dot-literals like .Track resolve by the normal expected-type rule. Reflection upgrades from marker-name strings to typed argument records.",
+          "technical": "Namespace working name: core.lang. Generation source: Policy::APPLIED_RULES signatures. No new type category — marker arguments are already comptime-evaluated values, so S26 is untouched. New I7 rows for the enum names only. TypeInfo.markers gains typed args; string form stays for compatibility during the epoch.",
+          "code": "// prelude (generated) — user-readable:\nenum ObligationMode { Track, Skip, None }\nenum TaintKind { Input, PII, Secret, Credential }\n\n// user experience:\n#Unsafe(\"raw pointer math\", obligations: .Track) fn poke(...) { }\n// typo `.Trak` now says: no variant `Trak` in ObligationMode — did you mean `Track`?\n// editor: hover on ObligationMode jumps to the prelude declaration"
+        },
+        {
+          "key": "B",
+          "name": "Keep types private; improve the prose",
+          "detail": "The registry stays the only home. jet explain and the docs gain a generated table of every rule's arguments and allowed values. No new declarations, no namespace to reserve. The names in error text keep pointing at nothing; the LSP still has no target to jump to; reflection stays strings.",
+          "technical": "Doc generation from APPLIED_RULES into docs/reference. E0930 text unchanged. No I7 rows.",
+          "code": "// jet explain rule Unsafe (generated):\n//   #Unsafe(reason: String, obligations: ObligationMode)\n//   ObligationMode: .Track | .Skip | .None\n// — better prose, but `ObligationMode` still is not a thing in the language."
+        },
+        {
+          "key": "C",
+          "name": "Hand-written prelude declarations",
+          "detail": "Same user surface as option A, but the declarations are written by hand instead of generated. Simpler build, and the declarations can carry richer doc comments. The cost is two sources of truth: the registry and the prelude can drift, and a drift is exactly an E0930 that lies.",
+          "technical": "Same namespace and I7 rows as A. No generation step; a CI check compares registry signatures against prelude declarations and fails on drift.",
+          "code": "// prelude (hand-written):\n/// How an #Unsafe region reports its audit obligations.\nenum ObligationMode { Track, Skip, None }\n// registry adds a fourth mode next release; prelude forgets; E0930 and the\n// declaration now disagree until someone notices the CI failure."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Java",
+          "note": "Annotations are real types: an annotation's arguments are typed members of a declared interface. Tooling, javadoc, and reflection all read one declaration. The strongest precedent for option A.",
+          "code": "public @interface Unsafe {\n    String reason();\n    ObligationMode obligations() default ObligationMode.TRACK;\n}"
+        },
+        {
+          "lang": "Rust",
+          "note": "Attribute arguments are untyped token trees; each macro parses its own. Errors about attribute arguments are famously uneven — the counterexample.",
+          "code": "#[inline(always)]   // `always` is a bare token, not a value of any type\nfn hot() {}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Option A makes the error text honest: every type E0930 prints becomes a declaration one jump away. One generated source of truth feeds errors, explain, hovers, docs, and reflection. It also delivers the larger idea — Jet's rule vocabulary written in Jet, readable by the person learning it.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Better prose still leaves names that point at nothing. The LSP has no jump target, reflection stays stringly, and the shadow vocabulary keeps growing privately."
+          },
+          {
+            "key": "C",
+            "reason": "Hand-written copies drift from the registry, and a drifted declaration makes E0930 lie — the exact disease this fix treats."
+          }
+        ],
+        "tradeoff": "A reserved prelude namespace must be named once and held stable, and its enum names become I7 surface. Renaming an argument type later is a ratified decision, not a refactor."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T14:56:29.547Z"
+    },
+    {
+      "id": "D-STATE-NS1",
+      "cardId": "c0ts6lkx",
+      "group": "syntax",
+      "title": "States join the type's namespace and TypeInfo",
+      "gist": "Whether typestate names like Open and Closed become addressable (T.State.Open) or stay checked-but-invisible.",
+      "lesson": "Typestate is Jet's compile-time state machine. You declare `state File { Open, Closed }`, mark methods with `#State(Open)` (only callable in that state) and `#Transition(Open, Closed)` (moves the value between states). Calling `read` on a closed file is a compile error with excellent teaching copy (E0150). The states erase — no runtime cost.\n\nThe checking works. The names do not exist. `File.Open` resolves to nothing — the error says \"nothing named File exists here\" even though the struct is right there. There is no completion inside `#State(...)`, no jump-to-definition, no way for a doc tool to list a type's states, and no way for a test to assert one. The compiler holds a perfectly good state machine and gives tools and users no handle on it.\n\nA namespace fixes this without touching the semantics. States become compile-time members of the type — addressable names, still erased, still never runtime values. Marker arguments then resolve by ordinary name lookup, which brings did-you-mean and editor completion for free. Reflection (`TypeInfo`) can expose `.states` and `.transitions`, so the documented state diagram is generated, never hand-drawn.\n\nThe one design wrinkle is collisions. Types already grow synthesized members — `#Patchable` mints `T.Patch` — and user code adds its own. A state named Patch must not collide. A qualified plane (`File.State.Open`) cannot collide with anything; bare members (`File.Open`) are shorter but need a clash rule.",
+      "explainer": "",
+      "story": "Sofia builds a connection pool with typestate: Fresh, Open, Closed. She writes `#Transition(Fersh, Open)` — a typo. Nothing catches it until the whole machine misbehaves and E0151 lists the valid set. Her editor completed nothing inside the marker. Later she wants the state diagram in the team docs; she draws it by hand in Mermaid, and it drifts from the code within a month.",
+      "inWild": "state Conn { Fresh, Open, Closed }\nstruct Conn { ... }\n\nimpl Conn {\n    #Transition(Fresh, Open) fn open(self) => Conn { ... }\n    #State(Open) fn query(self, q: SQL) => Rows { ... }\n}\n\nfn debug() {\n    s :: Conn.Open\n    // today: Error [E0107] nothing named `Conn` exists here\n    // — while Conn.open() resolves fine two lines up\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Qualified namespace: T.State.Open, plus TypeInfo",
+          "detail": "States live at T.State.Name — a reserved plane that cannot collide with methods, fields, synthesized members, or nested types. Marker arguments accept the qualified form and keep today's bare names as sugar where unambiguous. TypeInfo gains .states and .transitions so docs and diagram tools read the machine from reflection. States stay comptime-only facts; erasure unchanged.",
+          "technical": "Name resolution: T.State.X resolves in comptime/marker/test-assertion positions only; value position stays an error with copy saying states are not runtime values. Bare names inside #State/#Transition resolve against the declaring type's state set first (today's behavior, now via the same lookup). D-PATCH1-style synthesized members are unaffected by construction.",
+          "code": "state Conn { Fresh, Open, Closed }\n\nimpl Conn {\n    #Transition(Conn.State.Fresh, Conn.State.Open) fn open(self) => Conn { }\n    #State(Open) fn query(self, q: SQL) => Rows { }   // bare sugar still fine\n}\n// typo now: #Transition(Fersh, Open)\n// → no state `Fersh` in Conn.State — did you mean `Fresh`?\n// comptime: Conn.reflect().states  →  [Fresh, Open, Closed]"
+        },
+        {
+          "key": "B",
+          "name": "Bare members: T.Open",
+          "detail": "States become direct members of the type: Conn.Open. Shortest spelling and the most natural to guess. Requires a collision law with synthesized members, methods, and future nested types — declare-time error on clash — and reserves every state name a type uses against its own future members.",
+          "technical": "Clash rule: a state name colliding with any other member of T is a declare-time error naming both sites. Synthesized members (T.Patch) win or lose by declaration order unless the error is unconditional — the error must be unconditional to stay predictable.",
+          "code": "state Conn { Fresh, Open, Closed }\n\nfn debug() {\n    s :: Conn.Open        // resolves (comptime contexts only)\n}\n\n// the wrinkle:\nstate Doc { Draft, Patch }\n#Patchable struct Doc { ... }\n// Error: `Patch` is both a state of `Doc` and its synthesized patch type"
+        },
+        {
+          "key": "C",
+          "name": "Stay unaddressable; better suggestions only",
+          "detail": "No namespace. E0151's suggestion list gains did-you-mean ranking, and that is all. No completion, no reflection, no generated diagrams, no test assertions. The state machine stays a private conversation between the markers and the checker.",
+          "technical": "Copy-only change to E0151. The E0107 lying-message bug (card #1290) still gets fixed independently.",
+          "code": "#Transition(Fersh, Open) fn open(self) => Conn { }\n// → E0151: no state `Fersh`; states of `Conn` are Fresh, Open, Closed\n//   (did you mean `Fresh`?)\n// — better copy, still no completion, no reflection, no diagram"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Typestate is encoded with generic parameters (Conn<Open>) — states are real types, fully addressable, and heavy. Jet keeps the light checking and this ballot adds only the addressability.",
+          "code": "struct Open; struct Closed;\nstruct Conn<S> { _s: PhantomData<S> }\nimpl Conn<Open> { fn query(&self) { } }"
+        },
+        {
+          "lang": "Java",
+          "note": "State machines use enums — addressable, completable, reflectable, but runtime values with runtime cost. Option A gets the tooling without the cost.",
+          "code": "enum ConnState { FRESH, OPEN, CLOSED }\nConnState.values()   // reflection every tool uses"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The qualified plane gives every gain — lookup, did-you-mean, completion, reflection, generated diagrams — and cannot collide with anything by construction. Bare-name sugar inside markers keeps today's short spelling, so the common case types nothing new.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Bare members buy a shorter spelling in rare positions at the price of an unconditional clash rule, and every state name a type uses is reserved against its own future members forever."
+          },
+          {
+            "key": "C",
+            "reason": "Better error copy leaves tools blind: no completion, no reflection, no generated state diagram — the drift between hand-drawn docs and code continues."
+          }
+        ],
+        "tradeoff": "The canonical spelling T.State.Open is longer than the checked thing it names, and one more reserved member plane (State) joins the type namespace."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T14:56:29.860Z"
+    },
+    {
+      "id": "D-DIMENSION-OPEN1",
+      "cardId": "c03gs87j",
+      "group": "syntax",
+      "title": "Open dimension algebra to user-declared dimensions",
+      "gist": "Whether users can declare new physical dimensions (like Mass) that get the same unit math the built-in five get.",
+      "lesson": "A unit is a named scale: meter, foot, second. A dimension is the thing the unit measures: Length, Time, Mass. Many units can share one dimension — meter and foot are both Length.\n\nDimension math is what makes units useful. When you divide meters by seconds, the result is not Length and not Time. It is a new dimension: Speed. A compiler can track this. It stores each dimension as a small list of exponents, one slot per base dimension. Length is (1, 0). Time is (0, 1). Speed is (1, -1). Multiplying quantities adds the exponents; dividing subtracts them. This catches real bugs — NASA lost the Mars Climate Orbiter because one team used pound-seconds where another expected newton-seconds.\n\nJet already has half of this. `#UnitFamily(Currency) { usd, eur }` mints one real type per member, and unit literals like `4usd` work. Five dimensions ship built in: Length, Time, Speed, Area, Temperature. For those five, the math works: `12meter / 3second` gives a Speed.\n\nThe gap: the five dimensions live in a fixed compiler table with a fixed three-slot exponent list. A user who declares `#UnitFamily(Mass) { kg }` gets a working unit type but no dimension. `kg * meter` is just a type error. Science needs seven base dimensions. Real programs also want their own axes: pixels per point, tokens per second, dollars per hour. This decision picks who can add a dimension: nobody, the compiler, or you.",
+      "explainer": "",
+      "story": "Priya teaches a physics course and picked Jet for its unit literals. Week one is fine: distances and times work. Week two is forces — mass times acceleration. She declares a Mass family, writes `f :: m * a`, and gets a type error that tells her to make both sides the same type. She checks the docs and learns the truth: only the five built-in dimensions do math. She goes back to Python with a units library.",
+      "inWild": "#UnitFamily(Mass) { kg }\n#UnitFamily(Length) { meter }\n\nfn run() {\n    m :: 4kg\n    d :: 3meter\n    torque :: m * d\n    // today: Error [E0109]: `*` can't compare or combine `Kg` and `Meter`\n    // meanwhile, built-ins compose fine:\n    speed :: 12meter / 3second   // works, derives Speed\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Open dimensions: families opt in, vectors open up",
+          "detail": "A unit family can declare that it mints a dimension. The exponent list grows to any length, one slot per declared base dimension. The five built-ins become ordinary prelude declarations of the same kind. Families that do not opt in stay nominal — currency keeps its deliberate no-math rule. Two packages that each declare Mass get two different dimensions; sharing goes through a common dependency, the same rule types already follow.",
+          "technical": "Amends D-SHAPE-QUANTITY1 (dimension model) and the D-QUAL3 nominal/dimensional split. Exponent representation moves from [i32;3] to an open map keyed by declared base dimensions. Derived dimensions stay structural until a family claims a name. Quantity<Dim, Kind> bounds resolve against declared dimensions. Migration note: generalize the vector before unit facts serialize it.",
+          "code": "#UnitFamily(Mass, dimension) { kg, g(scale: 0.001) }\n\nfn momentum(m: Kg, v: MeterPerSecond) => Quantity {\n    return m * v      // derives Mass·Length/Time structurally\n}\n\nfn run() {\n    f :: 4kg * 9.8meter / 1second / 1second\n    print(f)          // 39.2 kg·m/s² — a force, no declaration needed\n}"
+        },
+        {
+          "key": "B",
+          "name": "Grow the built-in table to full SI",
+          "detail": "The compiler table expands from five rows to the seven SI base dimensions plus common derived ones. Users still cannot add a dimension. Physics homework works. Domain axes — pixels per point, tokens per second — stay impossible, and every new dimension request becomes a compiler release.",
+          "technical": "PHYSICAL_DIMENSIONS grows to [i32;7] with Mass, Current, Amount, LuminousIntensity added. No surface change beyond new prelude names. The closed-table shape and its retrofit cost remain.",
+          "code": "#UnitFamily(Mass) { kg }   // now blessed: Mass is row 6 of the table\n\nfn run() {\n    f :: 4kg * 9.8meter / 1second / 1second   // works\n    r :: 30token / 1second\n    // still Error: `token` has no dimension — not in the table\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep five; families stay nominal-only",
+          "detail": "No change. The five built-ins keep their math. Every user family is nominal: same-family arithmetic works, cross-family math is a type error. The spec says this plainly so nobody expects more. The science and engineering domain stays out of reach.",
+          "technical": "Status quo. Document in docs/reference/core-library.md that dimension algebra is closed. The [i32;3] representation still gets serialized into unit facts as-is.",
+          "code": "#UnitFamily(Mass) { kg }\n\nfn run() {\n    m :: 4kg\n    total :: m + 2kg        // fine: same family\n    t :: m * 3meter\n    // Error [E0109] — and the docs now say: by design\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "F#",
+          "note": "Units of measure are fully user-declared and compose structurally. Twenty years of production use; the standard proof that open dimensions work in a mainstream type system.",
+          "code": "[<Measure>] type kg\n[<Measure>] type m\n[<Measure>] type s\nlet force = 4.0<kg> * 9.8<m/s^2>   // force : float<kg m/s^2>"
+        },
+        {
+          "lang": "C++ (mp-units)",
+          "note": "Library-level open dimensions over template metaprogramming. Powerful, but the error messages are the cautionary tale — Jet can do the same math with real diagnostics.",
+          "code": "using namespace mp_units;\nquantity force = 4.0 * si::kilogram * 9.8 * si::metre / (si::second * si::second);"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Open dimensions finish a mechanism Jet already ships half of. Unit families already mint types; giving them dimensions makes physics, engineering, and domain rates (tokens per second) first-class. The magic scales: user code composes exactly like built-in code.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Full SI still blocks domain axes, and every new dimension becomes a compiler release. The closed table and its serialized three-slot vector stay, so the retrofit only gets more expensive."
+          },
+          {
+            "key": "C",
+            "reason": "The science domain stays a demo, and each release serializes the closed vector deeper into unit facts and snapshots."
+          }
+        ],
+        "tradeoff": "Dimensions become nominal to their declaring package. Two packages that each declare Mass do not unify unless they share a dependency. That is one more sharing rule to teach, and it is the same rule types already follow."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T14:57:51.582Z"
+    },
+    {
+      "id": "D-FACTMODEL1",
+      "cardId": "c09oa1up",
+      "group": "syntax",
+      "title": "One fact model behind tags, states, taint kinds, and effect leaves",
+      "gist": "Whether Jet's four kinds of erased compile-time labels become one mechanism, and what that mechanism looks like.",
+      "lesson": "A fact is a label the compiler attaches to a value at compile time and throws away at runtime. Facts cost nothing when the program runs; they exist only to catch mistakes while you write.\n\nJet has four fact mechanisms today, each with its own spelling and rules. Value tags: `tag Reviewed` lets you write `#Reviewed String`. Typestate: `state File { Open, Closed }` lets methods demand a state, so calling `read` on a closed file is a compile error. Taint kinds: `#Tainted(.PII)` marks data that must not reach a log or a query unsanitized; the compiler follows it through assignments. Effect leaves: `FS.Read` names a capability inside effect rows and grants.\n\nUnder the hood these are the same thing: a named label, erased at runtime. The check is always set or tree membership — is this label in that set, or under that branch? The tree question already has one shared answer — the law for effect matching says it reuses the same subtree rule as enum variant groups.\n\nWhat stays broken while they are four mechanisms: none of the labels live in a namespace, so tools cannot complete them and typos slip through. Each mechanism needs its own lesson. And every future fact-like feature has to pick one of four homes or invent a fifth.\n\nThis ballot decides two layers. Layer one is internal and ships regardless: one registry and one matching algorithm behind all four, plus one reflection surface. Layer two is the user-visible question: do facts get one declaration form, and which?",
+      "explainer": "",
+      "story": "Ana's team encodes review status with tags, connection lifecycle with states, and file access with effect rows. A new teammate asks her the difference between a tag and a state. She starts explaining and realizes the honest answer is the keyword plus which marker consumes it. Four lessons for one idea, and her editor completes none of the names in any of them.",
+      "inWild": "tag Reviewed                         // fact family 1\nstate Conn { Fresh, Open, Closed }   // fact family 2\n#Tainted(.PII) name :: form.field(\"name\")   // fact family 3 (closed set)\nfn save(d: Doc) =[FS.Write]=> Bool { ... }  // fact family 4 (freeform leaf)\n\n// Four spellings. One semantics: erased label + set/tree membership.\n// None of the four names has a namespace; typos in three of them are silent.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Facts are enums",
+          "detail": "States, taint kinds, and declared effect leaves become enum declarations that markers consume at compile time. Enum groups already give trees, subtree matching, exhaustiveness, and payloads — facts reuse all of it. One classification mechanism for runtime and compile time; erasure is just what happens when only markers consume the enum. The tag keyword stays for flat one-off qualifiers or retires into the same story.",
+          "technical": "Reuses D-TAG1 machinery. #State/#Transition/#Tainted/#Caps argument positions resolve against enum declarations. Ballot language amends S26-adjacent text explicitly (facts classify values and erase; they never select types or drive dispatch). User taint kinds remain gated on the deferred IFC decision — a kind with no sink checks nothing.",
+          "code": "enum ConnState { Fresh, Open, Closed }\nstruct Conn { ... }\nimpl Conn {\n    #Transition(ConnState.Fresh, ConnState.Open) fn open(self) => Conn { ... }\n    #State(ConnState.Open) fn query(self, q: SQL) => Rows { ... }\n}\n// completion + did-you-mean for free: it is ordinary name lookup\n// LSP: ConnState.Opne → no variant `Opne` — did you mean `Open`?"
+        },
+        {
+          "key": "B",
+          "name": "Tree-bodied tags",
+          "detail": "The tag keyword grows an optional tree body and becomes the one fact declarator. Tags, states, taint kinds, and effect leaves all declare with tag; markers consume them. Runtime enums stay purely runtime. This keeps the compile-time plane visually distinct, at the cost of a third tree-classification syntax next to enums and enum groups.",
+          "technical": "Amends D-QUAL2's ratified \"exactly two qualifier kinds\" text (trait / tag) to give tag a tree body. New parse form; same consumption sites as option A. Retirement terms for `state` as a separate keyword must ship in the same ruling or the spelling count goes up, not down.",
+          "code": "tag ConnState { Fresh, Open, Closed }\ntag Sensitive { Pii, Secret { Credential } }\n\nimpl Conn {\n    #State(ConnState.Open) fn query(self, q: SQL) => Rows { ... }\n}\nfn log_safe(x: #Sensitive.Pii String) { ... }   // subtree matching, one rule"
+        },
+        {
+          "key": "C",
+          "name": "Internal unification only",
+          "detail": "Ship layer one — one registry, one matching algorithm, one reflection surface — and keep all four user spellings as they are. Users see better errors and reflection but still learn four mechanisms. Every per-mechanism improvement (state namespaces, effect declarations) still lands, each in its own shape.",
+          "technical": "No surface change, no D-QUAL2 or S26 contact. The follow-on ballots (D-STATE-NS1, D-EFFECT-DECL1, D-TAG-STRICT1) each define their own naming and resolution rules independently.",
+          "code": "// No user-visible change. Internally:\n// FactRegistry { tags, states, taint_kinds, effect_leaves }\n// one subsume(fact, set_or_tree) used by #State, #Tainted, #Caps, effect rows\n// TypeInfo gains .facts — but each family keeps its own declaration story"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Haskell",
+          "note": "DataKinds promotes ordinary data declarations to compile-time labels — the direct precedent for option A: one declaration form serving runtime values and erased type-level facts.",
+          "code": "data ConnState = Fresh | Open | Closed   -- one declaration\nquery :: Conn 'Open -> Query -> IO Rows  -- promoted to a compile-time fact"
+        },
+        {
+          "lang": "TypeScript",
+          "note": "String-literal unions get used as erased fact labels (branding, state unions) precisely because they reuse the ordinary type vocabulary. No second mechanism was added; users unified it themselves.",
+          "code": "type ConnState = \"fresh\" | \"open\" | \"closed\";\ntype Open<T> = T & { readonly state: \"open\" };"
+        },
+        {
+          "lang": "Rust",
+          "note": "The counterexample: typestate is hand-rolled with marker structs plus PhantomData — two mechanisms and real ceremony, widely cited as expert-only.",
+          "code": "struct Open; struct Closed;\nstruct Conn<S> { _s: PhantomData<S> }\nimpl Conn<Open> { fn query(&self) { } }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Facts-are-enums retires spellings instead of adding one. Enum groups already own trees, subtree matching, and exhaustiveness under ratified law, and the effect-matching rule already points at them. Every fact name becomes an ordinary lookup, so completion, did-you-mean, and reflection arrive without new machinery.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A tree-bodied tag is a third tree-classification syntax beside enums and enum groups. It also forces the D-QUAL2 amendment while still needing retirement terms for state — more ruling for less unification."
+          },
+          {
+            "key": "C",
+            "reason": "Users keep learning four mechanisms for one idea, and each follow-on ballot designs its naming rules against a future this ballot declined to pick."
+          }
+        ],
+        "tradeoff": "The enum keyword now serves runtime variants and erased facts, and the spec must teach the difference: a fact enum is one that only markers consume. That is one new sentence in the enum lesson, accepted to avoid a whole new declaration kind."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T14:57:51.786Z"
+    },
+    {
+      "id": "D-TAG-STRICT1",
+      "cardId": "c0cv24hu",
+      "group": "safety",
+      "title": "Strict tags: opt-in checked value tags with an audited blessing gate",
+      "gist": "Whether a tag can demand a blessing step before plain values flow into tagged positions, or tags stay documentation.",
+      "lesson": "A value tag qualifies a type: `#Reviewed String` reads as \"a string that passed review.\" Tags erase — at runtime a tagged string is just a string, with zero cost.\n\nHere is what surprises people: tags check nothing. Today a plain `String` flows into a `#Reviewed String` parameter with no error. The tag is honest documentation, and the law says so — but the surface looks exactly like Jet's checked qualifiers. `#Tainted String` uses the same spelling, and the compiler really does follow taint through your program and block it at dangerous sinks. Two identical-looking prefixes; one checks, one does not.\n\nA strict tag would close that gap for tags that want it. Strictness means: an untagged value cannot flow into a tagged position on its own. It must pass through a blessing point — a function the author marked as the place where the fact becomes true. This mirrors how taint already exits: a `#Sanitizer` function is the audited door out of the taint lattice. A blessing marker is the audited door in.\n\nThe design question inside: Jet already has `distinct` for making one type into two. The dividing line matters. A `distinct` mints a new nominal identity with its own methods — good when the value is a different thing (UserId is not Int). A strict tag keeps the same type flowing through every existing API — good when the value is the same thing with a verified property. If that line feels too thin, the honest alternative is to keep tags as documentation and say so in the spec.",
+      "explainer": "",
+      "story": "Dev runs a small games portal. Every level description must pass moderation before it renders. He writes `fn publish(desc: #Reviewed String)` and sleeps well — the signature says reviewed. A month later a teammate wires a new import path that calls `publish` with raw form input. It compiles. The unreviewed text ships. The signature never checked anything; it just looked like it did.",
+      "inWild": "tag Reviewed\n\nfn publish(desc: #Reviewed String) => Html { ... }\n\nfn import(form: Form) {\n    publish(form.field(\"desc\"))\n    // compiles today: plain String flows into #Reviewed String silently\n    // (live probe, 2026-07-28) — the tag is documentation, not a check\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Strict tags with an audited blessing marker",
+          "detail": "A tag can be declared strict. Untagged values no longer flow into that tag's positions. The only way in is a function carrying a blessing marker for that tag — a visible, greppable, audited door, like #Sanitizer is for taint. Plain tags stay documentation, unchanged and free. The spec carries the one-line rule: distinct for a new identity with methods; strict tag for the same type with a verified property.",
+          "technical": "Declaration spelling for strictness and the blessing marker (working: #Blesses(Reviewed) on the blessing fn) are I7 rows. Checking is flow-insensitive at call boundaries: tagged position requires tagged value or blessing provenance. PartialEq and generic flow keep peeling tags as today. Depends on card #1289 (undeclared tags must error) landing first.",
+          "code": "tag Reviewed strict\n\n#Blesses(Reviewed)\nfn approve(raw: String, mod: Moderator) => #Reviewed String {\n    mod.log(raw)\n    return raw            // the audited door in\n}\n\nfn import(form: Form) {\n    publish(form.field(\"desc\"))\n    // Error: `publish` needs `#Reviewed String`; this `String` was never blessed\n    // Fix: pass it through `approve` first\n}"
+        },
+        {
+          "key": "B",
+          "name": "Tags stay documentation; the spec says so loudly",
+          "detail": "No checking, ever. The spec and the tag section of the book state plainly: tags document intent and erase; they never gate flow. The false rhyme with #Tainted is handled by teaching, not mechanism. Anyone who wants enforcement is pointed at distinct. Zero new surface; the ceremony cost lands on users who must wrap types to get checking.",
+          "technical": "Doc-only. The E-code from card #1289 (undeclared tag) still lands; its fix text points at distinct for enforcement.",
+          "code": "tag Reviewed   // documentation, and proud of it\n\n// want enforcement? the docs now say: use distinct\nReviewedDesc :: distinct String\nfn approve(raw: String, mod: Moderator) => ReviewedDesc { ... }\nfn publish(desc: ReviewedDesc) => Html { ... }\n// every call site now needs .raw() to use String APIs — the wrapping tax"
+        },
+        {
+          "key": "C",
+          "name": "Retire value tags from type position",
+          "detail": "Remove `#Tag T` from type position entirely. Tags remain as a declaration form only where markers consume them (fact vocabulary). Anyone qualifying a value type uses distinct. One mechanism, no false rhyme, and the sharpest break: existing tagged signatures respell. The lightweight \"same type, verified property\" pattern is lost.",
+          "technical": "Retires D-QUAL4 (type-position value tags). Tagged AST node keeps parsing for one epoch with a retirement error pointing at distinct. Greenfield policy makes the respell ordinary errors, not migration tooling.",
+          "code": "fn publish(desc: #Reviewed String) => Html { ... }\n// Error: value tags no longer qualify types — use a distinct type\n// Fix: ReviewedDesc :: distinct String, then publish(desc: ReviewedDesc)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "TypeScript",
+          "note": "Branded types are the same pattern users hand-roll: a compile-time-only brand with a blessing function as the door in. Massive real-world use proves the demand for erased checked facts.",
+          "code": "type Reviewed = string & { readonly __brand: \"reviewed\" };\nfunction approve(s: string): Reviewed { moderate(s); return s as Reviewed; }"
+        },
+        {
+          "lang": "Rust",
+          "note": "The newtype pattern is the distinct analog — enforcement with wrapping ceremony at every boundary. The tax option B accepts is exactly what Rust users complain about.",
+          "code": "struct Reviewed(String);\nfn publish(desc: Reviewed) { }\n// every String API call needs desc.0 — the unwrap tax"
+        },
+        {
+          "lang": "Perl",
+          "note": "Taint mode's untainting is the audited-door precedent: the only way from tainted to trusted is an explicit, visible operation reviewers can grep for.",
+          "code": "my ($clean) = $input =~ /^([\\w.-]+)$/;   # the one blessed door out of taint"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Strict tags give the \"same type, verified property\" pattern a real check with zero runtime cost, and the audited blessing marker makes every entry point visible and greppable. Plain tags stay free, so nobody pays who did not opt in. The false rhyme with #Tainted resolves by making the rhyme true.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Teaching alone leaves signatures that look like checks and are not. The next Dev ships the next unreviewed string, and the wrapping tax pushes teams away from encoding facts at all."
+          },
+          {
+            "key": "C",
+            "reason": "Retiring value tags loses the lightweight fact channel and forces wrapping ceremony onto every boundary where the value genuinely is the same type."
+          }
+        ],
+        "tradeoff": "Jet ends up with two nominal-separation tools, distinct and strict tags, separated by one spec rule. That rule must hold the line: a new identity with methods is a distinct; a verified property on the same type is a strict tag."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T14:57:51.981Z"
+    },
+    {
+      "id": "D-TASKGROUP-PARAM1",
+      "cardId": "c0wr4ji9",
+      "group": "runtime",
+      "title": "TaskGroup becomes a nameable parameter type",
+      "gist": "Whether a taskgroup handle can be passed to helper functions, and under what capture rule that stays safe.",
+      "lesson": "Structured concurrency is Jet's model for parallel work: a `taskgroup g { ... }` block owns every task spawned inside it and joins them all before the block exits. No orphan threads, no leaked work. Inside the block, `g.task => expr` spawns a child and `g.all(handles)` collects results.\n\nToday the group handle `g` is locked to its block. You cannot write a helper `fn fan_out(g: TaskGroup, xs: [Int])` — the type name does not exist (E0119), and spawning outside the block is its own error (E1110). Any fan-out pattern must be written inline, again, in every function that needs it.\n\nWhy the lock exists: safety without lifetimes. A spawned task may capture variables. If it captures a view (a borrow) of a local, the task must not outlive that local — and Jet v1 has no lifetimes to track that across calls. The lexical rule solves it structurally: the task cannot outlive the block, the block cannot outlive the enclosing function, so view captures of that function's locals are safe. Pass `g` into a helper and the trick breaks: a task could view-capture the helper's locals and outlive its frame.\n\nThe fix candidates therefore differ in how they close that hole. The main proposal: passing a group is allowed, and spawns through a parameter group require owned captures — the closure must move or copy what it uses (`~x`), never borrow. Owned data cannot dangle. Jet already applies exactly this discipline to detached tasks.",
+      "explainer": "",
+      "story": "Tomas writes a crawler. Fetch-all-and-collect appears in six functions. In any other language he would extract `fn fetch_all(g, urls)`. In Jet the helper cannot exist: TaskGroup is not a type he can write. He copies the same eleven-line taskgroup block six times, and the six copies drift apart within a sprint.",
+      "inWild": "fn fan_out(g: TaskGroup, xs: [Int]) => [Int] {\n    handles :: loop x; xs -> yield g.task => x * 2\n    return g.all(handles)\n}\n// today: Error [E0119] there's no type called `TaskGroup`\n//        Error [E1110] `.task => …` only works inside a `taskgroup` block\n\nfn run() {\n    taskgroup g {\n        doubled :: fan_out(g, [1, 2, 3])   // the pattern everyone reaches for\n    }\n}",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Nameable parameter + owned captures for non-local spawns",
+          "detail": "TaskGroup becomes a type you can write in parameter position. A helper may spawn through it, with one rule: spawns through a parameter group must own their captures — move or copy, never a view. Spawns inside the group's own block keep today's freedom. The group value still cannot be stored in a struct or returned; it flows down the call stack only.",
+          "technical": "Extends D-DETACH1's owned-captures discipline to non-local spawns. TaskGroup is second-class: legal in parameter position, illegal in struct fields, returns, and closures that escape. Escape checking stays lexical per frame — no interprocedural analysis needed because owned captures cannot dangle. E1110 copy updates to teach the parameter path.",
+          "code": "fn fan_out(g: TaskGroup, xs: [Int]) => [Int] {\n    handles :: loop x; xs -> yield g.task => x * 2   // x is copied in: owned\n    return g.all(handles)\n}\n\nfn helper(g: TaskGroup) {\n    local :: load_config()\n    g.task => use(&local)\n    // Error: a task spawned through a group parameter must own its captures\n    // Fix: move it in — g.task => use(~local)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep the lexical lock",
+          "detail": "No change. Fan-out stays inline in every function that needs it. The safety story stays maximally simple — one rule, no capture-mode distinction — and the duplication cost lands on every concurrent codebase. TaskGroup keeps appearing in error copy as a type that does not exist.",
+          "technical": "Status quo. The E0119/E1110 pair remains the answer to helper extraction. Diagnostics honesty fix (copy stops naming TaskGroup as a type) can land regardless.",
+          "code": "fn run() {\n    taskgroup g {\n        // the eleven lines, inline, copy #6\n        handles :: loop u; urls -> yield g.task => fetch(u)\n        pages :: g.all(handles)\n        ...\n    }\n}"
+        },
+        {
+          "key": "C",
+          "name": "First-class TaskGroup values",
+          "detail": "The group becomes an ordinary value: storable in structs, returnable, capturable. Maximum flexibility — and the structured guarantee quietly dies, because a stored group outlives its block and every safety argument with it. This is the unstructured-concurrency door Jet deliberately did not build.",
+          "technical": "Requires lifetime tracking or reference counting for group handles, plus join semantics for groups that escape their scope. Conflicts with v1's no-stored-references model (C1) and with the structured-concurrency ruling that tasks join at scope exit.",
+          "code": "struct Pool { g: TaskGroup }   // stored: who joins it, and when?\nfn make() => Pool {\n    taskgroup g { return .{g: g} }\n    // the block exits and joins — the stored handle is already dead\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python (Trio)",
+          "note": "Nurseries pass into helpers as a core idiom — the pattern option A enables. Trio leans on garbage collection for capture safety; Jet substitutes the owned-captures rule.",
+          "code": "async def fan_out(nursery, urls):\n    for u in urls:\n        nursery.start_soon(fetch, u)"
+        },
+        {
+          "lang": "Swift",
+          "note": "TaskGroup is scoped to withTaskGroup and non-escaping — you may pass it down but never store it. The same second-class shape option A proposes.",
+          "code": "await withTaskGroup(of: Int.self) { group in\n    await fanOut(&group, xs)   // passed down; cannot escape\n}"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "CoroutineScope flows through receivers into helpers; storing scopes is possible and is the community's top-cited source of leaked jobs — the option C warning.",
+          "code": "fun CoroutineScope.fanOut(xs: List<Int>) = xs.map { async { it * 2 } }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Fan-out helpers are a day-one pattern in every concurrent codebase. The owned-captures rule keeps the safety argument airtight without lifetimes: owned data cannot dangle, and the discipline already exists for detached tasks. Structured concurrency's guarantee — the block joins everything — survives untouched.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Inline-only taskgroups force the same block to be copied into every function that fans out, and the copies drift. The error copy also keeps naming a type the language refuses to admit exists."
+          },
+          {
+            "key": "C",
+            "reason": "Storable groups outlive their block, which un-structures structured concurrency and needs the lifetime machinery v1 rejected."
+          }
+        ],
+        "tradeoff": "Helpers cannot view-capture their own locals into spawned tasks; some code must copy or move data it would rather borrow. That is the price of keeping capture safety local to each frame."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T14:57:52.189Z"
+    },
+    {
+      "id": "D-RANGE-VALUE1",
+      "cardId": "c0zut94q",
+      "group": "syntax",
+      "title": "Ranges become values: one Range type in core",
+      "gist": "Whether 1..10 becomes a value you can store, pass, and return — and if so, one range type or two.",
+      "lesson": "A range names a band of integers: `1..10` (inclusive end) or `1..<10` (exclusive end). Jet uses ranges in exactly five places: loop sources, arm heads in match-style dispatch, slices, view arguments, and distinct-type constraints like `distinct Int(0..10)`.\n\nIn all five, the range is syntax — a shape the parser recognizes in that spot. It is not a value. There is no `Range` type. You cannot write `band :: 1..10`, put ranges in a list, return one from a function, or accept one as a parameter. A pagination API that wants \"rows 40 to 60\" takes two integers. A histogram that wants buckets takes pairs. The concept exists in the language; the value does not.\n\nMaking ranges values is old, proven ground — most modern languages did it. The design questions are small but real. One type or two? Rust has separate types for every inclusivity combination, and its users cite the range-type zoo as a wart. One type that carries its own end-exclusivity is simpler.\n\nWhich element types? The five current positions are integer positions, so Int-only matches today's language. And one honest asymmetry: `distinct Int(0..10)` consumes its range at type-declaration time. A runtime range value cannot flow into a type declaration — that would be value-dependent types, a different language. The literal-only rule there stays.\n\nPerformance does not change either way: loops over ranges keep compiling to plain jumps. Whether the surface calls it a value is a surface fact, not a codegen fact.",
+      "explainer": "",
+      "story": "Lena builds a log dashboard. Latency buckets: 0–10ms, 10–100ms, 100ms and up. She wants `buckets :: [0..<10, 10..<100]` and a function that takes a band and counts hits. Neither line has a type that can exist. She ships `[(0, 10), (10, 100)]` with a comment explaining which end is exclusive, and the comment is wrong within a month.",
+      "inWild": "// what people write today:\nfn page(rows: Rows, lo: Int, hi: Int) => Rows { ... }   // two ints, meaning by convention\nbuckets :: [(0, 10), (10, 100)]                          // exclusivity lives in a comment\n\n// what the language already understands, but only in five slots:\nloop i; 0..<10 { ... }\nsmall :: distinct Int(0..10)",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "One Range type; the value carries its exclusivity",
+          "detail": "Core gains one nominal Range over Int. Both spellings construct it; an inclusive and an exclusive range are the same type with different end behavior. Fields and methods: .start, .end, .contains(x). Every current range position keeps working unchanged and also accepts a Range value where a value can appear. The distinct-constraint position stays literal-only, stated in the spec.",
+          "technical": "Range { start: Int, end: Int, inclusive: Bool } semantics (representation is core's choice). Loop/slice/view positions accept literals as today plus Range-typed values; lowering specializes identically — no iterator object, no allocation. Arm heads accept range literals as today; Range values in arm heads are a later question, not this ballot. Int-only in v1.",
+          "code": "buckets :: [0..<10, 10..<100, 100..1000000]\n\nfn count_in(band: Range, xs: [Int]) => Int {\n    return loop x; xs -> if band.contains(x) yield 1 else next\n        .sum()\n}\n\nfn page(rows: Rows, band: Range) => Rows = rows.slice(band)"
+        },
+        {
+          "key": "B",
+          "name": "Two types: Range and RangeExclusive",
+          "detail": "Each spelling gets its own nominal type, so the inclusivity is visible in signatures. APIs must pick one or accept both, generic code needs two paths, and users learn which functions take which. This is Rust's shape, and Rust's users name it as a pain point.",
+          "technical": "Range (inclusive) and RangeExclusive as separate core types; .contains on both; conversions between them. Every API taking a band either doubles its signature or picks a canonical one and forces conversions at call sites.",
+          "code": "fn page(rows: Rows, band: RangeExclusive) => Rows { ... }\n\nfn run(rows: Rows) {\n    page(rows, 40..<60)      // fine\n    page(rows, 40..60)\n    // Error: expected RangeExclusive, got Range — convert with .exclusive()\n}"
+        },
+        {
+          "key": "C",
+          "name": "Stay syntax-only",
+          "detail": "No Range type. The five positions keep working; bands-as-data stay inexpressible; APIs keep taking integer pairs with meaning by convention. Zero new surface, and the one concept the language clearly already has keeps not being a value.",
+          "technical": "Status quo. S22/S72 and D-RANGE-EXCL1 unchanged.",
+          "code": "fn page(rows: Rows, lo: Int, hi: Int) => Rows { ... }\n// call sites forever: page(rows, 40, 60) — is 60 in or out? read the docs"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Kotlin",
+          "note": "IntRange is one value type; downTo and until construct variants of the same concept. The closest match to option A, widely liked.",
+          "code": "val band = 0 until 10\nif (x in band) { ... }\nval buckets = listOf(0 until 10, 10 until 100)"
+        },
+        {
+          "lang": "Rust",
+          "note": "Range, RangeInclusive, RangeTo, RangeFrom, RangeFull — the option B endpoint. Powerful, and the proliferation is a documented ergonomic complaint.",
+          "code": "fn page(rows: &Rows, band: std::ops::Range<usize>) -> Rows { ... }\n// callers with an inclusive range must convert: (40..=60) doesn't fit"
+        },
+        {
+          "lang": "Swift",
+          "note": "Two types (Range, ClosedRange) with protocol glue to accept both — the middle path, at the cost of protocol machinery Jet does not want to spend here.",
+          "code": "func page(_ rows: Rows, _ band: some RangeExpression<Int>) -> Rows { ... }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One type makes ranges data with one lesson: 1..10 is a value like any literal, wherever a value can go. The inclusivity travels inside the value, so APIs take one Range and every call site reads correctly without conversions.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Two types double every band-taking signature or force conversions at call sites — the documented Rust pain, imported for no gain a .contains check does not already give."
+          },
+          {
+            "key": "C",
+            "reason": "The language keeps a concept it refuses to hand to users; integer-pair APIs keep encoding exclusivity in comments that go stale."
+          }
+        ],
+        "tradeoff": "One stated asymmetry remains: distinct Int(0..10) stays a literal-only position, because a runtime range flowing into a type declaration is value-dependent typing. The spec says this in one sentence."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T14:57:52.388Z"
+    },
+    {
+      "id": "D-EFFECT-DECL1",
+      "cardId": "c0325rmi",
+      "group": "safety",
+      "title": "Optional effect-leaf declarations kill typo leaves",
+      "gist": "Whether effect names like FS.Read can be declared, so a typo like FS.Raed becomes an error instead of a new permission.",
+      "lesson": "Effects are Jet's answer to \"what can this function touch?\". A function's effect row — `=[FS.Read, Net]=>` — lists its capabilities. Callers see it, package budgets cap it, and `#Grant` scopes authorize it.\n\nEffect names form a tree. The roots are a fixed set of ten (FS, Net, Env, and so on) — a small vocabulary beginners can hold in their head, and that closure is ratified and right. Below a root, names are dotted paths: `FS.Read`, `Net.HTTP.Get`. Matching uses the tree: a grant of `FS` covers `FS.Read`.\n\nHere is the gap: leaves are never declared anywhere. Any dotted path under a legal root is accepted. Write `=[FS.Raed]=>` and the compiler mints a brand-new effect on the spot. No error, no warning. Now your function claims a capability nothing grants, or worse, a package budget that meant to cap `FS.Read` fails to cover the misspelled twin. Effect names are a security surface, and today they are compared as raw strings.\n\nThe language already reserved the fix: the `effect` keyword exists in the syntax registry, reserved and unused. Leaf declarations would make effect names resolvable — real names with did-you-mean — without touching the closed roots or the tree matching.\n\nThe design choice is strictness. Mandatory declarations would break the lightweight idiom of inventing an app-local leaf on the fly. Optional declarations with a per-root rule split the difference: once any leaf is declared under a root, that root becomes checked; untouched roots keep today's freedom.",
+      "explainer": "",
+      "story": "Rui's team caps their web service's package budget: file access is read-only, `FS.Read`. A teammate adds a cache module and types `=[FS.Raed]=>` in a helper. It compiles — a new leaf now exists. Code review misses one vowel. The budget that was supposed to be the backstop never matches the misspelled name, and the mistake surfaces months later in an audit.",
+      "inWild": "// pkg.jet — the team's security backstop:\neffects { FS.Read, Net.HTTP }\n\n// deep in a helper:\nfn warm_cache(path: String) =[FS.Raed]=> Bool { ... }\n// compiles today: `FS.Raed` silently becomes a new leaf under FS\n// the budget compares strings and never sees the twin",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Optional declarations; a declared root becomes checked",
+          "detail": "New declaration form: effect FS.Read. Once any leaf is declared under a root in a package's view, undeclared leaves under that root are resolution errors with did-you-mean. Roots nobody declared under keep today's mint-on-use freedom. The prelude declares the stdlib's own leaves, so every user gets typo protection on the common roots from day one, having written nothing.",
+          "technical": "Mints the reserved effect keyword (D-EFF4/5 slot). Declarations are package-scoped facts; the checked/unchecked flag is per root per package view (own + dependencies' declared leaves). pkg.jet budgets and #Caps/#Grant arguments resolve against the same names. Tree matching unchanged.",
+          "code": "// prelude (ships with Jet):\neffect FS.Read\neffect FS.Write\neffect Net.HTTP.Get\n\n// user code:\nfn warm_cache(path: String) =[FS.Raed]=> Bool { ... }\n// Error: no effect `FS.Raed` — did you mean `FS.Read`?\n\n// app-local leaves still one line away:\neffect App.Billing\nfn charge(c: Card) =[App.Billing]=> Receipt { ... }"
+        },
+        {
+          "key": "B",
+          "name": "Mandatory declarations for every leaf",
+          "detail": "Every dotted leaf must be declared before use, everywhere. Maximum typo protection and a complete effect inventory per package. The cost: the invent-a-leaf-inline idiom dies, and every quick script with a custom effect writes a declaration first. The beginner path gains a ceremony step the closed roots were designed to avoid.",
+          "technical": "Same declaration form as A; no per-root freedom. Undeclared leaf anywhere is an error. Requires the prelude to be complete for stdlib leaves before landing, or every existing program breaks at once.",
+          "code": "fn charge(c: Card) =[App.Billing]=> Receipt { ... }\n// Error: no effect `App.Billing` — declare it first: `effect App.Billing`\n// every custom leaf now costs a declaration, even in a 20-line script"
+        },
+        {
+          "key": "C",
+          "name": "Status quo: freeform leaves",
+          "detail": "No declarations. Leaves keep minting on use. The docs warn about typos, budgets keep comparing strings, and the effect keyword stays reserved for a future that never gets scheduled. Zero new surface; the security-surface string matching stays.",
+          "technical": "No change. The FS.Raed class of bug remains unfindable by the compiler.",
+          "code": "fn warm_cache(path: String) =[FS.Raed]=> Bool { ... }\n// compiles forever; the budget backstop silently does not apply"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Deno",
+          "note": "Permissions are strings on the command line; a typo in --allow-net silently over- or under-grants. The cautionary tale for option C on a real security surface.",
+          "code": "deno run --allow-net=api.exmaple.com app.ts   # typo: grant never matches"
+        },
+        {
+          "lang": "WASI",
+          "note": "Capabilities are handles minted by the host, not strings — misspelling one is impossible by construction. The direction option A moves toward while keeping Jet's readable names.",
+          "code": "// wasi: fd = preopened directory handle; there is no name to misspell"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Optional declarations put typo checking exactly where names carry authority, and the prelude makes the protection free for the roots everyone uses. The one-line app-local leaf survives, so the lightweight idiom and the security backstop stop being enemies.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Mandatory declarations tax every quick script and kill the inline leaf idiom, buying little beyond option A once the prelude covers the stdlib roots."
+          },
+          {
+            "key": "C",
+            "reason": "Effect names gate real authority, and string-matched authority with silent minting is how the FS.Raed bug ships and hides for months."
+          }
+        ],
+        "tradeoff": "The per-root rule has a mixed moment: the first declaration under a root flips that root to checked for the package. A team adding its first declaration must therefore declare the leaves it already uses. The error's fix text lists them."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T14:57:52.584Z"
+    },
+    {
+      "id": "D-MARKER-NAME-HYGIENE1",
+      "cardId": "c06cwjlo",
+      "group": "syntax",
+      "title": "Marker/trait name-collision law, and the two worst renames",
+      "gist": "One naming law so markers and traits stop sharing names by accident — and whether to rename the two worst offenders now.",
+      "lesson": "Jet has two Pascal-case vocabularies that meet in user code. Traits are contracts: `Comparable`, `Printable`. Markers are `#` rules: `#Comparable`, `#Codable`, `#Task`. Some markers *are* trait requests — `#Comparable` on a struct derives the `Comparable` trait, and user derives already work exactly this way (`derive T.Wire` defines it, `#Wire` applies it). For those, sharing the name is correct: the marker is the trait, applied.\n\nThe trouble is the names that collide by accident. \"Tag\" means three unrelated things today. It is the `tag` keyword (erased qualifiers), serde's `#Tag(\"type\")` (the discriminant field a serialized enum writes), and the spec's own name for nested enum groups. `#Task` marks a scheduled entry-point function, while `Task<T>` is the concurrency handle — same word, unrelated machinery, both near any async code. When one word means three things, error messages, docs, and searches all degrade at once.\n\nA naming law fixes the future: a marker that derives trait X is spelled `#X`, and a marker that is not a derive may not take a trait's name. Cheap, permanent, and it turns the marker/trait relationship from a coincidence into a rule the spec can state in one line.\n\nThe remaining question is the past: whether to rename serde's `#Tag` and the scheduled `#Task` now. Greenfield policy makes renames ordinary errors with fix text, not migrations — the cost is real but small, and it only shrinks with time in one direction.",
+      "explainer": "",
+      "story": "Noor searches the docs for \"tag\" to understand a serialization error. She gets the tag keyword page, the enum-groups section, and the serde marker — three unrelated mechanisms wearing one name. The error she is chasing involves exactly one of them, and nothing in the word tells her which.",
+      "inWild": "tag Reviewed                    // meaning 1: erased qualifier\n\n#Tag(\"type\")                    // meaning 2: serde discriminant field\nenum Event { Click(x: Int, y: Int) Scroll(dy: Int) }\n\n// meaning 3 (spec prose): D-TAG1 \"tag trees\" = nested enum groups\n\n#Task fn nightly_report() { ... }    // scheduled entry point\nfn fetch(u: String) => Task<Page> { ... }   // unrelated handle, same word",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Law + rename the two offenders",
+          "detail": "Adopt the naming law for all future markers. Rename serde's #Tag to #Discriminant (the standard term for the variant field) and the scheduled #Task to #Job (a scheduled unit of work, distinct from the Task handle). Old spellings error with fix text pointing at the new name. \"Tag\" shrinks to two meanings, and the remaining pair (tag keyword, spec prose for enum groups) is a docs cleanup, not surface.",
+          "technical": "Registry renames with retirement rows (E-code teaching the new spelling). Spec prose for D-TAG1 groups switches to \"variant groups\" in the same pass. The law lands in the marker-authoring section of the spec and as a registry lint.",
+          "code": "#Discriminant(\"type\")\nenum Event { Click(x: Int, y: Int) Scroll(dy: Int) }\n\n#Job fn nightly_report() { ... }\n\n#Tag(\"type\")\n// Error: `#Tag` was renamed — use `#Discriminant(\"type\")`"
+        },
+        {
+          "key": "B",
+          "name": "Law only; keep today's names",
+          "detail": "The naming law prevents every future collision, and the three-way \"tag\" overload plus #Task/Task stay as grandfathered exceptions the docs must forever disambiguate. No respell cost now; the two worst offenders remain the two worst offenders permanently, and each new user meets them.",
+          "technical": "Spec law + registry lint only. Docs add disambiguation boxes to the tag keyword page and the scheduling page.",
+          "code": "// unchanged:\n#Tag(\"type\") enum Event { ... }     // still 'tag', still not a tag\n#Task fn nightly_report() { ... }   // still shadows Task<T> in every search"
+        },
+        {
+          "key": "C",
+          "name": "No law, no renames",
+          "detail": "Names stay first-come, first-served. Nothing breaks, nothing improves, and the collision count grows with every rule added — each future marker author re-argues naming from scratch in review.",
+          "technical": "Status quo.",
+          "code": "// next year, plausibly:\n#Stream fn ingest() { ... }   // and Stream<T> gains its own #Task problem"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "serde contains the same concept inside its own namespace — #[serde(tag = \"type\")] — so 'tag' never collides with a language keyword. Jet's flat marker plane has no namespace to hide in, which is why the law matters more here.",
+          "code": "#[derive(Serialize)]\n#[serde(tag = \"type\")]\nenum Event { Click { x: i32, y: i32 } }"
+        },
+        {
+          "lang": "Java",
+          "note": "Annotations live in packages; two @Task annotations coexist by import path. The namespacing Jet chose not to have is exactly what a naming law substitutes for.",
+          "code": "import org.quartz.Task;    // vs\nimport myapp.Task;         // collision resolved by package, not by law"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The law costs one spec line and prevents every future collision; the two renames retire the only overloads bad enough that new users meet them in week one. Greenfield policy makes the respell ordinary errors with fix text, and that price only grows if deferred.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Grandfathering the two worst offenders means every future reader of docs, errors, and search results pays the disambiguation tax the law was written to end."
+          },
+          {
+            "key": "C",
+            "reason": "Without the law, each new rule re-fights naming in review, and the collision count only goes up."
+          }
+        ],
+        "tradeoff": "Existing examples, snapshots, and docs that use #Tag and #Task respell now. Two retirement diagnostics join the registry and stay for an epoch."
+      },
+      "hybrid": null,
+      "checkInstructions": null,
+      "draft": false,
+      "status": "open",
+      "created": "2026-07-28T14:57:52.790Z"
     }
   ],
   "questions": [
@@ -76963,6 +78762,503 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-28T15:10:34.383Z",
+      "by": "e3-burndown-orch",
+      "action": "card.add",
+      "ref": "c0b0tifp",
+      "note": "cffi_named_pure_callback_has_stable_c_symbol rejects I32 + 1"
+    },
+    {
+      "at": "2026-07-28T15:10:27.124Z",
+      "by": "e3-burndown-orch",
+      "action": "card.add",
+      "ref": "c0yyvnqg",
+      "note": "Orphan test binary from a deleted worktree spins at 100% CPU"
+    },
+    {
+      "at": "2026-07-28T15:10:20.281Z",
+      "by": "e3-burndown-orch",
+      "action": "card.add",
+      "ref": "c0tsprkx",
+      "note": "Stale example goldens: parallel_scan, returned_views, deadline_context, browser_locked_provision"
+    },
+    {
+      "at": "2026-07-28T15:10:12.558Z",
+      "by": "e3-burndown-orch",
+      "action": "card.add",
+      "ref": "c0a31c6z",
+      "note": "Vec3 and builtin structs print a different shape on each lens"
+    },
+    {
+      "at": "2026-07-28T15:10:05.505Z",
+      "by": "e3-burndown-orch",
+      "action": "card.update",
+      "ref": "c0unj2z0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T15:09:39.065Z",
+      "by": "e3-burndown-orch",
+      "action": "card.criteria-meet",
+      "ref": "c0unj2z0",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T15:09:32.228Z",
+      "by": "e3-burndown-orch",
+      "action": "card.update",
+      "ref": "c0unj2z0",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T14:59:27.648Z",
+      "by": "cursor-agent",
+      "action": "card.update",
+      "ref": "c0icnkbf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T14:59:27.431Z",
+      "by": "cursor-agent",
+      "action": "card.criteria-meet",
+      "ref": "c0icnkbf",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-28T14:57:52.791Z",
+      "by": "type-auditor",
+      "action": "decision.add",
+      "ref": "D-MARKER-NAME-HYGIENE1",
+      "note": "Marker/trait name-collision law, and the two worst renames"
+    },
+    {
+      "at": "2026-07-28T14:57:52.584Z",
+      "by": "type-auditor",
+      "action": "decision.add",
+      "ref": "D-EFFECT-DECL1",
+      "note": "Optional effect-leaf declarations kill typo leaves"
+    },
+    {
+      "at": "2026-07-28T14:57:52.389Z",
+      "by": "type-auditor",
+      "action": "decision.add",
+      "ref": "D-RANGE-VALUE1",
+      "note": "Ranges become values: one Range type in core"
+    },
+    {
+      "at": "2026-07-28T14:57:52.189Z",
+      "by": "type-auditor",
+      "action": "decision.add",
+      "ref": "D-TASKGROUP-PARAM1",
+      "note": "TaskGroup becomes a nameable parameter type"
+    },
+    {
+      "at": "2026-07-28T14:57:51.981Z",
+      "by": "type-auditor",
+      "action": "decision.add",
+      "ref": "D-TAG-STRICT1",
+      "note": "Strict tags: opt-in checked value tags with an audited blessing gate"
+    },
+    {
+      "at": "2026-07-28T14:57:51.787Z",
+      "by": "type-auditor",
+      "action": "decision.add",
+      "ref": "D-FACTMODEL1",
+      "note": "One fact model behind tags, states, taint kinds, and effect leaves"
+    },
+    {
+      "at": "2026-07-28T14:57:51.582Z",
+      "by": "type-auditor",
+      "action": "decision.add",
+      "ref": "D-DIMENSION-OPEN1",
+      "note": "Open dimension algebra to user-declared dimensions"
+    },
+    {
+      "at": "2026-07-28T14:56:29.860Z",
+      "by": "type-auditor",
+      "action": "decision.add",
+      "ref": "D-STATE-NS1",
+      "note": "States join the type's namespace and TypeInfo"
+    },
+    {
+      "at": "2026-07-28T14:56:29.548Z",
+      "by": "type-auditor",
+      "action": "decision.add",
+      "ref": "D-RULEARG-TYPES1",
+      "note": "Marker argument types become real prelude enums"
+    },
+    {
+      "at": "2026-07-28T14:49:16.330Z",
+      "by": "type-auditor",
+      "action": "card.add",
+      "ref": "c06cwjlo",
+      "note": "Marker/trait name-collision law"
+    },
+    {
+      "at": "2026-07-28T14:49:16.130Z",
+      "by": "type-auditor",
+      "action": "card.add",
+      "ref": "c0325rmi",
+      "note": "Optional effect-leaf declarations kill typo leaves"
+    },
+    {
+      "at": "2026-07-28T14:49:15.936Z",
+      "by": "type-auditor",
+      "action": "card.add",
+      "ref": "c0zut94q",
+      "note": "Ranges become values: one Range type in core"
+    },
+    {
+      "at": "2026-07-28T14:49:15.749Z",
+      "by": "type-auditor",
+      "action": "card.add",
+      "ref": "c0wr4ji9",
+      "note": "TaskGroup becomes a nameable parameter type"
+    },
+    {
+      "at": "2026-07-28T14:49:15.569Z",
+      "by": "type-auditor",
+      "action": "card.add",
+      "ref": "c0ts6lkx",
+      "note": "States join the type's namespace and TypeInfo"
+    },
+    {
+      "at": "2026-07-28T14:48:54.955Z",
+      "by": "type-auditor",
+      "action": "card.add",
+      "ref": "c0cv24hu",
+      "note": "Strict tags: opt-in checked value tags with audited blessing"
+    },
+    {
+      "at": "2026-07-28T14:48:54.762Z",
+      "by": "type-auditor",
+      "action": "card.add",
+      "ref": "c09oa1up",
+      "note": "One fact model behind tags, states, taint kinds, effect leaves"
+    },
+    {
+      "at": "2026-07-28T14:48:54.574Z",
+      "by": "type-auditor",
+      "action": "card.add",
+      "ref": "c06k73ro",
+      "note": "Marker argument types become real prelude enums"
+    },
+    {
+      "at": "2026-07-28T14:48:54.387Z",
+      "by": "type-auditor",
+      "action": "card.add",
+      "ref": "c03gs87j",
+      "note": "Open dimension algebra to user-declared dimensions"
+    },
+    {
+      "at": "2026-07-28T14:48:54.199Z",
+      "by": "type-auditor",
+      "action": "card.add",
+      "ref": "c00cz0ap",
+      "note": "Spec law: control constructs are never types; artifacts always are"
+    },
+    {
+      "at": "2026-07-28T14:48:25.842Z",
+      "by": "type-auditor",
+      "action": "card.add",
+      "ref": "c0zdohbb",
+      "note": "E0107 says a type does not exist when it does"
+    },
+    {
+      "at": "2026-07-28T14:48:12.373Z",
+      "by": "type-auditor",
+      "action": "card.add",
+      "ref": "c0smiy2v",
+      "note": "Undeclared value tag accepted in type position"
+    },
+    {
+      "at": "2026-07-28T14:47:30.704Z",
+      "by": "cursor-agent",
+      "action": "card.update",
+      "ref": "c0icnkbf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T14:47:30.477Z",
+      "by": "cursor-agent",
+      "action": "card.criteria-meet",
+      "ref": "c0icnkbf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-28T14:47:30.276Z",
+      "by": "cursor-agent",
+      "action": "card.criteria-meet",
+      "ref": "c0icnkbf",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-28T14:44:14.967Z",
+      "by": "pragma-auditor",
+      "action": "card.update",
+      "ref": "c02n9rz3",
+      "note": "title"
+    },
+    {
+      "at": "2026-07-28T14:44:02.270Z",
+      "by": "pragma-auditor",
+      "action": "decision.add",
+      "ref": "D-EXAMPLES-SHORTPATH1",
+      "note": "Flagship examples teach the short path first"
+    },
+    {
+      "at": "2026-07-28T14:43:51.082Z",
+      "by": "cursor-agent",
+      "action": "card.criteria-meet",
+      "ref": "c0icnkbf",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T14:43:50.893Z",
+      "by": "cursor-agent",
+      "action": "card.criteria-meet",
+      "ref": "c0icnkbf",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T14:43:41.522Z",
+      "by": "cursor-agent",
+      "action": "card.criteria-add",
+      "ref": "c0icnkbf",
+      "note": "#6 Independent Sol review: gate/emit alignment; no gate wider t"
+    },
+    {
+      "at": "2026-07-28T14:43:41.328Z",
+      "by": "cursor-agent",
+      "action": "card.criteria-add",
+      "ref": "c0icnkbf",
+      "note": "#5 Non-variant EnumMatch and non-Plain TIfCond covered or desug"
+    },
+    {
+      "at": "2026-07-28T14:43:41.134Z",
+      "by": "cursor-agent",
+      "action": "card.criteria-add",
+      "ref": "c0icnkbf",
+      "note": "#4 Loop/While/Break/Continue + IndexAssign covered on JS and Wa"
+    },
+    {
+      "at": "2026-07-28T14:43:40.945Z",
+      "by": "cursor-agent",
+      "action": "card.criteria-add",
+      "ref": "c0icnkbf",
+      "note": "#3 Remaining TStmt/TExpr holes inventoried; each emits or has h"
+    },
+    {
+      "at": "2026-07-28T14:43:40.756Z",
+      "by": "cursor-agent",
+      "action": "card.criteria-add",
+      "ref": "c0icnkbf",
+      "note": "#2 ui_showcase.jet uses canonical if-arm tables and builds unde"
+    },
+    {
+      "at": "2026-07-28T14:43:40.564Z",
+      "by": "cursor-agent",
+      "action": "card.criteria-add",
+      "ref": "c0icnkbf",
+      "note": "#1 Value/range arm tables (MixedSwitch/RangeSwitch) emit on JS "
+    },
+    {
+      "at": "2026-07-28T14:43:27.060Z",
+      "by": "cursor-agent",
+      "action": "card.claim",
+      "ref": "c0icnkbf",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T14:43:17.886Z",
+      "by": "cursor-agent",
+      "action": "card.add",
+      "ref": "c0icnkbf",
+      "note": "Web TIR parity: emit every native-covered construct on JS+Wasm"
+    },
+    {
+      "at": "2026-07-28T14:43:00.128Z",
+      "by": "pragma-auditor",
+      "action": "decision.add",
+      "ref": "D-BINREAD-LEN1",
+      "note": "Sized lengths in binary Reader.take"
+    },
+    {
+      "at": "2026-07-28T14:42:59.937Z",
+      "by": "pragma-auditor",
+      "action": "decision.add",
+      "ref": "D-REGEX-LIT1",
+      "note": "Compile-checked literal regex patterns"
+    },
+    {
+      "at": "2026-07-28T14:41:58.282Z",
+      "by": "pragma-auditor",
+      "action": "decision.add",
+      "ref": "D-IO-PROMPT1",
+      "note": "Interactive prompt helpers in core.io"
+    },
+    {
+      "at": "2026-07-28T14:41:45.687Z",
+      "by": "pragma-auditor",
+      "action": "decision.add",
+      "ref": "D-TASKS-LIST1",
+      "note": "Listing declared project tasks"
+    },
+    {
+      "at": "2026-07-28T14:40:44.032Z",
+      "by": "pragma-auditor",
+      "action": "decision.add",
+      "ref": "D-PROCESS-CHECKED1",
+      "note": "Checked subprocess runs: fail on nonzero exit"
+    },
+    {
+      "at": "2026-07-28T14:40:02.830Z",
+      "by": "pragma-auditor",
+      "action": "decision.add",
+      "ref": "D-ARGS-EXIT1",
+      "note": "core.args finishes --help and exit"
+    },
+    {
+      "at": "2026-07-28T14:38:38.860Z",
+      "by": "pragma-auditor",
+      "action": "card.criteria-add",
+      "ref": "c05p1lv8",
+      "note": "#1 uninit fixed-array fill+read golden passes under jet run and"
+    },
+    {
+      "at": "2026-07-28T14:38:38.682Z",
+      "by": "pragma-auditor",
+      "action": "card.criteria-add",
+      "ref": "c02n9rz3",
+      "note": "#1 derived help prints the program basename, not an absolute pa"
+    },
+    {
+      "at": "2026-07-28T14:38:38.492Z",
+      "by": "pragma-auditor",
+      "action": "card.add",
+      "ref": "c05p1lv8",
+      "note": "Finish uninit fixed-array buffer fill through TIR"
+    },
+    {
+      "at": "2026-07-28T14:38:38.308Z",
+      "by": "pragma-auditor",
+      "action": "card.add",
+      "ref": "c02n9rz3",
+      "note": "true"
+    },
+    {
+      "at": "2026-07-28T14:38:21.421Z",
+      "by": "pragma-auditor",
+      "action": "card.add",
+      "ref": "c0bda91w",
+      "note": "Flagship examples teach the short path"
+    },
+    {
+      "at": "2026-07-28T14:38:21.224Z",
+      "by": "pragma-auditor",
+      "action": "card.add",
+      "ref": "c083yh6b",
+      "note": "Sized lengths in binary Reader.take"
+    },
+    {
+      "at": "2026-07-28T14:38:21.036Z",
+      "by": "pragma-auditor",
+      "action": "card.add",
+      "ref": "c05051f9",
+      "note": "Compile-checked literal regex patterns"
+    },
+    {
+      "at": "2026-07-28T14:38:20.850Z",
+      "by": "pragma-auditor",
+      "action": "card.add",
+      "ref": "c01xexf7",
+      "note": "Task discovery: list declared tasks"
+    },
+    {
+      "at": "2026-07-28T14:38:03.297Z",
+      "by": "pragma-auditor",
+      "action": "card.add",
+      "ref": "c0zmsead",
+      "note": "Interactive prompt helpers (confirm, choose, secret)"
+    },
+    {
+      "at": "2026-07-28T14:38:03.015Z",
+      "by": "pragma-auditor",
+      "action": "card.add",
+      "ref": "c0uyofkz",
+      "note": "Subprocess failure needs a checked default"
+    },
+    {
+      "at": "2026-07-28T14:38:02.823Z",
+      "by": "pragma-auditor",
+      "action": "card.add",
+      "ref": "c0rsejxo",
+      "note": "core.args finishes --help by default"
+    },
+    {
+      "at": "2026-07-28T14:30:33.705Z",
+      "by": "e3-burndown-orch",
+      "action": "card.update",
+      "ref": "c0wxnoo3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T14:30:30.139Z",
+      "by": "e3-burndown-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0wxnoo3",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-28T14:30:29.883Z",
+      "by": "e3-burndown-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0wxnoo3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-28T14:30:29.609Z",
+      "by": "e3-burndown-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0wxnoo3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T14:30:29.356Z",
+      "by": "e3-burndown-orch",
+      "action": "card.criteria-verify",
+      "ref": "c0wxnoo3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T14:30:29.095Z",
+      "by": "e3-1256-check-order",
+      "action": "card.criteria-meet",
+      "ref": "c0wxnoo3",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-28T14:30:18.631Z",
+      "by": "e3-1256-check-order",
+      "action": "card.criteria-meet",
+      "ref": "c0wxnoo3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-28T14:30:18.387Z",
+      "by": "e3-1256-check-order",
+      "action": "card.criteria-meet",
+      "ref": "c0wxnoo3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T14:30:09.396Z",
+      "by": "e3-1256-check-order",
+      "action": "card.criteria-meet",
+      "ref": "c0wxnoo3",
+      "note": "#1"
+    },
     {
       "at": "2026-07-28T14:14:06.487Z",
       "by": "pragma-auditor",
@@ -79965,503 +82261,6 @@
       "action": "card.criteria-verify",
       "ref": "c08rt6iw",
       "note": "#3"
-    },
-    {
-      "at": "2026-07-28T00:55:51.632Z",
-      "by": "e3-1230-c2-verify",
-      "action": "card.criteria-verify",
-      "ref": "c08rt6iw",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-28T00:55:51.446Z",
-      "by": "e3-1230-c2-meet",
-      "action": "card.criteria-meet",
-      "ref": "c08rt6iw",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-28T00:53:48.529Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-EACH1",
-      "note": "A"
-    },
-    {
-      "at": "2026-07-28T00:52:16.263Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-FANOUT3",
-      "note": "C"
-    },
-    {
-      "at": "2026-07-28T00:52:16.263Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0pbnytf",
-      "note": "#4 snapshots re-blessed"
-    },
-    {
-      "at": "2026-07-28T00:52:16.263Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0pbnytf",
-      "note": "#3 jet devtools grammars regenerated"
-    },
-    {
-      "at": "2026-07-28T00:52:16.263Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0pbnytf",
-      "note": "#2 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-07-28T00:52:16.263Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c0pbnytf",
-      "note": "#1 Syntax.rs entry updated"
-    },
-    {
-      "at": "2026-07-28T00:48:37.677Z",
-      "by": "e3-1230-close",
-      "action": "card.claim",
-      "ref": "c08rt6iw",
-      "note": ""
-    },
-    {
-      "at": "2026-07-28T00:45:18.680Z",
-      "by": "e3-1251-grok",
-      "action": "card.criteria-meet",
-      "ref": "c08rt6iw",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-28T00:45:18.494Z",
-      "by": "e3-1251-grok",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-28T00:45:18.268Z",
-      "by": "e3-1251-grok",
-      "action": "card.update",
-      "ref": "c0sd2vqo",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-28T00:45:18.045Z",
-      "by": "e3-1251-grok",
-      "action": "card.update",
-      "ref": "c0sd2vqo",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-28T00:26:36.503Z",
-      "by": "claude",
-      "action": "card.update",
-      "ref": "c0pbnytf",
-      "note": "plan"
-    },
-    {
-      "at": "2026-07-28T00:26:28.888Z",
-      "by": "claude",
-      "action": "decision.update",
-      "ref": "D-FANOUT3",
-      "note": ""
-    },
-    {
-      "at": "2026-07-28T00:26:28.621Z",
-      "by": "claude",
-      "action": "decision.update",
-      "ref": "D-EACH-SPELL1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-28T00:26:28.381Z",
-      "by": "claude",
-      "action": "decision.update",
-      "ref": "D-EACH1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-28T00:24:12.774Z",
-      "by": "e3-1251-grok",
-      "action": "card.update",
-      "ref": "c0sd2vqo",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-28T00:23:43.771Z",
-      "by": "e3-1251-grok",
-      "action": "card.claim",
-      "ref": "c0sd2vqo",
-      "note": ""
-    },
-    {
-      "at": "2026-07-28T00:23:22.224Z",
-      "by": "e3-1251-grok",
-      "action": "card.update",
-      "ref": "c0sd2vqo",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-28T00:23:22.006Z",
-      "by": "e3-1251-grok",
-      "action": "card.claim",
-      "ref": "c0sd2vqo",
-      "note": ""
-    },
-    {
-      "at": "2026-07-28T00:22:33.903Z",
-      "by": "e3-1250-grok",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-28T00:22:27.800Z",
-      "by": "e3-1250-grok",
-      "action": "card.add",
-      "ref": "c0sd2vqo",
-      "note": "three-way: ui/ui_native_linux AOT times out without JET_UI_HEADLESS"
-    },
-    {
-      "at": "2026-07-28T00:22:27.608Z",
-      "by": "e3-1250-grok",
-      "action": "card.update",
-      "ref": "c0cs8lr0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-28T00:22:27.382Z",
-      "by": "e3-1250-grok",
-      "action": "card.update",
-      "ref": "c0cs8lr0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-28T00:00:43.650Z",
-      "by": "e3-1250-grok",
-      "action": "card.update",
-      "ref": "c0cs8lr0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-28T00:00:00.221Z",
-      "by": "e3-1250-grok",
-      "action": "card.claim",
-      "ref": "c0cs8lr0",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T23:59:35.725Z",
-      "by": "e3-1250-grok",
-      "action": "card.update",
-      "ref": "c0cs8lr0",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-27T23:59:35.504Z",
-      "by": "e3-1250-grok",
-      "action": "card.claim",
-      "ref": "c0cs8lr0",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T23:58:55.154Z",
-      "by": "e3-1249-grok",
-      "action": "card.claim",
-      "ref": "c0c9dey9",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T23:58:04.743Z",
-      "by": "e3-1249-grok",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-27T23:58:04.524Z",
-      "by": "e3-1249-grok",
-      "action": "card.update",
-      "ref": "c0c9dey9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T23:58:04.303Z",
-      "by": "e3-1249-grok",
-      "action": "card.update",
-      "ref": "c0c9dey9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T23:58:04.060Z",
-      "by": "e3-1249-grok",
-      "action": "card.add",
-      "ref": "c0cs8lr0",
-      "note": "JIT/interp: tooling/data_bridges three-way DataError show drift"
-    },
-    {
-      "at": "2026-07-27T23:32:34.030Z",
-      "by": "e3-1249-grok",
-      "action": "card.update",
-      "ref": "c0c9dey9",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T23:32:18.691Z",
-      "by": "e3-1249-grok",
-      "action": "card.claim",
-      "ref": "c0c9dey9",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T23:31:59.784Z",
-      "by": "e3-1249-grok",
-      "action": "card.update",
-      "ref": "c0c9dey9",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-27T23:31:59.560Z",
-      "by": "e3-1249-grok",
-      "action": "card.claim",
-      "ref": "c0c9dey9",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T23:31:35.731Z",
-      "by": "e3-1248-grok",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-27T23:31:35.505Z",
-      "by": "e3-1248-grok",
-      "action": "card.update",
-      "ref": "c0sbp21e",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T23:31:35.297Z",
-      "by": "e3-1248-grok",
-      "action": "card.update",
-      "ref": "c0sbp21e",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T23:31:26.270Z",
-      "by": "e3-1248-grok",
-      "action": "card.add",
-      "ref": "c0c9dey9",
-      "note": "JIT/AOT: serde/serde_generic three-way stdout drift"
-    },
-    {
-      "at": "2026-07-27T23:23:40.688Z",
-      "by": "claude",
-      "action": "card.update",
-      "ref": "c0pbnytf",
-      "note": "title,refs"
-    },
-    {
-      "at": "2026-07-27T23:23:32.306Z",
-      "by": "claude",
-      "action": "card.update",
-      "ref": "c0pbnytf",
-      "note": "blockedBy"
-    },
-    {
-      "at": "2026-07-27T23:23:27.418Z",
-      "by": "claude",
-      "action": "card.update",
-      "ref": "c0pbnytf",
-      "note": "body,plan"
-    },
-    {
-      "at": "2026-07-27T23:23:14.547Z",
-      "by": "claude",
-      "action": "decision.delete",
-      "ref": "D-EACH-LEGACY1",
-      "note": "What happens to today’s S75 f.[…] spelling?"
-    },
-    {
-      "at": "2026-07-27T23:23:14.296Z",
-      "by": "claude",
-      "action": "decision.delete",
-      "ref": "D-EACH-EMBED1",
-      "note": "May each-apply embed inside a call’s arguments?"
-    },
-    {
-      "at": "2026-07-27T23:23:11.560Z",
-      "by": "claude",
-      "action": "decision.update",
-      "ref": "D-FANOUT3",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T23:23:11.318Z",
-      "by": "claude",
-      "action": "decision.update",
-      "ref": "D-EACH-SPELL1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T23:23:11.065Z",
-      "by": "claude",
-      "action": "decision.update",
-      "ref": "D-EACH1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T23:15:15.426Z",
-      "by": "e3-1248-grok",
-      "action": "card.update",
-      "ref": "c0sbp21e",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T23:14:40.446Z",
-      "by": "e3-1248-grok",
-      "action": "card.claim",
-      "ref": "c0sbp21e",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T23:14:17.430Z",
-      "by": "e3-1248-grok",
-      "action": "card.update",
-      "ref": "c0sbp21e",
-      "note": "phase"
-    },
-    {
-      "at": "2026-07-27T23:14:17.219Z",
-      "by": "e3-1248-grok",
-      "action": "card.claim",
-      "ref": "c0sbp21e",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T23:14:02.137Z",
-      "by": "e3-1247-grok",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-27T23:13:55.856Z",
-      "by": "e3-1247-grok",
-      "action": "card.add",
-      "ref": "c0sbp21e",
-      "note": "JIT/AOT: serde/json_coerce three-way stderr drift"
-    },
-    {
-      "at": "2026-07-27T23:13:55.659Z",
-      "by": "e3-1247-verify",
-      "action": "card.update",
-      "ref": "c0ty93ot",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T23:13:27.385Z",
-      "by": "e3-1247-grok",
-      "action": "card.update",
-      "ref": "c0ty93ot",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T23:07:53.260Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c0pbnytf",
-      "note": "plan"
-    },
-    {
-      "at": "2026-07-27T23:07:52.807Z",
-      "by": "cursor-grok",
-      "action": "decision.update",
-      "ref": "D-EACH-LEGACY1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T23:07:32.303Z",
-      "by": "cursor-grok",
-      "action": "card.update",
-      "ref": "c0pbnytf",
-      "note": "logEntry,blockedBy"
-    },
-    {
-      "at": "2026-07-27T23:07:31.830Z",
-      "by": "cursor-grok",
-      "action": "decision.update",
-      "ref": "D-FANOUT3",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T22:57:02.966Z",
-      "by": "e3-1247-grok",
-      "action": "card.update",
-      "ref": "c0ty93ot",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-27T22:55:51.203Z",
-      "by": "e3-1194-grok",
-      "action": "card.update",
-      "ref": "c02xme1j",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-27T22:55:44.449Z",
-      "by": "e3-1194-verify",
-      "action": "card.update",
-      "ref": "c02xme1j",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T22:55:44.224Z",
-      "by": "e3-1194-grok",
-      "action": "card.update",
-      "ref": "c02xme1j",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T22:55:44.006Z",
-      "by": "e3-1194-verify",
-      "action": "card.criteria-verify",
-      "ref": "c02xme1j",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T22:55:43.829Z",
-      "by": "e3-1194-verify",
-      "action": "card.criteria-verify",
-      "ref": "c02xme1j",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T22:55:43.642Z",
-      "by": "e3-1194-verify",
-      "action": "card.criteria-verify",
-      "ref": "c02xme1j",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T22:55:43.451Z",
-      "by": "e3-1194-grok",
-      "action": "card.criteria-meet",
-      "ref": "c02xme1j",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T22:55:43.269Z",
-      "by": "e3-1194-grok",
-      "action": "card.criteria-meet",
-      "ref": "c02xme1j",
-      "note": "#2"
     }
   ],
   "nextNum": 368,

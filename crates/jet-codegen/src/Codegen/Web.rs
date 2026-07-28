@@ -357,6 +357,19 @@ fn web_stmts_guarantee_return(stmts: &[TIR::TStmt]) -> bool {
                     .as_ref()
                     .is_none_or(|body| web_stmts_guarantee_return(body))
         }
+        // Value/range arm tables are total only with an `else` (D-IF3).
+        TIR::TStmt::MixedSwitch {
+            arms,
+            else_body: Some(else_body),
+            ..
+        } => {
+            arms.iter().all(|(_, body)| web_stmts_guarantee_return(body))
+                && web_stmts_guarantee_return(else_body)
+        }
+        TIR::TStmt::RangeSwitch { arms, else_body, .. } => {
+            arms.iter().all(|(_, _, body)| web_stmts_guarantee_return(body))
+                && web_stmts_guarantee_return(else_body)
+        }
         TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) | TIR::TStmt::Impure(body) => {
             web_stmts_guarantee_return(body)
         }
@@ -364,8 +377,52 @@ fn web_stmts_guarantee_return(stmts: &[TIR::TStmt]) -> bool {
     })
 }
 
-fn web_variant_pattern_supported(pattern: &TIR::TPattern) -> bool {
-    matches!(pattern.pattern, crate::AST::Pattern::Variant { .. })
+fn web_match_pattern_supported(pattern: &TIR::TPattern) -> bool {
+    match &pattern.pattern {
+        crate::AST::Pattern::Variant { .. }
+        | crate::AST::Pattern::Ok { .. }
+        | crate::AST::Pattern::Err { .. }
+        | crate::AST::Pattern::Present { .. }
+        | crate::AST::Pattern::Absent(_) => true,
+        _ => false,
+    }
+}
+
+fn web_if_cond_supported(cond: &TIR::TIfCond) -> bool {
+    match cond {
+        TIR::TIfCond::Plain(expr) => web_expr_supported(expr),
+        TIR::TIfCond::And { left, right } => {
+            web_if_cond_supported(left) && web_if_cond_supported(right)
+        }
+        TIR::TIfCond::IsNone { subj } => web_expr_supported(subj),
+        TIR::TIfCond::IfLet { pattern, subj } | TIR::TIfCond::Matches { pattern, subj } => {
+            web_match_pattern_supported(pattern) && web_expr_supported(subj)
+        }
+    }
+}
+
+fn web_wasm_if_cond_supported(
+    cond: &TIR::TIfCond,
+    bundle: &ProgramBundle,
+    file_prefix: Option<&str>,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> bool {
+    match cond {
+        TIR::TIfCond::Plain(expr) => {
+            web_wasm_expr_supported(expr, bundle, file_prefix, reconstructions)
+        }
+        TIR::TIfCond::And { left, right } => {
+            web_wasm_if_cond_supported(left, bundle, file_prefix, reconstructions)
+                && web_wasm_if_cond_supported(right, bundle, file_prefix, reconstructions)
+        }
+        TIR::TIfCond::IsNone { subj } => {
+            web_wasm_expr_supported(subj, bundle, file_prefix, reconstructions)
+        }
+        TIR::TIfCond::IfLet { pattern, subj } | TIR::TIfCond::Matches { pattern, subj } => {
+            web_match_pattern_supported(pattern)
+                && web_wasm_expr_supported(subj, bundle, file_prefix, reconstructions)
+        }
+    }
 }
 
 fn is_list_int(ty: &Type) -> bool {
@@ -422,8 +479,8 @@ fn web_wasm_stmts_supported(
         TIR::TStmt::LineMarker(_) | TIR::TStmt::Return(None) => true,
         TIR::TStmt::Let { init, .. } | TIR::TStmt::ExprStmt(init) | TIR::TStmt::Return(Some(init)) => web_wasm_expr_supported(init, bundle, file_prefix, reconstructions),
         TIR::TStmt::Assign { value, .. } => web_wasm_expr_supported(value, bundle, file_prefix, reconstructions),
-        TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => {
-            web_wasm_expr_supported(cond, bundle, file_prefix, reconstructions)
+        TIR::TStmt::If { cond, then_body, else_body, .. } => {
+            web_wasm_if_cond_supported(cond, bundle, file_prefix, reconstructions)
                 && web_wasm_stmts_supported(then_body, bundle, file_prefix, reconstructions)
                 && else_body.as_deref().map(|body| web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)).unwrap_or(true)
         }
@@ -459,7 +516,7 @@ fn web_wasm_stmts_supported(
         } => {
             web_wasm_expr_supported(scrutinee, bundle, file_prefix, reconstructions)
                 && arms.iter().all(|arm| {
-                    web_variant_pattern_supported(&arm.pattern)
+                    web_match_pattern_supported(&arm.pattern)
                         && web_wasm_stmts_supported(
                             &arm.body,
                             bundle,
@@ -470,6 +527,73 @@ fn web_wasm_stmts_supported(
                 && else_body.as_ref().is_none_or(|body| {
                     web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
                 })
+        }
+        // `if x == { 0 -> … }` / mixed value+range tables — same if/else-if chain native emits.
+        TIR::TStmt::MixedSwitch {
+            subject,
+            arms,
+            else_body,
+        } => {
+            web_wasm_expr_supported(subject, bundle, file_prefix, reconstructions)
+                && arms.iter().all(|(cond, body)| {
+                    web_wasm_expr_supported(cond, bundle, file_prefix, reconstructions)
+                        && web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+                })
+                && else_body.as_ref().is_none_or(|body| {
+                    web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+                })
+        }
+        TIR::TStmt::RangeSwitch {
+            subject,
+            arms,
+            else_body,
+        } => {
+            web_wasm_expr_supported(subject, bundle, file_prefix, reconstructions)
+                && arms.iter().all(|(_, _, body)| {
+                    web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+                })
+                && web_wasm_stmts_supported(else_body, bundle, file_prefix, reconstructions)
+        }
+        TIR::TStmt::Loop { body, .. } => {
+            web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+        }
+        TIR::TStmt::While { cond, body, .. } => {
+            web_wasm_expr_supported(cond, bundle, file_prefix, reconstructions)
+                && web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+        }
+        TIR::TStmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => {
+            web_wasm_stmts_supported(
+                std::slice::from_ref(init.as_ref()),
+                bundle,
+                file_prefix,
+                reconstructions,
+            ) && web_wasm_expr_supported(cond, bundle, file_prefix, reconstructions)
+                && step.as_ref().is_none_or(|s| {
+                    web_wasm_stmts_supported(
+                        std::slice::from_ref(s.as_ref()),
+                        bundle,
+                        file_prefix,
+                        reconstructions,
+                    )
+                })
+                && web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
+        }
+        TIR::TStmt::Break(_) | TIR::TStmt::Continue(_) => true,
+        TIR::TStmt::IndexAssign {
+            base,
+            index,
+            value,
+            ..
+        } => {
+            web_wasm_expr_supported(base, bundle, file_prefix, reconstructions)
+                && web_wasm_expr_supported(index, bundle, file_prefix, reconstructions)
+                && web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)
         }
         TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) | TIR::TStmt::Impure(body) => {
             web_wasm_stmts_supported(body, bundle, file_prefix, reconstructions)
@@ -516,6 +640,15 @@ fn web_wasm_expr_supported(
         TIR::TExprKind::StructLit { fields, .. } => fields
             .iter()
             .all(|(_, value, _)| web_wasm_expr_supported(value, bundle, file_prefix, reconstructions)),
+        TIR::TExprKind::ListLit(elements) => elements.iter().all(|e| {
+            web_wasm_expr_supported(e, bundle, file_prefix, reconstructions)
+        }),
+        TIR::TExprKind::Present(inner)
+        | TIR::TExprKind::Ok(inner)
+        | TIR::TExprKind::Err(inner) => {
+            web_wasm_expr_supported(inner, bundle, file_prefix, reconstructions)
+        }
+        TIR::TExprKind::Absent => true,
         TIR::TExprKind::EnumLit { payload, .. } => match payload {
             TIR::TEnumPayload::Unit => true,
             TIR::TEnumPayload::Positional(args) => args.iter().all(|arg| {
@@ -528,7 +661,6 @@ fn web_wasm_expr_supported(
         TIR::TExprKind::Index {
             base,
             index,
-            is_map: true,
             ..
         } => {
             web_wasm_expr_supported(base, bundle, file_prefix, reconstructions)
@@ -565,7 +697,11 @@ fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
         TIR::TStmt::LineMarker(_) | TIR::TStmt::Return(None) => true,
         TIR::TStmt::Let { init, .. } | TIR::TStmt::ExprStmt(init) | TIR::TStmt::Return(Some(init)) => web_expr_supported(init),
         TIR::TStmt::Assign { value, .. } => web_expr_supported(value),
-        TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => web_expr_supported(cond) && web_stmts_supported(then_body) && else_body.as_deref().map(web_stmts_supported).unwrap_or(true),
+        TIR::TStmt::If { cond, then_body, else_body, .. } => {
+            web_if_cond_supported(cond)
+                && web_stmts_supported(then_body)
+                && else_body.as_deref().map(web_stmts_supported).unwrap_or(true)
+        }
         TIR::TStmt::Range { start, end, step, body, .. } => web_expr_supported(start) && web_expr_supported(end) && step.as_ref().map(web_expr_supported).unwrap_or(true) && web_stmts_supported(body),
         TIR::TStmt::ForIn { collection, body, .. } => web_expr_supported(collection) && web_stmts_supported(body),
         TIR::TStmt::EnumMatch {
@@ -576,12 +712,69 @@ fn web_stmts_supported(stmts: &[TIR::TStmt]) -> bool {
         } => {
             web_expr_supported(scrutinee)
                 && arms.iter().all(|arm| {
-                    web_variant_pattern_supported(&arm.pattern)
+                    web_match_pattern_supported(&arm.pattern)
                         && web_stmts_supported(&arm.body)
                 })
                 && else_body
                     .as_ref()
                     .is_none_or(|body| web_stmts_supported(body))
+        }
+        // `if x == { 0 -> … }` / mixed value+range tables (D-IF3) — arm conds are
+        // already plain `TExpr`s; HostCall-backed pattern arms stay gated out.
+        TIR::TStmt::MixedSwitch {
+            subject,
+            arms,
+            else_body,
+        } => {
+            web_expr_supported(subject)
+                && arms.iter().all(|(cond, body)| {
+                    web_expr_supported(cond) && web_stmts_supported(body)
+                })
+                && else_body
+                    .as_ref()
+                    .is_none_or(|body| web_stmts_supported(body))
+        }
+        TIR::TStmt::RangeSwitch {
+            subject,
+            arms,
+            else_body,
+        } => {
+            web_expr_supported(subject)
+                && arms
+                    .iter()
+                    .all(|(_, _, body)| web_stmts_supported(body))
+                && web_stmts_supported(else_body)
+        }
+        // Infinite / while / counted loops + unlabeled break/next (labeled too).
+        // `break value` stays unsupported — JS has no break-with-value.
+        TIR::TStmt::Loop { body, .. } => web_stmts_supported(body),
+        TIR::TStmt::While { cond, body, .. } => {
+            web_expr_supported(cond) && web_stmts_supported(body)
+        }
+        TIR::TStmt::CountedLoop {
+            init,
+            cond,
+            step,
+            body,
+            ..
+        } => {
+            web_stmts_supported(std::slice::from_ref(init.as_ref()))
+                && web_expr_supported(cond)
+                && step
+                    .as_ref()
+                    .is_none_or(|s| web_stmts_supported(std::slice::from_ref(s.as_ref())))
+                && web_stmts_supported(body)
+        }
+        TIR::TStmt::Break(_) | TIR::TStmt::Continue(_) => true,
+        TIR::TStmt::IndexAssign {
+            base,
+            index,
+            value,
+            ..
+        } => {
+            web_expr_supported(base)
+                && web_expr_supported(index)
+                && web_expr_supported(value)
         }
         TIR::TStmt::Inline(body) | TIR::TStmt::Region(body) | TIR::TStmt::Impure(body) => {
             web_stmts_supported(body)
@@ -651,6 +844,9 @@ fn web_expr_supported(expr: &TIR::TExpr) -> bool {
         E::MapLit(entries) => entries
             .iter()
             .all(|(key, value)| web_expr_supported(key) && web_expr_supported(value)),
+        E::Index { base, index, .. } => web_expr_supported(base) && web_expr_supported(index),
+        E::Present(inner) | E::Ok(inner) | E::Err(inner) => web_expr_supported(inner),
+        E::Absent => true,
         E::Call { args, .. } | E::MethodCall { args, .. } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::ModuleCall { form: TIR::TModuleCallForm::Qualified { .. } | TIR::TModuleCallForm::InlineMangled { .. }, args } => args.iter().all(|a| web_expr_supported(&a.value)),
         E::CoreCall { module, method, args, .. } => web_core_arity(module, method) == Some(args.len()) && args.iter().all(web_expr_supported),
@@ -1767,6 +1963,11 @@ fn wasm_ty(ty: &Type) -> Option<&'static str> {
 fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
     Some(match ty {
         Type::Option(inner) => format!("Option<{}>", wasm_internal_ty(inner, bundle)?),
+        Type::Result { ok, err } => format!(
+            "Result<{}, {}>",
+            wasm_internal_ty(ok, bundle)?,
+            wasm_internal_ty(err, bundle)?
+        ),
         Type::Union(members) => user_type_rust(&crate::AST::union_enum_name(members)),
         Type::Named(name) if bundle.modules.iter().any(|module| {
             find_named_web_type(&module.items, name)
@@ -1917,28 +2118,121 @@ fn wasm_emit_call_arg(
     Ok(value)
 }
 
-fn wasm_variant_pattern(pattern: &TIR::TPattern) -> Result<String, ()> {
-    let crate::AST::Pattern::Variant {
-        variant, bindings, ..
-    } = &pattern.pattern
-    else {
-        return Err(());
-    };
-    let owner = pattern.enum_type.as_deref().ok_or(())?;
-    let head = wasm_enum_head(owner, variant);
-    if bindings.is_empty() {
-        return Ok(head);
+fn wasm_match_arm_pattern(pattern: &TIR::TPattern) -> Result<String, ()> {
+    match &pattern.pattern {
+        crate::AST::Pattern::Ok { binding, .. } => Ok(format!("Ok({})", mangle(binding))),
+        crate::AST::Pattern::Err { binding, .. } => Ok(format!("Err({})", mangle(binding))),
+        crate::AST::Pattern::Present { binding, .. } => Ok(format!("Some({})", mangle(binding))),
+        crate::AST::Pattern::Absent(_) => Ok("None".to_string()),
+        crate::AST::Pattern::Variant {
+            variant, bindings, ..
+        } => {
+            let owner = pattern.enum_type.as_deref().ok_or(())?;
+            let head = wasm_enum_head(owner, variant);
+            if bindings.is_empty() {
+                return Ok(head);
+            }
+            let slots = bindings
+                .iter()
+                .map(|slot| match slot {
+                    crate::AST::PatSlot::Wildcard => "_".to_string(),
+                    crate::AST::PatSlot::Bind { name, .. } => mangle(name),
+                    crate::AST::PatSlot::Range { lo, hi } => format!("_ @ {lo}..={hi}"),
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            Ok(format!("{head}({slots})"))
+        }
+        _ => Err(()),
     }
-    let slots = bindings
-        .iter()
-        .map(|slot| match slot {
-            crate::AST::PatSlot::Wildcard => "_".to_string(),
-            crate::AST::PatSlot::Bind { name, .. } => mangle(name),
-            crate::AST::PatSlot::Range { lo, hi } => format!("_ @ {lo}..={hi}"),
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-    Ok(format!("{head}({slots})"))
+}
+
+fn wasm_if_let_pattern(pattern: &TIR::TPattern) -> Result<String, ()> {
+    // Binding-position patterns for `if let` — same spelling as match arms for
+    // Result/Option; variants keep the enum head form.
+    wasm_match_arm_pattern(pattern)
+}
+
+fn emit_wasm_if_head(
+    cond: &TIR::TIfCond,
+    out: &mut String,
+    indent: usize,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> Result<(), ()> {
+    let pad = "    ".repeat(indent);
+    let head = match cond {
+        TIR::TIfCond::Plain(expr) => {
+            format!(
+                "if {} {{",
+                wasm_emit_expr(expr, funcs, file_prefix, reconstructions)?
+            )
+        }
+        TIR::TIfCond::IsNone { subj } => {
+            format!(
+                "if ({}).is_none() {{",
+                wasm_emit_expr(subj, funcs, file_prefix, reconstructions)?
+            )
+        }
+        TIR::TIfCond::IfLet { pattern, subj } => {
+            format!(
+                "if let {} = {} {{",
+                wasm_if_let_pattern(pattern)?,
+                wasm_emit_expr(subj, funcs, file_prefix, reconstructions)?
+            )
+        }
+        TIR::TIfCond::Matches { pattern, subj } => {
+            format!(
+                "if matches!(&({}), {}) {{",
+                wasm_emit_expr(subj, funcs, file_prefix, reconstructions)?,
+                wasm_match_arm_pattern(pattern)?
+            )
+        }
+        TIR::TIfCond::And { .. } => unreachable!("And heads are nested, not headed"),
+    };
+    out.push_str(&format!("{pad}{head}\n"));
+    Ok(())
+}
+
+fn emit_wasm_if(
+    cond: &TIR::TIfCond,
+    then_body: &[TIR::TStmt],
+    else_body: Option<&[TIR::TStmt]>,
+    out: &mut String,
+    indent: usize,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    reconstructions: &[TIR::TWebParamReconstruction],
+) -> Result<(), ()> {
+    let pad = "    ".repeat(indent);
+    if let TIR::TIfCond::And { left, right } = cond {
+        emit_wasm_if_head(left, out, indent, funcs, file_prefix, reconstructions)?;
+        emit_wasm_if(
+            right,
+            then_body,
+            else_body,
+            out,
+            indent + 1,
+            funcs,
+            file_prefix,
+            reconstructions,
+        )?;
+        if let Some(else_body) = else_body {
+            out.push_str(&format!("{pad}}} else {{\n"));
+            emit_wasm_body(else_body, out, indent + 1, funcs, file_prefix, reconstructions)?;
+        }
+        out.push_str(&format!("{pad}}}\n"));
+        return Ok(());
+    }
+    emit_wasm_if_head(cond, out, indent, funcs, file_prefix, reconstructions)?;
+    emit_wasm_body(then_body, out, indent + 1, funcs, file_prefix, reconstructions)?;
+    if let Some(else_body) = else_body {
+        out.push_str(&format!("{pad}}} else {{\n"));
+        emit_wasm_body(else_body, out, indent + 1, funcs, file_prefix, reconstructions)?;
+    }
+    out.push_str(&format!("{pad}}}\n"));
+    Ok(())
 }
 
 fn emit_wasm_body(
@@ -1956,14 +2250,22 @@ fn emit_wasm_body(
             TIR::TStmt::ExprStmt(expr) => out.push_str(&format!("{pad}{};\n", wasm_emit_expr(expr, funcs, file_prefix, reconstructions)?)),
             TIR::TStmt::Let { name, init, .. } => out.push_str(&format!("{pad}let mut {} = {};\n", mangle(name), wasm_emit_expr(init, funcs, file_prefix, reconstructions)?)),
             TIR::TStmt::Assign { place, op, value, .. } => out.push_str(&format!("{pad}{} {}= {};\n", wasm_tir_place(place)?, op.as_ref().map(binop).unwrap_or(""), wasm_emit_expr(value, funcs, file_prefix, reconstructions)?)),
-            TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => {
-                out.push_str(&format!("{pad}if {} {{\n", wasm_emit_expr(cond, funcs, file_prefix, reconstructions)?));
-                emit_wasm_body(then_body, out, indent + 1, funcs, file_prefix, reconstructions)?;
-                if let Some(else_body) = else_body {
-                    out.push_str(&format!("{pad}}} else {{\n"));
-                    emit_wasm_body(else_body, out, indent + 1, funcs, file_prefix, reconstructions)?;
-                }
-                out.push_str(&format!("{pad}}}\n"));
+            TIR::TStmt::If {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
+                emit_wasm_if(
+                    cond,
+                    then_body,
+                    else_body.as_deref(),
+                    out,
+                    indent,
+                    funcs,
+                    file_prefix,
+                    reconstructions,
+                )?;
             }
             TIR::TStmt::Range { var, start, end, step, exclusive, body, .. } => {
                 let start = wasm_emit_expr(start, funcs, file_prefix, reconstructions)?;
@@ -2039,6 +2341,94 @@ fn emit_wasm_body(
                     }
                 }
             }
+            TIR::TStmt::Loop { label, body } => {
+                out.push_str(&format!("{pad}{}loop {{\n", wasm_label_prefix(label)));
+                emit_wasm_body(body, out, indent + 1, funcs, file_prefix, reconstructions)?;
+                out.push_str(&format!("{pad}}}\n"));
+            }
+            TIR::TStmt::While { label, cond, body } => {
+                out.push_str(&format!(
+                    "{pad}{}while {} {{\n",
+                    wasm_label_prefix(label),
+                    wasm_emit_expr(cond, funcs, file_prefix, reconstructions)?
+                ));
+                emit_wasm_body(body, out, indent + 1, funcs, file_prefix, reconstructions)?;
+                out.push_str(&format!("{pad}}}\n"));
+            }
+            TIR::TStmt::CountedLoop {
+                label,
+                init,
+                cond,
+                step,
+                body,
+            } => {
+                out.push_str(&format!("{pad}{{\n"));
+                emit_wasm_body(
+                    std::slice::from_ref(init.as_ref()),
+                    out,
+                    indent + 1,
+                    funcs,
+                    file_prefix,
+                    reconstructions,
+                )?;
+                let inner = "    ".repeat(indent + 1);
+                if step.is_some() {
+                    out.push_str(&format!("{inner}let mut _jet_loop_first = true;\n"));
+                }
+                out.push_str(&format!(
+                    "{inner}{}loop {{\n",
+                    wasm_label_prefix(label)
+                ));
+                let body_pad = "    ".repeat(indent + 2);
+                if let Some(step) = step {
+                    out.push_str(&format!(
+                        "{body_pad}if _jet_loop_first {{ _jet_loop_first = false; }} else {{\n"
+                    ));
+                    emit_wasm_body(
+                        std::slice::from_ref(step.as_ref()),
+                        out,
+                        indent + 3,
+                        funcs,
+                        file_prefix,
+                        reconstructions,
+                    )?;
+                    out.push_str(&format!("{body_pad}}}\n"));
+                }
+                out.push_str(&format!(
+                    "{body_pad}if !({}) {{ break; }}\n",
+                    wasm_emit_expr(cond, funcs, file_prefix, reconstructions)?
+                ));
+                emit_wasm_body(body, out, indent + 2, funcs, file_prefix, reconstructions)?;
+                out.push_str(&format!("{inner}}}\n"));
+                out.push_str(&format!("{pad}}}\n"));
+            }
+            TIR::TStmt::Break(label) => match label {
+                Some(name) => out.push_str(&format!("{pad}break 'jet_{name};\n")),
+                None => out.push_str(&format!("{pad}break;\n")),
+            },
+            TIR::TStmt::Continue(label) => match label {
+                Some(name) => out.push_str(&format!("{pad}continue 'jet_{name};\n")),
+                None => out.push_str(&format!("{pad}continue;\n")),
+            },
+            TIR::TStmt::IndexAssign {
+                base,
+                index,
+                is_map,
+                value,
+            } => {
+                let b = wasm_emit_expr(base, funcs, file_prefix, reconstructions)?;
+                let i = wasm_emit_expr(index, funcs, file_prefix, reconstructions)?;
+                let v = wasm_emit_expr(value, funcs, file_prefix, reconstructions)?;
+                if *is_map {
+                    out.push_str(&format!(
+                        "{pad}{{ let __jet_v = {v}; ({b}).insert(({i}).clone(), __jet_v); }}\n"
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "{pad}{{ let __jet_v = {v}; ({b})[{i} as usize] = __jet_v; }}\n"
+                    ));
+                }
+            }
             TIR::TStmt::EnumMatch {
                 scrutinee,
                 clone_subject,
@@ -2055,7 +2445,7 @@ fn emit_wasm_body(
                 for arm in arms {
                     out.push_str(&format!(
                         "{pad}    {} => {{\n",
-                        wasm_variant_pattern(&arm.pattern)?
+                        wasm_match_arm_pattern(&arm.pattern)?
                     ));
                     emit_wasm_body(
                         &arm.body,
@@ -2083,6 +2473,102 @@ fn emit_wasm_body(
                         "{pad}    _ => unreachable!(\"jet: exhaustiveness bug\"),\n"
                     ));
                 }
+                out.push_str(&format!("{pad}}}\n"));
+            }
+            // Value / mixed arm tables — same if/else-if chain as native MixedSwitch.
+            TIR::TStmt::MixedSwitch {
+                subject,
+                arms,
+                else_body,
+            } => {
+                let subject_str =
+                    wasm_emit_expr(subject, funcs, file_prefix, reconstructions)?;
+                out.push_str(&format!("{pad}{{\n"));
+                let inner = "    ".repeat(indent + 1);
+                out.push_str(&format!(
+                    "{inner}let _jet_switch_subject = &({subject_str});\n"
+                ));
+                for (i, (cond, body)) in arms.iter().enumerate() {
+                    let kw = if i == 0 { "if" } else { "} else if" };
+                    out.push_str(&format!(
+                        "{inner}{kw} {} {{\n",
+                        wasm_emit_expr(cond, funcs, file_prefix, reconstructions)?
+                    ));
+                    emit_wasm_body(
+                        body,
+                        out,
+                        indent + 2,
+                        funcs,
+                        file_prefix,
+                        reconstructions,
+                    )?;
+                }
+                match else_body {
+                    None if !arms.is_empty() => {
+                        out.push_str(&format!("{inner}}}\n"));
+                    }
+                    None => {}
+                    Some(body) if arms.is_empty() => {
+                        emit_wasm_body(
+                            body,
+                            out,
+                            indent + 1,
+                            funcs,
+                            file_prefix,
+                            reconstructions,
+                        )?;
+                    }
+                    Some(body) => {
+                        out.push_str(&format!("{inner}}} else {{\n"));
+                        emit_wasm_body(
+                            body,
+                            out,
+                            indent + 2,
+                            funcs,
+                            file_prefix,
+                            reconstructions,
+                        )?;
+                        out.push_str(&format!("{inner}}}\n"));
+                    }
+                }
+                out.push_str(&format!("{pad}}}\n"));
+            }
+            TIR::TStmt::RangeSwitch {
+                subject,
+                arms,
+                else_body,
+            } => {
+                let subject_str =
+                    wasm_emit_expr(subject, funcs, file_prefix, reconstructions)?;
+                out.push_str(&format!("{pad}{{\n"));
+                let inner = "    ".repeat(indent + 1);
+                out.push_str(&format!(
+                    "{inner}let _jet_switch_subject = &({subject_str});\n"
+                ));
+                for (i, (lo, hi, body)) in arms.iter().enumerate() {
+                    let kw = if i == 0 { "if" } else { "} else if" };
+                    out.push_str(&format!(
+                        "{inner}{kw} ({subject_str} >= {lo} && {subject_str} <= {hi}) {{\n"
+                    ));
+                    emit_wasm_body(
+                        body,
+                        out,
+                        indent + 2,
+                        funcs,
+                        file_prefix,
+                        reconstructions,
+                    )?;
+                }
+                out.push_str(&format!("{inner}}} else {{\n"));
+                emit_wasm_body(
+                    else_body,
+                    out,
+                    indent + 2,
+                    funcs,
+                    file_prefix,
+                    reconstructions,
+                )?;
+                out.push_str(&format!("{inner}}}\n"));
                 out.push_str(&format!("{pad}}}\n"));
             }
             TIR::TStmt::Inline(body)
@@ -2192,6 +2678,27 @@ fn wasm_emit_expr(
                     .join(", ")
             )
         }
+        TIR::TExprKind::ListLit(elements) => format!(
+            "vec![{}]",
+            elements
+                .iter()
+                .map(|e| wasm_emit_expr(e, funcs, file_prefix, reconstructions))
+                .collect::<Result<Vec<_>, ()>>()?
+                .join(", ")
+        ),
+        TIR::TExprKind::Present(inner) => format!(
+            "Some({})",
+            wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
+        ),
+        TIR::TExprKind::Absent => "None".to_string(),
+        TIR::TExprKind::Ok(inner) => format!(
+            "Ok({})",
+            wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
+        ),
+        TIR::TExprKind::Err(inner) => format!(
+            "Err({})",
+            wasm_emit_expr(inner, funcs, file_prefix, reconstructions)?
+        ),
         TIR::TExprKind::EnumLit {
             enum_type,
             variant,
@@ -2232,6 +2739,16 @@ fn wasm_emit_expr(
             ..
         } => format!(
             "({}).get(&({})).cloned().expect(\"index miss\")",
+            wasm_emit_expr(base, funcs, file_prefix, reconstructions)?,
+            wasm_emit_expr(index, funcs, file_prefix, reconstructions)?,
+        ),
+        TIR::TExprKind::Index {
+            base,
+            index,
+            is_map: false,
+            ..
+        } => format!(
+            "({})[{} as usize].clone()",
             wasm_emit_expr(base, funcs, file_prefix, reconstructions)?,
             wasm_emit_expr(index, funcs, file_prefix, reconstructions)?,
         ),
@@ -2624,6 +3141,166 @@ fn wasm_tir_place(place: &TIR::TPlace) -> Result<String, ()> {
         TIR::TPlace::Expr(_) => Err(()),
     }
 }
+
+fn js_label_prefix(label: &Option<String>) -> String {
+    match label {
+        Some(name) => format!("jet_{name}: "),
+        None => String::new(),
+    }
+}
+
+fn js_break_stmt(label: &Option<String>) -> String {
+    match label {
+        Some(name) => format!("break jet_{name};"),
+        None => "break;".to_string(),
+    }
+}
+
+fn js_continue_stmt(label: &Option<String>) -> String {
+    match label {
+        Some(name) => format!("continue jet_{name};"),
+        None => "continue;".to_string(),
+    }
+}
+
+fn wasm_label_prefix(label: &Option<String>) -> String {
+    match label {
+        Some(name) => format!("'jet_{name}: "),
+        None => String::new(),
+    }
+}
+
+fn js_match_tag(pattern: &crate::AST::Pattern) -> Result<&'static str, ()> {
+    match pattern {
+        crate::AST::Pattern::Ok { .. } => Ok("Ok"),
+        crate::AST::Pattern::Err { .. } => Ok("Err"),
+        crate::AST::Pattern::Present { .. } => Ok("Some"),
+        crate::AST::Pattern::Absent(_) => Ok("None"),
+        _ => Err(()),
+    }
+}
+
+fn emit_js_if_head(
+    cond: &TIR::TIfCond,
+    out: &mut String,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    indent: usize,
+) -> Result<(), ()> {
+    let pad = "  ".repeat(indent);
+    match cond {
+        TIR::TIfCond::Plain(expr) => {
+            out.push_str(&format!(
+                "{pad}if ({}) {{\n",
+                tir_js_expr(expr, funcs, file_prefix)?
+            ));
+        }
+        TIR::TIfCond::IsNone { subj } => {
+            out.push_str(&format!(
+                "{pad}if (({}).tag === \"None\") {{\n",
+                tir_js_expr(subj, funcs, file_prefix)?
+            ));
+        }
+        TIR::TIfCond::IfLet { pattern, subj } => {
+            let subj = tir_js_expr(subj, funcs, file_prefix)?;
+            match &pattern.pattern {
+                crate::AST::Pattern::Ok { binding, .. }
+                | crate::AST::Pattern::Err { binding, .. }
+                | crate::AST::Pattern::Present { binding, .. } => {
+                    let tag = js_match_tag(&pattern.pattern)?;
+                    out.push_str(&format!("{pad}if (({subj}).tag === \"{tag}\") {{\n"));
+                    if binding != "_" {
+                        out.push_str(&format!(
+                            "{pad}  const {} = ({subj}).values[0];\n",
+                            web_name(binding)
+                        ));
+                    }
+                }
+                crate::AST::Pattern::Variant {
+                    variant, bindings, ..
+                } => {
+                    out.push_str(&format!(
+                        "{pad}if (({subj}).tag === {}) {{\n",
+                        json_quote(variant)
+                    ));
+                    for (index, slot) in bindings.iter().enumerate() {
+                        if let crate::AST::PatSlot::Bind { name, .. } = slot {
+                            if name != "_" {
+                                out.push_str(&format!(
+                                    "{pad}  const {} = ({subj}).values[{index}];\n",
+                                    web_name(name)
+                                ));
+                            }
+                        }
+                    }
+                }
+                crate::AST::Pattern::Absent(_) => {
+                    out.push_str(&format!("{pad}if (({subj}).tag === \"None\") {{\n"));
+                }
+                _ => return Err(()),
+            }
+        }
+        TIR::TIfCond::Matches { pattern, subj } => {
+            let subj = tir_js_expr(subj, funcs, file_prefix)?;
+            match &pattern.pattern {
+                crate::AST::Pattern::Variant { variant, .. } => {
+                    out.push_str(&format!(
+                        "{pad}if (({subj}).tag === {}) {{\n",
+                        json_quote(variant)
+                    ));
+                }
+                crate::AST::Pattern::Absent(_) => {
+                    out.push_str(&format!("{pad}if (({subj}).tag === \"None\") {{\n"));
+                }
+                other => {
+                    let tag = js_match_tag(other)?;
+                    out.push_str(&format!("{pad}if (({subj}).tag === \"{tag}\") {{\n"));
+                }
+            }
+        }
+        TIR::TIfCond::And { .. } => unreachable!("And heads are nested"),
+    }
+    Ok(())
+}
+
+fn emit_js_if(
+    cond: &TIR::TIfCond,
+    then_body: &[TIR::TStmt],
+    else_body: Option<&[TIR::TStmt]>,
+    out: &mut String,
+    funcs: &[FuncWeb],
+    file_prefix: Option<&str>,
+    indent: usize,
+) -> Result<(), ()> {
+    let pad = "  ".repeat(indent);
+    if let TIR::TIfCond::And { left, right } = cond {
+        emit_js_if_head(left, out, funcs, file_prefix, indent)?;
+        emit_js_if(
+            right,
+            then_body,
+            else_body,
+            out,
+            funcs,
+            file_prefix,
+            indent + 1,
+        )?;
+        if let Some(else_body) = else_body {
+            out.push_str(&format!("{pad}}} else {{\n"));
+            emit_tir_js_body(else_body, out, funcs, file_prefix, indent + 1)?;
+        }
+        out.push_str(&format!("{pad}}}\n"));
+        return Ok(());
+    }
+    emit_js_if_head(cond, out, funcs, file_prefix, indent)?;
+    emit_tir_js_body(then_body, out, funcs, file_prefix, indent + 1)?;
+    if let Some(else_body) = else_body {
+        out.push_str(&format!("{pad}}} else {{\n"));
+        emit_tir_js_body(else_body, out, funcs, file_prefix, indent + 1)?;
+    }
+    out.push_str(&format!("{pad}}}\n"));
+    Ok(())
+}
+
 fn emit_tir_js_body(
     body: &[TIR::TStmt],
     out: &mut String,
@@ -2649,14 +3326,21 @@ fn emit_tir_js_body(
             TIR::TStmt::Return(Some(expr)) => out.push_str(&format!("{pad}return {};\n", tir_js_expr(expr, funcs, file_prefix)?)),
             TIR::TStmt::Return(None) => out.push_str(&format!("{pad}return;\n")),
             TIR::TStmt::ExprStmt(expr) => out.push_str(&format!("{pad}{};\n", tir_js_expr(expr, funcs, file_prefix)?)),
-            TIR::TStmt::If { cond: TIR::TIfCond::Plain(cond), then_body, else_body, .. } => {
-                out.push_str(&format!("{pad}if ({}) {{\n", tir_js_expr(cond, funcs, file_prefix)?));
-                emit_tir_js_body(then_body, out, funcs, file_prefix, indent + 1)?;
-                if let Some(else_body) = else_body {
-                    out.push_str(&format!("{pad}}} else {{\n"));
-                    emit_tir_js_body(else_body, out, funcs, file_prefix, indent + 1)?;
-                }
-                out.push_str(&format!("{pad}}}\n"));
+            TIR::TStmt::If {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
+                emit_js_if(
+                    cond,
+                    then_body,
+                    else_body.as_deref(),
+                    out,
+                    funcs,
+                    file_prefix,
+                    indent,
+                )?;
             }
             TIR::TStmt::Range { var, start, end, step, exclusive, body, .. } => {
                 let step = match step { Some(e) => tir_js_expr(e, funcs, file_prefix)?, None => "1".to_string() };
@@ -2687,6 +3371,91 @@ fn emit_tir_js_body(
                 emit_tir_js_body(body, out, funcs, file_prefix, indent + 1)?;
                 out.push_str(&format!("{pad}}}\n"));
             }
+            TIR::TStmt::Loop { label, body } => {
+                out.push_str(&format!(
+                    "{pad}{}while (true) {{\n",
+                    js_label_prefix(label)
+                ));
+                emit_tir_js_body(body, out, funcs, file_prefix, indent + 1)?;
+                out.push_str(&format!("{pad}}}\n"));
+            }
+            TIR::TStmt::While { label, cond, body } => {
+                out.push_str(&format!(
+                    "{pad}{}while ({}) {{\n",
+                    js_label_prefix(label),
+                    tir_js_expr(cond, funcs, file_prefix)?
+                ));
+                emit_tir_js_body(body, out, funcs, file_prefix, indent + 1)?;
+                out.push_str(&format!("{pad}}}\n"));
+            }
+            TIR::TStmt::CountedLoop {
+                label,
+                init,
+                cond,
+                step,
+                body,
+            } => {
+                // Mirror native: outer scope, optional first-pass skip of step, then
+                // retest + body. Continue re-enters at the top (D-LOOP-CONTINUE2).
+                out.push_str(&format!("{pad}{{\n"));
+                emit_tir_js_body(
+                    std::slice::from_ref(init.as_ref()),
+                    out,
+                    funcs,
+                    file_prefix,
+                    indent + 1,
+                )?;
+                let inner = "  ".repeat(indent + 1);
+                if step.is_some() {
+                    out.push_str(&format!("{inner}let _jet_loop_first = true;\n"));
+                }
+                out.push_str(&format!(
+                    "{inner}{}while (true) {{\n",
+                    js_label_prefix(label)
+                ));
+                let body_pad = "  ".repeat(indent + 2);
+                if let Some(step) = step {
+                    out.push_str(&format!(
+                        "{body_pad}if (_jet_loop_first) {{ _jet_loop_first = false; }} else {{\n"
+                    ));
+                    emit_tir_js_body(
+                        std::slice::from_ref(step.as_ref()),
+                        out,
+                        funcs,
+                        file_prefix,
+                        indent + 3,
+                    )?;
+                    out.push_str(&format!("{body_pad}}}\n"));
+                }
+                out.push_str(&format!(
+                    "{body_pad}if (!({})) {{ break; }}\n",
+                    tir_js_expr(cond, funcs, file_prefix)?
+                ));
+                emit_tir_js_body(body, out, funcs, file_prefix, indent + 2)?;
+                out.push_str(&format!("{inner}}}\n"));
+                out.push_str(&format!("{pad}}}\n"));
+            }
+            TIR::TStmt::Break(label) => {
+                out.push_str(&format!("{pad}{}\n", js_break_stmt(label)));
+            }
+            TIR::TStmt::Continue(label) => {
+                out.push_str(&format!("{pad}{}\n", js_continue_stmt(label)));
+            }
+            TIR::TStmt::IndexAssign {
+                base,
+                index,
+                is_map,
+                value,
+            } => {
+                let b = tir_js_expr(base, funcs, file_prefix)?;
+                let i = tir_js_expr(index, funcs, file_prefix)?;
+                let v = tir_js_expr(value, funcs, file_prefix)?;
+                if *is_map {
+                    out.push_str(&format!("{pad}{b}.set({i}, {v});\n"));
+                } else {
+                    out.push_str(&format!("{pad}{b}[{i}] = {v};\n"));
+                }
+            }
             TIR::TStmt::EnumMatch {
                 scrutinee,
                 arms,
@@ -2699,23 +3468,41 @@ fn emit_tir_js_body(
                     tir_js_expr(scrutinee, funcs, file_prefix)?
                 ));
                 for arm in arms {
-                    let crate::AST::Pattern::Variant {
-                        variant, bindings, ..
-                    } = &arm.pattern.pattern
-                    else {
-                        return Err(());
-                    };
-                    out.push_str(&format!(
-                        "{pad}    case {}: {{\n",
-                        json_quote(variant)
-                    ));
-                    for (index, slot) in bindings.iter().enumerate() {
-                        if let crate::AST::PatSlot::Bind { name, .. } = slot {
+                    match &arm.pattern.pattern {
+                        crate::AST::Pattern::Variant {
+                            variant, bindings, ..
+                        } => {
                             out.push_str(&format!(
-                                "{pad}      const {} = __jet_match.values[{index}];\n",
-                                web_name(name)
+                                "{pad}    case {}: {{\n",
+                                json_quote(variant)
                             ));
+                            for (index, slot) in bindings.iter().enumerate() {
+                                if let crate::AST::PatSlot::Bind { name, .. } = slot {
+                                    if name != "_" {
+                                        out.push_str(&format!(
+                                            "{pad}      const {} = __jet_match.values[{index}];\n",
+                                            web_name(name)
+                                        ));
+                                    }
+                                }
+                            }
                         }
+                        crate::AST::Pattern::Ok { binding, .. }
+                        | crate::AST::Pattern::Err { binding, .. }
+                        | crate::AST::Pattern::Present { binding, .. } => {
+                            let tag = js_match_tag(&arm.pattern.pattern)?;
+                            out.push_str(&format!("{pad}    case \"{tag}\": {{\n"));
+                            if binding != "_" {
+                                out.push_str(&format!(
+                                    "{pad}      const {} = __jet_match.values[0];\n",
+                                    web_name(binding)
+                                ));
+                            }
+                        }
+                        crate::AST::Pattern::Absent(_) => {
+                            out.push_str(&format!("{pad}    case \"None\": {{\n"));
+                        }
+                        _ => return Err(()),
                     }
                     emit_tir_js_body(&arm.body, out, funcs, file_prefix, indent + 3)?;
                     out.push_str(&format!("{pad}      break;\n{pad}    }}\n"));
@@ -2730,6 +3517,66 @@ fn emit_tir_js_body(
                     ));
                 }
                 out.push_str(&format!("{pad}  }}\n{pad}}}\n"));
+            }
+            // Value / mixed arm tables — if/else-if chain (native MixedSwitch parity).
+            TIR::TStmt::MixedSwitch {
+                subject,
+                arms,
+                else_body,
+            } => {
+                out.push_str(&format!("{pad}{{\n"));
+                let inner = "  ".repeat(indent + 1);
+                // Bind subject for parity with native (HostCall pattern arms stay gated out).
+                out.push_str(&format!(
+                    "{inner}const __jet_switch_subject = {};\n",
+                    tir_js_expr(subject, funcs, file_prefix)?
+                ));
+                for (i, (cond, body)) in arms.iter().enumerate() {
+                    let kw = if i == 0 { "if" } else { "} else if" };
+                    out.push_str(&format!(
+                        "{inner}{kw} ({}) {{\n",
+                        tir_js_expr(cond, funcs, file_prefix)?
+                    ));
+                    emit_tir_js_body(body, out, funcs, file_prefix, indent + 2)?;
+                }
+                match else_body {
+                    None if !arms.is_empty() => {
+                        out.push_str(&format!("{inner}}}\n"));
+                    }
+                    None => {}
+                    Some(body) if arms.is_empty() => {
+                        emit_tir_js_body(body, out, funcs, file_prefix, indent + 1)?;
+                    }
+                    Some(body) => {
+                        out.push_str(&format!("{inner}}} else {{\n"));
+                        emit_tir_js_body(body, out, funcs, file_prefix, indent + 2)?;
+                        out.push_str(&format!("{inner}}}\n"));
+                    }
+                }
+                out.push_str(&format!("{pad}}}\n"));
+            }
+            TIR::TStmt::RangeSwitch {
+                subject,
+                arms,
+                else_body,
+            } => {
+                out.push_str(&format!("{pad}{{\n"));
+                let inner = "  ".repeat(indent + 1);
+                out.push_str(&format!(
+                    "{inner}const __jet_switch_subject = {};\n",
+                    tir_js_expr(subject, funcs, file_prefix)?
+                ));
+                for (i, (lo, hi, body)) in arms.iter().enumerate() {
+                    let kw = if i == 0 { "if" } else { "} else if" };
+                    out.push_str(&format!(
+                        "{inner}{kw} (__jet_switch_subject >= {lo} && __jet_switch_subject <= {hi}) {{\n"
+                    ));
+                    emit_tir_js_body(body, out, funcs, file_prefix, indent + 2)?;
+                }
+                out.push_str(&format!("{inner}}} else {{\n"));
+                emit_tir_js_body(else_body, out, funcs, file_prefix, indent + 2)?;
+                out.push_str(&format!("{inner}}}\n"));
+                out.push_str(&format!("{pad}}}\n"));
             }
             TIR::TStmt::Inline(inner)
             | TIR::TStmt::Region(inner)
@@ -2840,6 +3687,19 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             )
         }
         E::ListLit(elements) => format!("[{}]", elements.iter().map(|element| tir_js_expr(element, funcs, file_prefix)).collect::<Result<Vec<_>, _>>()?.join(", ")),
+        E::Present(inner) => format!(
+            "{{ tag: \"Some\", values: [{}] }}",
+            tir_js_expr(inner, funcs, file_prefix)?
+        ),
+        E::Absent => "{ tag: \"None\", values: [] }".to_string(),
+        E::Ok(inner) => format!(
+            "{{ tag: \"Ok\", values: [{}] }}",
+            tir_js_expr(inner, funcs, file_prefix)?
+        ),
+        E::Err(inner) => format!(
+            "{{ tag: \"Err\", values: [{}] }}",
+            tir_js_expr(inner, funcs, file_prefix)?
+        ),
         E::MapLit(entries) => format!(
             "new Map([{}])",
             entries
@@ -2856,6 +3716,20 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
                 .collect::<Result<Vec<_>, ()>>()?
                 .join(", ")
         ),
+        E::Index {
+            base,
+            index,
+            is_map,
+            ..
+        } => {
+            let b = tir_js_expr(base, funcs, file_prefix)?;
+            let i = tir_js_expr(index, funcs, file_prefix)?;
+            if *is_map {
+                format!("{b}.get({i})")
+            } else {
+                format!("{b}[{i}]")
+            }
+        },
         E::Call { name, args } => {
             let name = local_web_key(file_prefix, name);
             let args = tir_call_args(args, funcs, file_prefix)?;
@@ -2917,11 +3791,20 @@ fn tir_js_expr(expr: &TIR::TExpr, funcs: &[FuncWeb], file_prefix: Option<&str>) 
             TIR::TNumericOp::CastAs { .. } => tir_js_expr(recv, funcs, file_prefix)?,
             TIR::TNumericOp::FloatToInt { lower, upper_exclusive, .. } => {
                 let value = tir_js_expr(recv, funcs, file_prefix)?;
-                format!("(() => {{ const __jet_value = {value}; return Number.isFinite(__jet_value) && __jet_value >= {lower} && __jet_value < {upper_exclusive} ? Math.trunc(__jet_value) : null; }})()")
+                format!(
+                    "(() => {{ const __jet_value = {value}; return Number.isFinite(__jet_value) && __jet_value >= {lower} && __jet_value < {upper_exclusive} ? {{ tag: \"Some\", values: [Math.trunc(__jet_value)] }} : {{ tag: \"None\", values: [] }}; }})()"
+                )
             }
             _ => return Err(()),
         },
-        E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => format!("({} ?? {})", tir_js_expr(value, funcs, file_prefix)?, tir_js_expr(fallback, funcs, file_prefix)?),
+        E::OrFallback { value, fallback: TIR::TOrFallback::Value(fallback), .. } => {
+            // Tagged Option/Result unwrap; also accepts legacy nullish from older emit.
+            format!(
+                "(((__jet_v) => (__jet_v != null && (__jet_v.tag === \"Some\" || __jet_v.tag === \"Ok\") ? __jet_v.values[0] : {}))({}))",
+                tir_js_expr(fallback, funcs, file_prefix)?,
+                tir_js_expr(value, funcs, file_prefix)?
+            )
+        },
         E::Lambda(lam) => tir_js_lambda(lam, funcs, file_prefix)?,
         E::CoreClosureCall { kind: TIR::TCoreClosureKind::UiReactiveRender { executable, .. } } => format!("jetDom.reactiveRender({})", tir_js_lambda(executable, funcs, file_prefix)?),
         E::CoreClosureCall { kind: TIR::TCoreClosureKind::ReactiveEffect { executable, .. } } => format!("jetDom.makeEffect({})", tir_js_lambda(executable, funcs, file_prefix)?),

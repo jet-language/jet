@@ -979,6 +979,227 @@ fn run() {}
 }
 
 #[test]
+fn web_value_and_range_arm_tables_emit_on_js_and_wasm() {
+    // D-IF3 arm tables must share the MixedSwitch / RangeSwitch path with native.
+    let src = r#"#Target(Web)
+#Target(JS)
+fn digit(n: Int) => String {
+    if n == {
+        0 -> return "0"
+        1 -> return "1"
+        else -> return "x"
+    }
+}
+#Target(JS)
+fn band(n: Int) => String {
+    if n == {
+        0..9 -> return "low"
+        else -> return "high"
+    }
+}
+#WasmExport
+fn wasm_digit(n: Int) => String {
+    if n == {
+        0 -> return "0"
+        1 -> return "1"
+        else -> return "x"
+    }
+}
+#WasmExport
+fn wasm_band(n: Int) => String {
+    if n == {
+        0..9 -> return "low"
+        10..19 -> return "mid"
+        else -> return "high"
+    }
+}
+fn run() {}
+"#;
+    let out = jet::compile_web_with_path(src, "tests/fixtures/web_arm_tables.jet")
+        .expect("value/range arm tables must compile on web");
+    let web = out.web.expect("web artifacts");
+    assert!(
+        web.js_app.contains("} else if"),
+        "JS MixedSwitch must emit an if/else-if chain:\n{}",
+        web.js_app
+    );
+    assert!(
+        web.js_app.contains("__jet_switch_subject"),
+        "JS arm tables must bind the switch subject:\n{}",
+        web.js_app
+    );
+    assert!(
+        web.wasm_rust.contains("_jet_switch_subject"),
+        "Wasm MixedSwitch/RangeSwitch must bind the switch subject:\n{}",
+        web.wasm_rust
+    );
+    assert!(
+        web.wasm_rust.contains("} else if"),
+        "Wasm arm tables must emit an if/else-if chain:\n{}",
+        web.wasm_rust
+    );
+    assert!(
+        web.wasm_rust.contains(">= 0") && web.wasm_rust.contains("<= 9"),
+        "Wasm RangeSwitch must emit inclusive range tests:\n{}",
+        web.wasm_rust
+    );
+}
+
+#[test]
+fn web_loops_and_index_assign_emit_on_js_and_wasm() {
+    let src = r#"#Target(Web)
+#Target(JS)
+fn sum_to(n: Int) => Int {
+    total := 0
+    i := 0
+    loop {
+        if i >= n { break }
+        total = total + i
+        i = i + 1
+    }
+    return total
+}
+#Target(JS)
+fn bump(n: Int) => Int {
+    xs := [n]
+    xs[0] = 9
+    return xs[0]
+}
+#WasmExport
+fn wasm_sum_to(n: Int) => Int {
+    total := 0
+    i := 0
+    loop {
+        if i >= n { break }
+        total = total + i
+        i = i + 1
+    }
+    return total
+}
+#WasmExport
+fn wasm_bump(n: Int) => Int {
+    xs := [n]
+    xs[0] = 9
+    return xs[0]
+}
+fn run() {}
+"#;
+    let out = jet::compile_web_with_path(src, "tests/fixtures/web_loops_index.jet")
+        .expect("loops + index assign must compile on web");
+    let web = out.web.expect("web artifacts");
+    assert!(
+        web.js_app.contains("while (true)"),
+        "JS Loop must emit while(true):\n{}",
+        web.js_app
+    );
+    assert!(
+        web.js_app.contains("break;"),
+        "JS Break must emit break:\n{}",
+        web.js_app
+    );
+    assert!(
+        web.js_app.contains("] = ") || web.js_app.contains("[0] ="),
+        "JS IndexAssign must emit array write:\n{}",
+        web.js_app
+    );
+    assert!(
+        web.wasm_rust.contains("loop {") || web.wasm_rust.contains("loop{"),
+        "Wasm Loop must emit loop:\n{}",
+        web.wasm_rust
+    );
+    assert!(
+        web.wasm_rust.contains("break;"),
+        "Wasm Break must emit break:\n{}",
+        web.wasm_rust
+    );
+    assert!(
+        web.wasm_rust.contains("as usize] ="),
+        "Wasm IndexAssign must emit list write:\n{}",
+        web.wasm_rust
+    );
+}
+
+#[test]
+fn web_fallible_match_and_option_if_emit_on_js_and_wasm() {
+    let src = r#"#Target(Web)
+#Target(JS)
+fn make_result(flag: Bool) => Int ? String {
+    if flag return .Ok(7)
+    return .Err("x")
+}
+#Target(JS)
+fn make_opt(flag: Bool) => Int? {
+    if flag return .Val(3)
+    return .None
+}
+#Target(JS)
+fn classify(flag: Bool) => Int {
+    r :: make_result(flag)
+    if r == {
+        .Ok(n) -> return n
+        .Err(_) -> return -1
+    }
+}
+#Target(JS)
+fn maybe(flag: Bool) => Int {
+    x :: make_opt(flag)
+    if x == .None { return 0 }
+    if x == .Val(n) { return n }
+    return -1
+}
+#Target(Wasm)
+fn wasm_make_result(flag: Bool) => Int ? String {
+    if flag return .Ok(7)
+    return .Err("x")
+}
+#Target(Wasm)
+fn wasm_make_opt(flag: Bool) => Int? {
+    if flag return .Val(3)
+    return .None
+}
+#WasmExport
+fn wasm_classify(flag: Bool) => Int {
+    r :: wasm_make_result(flag)
+    if r == {
+        .Ok(n) -> return n
+        .Err(_) -> return -1
+    }
+}
+#WasmExport
+fn wasm_maybe(flag: Bool) => Int {
+    x :: wasm_make_opt(flag)
+    if x == .None { return 0 }
+    if x == .Val(n) { return n }
+    return -1
+}
+fn run() {}
+"#;
+    let out = jet::compile_web_with_path(src, "tests/fixtures/web_fallible_match.jet")
+        .expect("Result/Option match must compile on web");
+    let web = out.web.expect("web artifacts");
+    assert!(
+        web.js_app.contains("case \"Ok\"") || web.js_app.contains("case \"Ok\":"),
+        "JS EnumMatch must emit Ok case:\n{}",
+        web.js_app
+    );
+    assert!(
+        web.js_app.contains("tag: \"None\"") || web.js_app.contains("\"None\""),
+        "JS must emit None tag:\n{}",
+        web.js_app
+    );
+    assert!(
+        web.wasm_rust.contains("Ok(") && web.wasm_rust.contains("Err("),
+        "Wasm must emit Ok/Err patterns:\n{}",
+        web.wasm_rust
+    );
+    assert!(
+        web.wasm_rust.contains("Some(") && web.wasm_rust.contains("None"),
+        "Wasm must emit Some/None:\n{}",
+        web.wasm_rust
+    );
+}
+
+#[test]
 fn web_backends_traverse_impure_regions() {
     let src = r#"#Target(Web)
 #Target(JS)
