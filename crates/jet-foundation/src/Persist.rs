@@ -376,17 +376,15 @@ mod tests {
             shape: "Int".into(),
             payload: r#"{"shape":"Int","value":7}"#.into(),
         });
-        match store.migrate("app", "counter", "Int", r#"{"shape":"Int","value":0}"#) {
-            PersistOutcome::Kept(e) => assert!(e.payload.contains('7')),
-            other => panic!("expected Kept, got {other:?}"),
-        }
-        match store.migrate("app", "counter", "String", r#"{"shape":"String","value":""}"#) {
-            PersistOutcome::Reset { reason, entry } => {
-                assert!(reason.contains("reinitialized"));
-                assert!(entry.payload.contains("String"));
-            }
-            other => panic!("expected Reset, got {other:?}"),
-        }
+        assert!(matches!(
+            store.migrate("app", "counter", "Int", r#"{"shape":"Int","value":0}"#),
+            PersistOutcome::Kept(e) if e.payload.contains('7')
+        ));
+        assert!(matches!(
+            store.migrate("app", "counter", "String", r#"{"shape":"String","value":""}"#),
+            PersistOutcome::Reset { reason, entry }
+                if reason.contains("reinitialized") && entry.payload.contains("String")
+        ));
     }
 
     #[test]
