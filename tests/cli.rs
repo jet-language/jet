@@ -3588,22 +3588,58 @@ fn check_fixed_dynamic_size_reports_e0103_without_internal_failure() {
     );
 
     fs::write(
-        dir.join("higher_order.jet"),
-        "use core.mem\nfn apply(f: fn() => Int) => Int { return f() }\nfn fixed_size() => Int { return 32 }\nfn bad(size: Int) {\n fixed :: mem.Fixed.new(size: size)\n close(^fixed)\n}\nfn run() {\n fixed :: mem.Fixed.new(size: apply(fixed_size))\n close(^fixed)\n}\n",
+        dir.join("higher_order_valid.jet"),
+        "use core.mem\nfn apply(f: fn() => Int) => Int { return f() }\nfn fixed_size() => Int { return 32 }\nfn run() {\n fixed :: mem.Fixed.new(size: apply(fixed_size))\n close(^fixed)\n}\n",
     )
     .unwrap();
-    let higher_order = Command::new(jet())
-        .args(["check", "higher_order.jet"])
+    let higher_order_valid = Command::new(jet())
+        .args(["check", "higher_order_valid.jet"])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert_eq!(higher_order.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&higher_order.stderr);
-    assert!(stderr.contains("Error [E0103]"), "{stderr}");
+    assert_eq!(
+        higher_order_valid.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&higher_order_valid.stderr)
+    );
+
+    fs::write(
+        dir.join("higher_order_isolation.jet"),
+        "use core.mem\nfn apply(f: fn() => Int) => Int { return f() }\nfn fixed_size() => Int { return 32 }\nfn bad(size: Int) {\n fixed :: mem.Fixed.new(size: size)\n close(^fixed)\n}\nfn run() {\n fixed :: mem.Fixed.new(size: apply(fixed_size))\n close(^fixed)\n}\n",
+    )
+    .unwrap();
+    let higher_order_isolation = Command::new(jet())
+        .args(["check", "higher_order_isolation.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(higher_order_isolation.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&higher_order_isolation.stderr);
+    assert_eq!(stderr.matches("Error [E0103]").count(), 1, "{stderr}");
     for leaked in ["panicked at", "entered unreachable code", "internal error"] {
         assert!(!stderr.contains(leaked), "`{leaked}` leaked:\n{stderr}");
     }
+
+    fs::write(
+        dir.join("lambda_value.jet"),
+        "fn run() {\n comptime callback = () => print(\"not called\")\n print(\"ok\")\n}\n",
+    )
+    .unwrap();
+    let lambda_value = Command::new(jet())
+        .args(["check", "lambda_value.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        lambda_value.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&lambda_value.stderr)
+    );
 
     fs::write(
         dir.join("helper.jet"),

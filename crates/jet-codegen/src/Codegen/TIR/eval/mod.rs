@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use crate::AST::{Expr, ProgramBundle, Stmt};
+use crate::AST::{Expr, Func, ProgramBundle, Stmt, Type};
 use super::Cx;
 use crate::Codegen::TIR::{
     self, JitProgram, LowerEnv, TExpr, TFunc, TJitSpawnBody, TJitSpawnLambda, TLocal, TStmt,
@@ -399,9 +399,56 @@ fn seed_fragment_distinct_types(
     }
 }
 
+fn seed_fragment_funcs(cx: &mut Cx, funcs: &HashMap<String, &Func>) {
+    for (name, function) in funcs {
+        cx.fn_type_params.insert(
+            name.clone(),
+            function
+                .type_params
+                .iter()
+                .map(|parameter| parameter.name.clone())
+                .collect(),
+        );
+        cx.sigs.insert(
+            name.clone(),
+            function
+                .params
+                .iter()
+                .map(|parameter| {
+                    let ty = if parameter.variadic {
+                        Type::List(Box::new(parameter.ty.clone()))
+                    } else {
+                        parameter.ty.clone()
+                    };
+                    (parameter.convention, ty)
+                })
+                .collect(),
+        );
+        cx.fn_types.insert(
+            name.clone(),
+            Type::Fn {
+                params: function
+                    .params
+                    .iter()
+                    .map(|parameter| {
+                        if parameter.variadic {
+                            Type::List(Box::new(parameter.ty.clone()))
+                        } else {
+                            parameter.ty.clone()
+                        }
+                    })
+                    .collect(),
+                ret: function.return_type.clone().map(Box::new),
+                effect_bound: None,
+            },
+        );
+    }
+}
+
 /// Lower one expression for the evaluator (comptime / REPL fragments).
 pub fn lower_expr_for_eval(
     expr: &Expr,
+    funcs: &HashMap<String, &Func>,
     globals: &HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
@@ -409,6 +456,7 @@ pub fn lower_expr_for_eval(
 ) -> Result<TExpr, Diagnostic> {
     let mut cx = empty_cx();
     seed_fragment_distinct_types(&mut cx, distinct_ranges, distinct_bases);
+    seed_fragment_funcs(&mut cx, funcs);
     cx.const_values = globals.clone();
     for (name, value) in globals {
         cx.consts.insert(name.clone(), String::new());
@@ -432,6 +480,7 @@ pub fn lower_expr_for_eval(
 /// Lower a statement list for the evaluator.
 pub fn lower_stmts_for_eval(
     stmts: &[Stmt],
+    funcs: &HashMap<String, &Func>,
     globals: &HashMap<String, CtValue>,
     core_imports: &HashMap<String, String>,
     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
@@ -439,6 +488,7 @@ pub fn lower_stmts_for_eval(
 ) -> Result<Vec<TStmt>, Diagnostic> {
     let mut cx = empty_cx();
     seed_fragment_distinct_types(&mut cx, distinct_ranges, distinct_bases);
+    seed_fragment_funcs(&mut cx, funcs);
     cx.const_values = globals.clone();
     for name in globals.keys() {
         cx.consts.insert(name.clone(), String::new());
@@ -726,6 +776,7 @@ fn eval_expr_hook(
 ) -> Result<CtValue, Diagnostic> {
     let tir = lower_expr_for_eval(
         req.expr,
+        req.funcs,
         req.globals,
         req.core_imports,
         req.distinct_ranges,
@@ -733,6 +784,7 @@ fn eval_expr_hook(
     )?;
     let mut cx = empty_cx();
     seed_fragment_distinct_types(&mut cx, req.distinct_ranges, req.distinct_bases);
+    seed_fragment_funcs(&mut cx, req.funcs);
     cx.core_imports = req.core_imports.clone();
     let lowered: Vec<TFunc> = req
         .funcs
@@ -797,6 +849,7 @@ fn eval_block_hook(
 ) -> Result<Comptime::TirBridge::StmtOutcome, Diagnostic> {
     let tir = lower_stmts_for_eval(
         req.stmts,
+        req.funcs,
         req.globals,
         req.core_imports,
         req.distinct_ranges,
@@ -804,6 +857,7 @@ fn eval_block_hook(
     )?;
     let mut cx = empty_cx();
     seed_fragment_distinct_types(&mut cx, req.distinct_ranges, req.distinct_bases);
+    seed_fragment_funcs(&mut cx, req.funcs);
     cx.core_imports = req.core_imports.clone();
     let lowered: Vec<TFunc> = req
         .funcs

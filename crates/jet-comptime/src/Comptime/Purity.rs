@@ -311,14 +311,18 @@ fn walk_expr_nodes(e: &Expr, include_suppressed: bool, f: &mut impl FnMut(&Expr)
                 walk_expr_nodes(value, include_suppressed, f);
             }
         }
-        Expr::Lambda(lambda) => match &lambda.body {
-            LambdaBody::Expr(body) => walk_expr_nodes(body, include_suppressed, f),
-            LambdaBody::Block(body) => {
-                for stmt in body {
-                    walk_stmt_expr_nodes(stmt, include_suppressed, f);
+        Expr::Lambda(lambda) => {
+            if include_suppressed {
+                match &lambda.body {
+                    LambdaBody::Expr(body) => walk_expr_nodes(body, include_suppressed, f),
+                    LambdaBody::Block(body) => {
+                        for stmt in body {
+                            walk_stmt_expr_nodes(stmt, include_suppressed, f);
+                        }
+                    }
                 }
             }
-        },
+        }
         Expr::CallValue { callee, args, .. } => {
             walk_expr_nodes(callee, include_suppressed, f);
             for arg in args {
