@@ -3,6 +3,9 @@
 //! thin `std::process` wrappers, not a third algorithm.
 
 use super::Concurrency;
+use super::CoreHost::{
+    jit_env_key_eq, jit_env_snapshot_raw, jit_env_validate_name, jit_env_validate_value,
+};
 use std::io::{BufRead, Read};
 use std::time::Instant;
 
@@ -214,19 +217,31 @@ fn build_command(spec: &JitProcessSpec) -> Result<std::process::Command, String>
     if let Some(cwd) = &spec.cwd {
         command.current_dir(cwd);
     }
-    // Same composition order as `jet_process_command` in the AOT prelude: start
-    // from the inherited environment unless `env_clear`, apply every `env` set,
-    // then every `env_remove`. Removes run last there too, so a name that is
-    // both set and removed is absent under both lenses.
-    if spec.env_clear {
-        command.env_clear();
-    }
+    // D-ENV-MUTATE1=A: clone the process-global logical environment under its
+    // lock. Compose this launch in owned memory, then replace the host
+    // environment atomically from the child's point of view.
+    let mut child_env = if spec.env_clear {
+        Vec::new()
+    } else {
+        jit_env_snapshot_raw()
+    };
     for (name, value) in &spec.env_set {
-        command.env(name, value);
+        jit_env_validate_name(name)
+            .map_err(|error| format!("invalid input during resolve `{name}`: {error}"))?;
+        jit_env_validate_value(value)
+            .map_err(|error| format!("invalid input during resolve `{name}`: {error}"))?;
+        let name = std::ffi::OsString::from(name);
+        child_env.retain(|(candidate, _)| !jit_env_key_eq(candidate.as_os_str(), name.as_os_str()));
+        child_env.push((name, std::ffi::OsString::from(value)));
     }
     for name in &spec.env_remove {
-        command.env_remove(name);
+        jit_env_validate_name(name)
+            .map_err(|error| format!("invalid input during resolve `{name}`: {error}"))?;
+        let name = std::ffi::OsStr::new(name);
+        child_env.retain(|(candidate, _)| !jit_env_key_eq(candidate.as_os_str(), name));
     }
+    command.env_clear();
+    command.envs(child_env);
     command.stdin(std::process::Stdio::null());
     command.stdout(spec.stdout.stdio());
     command.stderr(spec.stderr.stdio());

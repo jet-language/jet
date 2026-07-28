@@ -744,21 +744,101 @@ fn option_string_bits(s: Option<String>) -> i64 {
     }
 }
 
-fn env_validate_name(name: &str) -> Result<(), String> {
-    if name.is_empty() {
-        return Err("empty name".into());
-    }
-    if name.contains('\0') {
-        return Err("name contains NUL".into());
-    }
-    Ok(())
+pub(crate) type JitEnvEntries = Vec<(std::ffi::OsString, std::ffi::OsString)>;
+
+fn jit_env_table() -> &'static std::sync::RwLock<JitEnvEntries> {
+    static TABLE: std::sync::OnceLock<std::sync::RwLock<JitEnvEntries>> =
+        std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut entries: JitEnvEntries = Vec::new();
+        for (name, value) in std::env::vars_os() {
+            if let Some(old) = entries
+                .iter()
+                .position(|(candidate, _)| jit_env_key_eq(candidate.as_os_str(), name.as_os_str()))
+            {
+                entries.remove(old);
+            }
+            entries.push((name, value));
+        }
+        std::sync::RwLock::new(entries)
+    })
 }
 
-fn env_validate_value(value: &str) -> Result<(), String> {
-    if value.contains('\0') {
-        return Err("value contains NUL".into());
+fn jit_env_read() -> std::sync::RwLockReadGuard<'static, JitEnvEntries> {
+    jit_env_table()
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn jit_env_write() -> std::sync::RwLockWriteGuard<'static, JitEnvEntries> {
+    jit_env_table()
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(unix)]
+fn jit_env_key_cmp(left: &std::ffi::OsStr, right: &std::ffi::OsStr) -> std::cmp::Ordering {
+    use std::os::unix::ffi::OsStrExt;
+    left.as_bytes().cmp(right.as_bytes())
+}
+
+// JET_VETTED_UNSAFE_BEGIN: jit_env_windows
+#[cfg(windows)]
+fn jit_env_key_cmp(left: &std::ffi::OsStr, right: &std::ffi::OsStr) -> std::cmp::Ordering {
+    use std::os::windows::ffi::OsStrExt;
+    extern "system" {
+        fn CompareStringOrdinal(
+            left: *const u16,
+            left_len: i32,
+            right: *const u16,
+            right_len: i32,
+            ignore_case: i32,
+        ) -> i32;
     }
-    Ok(())
+    let left: Vec<u16> = left.encode_wide().collect();
+    let right: Vec<u16> = right.encode_wide().collect();
+    let (Ok(left_len), Ok(right_len)) = (i32::try_from(left.len()), i32::try_from(right.len()))
+    else {
+        return left.cmp(&right);
+    };
+    let result =
+        unsafe { CompareStringOrdinal(left.as_ptr(), left_len, right.as_ptr(), right_len, 1) };
+    match result {
+        1 => std::cmp::Ordering::Less,
+        2 => std::cmp::Ordering::Equal,
+        3 => std::cmp::Ordering::Greater,
+        _ => left.cmp(&right),
+    }
+}
+// JET_VETTED_UNSAFE_END: jit_env_windows
+
+#[cfg(not(any(unix, windows)))]
+fn jit_env_key_cmp(left: &std::ffi::OsStr, right: &std::ffi::OsStr) -> std::cmp::Ordering {
+    left.cmp(right)
+}
+
+pub(crate) fn jit_env_key_eq(left: &std::ffi::OsStr, right: &std::ffi::OsStr) -> bool {
+    jit_env_key_cmp(left, right) == std::cmp::Ordering::Equal
+}
+
+pub(crate) fn jit_env_validate_name(name: &str) -> Result<(), &'static str> {
+    if name.is_empty() || name.contains('\0') || name.contains('=') {
+        Err("invalid environment variable name")
+    } else {
+        Ok(())
+    }
+}
+
+pub(crate) fn jit_env_validate_value(value: &str) -> Result<(), &'static str> {
+    if value.contains('\0') {
+        Err("invalid environment variable value")
+    } else {
+        Ok(())
+    }
+}
+
+pub(crate) fn jit_env_snapshot_raw() -> JitEnvEntries {
+    jit_env_read().clone()
 }
 
 fn jet_temp_path(prefix: &str) -> String {
@@ -1212,53 +1292,88 @@ extern "C" fn jet_jit_math_ceil_f32(x: f64) -> f64 {
 /// Option ABI: `0` = None, else string-handle+1 (same as list_get_opt).
 extern "C" fn jet_jit_env_get(name: i64) -> i64 {
     let key = clone_heap_string(name);
-    match std::env::var(&key) {
-        Ok(v) => {
-            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(v));
+    let key = std::ffi::OsStr::new(&key);
+    let value = jit_env_read()
+        .iter()
+        .find(|(candidate, _)| jit_env_key_eq(candidate.as_os_str(), key))
+        .and_then(|(_, value)| value.to_str().map(str::to_string));
+    match value {
+        Some(value) => {
+            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(value));
             sid.wrapping_add(1)
         }
-        Err(_) => 0,
+        None => 0,
     }
 }
 
 extern "C" fn jet_jit_env_set(name: i64, value: i64) -> i64 {
     let key = clone_heap_string(name);
     let val = clone_heap_string(value);
-    if let Err(e) = env_validate_name(&key) {
-        return result_err_msg(&format!("env set: {e}"));
+    if let Err(error) = jit_env_validate_name(&key) {
+        return result_err_msg(error);
     }
-    if let Err(e) = env_validate_value(&val) {
-        return result_err_msg(&format!("env set: {e}"));
+    if let Err(error) = jit_env_validate_value(&val) {
+        return result_err_msg(error);
     }
-    std::env::set_var(key, val);
+    let key = std::ffi::OsString::from(key);
+    let mut entries = jit_env_write();
+    if let Some(old) = entries
+        .iter()
+        .position(|(candidate, _)| jit_env_key_eq(candidate.as_os_str(), key.as_os_str()))
+    {
+        entries.remove(old);
+    }
+    entries.push((key, std::ffi::OsString::from(val)));
     result_ok_bits(0)
 }
 
 extern "C" fn jet_jit_env_unset(name: i64) -> i64 {
     let key = clone_heap_string(name);
-    if let Err(e) = env_validate_name(&key) {
-        return result_err_msg(&format!("env unset: {e}"));
+    if let Err(error) = jit_env_validate_name(&key) {
+        return result_err_msg(error);
     }
-    let existed = std::env::var_os(&key).is_some();
-    std::env::remove_var(&key);
+    let key = std::ffi::OsStr::new(&key);
+    let mut entries = jit_env_write();
+    let existed = entries
+        .iter()
+        .position(|(candidate, _)| jit_env_key_eq(candidate.as_os_str(), key))
+        .map(|old| entries.remove(old))
+        .is_some();
     result_ok_bits(u64::from(existed))
 }
 
 extern "C" fn jet_jit_env_vars() -> i64 {
-    let mut names = Vec::new();
-    for (name, value) in std::env::vars_os() {
+    let entries = jit_env_read();
+    let mut names = Vec::with_capacity(entries.len());
+    for (name, value) in entries.iter() {
         let Some(decoded) = name.to_str() else {
-            return result_err_msg("environment is not Unicode");
+            return result_err_msg(
+                "environment contains a name or value that is not valid Unicode",
+            );
         };
         if value.to_str().is_none() {
-            return result_err_msg("environment is not Unicode");
+            return result_err_msg(
+                "environment contains a name or value that is not valid Unicode",
+            );
         }
-        names.push(decoded.to_string());
+        names.push((name.clone(), decoded.to_string()));
     }
-    names.sort();
+    names.sort_by(|(left, _), (right, _)| {
+        let folded = jit_env_key_cmp(left.as_os_str(), right.as_os_str());
+        if folded != std::cmp::Ordering::Equal {
+            return folded;
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            return left.encode_wide().cmp(right.encode_wide());
+        }
+        #[cfg(not(windows))]
+        std::cmp::Ordering::Equal
+    });
     let list = Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();
-        for name in names {
+        for (_, name) in names {
             let sid = rt.heap.alloc_string(name);
             let _ = rt.heap.list_push_int(list, sid);
         }

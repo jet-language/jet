@@ -11,6 +11,8 @@
 //! nothing reported it.
 
 use std::fs;
+use std::path::Path;
+use std::process::{Command, Output};
 
 mod common;
 
@@ -97,16 +99,51 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// The argument-taking `ProcessSpec` builders run resident and the argument
-/// reaches the child.
-///
-/// The child prints its own working directory, so the assertion fails if `cwd`
-/// is dropped the way the old host shim dropped it. It also prints one name set
-/// by `env` and one name that `env` set and `env_remove` then took away, so a
-/// no-op `env_remove` prints `dropped` instead of an empty value.
-///
-/// The expected text is the recorded `jet run --release` stdout for the same
-/// program, so a divergence here is a lens gap.
+fn jet_string(value: &Path) -> String {
+    value
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+}
+
+fn run_jet(file: &Path, release: bool) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
+    command.arg("run");
+    if release {
+        command.arg("--release");
+    }
+    command
+        .arg(file)
+        .env("NO_COLOR", "1")
+        .env("JET_SPEC_REMOVE", "host-value")
+        .output()
+        .expect("run ProcessSpec lens fixture")
+}
+
+/// Portable child for the ProcessSpec fixture. The fixture invokes this test
+/// binary by absolute path, so it needs no shell or platform utility.
+#[test]
+fn process_probe_helper() {
+    if std::env::var("JET_PROCESS_PROBE").as_deref() != Ok("1") {
+        return;
+    }
+    let cwd = std::env::current_dir().unwrap();
+    let logical = std::env::var("JET_LOGICAL_ENV").unwrap();
+    let spec_set = std::env::var("JET_SPEC_SET").unwrap();
+    let removed = std::env::var_os("JET_SPEC_REMOVE").is_none();
+    fs::write(
+        "process-probe.txt",
+        format!(
+            "cwd={}|logical={logical}|set={spec_set}|removed={removed}",
+            cwd.display()
+        ),
+    )
+    .unwrap();
+}
+
+/// Argument-taking builders stay resident and match the AOT lens byte for
+/// byte. The child also proves that `core.env` mutations and ProcessSpec
+/// overrides share one logical environment.
 #[test]
 fn arg_process_spec_builders_reach_the_child() {
     if skip_if_cranelift_host_unsupported() {
@@ -114,49 +151,93 @@ fn arg_process_spec_builders_reach_the_child() {
     }
     let dir = common::unique_tmp("jit_process_arg_builders");
     fs::create_dir_all(&dir).unwrap();
-    // `pwd` reports the physical path, so compare against the resolved one.
     let child_dir = fs::canonicalize(&dir).unwrap();
-    let child_dir = child_dir.to_str().unwrap().to_string();
+    let child_probe = child_dir.join("process-probe.txt");
+    let bad_value_path = child_dir.join("bad-env-value.txt");
+    fs::write(&bad_value_path, b"bad\0value").unwrap();
+    let test_binary = std::env::current_exe().unwrap();
     let file = dir.join("builders.jet");
     fs::write(
         &file,
         format!(
-            r#"use core.process as process
+            r#"use core.env as env
+use core.files as files
+use core.process as process
 
 fn run() {{
-    here :: process.cmd(["pwd"]).cwd("{child_dir}").run() ?? panic("cwd failed")
-    print(here.output.trim())
-    envs :: process.cmd(["sh", "-c", "echo [$JET_PROBE_KEEP] [$JET_PROBE_DROP]"])
-        .env("JET_PROBE_KEEP", "kept")
-        .env("JET_PROBE_DROP", "dropped")
-        .env_remove("JET_PROBE_DROP")
-        .run() ?? panic("env failed")
-    print(envs.output.trim())
+    env.set("JET_PROCESS_PROBE", "1")
+    env.set("JET_LOGICAL_ENV", "logical-value")
+    print((env.get("JET_LOGICAL_ENV") ?? "missing") == "logical-value")
+    names :: env.vars() ?? panic("env vars failed")
+    print(names.contains("JET_LOGICAL_ENV"))
+    env.set("JET_LOGICAL_GONE", "gone")
+    print(env.unset("JET_LOGICAL_GONE") ?? false)
+    print((env.get("JET_LOGICAL_GONE") ?? "missing") == "missing")
+    child :: process.cmd(["{test_binary}", "--exact", "process_probe_helper", "--nocapture"])
+        .cwd("{child_dir}")
+        .env("JET_SPEC_SET", "spec-value")
+        .env_remove("JET_SPEC_REMOVE")
+        .run() ?? panic("child failed")
+    print(child.success)
+    print(files.read("{child_probe}") ?? panic("probe read failed"))
+    if process.cmd(["{test_binary}"]).env("BAD=NAME", "value").run() == {{
+        .Ok(v) -> {{ print("process name accepted") }}
+        .Err(e) -> {{ print("process name rejected") }}
+        else -> {{}}
+    }}
+    bad_value :: files.read("{bad_value_path}") ?? panic("bad value read failed")
+    if process.cmd(["{test_binary}"]).env("JET_BAD_VALUE", bad_value).run() == {{
+        .Ok(v) -> {{ print("process value accepted") }}
+        .Err(e) -> {{ print("process value rejected") }}
+        else -> {{}}
+    }}
 }}
-"#
+"#,
+            test_binary = jet_string(&test_binary),
+            child_dir = jet_string(&child_dir),
+            child_probe = jet_string(&child_probe),
+            bad_value_path = jet_string(&bad_value_path),
         ),
     )
     .unwrap();
 
-    jet_jit::reset_jit_trace_for_test();
-    let outcome = dev_iteration(file.to_str().unwrap(), false, false);
-    let stdout = match outcome {
-        RunOutcome::Ran { stdout, .. } => stdout,
-        RunOutcome::Problems(diags) => panic!(
-            "the argument-taking ProcessSpec builders must run under default \
-             `jet run`: {:?}",
-            diags.iter().map(|d| d.code.clone()).collect::<Vec<_>>()
-        ),
-    };
-    assert_eq!(stdout, format!("{child_dir}\n[kept] []\n"));
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "the builders must lower to host calls, not deopt"
+    // Default `jet run` cannot deopt this program: tier 0 rejects
+    // `process.cmd` with E0956. Removing any cwd/env/env_remove residency or
+    // dispatch entry therefore makes this command fail.
+    let default = run_jet(&file, false);
+    let release = run_jet(&file, true);
+    assert_eq!(
+        default.status.code(),
+        release.status.code(),
+        "default stdout:\n{}\ndefault stderr:\n{}\nrelease stdout:\n{}\nrelease stderr:\n{}",
+        String::from_utf8_lossy(&default.stdout),
+        String::from_utf8_lossy(&default.stderr),
+        String::from_utf8_lossy(&release.stdout),
+        String::from_utf8_lossy(&release.stderr),
+    );
+    assert_eq!(default.stdout, release.stdout);
+    let release_stderr = String::from_utf8(release.stderr.clone()).unwrap();
+    let (_, release_program_stderr) = release_stderr
+        .split_once('\n')
+        .filter(|(line, _)| line.starts_with("effects: "))
+        .expect("release lens must report its compile-time effect summary");
+    assert_eq!(
+        String::from_utf8_lossy(&default.stderr),
+        release_program_stderr
     );
     assert!(
-        !jet_jit::fallback_invoked_for_test(),
-        "a missing host entry deopts to tier 0, which then raises E0956"
+        default.status.success(),
+        "default lens failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&default.stdout),
+        String::from_utf8_lossy(&default.stderr)
     );
+    let stdout = String::from_utf8_lossy(&default.stdout);
+    assert!(
+        stdout.starts_with("true\ntrue\ntrue\ntrue\ntrue\ncwd="),
+        "{stdout}"
+    );
+    assert!(stdout.contains("|logical=logical-value|set=spec-value|removed=true\n"));
+    assert!(stdout.ends_with("process name rejected\nprocess value rejected\n"));
 
     let _ = fs::remove_dir_all(&dir);
 }
