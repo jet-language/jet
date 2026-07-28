@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1265,
-    "rev": 18309,
+    "rev": 18315,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59123,13 +59123,56 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "building",
       "priority": "P1",
       "plan": "Determine whether ModuleCall can be lowered for the JIT the way #1253 and #1255 handled the ProcessSpec builders, following the two-table pattern in crates/jet-jit/src/jit/safety.rs and lower_ctx.rs. If it can, fix it here and prove both lenses give byte-identical output. If it genuinely needs the tier-0 law from #1254, say so with evidence and block this card on #1254 rather than half-building it. Do not grow tests/jit_gaps.txt; it is shrink-only. blockedBy: none.",
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [],
+      "assignee": "e3-1258-modulecall",
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "e3-1258-modulecall",
+          "text": "Claimed the concrete Qualified ModuleCall JIT gap. Start with the existing InlineMangled safety/lowering pattern and one polyglot golden; block on #1254 only if qualified targets are absent from the resident function set."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Qualified module calls are resident-safe only when the resolved target and every argument are already JIT-safe.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T12:35:02.699Z"
+        },
+        {
+          "n": 2,
+          "text": "The affected polyglot binder goldens succeed under default jet run and match their checked AOT/expected output byte-for-byte.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T12:35:02.935Z"
+        },
+        {
+          "n": 3,
+          "text": "The fix adds no fallback gap; tests/jit_gaps.txt does not grow, and focused regression coverage proves the qualified-call path.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T12:35:03.162Z"
+        },
+        {
+          "n": 4,
+          "text": "A fresh reviewer checks both JIT tables, target-name resolution, parity evidence, and unrelated scope.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-07-28T12:35:03.406Z"
+        }
+      ],
       "refs": [
         "crates/jet-jit/src/jit/lower_ctx.rs",
         "crates/jet-jit/src/jit/safety.rs",
@@ -59137,8 +59180,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T10:09:11.328Z",
-      "updated": "2026-07-28T10:09:11.328Z",
-      "updatedBy": "burndown-orch"
+      "updated": "2026-07-28T12:35:03.406Z",
+      "updatedBy": "e3-1258-modulecall",
+      "claimedAt": "2026-07-28T12:35:02.465Z"
     },
     {
       "id": "c0q4t3oj",
@@ -75367,6 +75411,48 @@
   ],
   "events": [
     {
+      "at": "2026-07-28T12:35:03.406Z",
+      "by": "e3-1258-modulecall",
+      "action": "card.criteria-add",
+      "ref": "c02cun0p",
+      "note": "#4 A fresh reviewer checks both JIT tables, target-name resolut"
+    },
+    {
+      "at": "2026-07-28T12:35:03.162Z",
+      "by": "e3-1258-modulecall",
+      "action": "card.criteria-add",
+      "ref": "c02cun0p",
+      "note": "#3 The fix adds no fallback gap; tests/jit_gaps.txt does not gr"
+    },
+    {
+      "at": "2026-07-28T12:35:02.935Z",
+      "by": "e3-1258-modulecall",
+      "action": "card.criteria-add",
+      "ref": "c02cun0p",
+      "note": "#2 The affected polyglot binder goldens succeed under default j"
+    },
+    {
+      "at": "2026-07-28T12:35:02.699Z",
+      "by": "e3-1258-modulecall",
+      "action": "card.criteria-add",
+      "ref": "c02cun0p",
+      "note": "#1 Qualified module calls are resident-safe only when the resol"
+    },
+    {
+      "at": "2026-07-28T12:35:02.465Z",
+      "by": "e3-1258-modulecall",
+      "action": "card.update",
+      "ref": "c02cun0p",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T12:35:02.201Z",
+      "by": "e3-1258-modulecall",
+      "action": "card.claim",
+      "ref": "c02cun0p",
+      "note": ""
+    },
+    {
       "at": "2026-07-28T12:34:22.878Z",
       "by": "burndown-root",
       "action": "card.update",
@@ -78823,48 +78909,6 @@
       "action": "card.update",
       "ref": "c0fm6twq",
       "note": "title,body,plan,phase,priority,track,epoch,assignee"
-    },
-    {
-      "at": "2026-07-27T22:16:29.241Z",
-      "by": "e3-1243-grok",
-      "action": "card.add",
-      "ref": "c0fm6twq",
-      "note": "test"
-    },
-    {
-      "at": "2026-07-27T22:16:06.826Z",
-      "by": "e3-1230-orch",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T22:16:01.630Z",
-      "by": "e3-1230-orch",
-      "action": "card.update",
-      "ref": "c08rt6iw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-27T22:15:00.007Z",
-      "by": "e3-1191-grok",
-      "action": "card.update",
-      "ref": "c0d8o43a",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T22:13:33.146Z",
-      "by": "e3-1191-grok",
-      "action": "card.claim",
-      "ref": "c0d8o43a",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T22:01:00.240Z",
-      "by": "e3-1191-grok",
-      "action": "card.update",
-      "ref": "c0d8o43a",
-      "note": "phase"
     }
   ],
   "nextNum": 368,
