@@ -146,6 +146,15 @@ expr     = precedence climbing over:
   `Bool`; `&& || !` operate on `Bool` (E0110).
 - `&&` and `||` combine `Bool` expressions only (D-S25-RETIRE1). Value
   alternatives in arm heads use single `|`.
+
+A control construct is an expression wherever it produces a value; its runtime
+artifacts are types; the construct itself never is. Lambdas already name
+deferred control, and value-producing cases are already expressions. Typed
+artifacts hold reusable values, while constructs stay zero-cost keywords and
+keep code readable from top to bottom. See
+`docs/audits/type-unification-audit-2026-07-28.md`, heading
+`### F11 — Spec law: constructs are never types; their artifacts always are`.
+
 - `if` is Jet's one branching form. Its preferred multi-branch surface is an
   ordered arm table: `if subject == { head -> body }` when naming a subject
   improves clarity, or `if { head -> body }` without one. A head may be a value
