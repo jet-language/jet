@@ -23,7 +23,6 @@ module cache<K, capacity: Int> {
 
     pub fn slot(k: K) => Slot = Slot.Value(k)
     pub fn key_of(k: K) => String {
-        value :: K.{ k }
         return "key"
     }
 
@@ -42,7 +41,9 @@ enum Mode {
 }
 
 module tier_zero<flag: Bool, count: Int, letter: Char, label: String, mode: Mode> {
-    #Meta(category: label)
+    // A marker argument is fixed metadata; module value parameters reach the
+    // body, not the marker.
+    #Meta(category: "tier zero")
     pub fn show() {
         print(flag)
         print(count)
@@ -79,8 +80,7 @@ module fixed_buffer<T, capacity: Int> {
     }
 
     pub fn echo(values: [T#capacity]) => [T#capacity] {
-        result :: [T#capacity].{ ~values }
-        return result
+        return ~values
     }
 }
 
@@ -130,7 +130,7 @@ fn run() {
     values.show()
     print(kinds.count())
     input :: [Int#3].{1, 2, 3}
-    fixed :: [Int#3].{three_ints.echo(input)}
+    fixed :: three_ints.echo(input)
     buffer :: M5Three4IntsBuffer.{items: fixed}
     print(buffer.items[2])
     wrapped :: M3Int4LawsWrapped.{value: 91}
