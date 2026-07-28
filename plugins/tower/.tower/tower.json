@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1262,
-    "rev": 18271,
+    "nextNum": 1263,
+    "rev": 18276,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59317,9 +59317,21 @@
       "phase": "building",
       "priority": "P1",
       "plan": "Keep the ratified JSON spelling. Add the narrowest crate-level Clippy exception beside the existing non_snake_case exception, with a reason tied to S66/D-ACRO-CASE1. Run scripts/agent/verify-nix-eval-stopline.sh, then resume the full verification boundary. Do not weaken any authority lint. blockedBy: none.",
-      "blockedBy": [],
-      "assignee": "e3-1261-clippy",
+      "blockedBy": [
+        "#1262"
+      ],
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "burndown-root",
+          "text": "Scoped patch is integrated at d0af93cd4. Waiting only for #1262 to restore the truthful stop-line assertion, then independent review can rerun the complete gate."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-1261-clippy",
+          "text": "[handoff] Commit d0af93cd4 fixes the scoped Clippy warning and cargo clippy for jet-nix-eval passes. Complete stop-line proof is blocked by newly carded #1262: the harness expects TCPStream instead of Rust TcpStream."
+        },
         {
           "at": "2026-07-28",
           "by": "e3-1261-clippy",
@@ -59335,9 +59347,41 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T11:23:49.763Z",
-      "updated": "2026-07-28T11:23:55.681Z",
-      "updatedBy": "e3-1261-clippy",
-      "claimedAt": "2026-07-28T11:23:55.681Z"
+      "updated": "2026-07-28T11:26:35.753Z",
+      "updatedBy": "burndown-root"
+    },
+    {
+      "id": "c09s84ll",
+      "num": 1262,
+      "title": "Nix evaluator stop-line expects nonexistent TCPStream type",
+      "body": "After #1261 clears the crate Clippy warning, scripts/agent/verify-nix-eval-stopline.sh still fails. The hostile fixture is correctly rejected as std::net::TcpStream, but commit 4940466c8 mechanically changed the assertion to std::net::TCPStream. D-ACRO-CASE1 governs Jet names; it does not rename Rust standard-library types. The false assertion blocks the required authority stop-line and full verification.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "building",
+      "priority": "P1",
+      "plan": "Restore the exact Rust diagnostic spelling std::net::TcpStream in the stop-line assertion. Do not change the hostile fixture or weaken any disallowed type. Prove the complete verify-nix-eval-stopline.sh passes, including process, TCP, address-resolution, Unix-socket, and build-script authority denials. blockedBy: none.",
+      "blockedBy": [],
+      "assignee": "e3-1262-tcpstream",
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "e3-1262-tcpstream",
+          "text": "Fix started on the exact stale Rust diagnostic spelling. No authority rule, fixture, or Clippy denial changes."
+        }
+      ],
+      "criteria": [],
+      "refs": [
+        "scripts/agent/verify-nix-eval-stopline.sh",
+        "tests/fixtures/nix-compat/authority-escape/src/lib.rs",
+        "docs/spec/syntax-decisions.md"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-28T11:26:26.147Z",
+      "updated": "2026-07-28T11:26:41.722Z",
+      "updatedBy": "e3-1262-tcpstream",
+      "claimedAt": "2026-07-28T11:26:41.721Z"
     }
   ],
   "decisions": [
@@ -75154,6 +75198,41 @@
   ],
   "events": [
     {
+      "at": "2026-07-28T11:26:41.722Z",
+      "by": "e3-1262-tcpstream",
+      "action": "card.update",
+      "ref": "c09s84ll",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T11:26:41.452Z",
+      "by": "e3-1262-tcpstream",
+      "action": "card.claim",
+      "ref": "c09s84ll",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T11:26:35.753Z",
+      "by": "burndown-root",
+      "action": "card.update",
+      "ref": "c0fh8zyz",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-28T11:26:35.485Z",
+      "by": "e3-1261-clippy",
+      "action": "card.release",
+      "ref": "c0fh8zyz",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-28T11:26:26.147Z",
+      "by": "burndown-root",
+      "action": "card.add",
+      "ref": "c09s84ll",
+      "note": "Nix evaluator stop-line expects nonexistent TCPStream type"
+    },
+    {
       "at": "2026-07-28T11:23:55.681Z",
       "by": "e3-1261-clippy",
       "action": "card.update",
@@ -78616,41 +78695,6 @@
       "by": "e3-1243-grok",
       "action": "card.claim",
       "ref": "c01nsow8",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T21:43:20.009Z",
-      "by": "e3-1230-orch",
-      "action": "card.update",
-      "ref": "c0yavfup",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T21:43:19.791Z",
-      "by": "e3-1243-grok",
-      "action": "card.update",
-      "ref": "c01nsow8",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T21:43:19.562Z",
-      "by": "e3-1243-grok",
-      "action": "card.claim",
-      "ref": "c01nsow8",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T21:43:16.454Z",
-      "by": "e3-1243-grok",
-      "action": "card.claim",
-      "ref": "c0yavfup",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T21:42:49.683Z",
-      "by": "e3-1243-grok",
-      "action": "card.claim",
-      "ref": "c0yavfup",
       "note": ""
     }
   ],
