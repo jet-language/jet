@@ -3570,6 +3570,42 @@ fn check_fixed_dynamic_size_reports_e0103_without_internal_failure() {
     );
 
     fs::write(
+        dir.join("compare_chain.jet"),
+        "fn helper() => Int { return 1 }\nfn run() {\n comptime if 0 < helper() < 2 {\n  print(\"reachable\")\n }\n}\n",
+    )
+    .unwrap();
+    let compare_chain = Command::new(jet())
+        .args(["check", "compare_chain.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        compare_chain.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&compare_chain.stderr)
+    );
+
+    fs::write(
+        dir.join("higher_order.jet"),
+        "use core.mem\nfn apply(f: fn() => Int) => Int { return f() }\nfn fixed_size() => Int { return 32 }\nfn bad(size: Int) {\n fixed :: mem.Fixed.new(size: size)\n close(^fixed)\n}\nfn run() {\n fixed :: mem.Fixed.new(size: apply(fixed_size))\n close(^fixed)\n}\n",
+    )
+    .unwrap();
+    let higher_order = Command::new(jet())
+        .args(["check", "higher_order.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(higher_order.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&higher_order.stderr);
+    assert!(stderr.contains("Error [E0103]"), "{stderr}");
+    for leaked in ["panicked at", "entered unreachable code", "internal error"] {
+        assert!(!stderr.contains(leaked), "`{leaked}` leaked:\n{stderr}");
+    }
+
+    fs::write(
         dir.join("helper.jet"),
         "use core.mem\nfn fixed_size() => Int { return 32 }\nfn run() {\n fixed :: mem.Fixed.new(size: fixed_size())\n close(^fixed)\n}\n",
     )
