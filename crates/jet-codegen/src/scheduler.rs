@@ -1575,7 +1575,7 @@ mod interrupt_boundary_tests {
             JetSchedulerResult::Deadline(rendered) => {
                 assert_eq!(rendered, "deadline detail");
             }
-            _ => panic!("spawned deadline must stay distinct from a task panic"),
+            _ => unreachable!("spawned deadline must stay distinct from a task panic"),
         }
     }
 
