@@ -1987,9 +1987,11 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
 }
 
 pub(crate) fn emit_const(c: &crate::AST::ConstDef, out: &mut String) {
-    // S57 (M9.5): comptime values are inlined at use sites (registered into
+    // S57 (M9.5): plain comptime values are inlined at use sites (registered into
     // `cx.consts`), so there is no top-level item to emit.
-    if c.is_comptime
+    // D-CONSTMARK1: `#Static comptime` still emits a Rust static when ForceStatic.
+    let force_static = c.attrs.contains(&ConstAttr::ForceStatic);
+    if (c.is_comptime && !force_static)
         || matches!(&c.ty, Some(Type::Named(name)) if name == crate::Syntax::TYPE_OUTPUT)
     {
         return;

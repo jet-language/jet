@@ -67,7 +67,7 @@
   "return"
 ] @keyword.control
 
-; keyword.declaration: Bench Context Impure Reactive Sanitizer State Tainted Test Todo Transact Transition Unsafe add alias as change client comptime const derive distinct enum extern fn impl migration module priv protocol pub remove rename rust server state struct tag taskgroup trait use validate via
+; keyword.declaration: Bench Context Impure Reactive Sanitizer State Tainted Test Todo Transact Transition Unsafe add alias as change client comptime derive distinct enum extern fn impl migration module priv protocol pub remove rename rust server state struct tag taskgroup trait use validate via
 [
   "Bench"
   "Test"
@@ -75,7 +75,6 @@
   "as"
   "change"
   "comptime"
-  "const"
   "derive"
   "distinct"
   "enum"

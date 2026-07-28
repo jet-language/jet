@@ -1,15 +1,8 @@
 ---
 title: Owner scratch
 ---
-Conformance
+## Status ping (agent)
 
-- Card #560 must enforce the atomic language-shape laws across compiler,
-formatter, tools, examples, and docs. Its scope includes D-SHAPE-PIPE1=C.
-- Card #560 must make each inferred fact inspectable and pinnable without a
-second source form.
-Package graph
+**JIT closeout complete** (`#1230` / `#729` done). Three-way battery green; ledger reconciled at covered=370 / gaps=0 (`ed4a493e8`). Now continuing remaining epoch 3 burndown.
 
-- Card #532 must close only after #610, #653, #654, #587, and #609 implement
-and independently verify the ratified one-Package-graph law.
-- Card #560 must then verify that the compiler and every tool expose the same
-graph facts.
+Owner-visible question `q0dukq6f` on `#1230` carries the same ping (phone via live SSE).

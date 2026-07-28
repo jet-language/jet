@@ -2366,16 +2366,24 @@ fn run() {
 
 #[test]
 fn fmt_preserves_persist() {
-    // D-PERSIST1: `#Persist` on a module-level `const` must survive
-    // byte-for-byte.
-    let src = "\
-#Persist const counter = 0
+    // D-PERSIST1 / D-BIND-BARE1: `#Persist` and the bare bind sigil (`:=` / `::`)
+    // must survive byte-for-byte.
+    let mut_src = "\
+#Persist counter := 0
 
 fn run() {
     print(\"{counter}\")
 }
 ";
-    assert_fmt_stable(src, "persist marker");
+    assert_fmt_stable(mut_src, "persist marker :=");
+    let immut_src = "\
+#Persist counter :: 0
+
+fn run() {
+    print(\"{counter}\")
+}
+";
+    assert_fmt_stable(immut_src, "persist marker ::");
 }
 
 #[test]
@@ -2867,7 +2875,7 @@ fn fmt_preserves_casing_errors_for_sema() {
 fn generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_chains() {
     let src = r#"module ring<T, capacity: Int, label: String> {
 #Meta(category: label)
-const size = capacity
+comptime size = capacity
 pub struct Buffer { slots: [T#capacity] }
 module nested<U> { pub fn keep(value: U) => U { return ~value } }
 module inner = nested<T>

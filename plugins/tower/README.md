@@ -13,8 +13,25 @@ never desync.
 
 ## Install into a project
 
+**As a Cursor plugin** — this directory has `.cursor-plugin/plugin.json` and
+skills under `skills/`. Cursor does not auto-load a vendored plugin from the
+repo, so install it locally (real copy — external symlinks are rejected):
+
+```
+mkdir -p ~/.cursor/plugins/local
+rsync -a --exclude '.tower/' --exclude 'node_modules/' \
+  /path/to/plugins/tower/ ~/.cursor/plugins/local/tower/
+```
+
+Then **Developer: Reload Window**. Skills show up as `/tower`,
+`/tower-ballot`, `/tower-rank`, `/tower-prep`, `/tower-burndown`,
+`/tower-setup`. In the Jet repo, project symlinks under `.cursor/skills/`
+also expose those skills without a local install; always run the CLI from
+the checkout (`node plugins/tower/tower.mjs`) so the board stays in
+`plugins/tower/.tower/`.
+
 **As a Codex plugin** — install `tower` from the repository marketplace; the
-four Tower skills are discovered from `.codex-plugin/plugin.json`.
+Tower skills are discovered from `.codex-plugin/plugin.json`.
 
 **As a Claude Code plugin** — add this directory (or its repo) as a plugin;
 the `tower` skill teaches Claude the board mechanics automatically.

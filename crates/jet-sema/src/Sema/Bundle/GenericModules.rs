@@ -1406,6 +1406,7 @@ fn expand_alias(
             ty: source.ty.as_ref().map(|ty| specialize_module_type(ty, &definition_types, &definition_values)),
             is_persist: source.is_persist,
             persist_span: source.persist_span,
+            mutable: source.mutable,
             resolved_output: source.resolved_output.clone(),
         }));
     }

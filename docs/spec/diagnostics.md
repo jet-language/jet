@@ -226,6 +226,7 @@ renumbered, and no new `W` code may be allocated.
 | E0143 | sema  | `consume` of a `#SingleUse` value outside an `#Unsafe("reason")` region/fn — the audited deliberate-discard hatch (D-LIN1-DROP/D-DROP-WORD1) |
 | E0144 | sema  | `result` used inside a `#Pre` condition — it only exists once the function has returned (D-PREPOST1) |
 | E0145 | parse | `#Persist` on a binding that isn't module-level (D-PERSIST1) |
+| E0146 | parse | retired `const` keyword — write `comptime` (D-CONST-RETIRE1) |
 | E0147 | parse | two `{}` holes in a str-match pattern with no literal text between them (D-PARSESTR1/D-PARSESTR2) |
 | E0148 | sema  | a str-match pattern used in an `if == {}` table with no `else` arm (D-PARSESTR1) |
 | E0149 | sema  | a runtime `String` used where `SQL`/`HTML` is expected (D-TYPEDTEXT1) |
@@ -309,7 +310,7 @@ renumbered, and no new `W` code may be allocated.
 | E0346 | sema  | `#Meta` duplicate field (D-CANVASMETA1) |
 | E0347 | sema  | `#Meta` category is not plain quoted text (D-CANVASMETA1) |
 | E0348 | sema  | `#Meta` category is empty (D-CANVASMETA1) |
-| E0349 | parse | `#Meta` written outside binding/function/const position (D-CANVASMETA1) |
+| E0349 | parse | `#Meta` written outside binding/function position (D-CANVASMETA1) |
 | E0350 | sema  | `Any` type requested, but Jet has no general top type (D-DYNAMIC-TYPE1) |
 | E0351 | sema  | retired `Data` value-tree name; use `DataTree` (D-SERDE13) |
 | E0352 | sema  | invalid `#Meta` maturity value (D-MARK-META1) |
@@ -367,6 +368,7 @@ renumbered, and no new `W` code may be allocated.
 | E0511 | sema  | `Expiring.force` bypasses fallible cache-expiry access — use `get(clock)` (D-TTLVAL1) |
 | L0501 | sema  | slice copy inside a loop (lint)           |
 | L0502 | sema  | float `==`/`!=` comparison is unreliable (D-SMELLLINT1) |
+| L0503 | sema  | prefer compound assignment (`+=`/`-=`/…) over repeating the left side (S17) |
 | L0504 | sema  | money-like name holds `Float` instead of `Decimal` (D-DECIMAL1) |
 | L0505 | sema  | heap growth in a loop after `use core.mem` — consider an arena (c26) |
 | L0506 | sema  | hidden allocation inside `#Context` without an allocator (c26) |
@@ -1272,6 +1274,7 @@ already-freed arena), these track the views themselves.
 | E0360 | No `{symbol}` operator is defined for `{type}`. | User arithmetic dispatches only through the matching fixed operator trait hook; the compiler does not guess a method or fall through to rustc. | Implement the named `Type.Trait` hook, or call a named method instead. |
 | E0361 | `{hook}` calls itself through `{symbol}`. | The symbol inside its own hook dispatches directly back to that hook, so evaluation would recurse forever. | Combine the value's fields directly, or call a different named helper inside the hook. |
 | E0362 | Compound assignment can't target a nested operator field. | Hooked compound assignment must read and write one stable place exactly once; nested field places are not yet represented by the operator assignment spine. | Bind the inner value, update it, then assign the whole inner value back. |
+| L0503 | prefer `{place} {op=} …` instead of repeating the left side | compound assignment updates a place in one step without restating it | write `{place} {op=} …` |
 | E0363 | `{Type}` can't be a union member. | Anonymous unions (D-UNIONTYPE1=A) hold concrete closed member types only — not type parameters, trait objects, or function types. | Use a named enum when a member needs an open shape. |
 | E0364 | This range includes `{xs}.len()`, one past the last index. | An inclusive range that ends at a list's length runs one step too far when the body indexes that list. | Write `loop i, item; xs` — or `loop i; xs.indexes()` — or `0..<xs.len()`. |
 | E0365 | Arm `{Type}` is unreachable — that case is already handled. | Every earlier arm already covers this pattern. | Remove this arm or merge it with the one above. |

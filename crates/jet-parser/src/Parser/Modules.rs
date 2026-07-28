@@ -253,50 +253,9 @@ impl<'a> Parser<'a> {
                     ));
                 };
                 let list_span = budgets.span();
-                let Expr::ListLit(entries, _) = budgets else {
-                    return Err(Diagnostic::error(
-                        "E2903",
-                        format!("performance budget role `{path}` is not valid"),
-                        "`budgets` must be a list of typed `Budget` values".to_string(),
-                        "write `budgets: [Budget.{ ... }]`".to_string(),
-                        Some(list_span),
-                    ));
-                };
-                let mut typed_budgets = Vec::with_capacity(entries.len());
-                for entry in entries {
-                    let entry_span = entry.span();
-                    let Expr::StructLit { type_name, fields, span, .. } = entry else {
-                        return Err(Diagnostic::error(
-                            "E2903",
-                            "performance budget entry is not valid".to_string(),
-                            "every `budgets` item must be one typed `Budget` literal".to_string(),
-                            "write `Budget.{ name: ..., metric: ..., limit: ... }`".to_string(),
-                            Some(entry_span),
-                        ));
-                    };
-                    if type_name != Syntax::TYPE_BUDGET {
-                        return Err(Diagnostic::error(
-                            "E2903",
-                            "performance budget entry is not valid".to_string(),
-                            format!("this list item has type `{type_name}`, not `Budget`"),
-                            "replace it with `Budget.{ name: ..., metric: ..., limit: ... }`".to_string(),
-                            Some(span),
-                        ));
-                    }
-                    let fields = fields
-                        .into_iter()
-                        .map(|(name, name_span, value)| {
-                            let value_span = value.span();
-                            crate::AST::BudgetField {
-                                name,
-                                name_span,
-                                value,
-                                span: Span::new(name_span.start, value_span.end),
-                            }
-                        })
-                        .collect();
-                    typed_budgets.push(crate::AST::BudgetDecl { fields, span });
-                }
+                // D-PERFBUDGET-SURFACE1: `budgets: [Budget.{ … }]`.
+                // D-DOTCTOR3: also `budgets: [Budget].{ .{ … }, … }` (typed-list head).
+                let typed_budgets = Self::perf_budget_decls(budgets, &path)?;
                 crate::AST::ContribValue::Perf(crate::AST::PerfLit {
                     budgets: typed_budgets,
                     budgets_span,
@@ -323,6 +282,144 @@ impl<'a> Parser<'a> {
             contributions: vec![contribution],
             span: Span::new(start.start, end),
         })
+    }
+
+    /// Collect `Budget` decls from a `budgets:` value.
+    /// Accepts plain `[Budget.{ … }, …]` and D-DOTCTOR3 `[Budget].{ .{ … }, … }`.
+    fn perf_budget_decls(
+        budgets: Expr,
+        path: &str,
+    ) -> Result<Vec<crate::AST::BudgetDecl>, Diagnostic> {
+        let (entries, allow_inferred) = match budgets {
+            Expr::ListLit(entries, _) => (entries, false),
+            Expr::TypedLit {
+                head: Some(Type::List(inner)),
+                body,
+                span,
+            } => {
+                let ok = matches!(inner.as_ref(), Type::Named(n) if n == Syntax::TYPE_BUDGET);
+                if !ok {
+                    return Err(Diagnostic::error(
+                        "E2903",
+                        format!("performance budget role `{path}` is not valid"),
+                        format!(
+                            "`budgets` must be a list of `{0}` values, not `{1}`",
+                            Syntax::TYPE_BUDGET,
+                            Type::List(inner).name()
+                        ),
+                        format!("write `budgets: [{0}].{{ … }}` or `budgets: [{0}.{{ … }}]`", Syntax::TYPE_BUDGET),
+                        Some(span),
+                    ));
+                }
+                match body {
+                    TypedLitBody::Elements(entries) => (entries, true),
+                    TypedLitBody::Empty => (Vec::new(), true),
+                    _ => {
+                        return Err(Diagnostic::error(
+                            "E2903",
+                            format!("performance budget role `{path}` is not valid"),
+                            "`budgets` must be a list of typed `Budget` values".to_string(),
+                            format!(
+                                "write `budgets: [{0}].{{ .{{ … }}, … }}` or `budgets: [{0}.{{ … }}]`",
+                                Syntax::TYPE_BUDGET
+                            ),
+                            Some(span),
+                        ));
+                    }
+                }
+            }
+            other => {
+                return Err(Diagnostic::error(
+                    "E2903",
+                    format!("performance budget role `{path}` is not valid"),
+                    "`budgets` must be a list of typed `Budget` values".to_string(),
+                    format!(
+                        "write `budgets: [{0}].{{ … }}` or `budgets: [{0}.{{ … }}]`",
+                        Syntax::TYPE_BUDGET
+                    ),
+                    Some(other.span()),
+                ));
+            }
+        };
+        let mut typed_budgets = Vec::with_capacity(entries.len());
+        for entry in entries {
+            typed_budgets.push(Self::perf_budget_entry(entry, allow_inferred)?);
+        }
+        Ok(typed_budgets)
+    }
+
+    fn perf_budget_entry(
+        entry: Expr,
+        allow_inferred: bool,
+    ) -> Result<crate::AST::BudgetDecl, Diagnostic> {
+        let entry_span = entry.span();
+        match entry {
+            Expr::StructLit {
+                type_name,
+                fields,
+                span,
+                inferred,
+                ..
+            } => {
+                let named_budget = type_name == Syntax::TYPE_BUDGET;
+                let inferred_budget = allow_inferred && inferred && type_name.is_empty();
+                if !named_budget && !inferred_budget {
+                    let why = if type_name.is_empty() {
+                        "every `budgets` item must be one typed `Budget` literal".to_string()
+                    } else {
+                        format!("this list item has type `{type_name}`, not `Budget`")
+                    };
+                    return Err(Diagnostic::error(
+                        "E2903",
+                        "performance budget entry is not valid".to_string(),
+                        why,
+                        "write `Budget.{ name: ..., metric: ..., limit: ... }`".to_string(),
+                        Some(span),
+                    ));
+                }
+                Ok(crate::AST::BudgetDecl {
+                    fields: fields
+                        .into_iter()
+                        .map(|(name, name_span, value)| {
+                            let value_span = value.span();
+                            crate::AST::BudgetField {
+                                name,
+                                name_span,
+                                value,
+                                span: Span::new(name_span.start, value_span.end),
+                            }
+                        })
+                        .collect(),
+                    span,
+                })
+            }
+            Expr::TypedLit {
+                head: Some(Type::Named(name)),
+                body: TypedLitBody::Fields(fields),
+                span,
+            } if name == Syntax::TYPE_BUDGET => Ok(crate::AST::BudgetDecl {
+                fields: fields
+                    .into_iter()
+                    .map(|(name, name_span, value)| {
+                        let value_span = value.span();
+                        crate::AST::BudgetField {
+                            name,
+                            name_span,
+                            value,
+                            span: Span::new(name_span.start, value_span.end),
+                        }
+                    })
+                    .collect(),
+                span,
+            }),
+            _ => Err(Diagnostic::error(
+                "E2903",
+                "performance budget entry is not valid".to_string(),
+                "every `budgets` item must be one typed `Budget` literal".to_string(),
+                "write `Budget.{ name: ..., metric: ..., limit: ... }`".to_string(),
+                Some(entry_span),
+            )),
+        }
     }
 
     /// D-MOD1/2: decide whether `module name` at position `offset` (1 = current pos
@@ -658,9 +755,13 @@ impl<'a> Parser<'a> {
             }
             TokKind::Hash if self.at_meta_attr() => {
                 if matches!(self.meta_attr_next_kind(), Some(TokKind::KwConst)) {
-                    self.const_def().map(Item::Const)
-                } else if matches!(self.meta_attr_next_kind(), Some(TokKind::KwComptime)) {
+                    self.retired_const_def().map(Item::Const)
+                } else if matches!(self.meta_attr_next_kind(), Some(TokKind::KwComptime))
+                    || self.at_comptime_marker_after_meta()
+                {
                     self.comptime_def().map(Item::Const)
+                } else if self.at_persist_after_meta() {
+                    self.persist_def().map(Item::Const)
                 } else {
                     self.func().map(Item::Func)
                 }
@@ -749,17 +850,13 @@ impl<'a> Parser<'a> {
                 }
             },
             TokKind::KwImpl => self.impl_or_error_conv(),
-            TokKind::KwConst => self.const_def().map(Item::Const),
+            TokKind::KwConst => self.retired_const_def().map(Item::Const),
             TokKind::KwComptime => self.comptime_def().map(Item::Const),
             TokKind::Hash if self.at_test_def() => self.test_def().map(Item::Test),
             // D-BENCH1/D-BENCH-MARKER1=A: `#Bench("name") { … }`.
             TokKind::Hash if self.at_bench_def() => self.bench_def().map(Item::Bench),
-            TokKind::Hash
-                if self.at_persist_const()
-                    || matches!(&self.peek2().kind, TokKind::Ident(n) if n == "static" || n == "inline") =>
-            {
-                self.const_def().map(Item::Const)
-            }
+            TokKind::Hash if self.at_persist_binding() => self.persist_def().map(Item::Const),
+            TokKind::Hash if self.at_comptime_marker() => self.comptime_def().map(Item::Const),
             TokKind::KwUse => {
                 let span = self.peek().span;
                 self.sync_stmt();

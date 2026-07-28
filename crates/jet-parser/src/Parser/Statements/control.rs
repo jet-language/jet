@@ -254,6 +254,12 @@ impl<'a> Parser<'a> {
     }
 
     pub(in super::super) fn meta_attr_next_kind(&self) -> Option<&TokKind> {
+        self.meta_attr_next_index()
+            .and_then(|i| self.toks.get(i).map(|t| &t.kind))
+    }
+
+    /// Index of the token immediately after a leading `#Meta(...)` (skipping ASI semis).
+    pub(in super::super) fn meta_attr_next_index(&self) -> Option<usize> {
         if !self.at_meta_attr() {
             return None;
         }
@@ -282,7 +288,36 @@ impl<'a> Parser<'a> {
         ) {
             i += 1;
         }
-        self.toks.get(i).map(|t| &t.kind)
+        if i < self.toks.len() {
+            Some(i)
+        } else {
+            None
+        }
+    }
+
+    /// After `#Meta(...)`, is the next item `#Persist …`?
+    pub(in super::super) fn at_persist_after_meta(&self) -> bool {
+        let Some(i) = self.meta_attr_next_index() else {
+            return false;
+        };
+        matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Hash))
+            && matches!(
+                self.toks.get(i + 1).map(|t| &t.kind),
+                Some(TokKind::Ident(n)) if n == Syntax::CONTRACT_PERSIST
+            )
+    }
+
+    /// After `#Meta(...)`, is the next item `#Static`/`#Inline` (comptime markers)?
+    pub(in super::super) fn at_comptime_marker_after_meta(&self) -> bool {
+        let Some(i) = self.meta_attr_next_index() else {
+            return false;
+        };
+        matches!(self.toks.get(i).map(|t| &t.kind), Some(TokKind::Hash))
+            && matches!(
+                self.toks.get(i + 1).map(|t| &t.kind),
+                Some(TokKind::Ident(n))
+                    if matches!(n.as_str(), "Static" | "Inline" | "static" | "inline")
+            )
     }
 
     /// D-UNINIT-SENTINEL1/2: `#Uninit name: Type` is retired — teaching error
@@ -421,7 +456,7 @@ impl<'a> Parser<'a> {
     pub(in super::super) fn meta_attr_wrong_place_diag(&self, span: Span, target: &str) -> Diagnostic {
         Diagnostic::error(
             "E0349",
-            "`#Meta` attaches to a binding, const, or function".to_string(),
+            "`#Meta` attaches to a binding or function".to_string(),
             "`#Meta` is a tooling fact about a named source item; expressions do not carry it"
                 .to_string(),
             format!("move `#Meta(...)` before a {target}, or remove it"),

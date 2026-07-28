@@ -19,6 +19,7 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/cffi_retired_at_extern.jet",
     "tests/ui/cffi_retired_hash_extern.jet",
     "tests/ui/chained_comparison_mixed_direction.jet",
+    "tests/ui/const_retired.jet",
     "tests/ui/context_eq_rejected.jet",
     "tests/ui/context_unknown_field.jet",
     "tests/ui/continue_teaches_next.jet",

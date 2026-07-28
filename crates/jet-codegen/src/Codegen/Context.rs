@@ -2472,7 +2472,8 @@ pub(crate) fn build_cx_items(
                 }
             }
             Item::Const(c) => {
-                if c.is_comptime {
+                let force_static = c.attrs.contains(&crate::AST::ConstAttr::ForceStatic);
+                if c.is_comptime && !force_static {
                     // Inline the evaluated literal at every reference.
                     // `CtValue::serialize()` renders an empty `List([])` as a bare
                     // `vec![]` — fine when the splice site supplies a type (a `let`

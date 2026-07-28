@@ -209,7 +209,7 @@ fn run() {
 #[test]
 fn const_address_taken_emits_static() {
     let src = r#"
-const limit = 10
+#Static comptime limit = 10
 
 fn show(n: Int) {
     print(n)

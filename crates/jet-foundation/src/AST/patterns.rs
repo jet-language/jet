@@ -322,6 +322,9 @@ pub struct ConstDef {
     /// (identity = module path + binding name). Inert in release builds.
     pub is_persist: bool,
     pub persist_span: Option<Span>,
+    /// D-BIND-BARE1 / D-PERSIST1: `true` for `#Persist name := …`, `false` for
+    /// `#Persist name :: …`. Irrelevant for `comptime` / Output consts.
+    pub mutable: bool,
     /// D-SHAPE-OUTPUT-CALLABLE1: sema-owned checked output link. `None` for
     /// ordinary constants and for an Output rejected before resolution.
     pub resolved_output: Option<ResolvedOutput>,

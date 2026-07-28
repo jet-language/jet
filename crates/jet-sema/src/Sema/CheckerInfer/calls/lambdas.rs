@@ -372,7 +372,20 @@ use std::collections::HashSet;
                     if self.is_task_spawn {
                         self.borrow_ctx = true;
                     }
-                    self.infer(e)
+                    // S46 one-line bodies: `() => transfer(...)` is the brace-free
+                    // form of `() => { transfer(...) }`. When no value is expected
+                    // (Void callback, or inferred spawn body), treat the call as a
+                    // statement so void functions do not trip E0116.
+                    let needs_value = match exp_ret.map(|r| r.as_ref()) {
+                        Some(Type::Named(name)) if name == "Void" => false,
+                        None => false,
+                        Some(_) => true,
+                    };
+                    if needs_value {
+                        self.infer(e)
+                    } else {
+                        self.infer_fallible_stmt(e)
+                    }
                 }
                 LambdaBody::Block(stmts) => {
                     self.check_block(stmts, false);

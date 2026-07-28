@@ -146,6 +146,7 @@ fn is_teaching_parse_diag(code: &str) -> bool {
             | "E0070"
             | "E0071"
             | "E0077"
+            | "E0146"
             | "E0154"
             | "E0210"
             | "E0986"

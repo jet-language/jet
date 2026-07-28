@@ -1,0 +1,35 @@
+struct Player {
+    hp: Int
+}
+
+fn damage(p: &Player, amount: Int) {
+    p.hp = p.hp - amount
+}
+
+fn heal(p: &Player, amount: Int) {
+    p.hp = p.hp + amount
+}
+
+fn tally() {
+    n := 0
+    n = n + 1
+    // Already compound — must not warn (including after any hooked rewrite).
+    n += 1
+    // Parenthesized RHS still counts as the long form.
+    n = (n + 1)
+}
+
+fn index_stay_expanded() {
+    xs := [1, 2, 3]
+    // Indexed compound is E0003; expanded form must not get L0503.
+    xs[0] = xs[0] + 1
+}
+
+fn run() {
+    p := Player.{hp: 100}
+    damage(&p, 30)
+    heal(&p, 10)
+    tally()
+    index_stay_expanded()
+    print(p.hp)
+}

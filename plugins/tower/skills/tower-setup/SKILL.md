@@ -10,6 +10,11 @@ its DATA lives at `plugins/tower/.tower/` beside this app. Setup = create that d
 shape the config, start the server.
 
 ```
+# Jet (vendored):
+node plugins/tower/tower.mjs init --name "<Project>"
+node plugins/tower/tower.mjs serve --open
+
+# Plugin install (Claude Code / Cursor):
 node ${CLAUDE_PLUGIN_ROOT}/tower.mjs init --name "<Project>"
 node ${CLAUDE_PLUGIN_ROOT}/tower.mjs serve --open      # board at :7878
 ```

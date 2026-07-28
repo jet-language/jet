@@ -1,8 +1,8 @@
 use core.game as game
 
 module perf.game {
-    budgets: [
-        Budget.{
+    budgets: [Budget].{
+        .{
             name: "frame",
             scope: .Scene("arcade"),
             metric: .FrameTime(.P99),
@@ -10,7 +10,7 @@ module perf.game {
             comparison: .AbsoluteFrom("local/arcade"),
             limit: .AtMost(16ms)
         },
-        Budget.{
+        .{
             name: "memory",
             scope: .Scene("arcade"),
             metric: .MemoryHighWater,
@@ -18,7 +18,7 @@ module perf.game {
             comparison: .AbsoluteFrom("local/arcade"),
             limit: .AtMost(96MiB)
         },
-        Budget.{
+        .{
             name: "assets",
             scope: .Scene("arcade"),
             metric: .SceneAssetBytes,
@@ -26,15 +26,15 @@ module perf.game {
             comparison: .AbsoluteFrom("local/arcade"),
             limit: .AtMost(256KiB)
         },
-        Budget.{
+        .{
             name: "draws",
             scope: .Scene("arcade"),
             metric: .DrawCalls(.P99),
             provider: .SceneProbe("arcade"),
             comparison: .AbsoluteFrom("local/arcade"),
             limit: .AtMost(4)
-        }
-    ]
+        },
+    }
 }
 
 struct Position {

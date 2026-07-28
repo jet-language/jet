@@ -796,9 +796,13 @@ impl<'a> Parser<'a> {
                     TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::ATTR_POLICY) => self.func().map(Item::Func),
                     TokKind::Hash if self.at_meta_attr() => {
                         if matches!(self.meta_attr_next_kind(), Some(TokKind::KwConst)) {
-                            self.const_def().map(Item::Const)
-                        } else if matches!(self.meta_attr_next_kind(), Some(TokKind::KwComptime)) {
+                            self.retired_const_def().map(Item::Const)
+                        } else if matches!(self.meta_attr_next_kind(), Some(TokKind::KwComptime))
+                            || self.at_comptime_marker_after_meta()
+                        {
                             self.comptime_def().map(Item::Const)
+                        } else if self.at_persist_after_meta() {
+                            self.persist_def().map(Item::Const)
                         } else {
                             self.func().map(Item::Func)
                         }
@@ -1198,18 +1202,15 @@ impl<'a> Parser<'a> {
                         self.sync_top();
                         continue;
                     }
-                    TokKind::KwConst => self.const_def().map(Item::Const),
-                    // D-PERSIST1: `#Persist const name = expr;` — module-level
-                    // binding that survives a `jet dev` hot reload.
-                    TokKind::Hash if self.at_persist_const() => self.const_def().map(Item::Const),
-                    TokKind::Hash
-                        if matches!(
-                            &self.peek2().kind,
-                            TokKind::Ident(n)
-                                if matches!(n.as_str(), "Static" | "Inline" | "static" | "inline")
-                        ) =>
-                    {
-                        self.const_def().map(Item::Const)
+                    TokKind::KwConst => self.retired_const_def().map(Item::Const),
+                    // D-PERSIST1: `#Persist name (:: | :=) expr` — module-level
+                    // bare binding that survives a `jet dev` hot reload.
+                    TokKind::Hash if self.at_persist_binding() => {
+                        self.persist_def().map(Item::Const)
+                    }
+                    // D-CONSTMARK1: `#Static` / `#Inline` before `comptime`.
+                    TokKind::Hash if self.at_comptime_marker() => {
+                        self.comptime_def().map(Item::Const)
                     }
                     TokKind::At => {
                         let t = self.bump();
@@ -1373,12 +1374,12 @@ impl<'a> Parser<'a> {
                                 Syntax::KW_FN,
                                 Syntax::KW_TEST,
                                 Syntax::KW_STRUCT,
-                                Syntax::KW_CONST,
+                                Syntax::KW_COMPTIME,
                                 describe(other)
                             ),
                             "at the top level of a file, only definitions can appear".to_string(),
                             format!(
-                                "define a function ({} run() {{ ... }}), #{} block, struct, or const",
+                                "define a function ({} run() {{ ... }}), #{} block, struct, or comptime binding",
                                 Syntax::KW_FN,
                                 Syntax::KW_TEST
                             ),

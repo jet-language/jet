@@ -1227,7 +1227,29 @@ impl<'a> Fmt<'a> {
             self.fmt_meta_attr(meta);
             self.newline();
         }
+        // D-PERSIST1: `#Persist` on a bare binding (not on `comptime`).
+        // D-BIND-BARE1: preserve `::` vs `:=`.
+        if c.is_persist {
+            self.write(&format!("#{} ", Syntax::CONTRACT_PERSIST));
+            self.write(&c.name);
+            self.write(" ");
+            self.write(if c.mutable {
+                Syntax::SIGIL_BIND_MUT
+            } else {
+                Syntax::SIGIL_BIND_IMMUT
+            });
+            self.write(" ");
+            self.fmt_expr(&c.value, Prec::OrFallback);
+            return;
+        }
         if c.is_comptime {
+            // D-CONSTMARK1: `#Static` / `#Inline` precede `comptime`.
+            for attr in &c.attrs {
+                match attr {
+                    ConstAttr::ForceStatic => self.write("#Static "),
+                    ConstAttr::ForceInline => self.write("#Inline "),
+                }
+            }
             self.write(Syntax::KW_COMPTIME);
             self.write(" ");
             self.write(&c.name);
@@ -1251,17 +1273,9 @@ impl<'a> Fmt<'a> {
             self.write(";");
             return;
         }
-        // D-PERSIST1: `#Persist` precedes the const's other attrs.
-        if c.is_persist {
-            self.write(&format!("#{} ", Syntax::CONTRACT_PERSIST));
-        }
-        for attr in &c.attrs {
-            match attr {
-                ConstAttr::ForceStatic => self.write("#Static "),
-                ConstAttr::ForceInline => self.write("#Inline "),
-            }
-        }
-        self.write("const ");
+        // Fallback: treat as comptime (D-CONST-RETIRE1 — no live `const` keyword).
+        self.write(Syntax::KW_COMPTIME);
+        self.write(" ");
         self.write(&c.name);
         self.write(" = ");
         self.fmt_expr(&c.value, Prec::OrFallback);

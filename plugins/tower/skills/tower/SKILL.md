@@ -11,12 +11,15 @@ hand** — every operation goes through the Tower CLI (or the HTTP API of a
 running `tower serve`).
 
 ```
+# Jet (vendored) — always prefer this so the board stays in-repo:
+node plugins/tower/tower.mjs help
+
+# Plugin install (Claude Code / Cursor): ${CLAUDE_PLUGIN_ROOT} or the
+# installed plugin directory containing tower.mjs + app/.
 node ${CLAUDE_PLUGIN_ROOT}/tower.mjs help
 ```
 
-If Tower is vendored in the repo instead of installed as a plugin, find the
-  directory containing `tower.mjs` with `app/` beside it (commonly `Tower/` at
-the repo root). Alias once per session: `alias tower='node <path>/tower.mjs'`.
+Alias once per session: `alias tower='node <path>/tower.mjs'`.
 No `plugins/tower/.tower/` yet → use the **tower-setup** skill.
 
 ## The one rule that governs everything

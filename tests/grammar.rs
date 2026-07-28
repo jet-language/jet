@@ -481,6 +481,49 @@ fn s6r_terminator_insertion_and_suppression() {
     // A closing `)` on its own line never gets a terminator before it
     // (multi-line call args) → one statement.
     assert_eq!(count_semis("fn run() {\n    f(\n        a\n    )\n}\n"), 1);
+
+    // D-IF3 / D-ENUMDOT1: a leading-dot dispatch arm is a new statement, not a
+    // fluent chain — otherwise a braceless prior arm body glues onto `.Empty`.
+    // Two arm bodies + pre-`}` terminator → 3 semis inside the outer fn body
+    // (the `if` itself is one statement; semis live inside its dispatch block).
+    assert_eq!(
+        count_semis(
+            "fn run() {\n    if s == {\n        .Circle(r) -> print(r)\n        .Empty -> print(0)\n    }\n}\n"
+        ),
+        3
+    );
+}
+
+#[test]
+fn parse_braceless_leading_dot_dispatch_arms() {
+    // Regression: S6-R must terminate before `.Empty ->` so braceless arm bodies
+    // parse (D-IF2 Q2). Without the terminator, `print(r).Empty` ate the head.
+    let src = r#"
+enum Shape {
+    Circle(Float)
+    Empty
+}
+fn area(s: Shape) => Float {
+    if s == {
+        .Circle(r) -> return r
+        .Empty -> return 0.0
+    }
+}
+fn run() {}
+"#;
+    let (toks, lex_diags) = jet::Lexer::lex(src);
+    assert!(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}");
+    let prog = jet::Parser::parse(&toks).expect("parse");
+    let jet::AST::Item::Func(func) = &prog.items[1] else {
+        panic!("expected area function");
+    };
+    let jet::AST::Stmt::Switch { arms, else_body, .. } = &func.body[0] else {
+        panic!("expected switch");
+    };
+    assert_eq!(arms.len(), 2);
+    assert!(else_body.is_none());
+    assert!(matches!(&arms[0].body[..], [jet::AST::Stmt::Return(..)]));
+    assert!(matches!(&arms[1].body[..], [jet::AST::Stmt::Return(..)]));
 }
 
 #[test]

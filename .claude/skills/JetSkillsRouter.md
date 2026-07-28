@@ -20,6 +20,7 @@ File id: `<skill>-YYYY-MM-DD`. Never overwrite another day's note.
 | --- | --- | --- |
 | Jet Router | `jet-router` | Route to exactly one skill below |
 | Surface Audit | `surface-audit` | Shape / uniformity / consistency outliers and gaps |
+| Isomorphic Ontology Audit | `isomorphic-ontology-audit` | Map syntax to foundational concepts; missed isomorphisms / false rhymes / clarity |
 | Persona Audit | `persona-audit` | Persona status, push/pull, practical feel |
 | Spec Compliance Audit | `spec-compliance-audit` | Codebase vs ratified syntax/spec |
 | Mission Audit | `mission-audit` | Language and experience vs philosophy/mission |
@@ -39,6 +40,7 @@ are opt-in and outside this table.
 | --- | --- |
 | Unclear which skill / pulse / health check | **Jet Router** → then that skill |
 | Shape, uniformity, consistency, syntax/structure outliers | **Surface Audit** |
+| Conceptual unity, “what is this”, isomorphisms, false rhymes, clarity-vs-ceremony | **Isomorphic Ontology Audit** |
 | Personas, push/pull, real-user feel | **Persona Audit** |
 | Ratified syntax/spec vs source | **Spec Compliance Audit** |
 | Philosophy / mission alignment | **Mission Audit** |

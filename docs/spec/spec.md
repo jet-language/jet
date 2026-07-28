@@ -470,8 +470,8 @@ shared state.
 ```jet
 fn transfer(from: Shared<Account>, to: Shared<Account>, amount: Int) {
     #Transact(tx) {
-        from.edit(a => { a.balance -= amount })  // both land, or neither
-        to.edit(a => { a.balance += amount })    // no lock order to get wrong
+        from.edit(a => a.balance -= amount)  // both land, or neither
+        to.edit(a => a.balance += amount)    // no lock order to get wrong
     }
 }
 ```
@@ -519,8 +519,10 @@ fn integrate(e: &Entity, dt: Float) { e.pos += e.vel * dt }
 Card #644 owns the implementation migration from the shipped module-local
 `no_alloc` denylist to this transitive contract.
 
-`const name = value` always looks the same; the transpiler emits Rust
-`const` or `static` when the address is taken or the type needs it.
+`comptime name = value` is the module immutable binding (S57 / D-CONST-RETIRE1);
+plain comptime inlines at use sites. `#Static comptime` emits a Rust `static`
+when a stable address is required. `#Persist name := value` marks hot-reload
+state on a bare binding (D-PERSIST1).
 
 Aliasing rule, stated for humans: *while something is being changed, nobody
 else may be looking at it.* Foreign `read`/`write` spellings are paused under
@@ -1818,7 +1820,9 @@ invokes rustc, so the cargo debug binary is sufficient.
 
 ## M8 — Functions as values (closures, done)
 
-**Lambdas (S46):** `(params) => expr` or `(params) => { … }`. Parameter types
+**Lambdas (S46):** `(params) => expr` or `(params) => { … }`. A single
+assignment or void call after `=>` needs no braces (`a => a.n += 1`,
+`() => work()`). Parameter types
 may be omitted when the expected function type is known (**E0801** when not).
 The lambda arrow is **`=>`**. **`->`** selects dispatch-arm values and finite-loop
 items.

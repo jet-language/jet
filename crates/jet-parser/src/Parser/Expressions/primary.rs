@@ -79,7 +79,7 @@ impl<'a> Parser<'a> {
                     let name_tok = self.bump();
                     return Err(self.meta_attr_wrong_place_diag(
                         Span::new(hash.start, name_tok.span.end),
-                        "binding, const, or function",
+                        "binding or function",
                     ));
                 }
                 TokKind::Hash

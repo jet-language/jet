@@ -141,7 +141,7 @@ fn every_syntax_const_has_adjacent_decision_comment() {
     // instead of a fabricated decision ID. This count must never grow —
     // shrinking (by finding/assigning the real ID) is always welcome.
     const EXEMPT_MARKER: &str = "KW_DECISION_ID_EXEMPT";
-    const EXEMPT_BASELINE: usize = 3; // KW_CONST, KW_RETURN, KW_IT
+    const EXEMPT_BASELINE: usize = 2; // KW_RETURN, KW_IT
 
     let mut violations = Vec::new();
     let mut exempt_count = 0usize;

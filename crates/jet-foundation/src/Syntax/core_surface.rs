@@ -257,8 +257,8 @@ pub const KW_IMPL: &str = "impl";
 pub const EXTERNAL_METHOD_CONNECTOR: &str = ".";
 pub const EXTERNAL_METHOD_CONNECTOR_RETIRED: &str = "~~";
 
-/// M2: compile-time constant (emits Rust `const` or `static`). Foundational
-/// keyword predating the S-numbered decision log (card #447 KW_DECISION_ID_EXEMPT).
+/// D-CONST-RETIRE1: retired module binding keyword. Lexer still emits `KwConst`
+/// so the parser can teach `comptime` (S57). Not in `JET_KEYWORD_LIST`.
 pub const KW_CONST: &str = "const";
 
 /// M1/M2: return from a function. Foundational keyword predating the

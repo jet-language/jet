@@ -186,6 +186,84 @@ fn scope_member_starts_at(toks: &[Token], i: usize) -> bool {
     }
 }
 
+/// True when `kind` can start a leading-dot enum/group pattern (D-ENUMDOT1 /
+/// D-TAG1): PascalCase ident or `null`.
+fn leading_dot_variant_token(kind: &TokKind) -> bool {
+    match kind {
+        TokKind::Ident(name) => name.chars().next().is_some_and(char::is_uppercase),
+        TokKind::KwNull => true,
+        _ => false,
+    }
+}
+
+/// D-IF3 / D-ENUMDOT1: does the token at `i` (a `.`) begin a dispatch arm head
+/// — `.Variant ->`, `.Variant(payload) ->`, `.Group.Leaf ->`, or
+/// `.{ … } ->` — rather than a fluent chain step? Without a terminator, a
+/// braceless prior arm body would glue onto the next `.Variant` as a field
+/// access and then choke on `->`.
+fn dispatch_arm_starts_at(toks: &[Token], i: usize) -> bool {
+    if !matches!(toks.get(i).map(|t| &t.kind), Some(TokKind::Dot)) {
+        return false;
+    }
+    let mut j = i + 1;
+    // D-DESTRUCT1: `.{ … } -> …` — `expr\n.{` is never a legal chain.
+    if matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::LBrace)) {
+        let mut depth = 0usize;
+        while j < toks.len() {
+            match &toks[j].kind {
+                TokKind::LBrace => depth += 1,
+                TokKind::RBrace => {
+                    depth -= 1;
+                    if depth == 0 {
+                        j += 1;
+                        break;
+                    }
+                }
+                TokKind::Eof => return false,
+                _ => {}
+            }
+            j += 1;
+        }
+        return matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::Arrow));
+    }
+    if !toks
+        .get(j)
+        .map(|t| leading_dot_variant_token(&t.kind))
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    j += 1;
+    // D-TAG1: `.Fire.Burn` leaf path.
+    while matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::Dot))
+        && toks
+            .get(j + 1)
+            .map(|t| leading_dot_variant_token(&t.kind))
+            .unwrap_or(false)
+    {
+        j += 2;
+    }
+    if matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::LParen)) {
+        let mut depth = 0usize;
+        while j < toks.len() {
+            match &toks[j].kind {
+                TokKind::LParen => depth += 1,
+                TokKind::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        j += 1;
+                        break;
+                    }
+                }
+                TokKind::Eof => return false,
+                _ => {}
+            }
+            j += 1;
+        }
+    }
+    matches!(toks.get(j).map(|t| &t.kind), Some(TokKind::Arrow))
+}
+
 /// S6-R post-pass: walk the code tokens (comments are trivia, skipped but kept
 /// in the stream) and insert a synthetic `Semi` whenever a statement-ending
 /// token is followed — across a line break — by a token that does not continue
@@ -272,7 +350,11 @@ fn insert_terminators(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnost
                     // `expr.field { }` is never legal (E0335), so breaking the chain
                     // here is unambiguous. Insert the terminator so the parser sees
                     // a fresh statement.
-                    || scope_member_starts_at(toks, i))
+                    || scope_member_starts_at(toks, i)
+                    // D-IF3 / D-ENUMDOT1: `.Variant ->` / `.Variant(x) ->` /
+                    // `.{ … } ->` at line start is the next dispatch arm, not a
+                    // field chain off the previous braceless arm body.
+                    || dispatch_arm_starts_at(toks, i))
                     // A closing `)` / `]` on its own line never begins a
                     // statement, so a terminator before it is never grammatical
                     // (multi-line call args / list / map). Suppress it. A `}` is

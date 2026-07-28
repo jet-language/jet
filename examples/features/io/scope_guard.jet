@@ -8,20 +8,14 @@ enum Fail {
 }
 
 fn with_guards(succeed: Bool) => Int ? Fail {
-    _g1 :: scope.guard(() => {
-        print("guard 1 runs")
-    })
-    _g2 :: scope.guard(() => {
-        print("guard 2 runs")
-    })
-    if succeed { return Ok(42) }
+    _g1 :: scope.guard(() => print("guard 1 runs"))
+    _g2 :: scope.guard(() => print("guard 2 runs"))
+    if succeed return Ok(42)
     return Err(Fail.Bad)
 }
 
 fn question_path() => Int ? Fail {
-    _cleanup :: scope.guard(() => {
-        print("cleanup before ?")
-    })
+    _cleanup :: scope.guard(() => print("cleanup before ?"))
     n :: with_guards(false)?
     return Ok(n)
 }

@@ -143,16 +143,36 @@ impl<'a> Parser<'a> {
             })
         }
     
-        /// D-PERSIST1: true at `#Persist` immediately before `const`/`#` (module
-        /// top level only — this predicate is never consulted by the statement
-        /// parser, so a local binding's `#Persist` falls through to the E0145
-        /// teaching diagnostic in `Statements.rs` instead).
-        pub(in crate::Parser) fn at_persist_const(&self) -> bool {
+        /// D-PERSIST1: true at `#Persist` (module top level only — this
+        /// predicate is never consulted by the statement parser, so a local
+        /// binding's `#Persist` falls through to the E0145 teaching diagnostic
+        /// in `Statements.rs` instead).
+        pub(in crate::Parser) fn at_persist_binding(&self) -> bool {
             matches!(&self.peek().kind, TokKind::Hash)
                 && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_PERSIST)
         }
-    
-        pub(in crate::Parser) fn const_def(&mut self) -> Result<ConstDef, Diagnostic> {
+
+        /// D-CONSTMARK1: true at `#Static` / `#Inline` (or retired lowercase)
+        /// immediately before a comptime binding.
+        pub(in crate::Parser) fn at_comptime_marker(&self) -> bool {
+            matches!(&self.peek().kind, TokKind::Hash)
+                && matches!(
+                    &self.peek2().kind,
+                    TokKind::Ident(n)
+                        if matches!(n.as_str(), "Static" | "Inline" | "static" | "inline")
+                )
+        }
+
+        /// D-CONST-RETIRE1 (E0146): `const` is retired — teach `comptime`, then
+        /// recover by parsing the rest as a comptime binding.
+        pub(in crate::Parser) fn retired_const_def(&mut self) -> Result<ConstDef, Diagnostic> {
+            self.comptime_def()
+        }
+
+        /// D-PERSIST1: `#Persist name (:: | :=) expr` — module-level bare
+        /// binding that survives a `jet dev` hot reload. Not `#Persist comptime`
+        /// and not `#Persist const`.
+        pub(in crate::Parser) fn persist_def(&mut self) -> Result<ConstDef, Diagnostic> {
             let item_start = self.peek().span.start;
             let meta = if self.at_meta_attr() {
                 let meta = self.parse_meta_attr()?;
@@ -163,21 +183,94 @@ impl<'a> Parser<'a> {
             } else {
                 None
             };
-            // D-PERSIST1: optional `#Persist`.
-            let (is_persist, persist_span) = if matches!(&self.peek().kind, TokKind::Hash)
-                && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::CONTRACT_PERSIST)
-            {
-                let sigil = self.bump(); // `@`
-                let name_tok = self.bump(); // `Persist`
-                let span = Span::new(sigil.span.start, name_tok.span.end);
-                (true, Some(span))
-            } else {
-                (false, None)
+            let sigil = self.bump(); // `#`
+            let name_tok = self.bump(); // `Persist`
+            let persist_span = Span::new(sigil.span.start, name_tok.span.end);
+            if matches!(self.peek().kind, TokKind::KwConst | TokKind::KwComptime) {
+                let bad = self.bump();
+                return Err(Diagnostic::error(
+                    "E0003",
+                    format!(
+                        "`#{}` marks a bare binding, not `{}`",
+                        Syntax::CONTRACT_PERSIST,
+                        match bad.kind {
+                            TokKind::KwConst => Syntax::KW_CONST,
+                            _ => Syntax::KW_COMPTIME,
+                        }
+                    ),
+                    format!(
+                        "`#{}` attaches to `name :: …` or `name := …` (D-PERSIST1 / D-BIND-BARE1)",
+                        Syntax::CONTRACT_PERSIST
+                    ),
+                    format!(
+                        "write `#{} name := …` (or `::` for an immutable bare bind)",
+                        Syntax::CONTRACT_PERSIST
+                    ),
+                    Some(Span::new(persist_span.start, bad.span.end)),
+                ));
+            }
+            let (name, name_span) = self.expect_ident("after `#Persist`")?;
+            let mutable = match self.peek().kind {
+                TokKind::ColonColon => {
+                    self.bump();
+                    false
+                }
+                TokKind::ColonEq => {
+                    self.bump();
+                    true
+                }
+                _ => {
+                    return Err(Diagnostic::error(
+                        "E0003",
+                        format!(
+                            "expected `{}` or `{}` after the `#{}` name",
+                            Syntax::SIGIL_BIND_IMMUT,
+                            Syntax::SIGIL_BIND_MUT,
+                            Syntax::CONTRACT_PERSIST
+                        ),
+                        format!(
+                            "`#{}` marks a bare binding (D-PERSIST1 / D-BIND-BARE1)",
+                            Syntax::CONTRACT_PERSIST
+                        ),
+                        format!(
+                            "write `#{} {name} := …` (or `{name} :: …`)",
+                            Syntax::CONTRACT_PERSIST
+                        ),
+                        Some(self.peek().span),
+                    ));
+                }
             };
+            let value = self.expr()?;
+            self.expect(TokKind::Semi, "after a `#Persist` value")?;
+            Ok(ConstDef {
+                span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
+                name,
+                name_span,
+                value,
+                meta,
+                attrs: Vec::new(),
+                rust_kind: crate::AST::RustConstKind::Const,
+                is_comptime: false,
+                ct: None,
+                ty: None,
+                is_persist: true,
+                persist_span: Some(persist_span),
+                mutable,
+                resolved_output: None,
+            })
+        }
+
+        fn parse_comptime_attrs(&mut self) -> Result<Vec<ConstAttr>, Diagnostic> {
             let mut attrs = Vec::new();
-            while matches!(self.peek().kind, TokKind::Hash) {
+            while matches!(self.peek().kind, TokKind::Hash)
+                && matches!(
+                    &self.peek2().kind,
+                    TokKind::Ident(n)
+                        if matches!(n.as_str(), "Static" | "Inline" | "static" | "inline")
+                )
+            {
                 self.bump();
-                let (attr_name, _) = self.expect_ident("after `@`")?;
+                let (attr_name, _) = self.expect_ident("after `#`")?;
                 match attr_name.as_str() {
                     "Static" => attrs.push(ConstAttr::ForceStatic),
                     "Inline" => attrs.push(ConstAttr::ForceInline),
@@ -193,7 +286,7 @@ impl<'a> Parser<'a> {
                         self.diags.push(Diagnostic::error(
                             "E0927",
                             format!("`#{attr_name}` is retired"),
-                            "const markers use the same PascalCase marker plane as other declarations"
+                            "comptime markers use the same PascalCase marker plane as other declarations"
                                 .to_string(),
                             format!("write `{replacement}`"),
                             Some(self.toks[self.pos.saturating_sub(1)].span),
@@ -207,8 +300,8 @@ impl<'a> Parser<'a> {
                     other => {
                         return Err(Diagnostic::error(
                             "E0003",
-                            format!("`#{}` isn't a known rule on a const", other),
-                            "only `#Static` and `#Inline` are supported on const declarations"
+                            format!("`#{}` isn't a known rule on a comptime binding", other),
+                            "only `#Static` and `#Inline` are supported on comptime declarations"
                                 .to_string(),
                             "remove the rule or use `#Static` or `#Inline`".to_string(),
                             Some(self.peek().span),
@@ -216,26 +309,7 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            self.expect_kw(TokKind::KwConst, "to start a const declaration")?;
-            let (name, name_span) = self.expect_ident("after `const`")?;
-            self.expect(TokKind::Eq, "after the const name")?;
-            let value = self.expr()?;
-            self.expect(TokKind::Semi, "after a const value")?;
-            Ok(ConstDef {
-                span: Span::new(item_start, self.toks[self.pos.saturating_sub(1)].span.end),
-                name,
-                name_span,
-                value,
-                meta,
-                attrs,
-                rust_kind: crate::AST::RustConstKind::Const,
-                is_comptime: false,
-                ct: None,
-                ty: None,
-                is_persist,
-                persist_span,
-                resolved_output: None,
-            })
+            Ok(attrs)
         }
 
         /// D-SHAPE-OUTPUT-CALLABLE1: an Output is an ordinary typed immutable
@@ -261,6 +335,7 @@ impl<'a> Parser<'a> {
                 ty: Some(ty),
                 is_persist: false,
                 persist_span: None,
+                mutable: false,
                 resolved_output: None,
             })
         }
@@ -286,11 +361,14 @@ impl<'a> Parser<'a> {
                 ty: Some(crate::AST::Type::Named(Syntax::TYPE_OUTPUT_DEFAULTS.to_string())),
                 is_persist: false,
                 persist_span: None,
+                mutable: false,
                 resolved_output: None,
             })
         }
     
         /// S57 (M9.5): `comptime name = expr;` — a compile-time constant binding.
+        /// D-CONSTMARK1: optional `#Static` / `#Inline` precede `comptime`.
+        /// D-CONST-RETIRE1: bare/`#Static`/`#Inline` `const` teaches E0146 and recovers.
         pub(in crate::Parser) fn comptime_def(&mut self) -> Result<ConstDef, Diagnostic> {
             let item_start = self.peek().span.start;
             let meta = if self.at_meta_attr() {
@@ -302,7 +380,35 @@ impl<'a> Parser<'a> {
             } else {
                 None
             };
-            self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
+            let attrs = self.parse_comptime_attrs()?;
+            match self.peek().kind {
+                TokKind::KwComptime => {
+                    self.bump();
+                }
+                TokKind::KwConst => {
+                    let kw = self.bump();
+                    self.diags.push(Diagnostic::error(
+                        "E0146",
+                        format!(
+                            "`{}` is retired — write `{}`",
+                            Syntax::KW_CONST,
+                            Syntax::KW_COMPTIME
+                        ),
+                        format!(
+                            "the only module immutable binding keyword is `{}` (S57 / D-CONST-RETIRE1)",
+                            Syntax::KW_COMPTIME
+                        ),
+                        format!(
+                            "write `{} name = …` (or `#Persist name := …` for hot-reload state)",
+                            Syntax::KW_COMPTIME
+                        ),
+                        Some(kw.span),
+                    ));
+                }
+                _ => {
+                    self.expect_kw(TokKind::KwComptime, "to start a comptime binding")?;
+                }
+            }
             let (name, name_span) = self.expect_ident("after `comptime`")?;
             self.expect(TokKind::Eq, "after the comptime name")?;
             let value = self.expr()?;
@@ -313,13 +419,14 @@ impl<'a> Parser<'a> {
                 name_span,
                 value,
                 meta,
-                attrs: Vec::new(),
+                attrs,
                 rust_kind: crate::AST::RustConstKind::Const,
                 is_comptime: true,
                 ct: None,
                 ty: None,
                 is_persist: false,
                 persist_span: None,
+                mutable: false,
                 resolved_output: None,
             })
         }

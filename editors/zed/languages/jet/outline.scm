@@ -5,6 +5,6 @@
 (tag_def name: (type_identifier) @name) @item
 (impl_block type: (type_identifier) @name) @item
 (distinct_def name: (type_identifier) @name) @item
-(const_def name: (identifier) @name) @item
+(comptime_stmt name: (_) @name) @item
 (module_def name: (module_path) @name) @item
 (migration_block type: (type_identifier) @name) @item

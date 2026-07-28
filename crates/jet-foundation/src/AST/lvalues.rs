@@ -73,7 +73,7 @@ pub enum MetaField {
     },
 }
 
-/// D-CANVASMETA1=B: tooling metadata attached to a binding, const, or function.
+/// D-CANVASMETA1=B: tooling metadata attached to a binding or function.
 /// Sema validates the raw fields; codegen ignores them.
 #[derive(Debug, Clone)]
 pub struct MetaAttr {

@@ -96,6 +96,23 @@ impl BinOp {
             BinOp::Or => "||",
         }
     }
+
+    /// S17 compound-assignment spelling for this binary op, when one exists.
+    pub fn compound_spell(self) -> Option<&'static str> {
+        match self {
+            BinOp::Add => Some("+="),
+            BinOp::Sub => Some("-="),
+            BinOp::Mul => Some("*="),
+            BinOp::Div => Some("/="),
+            BinOp::Rem => Some("%="),
+            BinOp::BitAnd => Some("&="),
+            BinOp::BitOr => Some("|="),
+            BinOp::BitXor => Some("^="),
+            BinOp::Shl => Some("<<="),
+            BinOp::Shr => Some(">>="),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

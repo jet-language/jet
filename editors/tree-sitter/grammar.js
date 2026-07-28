@@ -13,7 +13,7 @@
 
 // BEGIN GENERATED JET SYNTAX HIGHLIGHTS
 const JET_HIGHLIGHT_KEYWORD_CONTROL = ["break", "defer", "else", "if", "loop", "return"];
-const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Reactive", "Sanitizer", "State", "Tainted", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "comptime", "const", "derive", "distinct", "enum", "extern", "fn", "impl", "migration", "module", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "taskgroup", "trait", "use", "validate", "via"];
+const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Reactive", "Sanitizer", "State", "Tainted", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "comptime", "derive", "distinct", "enum", "extern", "fn", "impl", "migration", "module", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "taskgroup", "trait", "use", "validate", "via"];
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self"];
 const JET_HIGHLIGHT_LITERAL = ["None", "Val", "false", "true"];
@@ -113,7 +113,6 @@ module.exports = grammar({
         $.impl_block,
         $.trait_def,
         $.tag_def,
-        $.const_def,
         $.distinct_def,
         $.comptime_stmt,
         $.use_stmt,
@@ -390,16 +389,8 @@ module.exports = grammar({
         )),
       )),
 
-    // ── Const definition ───────────────────────────────────────────────────
-    const_def: ($) =>
-      seq(
-        optional("pub"),
-        "const",
-        field("name", $._value_name),
-        optional(seq(":", field("type", $._type))),
-        "=",
-        field("value", $._expr),
-      ),
+    // D-CONST-RETIRE1: live `const` retired — module immutable bindings use
+    // `comptime` (`comptime_stmt`). Do not reintroduce a `const_def` production.
 
     // ── Distinct type (D-DIST1): `UserId :: distinct Int`, `#Numeric M :: …` ──
     distinct_def: ($) =>
@@ -707,8 +698,8 @@ module.exports = grammar({
         field("value", $._expr),
       ),
 
-    // Binding names are usually lower_snake, but constants are UPPER (a
-    // type_identifier lexically) — accept either for const/comptime targets.
+    // Binding names are usually lower_snake, but comptime names may be UPPER
+    // (a type_identifier lexically) — accept either.
     _value_name: ($) => choice($.identifier, $.type_identifier),
 
     comptime_if_stmt: ($) =>

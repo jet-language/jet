@@ -335,14 +335,22 @@ fn item_span_start(item: &Item, src: &str) -> usize {
             .rfind("impl")
             .unwrap_or(i.type_span.start),
         Item::Const(c) => {
-            let kw = if c.is_comptime {
-                Syntax::KW_COMPTIME
+            if c.is_persist {
+                src[..c.name_span.start]
+                    .rfind(&format!("#{}", Syntax::CONTRACT_PERSIST))
+                    .unwrap_or(c.name_span.start)
+            } else if c.is_comptime {
+                // Prefer `#Static`/`#Inline` when present; else `comptime`.
+                let before = &src[..c.name_span.start];
+                before
+                    .rfind("#Static")
+                    .or_else(|| before.rfind("#Inline"))
+                    .or_else(|| before.rfind(Syntax::KW_COMPTIME))
+                    .or_else(|| before.rfind(Syntax::KW_CONST))
+                    .unwrap_or(c.name_span.start)
             } else {
-                Syntax::KW_CONST
-            };
-            src[..c.name_span.start]
-                .rfind(kw)
-                .unwrap_or(c.name_span.start)
+                c.name_span.start
+            }
         }
         Item::Test(t) => src[..t.name_span.start]
             .rfind(&format!("{}{}", Syntax::ATTR_PREFIX, Syntax::KW_TEST))

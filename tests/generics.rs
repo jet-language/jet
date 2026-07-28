@@ -30,7 +30,7 @@ fn run() {}
     let body_items = r#"
 module complete<T, count: Int, label: String> {
     #Meta(category: label)
-    const value = count
+    comptime value = count
     comptime comptime_value = count + 1
     tag Marked;
     trait Reveal { fn reveal(self) => T }

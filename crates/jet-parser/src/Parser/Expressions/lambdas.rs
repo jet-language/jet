@@ -1,5 +1,5 @@
 use super::super::{
-    Diagnostic, Lambda, LambdaBody, LambdaMeta, LambdaParam, Parser, Span, TokKind,
+    Diagnostic, Lambda, LambdaBody, LambdaMeta, LambdaParam, Parser, Span, Stmt, TokKind,
 };
 
 impl<'a> Parser<'a> {
@@ -120,6 +120,10 @@ impl<'a> Parser<'a> {
         /// Shared by `parse_lambda`/`parse_bare_lambda`: the body after `=>` and
         /// the lambda's overall end offset. `fallback_end` is used only for an
         /// empty block body (no statements to read an end span from).
+        ///
+        /// S46: `=> expr` or `=> { … }`. A single assignment after `=>` needs no
+        /// braces — `a => a.balance -= n` is the one-statement form of
+        /// `a => { a.balance -= n }` (braces stay for multi-statement bodies).
         fn lambda_arrow_body(
             &mut self,
             fallback_end: usize,
@@ -135,8 +139,26 @@ impl<'a> Parser<'a> {
                 Ok((LambdaBody::Block(statements), end))
             } else {
                 let expression = self.expr()?;
-                let end = expression.span().end.max(fallback_end);
-                Ok((LambdaBody::Expr(Box::new(expression)), end))
+                if matches!(self.peek().kind, TokKind::Eq) || self.peek().kind.compound_op().is_some()
+                {
+                    let op_tok = self.bump();
+                    let op = op_tok.kind.compound_op();
+                    let value = self.expr()?;
+                    let end = value.span().end.max(fallback_end);
+                    let target = self.expr_to_lvalue(expression)?;
+                    Ok((
+                        LambdaBody::Block(vec![Stmt::Assign {
+                            target,
+                            op,
+                            op_span: op_tok.span,
+                            value,
+                        }]),
+                        end,
+                    ))
+                } else {
+                    let end = expression.span().end.max(fallback_end);
+                    Ok((LambdaBody::Expr(Box::new(expression)), end))
+                }
             }
         }
     

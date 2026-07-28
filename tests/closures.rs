@@ -31,6 +31,35 @@ fn run() {
 }
 
 #[test]
+fn single_line_lambda_bodies_need_no_braces() {
+    // S46: braces only for multi-statement bodies. One assignment or one void
+    // call after `=>` is the brace-free form of the same block.
+    let src = r#"
+use core.tasks as tasks
+
+struct Box {
+    n: Int
+}
+
+fn bump(box: Shared<Box>) {
+    box.edit(b => b.n += 1)
+}
+
+fn run() {
+    box :: Shared.new(Box.{n: 0})
+    t :: tasks.spawn(() => bump(box))
+    t.wait()
+    print(box.read(b => b.n))
+}
+"#;
+    let out = jet::compile(src).expect("brace-free single-statement lambdas should compile");
+    assert!(
+        out.rust.contains("move |"),
+        "brace-free lambdas should still emit closures"
+    );
+}
+
+#[test]
 fn parallel_adapters_reject_unsafe_boundaries_before_codegen() {
     let mutable_capture = r#"
 fn run() {

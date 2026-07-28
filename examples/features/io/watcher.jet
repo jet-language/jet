@@ -71,8 +71,11 @@ fn run() {
     process_kind := "none"
     port_kind := "none"
     loop ev; combined {
-        if ev.domain == "process" { process_kind = ev.kind }
-        if ev.domain == "port" { port_kind = ev.kind }
+        if ev.domain == {
+            "process" -> process_kind = ev.kind
+            "port" -> port_kind = ev.kind
+            else -> {}
+        }
     }
     print("process event: {process_kind}")
     print("port event: {port_kind}")

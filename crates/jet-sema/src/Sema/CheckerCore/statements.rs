@@ -195,6 +195,36 @@ impl<'a> Checker<'a> {
                     }))
         }
 
+        /// True when compound assign on `target` is rejected (E0003 / E0362), so
+        /// L0503 must not recommend it.
+        fn compound_assign_rejected(&self, target: &LValue, op: crate::AST::BinOp) -> bool {
+            match target {
+                LValue::Index { .. } => true,
+                LValue::Local { .. } => false,
+                LValue::Field { base, field, .. } => {
+                    let trait_name = match op {
+                        crate::AST::BinOp::Add => Some(Syntax::TRAIT_ADD),
+                        crate::AST::BinOp::Sub => Some(Syntax::TRAIT_SUB),
+                        crate::AST::BinOp::Mul => Some(Syntax::TRAIT_MUL),
+                        crate::AST::BinOp::Div => Some(Syntax::TRAIT_DIV),
+                        _ => None,
+                    };
+                    trait_name.is_some_and(|trait_name| {
+                        self.compound_field_type(base, field).is_some_and(|ty| {
+                            self.compound_type_implements(&ty, trait_name)
+                                && match base.as_ref() {
+                                    Expr::Ident(..) => false,
+                                    Expr::Index { .. } => {
+                                        matches!(ty, Type::Named(_) | Type::Apply { .. })
+                                    }
+                                    _ => true,
+                                }
+                        })
+                    })
+                }
+            }
+        }
+
         /// Check two alternative branches with independent move states, then
         /// keep the union (a value moved in either branch counts as gone).
         pub(crate) fn check_stmt(&mut self, stmt: &mut Stmt) {
@@ -285,6 +315,31 @@ impl<'a> Checker<'a> {
                     ));
                     self.infer(value);
                     return;
+                }
+            }
+            // S17 / L0503: prefer `place += …` over `place = place + …`.
+            // Must run before the hooked compound rewrite below, which expands
+            // intentional `+=` into `place = place + …` and would false-positive.
+            if let Stmt::Assign {
+                target,
+                op: None,
+                op_span,
+                value,
+            } = &*stmt
+            {
+                if let Some((place, bin_op, compound)) = prefer_compound_assign(target, value) {
+                    if !self.compound_assign_rejected(target, bin_op) {
+                        self.diags.push(Diagnostic::lint(
+                            "L0503",
+                            format!(
+                                "prefer `{place} {compound} …` instead of repeating the left side"
+                            ),
+                            "compound assignment updates a place in one step without restating it"
+                                .to_string(),
+                            format!("write `{place} {compound} …`"),
+                            Some(*op_span),
+                        ));
+                    }
                 }
             }
             // D-OPDEF1=A: compound arithmetic is the same hook as its binary
@@ -2700,5 +2755,82 @@ fn expr_indexes_root_with(expr: &Expr, root: &str, index_var: &str) -> bool {
                 || expr_indexes_root_with(else_value, root, index_var)
         }
         _ => false,
+    }
+}
+
+/// S17 / L0503: `place = place op rhs` → prefer `place op= rhs`.
+/// Indexed places are excluded (compound assign there is E0003).
+fn prefer_compound_assign(
+    target: &LValue,
+    value: &Expr,
+) -> Option<(String, crate::AST::BinOp, &'static str)> {
+    if matches!(target, LValue::Index { .. }) {
+        return None;
+    }
+    let Expr::Binary(op, left, _right, _) = peel_parens(value) else {
+        return None;
+    };
+    let compound = op.compound_spell()?;
+    if !lvalue_same_place(target, left) {
+        return None;
+    }
+    Some((lvalue_spell(target)?, *op, compound))
+}
+
+fn peel_parens(expr: &Expr) -> &Expr {
+    match expr {
+        Expr::Paren(inner, _) => peel_parens(inner),
+        other => other,
+    }
+}
+
+fn lvalue_same_place(lv: &LValue, expr: &Expr) -> bool {
+    match (lv, peel_parens(expr)) {
+        (LValue::Local { name, .. }, Expr::Ident(n, _)) => name == n,
+        (LValue::Field { base, field, .. }, Expr::Field(b, f, _)) => {
+            field == f && expr_same_place(base, b)
+        }
+        _ => false,
+    }
+}
+
+fn expr_same_place(a: &Expr, b: &Expr) -> bool {
+    match (peel_parens(a), peel_parens(b)) {
+        (Expr::Ident(n1, _), Expr::Ident(n2, _)) => n1 == n2,
+        (Expr::Field(b1, f1, _), Expr::Field(b2, f2, _)) => f1 == f2 && expr_same_place(b1, b2),
+        (
+            Expr::Index {
+                base: b1,
+                index: i1,
+                ..
+            },
+            Expr::Index {
+                base: b2,
+                index: i2,
+                ..
+            },
+        ) => expr_same_place(b1, b2) && expr_same_place(i1, i2),
+        _ => false,
+    }
+}
+
+fn lvalue_spell(lv: &LValue) -> Option<String> {
+    match lv {
+        LValue::Local { name, .. } => Some(name.clone()),
+        LValue::Field { base, field, .. } => Some(format!("{}.{}", expr_place_spell(base)?, field)),
+        LValue::Index { .. } => None,
+    }
+}
+
+fn expr_place_spell(expr: &Expr) -> Option<String> {
+    match peel_parens(expr) {
+        Expr::Ident(name, _) => Some(name.clone()),
+        Expr::Field(base, field, _) => Some(format!("{}.{}", expr_place_spell(base)?, field)),
+        Expr::Index { base, index, .. } => Some(format!(
+            "{}[{}]",
+            expr_place_spell(base)?,
+            expr_place_spell(index).unwrap_or_else(|| "…".to_string())
+        )),
+        _ => None,
     }
 }
