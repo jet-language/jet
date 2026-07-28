@@ -407,13 +407,16 @@ fn jet_style_code(name: &str) -> Option<&'static str> {
         _ => None,
     }
 }
-fn jet_style_enabled() -> bool {
-    use std::io::IsTerminal;
-    jet_std_env_get(&"NO_COLOR".to_string()).is_none()
-        && jet_std_env_get(&"TERM".to_string())
+fn jet_style_env_enabled() -> bool {
+    jet_env_value_raw("NO_COLOR").is_none()
+        && jet_env_value_raw("TERM")
+            .and_then(|term| term.into_string().ok())
             .map(|term| term != "dumb")
             .unwrap_or(true)
-        && std::io::stdout().is_terminal()
+}
+fn jet_style_enabled() -> bool {
+    use std::io::IsTerminal;
+    jet_style_env_enabled() && std::io::stdout().is_terminal()
 }
 fn jet_std_io_style(style: &String, text: &String) -> String {
     if jet_style_enabled() {
@@ -460,12 +463,16 @@ fn jet_env_validate_value(value: &str) -> Result<(), jet_std::EnvError> {
     }
 }
 
-fn jet_std_env_get(name: &String) -> Option<String> {
+fn jet_env_value_raw(name: &str) -> Option<std::ffi::OsString> {
     let name = std::ffi::OsStr::new(name);
     jet_env_read()
         .iter()
         .find(|(candidate, _)| jet_env_key_eq(candidate.as_os_str(), name))
-        .and_then(|(_, value)| value.to_str().map(str::to_string))
+        .map(|(_, value)| value.clone())
+}
+
+fn jet_std_env_get(name: &String) -> Option<String> {
+    jet_env_value_raw(name).and_then(|value| value.into_string().ok())
 }
 
 fn jet_std_env_set(name: &String, value: &String) -> Result<(), jet_std::EnvError> {
