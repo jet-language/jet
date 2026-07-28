@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1252,
-    "rev": 18075,
+    "rev": 18081,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57905,18 +57905,17 @@
     {
       "id": "c0pbnytf",
       "num": 1239,
-      "title": "Fan-out reach, marks, and multi-wait",
-      "body": "S75 fan-out `f.[a, b, c]` takes written items only — no held collection, no repeat count, no method. Spawning N identical tasks repeats a line per task. The waiting half of that paste is already covered by ratified structured concurrency (`taskgroup`, `g.all`), so the real open question is how far fan-out reaches and what marks it uses.\n\nOwner decides: reach (D-EACH1), marks + fate of `f.[…]` (D-EACH-SPELL1), and whether multi-wait needs anything new at all (D-FANOUT3).",
+      "title": "Cut pasted lines: fenced-name expansion",
+      "body": "Sixteen of the twenty-nine body lines in `examples/features/memory/shared_transact.jet` are the same spawn and the same wait, eight times each, differing only by handle name. Owner wants one written line to stand for several: `<: t1, … t8 :> :: tasks.spawn(…)` expands to eight bindings, `<: t1, … t8 :>.wait()` to eight waits.\n\nThis is statement expansion, not mapping — nothing is collected and no list type appears. S75 `f.[a, b, c]` and `taskgroup` are untouched.",
       "kind": "task",
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-language-coherence",
       "phase": "planning",
       "priority": "P2",
-      "plan": "Owner decides in order:\n1. D-EACH-SPELL1 — the marks (`<:` / `:>`) and how the varying slot is shown; also retires `f.[a, b, c]`\n2. D-EACH1 — running law: order, failure, and what repeats vs runs once\n3. D-FANOUT3 — multi-wait: taskgroup only, fan-out wait, or a join helper\n4. Implement: lexer digraphs (+ `suppresses_terminator`, not `ends_statement`), precedence, parser, sema, formatter emission + fmt stability test, diagnostics with codes and UI snapshots (I4)\n5. Retire S75: migration diagnostic, rewrite `fan_out.jet`, `fan_out_flatten.jet`, `canon.jet`, spec sections\n6. Rewrite `examples/features/memory/shared_transact.jet`; one example per new form (I5)\n7. Verify; close",
+      "plan": "D-FANOUT3 is ratified (=C): `tasks.join_all(handles)` ships on `core.tasks`.\n\nOwner still decides:\n1. D-EACH1 — does a fenced line expand to several, and do multiple fences step together\n\nThen implement:\n2. `tasks.join_all([Task<T>]) => [T]` per D-FANOUT3=C, waiting in list order and consuming each handle; docs say when to use it over `g.all`\n3. If D-EACH1 lands: lexer digraphs (`:>` into `suppresses_terminator`, neither into `ends_statement`), parser-level expansion, per-copy spans naming the original line and its entry, formatter emission + fmt stability test, diagnostics with codes and UI snapshots (I4)\n4. Rewrite `examples/features/memory/shared_transact.jet` lines 31-49; add an example for each new form (I5)\n5. Verify; close",
       "blockedBy": [
         "D-EACH1",
-        "D-EACH-SPELL1",
         "D-FANOUT3"
       ],
       "assignee": null,
@@ -57984,8 +57983,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-27T19:32:53.509Z",
-      "updated": "2026-07-28T01:17:28.639Z",
-      "updatedBy": "owner"
+      "updated": "2026-07-28T01:25:50.907Z",
+      "updatedBy": "claude"
     },
     {
       "id": "c0ahqhoi",
@@ -72260,7 +72259,7 @@
       "group": "syntax",
       "title": "Waiting for many tasks at once",
       "gist": "Decide whether waiting for many task handles needs anything new at all.",
-      "lesson": "`tasks.spawn(() => work())` starts a task and hands back a `Task<T>` handle. `handle.wait()` blocks until that task finishes and consumes the handle. Dropping a handle without waiting warns with L1101, because the program could end first.\n\nEight spawns therefore leave eight handles and eight waits, one line each. That is the paste this card started from.\n\nJet already ships a shorter way. Inside `taskgroup g { … }`, `g.task => work()` starts a child the group owns. Every child still running when the block ends is joined before the block returns. No handle can be forgotten.\n\nThe group also takes lists. `g.all([t1, t2])` waits for all of them and fails fast, `g.race` keeps the first success, and `g.any` keeps the first finisher.\n\nSo two ways to wait for many tasks already exist. Under I8, a third has to earn its place rather than simply read a little shorter.\n\nDecide this after D-EACH-SPELL1, because one option here is spelled with the fan-out marks that ballot chooses.",
+      "lesson": "`tasks.spawn(() => work())` starts a task and hands back a `Task<T>` handle. `handle.wait()` blocks until that task finishes and consumes the handle. Dropping a handle without waiting warns with L1101, because the program could end first.\n\nEight spawns therefore leave eight handles and eight waits, one line each. That is the paste this card started from.\n\nJet already ships a shorter way. Inside `taskgroup g { … }`, `g.task => work()` starts a child the group owns. Every child still running when the block ends is joined before the block returns. No handle can be forgotten.\n\nThe group also takes lists. `g.all([t1, t2])` waits for all of them and fails fast, `g.race` keeps the first success, and `g.any` keeps the first finisher.\n\nSo two ways to wait for many tasks already exist. Under I8, a third has to earn its place rather than simply read a little shorter.\n\nDecide this after D-EACH1, because one option here is written with the fenced line that ballot decides.",
       "explainer": "",
       "story": "Nate's shared transaction demo pastes eight `.wait()` lines. He wants them gone. He does not want a second mechanism doing what taskgroups already do.",
       "inWild": "// examples/features/memory/shared_transact.jet, today\nt1 :: tasks.spawn(() => transfer(from, to, 100))\n// … seven more spawns …\nt1.wait()\nt2.wait()\nt3.wait()\nt4.wait()\nt5.wait()\nt6.wait()\nt7.wait()\nt8.wait()\nfrom_bal :: from.read(a => a.balance)",
@@ -72275,24 +72274,24 @@
         },
         {
           "key": "B",
-          "name": "Fan the wait out over the handles",
-          "detail": "Keep bare handles and let the fan-out operator do the waiting, in whatever marks D-EACH-SPELL1 picks. No new library call, and the same shape works for any method, not only waiting.",
-          "technical": "Needs the marks from D-EACH-SPELL1 in receiver position, which every option there allows. Each handle is consumed in order, so L1101 stays satisfied. Failure follows the running law from D-EACH1.",
-          "code": "work :: () => transfer(from, to, 100)\nhandles :: /* eight spawns */\n<: ...^handles :>.wait()"
+          "name": "Expand the wait line",
+          "detail": "Keep the named handles and let one fenced line stand for the eight waits, the same way the eight spawns collapse. No new library call, and the same shape works for any repeated line.",
+          "technical": "Needs D-EACH1 to ratify line expansion. Each copy is a real `tN.wait()` statement, so each handle is consumed by its own call and L1101 stays satisfied. No list is built and no ownership mark is needed.",
+          "code": "<: t1, t2, t3, t4, t5, t6, t7, t8 :> :: tasks.spawn(() => transfer(from, to, 100))\n<: t1, t2, t3, t4, t5, t6, t7, t8 :>.wait()"
         },
         {
           "key": "C",
           "name": "Add `tasks.join_all(handles)`",
           "detail": "A plain named call that waits for a whole list of handles. It reads clearly, works without a group, and needs no operator knowledge at all.",
           "technical": "New library surface on `core.tasks`: `join_all([Task<T>]) => [T]`, waiting in list order and consuming each handle. Overlaps `g.all`, which already does this inside a group, so the docs must say plainly when each one is right.",
-          "code": "work :: () => transfer(from, to, 100)\nhandles :: /* eight spawns */\ntasks.join_all(^handles)"
+          "code": "work :: () => transfer(from, to, 100)\nhandles :: /* eight spawned tasks in a list */\ntasks.join_all(^handles)"
         },
         {
           "key": "D",
           "name": "Add both the fan-out wait and `join_all`",
           "detail": "Ship the operator form for short expressions and the named call for readability. Authors pick per site. Most convenience, and four ways in total to wait for many tasks.",
           "technical": "Union of B and C on top of the two group forms. Needs an explicit house style in the docs and examples, or the four forms drift apart across the codebase.",
-          "code": "<: ...^handles :>.wait()\n// or\ntasks.join_all(^handles)"
+          "code": "<: t1, t2, t3, t4, t5, t6, t7, t8 :>.wait()\n// or\ntasks.join_all(^handles)"
         }
       ],
       "comparisons": [
@@ -72318,7 +72317,7 @@
         "whyNot": [
           {
             "key": "B",
-            "reason": "Reads well, but it keeps loose handles that the group model exists to retire, and only after the marks ballot grants a member template."
+            "reason": "Reads well and needs no new library call, but keeps eight named handles that the group model exists to retire."
           },
           {
             "key": "C",
@@ -72343,174 +72342,95 @@
       "id": "D-EACH1",
       "cardId": "c0pbnytf",
       "group": "syntax",
-      "title": "How far the fill-down reaches around the marked values",
-      "gist": "Decide how much of the line repeats around the marked values, and where the repeat stops.",
-      "lesson": "Marking values with `<: … :>` says the line runs once per value. It does not yet say how much of the line that is.\n\nThree shapes show the whole problem. In `sum(weight(<: a, b, c :>))` you almost certainly want three weights and one sum. In `<: t1, t2 :>.wait().code()` you almost certainly want each handle waited and each code read, not a code read off a list. In `load(<: ...paths :>)?` you want the failure of one read to end the line.\n\nSo the repeat must reach past the innermost call sometimes, and must stop before an outer call other times. A rule that always picks the inner one breaks the second shape. A rule that always fills the whole line breaks the first.\n\nThe useful distinction is what the surrounding code does with the result. Something applied *to* each result belongs inside the repeat. Something that takes the whole set of results *as one argument* belongs outside it.\n\nA spreadsheet works the same way. A cell formula can wrap the changing cell in as many steps as it likes. Summing the finished column is a different formula that takes the column as a range.\n\nThis law holds whatever marks D-EACH-SPELL1 picks. If that ballot picks the underscore-slot option, the arrow sets the extent instead and this ballot is void.",
+      "title": "Fenced names: one written line that stands for several",
+      "gist": "Decide whether one fenced line may stand in for several near-identical lines.",
+      "lesson": "Some code repeats a line only to change one name. Eight spawns that differ by a handle name. Eight waits that differ the same way. The reader learns nothing from lines two through eight.\n\nA fence on the changing part says: write the line once, and run it once per entry.\n\n`<: t1, t2 :> :: tasks.spawn(work)` stands for two lines, `t1 :: tasks.spawn(work)` and `t2 :: tasks.spawn(work)`. Sixteen lines become two.\n\nThis is not a list and not a loop. Nothing is gathered up and nothing is returned. The line is written out several times, top to bottom, and each copy runs in full before the next one starts.\n\nBecause each copy is a real line, everything in it runs again. Two spawns are two calls, not one call reused. That is the point for tasks, and it is worth knowing for anything expensive.\n\nJet already has a mark that looks related and means the opposite. `[a, b, c] :: result` splits one value into three names. A fence runs the line three times. The marks have to stay far apart in the eye.\n\nThe fan-out operator `double.[1, 2, 3]` is a third, separate thing: one expression that yields a list of results. It is untouched by this ballot.",
       "explainer": "",
-      "story": "Nate wants one written line to do the obvious thing in all three shapes, without a rule he has to look up. He would rather spend design effort now than ship a default that surprises people later.",
-      "inWild": "// three shapes, three different reaches, one set of marks\ntotal    :: sum(weight(<: north, south, east :>))\nstatuses :: <: ...^handles :>.wait().code()\nsettings :: load_config(env_name(), <: ...paths :>)?",
-      "detail": "Shared by every option. Values are applied in written order, and each pass finishes before the next begins. Anything on the line that is not part of the repeat runs once, before the first pass, in written order — so `env_name()` above runs once, not once per path. A known item count gives `[R#N]`; a poured-in collection gives `[R]`. A repeated line that returns nothing yields nothing, rather than a list of empty values. Each value is passed with the access its callee demands, so a consuming method needs owned values under D-MEM1. Effects are the union of the repeated line's effects. One set of marks per statement; a second set is rejected, with lock-step pairing reserved for a later ballot. Every rejection named here needs a registered code and a UI snapshot (I4).",
+      "story": "Nate is looking at `examples/features/memory/shared_transact.jet`. Sixteen of its twenty-nine body lines are the same spawn and the same wait, eight times each. He wants to trade a little width for that much height.",
+      "inWild": "// examples/features/memory/shared_transact.jet, lines 33–49 today\nt1 :: tasks.spawn(() => transfer(from, to, 100))\nt2 :: tasks.spawn(() => transfer(from, to, 100))\n// … six more, identical but for the name …\nt8 :: tasks.spawn(() => transfer(from, to, 100))\nt1.wait()\nt2.wait()\n// … six more …\nt8.wait()\n\n// the shape Nate wants:\n// <: t1, t2, t3, t4, t5, t6, t7, t8 :> :: tasks.spawn(() => transfer(from, to, 100))\n// <: t1, t2, t3, t4, t5, t6, t7, t8 :>.wait()",
+      "detail": "Collision review, checked against the lexer and the shipped grammar.\n\nLEXER. `<` scans as `<<=`, `<<`, `<=`, `<`; `>` as `>>=`, `>>`, `>=`, `>`; `:` as `::`, `:=`, `:`. Adding `<:` and `:>` as longest-match digraphs takes no existing pair, because no expression or type may begin with `:`, and none may begin with `>`. No existing program changes meaning. The marks are never used between two values, so `a <: b` is not grammatical and cannot be misread as a comparison.\n\nNEAREST NEIGHBOUR. `[a, b, c] :: result` (S76 destructuring) and `(sender, receiver) :: tasks.channel()` (D-TUPLE-DESTRUCT1) both split one value across names. A fenced target runs the line once per name. This is the one real confusion risk, and it is why the round brackets Nate first sketched are the wrong marks: `<: … :>` cannot be mistaken for either.\n\nLINE BREAKS. `Terminators.rs` inserts a synthetic `Semi` after a line-ending token, with no bracket-depth tracking. `:>` must join `suppresses_terminator` so a fence closing at the start of a line does not cut the statement. Neither mark may join `ends_statement`.\n\nWHERE A FENCE MAY SIT. In a binding target, and anywhere inside an expression statement — an argument, a receiver, a field value. Not in an `if`, `loop`, or `switch` header, and not in an item declaration, in this pass.\n\nDIAGNOSTICS. Empty fence; duplicate name in one fence; entry counts that disagree between two fences in one statement; a fence in a rejected position; a fenced target that would bind the same name twice. Each needs a code and a UI snapshot (I4).\n\nSPANS. Every expanded copy must carry a span pointing at both the original line and its entry, so an error on the fifth copy names `t5` and underlines the right mark. This is the standard cost of expansion and it decides whether the feature is pleasant or hateful in practice.\n\nFORMATTER. Emission plus a `fmt` stability test, and a wrapping rule for a fence too wide for the line.\n\nALREADY RATIFIED NEARBY. D-FANOUT3=C ships `tasks.join_all(handles)`, which takes a list. Fenced names are not a list, so the two answers to the demo do not compose: either eight names and eight expanded waits, or a list of handles and one join call. S75 `f.[a, b, c]` keeps building lists, and `taskgroup` keeps owning concurrent work.",
       "options": [
         {
           "key": "A",
-          "name": "Grow through what is applied to the result; stop where the whole set is taken",
-          "detail": "The repeat starts at the call holding the marks and grows outward through anything applied to each result: further methods, fields, operators, and the failure mark. It stops at the first call that takes the results as one argument, and at any bracketed group.",
-          "technical": "Seed: the innermost call whose argument list directly holds the marks, or the first postfix step when the marks are the receiver. Growth: postfix steps (`.m()`, `.field`, `?`, `[i]`) and unary or binary operators applied to the region's result. Stops: an enclosing call's argument list, an explicit `( … )` group, or a binding sigil. Brackets therefore narrow the repeat the same way they group arithmetic.",
-          "code": "total    :: sum(weight(<: north, south, east :>))\n// three weights, one sum\n\nstatuses :: <: ...^handles :>.wait().code()\n// : [Int#8] — each waited, each code read\n\nlengths  :: (<: a, b :>.load()).len()\n// brackets stop the repeat: the length of the list of two"
+          "name": "The fence expands the line, and several fences step together",
+          "detail": "A statement holding fences is written out once per entry, in order. When a line carries more than one fence, they advance together, so the first copy takes every first entry. Counts that disagree are rejected.",
+          "technical": "Parser-level expansion into N statements before checking. Entries are ordinary expressions, or names when the fence is a binding target. Lock-step gives paired declaration for free, and a plain count-mismatch error when the columns disagree. No list is built and no type is introduced.",
+          "code": "<: t1, t2, t3, t4, t5, t6, t7, t8 :> :: tasks.spawn(() => transfer(from, to, 100))\n<: t1, t2, t3, t4, t5, t6, t7, t8 :>.wait()\n\n// two fences advance together\n<: north, south :> :: load(<: \"north.json\", \"south.json\" :>)\n\n// and anywhere else in the line\nreport(\"Q3 results\", <: north, south, east :>, Level.Summary)"
         },
         {
           "key": "B",
-          "name": "The innermost call only",
-          "detail": "Only the call that directly holds the marks repeats. Everything outside it, including a method chained afterwards, receives the finished list. The simplest rule to state, and the one that reads a chain the wrong way round.",
-          "technical": "Seed as in A, with no growth. `<: a, b :>.wait().code()` waits each handle and then calls `code()` on the resulting list, which is normally a type error needing its own diagnostic. Operators after the call apply to the list, so `weight(<: a, b :>) * 2` is rejected unless list arithmetic exists.",
-          "code": "total    :: sum(weight(<: north, south, east :>))\n// three weights, one sum\n\nstatuses :: <: ...^handles :>.wait().code()\n// error: `code()` is called on [Unit#8], not on each result"
+          "name": "The fence expands the line, one fence per statement",
+          "detail": "The same expansion, with a hard limit of one fence per line. Nothing pairs up, so nothing can be miscounted, and the reader never has to check two columns against each other.",
+          "technical": "Same expansion machinery, with a second fence rejected outright. Paired declaration needs two statements instead of one. Removes the count-mismatch error and the mental work behind it.",
+          "code": "<: t1, t2, t3, t4, t5, t6, t7, t8 :> :: tasks.spawn(() => transfer(from, to, 100))\n<: t1, t2, t3, t4, t5, t6, t7, t8 :>.wait()\n\n// paired declaration needs the values in a list instead\npaths :: [\"north.json\", \"south.json\"]\n<: north, south :> :: load(paths[<: 0, 1 :>])  // rejected: second fence"
         },
         {
           "key": "C",
-          "name": "The whole line fills down; brackets stop it",
-          "detail": "The marks make everything around them repeat, right out to the binding, exactly as copying a spreadsheet formula down a column does. To hand the finished set to an outer call, you bracket the repeated part yourself.",
-          "technical": "No seed rule and no stop rule except an explicit `( … )` group and the binding sigil. Call parentheses do not stop growth, so the narrowing group is written by hand and reads as a doubled bracket in argument position.",
-          "code": "total    :: sum((weight(<: north, south, east :>)))\n// the inner brackets are what make this one sum\n\nstatuses :: <: ...^handles :>.wait().code()\n// : [Int#8] — same as A"
+          "name": "Expansion, plus numbered names from a range",
+          "detail": "Everything in option A, and a range writes the numbered names for you. Eight handles cost four characters instead of thirty-two, at both the spawn and the wait.",
+          "technical": "`<: t1..t8 :>` in a binding target generates `t1` through `t8`. The names exist only after expansion, so a plain text search for `t5` finds nothing, and jump-to-definition must be taught to look through the range. Ranges are rejected outside binding targets.",
+          "code": "<: t1..t8 :> :: tasks.spawn(() => transfer(from, to, 100))\n<: t1..t8 :>.wait()\n\n// searching the file for `t5` returns no match"
         },
         {
           "key": "D",
-          "name": "Grow as in A, and never stop at a failure",
-          "detail": "The same reach as the recommended rule, with a different answer for failure. No pass is skipped, and the result carries one outcome per value, successes and failures alike.",
-          "technical": "Result is `[R ? E]` whenever the repeated line is fallible, so the failure mark cannot be written inside the repeat. Callers unwrap per element or fold. Suits validation sweeps; taxes the ordinary case where one bad value should end the line.",
-          "code": "settings :: load_config(env_name(), <: ...paths :>)\n// : [Config ? Error] — all four reads attempted\nfailed :: settings.filter(s => s.is_error())"
+          "name": "The fence is an expression that yields a list",
+          "detail": "The marks build one value rather than several lines. The line runs once, gathers the results, and hands back a list. Good for mapping, and it cannot declare eight names or run eight statements.",
+          "technical": "The expression reading of the same marks: `f(<: a, b :>)` yields `[R#2]`. Needs a reach rule for how far the repeat grows, once-only evaluation of unmarked parts, and a failure law. Overlaps S75, which already builds a list from written items.",
+          "code": "// works for mapping\nweights :: weight(<: north, south, east :>)   // : [Int#3]\n\n// cannot express the eight named spawns\n// <: t1, t2 :> :: tasks.spawn(work)   — not a binding target"
+        },
+        {
+          "key": "E",
+          "name": "Add nothing; use what is already here",
+          "detail": "A loop covers repeated statements, a taskgroup covers this demo without naming a handle, and the ratified `tasks.join_all` covers the waiting. Nothing new to learn, and pasted lines stay wherever a loop does not fit.",
+          "technical": "No language change. Uses D-FANOUT3=C for the waiting half and either S75 or a loop for the spawning half. Cases that genuinely need eight distinct names keep their eight lines.",
+          "code": "// with a list of handles and the ratified join helper\nwork :: () => transfer(from, to, 100)\nhandles :: tasks.spawn.[work, work, work, work, work, work, work, work]\ntasks.join_all(^handles)"
         }
       ],
       "comparisons": [
         {
-          "lang": "Spreadsheet",
-          "note": "A filled formula repeats every step wrapped around the changing cell. Aggregating the finished column is a separate formula over a range.",
-          "code": "=WEIGHT(B2)*2      ' filled down\n=SUM(C2:C4)        ' over the column"
-        },
-        {
           "lang": "Rust",
-          "note": "The mapped closure holds everything that repeats, and its brackets are the boundary. The call around the collect sees the finished vector.",
-          "code": "let total = sum(regions.iter().map(|r| weight(r) * 2).collect());"
+          "note": "Repetition inside a macro does exactly this job, but only after you define and name a macro for it.",
+          "code": "macro_rules! spawn_all { ($($t:ident),*) => { $(let $t = spawn(work);)* } }"
         },
         {
-          "lang": "Julia",
-          "note": "Dotted operators keep the broadcast growing through a chain, and an undotted call ends it. The boundary is per-operator rather than per-region.",
-          "code": "sum(weight.(regions) .* 2)"
+          "lang": "C",
+          "note": "The preprocessor expands text before the compiler sees it. Powerful, and famous for errors that point at lines nobody wrote.",
+          "code": "#define SPAWN(t) Task t = spawn(work);"
+        },
+        {
+          "lang": "Spreadsheet",
+          "note": "Filling a formula down writes a real row each time. Nothing is gathered up unless a later formula asks for the range.",
+          "code": "=SPAWN($B$1)   ' filled down eight rows"
         }
       ],
       "rec": "A",
       "recommendation": {
-        "why": "It answers all three shapes the way a reader expects, from one sentence: steps applied to each result join the repeat, and the first thing that takes the whole set ends it. Brackets narrow it, exactly as they group arithmetic.",
+        "why": "It removes the pasted lines without inventing a value, a type, or a reach rule. The line means what it looks like: itself, written out once per entry. Lock-step comes free and makes paired declaration read as one line.",
         "whyNot": [
           {
             "key": "B",
-            "reason": "Reads a chained method against the finished list, so the common `wait().code()` shape becomes a type error the author has to work around."
+            "reason": "Bans the paired case that reads best, and buys only the removal of one count-mismatch error the compiler can state plainly."
           },
           {
             "key": "C",
-            "reason": "Makes the everyday aggregate case carry a hand-written bracket inside call parentheses, which reads as a doubled bracket."
+            "reason": "Saves the most typing and hides the names from search and from jump-to-definition, which is a poor trade in a language that wants tooling to be first class."
           },
           {
             "key": "D",
-            "reason": "Turns every fan-out over fallible work into a list of outcomes to unwrap, taxing the common case to serve the rare one."
+            "reason": "Solves a different problem. It maps values to a list, cannot declare the eight names, and overlaps the fan-out operator that already builds lists."
+          },
+          {
+            "key": "E",
+            "reason": "Right for this demo, since the ratified join helper takes a list, and wrong for the general case, because a loop cannot declare eight separate names."
           }
         ],
-        "tradeoff": "Widening past an argument boundary cannot be written inline. `save(encode(<: ...msgs :>))` fans `encode` and hands `save` a list, which is a type error carrying a fix hint; the fix is to bind the encoded list and mark it again. Fixed parts also run once, so the line is not a literal copy of itself."
+        "tradeoff": "Expansion means the compiler reports errors on lines the author never wrote, so every copy must carry a span naming both the original line and its entry. Get that wrong and the feature is worse than the paste it replaces."
       },
       "hybrid": null,
       "checkInstructions": null,
       "draft": false,
       "status": "open",
       "created": "2026-07-27T22:49:34.679Z"
-    },
-    {
-      "id": "D-EACH-SPELL1",
-      "cardId": "c0pbnytf",
-      "group": "syntax",
-      "title": "Fan-out marks: what goes inside `<: … :>`, and where it may sit",
-      "gist": "Pick how the varying values are marked when one written line becomes several calls.",
-      "lesson": "Think of a spreadsheet. You write one formula, point it at one changing cell, and fill it down the column. The fixed parts are typed once. Only the marked cell moves.\n\nFan-out is that idea in a language. The marks `<:` and `:>` fence the values that move. Everything outside the fence is the fixed formula.\n\nBecause the fence sits exactly where the value would sit, no direction or ordering rule is needed. `report(\"Q3\", <: north, south :>, Level.Summary)` reads as the report line, filled down.\n\nThe same marks work when the values are the receiver. `<: t1, t2 :>.wait()` waits for each one, because the fence is where the receiver goes.\n\nA fence is not a list. `[a, b, c]` is one value holding three things. `<: a, b, c :>` is a note to the compiler saying that this line runs three times.\n\nTwo questions remain, and they are the options below. What may be written inside the fence, and whether anything simpler should win instead.\n\nBoth marks are free in Jet today. Nothing valid puts `<` before `:`, and nothing valid puts `:` before `>`.",
-      "explainer": "",
-      "story": "Nate wants the many-calls fact to be loud, not quiet. He asked for one matched pair, used the same way everywhere: `myFunc(<:a,b,c:>)`, `coolFunc(true, <:a,b,c:>, 42)`, and `<:a,b,c:>.wait()`.",
-      "inWild": "fn report(title: String, region: Region, level: Level) { … }\n\n// three near-identical lines, one column changing\nreport(\"Q3 results\", north, Level.Summary)\nreport(\"Q3 results\", south, Level.Summary)\nreport(\"Q3 results\", east,  Level.Summary)\n\n// and the eight handles from shared_transact.jet, waited one line each\nhandles :: /* eight Task<Unit> */",
-      "detail": "Collision review, checked against the lexer and the shipped grammar.\n\nLEXER. `<` scans as `<<=`, `<<`, `<=`, `<`; `>` as `>>=`, `>>`, `>=`, `>`; `:` as `::`, `:=`, `:`. Adding `<:` and `:>` as longest-match digraphs takes no existing pair, because no expression or type may begin with `:`, and none may begin with `>`. No existing program changes meaning.\n\nWHY A MATCHED PAIR IS SAFER THAN AN INFIX ARROW. Options A and B never use the marks between two values, so `a <: b` is not grammatical and cannot be misread as a comparison. There is no precedence entry, and the closer never competes with an infix use of the same token. Option C reintroduces all three.\n\nLINE BREAKS. `Terminators.rs` inserts a synthetic `Semi` after a line-ending token, with no bracket-depth tracking. `:>` must therefore join `suppresses_terminator`, so a fence closing at the start of a line does not cut the statement. Neither mark may join `ends_statement`.\n\nWHERE A FENCE MAY SIT. In a call's argument list, or in receiver position before a method call. A fence with no enclosing call is an error, so a bare `x :: <: a, b :>` is rejected with a message that names the missing call. Construction `Type.{ … }` counts as a call for this purpose, so `Card.{ title: <: \"a\", \"b\" :>, id: 0 }` builds two cards.\n\nONE FENCE PER CALL. Two fences in one call are rejected; lock-step pairing stays reserved for a later ballot with its own evidence.\n\nMEMORY. Each value is passed with the access its callee demands, so a consuming method needs owned values: `<: ...^handles :>.wait()` under D-MEM1.\n\nWHAT REPEATS. How far the repeat reaches around the marks is D-EACH1, not this ballot. Options A, B and D there share one reach rule; option C sets the reach with its arrow instead.\n\nOUT OF SCOPE. Repeating one value N times is list building, not fan-out. If it ships it ships as a list form such as `[work#8]`, rhyming with the `[T#8]` type.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Fence holds a comma list",
-          "detail": "The fence body is written like a list without its brackets: values separated by commas. A collection you already hold is poured in with the spread mark that Jet already uses for lists and calls.",
-          "technical": "Grammar: `each_domain = \"<:\" [ item { \",\" item } [ \",\" ] ] \":>\"` where `item = expr | \"...\" expr`, matching the list-literal body exactly. Known item count gives `[R#N]`; any spread makes it `[R]`. Empty fence is an error, not an empty run. `f.[a, b, c]` retires with a migration diagnostic.",
-          "code": "report(\"Q3 results\", <: north, south, east :>, Level.Summary)\ndoubled :: double(<: 1, 2, 3 :>)\ngreetings :: greet(<: ...names :>)\n<: ...^handles :>.wait()\n<: t1, t2 :>.wait()"
-        },
-        {
-          "key": "B",
-          "name": "Fence holds one sequence",
-          "detail": "The fence body is a single ordinary expression that yields a sequence. A held collection needs no extra mark, which is the common case in real code. Inline values are written as a list, so they carry brackets.",
-          "technical": "Grammar: `each_domain = \"<:\" expr \":>\"`, where the expression must be a sequence. No spread mark and no second comma-list grammar. A statically sized domain gives `[R#N]`; anything else gives `[R]`. The body may be any expression, including a filter or a call. `f.[a, b, c]` retires.",
-          "code": "report(\"Q3 results\", <: [north, south, east] :>, Level.Summary)\ndoubled :: double(<: [1, 2, 3] :>)\ngreetings :: greet(<: names :>)\n<: ^handles :>.wait()\nactive :: notify(<: users.filter(u => u.online) :>)"
-        },
-        {
-          "key": "C",
-          "name": "Facing arrows with a written slot",
-          "detail": "Drop the fence. Two arrows point at the work, and an underscore marks the slot each value fills. It reaches past calls, so arithmetic and struct templates repeat too, at the cost of a busier operator table.",
-          "technical": "Two infix digraphs plus a reserved bare `_`. Extent is set by precedence rather than by the enclosing call. Needs a precedence entry, a rule banning mixed directions, and an error for a binding named `_`. Reintroduces the `a <: b` near-miss against `a < b`.",
-          "code": "report(\"Q3 results\", _, Level.Summary) <: regions\ndoubled :: [1, 2, 3] :> double\ngreetings :: names :> greet\n^handles :> .wait()\nxs :> _ * 2"
-        },
-        {
-          "key": "D",
-          "name": "No new marks, extend the dot family",
-          "detail": "Fan-out keeps the marks it already has. Nothing enters the alphabet and every shipped example stays green. The repeated part stays quiet, so a reader can miss that one call became several.",
-          "technical": "No lexer change. The domain gains `...expr`, and a bare `.[ … ]` in an argument or receiver position repeats the enclosing call. Same placement rules as A, without the visual warning.",
-          "code": "report(\"Q3 results\", .[north, south, east], Level.Summary)\ndoubled :: double.[1, 2, 3]\ngreetings :: greet.[...names]\n.[...^handles].wait()"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Spreadsheet",
-          "note": "Writes the formula once and fills it down a column. The fixed parts stay in place and only the referenced cell moves.",
-          "code": "=REPORT(\"Q3\", B2, \"Summary\")"
-        },
-        {
-          "lang": "Julia",
-          "note": "Marks the call rather than the values, and works out which arguments vary by shape. Very short, and easy to read past.",
-          "code": "report.(\"Q3\", regions, Summary)"
-        },
-        {
-          "lang": "Scala",
-          "note": "Marks the slot with an underscore, but its extent comes from the surrounding syntax, which is a known source of confusion.",
-          "code": "regions.map(report(\"Q3\", _, Summary))"
-        },
-        {
-          "lang": "Raku",
-          "note": "Uses a distinct pair of marks around a stepped domain, which reads clearly and costs two characters at each end.",
-          "code": "@results = report(\"Q3\", @regions.list, Summary)"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "One matched pair, used identically in every position, and the values stay where they belong in the line. Nothing infix means no precedence, no mixed directions, and no way to read `<:` as a comparison.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Cleaner for held collections, but puts brackets inside marks for inline values, which is the shape Nate wrote out by hand."
-          },
-          {
-            "key": "C",
-            "reason": "Reaches further, and pays for it with a precedence entry, a reserved `_`, and marks that sit one character from a comparison."
-          },
-          {
-            "key": "D",
-            "reason": "Costs nothing to add and keeps the repeat quiet, which is the property this card exists to remove."
-          }
-        ],
-        "tradeoff": "A collection you already hold reads `<: ...names :>` rather than plain `names`, so the everyday case carries three extra characters. Option B is the flip of exactly that trade if the collection case turns out to dominate."
-      },
-      "hybrid": null,
-      "checkInstructions": null,
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-07-27T22:49:34.880Z",
-      "outcome": "B",
-      "ratifiedAt": "2026-07-28"
     }
   ],
   "questions": [
@@ -73482,6 +73402,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-28T01:25:50.908Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0pbnytf",
+      "note": "plan"
+    },
+    {
+      "at": "2026-07-28T01:25:50.632Z",
+      "by": "claude",
+      "action": "decision.update",
+      "ref": "D-EACH1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T01:24:34.638Z",
+      "by": "claude",
+      "action": "card.update",
+      "ref": "c0pbnytf",
+      "note": "title,body,plan,blockedBy"
+    },
+    {
+      "at": "2026-07-28T01:24:23.851Z",
+      "by": "claude",
+      "action": "decision.update",
+      "ref": "D-FANOUT3",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T01:24:23.595Z",
+      "by": "claude",
+      "action": "decision.delete",
+      "ref": "D-EACH-SPELL1",
+      "note": "Fan-out marks: what goes inside `<: … :>`, and where it may sit"
+    },
+    {
+      "at": "2026-07-28T01:24:23.358Z",
+      "by": "claude",
+      "action": "decision.update",
+      "ref": "D-EACH1",
+      "note": ""
+    },
     {
       "at": "2026-07-28T01:22:46.129Z",
       "by": "e3-730-grok",
@@ -76939,48 +76901,6 @@
       "action": "card.update",
       "ref": "c0jhqamo",
       "note": "phase"
-    },
-    {
-      "at": "2026-07-27T20:05:55.256Z",
-      "by": "e3-1110-review",
-      "action": "card.criteria-verify",
-      "ref": "c0jhqamo",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T20:05:55.064Z",
-      "by": "e3-1110-review",
-      "action": "card.criteria-verify",
-      "ref": "c0jhqamo",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T20:05:54.877Z",
-      "by": "e3-1110-review",
-      "action": "card.criteria-verify",
-      "ref": "c0jhqamo",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T20:05:54.700Z",
-      "by": "e3-1110-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0jhqamo",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T20:05:54.518Z",
-      "by": "e3-1110-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0jhqamo",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T20:05:54.326Z",
-      "by": "e3-1110-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0jhqamo",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
