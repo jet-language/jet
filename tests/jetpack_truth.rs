@@ -205,11 +205,11 @@ fn tower_cards(root: &Path) -> BTreeMap<u64, CardState> {
 
 fn ingest_tower_card(
     cards: &mut BTreeMap<u64, CardState>,
-    card: &jetpack::JSON::JSON,
+    card: &jetpack::JSON::JSONValue,
     prefer_existing: bool,
 ) {
     let num = match card.get("num").unwrap() {
-        jetpack::JSON::JSON::Num(num) => *num as u64,
+        jetpack::JSON::JSONValue::Num(num) => *num as u64,
         other => panic!("card num is not numeric: {other:?}"),
     };
     if prefer_existing && cards.contains_key(&num) {
