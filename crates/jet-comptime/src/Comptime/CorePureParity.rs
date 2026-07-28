@@ -420,6 +420,54 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
             let status = if failures == 0 { "ok" } else { "failed" };
             Some(format!("Solver(status: {status}, failures: {failures})"))
         }
+        // Match AOT/JIT `DataError::display_text` / JetShow — not Rust Debug
+        // of the mangled `user_DataError { user_kind: … }` shape (#1250).
+        CtValue::Struct { type_name, fields }
+            if type_name.strip_prefix("user_").unwrap_or(type_name.as_str()) == "DataError" =>
+        {
+            let get = |name: &str| -> Option<&CtValue> {
+                fields.iter().find_map(|(n, v)| {
+                    let n = n.strip_prefix("user_").unwrap_or(n.as_str());
+                    (n == name).then_some(v)
+                })
+            };
+            let kind = match get("kind")? {
+                CtValue::Enum { variant, .. } => {
+                    variant.strip_prefix("user_").unwrap_or(variant).to_string()
+                }
+                _ => return None,
+            };
+            let operation = match get("operation")? {
+                CtValue::Str(s) => s.as_str(),
+                _ => return None,
+            };
+            let reason = match get("reason")? {
+                CtValue::Str(s) => s.as_str(),
+                _ => return None,
+            };
+            let opt_int = |name: &str| -> Option<i64> {
+                match get(name)? {
+                    CtValue::Some(inner) => match inner.as_ref() {
+                        CtValue::Int(n) => Some(*n),
+                        _ => None,
+                    },
+                    CtValue::Int(n) => Some(*n),
+                    _ => None,
+                }
+            };
+            let mut out = format!("{kind} {operation}");
+            if let Some(row) = opt_int("row") {
+                out.push_str(&format!(", row {row}"));
+            }
+            if let Some(column) = opt_int("column") {
+                out.push_str(&format!(", column {column}"));
+            }
+            if let Some(index) = opt_int("index") {
+                out.push_str(&format!(", index {index}"));
+            }
+            out.push_str(&format!(": {reason}"));
+            Some(out)
+        }
         // Core pure structs: REPL/transcript show uses Type(field: jet_show) —
         // not Rust `user_*` Debug — matching AOT JetShow for these foreign types.
         CtValue::Struct { type_name, fields }
