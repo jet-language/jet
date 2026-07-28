@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1259,
-    "rev": 18205,
+    "rev": 18210,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -25,7 +25,7 @@
         "radar:e4"
       ]
     },
-    "digestCursor": "2026-07-28T10:32:27.775Z"
+    "digestCursor": "2026-07-28T10:38:54.471Z"
   },
   "epochs": [
     {
@@ -26330,9 +26330,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:04.053Z",
-      "updated": "2026-07-28T10:35:49.398Z",
+      "updated": "2026-07-28T10:37:27.177Z",
       "workOrder": 3770,
-      "updatedBy": "tower-prep-ballots"
+      "updatedBy": "owner"
     },
     {
       "id": "c0ft6gme",
@@ -54063,7 +54063,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul1-safety",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P0",
       "plan": "## Goal\nClose field-audit G4 under D-PIN1=A: `mem.pin(&place) -> Pin<T>` as a tracked write view that blocks move/replace while live.\n\n## Law (ratified)\n- Pin reuses the owner/provenance graph; no second memory model.\n- Structural field projection is declared by the type implementation.\n- Dropping the final pin ends the no-move loan.\n- Unsafe construction stays local; safe callers use `Pin<T>` APIs.\n- Support stack, Fixed, arena, and owned heap places.\n\n## Scope\nIn: `Pin<T>` type, `mem.pin`, move/replace rejection, projection rules, cleanup/cancel/panic paths, self-referential + intrusive examples.\nOut: Pool/Shared as substitutes; Cell (#1201); Shared guards (#1202).\n\n## Owned paths\n- foundation/core `mem` surface + Syntax.rs if `Pin` is user-typeable\n- sema move/replace/projection checks for pinned places\n- tests (`tests/arena.rs`, `tests/resource_close.rs`, new pin tests)\n- examples: zero-allocation queue node / intrusive list\n- docs/spec memory + syntax-decisions\n\n## Steps\n1. Add `Pin<T>` as expert tracked view; `mem.pin(&place)` entry point.\n2. While any pin is live: reject move, replace, and resize of the pinned storage.\n3. Declare structural pin projection on implementing types; reject undeclared projections.\n4. Ensure drop/cancel/panic/owner destruction preserve the contract.\n5. Example: audited unsafe constructor + safe `Pin` use at call sites.\n6. No-allocation / caller-storage parity cases where Rust Pin can; independent review.\n\n## Acceptance / proof\nCriteria 1–5. Proof: focused pin tests + examples; verify skill syntax chores if new names land.\n\n## Owner gates\n`Pin` / `mem.pin` names were chosen by D-PIN1=A. If additional user-typeable keywords beyond that ruling appear, raise a syntax ballot before shipping. Otherwise blockedBy: none.\n",
       "blockedBy": [
@@ -54071,6 +54071,10 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-07-28",
           "by": "tower-prep-ballots",
@@ -54139,8 +54143,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:00.888Z",
-      "updated": "2026-07-28T10:35:49.617Z",
-      "updatedBy": "tower-prep-ballots"
+      "updated": "2026-07-28T10:37:48.333Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0wpp6cz",
@@ -54222,7 +54226,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-ul1-safety",
-      "phase": "deciding",
+      "phase": "ready",
       "priority": "P1",
       "plan": "## Goal\nShip D-SHAREDGUARD1=A: expert `guard_read` / `guard_edit` and `Condition` on `Shared<T>`, keeping beginner `read`/`edit` closures unchanged.\n\n## Law (ratified)\n- Short closures remain the default.\n- Guards are owned lock tokens with safe cleanup on return/error/panic/cancel.\n- Wait atomically registers, releases, parks, reacquires, and rechecks the predicate.\n- Cancellation unregisters before guard release.\n- Lock-order receipts cover nested guards; dossier/audit integration where grant graph already exists.\n\n## Scope\nIn: Shared guard APIs, Condition, map/split, wait protocols, diagnostics for long lock scopes.\nOut: Mutex/RwLock/Condvar family; changing beginner Shared surface; Cell (#1201) except parallel teaching.\n\n## Owned paths\n- `Shared` corelib + runtime wait/park\n- sema cleanup tracking for guards\n- `tests/ownership.rs`, `tests/concurrency_boundaries.rs`\n- example: bounded work queue with full/empty wait\n- docs + lock-order audit output\n\n## Steps\n1. Add `guard_read` / `guard_edit` without changing `read`/`edit`.\n2. Map/split guards preserve lock + provenance.\n3. Add `Condition` with `wait` / `notify_one` / `notify_all` semantics as ratified.\n4. Prove no lost wakeups; cancel/panic/return always release and unregister.\n5. Lock-order / nested-guard audit facts; diagnostics for long scopes.\n6. Independent review.\n\n## Acceptance / proof\nCriteria 1–5. Proof: concurrency stress for wait; cancellation races; beginner API unchanged snapshot/tests.\n\n## Blockers\nblockedBy: none. D-SHAREDGUARD1 ratified (=A).\n",
       "blockedBy": [
@@ -54230,6 +54234,10 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
         {
           "at": "2026-07-28",
           "by": "tower-prep-ballots",
@@ -54297,8 +54305,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T11:19:01.283Z",
-      "updated": "2026-07-28T10:36:13.012Z",
-      "updatedBy": "tower-prep-ballots"
+      "updated": "2026-07-28T10:38:51.343Z",
+      "updatedBy": "owner"
     },
     {
       "id": "c0kyjd7a",
@@ -58910,8 +58918,14 @@
       "priority": "P1",
       "plan": "Follow the pattern proved by c485d5f17 and 534a49fbd: a ProcessSpec method needs an entry in the safety.rs residency list and in the lower_ctx.rs dispatch, plus a host shim that reuses the existing launch behavior. Store the environment edits and the working directory on JitProcessSpec and apply them at launch exactly as jet_process_command does. Reuse the existing runtime; never a second copy. Prove a program that sets cwd and edits the environment gives byte-identical stdout, stderr and exit under jet run and jet run --release, and add a test that fails if either table entry is removed. Do not grow tests/jit_gaps.txt. blockedBy: none.",
       "blockedBy": [],
-      "assignee": "e3-1255-procenv",
-      "log": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-07-28",
+          "by": "e3-1255-procenv",
+          "text": "[handoff] Commit 7813d1166 landed but independent review rejected closeout. Fix four findings: JIT must use one locked raw-preserving logical environment shared with core.env and atomically snapshot/validate/compose it for child launch; test must directly compare default and --release stdout/stderr/exit; targeted test must pass without a stack override; replace or explicitly gate Unix-only pwd/sh helpers. Review evidence: literal resident JIT passes only with RUST_MIN_STACK=33554432; default stack overflows."
+        }
+      ],
       "criteria": [],
       "refs": [
         "crates/jet-jit/src/Process.rs",
@@ -58921,9 +58935,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T10:03:20.477Z",
-      "updated": "2026-07-28T10:05:48.235Z",
-      "updatedBy": "e3-1255-procenv",
-      "claimedAt": "2026-07-28T10:05:48.234Z"
+      "updated": "2026-07-28T10:41:48.087Z",
+      "updatedBy": "e3-1255-procenv"
     },
     {
       "id": "c0wxnoo3",
@@ -73124,8 +73137,10 @@
       "hybrid": null,
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-28T10:35:48.923Z"
+      "status": "ratified",
+      "created": "2026-07-28T10:35:48.923Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-28"
     },
     {
       "id": "D-PIN2",
@@ -73202,8 +73217,10 @@
       "hybrid": null,
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-28T10:35:49.116Z"
+      "status": "ratified",
+      "created": "2026-07-28T10:35:49.116Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-28"
     },
     {
       "id": "D-SHAREDGUARD2",
@@ -73285,8 +73302,10 @@
       "hybrid": null,
       "checkInstructions": null,
       "draft": false,
-      "status": "open",
-      "created": "2026-07-28T10:36:12.794Z"
+      "status": "ratified",
+      "created": "2026-07-28T10:36:12.794Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-28"
     }
   ],
   "questions": [
@@ -74273,6 +74292,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-28T10:41:48.087Z",
+      "by": "e3-1255-procenv",
+      "action": "card.release",
+      "ref": "c0vxecje",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-28T10:38:51.343Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-SHAREDGUARD2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-28T10:37:48.333Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-PIN2",
+      "note": "A"
+    },
+    {
+      "at": "2026-07-28T10:37:27.177Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-AGENT-EXEC2",
+      "note": "A"
+    },
     {
       "at": "2026-07-28T10:36:43.977Z",
       "by": "burndown-root",
@@ -77743,34 +77790,6 @@
       "by": "e3-1187-grok",
       "action": "card.claim",
       "ref": "c0fv3bcg",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T21:01:02.159Z",
-      "by": "e3-1163-grok",
-      "action": "card.claim",
-      "ref": "c0bp1vi1",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:27.083Z",
-      "by": "cursor",
-      "action": "milestone.update",
-      "ref": "e3-automation-apis",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:26.879Z",
-      "by": "cursor",
-      "action": "milestone.update",
-      "ref": "e3-agent-execution",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:55:26.678Z",
-      "by": "cursor",
-      "action": "milestone.update",
-      "ref": "e3-ul13-boundaries",
       "note": ""
     }
   ],
