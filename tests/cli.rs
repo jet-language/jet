@@ -3529,6 +3529,89 @@ fn ext_optional_check_resolves_dot_jet() {
 }
 
 #[test]
+fn check_fixed_dynamic_size_reports_e0103_without_internal_failure() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let invalid = root.join("tests/fuzz/sema/invalid/ui_fixed_dynamic_size.E0103.jet");
+    let rejected = Command::new(jet())
+        .args(["check", invalid.to_str().unwrap()])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(rejected.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert!(stderr.contains("Error [E0103]"), "{stderr}");
+    for leaked in [
+        "panicked at",
+        "entered unreachable code",
+        "internal error",
+        "generated Rust",
+    ] {
+        assert!(!stderr.contains(leaked), "`{leaked}` leaked:\n{stderr}");
+    }
+
+    let dir = isolated_cwd("check_fixed_comptime_size");
+    fs::write(
+        dir.join("mixed.jet"),
+        "use core.mem\nfn fixed_size() => Int { return 32 }\nfn bad(size: Int) {\n fixed :: mem.Fixed.new(size: size)\n close(^fixed)\n}\nfn run() {\n fixed :: mem.Fixed.new(size: fixed_size())\n close(^fixed)\n}\n",
+    )
+    .unwrap();
+    let mixed = Command::new(jet())
+        .args(["check", "mixed.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(mixed.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&mixed.stderr);
+    assert!(stderr.contains("Error [E0103]"), "{stderr}");
+    assert!(
+        !stderr.contains("panicked at") && !stderr.contains("internal error"),
+        "{stderr}"
+    );
+
+    fs::write(
+        dir.join("helper.jet"),
+        "use core.mem\nfn fixed_size() => Int { return 32 }\nfn run() {\n fixed :: mem.Fixed.new(size: fixed_size())\n close(^fixed)\n}\n",
+    )
+    .unwrap();
+    let helper = Command::new(jet())
+        .args(["check", "helper.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(helper.status.code(), Some(0));
+    let stderr = String::from_utf8_lossy(&helper.stderr);
+    assert!(
+        !stderr.contains("panicked at") && !stderr.contains("internal error"),
+        "{stderr}"
+    );
+
+    fs::write(
+        dir.join("main.jet"),
+        "use core.mem\nfn run() {\n fixed :: mem.Fixed.new(size: 16 + 16)\n close(^fixed)\n}\n",
+    )
+    .unwrap();
+    let accepted = Command::new(jet())
+        .args(["check", "main.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        accepted.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&accepted.stderr);
+    assert!(
+        !stderr.contains("panicked at") && !stderr.contains("internal error"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn check_reports_soft_public_lints_without_failing() {
     let dir = isolated_cwd("check_soft_public");
     fs::write(

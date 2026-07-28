@@ -150,6 +150,54 @@ pub fn walk_calls(e: &Expr, f: &mut impl FnMut(&str, Span)) {
     }
 }
 
+pub(super) fn reachable_owned_funcs(
+    init: &Expr,
+    funcs: &HashMap<String, Func>,
+) -> HashMap<String, Func> {
+    fn collect(
+        expr: &Expr,
+        funcs: &HashMap<String, Func>,
+        visited: &mut HashSet<String>,
+        reachable: &mut HashMap<String, Func>,
+        needs_all: &mut bool,
+    ) {
+        let mut calls = Vec::new();
+        walk_calls(expr, &mut |name, _| calls.push(name.to_string()));
+        for name in calls {
+            if !visited.insert(name.clone()) {
+                continue;
+            }
+            let Some(function) = funcs.get(&name) else {
+                continue;
+            };
+            if function
+                .params
+                .iter()
+                .any(|parameter| matches!(parameter.ty, crate::AST::Type::Fn { .. }))
+            {
+                *needs_all = true;
+                return;
+            }
+            reachable.insert(name, function.clone());
+            for statement in &function.body {
+                walk_stmt_exprs(statement, &mut |expr| {
+                    collect(expr, funcs, visited, reachable, needs_all)
+                });
+            }
+        }
+    }
+
+    let mut visited = HashSet::new();
+    let mut reachable = HashMap::new();
+    let mut needs_all = false;
+    collect(init, funcs, &mut visited, &mut reachable, &mut needs_all);
+    if needs_all {
+        funcs.clone()
+    } else {
+        reachable
+    }
+}
+
 fn walk_stmt_exprs(s: &Stmt, f: &mut impl FnMut(&Expr)) {
     match s {
         Stmt::Expr(e) | Stmt::Val(crate::AST::Binding { init: e, .. }) | Stmt::Yield(e, _) => f(e),

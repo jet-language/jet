@@ -1,5 +1,5 @@
 use crate::AST::{AccessConvention, BindPattern, Binding, CallArg, Expr, MetaAttr, MetaField, StrPart, Type};
-use crate::Diagnostics::Diagnostic;
+use crate::Diagnostics::{Diagnostic, Severity};
 use crate::Sema::Diagnostics::{edit_distance, is_task_type, type_fix_hint};
 use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
@@ -351,7 +351,11 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+            let diagnostics_before_init = self.diags.len();
             let mut it = self.infer(&mut b.init);
+            let init_has_error = self.diags[diagnostics_before_init..]
+                .iter()
+                .any(|diagnostic| diagnostic.severity == Severity::Error);
             self.allow_fixed_constructor = saved_fixed_constructor;
             if let (
                 Some(Type::Result { ok, .. }),
@@ -651,7 +655,9 @@ impl<'a> Checker<'a> {
             let concrete_unit_value = (!b.mutable)
                 .then(|| self.concrete_unit_value(&b.init))
                 .flatten();
-            let constant_value = (!b.mutable)
+            let constant_value = (!b.mutable
+                && !init_has_error
+                && !matches!(&final_ty, Type::Named(name) if name == "Fixed"))
                 .then(|| self.evaluate_constant(&b.init))
                 .flatten();
             self.declare(

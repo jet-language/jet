@@ -978,7 +978,9 @@ pub fn evaluate_owned_with_imports_opts(
     allow_impure: bool,
     initial_impure_depth: usize,
 ) -> Result<CtValue, Diagnostic> {
-    let refs: HashMap<String, &Func> = funcs.iter().map(|(n, f)| (n.clone(), f)).collect();
+    let reachable = Purity::reachable_owned_funcs(init, funcs);
+    let refs: HashMap<String, &Func> =
+        reachable.iter().map(|(name, function)| (name.clone(), function)).collect();
     evaluate_with_imports_opts(
         init,
         &refs,
@@ -1003,7 +1005,9 @@ pub fn evaluate_owned_with_imports_opts_collecting(
     allow_impure: bool,
     initial_impure_depth: usize,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
-    let refs: HashMap<String, &Func> = funcs.iter().map(|(n, f)| (n.clone(), f)).collect();
+    let reachable = Purity::reachable_owned_funcs(init, funcs);
+    let refs: HashMap<String, &Func> =
+        reachable.iter().map(|(name, function)| (name.clone(), function)).collect();
     evaluate_with_imports_opts_collecting(
         init,
         &refs,
