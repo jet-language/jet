@@ -1700,9 +1700,10 @@ series, stats, CSV/JSON ingest, and plots. D-DATAFLOW1=A adds bounded typed
 pull streams (`csv_reader`/`json_reader`), `DataLimits`, and `DataError` for
 the current edition: filters and scalar reducers stay streaming, while group,
 sort, join, pivot, and collect enforce named ceilings. Invalid analytics
-(empty mean, bad quantile, non-finite input, overflow) return `DataError`
-instead of silent zeros or clamps. Pivot cells use distinct `DataPivotCell`
-row/column keys.
+(empty mean/variance, bad quantile, non-finite input, overflow) return `DataError`
+instead of silent zeros or clamps. Numeric reducers use population variance
+(divide by `n`), Neumaier summation, and collapse signed zero to `+0.0` on
+output. Pivot cells use distinct `DataPivotCell` row/column keys.
 
 `data.csv<T>(text)` decodes CSV into `[T]` using the same `#Codable` model as
 `core.encoding.csv.decode<T>`. `data.json<T>(text)` decodes a JSON array of objects
@@ -1725,7 +1726,7 @@ lambdas, so a misspelled row field is a Jet field error before codegen.
 | `count(value)` | `Int` | Count rows/values in `[T]`, `Table<T>`, `Series<T>`, or `LazyFrame<T>` |
 | `sum(values)` / `mean(values)` / `min(values)` / `max(values)` | `Float ? DataError` | Numeric series stats over `[Float]` (empty mean/min/max are `Empty`) |
 | `median(values)` / `quantile(values, q)` | `Float ? DataError` | Sorted numeric quantiles; `q` must be finite in `0.0..=1.0` |
-| `variance(values)` / `stddev(values)` / `describe(values)` | `Float ? DataError` / `DataSummary ? DataError` | Numeric distribution summary |
+| `variance(values)` / `stddev(values)` / `describe(values)` | `Float ? DataError` / `DataSummary ? DataError` | Population variance/stddev (Welford, divide by `n`); empty is `Empty` |
 | `rolling_mean(values, width)` | `[Float] ? DataError` | Rolling window mean; width must be positive |
 | `group_count(rows, row => row.key)` | `[DataGroup] ? DataError` | Count rows by a `String` key |
 | `group_sum(rows, row => row.key, row => row.value)` | `[DataGroup] ? DataError` | Sum a `Float` selector per key |
@@ -1746,10 +1747,13 @@ Flagship proof for this slice is `examples/features/tooling/data_analysis.jet`
 (CSV ingest → filter → sort → join → group → stats → plot → status). The
 hostile corpus is `examples/features/tooling/data_hostile.jet`: empty and
 missing series, duplicate-key joins, delimiter-like pivot keys, stable sort
-ties, non-finite numerics, invalid quantiles and windows, SVG-escaped plot
+ties, non-finite numerics, signed-zero collapse, population variance
+(including singleton `0.0`), invalid quantiles and windows, SVG-escaped plot
 labels, and tightened `DataLimits` failures. Both ship golden output under
 `examples/features/expected/tooling/` and AOT coverage in
-`tests/data_hostile.rs`.
+`tests/data_hostile.rs`. Strict resident-JIT parity (no AOT fallback) is
+covered by `tests/dev.rs`
+(`data_pipelines_and_parsing_match_interpreter_jit_and_aot`).
 
 `Table<T>` and `LazyFrame<T>` keep typed rows; `Series<T>` keeps typed values.
 `data.schema` returns `[DataColumn]` with `.name` and `.type_name` for each

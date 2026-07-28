@@ -34,51 +34,93 @@ fn err(kind: &'static str, operation: &str, reason: impl Into<String>) -> DataEr
     }
 }
 
+fn normalize_zero(value: f64) -> f64 {
+    if value == 0.0 {
+        0.0
+    } else {
+        value
+    }
+}
+
 fn reject_nonfinite(operation: &str, values: &[f64]) -> Result<(), DataError> {
     for (i, v) in values.iter().enumerate() {
         if !v.is_finite() {
             return Err(DataError {
                 kind: "NonFinite",
-                operation: "sum".into(),
+                operation: operation.into(),
                 reason: "numeric input must be finite".into(),
                 index: Some(i as i64),
             });
         }
     }
-    let _ = operation;
     Ok(())
+}
+
+/// Neumaier compensated sum — matches AOT `jet_data_neumaier_sum` (reports as `sum`).
+fn neumaier_sum(values: &[f64]) -> Result<f64, DataError> {
+    reject_nonfinite("sum", values)?;
+    let mut sum = 0.0f64;
+    let mut compensation = 0.0f64;
+    for value in values.iter().copied() {
+        let t = sum + value;
+        if sum.abs() >= value.abs() {
+            compensation += (sum - t) + value;
+        } else {
+            compensation += (value - t) + sum;
+        }
+        sum = t;
+        if !sum.is_finite() || !compensation.is_finite() {
+            return Err(err(
+                "Overflow",
+                "sum",
+                "finite overflow while summing",
+            ));
+        }
+    }
+    let out = sum + compensation;
+    if !out.is_finite() {
+        return Err(err(
+            "Overflow",
+            "sum",
+            "finite overflow while summing",
+        ));
+    }
+    Ok(normalize_zero(out))
 }
 
 fn mean_checked(values: &[f64]) -> Result<f64, DataError> {
     if values.is_empty() {
         return Err(err("Empty", "mean", "mean of empty data is undefined"));
     }
-    reject_nonfinite("mean", values)?;
-    Ok(values.iter().sum::<f64>() / values.len() as f64)
+    let sum = neumaier_sum(values)?;
+    Ok(normalize_zero(sum / values.len() as f64))
 }
 
 fn sum_checked(values: &[f64]) -> Result<f64, DataError> {
     if values.is_empty() {
         return Ok(0.0);
     }
-    reject_nonfinite("sum", values)?;
-    Ok(values.iter().sum())
+    neumaier_sum(values)
 }
 
 fn min_checked(values: &[f64]) -> Result<f64, DataError> {
     if values.is_empty() {
-        return Err(err("Empty", "min", "empty series"));
+        return Err(err("Empty", "min", "min of empty data is undefined"));
     }
     reject_nonfinite("min", values)?;
-    Ok(values.iter().cloned().fold(f64::INFINITY, f64::min))
+    Ok(normalize_zero(
+        values.iter().copied().fold(f64::INFINITY, f64::min),
+    ))
 }
 
 fn max_checked(values: &[f64]) -> Result<f64, DataError> {
     if values.is_empty() {
-        return Err(err("Empty", "max", "empty series"));
+        return Err(err("Empty", "max", "max of empty data is undefined"));
     }
     reject_nonfinite("max", values)?;
-    Ok(values.iter().cloned().fold(f64::NEG_INFINITY, f64::max))
+    Ok(normalize_zero(
+        values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+    ))
 }
 
 fn quantile_checked(values: &[f64], q: f64) -> Result<f64, DataError> {
@@ -99,19 +141,16 @@ fn quantile_checked(values: &[f64], q: f64) -> Result<f64, DataError> {
     reject_nonfinite("quantile", values)?;
     let mut sorted = values.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let n = sorted.len();
-    if n == 1 {
-        return Ok(sorted[0]);
-    }
-    let pos = q * (n as f64 - 1.0);
+    let pos = q * (sorted.len().saturating_sub(1)) as f64;
     let lo = pos.floor() as usize;
     let hi = pos.ceil() as usize;
-    if lo == hi {
-        Ok(sorted[lo])
+    let value = if lo == hi {
+        sorted[lo]
     } else {
-        let w = pos - lo as f64;
-        Ok(sorted[lo] * (1.0 - w) + sorted[hi] * w)
-    }
+        let t = pos - lo as f64;
+        sorted[lo] * (1.0 - t) + sorted[hi] * t
+    };
+    Ok(normalize_zero(value))
 }
 
 fn median_checked(values: &[f64]) -> Result<f64, DataError> {
@@ -122,19 +161,37 @@ fn median_checked(values: &[f64]) -> Result<f64, DataError> {
 }
 
 fn variance_checked(values: &[f64]) -> Result<f64, DataError> {
-    if values.len() < 2 {
-        return Err(err("Empty", "variance", "need at least two values"));
+    if values.is_empty() {
+        return Err(err(
+            "Empty",
+            "variance",
+            "variance of empty data is undefined",
+        ));
     }
-    let mean = mean_checked(values)?;
-    let sum_sq: f64 = values.iter().map(|v| {
-        let d = v - mean;
-        d * d
-    }).sum();
-    Ok(sum_sq / (values.len() as f64 - 1.0))
+    reject_nonfinite("variance", values)?;
+    // Deterministic Welford population variance in input order (matches AOT).
+    let mut count = 0.0f64;
+    let mut mean = 0.0f64;
+    let mut m2 = 0.0f64;
+    for value in values.iter().copied() {
+        count += 1.0;
+        let delta = value - mean;
+        mean += delta / count;
+        let delta2 = value - mean;
+        m2 += delta * delta2;
+        if !mean.is_finite() || !m2.is_finite() {
+            return Err(err(
+                "Overflow",
+                "variance",
+                "finite overflow while computing variance",
+            ));
+        }
+    }
+    Ok(normalize_zero(m2 / count))
 }
 
 fn stddev_checked(values: &[f64]) -> Result<f64, DataError> {
-    Ok(variance_checked(values)?.sqrt())
+    Ok(normalize_zero(variance_checked(values)?.sqrt()))
 }
 
 #[derive(Clone)]
@@ -157,27 +214,16 @@ fn describe_checked(values: &[f64]) -> Result<DataSummary, DataError> {
             "describe of empty data is undefined",
         ));
     }
-    let sum = sum_checked(values)?;
-    let mean = mean_checked(values)?;
-    let variance = if values.len() < 1 {
-        0.0
-    } else {
-        // Match AOT population variance used by jet_data_variance.
-        let sum_sq: f64 = values.iter().map(|v| {
-            let d = v - mean;
-            d * d
-        }).sum();
-        sum_sq / values.len() as f64
-    };
+    let variance = variance_checked(values)?;
     Ok(DataSummary {
         count: values.len() as i64,
-        sum,
-        mean,
+        sum: sum_checked(values)?,
+        mean: mean_checked(values)?,
         min: min_checked(values)?,
         max: max_checked(values)?,
         median: median_checked(values)?,
         variance,
-        stddev: variance.sqrt(),
+        stddev: normalize_zero(variance.sqrt()),
     })
 }
 
@@ -190,8 +236,23 @@ struct DataGroup {
 }
 
 fn bar_text_checked(groups: &[DataGroup]) -> Result<String, DataError> {
-    if groups.is_empty() {
-        return Err(err("Empty", "bar_text", "empty groups"));
+    for (index, g) in groups.iter().enumerate() {
+        if g.count < 0 {
+            return Err(DataError {
+                kind: "InvalidArgument",
+                operation: "bar_text".into(),
+                reason: "plot counts must be non-negative".into(),
+                index: Some(index as i64),
+            });
+        }
+        if !g.sum.is_finite() || !g.mean.is_finite() {
+            return Err(DataError {
+                kind: "NonFinite",
+                operation: "bar_text".into(),
+                reason: "plot values must be finite".into(),
+                index: Some(index as i64),
+            });
+        }
     }
     let mut lines = Vec::new();
     for g in groups {
@@ -213,12 +274,22 @@ fn svg_escape(s: &str) -> String {
 }
 
 fn bar_svg_checked(groups: &[DataGroup]) -> Result<String, DataError> {
-    if groups.is_empty() {
-        return Err(err("Empty", "bar_svg", "empty groups"));
-    }
-    for g in groups {
+    for (index, g) in groups.iter().enumerate() {
         if g.count < 0 {
-            return Err(err("Invalid", "bar_svg", "negative count"));
+            return Err(DataError {
+                kind: "InvalidArgument",
+                operation: "bar_svg".into(),
+                reason: "plot counts must be non-negative".into(),
+                index: Some(index as i64),
+            });
+        }
+        if !g.sum.is_finite() || !g.mean.is_finite() {
+            return Err(DataError {
+                kind: "NonFinite",
+                operation: "bar_svg".into(),
+                reason: "plot values must be finite".into(),
+                index: Some(index as i64),
+            });
         }
     }
     let width = 320.0f64;
@@ -749,7 +820,14 @@ extern "C" fn jet_jit_data_rolling_mean(values: i64, width: i64) -> i64 {
     for i in 0..vals.len() {
         let start = i.saturating_add(1).saturating_sub(width);
         let window = &vals[start..=i];
-        out.push(window.iter().sum::<f64>() / window.len() as f64);
+        match neumaier_sum(window) {
+            Ok(sum) => out.push(normalize_zero(sum / window.len() as f64)),
+            Err(e) => {
+                let mut e = e;
+                e.operation = "rolling_mean".into();
+                return result_data_err(e);
+            }
+        }
     }
     Concurrency::with_runtime_mut(|rt| {
         let list = rt.heap.alloc_empty_list();

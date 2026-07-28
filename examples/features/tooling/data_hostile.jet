@@ -1,4 +1,4 @@
-// #709 / #237 C4: hostile typed-data corpus — typed DataError or safe behavior.
+// #709 / #237 C4 / #706: hostile typed-data corpus — typed DataError or safe behavior.
 use core.data as data
 use core.files as files
 
@@ -33,6 +33,11 @@ fn run() {
     if empty_q == {
         .Ok(_) -> { print("empty_quantile: ok") }
         .Err(error) -> { print("empty_quantile: {error}") }
+    }
+    empty_var :: data.variance([Float].{})
+    if empty_var == {
+        .Ok(_) -> { print("empty_variance: ok") }
+        .Err(error) -> { print("empty_variance: {error}") }
     }
 
     // All-missing series: typed optionals, not a second sentinel.
@@ -72,6 +77,18 @@ fn run() {
         .Ok(_) -> { print("inf_sum: ok") }
         .Err(error) -> { print("inf_sum: {error}") }
     }
+
+    // Signed zero collapses to +0.0 on reducer output (no silent -0.0).
+    signed_sum :: data.sum([-0.0, -0.0]) ?? panic("signed_sum")
+    signed_mean :: data.mean([-0.0, 0.0]) ?? panic("signed_mean")
+    print("signed_zero_sum: {signed_sum}")
+    print("signed_zero_mean: {signed_mean}")
+
+    // Population variance (divide by n); singleton series is defined as 0.0.
+    pop_var :: data.variance([1.0, 2.0, 3.0]) ?? panic("pop_var")
+    one_var :: data.variance([4.0]) ?? panic("one_var")
+    print("pop_variance: {pop_var}")
+    print("one_variance: {one_var}")
 
     // Invalid quantile domain and rolling width.
     bad_q :: data.quantile([1.0, 2.0, 3.0], 1.5)
