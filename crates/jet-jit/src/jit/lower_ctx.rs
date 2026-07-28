@@ -4101,7 +4101,7 @@ impl LowerCtx<'_, '_> {
                 self.vars.insert(TIR::local_place(&handle.name), var);
                 self.var_tys.insert(
                     TIR::local_place(&handle.name),
-                    Type::Named("LayoutHandle".to_string()),
+                    Type::Named("Layout".to_string()),
                 );
                 self.lower_stmts_scoped(body)?;
             }
@@ -8487,11 +8487,27 @@ impl LowerCtx<'_, '_> {
                             }
                         }
                     }
+                    // `csv.to_string` has two shapes: the dynamic `[[String]]` rows
+                    // form, and the typed `[T]` Codable form AOT renders through
+                    // `jet_enc_csv_to_string`. Only rows may reach the rows host —
+                    // feeding it a typed list used to render an empty string and
+                    // report success, which is silent data loss.
+                    let rows_arg = args.first().is_some_and(|a| {
+                        matches!(&a.ty, Type::List(inner)
+                            if matches!(inner.as_ref(), Type::List(cell)
+                                if matches!(cell.as_ref(), Type::String)))
+                    });
+                    if method == "to_string" && args.len() == 1 && !rows_arg {
+                        return self.lower_typed_tree_to_string(
+                            &args[0],
+                            self.host.encoding.csv_tree_to_string,
+                        );
+                    }
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "parse" if args.len() == 1 => {
                             (self.host.encoding.csv_parse, vec![self.lower_expr(&args[0])?])
                         }
-                        "to_string" if args.len() == 1 => (
+                        "to_string" if args.len() == 1 && rows_arg => (
                             self.host.encoding.csv_to_string,
                             vec![self.lower_expr(&args[0])?],
                         ),

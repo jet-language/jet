@@ -682,6 +682,49 @@ extern "C" fn jet_jit_csv_to_string(rows: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
 }
 
+/// Typed `csv.to_string([T])` where `T` is `#Codable`: the encoded `DataTree` is
+/// an array of flat objects. Header comes from the first row's keys, then one
+/// record per element. Mirrors AOT `jet_enc_csv_to_string` cell for cell.
+fn csv_render_datatree(tree: &json_rt::DataTree) -> String {
+    let json_rt::DataTree::Array(trees) = tree else {
+        return String::new();
+    };
+    let mut header: Vec<String> = Vec::new();
+    if let Some(json_rt::DataTree::Object(entries)) = trees.first() {
+        header = entries.iter().map(|(k, _)| k.clone()).collect();
+    }
+    let mut rows: Vec<Vec<String>> = vec![header.clone()];
+    for tree in trees {
+        let mut record = Vec::with_capacity(header.len());
+        for key in &header {
+            let cell = match tree {
+                json_rt::DataTree::Object(entries) => entries
+                    .iter()
+                    .find(|(k, _)| k == key)
+                    .map(|(_, v)| v.clone()),
+                _ => None,
+            };
+            record.push(match cell {
+                Some(json_rt::DataTree::Text(s)) => s,
+                Some(json_rt::DataTree::Int(n)) => n.to_string(),
+                Some(json_rt::DataTree::Float(f)) => format!("{f:?}"),
+                Some(json_rt::DataTree::Bool(b)) => b.to_string(),
+                Some(json_rt::DataTree::Null) | None => String::new(),
+                Some(other) => json_rt::render_datatree_json(&other, false, 0),
+            });
+        }
+        rows.push(record);
+    }
+    csv_render(&rows)
+}
+
+extern "C" fn jet_jit_csv_tree_to_string(tree: i64) -> i64 {
+    let rendered = read_datatree(tree)
+        .map(|t| csv_render_datatree(&t))
+        .unwrap_or_default();
+    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
+}
+
 // ── UUID (mirrors jet_std_uuid_v4 / jet_std_uuid_v7) ─────────────────────────
 
 fn uuid_fill_random(out: &mut [u8]) {
@@ -1543,6 +1586,7 @@ pub(crate) struct EncodingHostFns {
     pub base32_decode: cranelift_module::FuncId,
     pub csv_parse: cranelift_module::FuncId,
     pub csv_to_string: cranelift_module::FuncId,
+    pub csv_tree_to_string: cranelift_module::FuncId,
     pub uuid_v4: cranelift_module::FuncId,
     pub uuid_v7: cranelift_module::FuncId,
     pub json_parse: cranelift_module::FuncId,
@@ -1593,6 +1637,10 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
     builder.symbol("jet_jit_base32_decode", jet_jit_base32_decode as *const u8);
     builder.symbol("jet_jit_csv_parse", jet_jit_csv_parse as *const u8);
     builder.symbol("jet_jit_csv_to_string", jet_jit_csv_to_string as *const u8);
+    builder.symbol(
+        "jet_jit_csv_tree_to_string",
+        jet_jit_csv_tree_to_string as *const u8,
+    );
     builder.symbol("jet_jit_uuid_v4", jet_jit_uuid_v4 as *const u8);
     builder.symbol("jet_jit_uuid_v7", jet_jit_uuid_v7 as *const u8);
     builder.symbol("jet_jit_json_parse", jet_jit_json_parse as *const u8);
@@ -1948,6 +1996,7 @@ pub(crate) fn declare_encoding_host_fns(
         base32_decode: import("jet_jit_base32_decode", &sig_unary)?,
         csv_parse: import("jet_jit_csv_parse", &sig_unary)?,
         csv_to_string: import("jet_jit_csv_to_string", &sig_unary)?,
+        csv_tree_to_string: import("jet_jit_csv_tree_to_string", &sig_unary)?,
         uuid_v4: import("jet_jit_uuid_v4", &sig_nullary)?,
         uuid_v7: import("jet_jit_uuid_v7", &sig_unary)?,
         json_parse: import("jet_jit_json_parse", &sig_unary)?,

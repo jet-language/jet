@@ -1,6 +1,6 @@
-// 56 — typed CSV decode → struct → JSON (D-SERDE; the c89+c90 pipeline).
-// `csv.decode<Sale>` maps columns to fields by header name; one derive then
-// re-emits the same values as JSON.
+// 56 — typed CSV round-trip → struct → JSON (D-SERDE; the c89+c90 pipeline).
+// `csv.decode<Sale>` maps columns to fields by header name; `csv.to_string`
+// writes the same values back, and one derive re-emits them as JSON.
 use core.encoding.csv as csv
 use core.encoding.json as json
 
@@ -17,5 +17,6 @@ fn run() {
     loop s; sales { total += s.qty }
     print("rows: {sales.len()}")
     print("total qty: {total}")
+    print(csv.to_string(sales))
     print(json.to_string(sales))
 }

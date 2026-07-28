@@ -139,11 +139,62 @@ fn as_string_rows(v: &CtValue, span: Span) -> Result<Vec<Vec<String>>, Diagnosti
                     .iter()
                     .map(|c| Ok(as_string(c, span)?.to_string()))
                     .collect::<Result<Vec<_>, _>>(),
-                _ => Err(unsupported("core.url query rows must be `[[String]]`", span)),
+                _ => Err(unsupported("rows that are not `[[String]]`", span)),
             })
             .collect(),
-        _ => Err(unsupported("core.url query rows must be `[[String]]`", span)),
+        _ => Err(unsupported("rows that are not `[[String]]`", span)),
     }
+}
+
+/// Typed `csv.to_string([T])`: a list of records becomes a header row taken from
+/// the first record's fields plus one row per record. Mirrors AOT
+/// `jet_enc_csv_to_string` and the resident JIT's `csv_render_datatree` cell for
+/// cell. Returns `None` when the value is not a list of records, so the caller
+/// can fall back to the dynamic `[[String]]` rows shape.
+fn csv_rows_from_records(v: &CtValue) -> Option<Vec<Vec<String>>> {
+    let CtValue::List(items) = v else {
+        return None;
+    };
+    let field_names = |value: &CtValue| match value {
+        CtValue::Struct { fields, .. } => Some(
+            fields
+                .iter()
+                .map(|(name, _)| name.strip_prefix("user_").unwrap_or(name).to_string())
+                .collect::<Vec<_>>(),
+        ),
+        _ => None,
+    };
+    let header = field_names(items.first()?)?;
+    if items.iter().any(|item| field_names(item).is_none()) {
+        return None;
+    }
+    let cell = |value: &CtValue| match value {
+        CtValue::Str(s) => s.clone(),
+        CtValue::Int(n) => n.to_string(),
+        CtValue::Float(f) => f.render(),
+        CtValue::Bool(b) => b.to_string(),
+        CtValue::Unit | CtValue::None(_) => String::new(),
+        other => other.to_json(),
+    };
+    let mut rows = vec![header.clone()];
+    for item in items {
+        let CtValue::Struct { fields, .. } = item else {
+            return None;
+        };
+        rows.push(
+            header
+                .iter()
+                .map(|key| {
+                    fields
+                        .iter()
+                        .find(|(name, _)| name.strip_prefix("user_").unwrap_or(name) == key)
+                        .map(|(_, value)| cell(value))
+                        .unwrap_or_default()
+                })
+                .collect(),
+        );
+    }
+    Some(rows)
 }
 
 /// Mirrors AOT's `JetURL` field shape 1:1 so `.scheme`/`.host`/`.path`/
@@ -1193,7 +1244,13 @@ pub fn apply_core_call(
             }
         }
         ("core.encoding.csv", "to_string") => {
-            let rows = as_string_rows(one(0)?, span)?;
+            // Two shapes, same as AOT and the resident JIT: dynamic `[[String]]`
+            // rows, or a typed `[T]` list of `#Codable` values (#1269).
+            let arg = one(0)?;
+            let rows = match csv_rows_from_records(arg) {
+                Some(rows) => rows,
+                None => as_string_rows(arg, span)?,
+            };
             Ok(CtValue::Str(super::super::EncodingLite::csv_render(&rows)))
         }
         // --- core.encoding.toml (ported verbatim, `EncodingLite.rs`) ---

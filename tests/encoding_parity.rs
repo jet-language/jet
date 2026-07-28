@@ -373,6 +373,66 @@ fn whole_value_codecs_match_aot_comptime_and_default_dev() {
     assert_default_dev_matches_aot_or_honest_gap("whole-value", &path, scratch.path(), &aot, true);
 }
 
+/// `csv.to_string` takes either the dynamic `[[String]]` rows form or a typed
+/// `[T]` list of `#Codable` values. The resident JIT used to send both to the
+/// rows host, so a typed list rendered "" and still reported success — silent
+/// data loss on the default `jet run` path (#1269). Both shapes are exercised
+/// here so the rows form stays covered too.
+const TYPED_CSV_ENCODE: &str = r#"
+use core.encoding.csv as csv
+
+#Codable
+struct Sale {
+    item: String
+    qty: Int
+}
+
+fn run() {
+    sales :: [Sale.{item: "pen", qty: 3}, Sale.{item: "ink", qty: 5}]
+    typed :: csv.to_string(sales)
+    print("typed-len: {typed.len()}")
+    print(typed)
+    rows :: [["name", "score"], ["ada", "9"]]
+    print("rows: {csv.to_string(rows)}")
+}
+"#;
+
+#[test]
+fn typed_csv_encode_matches_aot_and_default_dev() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping typed CSV encode parity (need rustc)");
+        return;
+    }
+    let scratch = Scratch::new("typed_csv_encode");
+    let path = scratch.write_project("2026", TYPED_CSV_ENCODE);
+    let aot = run_aot(&path, scratch.path());
+    assert_eq!(aot.exit, 0, "typed CSV AOT failed: {}", aot.stderr);
+    // An empty success is never correct: pin the real cells, not just parity,
+    // so both lenses agreeing on "" could not pass this test.
+    assert!(
+        aot.stdout.contains("item,qty\npen,3\nink,5"),
+        "typed CSV AOT lost the records: {}",
+        aot.stdout
+    );
+    assert!(
+        aot.stdout.contains("typed-len: 20"),
+        "typed CSV AOT length drifted: {}",
+        aot.stdout
+    );
+    assert!(
+        aot.stdout.contains("rows: name,score\nada,9"),
+        "dynamic rows CSV regressed: {}",
+        aot.stdout
+    );
+    assert_default_dev_matches_aot_or_honest_gap(
+        "typed-csv-encode",
+        &path,
+        scratch.path(),
+        &aot,
+        true,
+    );
+}
+
 fn stream_fixture(format: &str, body: &str) -> String {
     format!(
         r#"
