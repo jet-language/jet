@@ -4998,14 +4998,30 @@ fn fail() => Int ? IOError {
     }))
 }
 
+fn fail_other() => Int ? IOError {
+    return Err(IOError.Other(IOContext.{
+        cause: Val("denied"),
+        os_code: Val(13),
+        resource: Val("out.txt"),
+        operation: .Write,
+    }))
+}
+
 fn run() {
     if fail() == {
         Ok(_) -> panic("failure succeeded")
         Err(error) -> print("{error#Debug}")
     }
+    if fail_other() == {
+        Ok(_) -> panic("other failure succeeded")
+        Err(error) -> print("{error#Debug}")
+    }
 }
 "#;
-    let expected_aot = "InvalidInput(IOContext { operation: Resolve, resource: None, os_code: None, cause: Some(\"debug\") })\n";
+    let expected_aot = concat!(
+        "InvalidInput(IOContext { operation: Resolve, resource: None, os_code: None, cause: Some(\"debug\") })\n",
+        "Other(IOContext { operation: Write, resource: Some(\"out.txt\"), os_code: Some(13), cause: Some(\"denied\") })\n",
+    );
     let expected_dev = expected_aot;
     let (code, stdout, stderr) = build_and_run(
         &dir,

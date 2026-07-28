@@ -2569,13 +2569,17 @@ impl<'a> EvalCtx<'a> {
                                     .unwrap_or(type_name)
                                     == "IOContext" =>
                             {
-                                let fields: Vec<String> = fields
+                                let fields: Vec<String> =
+                                    ["operation", "resource", "os_code", "cause"]
                                     .iter()
-                                    .map(|(name, value)| {
-                                        let name =
-                                            name.strip_prefix("user_").unwrap_or(name);
+                                    .map(|wanted| {
+                                        let value = fields.iter().find_map(|(name, value)| {
+                                            (name.strip_prefix("user_").unwrap_or(name)
+                                                == *wanted)
+                                                .then_some(value)
+                                        });
                                         let value = match value {
-                                            CtValue::Enum { variant, args, .. }
+                                            Some(CtValue::Enum { variant, args, .. })
                                                 if args.is_empty() =>
                                             {
                                                 variant
@@ -2583,9 +2587,10 @@ impl<'a> EvalCtx<'a> {
                                                     .unwrap_or(variant)
                                                     .to_string()
                                             }
-                                            _ => value.debug_rust(),
+                                            Some(value) => value.debug_rust(),
+                                            None => CtValue::Unit.debug_rust(),
                                         };
-                                        format!("{name}: {value}")
+                                        format!("{wanted}: {value}")
                                     })
                                     .collect();
                                 format!("IOContext {{ {} }}", fields.join(", "))
