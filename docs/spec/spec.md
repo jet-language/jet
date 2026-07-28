@@ -148,12 +148,12 @@ expr     = precedence climbing over:
   alternatives in arm heads use single `|`.
 
 A control construct is an expression wherever it produces a value; its runtime
-artifacts are types; the construct itself never is. Lambdas already name
-deferred control, and value-producing cases are already expressions. Typed
+artifacts are types; the construct itself never is. Jet already uses lambdas
+for deferred control, so `Loop` and `If` types would duplicate the lambda
+mechanism and violate I8. Value-producing cases are already expressions. Typed
 artifacts hold reusable values, while constructs stay zero-cost keywords and
 keep code readable from top to bottom. See
-`docs/audits/type-unification-audit-2026-07-28.md`, heading
-`### F11 — Spec law: constructs are never types; their artifacts always are`.
+[type-unification audit F11](../audits/type-unification-audit-2026-07-28.md#f11--spec-law-constructs-are-never-types-their-artifacts-always-are).
 
 - `if` is Jet's one branching form. Its preferred multi-branch surface is an
   ordered arm table: `if subject == { head -> body }` when naming a subject
