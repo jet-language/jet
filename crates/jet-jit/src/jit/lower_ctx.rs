@@ -6492,40 +6492,25 @@ impl LowerCtx<'_, '_> {
         let (field_names, field_tys) = self.meta.struct_layout(type_name).ok_or_else(|| {
             format!("jit string interp type unsupported: Named({type_name:?})")
         })?;
-        // JetDebug needs #[Redact] metadata from the ProgramBundle. Refuse when
-        // missing rather than leak secrets (Display/JetShow path above is fine).
-        if matches!(fmt, StrFormat::Debug)
-            && !field_names.is_empty()
+        // Both lenses render records with Jet-source names (I2), so both need
+        // #[Redact] metadata from the ProgramBundle. Refuse when it is missing
+        // rather than leak secrets.
+        if !field_names.is_empty()
             && super::types_meta::struct_field_redacted(type_name, 0).is_none()
         {
             return Err(format!(
-                "jit string interp Debug type unsupported: Named({type_name:?})"
+                "jit string interp type unsupported: Named({type_name:?})"
             ));
         }
         let handle = self.lower_expr(expr)?;
-        let mangled_show = matches!(fmt, StrFormat::Display);
-        let head = if mangled_show {
-            format!("user_{type_name} {{ ")
-        } else {
-            format!("{type_name} {{ ")
-        };
-        self.push_str_lit(buf_id, &head)?;
+        self.push_str_lit(buf_id, &format!("{type_name} {{ "))?;
         for (i, (fname, fty)) in field_names.iter().zip(field_tys.iter()).enumerate() {
             if i > 0 {
                 self.push_str_lit(buf_id, ", ")?;
             }
-            let label = if mangled_show {
-                fname.clone()
-            } else {
-                fname
-                    .strip_prefix("user_")
-                    .unwrap_or(fname.as_str())
-                    .to_string()
-            };
+            let label = fname.strip_prefix("user_").unwrap_or(fname.as_str());
             self.push_str_lit(buf_id, &format!("{label}: "))?;
-            if matches!(fmt, StrFormat::Debug)
-                && super::types_meta::struct_field_redacted(type_name, i) == Some(true)
-            {
+            if super::types_meta::struct_field_redacted(type_name, i) == Some(true) {
                 self.push_str_lit(buf_id, "[redacted]")?;
                 continue;
             }

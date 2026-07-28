@@ -2521,6 +2521,10 @@ impl<'a> EvalCtx<'a> {
                     return Ok(s);
                 }
             }
+            // I2: no user `display` — render Jet-source names, the same body AOT
+            // `JetShow` uses for records. `jet_show` still mirrors Rust's mangled
+            // derive for the internal differential corpus.
+            return Ok(self.debug_value(v));
         }
         Ok(v.jet_show())
     }
@@ -2530,7 +2534,19 @@ impl<'a> EvalCtx<'a> {
             CtValue::Struct { type_name, fields } => {
                 let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
                 let Some(defs) = self.struct_fields.get(ty) else {
-                    return v.debug_rust();
+                    // Builtin struct with no declared fields on hand (Vec3, …).
+                    // Still render Jet-source names — `debug_rust` re-mangles (I2).
+                    if fields.is_empty() {
+                        return format!("{ty} {{}}");
+                    }
+                    let parts: Vec<String> = fields
+                        .iter()
+                        .map(|(name, value)| {
+                            let name = name.strip_prefix("user_").unwrap_or(name);
+                            format!("{name}: {}", self.debug_value(value))
+                        })
+                        .collect();
+                    return format!("{ty} {{ {} }}", parts.join(", "));
                 };
                 if defs.is_empty() {
                     return format!("{ty} {{}}");
@@ -2604,8 +2620,10 @@ impl<'a> EvalCtx<'a> {
                         format!("{var}({})", parts.join(", "))
                     };
                 }
+                // Bare variant, matching AOT `JetShow`/`JetDebug` for enums.
+                let _ = ty;
                 if args.is_empty() {
-                    format!("{ty}.{var}")
+                    var.to_string()
                 } else if args.iter().all(|(label, _)| label.is_some()) {
                     let parts: Vec<String> = args
                         .iter()
@@ -2617,13 +2635,13 @@ impl<'a> EvalCtx<'a> {
                             )
                         })
                         .collect();
-                    format!("{ty}.{var} {{ {} }}", parts.join(", "))
+                    format!("{var} {{ {} }}", parts.join(", "))
                 } else {
                     let parts: Vec<String> = args
                         .iter()
                         .map(|(_, val)| self.debug_value(val))
                         .collect();
-                    format!("{ty}.{var}({})", parts.join(", "))
+                    format!("{var}({})", parts.join(", "))
                 }
             }
             _ => v.debug_rust(),

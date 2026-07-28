@@ -275,11 +275,9 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             ));
         }
     } else {
-        let show_body = if has_fn_field {
-            format!("\"{} {{ ... }}\".to_string()", s.name)
-        } else {
-            "format!(\"{:?}\", self)".to_string()
-        };
+        // I2: Rust's `{:?}` would leak the mangled `user_Point { user_x: … }`
+        // form. Render Jet-source names instead — the same body `jet_debug` uses.
+        let show_body = struct_jet_debug_body(s, has_fn_field);
         let impl_generic = if has_view_field { "<'__jet_view>" } else { "" };
         let type_arg = if has_view_field { "<'__jet_view>" } else { "" };
         out.push_str(&format!(
@@ -1242,12 +1240,14 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         ));
     }
     out.push_str(&format!(
-        "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{ format!(\"{{:?}}\", self) }}\n}}\n\n",
-        e.name
+        "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
+        e.name,
+        enum_jet_render_body(e)
     ));
     out.push_str(&format!(
-        "impl JetDebug for user_{} {{\n    fn jet_debug(&self) -> String {{ format!(\"{{:?}}\", self) }}\n}}\n\n",
-        e.name
+        "impl JetDebug for user_{} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
+        e.name,
+        enum_jet_render_body(e)
     ));
     if !cx.display_types.contains(&e.name) {
         out.push_str(&format!(
@@ -1712,6 +1712,52 @@ pub(crate) fn emit_trait_impl(
             Generics::user_trait_rust(crate::Syntax::TRAIT_DISPLAY),
         ));
     }
+}
+
+/// I2: render an enum value with Jet-source names. Rust's derived `Debug` would
+/// print the mangled `user_Red` / `user_Some(user_x: …)` form. Payloads render
+/// through `jet_debug` — the same rule struct bodies use, so a `String` payload
+/// keeps its quotes in both lenses.
+fn enum_jet_render_body(e: &EnumDef) -> String {
+    let method = "jet_debug";
+    let mut arms = String::new();
+    for v in &e.variants {
+        let pat = mangle_variant(&v.name);
+        match &v.payload {
+            VariantPayload::Unit => {
+                arms.push_str(&format!(
+                    "            Self::{pat} => \"{}\".to_string(),\n",
+                    v.name
+                ));
+            }
+            VariantPayload::Single(_, _) => {
+                arms.push_str(&format!(
+                    "            Self::{pat}(__v) => format!(\"{}({{}})\", (__v).{method}()),\n",
+                    v.name
+                ));
+            }
+            VariantPayload::Named(fs) => {
+                let binds: Vec<String> = fs.iter().map(|f| mangle(&f.name)).collect();
+                let parts: Vec<String> = fs
+                    .iter()
+                    .map(|f| {
+                        format!(
+                            "format!(\"{}: {{}}\", ({}).{method}())",
+                            f.name,
+                            mangle(&f.name)
+                        )
+                    })
+                    .collect();
+                arms.push_str(&format!(
+                    "            Self::{pat} {{ {} }} => format!(\"{} {{{{ {{}} }}}}\", [{}].join(\", \")),\n",
+                    binds.join(", "),
+                    v.name,
+                    parts.join(", ")
+                ));
+            }
+        }
+    }
+    format!("match self {{\n{arms}        }}")
 }
 
 fn struct_jet_debug_body(s: &StructDef, has_fn_field: bool) -> String {

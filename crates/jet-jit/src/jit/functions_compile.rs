@@ -36,7 +36,8 @@ fn register_packed_enum_show_table(meta: &JitMeta<'_>) {
                 [Type::String] => (3u8, String::new()),
                 _ => continue,
             };
-            rows.push((variant.clone(), kind, nested));
+            // I2: print the Jet-source variant name, not the mangled `user_` form.
+            rows.push((vname.to_string(), kind, nested));
         }
         Collections::register_packed_enum_show(enum_name, rows);
     }
