@@ -247,7 +247,29 @@ impl<'a> Checker<'a> {
         }
 
         self.borrow_ctx = self.operator_operand_needs_borrow(rhs, op);
+        // Same-type ops: LHS feeds RHS `.{…}`. Clear inherited assign expected
+        // otherwise so heterogeneous RHS (unit Point += Delta) can still infer.
+        let saved_expected = self.expected_type.clone();
+        if matches!(
+            op,
+            BinOp::Add
+                | BinOp::Sub
+                | BinOp::Mul
+                | BinOp::Div
+                | BinOp::Eq
+                | BinOp::Ne
+                | BinOp::Lt
+                | BinOp::Le
+                | BinOp::Gt
+                | BinOp::Ge
+        ) {
+            self.expected_type = lt
+                .as_ref()
+                .filter(|_| expr_wants_expected_type(rhs))
+                .cloned();
+        }
         let rt = self.infer(rhs);
+        self.expected_type = saved_expected;
         let (lt, rt) = (lt?, rt?);
         if matches!(op, BinOp::Eq | BinOp::Ne)
             && (self.type_contains_observable_clock(&lt)
@@ -1161,4 +1183,15 @@ impl<'a> Checker<'a> {
     }
 
     // --- calls -----------------------------------------------------------
+}
+
+/// RHS forms that need a surrounding expected type (`.{…}`, `.Variant`).
+fn expr_wants_expected_type(expr: &Expr) -> bool {
+    match expr {
+        Expr::Paren(inner, _) => expr_wants_expected_type(inner),
+        Expr::StructLit { inferred: true, .. } => true,
+        Expr::TypedLit { head: None, .. } => true,
+        Expr::EnumLit { type_name, .. } if type_name.is_empty() => true,
+        _ => false,
+    }
 }

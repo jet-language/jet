@@ -94,7 +94,6 @@ fn ends_statement(kind: &TokKind) -> bool {
         kind,
         TokKind::Ident(_)
             | TokKind::Str(_)
-            | TokKind::BinStr(_)
             | TokKind::Int(..)
             | TokKind::Float(_)
             | TokKind::UnitNumber { .. } // D-UNITLIT1: `500ms` ends a line like any literal

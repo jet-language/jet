@@ -102,13 +102,11 @@ fn fmt_is_idempotent_on_examples() {
 
 #[test]
 fn fmt_preserves_binary_pattern_holes() {
-    // D-BINPAT1 (card #506): a `b"…"` binary pattern must survive fmt with
-    // every hole intact — the bit widths, endian suffixes, and rest capture.
-    // Idempotence alone can miss a dropped token, so assert the exact spelling.
-    let src = "fn run() {\n    packet :: [0x45]\n    if packet == {\n        b\"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}\" -> { print(\"ok\") }\n        else -> { print(\"no\") }\n    }\n}\n";
+    // D-BINPAT1 / D-UNIFYLIT1=A: `[U8].{"…"}` must survive fmt with every hole intact.
+    let src = "fn run() {\n    packet :: [0x45]\n    if packet == {\n        [U8].{\"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}\"} -> { print(\"ok\") }\n        else -> { print(\"no\") }\n    }\n}\n";
     let once = jet::format_source(src).expect("binary pattern should format");
     assert!(
-        once.contains("b\"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}\""),
+        once.contains("[U8].{\"{version:U4}{ihl:U4}{tos:U8}{len:U16be}{rest:...}\"}"),
         "formatter dropped or garbled the binary pattern:\n{once}"
     );
     let twice = jet::format_source(&once).expect("formatted binary pattern should parse");
@@ -944,13 +942,11 @@ fn fmt_preserves_take_pattern_literal() {
 
 #[test]
 fn fmt_preserves_bin_take_pattern_literal() {
-    // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…{hole:U<w>}…")`
-    // — the byte-mode sibling of `fmt_preserves_take_pattern_literal` above.
-    // Must round-trip byte-for-byte (fmt STABILITY, not just accept-without-crash).
+    // D-BINPAT1 / D-UNIFYLIT1=A: `reader.take_pattern([U8].{"…"})`.
     let src = r#"fn run() {
     header :: [69, 0, 0, 40]
     r :: Reader.over(header)
-    parsed :: r.take_pattern(b"{version:U4}{ihl:U4}{tos:U8}{len:U16be}") ?? panic("no match")
+    parsed :: r.take_pattern([U8].{"{version:U4}{ihl:U4}{tos:U8}{len:U16be}"}) ?? panic("no match")
     print("{parsed.version} {parsed.ihl} {parsed.tos} {parsed.len}")
 }
 "#;
@@ -2083,11 +2079,10 @@ fn run() {
 }
 
 #[test]
-fn fmt_preserves_trailing_block() {
-    // D-TRAILBLOCK1: a bare-name call with only a trailing block (`twice { … }`,
-    // no `()` at all) and a call with args plus a trailing block
-    // (`ui.button("Save") { save() }`) must both round-trip byte-for-byte — the
-    // block must not migrate back inside the parens, and no argument is dropped.
+fn fmt_preserves_multiline_lambda_call_arg() {
+    // D-TRAILBLOCK2=A: multiline `() => { … }` inside call parentheses is the
+    // spelling for code-as-argument; fmt must round-trip it byte-for-byte and
+    // must not rewrite it into retired trailing-block sugar.
     let src = "\
 fn twice(f: fn()) {
     f()
@@ -2095,12 +2090,13 @@ fn twice(f: fn()) {
 }
 
 fn run() {
-    twice {
-        print(\"hi\")
-    }
+    twice(() => {
+        print(\"HI\")
+        print(\"Hello\")
+    })
 }
 ";
-    assert_fmt_stable(src, "trailing block, no parens");
+    assert_fmt_stable(src, "multiline () => call arg");
 }
 
 #[test]
@@ -2258,8 +2254,7 @@ fn run() {
 
 #[test]
 fn fmt_preserves_typed_text() {
-    // D-TYPEDTEXT1=D: a `SQL`/`HTML` literal argument and the `.raw()` escape
-    // must survive byte-for-byte.
+    // D-UNIFYLIT1=A: typed-literal heads and `.raw()` must survive byte-for-byte.
     let src = "\
 fn run_query(q: SQL) {
     print(\"template: {q.template()}\")
@@ -2271,16 +2266,15 @@ fn render(h: HTML) {
 
 fn run() {
     id :: 42
-    q :: sql\"select * from t where id = {id}\"
+    q :: SQL.{\"select * from t where id = {id}\"}
     run_query(q)
     name :: \"Jet\"
-    page :: html\"<p>{name}</p>\"
+    page :: HTML.{\"<p>{name}</p>\"}
     render(page)
     trusted :: HTML.raw(\"<b>audited</b>\")
     render(trusted)
     arg :: \"two words;*.jet\"
-    expected :: \"printf <%s> {arg}\"
-    prefixed :: sh\"printf [%s] {arg}\"
+    expected :: Sh.{\"printf <%s> {arg}\"}
     audited_cmd :: Sh.raw(\"printf raw\")
 }
 ";

@@ -26,12 +26,12 @@ the spec and a passing example disagree, the spec is wrong — fix the spec.
   and interpolation. The newline right after the opening `"""` and the one right
   before the closing `"""` are dropped, and the closing `"""`'s indentation is
   stripped from every line (Swift-style). An unterminated `"""` is E0002.
-- Typed text (D-TYPEDTEXT1/2, D-FFI-SH1): a literal expected as `SQL`, `HTML`,
-  or `Sh` uses one checked interpolation engine. `sql"…"`, `html"…"`, and
-  `sh"…"` provide the same rewrite without an expected type. For `Sh`, literal
-  words become argv items and each `{hole}` becomes exactly one argv item;
-  neither word splitting, glob expansion, nor shell parsing touches a hole.
-  Runtime `String` conversion is E0149; `Sh.raw(text)` is the audited escape.
+- Typed text (D-TYPEDTEXT1/2, D-FFI-SH1, D-UNIFYLIT1=A): `SQL.{"…"}`,
+  `HTML.{"…"}`, and `Sh.{"…"}` use one checked interpolation engine. For `Sh`,
+  literal words become argv items and each `{hole}` becomes exactly one argv
+  item; neither word splitting, glob expansion, nor shell parsing touches a
+  hole. Runtime `String` conversion is E0149; `Sh.raw(text)` is the audited
+  escape. Bare `"…"` never elaborates into these types.
 - Numbers (S67): decimal `Int` (64-bit signed, E0007 if too large) and `Float`
   (digits `.` digits, optional `e`/`E` exponent). `_` digit separators are
   allowed anywhere among the digits (`1_000_000`); base prefixes `0x`/`0o`/`0b`
@@ -834,9 +834,9 @@ Cross-type **`?`** conversion supports two forms:
 - Postfix **`?`** (S7) propagates: unwraps `ok`, early-returns `err`. The
   enclosing function must return a compatible fallible type. On **`T?`**,
   `?` propagates `None` when the function returns an optional.
-- In a function return type, **`T?`** parses as **`T ?`** and the formatter
-  writes the space. A function that returns an optional writes
-  **`=> (T?)`**.
+- Return types follow **D-RESULT-OPTION-CANON1** like every other type
+  position: tight **`T?`** is Optional; spaced **`T ?`** / **`T ? E`** is
+  fallible. Parentheses (`=> (T?)`) remain legal grouping, not required.
 - **`?? <expr>`** (S35/S71) is the fallback operator on a fallible value or
   optional: yields the success payload or evaluates the right side. Precedence is
   looser than **`&&`** / **`||`**, so `a? ?? b` and `x == 1 || y ?? 0`

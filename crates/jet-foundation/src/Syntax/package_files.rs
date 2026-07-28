@@ -107,13 +107,11 @@ pub const METHOD_VIEW: &str = "view";
 /// argument shape, no second call-argument grammar.
 pub const METHOD_TAKE_PATTERN: &str = "take_pattern";
 
-/// D-BINPAT1 (ratified 2026-07-12, card #506): a `b"…"` binary pattern
-/// literal — the byte-mode sibling of the D-PARSESTR1 string pattern. The `b`
-/// prefix on a string literal switches the ONE pattern engine into byte mode:
-/// each `{name:U4}` hole reads a fixed-width bit field, an endian suffix
-/// (`be`/`le`) picks byte order on a multi-byte read, and a final `{name:...}`
-/// captures the remaining bytes as `[U8]`.
-pub const BINPAT_PREFIX: char = 'b';
+/// D-BINPAT1 / D-UNIFYLIT1=A: binary patterns use typed head `[U8].{"…"}`
+/// (byte-mode sibling of D-PARSESTR1 string patterns). Each `{name:U4}` hole
+/// reads a fixed-width bit field; an endian suffix (`be`/`le`) picks byte
+/// order on a multi-byte read; a final `{name:...}` captures remaining bytes.
+/// The retired `b"…"` lexer prefix is gone.
 /// D-BINPAT1: multi-byte big-endian read suffix — `{len:U16be}`.
 pub const BINPAT_ENDIAN_BIG: &str = "be";
 /// D-BINPAT1: multi-byte little-endian read suffix — `{len:U16le}`.

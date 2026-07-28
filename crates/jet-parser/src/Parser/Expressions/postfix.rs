@@ -1,13 +1,10 @@
 use super::super::{
-    AccessConvention, Call, CallArg, Diagnostic, Expr, LValue, Parser, Span, Syntax, TokKind,
-    TryConvert,
+    AccessConvention, CallArg, Diagnostic, Expr, LValue, Parser, Span, Syntax, TokKind, TryConvert,
 };
 
 impl<'a> Parser<'a> {
         pub(super) fn expr_postfix(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
             let mut expr = self.expr_primary(allow_struct_lit)?;
-            // D-TRAILBLOCK1: a call takes at most one trailing `{ }` block.
-            let mut trailing_block_attached = false;
             loop {
                 match &self.peek().kind {
                     TokKind::Dot => {
@@ -283,99 +280,45 @@ impl<'a> Parser<'a> {
                                     | Expr::CallValue { .. }
                             )
                         {
-                            // D-TRAILBLOCK1: `callee(args) { … }` — a bare `{` directly
-                            // after a call's `)` (or after a callable name with no `()`
-                            // at all, `callee { … }`) is a trailing ZERO-PARAMETER
-                            // lambda filling the call's last argument. Jet has no
-                            // bare-block statements, so this slot was free; a PascalCase
-                            // name still takes the E0320 dotless-struct-literal recovery
-                            // above (mirrors the turbofish case rule).
-                            if trailing_block_attached {
-                                let bad_span = self.peek().span;
-                                return Err(Diagnostic::error(
-                                    "E0335",
-                                    "a call takes only one trailing block".to_string(),
-                                    "a trailing `{ }` fills exactly one last argument; a second `{ }` has nothing to fill".to_string(),
-                                    "pass the extra block as an ordinary argument inside the parentheses, or remove it".to_string(),
-                                    Some(bad_span),
-                                ));
-                            }
-                            let lam = self.parse_trailing_block_lambda()?;
-                            let lam_span = lam.span;
-                            let arg = CallArg {
-                                convention: AccessConvention::Read,
-                                expr: Expr::Lambda(lam),
-                                span: lam_span,
-                                flags: crate::AST::CallArgFlags {
-                                    is_trailing_block: true,
-                                    ..Default::default()
-                                },
-                                label: None,
-                                spread: false,
+                            // D-TRAILBLOCK2=A: trailing `{ }` after a call is retired.
+                            // Pass code as an ordinary `() => { … }` argument inside the
+                            // parentheses (multiline bodies and multiple code args allowed).
+                            let bad_span = self.peek().span;
+                            let fix = match &expr {
+                                Expr::Ident(name, _) => format!(
+                                    "write `{name}(() => {{ … }})` — a multiline code argument uses `() => {{ … }}` inside the call"
+                                ),
+                                Expr::Call(c) => format!(
+                                    "write `{}(…, () => {{ … }})` — put the block inside the parentheses as `() => {{ … }}`",
+                                    c.name
+                                ),
+                                Expr::MethodCall { method, .. } => format!(
+                                    "write `….{method}(…, () => {{ … }})` — put the block inside the parentheses as `() => {{ … }}`"
+                                ),
+                                _ => "write `callee(…, () => { … })` — put the block inside the parentheses as `() => { … }`".to_string(),
                             };
-                            expr = match expr {
-                                Expr::Ident(name, name_span) => Expr::Call(Call {
-                                    name,
-                                    name_span,
-                                    args: vec![arg],
-                                    range_checked: false,
-                                }),
-                                Expr::Call(mut c) => {
-                                    c.args.push(arg);
-                                    Expr::Call(c)
-                                }
-                                Expr::MethodCall {
-                                    receiver,
-                                    method,
-                                    method_span,
-                                    type_args,
-                                    mut args,
-                                    recv_type,
-                                    resolved_ret,
-                                } => {
-                                    args.push(arg);
-                                    Expr::MethodCall {
-                                        receiver,
-                                        method,
-                                        method_span,
-                                        type_args,
-                                        args,
-                                        recv_type,
-                                        resolved_ret,
-                                    }
-                                }
-                                Expr::CallValue {
-                                    callee,
-                                    mut args,
-                                    span,
-                                } => {
-                                    args.push(arg);
-                                    Expr::CallValue {
-                                        callee,
-                                        args,
-                                        span: Span::new(span.start, lam_span.end),
-                                    }
-                                }
-                                _ => unreachable!("guarded by the outer match above"),
-                            };
-                            trailing_block_attached = true;
-                            continue;
+                            return Err(Diagnostic::error(
+                                "E0335",
+                                "trailing blocks are gone — pass code with `() =>`".to_string(),
+                                "a bare `{ }` after a call used to fill one last zero-parameter function argument; that sugar is retired (D-TRAILBLOCK2)"
+                                    .to_string(),
+                                fix,
+                                Some(bad_span),
+                            ));
                         } else if allow_struct_lit
                             && matches!(
                                 expr,
                                 Expr::Field(..) | Expr::Index { .. } | Expr::Slice { .. }
                             )
                         {
-                            // D-TRAILBLOCK1: a trailing `{ }` on something that isn't a
-                            // call at all (a plain field/index read) — teach the shape
-                            // rather than falling through to a generic parse error.
                             let bad_span = self.peek().span;
                             return Err(Diagnostic::error(
                                 "E0335",
-                                "a trailing block only follows a call".to_string(),
-                                "a trailing `{ }` fills a call's last argument; this isn't a call"
+                                "trailing blocks are gone — pass code with `() =>`".to_string(),
+                                "a bare `{ }` here is not a call argument; code arguments use `() => { … }` inside a call's parentheses (D-TRAILBLOCK2)"
                                     .to_string(),
-                                "call it first, e.g. `name(){ … }`, or remove the block".to_string(),
+                                "write `callee(() => { … })` on a call — this expression is not a call"
+                                    .to_string(),
                                 Some(bad_span),
                             ));
                         } else {

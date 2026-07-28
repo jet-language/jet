@@ -1,9 +1,9 @@
-// D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")` reuses the
-// SAME hole grammar as a switch-position `b"…"` pattern (I8, one engine) —
+// D-BINPAT1 (card #506 follow-up): `reader.take_pattern([U8].{"…"})` reuses the
+// SAME hole grammar as a switch-position `[U8].{"…"}` pattern (I8, one engine) —
 // a malformed bit-width spec fires the same E1007 in take_pattern position.
 fn run() {
     packet :: [U8].{ 1, 2, 3 }
     r :: Reader.over(packet)
-    matched :: r.take_pattern(b"{x:U99}") ?? panic("bad header")
+    matched :: r.take_pattern([U8].{"{x:U99}"}) ?? panic("bad header")
     print("{matched.x}")
 }

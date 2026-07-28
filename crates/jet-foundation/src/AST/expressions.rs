@@ -20,11 +20,9 @@ pub struct Call {
 pub struct CallArgFlags {
     pub implicit_clone: bool,
     pub shared_auto_clone: bool,
-    /// D-TRAILBLOCK1: this argument is the desugared zero-parameter lambda
-    /// from a trailing `{ }` block (`callee(args) { … }`). Sema reads this to
-    /// give the specific E0334 teaching message instead of a generic
-    /// argument-type mismatch when the parameter it lands in isn't a
-    /// zero-parameter function.
+    /// Retired D-TRAILBLOCK1 flag (D-TRAILBLOCK2=A): trailing `{ }` sugar no
+    /// longer parses, so this stays false. Kept so older AST snapshots and
+    /// defensive formatter paths remain stable.
     pub is_trailing_block: bool,
     /// D-CABI-CALLBACK1: sema proved this argument is a stable C callback symbol.
     pub c_callback_symbol: bool,
@@ -276,10 +274,10 @@ pub enum Expr {
     /// not a legal interpolation value expression. Legal ONLY as a
     /// `take_pattern` call argument; sema rejects it anywhere else.
     StrMatchLit(Vec<StrMatchPart>, Span),
-    /// D-BINPAT1 (card #506 follow-up): the byte-mode sibling of
-    /// `StrMatchLit` — the sole legal shape of `reader.take_pattern(b"…")`'s
-    /// argument. Same source syntax as a bin-match `Pattern::BinMatch` (a
-    /// `b"…"` literal with `{name:U<width>}`/`{name:...}` holes), parsed via
+    /// D-BINPAT1 / D-UNIFYLIT1=A: the byte-mode sibling of
+    /// `StrMatchLit` — the sole legal shape of `reader.take_pattern([U8].{"…"})`'s
+    /// argument. Same source syntax as a bin-match `Pattern::BinMatch` (an
+    /// `[U8].{"…"}` literal with `{name:U<width>}`/`{name:...}` holes), parsed via
     /// the same D-BINPAT1 hole engine (`BinMatchPart`). Legal ONLY as a
     /// `take_pattern` call argument; sema rejects it anywhere else.
     BinMatchLit(Vec<BinMatchPart>, Span),

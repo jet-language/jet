@@ -1183,4 +1183,41 @@ fn notify(ready: Bool) =[Net]=> Void {
             );
         }
     }
+
+    /// D-RESULT-OPTION-CANON1: tight `T?` is Optional; spaced `T ?` is fallible.
+    #[test]
+    fn return_type_question_spacing_disambiguates_option_vs_result() {
+        let opt = program("fn a() => Int? { return None }\nfn run() {}\n");
+        let a = opt.items.iter().find_map(|i| match i {
+            crate::AST::Item::Func(f) if f.name == "a" => Some(f),
+            _ => None,
+        });
+        assert!(
+            matches!(a.expect("a").return_type, Some(crate::AST::Type::Option(_))),
+            "tight `Int?` must be Optional"
+        );
+
+        let res = program("fn b() => Int ? { return Ok(1) }\nfn run() {}\n");
+        let b = res.items.iter().find_map(|i| match i {
+            crate::AST::Item::Func(f) if f.name == "b" => Some(f),
+            _ => None,
+        });
+        assert!(
+            matches!(
+                b.expect("b").return_type,
+                Some(crate::AST::Type::Result { .. })
+            ),
+            "spaced `Int ?` must be Result"
+        );
+
+        let paren = program("fn c() => (Int?) { return None }\nfn run() {}\n");
+        let c = paren.items.iter().find_map(|i| match i {
+            crate::AST::Item::Func(f) if f.name == "c" => Some(f),
+            _ => None,
+        });
+        assert!(
+            matches!(c.expect("c").return_type, Some(crate::AST::Type::Option(_))),
+            "parenthesized `(Int?)` stays Optional"
+        );
+    }
 }

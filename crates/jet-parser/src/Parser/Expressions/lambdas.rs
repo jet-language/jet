@@ -177,19 +177,4 @@ impl<'a> Parser<'a> {
             })
         }
 
-        /// Existing trailing-block call sugar: `call(args) { stmts }`.
-        pub(super) fn parse_trailing_block_lambda(&mut self) -> Result<Lambda, Diagnostic> {
-            let open = self.peek().span;
-            self.expect(TokKind::LBrace, "to open the trailing block")?;
-            let stmts = self.block_stmts();
-            let end = self.toks[self.pos - 1].span.end;
-            Ok(Lambda {
-                take_names: Vec::new(),
-                params: Vec::new(),
-                body: LambdaBody::Block(stmts),
-                span: Span::new(open.start, end),
-                meta: LambdaMeta::default(),
-            })
-        }
-    
 }

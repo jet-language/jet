@@ -109,7 +109,10 @@ pub fn normalize_fixture_selector(var: &str, raw: &str) -> String {
     let raw = normalized_separators.as_str();
     assert!(!raw.is_empty(), "{var} must not be empty");
     let path = Path::new(raw);
-    assert!(!path.is_absolute(), "{var} must be repository-relative: {raw}");
+    assert!(
+        !path.is_absolute(),
+        "{var} must be repository-relative: {raw}"
+    );
     let mut parts = Vec::new();
     for component in path.components() {
         match component {
@@ -227,7 +230,10 @@ fn bounded_diff_lines(input: &str) -> BoundedDiffLines<'_> {
     let prefix = &input[..byte_end];
     let mut lines = Vec::new();
     let mut compared_bytes = 0;
-    for line in prefix.split_inclusive('\n').take(UNIFIED_DIFF_MAX_INPUT_LINES) {
+    for line in prefix
+        .split_inclusive('\n')
+        .take(UNIFIED_DIFF_MAX_INPUT_LINES)
+    {
         compared_bytes += line.len();
         lines.push(line);
     }
@@ -298,12 +304,7 @@ impl BoundedDiffOutput {
     }
 }
 
-fn push_diff_line(
-    out: &mut BoundedDiffOutput,
-    marker: char,
-    line: &str,
-    cut_mid_line: bool,
-) {
+fn push_diff_line(out: &mut BoundedDiffOutput, marker: char, line: &str, cut_mid_line: bool) {
     let mut marker_bytes = [0; 4];
     out.push(marker.encode_utf8(&mut marker_bytes));
     out.push(line);
@@ -384,11 +385,7 @@ pub fn build_and_run(prefix: &str, name: &str, src: &str) -> (i32, String, Strin
 
 /// `build_and_run`, with the generated binary's working directory isolated to
 /// its unique scratch directory.
-pub fn build_and_run_in_scratch(
-    prefix: &str,
-    name: &str,
-    src: &str,
-) -> (i32, String, String) {
+pub fn build_and_run_in_scratch(prefix: &str, name: &str, src: &str) -> (i32, String, String) {
     build_and_run_with_cwd(prefix, name, src, true)
 }
 

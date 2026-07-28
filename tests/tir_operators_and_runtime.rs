@@ -55,9 +55,13 @@ fn run() {
     b :: Vec2.{ x: 3, y: 4 }
     c :: add_generic(a, b)
     d := Vec2.{ x: 1, y: 2 }
-    d += b
+    d = .{ x: 1, y: 2 }
+    d += .{ x: 3, y: 4 }
     holder := Holder.{ value: Vec2.{ x: 1, y: 2 } }
-    holder.value += b
+    holder.value = .{ x: 1, y: 2 }
+    holder.value += .{ x: 3, y: 4 }
+    box := EqBox<Int>.{ value: 1 }
+    box = .{ value: 7 }
     chain :: marked(1) < marked(2) < marked(3)
     boxes_equal :: equal_generic(EqBox<Int>.{ value: 7 }, EqBox<Int>.{ value: 7 })
     ranks_ordered :: less_generic(Rank<Int>.{ value: 1 }, Rank<Int>.{ value: 2 })
@@ -67,14 +71,14 @@ fn run() {
     )
     cell := Cell<Int>.{ value: 4 }
     cell.value += 3
-    print("{c.x},{c.y} {d.x},{d.y} {holder.value.x},{holder.value.y} {(!equal_generic(a, b))} {less_generic(a, b)} {(b >= a)} {chain} {boxes_equal} {ranks_ordered} {nested_ordered} {cell.value}")
+    print("{c.x},{c.y} {d.x},{d.y} {holder.value.x},{holder.value.y} {(!equal_generic(a, b))} {less_generic(a, b)} {(b >= a)} {chain} {boxes_equal} {ranks_ordered} {nested_ordered} {cell.value} {box.value}")
 }
 "#;
     let (code, stdout) = build_and_run("tir_user_operator_traits", src);
     assert_eq!(code, 0);
     assert_eq!(
         stdout,
-        "marked 1\nmarked 2\nmarked 3\n4,6 4,6 4,6 true true true true true true true 7\n"
+        "marked 1\nmarked 2\nmarked 3\n4,6 4,6 4,6 true true true true true true true 7 7\n"
     );
 }
 

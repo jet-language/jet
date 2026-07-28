@@ -231,10 +231,17 @@ Codable field, and `?` error boundaries. Match arms name member types; Codable
 decode rejects ambiguous wire shapes (E2415). Named enums remain the documenting
 form; crossings use ordinary match conversion. Does not reopen D-ANY-JAI1.
 
-**D-TRAILBLOCK1 — Trailing block argument**: when a call's final param is a
-function type, a bare `{ }` after `)` stands in for that lambda —
-`ui.button("Save") { prefs.save() }`. Zero-parameter blocks only in v1
-(E0334/E0335).
+**D-TRAILBLOCK1 — Trailing block argument** *(superseded by D-TRAILBLOCK2=A)*:
+when a call's final param was a function type, a bare `{ }` after `)` stood in
+for that lambda — `ui.button("Save") { prefs.save() }`. Zero-parameter blocks
+only in v1 (E0334/E0335).
+
+**D-TRAILBLOCK2=A — Explicit `() =>` code arguments** *(ratified 2026-07-28,
+card #1266)*: pass multiline code into a call as an ordinary lambda argument
+inside the parentheses — `twice(() => { print("HI"); print("Hello") })` (each
+statement on its own line). Multiple code arguments are ordinary
+comma-separated args. Retires D-TRAILBLOCK1 trailing `{ }` sugar; a bare `{ }`
+after a call is E0335 with a fix that shows `callee(() => { … })`.
 
 **Declined (functions)**: UFCS (D-UFCS1); call-site macro-method expansion —
 inlining via `#Inline`/`#Inline(Always)` contracts instead (D-METHODMACRO1);
@@ -432,14 +439,16 @@ struct-pattern heads (`.{ kind: "page", target, .. } -> …`) are source-shipped
 #341 owns the remaining user-facing dispatch/pattern wording audit.
 
 **D-BINPAT1=A — binary patterns** *(ratified by owner 2026-07-12, card
-#506)*: `b"…"` binary pattern literals join the ONE pattern engine
-(D-PARSESTR1's grammar and matcher, byte mode). Bit-typed holes —
-`b"{version:U4}{ihl:U4}{len:U16be}{rest:...}"` — with widths U1–U64,
+#506; spelling amended by D-UNIFYLIT1=A 2026-07-28)*: `[U8].{"…"}` binary
+pattern literals join the ONE pattern engine (D-PARSESTR1's grammar and
+matcher, byte mode). Bit-typed holes —
+`[U8].{"{version:U4}{ihl:U4}{len:U16be}{rest:...}"}` — with widths U1–U64,
 `le`/`be` suffixes on multi-byte reads, and a final `{name:...}` rest
 capture. Valid wherever string patterns are: `==` pattern tests,
 if-table arms (refutable — table needs `else`), and consume mode via
-`Reader.take_pattern(b"…")` (D-SHIFT1, prefix match + advance). Same
-non-greedy anchoring and E0147-class ambiguity law as text holes.
+`Reader.take_pattern([U8].{"…"})` (D-SHIFT1, prefix match + advance). Same
+non-greedy anchoring and E0147-class ambiguity law as text holes. The
+retired `b"…"` lexer prefix is gone.
 
 **S77 — Field punning**: in a struct literal, bare `name` ≡ `name: name` when
 a binding of that name is in scope; mixes freely with explicit fields.
@@ -882,18 +891,27 @@ read, and the literal text might not match), so an `if == {}` table needs an
 `else` arm (E0148). **D-PARSESTR2 — ambiguity rule**: two interpolation
 holes with no literal text between them is E0147 (add an anchor, or type
 them so the boundary is unambiguous); a hole-free string in pattern position
-is plain text equality, not a pattern (I8). **D-TYPEDTEXT1 — Typed text**: a
-string literal (with or without interpolation) in a position whose expected
-type is `SQL`/`HTML` elaborates to that checked value instead of `String` —
-each `{hole}` becomes a bound parameter (SQL) or an HTML-escaped insertion
+is plain text equality, not a pattern (I8). **D-TYPEDTEXT1 — Typed text** *(amended by D-UNIFYLIT1=A)*: a typed-literal
+head `SQL.{"…"}` / `HTML.{"…"}` elaborates to that checked value — each
+`{hole}` becomes a bound parameter (SQL) or an HTML-escaped insertion
 (HTML); a runtime `String` reaching the position directly is E0149.
 `SQL.raw("…")`/`HTML.raw("…")` is the sole audited escape. Implemented for
-the expected-type path (function params, bindings); `.template()`/
-`.params()` (SQL) and `.text()` (HTML) read the checked value back.
-**D-TYPEDTEXT2 — Typed text amendment**: hole-free string literals also
-elaborate (not just interpolated ones); `sql"…"`/`html"…"` prefixes for
-bindings without an expected type use the same typed-text rewrite as
-expected-type literals; user-defined prefixes deferred to E4.
+typed-literal heads (and annotated bindings that still use a typed head);
+`.template()`/`.params()` (SQL) and `.text()` (HTML) read the checked value
+back. Bare `"…"` never elaborates into these types.
+**D-TYPEDTEXT2 — Typed text amendment** *(amended by D-UNIFYLIT1=A)*:
+hole-free bodies also elaborate under a typed head; the former `sql"…"` /
+`html"…"` prefixes are retired — use `SQL.{"…"}` / `HTML.{"…"}`.
+User-defined prefixes remain deferred (and D-LITERAL-PREFIX1's prefix
+surface is superseded by D-UNIFYLIT1=A).
+
+**D-UNIFYLIT1=A — unify domain text + pattern modes** *(ratified 2026-07-28,
+card #1265)*: one surface law — the head names the language; the body is that
+language's quoted recipe. Domain text: `SQL`/`HTML`/`Sh.{"…"}` only (plus
+`.raw`). Byte patterns: `[U8].{"…"}` in pattern / `Reader.take_pattern`
+position (retires `b"…"`). Text patterns keep plain `"…"` convenience and
+optional `String.{"…"}`. Amends D-TYPEDTEXT1/2 and D-BINPAT1; supersedes
+D-LITERAL-PREFIX1's prefix-first surface.
 
 **D-SHIFT1 — Shift-style stream parsing (ratified 2026-07-01, c7shift)**: the
 Jai `shift` idiom lands as a core cursor surface, not an operator (option C —
@@ -2146,7 +2164,8 @@ the D-FFI-PY1 precedent):**
   (same engine, I8): each `{hole}` becomes exactly one argv item, never
   word-split or glob-expanded; `core.process.run(cmd: Sh)` executes
   without a shell parsing user data; `Sh.raw("…")` is the sole audited
-  escape; `sh"…"` prefix per D-TYPEDTEXT2.
+  escape; spelling `Sh.{"…"}` per D-UNIFYLIT1=A (former `sh"…"` prefix
+  retired).
 - **Phase 5 (ratified by owner 2026-07-12, card #507)**:
   **D-FFI-COM1=A** — `com.*` Windows COM/IDispatch automation root,
   Windows-gated (honest error elsewhere); typed stubs generated from
@@ -5059,3 +5078,7 @@ AOT, dev/JIT, semantic navigation, solved effects, safe authority, inspection,
 and Canvas. Checked defaults and explicit addresses select Executable or
 Service entries; `jet test` runs every Check. E1321 owns stale, mismatched, and
 ambiguous links. Implemented end to end on card #544.
+
+**2026-07-28 — D-TRAILBLOCK2=A**: code-as-argument uses explicit `() => { … }` inside call parentheses (multiline bodies and multiple code args allowed); retires D-TRAILBLOCK1 trailing `{ }` sugar (`twice { … }` / `f() { … }`). E0335 teaches the `() =>` form. Card #1266.
+
+**2026-07-28 — D-UNIFYLIT1=A**: typed heads only for domain text (`SQL`/`HTML`/`Sh.{"…"}` + `.raw`); byte patterns `[U8].{"…"}`; retires `sql"`/`html"`/`sh"` prefixes, silent expected-type rewrite of bare quotes, and `b"…"`; text patterns keep plain `"…"` convenience. Amends D-TYPEDTEXT1/2 and D-BINPAT1; supersedes D-LITERAL-PREFIX1 prefix surface. Card #1265.

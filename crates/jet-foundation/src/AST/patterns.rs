@@ -85,8 +85,8 @@ pub enum Pattern {
         parts: Vec<StrMatchPart>,
         span: Span,
     },
-    /// D-BINPAT1 (ratified 2026-07-12, card #506): the byte-mode sibling of
-    /// `StrMatch`. A `b"…"` literal in pattern position matches a `[U8]`
+    /// D-BINPAT1 / D-UNIFYLIT1=A: the byte-mode sibling of
+    /// `StrMatch`. An `[U8].{"…"}` literal in pattern position matches a `[U8]`
     /// subject bit-by-bit — each `{name:U4}` reads a fixed-width bit field,
     /// `be`/`le` picks endianness on a multi-byte read, and a final
     /// `{name:...}` captures the remaining bytes as `[U8]`. Always refutable

@@ -121,6 +121,8 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/take_pattern_computed_arg.jet",
     "tests/ui/test_block_nested.jet",
     "tests/ui/trailing_block_double.jet",
+    "tests/ui/trailing_block_not_function.jet",
+    "tests/ui/trailing_block_on_index.jet",
     "tests/ui/tuple_numeric_field.jet",
     "tests/ui/tuple_single_field.jet",
     "tests/ui/two_capability_markers.jet",
@@ -707,13 +709,8 @@ fn plain_string_value(parts: &[StrTokPart]) -> Option<String> {
 fn token_kinds_equal(left: &TokKind, right: &TokKind) -> bool {
     match (left, right) {
         (TokKind::Str(left), TokKind::Str(right)) => string_parts_equal(left, right),
-        // D-BINPAT1 (card #506): `b"…"` binary patterns share `StrTokPart`'s
-        // nested-token shape (including each part's absolute `Span`), so a
-        // derived `==` here is exactly as span-sensitive as the old bug this
-        // whole function exists to route around for `Str` — reformatting
-        // upstream text shifts every later byte offset even though no
-        // meaningful token changed. Compare structurally like `Str`.
-        (TokKind::BinStr(left), TokKind::BinStr(right)) => string_parts_equal(left, right),
+        // D-BINPAT1 / D-UNIFYLIT1=A: `[U8].{"…"}` binary patterns are ordinary
+        // `Str` parts inside a typed literal, so the `Str` arm already covers them.
         _ => left == right,
     }
 }

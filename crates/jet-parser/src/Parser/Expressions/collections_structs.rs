@@ -414,6 +414,13 @@ impl<'a> Parser<'a> {
         /// (`a == b`); unit-variant tests like `light == Red` are resolved in
         /// sema when `Red` is not a variable but is a variant on the subject.
         pub(in crate::Parser) fn try_pattern_rhs(&mut self) -> Result<Option<Pattern>, Diagnostic> {
+            // D-UNIFYLIT1=A: typed pattern heads before bare tokens.
+            if let Some(pat) = self.try_bin_match_pattern()? {
+                return Ok(Some(pat));
+            }
+            if let Some(pat) = self.try_string_typed_str_match_pattern()? {
+                return Ok(Some(pat));
+            }
             match &self.peek().kind {
                 // D-PARSESTR1: an interpolation literal in pattern position —
                 // `subject == "prefix-{id:Int}-suffix"`. Each hole must reduce to
@@ -422,11 +429,6 @@ impl<'a> Parser<'a> {
                 // fall through to ordinary `Expr::Str` parsing instead.
                 TokKind::Str(_) => {
                     return self.try_str_match_pattern();
-                }
-                // D-BINPAT1 (card #506): `subject == b"{v:U4}…"` — a binary
-                // pattern in byte mode of the same engine.
-                TokKind::BinStr(_) => {
-                    return self.try_bin_match_pattern();
                 }
                 TokKind::KwNull => {
                     let span = self.bump().span;

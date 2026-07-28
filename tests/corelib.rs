@@ -5914,26 +5914,23 @@ use core.process as process
 
 fn run() {
     hostile :: "two words;*.jet"
-    expected :: Sh.{ "printf <%s> {hostile}" }
-    first :: process.run(expected) ?? panic("expected-type command failed")
+    expected :: Sh.{"printf <%s> {hostile}"}
+    first :: process.run(expected) ?? panic("typed-head command failed")
     print(first.output)
 
-    second :: process.run(sh"printf [%s] {hostile}") ?? panic("prefix command failed")
+    second :: process.run(Sh.{"printf [%s] {hostile}"}) ?? panic("second typed-head failed")
     print(second.output)
 
     audited :: Sh.raw("printf raw")
     third :: process.run(audited) ?? panic("raw command failed")
     print(third.output)
-
-    fourth :: process.run("printf direct") ?? panic("direct expected-type command failed")
-    print(fourth.output)
 }
 "#,
         &[],
         None,
     );
     assert_eq!(code, 0, "stderr:\n{stderr}");
-    assert_eq!(stdout, "<two words;*.jet>\n[two words;*.jet]\nraw\ndirect\n");
+    assert_eq!(stdout, "<two words;*.jet>\n[two words;*.jet]\nraw\n");
 }
 
 #[test]
@@ -8473,7 +8470,7 @@ fn run() {
     ]) ?? panic("migrate again")
     id :: 7
     name :: "Ada"
-    insert :: sql"INSERT INTO person (id, name, active) VALUES ({id}, {name}, 1)"
+    insert :: SQL.{"INSERT INTO person (id, name, active) VALUES ({id}, {name}, 1)"}
     _inserted :: conn.execute(insert.template(), db.params(insert)) ?? panic("insert")
     failed :: db.transaction(conn, "bad batch", [
         "INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)",

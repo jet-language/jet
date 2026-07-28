@@ -13,6 +13,9 @@
 // below; keep this root file mentioning them so I7 audits can check one
 // canonical surface entrypoint.
 //
+// D-TRAILBLOCK2=A adds no token: retires D-TRAILBLOCK1 trailing `{ }` sugar.
+// Code arguments are ordinary `() => { … }` lambdas inside call parentheses;
+// a bare `{` after a call is E0335.
 // D-BIND-BARE1=A adds no token: bindings are always bare `name :: value` /
 // `name := value`; types ride values (`Type.{ … }`) or live on signatures
 // and fields. Retires `name: Type ::` / `name: Type :=`.

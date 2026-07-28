@@ -461,33 +461,6 @@ impl<'a> Checker<'a> {
                 return Some(Some(Type::Named("__JetExpect__".to_string())));
             }
     
-            if matches!(
-                call.name.as_str(),
-                Syntax::TYPED_TEXT_SQL_PREFIX_CALL
-                    | Syntax::TYPED_TEXT_HTML_PREFIX_CALL
-                    | Syntax::TYPED_TEXT_SH_PREFIX_CALL
-            ) {
-                let type_name = match call.name.as_str() {
-                    Syntax::TYPED_TEXT_SQL_PREFIX_CALL => "SQL",
-                    Syntax::TYPED_TEXT_HTML_PREFIX_CALL => "HTML",
-                    Syntax::TYPED_TEXT_SH_PREFIX_CALL => Syntax::TYPE_SH,
-                    _ => unreachable!(),
-                };
-                if let Some(arg) = call.args.get_mut(0) {
-                    let span = arg.span;
-                    let mut expr = std::mem::replace(&mut arg.expr, Expr::Absent(span));
-                    let ty = self.rewrite_typed_text_literal(&mut expr, type_name.to_string(), span);
-                    if let Expr::Call(rewritten) = expr {
-                        *call = rewritten;
-                    } else {
-                        arg.expr = expr;
-                        call.name = type_name.to_string();
-                    }
-                    return Some(ty);
-                }
-                return Some(Some(Type::Named(type_name.to_string())));
-            }
-    
             if self.funcs.get(&call.name).is_none() {
                 if let Some(info) = self.lookup(&call.name) {
                     if matches!(info.ty, Type::Fn { .. }) {
@@ -1202,22 +1175,6 @@ impl<'a> Checker<'a> {
                         // a generic E0112.
                         if let Some(diag) = typed_text_mismatch(&param_ty, &arg_ty, arg.expr.span()) {
                             self.diags.push(diag);
-                        } else
-                        // D-TRAILBLOCK1: a trailing `{ }` block always desugars to a
-                        // ZERO-parameter lambda argument. If the parameter it lands in
-                        // isn't a zero-parameter function, that's not an ordinary type
-                        // mismatch — teach the actual shape instead of a generic E0112.
-                        if arg.flags.is_trailing_block {
-                            self.diags.push(Diagnostic::error(
-                                "E0334",
-                                format!("`{}` doesn't take a trailing block", call.name),
-                                format!(
-                                    "a trailing `{{ }}` block fills a last argument that is a function taking no parameters; this call's last parameter is {}",
-                                    param_ty.show()
-                                ),
-                                "pass it inside the parentheses, or give the function a zero-parameter last argument".to_string(),
-                                Some(arg.expr.span()),
-                            ));
                         } else {
                             self.diags.push(Diagnostic::error(
                                 "E0112",

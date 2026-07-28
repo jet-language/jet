@@ -1049,7 +1049,7 @@ use core.time as time
 
 fn run() {
     target :: "directory with spaces;*.tmp"
-    copied :: process.run(sh"cp -- {target} backup") ?? return
+    copied :: process.run(Sh.{"cp -- {target} backup"}) ?? return
 
     spec :: process.cmd(["cargo", "test"])
         .cwd("crates/app")
@@ -2634,7 +2634,7 @@ fn run() {
 }
 ```
 
-`take_pattern` reuses the `b"…{hole:U<width>}…"` binary-pattern grammar
+`take_pattern` reuses the `[U8].{"…{hole:U<width>}…"}` binary-pattern grammar
 (D-BINPAT1) in consume mode — the byte-mode sibling of `Cursor.take_pattern`
 above: it matches a *prefix* of the remaining bytes and returns the typed
 holes, advancing the reader past them so more reads can follow. A miss is an
@@ -2644,7 +2644,7 @@ ordinary error value.
 fn run() {
     header: [U8] :: [0x45, 0x00, 0x00, 0x28]
     r :: Reader.over(header)
-    h :: r.take_pattern(b"{version:U4}{ihl:U4}{tos:U8}{len:U16be}") ?? panic("bad header")
+    h :: r.take_pattern([U8].{"{version:U4}{ihl:U4}{tos:U8}{len:U16be}"}) ?? panic("bad header")
     print("{h.version} {h.ihl} {h.tos} {h.len}")   // 4 5 0 40
 }
 ```
@@ -2657,7 +2657,7 @@ fn run() {
 | `r.read_u32_le()` / `_be()` | `U32 ? String` | Four bytes |
 | `r.read_u64_le()` / `_be()` | `U64 ? String` | Eight bytes |
 | `r.take(n)` | `[U8] ? String` | Next `n` bytes (`n: Int`; sized ints widen with `Int.from_u*(n)`) |
-| `r.take_pattern(b"…{h:U<w>}…")` | `(holes…) ? String` | Match + consume a prefix; literal pattern only |
+| `r.take_pattern([U8].{"…{h:U<w>}…"})` | `(holes…) ? String` | Match + consume a prefix; literal pattern only |
 | `r.remaining()` | `Int` | Bytes left |
 | `r.is_at_end()` | `Bool` | Position at buffer end |
 

@@ -56,6 +56,9 @@ impl<'a> Parser<'a> {
     }
 
     fn return_type_inner(&mut self) -> Result<(Type, Span), Diagnostic> {
+        // D-RESULT-OPTION-CANON1: return types use the same `T?` / `T ?` / `T ? E`
+        // rules as every other type position. Parentheses only group
+        // (including optional `=> (T?)` when the author wants them).
         if matches!(self.peek().kind, TokKind::LParen) {
             let start = self.bump().span;
             if self.looks_like_named_tuple(true) {
@@ -66,30 +69,7 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::RParen, "to close this parenthesized return type")?;
             return Ok((ty, start));
         }
-
-        let (ty, span) = self.type_()?;
-        if let Type::Option(ok_ty) = ty {
-            if self.type_starts_here() {
-                let (err_ty, _) = self.type_()?;
-                Ok((
-                    Type::Result {
-                        ok: ok_ty,
-                        err: Box::new(err_ty),
-                    },
-                    span,
-                ))
-            } else {
-                Ok((
-                    Type::Result {
-                        ok: ok_ty,
-                        err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
-                    },
-                    span,
-                ))
-            }
-        } else {
-            Ok((ty, span))
-        }
+        self.type_()
     }
 
     /// Skip tokens until the enclosing `Type<…>` or `[T]` argument ends.
@@ -699,7 +679,12 @@ impl<'a> Parser<'a> {
                 Some(qspan),
             ));
         }
+        // D-RESULT-OPTION-CANON1 / S34: tight `T?` is Optional; spaced `T ?`
+        // (and `T ? E`) is fallible. Span-adjacency matches dashed-name
+        // disambiguation — no lexer change.
         let member = if matches!(self.peek().kind, TokKind::Question) {
+            let base_end = self.toks[self.pos.saturating_sub(1)].span.end;
+            let tight = self.peek().span.start == base_end;
             self.bump();
             if self.type_starts_here() {
                 // Recursive `type_()` so `T ? E1 | E2` places the union on the
@@ -709,8 +694,13 @@ impl<'a> Parser<'a> {
                     ok: Box::new(base),
                     err: Box::new(err_ty),
                 }
-            } else {
+            } else if tight {
                 Type::Option(Box::new(base))
+            } else {
+                Type::Result {
+                    ok: Box::new(base),
+                    err: Box::new(Type::Named(Syntax::TYPE_ERROR.to_string())),
+                }
             }
         } else {
             base

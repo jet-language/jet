@@ -82,7 +82,16 @@ impl<'a> Checker<'a> {
         let old = std::mem::replace(e, Expr::Absent(span));
         let Expr::Str(parts, _) = old else {
             *e = old;
-            return Some(Type::Named(type_name));
+            self.diags.push(Diagnostic::error(
+                "E0112",
+                format!("`{type_name}.{{ … }}` needs a string recipe body"),
+                format!(
+                    "checked `{type_name}` is built from a quoted template, not from another expression shape"
+                ),
+                format!("write `{type_name}.{{\"...\"}}` with `{{value}}` holes as needed"),
+                Some(span),
+            ));
+            return None;
         };
         let mk_lit = |s: String, span: Span| CallArg {
             convention: AccessConvention::Read,
@@ -593,21 +602,9 @@ impl<'a> Checker<'a> {
                 self.infer(e)
             }
             Expr::Bool(_, _) => Some(Type::Bool),
-            // D-TYPEDTEXT1=D: a string literal in a position whose expected
-            // type is `SQL`/`HTML`/`Sh` elaborates to that typed value instead of
-            // `String` — the same expected-type law as `.{ }` construction.
-            // Each `{hole}` becomes a bound parameter (SQL) or an escaped
-            // insertion (HTML) at codegen; it is checked here like any other
-            // value, not run through the Display-ability check below (a hole
-            // is never printed as text).
-            Expr::Str(_, str_span) if matches!(&self.expected_type, Some(Type::Named(n)) if n == "SQL" || n == "HTML" || n == Syntax::TYPE_SH) =>
-            {
-                let Some(Type::Named(type_name)) = self.expected_type.clone() else {
-                    unreachable!()
-                };
-                let span = *str_span;
-                self.rewrite_typed_text_literal(e, type_name, span)
-            }
+            // D-UNIFYLIT1=A: bare `"…"` is always `String`. Domain text elaborates
+            // only from `SQL.{"…"}` / `HTML.{"…"}` / `Sh.{"…"}` (typed-literal
+            // heads) via `elaborate_typed_lit` → `rewrite_typed_text_literal`.
             Expr::Str(parts, str_span) => {
                 // D-MEM1/S7 (D-NOALLOC-SEM1=A): interpolation with at least one
                 // `{…}` hole builds a fresh `String` (unlike a plain literal
@@ -775,17 +772,16 @@ impl<'a> Checker<'a> {
                 ));
                 None
             }
-            // D-BINPAT1 (card #506 follow-up): byte-mode sibling of the arm
-            // above — `b"…"` with holes is legal ONLY as `reader.take_pattern(b"…")`'s
-            // argument, intercepted there (`CheckerInfer/calls/method_calls.rs`)
-            // before generic inference ever reaches this arm.
+            // D-BINPAT1 / D-UNIFYLIT1=A: `[U8].{"…"}` is legal ONLY as a
+            // `reader.take_pattern([U8].{"…"})` argument (or pattern arm),
+            // intercepted in method_calls / pattern validate — not as a value.
             Expr::BinMatchLit(_, span) => {
                 self.diags.push(Diagnostic::error(
                     "E0112",
                     "a binary pattern literal is only valid as a `take_pattern` argument".to_string(),
-                    "this `b\"…\"` literal has typed holes (`{name:U<width>}`), which only `take_pattern` understands"
+                    "this `[U8].{\"…\"}` literal has typed holes (`{name:U<width>}`), which only `take_pattern` understands"
                         .to_string(),
-                    "call it as `reader.take_pattern(b\"…\")`".to_string(),
+                    "call it as `reader.take_pattern([U8].{\"…\"})`".to_string(),
                     Some(*span),
                 ));
                 None
@@ -1448,9 +1444,17 @@ impl<'a> Checker<'a> {
                 // D-DOTCTOR1: inferred `.{ … }` form — resolve type_name from context
                 // and write it back so later passes (TIR lowering, codegen) see it.
                 if *inferred {
-                    match self.expected_type.clone() {
+                    let mut expected = self.expected_type.clone();
+                    while let Some(Type::Tagged { inner, .. }) = expected {
+                        expected = Some(*inner);
+                    }
+                    match expected {
                         Some(Type::Named(ctx_name)) => {
                             *type_name = ctx_name;
+                        }
+                        Some(Type::Apply { name, args }) => {
+                            *type_name = name;
+                            *type_args = args;
                         }
                         _ => {
                             self.diags.push(Diagnostic::error(
@@ -1488,7 +1492,11 @@ impl<'a> Checker<'a> {
             } => {
                 if type_name.is_empty() {
                     // D-ENUMDOT2=A: leading-dot variant — resolve type from expected context.
-                    let resolved = self.expected_type.clone().and_then(|et| {
+                    let mut expected = self.expected_type.clone();
+                    while let Some(Type::Tagged { inner, .. }) = expected {
+                        expected = Some(*inner);
+                    }
+                    let resolved = expected.and_then(|et| {
                         let name = match &et {
                             Type::Named(n) => Some(n.clone()),
                             Type::Apply { name, .. } => Some(name.clone()),
@@ -1763,6 +1771,17 @@ impl<'a> Checker<'a> {
                     inferred: false,
                     span,
                 };
+            }
+            // D-UNIFYLIT1=A: `SQL.{"…"}` / `HTML.{"…"}` / `Sh.{"…"}` — typed head
+            // is the sole domain-text spelling (no silent bare-quote rewrite).
+            (
+                Type::Named(ref type_name),
+                TypedLitBody::Value(inner),
+            ) if matches!(type_name.as_str(), "SQL" | "HTML")
+                || type_name == Syntax::TYPE_SH =>
+            {
+                *e = *inner;
+                return self.rewrite_typed_text_literal(e, type_name.clone(), span);
             }
             (_, TypedLitBody::Value(inner)) => {
                 *e = *inner;

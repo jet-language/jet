@@ -1,7 +1,7 @@
-Error [E0335]: a call takes only one trailing block
-  --> tests/ui/trailing_block_double.jet:7:26
+Error [E0335]: trailing blocks are gone — pass code with `() =>`
+  --> tests/ui/trailing_block_double.jet:8:11
     |
-  7 |     twice { print("a") } { print("b") }
-    |                          ^
- Why: a trailing `{ }` fills exactly one last argument; a second `{ }` has nothing to fill
- Fix: pass the extra block as an ordinary argument inside the parentheses, or remove it
+  8 |     twice {
+    |           ^
+ Why: a bare `{ }` after a call used to fill one last zero-parameter function argument; that sugar is retired (D-TRAILBLOCK2)
+ Fix: write `twice(() => { … })` — a multiline code argument uses `() => { … }` inside the call

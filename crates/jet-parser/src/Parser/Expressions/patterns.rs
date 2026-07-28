@@ -1,7 +1,26 @@
 use super::super::{
     Diagnostic, Expr, Parser, Pattern, Span, StrMatchPart, StrTokPart, Syntax, TokKind, Token,
-    describe,
+    Type, describe,
 };
+
+enum TypedPatternKind {
+    Bytes,
+    Text,
+}
+
+fn is_byte_list_head(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::List(elem) | Type::FixedList { elem, .. }
+            if matches!(
+                elem.as_ref(),
+                Type::IntN {
+                    signed: false,
+                    bits: 8
+                }
+            )
+    )
+}
 
 impl<'a> Parser<'a> {
         /// D-PARSESTR1: try to read the string-literal token at the cursor as a
@@ -167,27 +186,12 @@ impl<'a> Parser<'a> {
             Ok(match_parts)
         }
     
-        /// D-SHIFT1 (c7shift): parse the sole argument of `cursor.take_pattern(…)`
-        /// as a pattern literal (`Expr::StrMatchLit`), reusing the D-PARSESTR1
-        /// hole grammar/engine (`build_str_match_parts`) instead of a second
-        /// pattern parser (I8). Unlike `try_str_match_pattern` (the `==`
-        /// position), a hole-free literal IS legal here (a fixed prefix to
-        /// consume with no bindings), and a malformed hole is a hard parse error
-        /// — there's no ordinary-`Expr::Str` fallback for a `take_pattern`
-        /// argument, so silently falling back would just move the failure to a
-        /// confusing type error later.
+        /// D-SHIFT1 / D-UNIFYLIT1=A: parse the sole argument of `take_pattern(…)`.
+        /// Accepts a bare `"…"` text pattern, `String.{"…"}`, or `[U8].{"…"}`
+        /// (byte mode). The retired `b"…"` prefix is no longer lexed.
         pub(super) fn parse_take_pattern_literal(&mut self) -> Result<Expr, Diagnostic> {
-            // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")` —
-            // the byte-mode sibling. Receiver type isn't known yet at parse
-            // time (`Cursor` vs `Reader`), so both literal kinds are accepted
-            // here; sema rejects the mismatched pairing (text pattern on a
-            // `Reader`, byte pattern on a `Cursor`). Byte-mode holes have no
-            // alternate legal meaning already (I8: reuse `build_bin_match_parts`,
-            // the same hole engine `try_bin_match_pattern` uses).
-            if let TokKind::BinStr(parts) = self.peek().kind.clone() {
-                let span = self.bump().span;
-                let match_parts = self.build_bin_match_parts(parts, span)?;
-                return Ok(Expr::BinMatchLit(match_parts, span));
+            if let Some(expr) = self.try_typed_pattern_literal_expr()? {
+                return Ok(expr);
             }
             let TokKind::Str(parts) = self.peek().kind.clone() else {
                 return Err(Diagnostic::error(
@@ -200,13 +204,48 @@ impl<'a> Parser<'a> {
                     "the pattern is matched at compile time, so it must be written directly as a string literal"
                         .to_string(),
                     format!(
-                        "write `{}(\"literal-{{hole}}-pattern\")`",
+                        "write `{}(\"literal-{{hole}}-pattern\")` or `{}([U8].{{\"…\"}})` for bytes",
+                        Syntax::METHOD_TAKE_PATTERN,
                         Syntax::METHOD_TAKE_PATTERN
                     ),
                     Some(self.peek().span),
                 ));
             };
-            for part in &parts {
+            Self::reject_bad_take_pattern_holes(&parts, self.peek().span)?;
+            let span = self.bump().span;
+            let match_parts = self.build_str_match_parts(parts)?;
+            Ok(Expr::StrMatchLit(match_parts, span))
+        }
+
+        /// D-UNIFYLIT1=A: `[U8].{"…"}` / `String.{"…"}` as a take_pattern /
+        /// pattern-position literal expression.
+        fn try_typed_pattern_literal_expr(&mut self) -> Result<Option<Expr>, Diagnostic> {
+            let save = self.pos;
+            let save_diags = self.diags.len();
+            let Some((kind, parts, span)) = self.try_typed_pattern_str_body()? else {
+                self.pos = save;
+                self.diags.truncate(save_diags);
+                return Ok(None);
+            };
+            match kind {
+                TypedPatternKind::Bytes => {
+                    let match_parts = self.build_bin_match_parts(parts, span)?;
+                    Ok(Some(Expr::BinMatchLit(match_parts, span)))
+                }
+                TypedPatternKind::Text => {
+                    Self::reject_bad_take_pattern_holes(&parts, span)?;
+                    let match_parts = self.build_str_match_parts(parts)?;
+                    Ok(Some(Expr::StrMatchLit(match_parts, span)))
+                }
+            }
+        }
+
+        /// Hard-error gate shared by bare `"…"` and `String.{"…"}` take_pattern args.
+        fn reject_bad_take_pattern_holes(
+            parts: &[StrTokPart],
+            fallback_span: Span,
+        ) -> Result<(), Diagnostic> {
+            for part in parts {
                 if let StrTokPart::Interp(toks) = part {
                     let bad_hole = match toks.first() {
                         Some(Token {
@@ -220,7 +259,7 @@ impl<'a> Parser<'a> {
                         _ => true,
                     };
                     if bad_hole {
-                        let hole_span = toks.first().map(|t| t.span).unwrap_or(self.peek().span);
+                        let hole_span = toks.first().map(|t| t.span).unwrap_or(fallback_span);
                         return Err(Diagnostic::error(
                             "E0003",
                             "a `take_pattern` hole must be a bare name, optionally typed".to_string(),
@@ -232,23 +271,25 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            let span = self.bump().span;
-            let match_parts = self.build_str_match_parts(parts)?;
-            Ok(Expr::StrMatchLit(match_parts, span))
+            Ok(())
         }
-    
-        /// D-BINPAT1 (card #506): read the `b"…"` token at the cursor as a
-        /// binary pattern — the byte-mode sibling of `try_str_match_pattern`.
-        /// Every hole must be `{name:U<width>[be|le]}` or `{name:...}`; the
-        /// `b"…"` token has no alternate legal meaning (there is no byte-value
-        /// literal), so a malformed hole is a hard error here rather than a
-        /// fall-through.
+
+        /// D-BINPAT1 / D-UNIFYLIT1=A: `[U8].{"…"}` binary pattern — byte-mode
+        /// sibling of `try_str_match_pattern`. Malformed holes are hard errors
+        /// (no byte-value literal fallback).
         pub(super) fn try_bin_match_pattern(&mut self) -> Result<Option<Pattern>, Diagnostic> {
-            let TokKind::BinStr(parts) = &self.peek().kind else {
+            let save = self.pos;
+            let save_diags = self.diags.len();
+            let Some((kind, parts, span)) = self.try_typed_pattern_str_body()? else {
+                self.pos = save;
+                self.diags.truncate(save_diags);
                 return Ok(None);
             };
-            let parts = parts.clone();
-            let span = self.bump().span;
+            if !matches!(kind, TypedPatternKind::Bytes) {
+                self.pos = save;
+                self.diags.truncate(save_diags);
+                return Ok(None);
+            }
             let match_parts = self.build_bin_match_parts(parts, span)?;
             Ok(Some(Pattern::BinMatch {
                 parts: match_parts,
@@ -256,7 +297,120 @@ impl<'a> Parser<'a> {
             }))
         }
 
-        /// D-BINPAT1: turn a `b"…"` token's lexed `StrTokPart`s into
+        /// Optional `String.{"…"}` text pattern head (symmetry with `[U8].{"…"}`).
+        pub(super) fn try_string_typed_str_match_pattern(
+            &mut self,
+        ) -> Result<Option<Pattern>, Diagnostic> {
+            let save = self.pos;
+            let save_diags = self.diags.len();
+            let Some((kind, parts, span)) = self.try_typed_pattern_str_body()? else {
+                self.pos = save;
+                self.diags.truncate(save_diags);
+                return Ok(None);
+            };
+            if !matches!(kind, TypedPatternKind::Text) {
+                self.pos = save;
+                self.diags.truncate(save_diags);
+                return Ok(None);
+            }
+            if !parts.iter().any(|p| matches!(p, StrTokPart::Interp(_))) {
+                // Hole-free String.{"…"} is plain equality, not a str-match pattern.
+                self.pos = save;
+                self.diags.truncate(save_diags);
+                return Ok(None);
+            }
+            for part in &parts {
+                if let StrTokPart::Interp(toks) = part {
+                    let Some(Token {
+                        kind: TokKind::Ident(_),
+                        ..
+                    }) = toks.first()
+                    else {
+                        self.pos = save;
+                        self.diags.truncate(save_diags);
+                        return Ok(None);
+                    };
+                    match toks.get(1).map(|t| &t.kind) {
+                        None | Some(TokKind::Eof) => {}
+                        Some(TokKind::Colon) => {
+                            if toks.len() < 3 {
+                                self.pos = save;
+                                self.diags.truncate(save_diags);
+                                return Ok(None);
+                            }
+                        }
+                        _ => {
+                            self.pos = save;
+                            self.diags.truncate(save_diags);
+                            return Ok(None);
+                        }
+                    }
+                }
+            }
+            let match_parts = self.build_str_match_parts(parts)?;
+            Ok(Some(Pattern::StrMatch {
+                parts: match_parts,
+                span,
+            }))
+        }
+
+        /// Parse `Head.{"…"}` where Head is `[U8]` / `[U8#N]` or `String`.
+        /// Returns the raw string token parts without elaborating holes as exprs.
+        fn try_typed_pattern_str_body(
+            &mut self,
+        ) -> Result<Option<(TypedPatternKind, Vec<StrTokPart>, Span)>, Diagnostic> {
+            let save = self.pos;
+            let save_diags = self.diags.len();
+            let kind = if matches!(self.peek().kind, TokKind::LBracket) {
+                let Ok((head, head_span)) = self.type_() else {
+                    self.pos = save;
+                    self.diags.truncate(save_diags);
+                    return Ok(None);
+                };
+                if !is_byte_list_head(&head) {
+                    self.pos = save;
+                    self.diags.truncate(save_diags);
+                    return Ok(None);
+                }
+                (TypedPatternKind::Bytes, head_span.start)
+            } else if let TokKind::Ident(n) = &self.peek().kind {
+                if n != "String" {
+                    return Ok(None);
+                }
+                let head_span = self.bump().span;
+                (TypedPatternKind::Text, head_span.start)
+            } else {
+                return Ok(None);
+            };
+            let (kind, start) = kind;
+            if !matches!(self.peek().kind, TokKind::Dot) {
+                self.pos = save;
+                self.diags.truncate(save_diags);
+                return Ok(None);
+            }
+            self.bump();
+            if !matches!(self.peek().kind, TokKind::LBrace) {
+                self.pos = save;
+                self.diags.truncate(save_diags);
+                return Ok(None);
+            }
+            self.bump(); // `{`
+            let TokKind::Str(parts) = self.peek().kind.clone() else {
+                self.pos = save;
+                self.diags.truncate(save_diags);
+                return Ok(None);
+            };
+            self.bump(); // string
+            if !matches!(self.peek().kind, TokKind::RBrace) {
+                self.pos = save;
+                self.diags.truncate(save_diags);
+                return Ok(None);
+            }
+            let end = self.bump().span.end;
+            Ok(Some((kind, parts, Span::new(start, end))))
+        }
+
+        /// D-BINPAT1: turn a pattern string's lexed `StrTokPart`s into
         /// `BinMatchPart`s — fixed literal bytes, or bit-typed holes — checking
         /// the bit-spec grammar (E1007), endianness rules (E1008), and the
         /// rest-must-be-final law (E1009, the byte-mode analog of E0147).

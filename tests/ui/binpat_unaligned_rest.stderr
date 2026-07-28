@@ -1,7 +1,7 @@
 Error [E1011]: this part of the binary pattern doesn't start on a byte boundary
-  --> tests/ui/binpat_unaligned_rest.jet:4:18
+  --> tests/ui/binpat_unaligned_rest.jet:4:23
     |
-  4 |         b"{a:U4}{rest:...}" -> { print("x") }
-    |                  ^^^^^^^^
+  4 |         [U8].{"{a:U4}{rest:...}"} -> { print("x") }
+    |                       ^^^^^^^^
  Why: fixed bytes and a `{rest:...}` capture are read whole-byte, so every bit-field before them must add up to a multiple of 8 bits
  Fix: pad the preceding holes to a byte boundary (e.g. add a reserved `{_:U4}`)

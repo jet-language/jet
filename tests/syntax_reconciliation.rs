@@ -739,7 +739,7 @@ fn source_identifier_offsets(source: &str, identifier: &str) -> Vec<usize> {
                 jet::Lexer::TokKind::Ident(name) if name == identifier => {
                     offsets.push(token.span.start)
                 }
-                jet::Lexer::TokKind::Str(parts) | jet::Lexer::TokKind::BinStr(parts) => {
+                jet::Lexer::TokKind::Str(parts) => {
                     for part in parts {
                         if let jet::Lexer::StrTokPart::Interp(tokens) = part {
                             collect(tokens, identifier, offsets);

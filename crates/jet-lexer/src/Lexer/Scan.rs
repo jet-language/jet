@@ -301,21 +301,8 @@ impl<'a> Lexer<'a> {
                 '>' if next == '>' => toks.push(simple(self, TokKind::Shr, 2)),
                 '>' if next == '=' => toks.push(simple(self, TokKind::Ge, 2)),
                 '>' => toks.push(simple(self, TokKind::Gt, 1)),
-                // D-BINPAT1 (card #506): `b"…"` — a binary pattern literal. A
-                // bare `b` immediately followed by `"` is never two tokens in
-                // Jet (no juxtaposition), so this is unambiguous. Reuse the
-                // ordinary string lexer (interpolation holes included), then
-                // relabel the token kind and widen its span to cover the `b`.
-                'b' if next == '"' => {
-                    self.i += 1; // consume `b`
-                    if let Some(mut tok) = self.string(self.pos(self.i)) {
-                        if let TokKind::Str(parts) = tok.kind {
-                            tok.kind = TokKind::BinStr(parts);
-                        }
-                        tok.span = Span::new(start, tok.span.end);
-                        toks.push(tok);
-                    }
-                }
+                // D-UNIFYLIT1=A: `b"…"` retired — byte patterns use `[U8].{"…"}`.
+                // Bare `b` followed by `"` falls through to the identifier lexer.
                 '"' => {
                     let tok = if next == '"' && next2 == '"' {
                         if Self::starts_inline_foreign_body(&toks) {

@@ -15,14 +15,6 @@ use super::serde_diags::{
     reactive_lambda_arity, reactive_not_lambda, unknown_core_item, wrong_core_arity,
 };
 
-fn is_string_literal_expr(expr: &crate::AST::Expr) -> bool {
-    match expr {
-        crate::AST::Expr::Str(..) => true,
-        crate::AST::Expr::Paren(inner, _) => is_string_literal_expr(inner),
-        _ => false,
-    }
-}
-
 fn vault_key_arg(ty: &Type) -> Option<Type> {
     match ty {
         Type::Apply { name, args }
@@ -3617,21 +3609,16 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
 
-            // D-FFI-SH1=A: `process.run` gives its literal argument expected type
-            // `Sh`, activating the shared typed-text rewrite. Keep the older explicit
-            // argv value accepted as compatibility sugar over `process.cmd(argv).run()`;
-            // both lower to the same argv-only primitive and neither invokes a shell.
+            // D-FFI-SH1=A / D-UNIFYLIT1=A: `process.run` accepts `Sh` (from
+            // `Sh.{"…"}` / `Sh.raw`) or an explicit `[String]` argv list.
+            // Bare `"…"` is `String` and E0149 — no silent typed-text rewrite.
             if module == "core.process" && name == "run" {
                 let Some((_, ret)) = sig else { unreachable!() };
                 if args.len() != 1 {
                     self.diags.push(wrong_core_arity(name, 1, args.len(), span));
                 }
                 if let Some(arg) = args.get_mut(0) {
-                    let saved = self.expected_type.clone();
-                    self.expected_type = is_string_literal_expr(&arg.expr)
-                        .then(|| Type::Named(Syntax::TYPE_SH.to_string()));
                     let got = self.infer(&mut arg.expr);
-                    self.expected_type = saved;
                     if let Some(got) = got {
                         let explicit_argv = matches!(
                             got,

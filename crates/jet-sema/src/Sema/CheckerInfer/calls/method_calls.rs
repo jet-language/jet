@@ -2072,7 +2072,7 @@ impl<'a> Checker<'a> {
                     return Some(out);
                 }
             }
-            // D-BINPAT1 (card #506 follow-up): `reader.take_pattern(b"…")` —
+            // D-BINPAT1 / D-UNIFYLIT1=A: `reader.take_pattern([U8].{"…"})` —
             // the byte-mode sibling of `Cursor.take_pattern` above. Same
             // reason it's resolved directly here rather than through
             // `binary_reader_method_return`'s generic table: the return shape
@@ -2092,7 +2092,7 @@ impl<'a> Checker<'a> {
                             format!("`{}` needs a literal binary pattern", Syntax::METHOD_TAKE_PATTERN),
                             "the pattern is matched at compile time, so it can't be a computed value"
                                 .to_string(),
-                            "write the pattern directly: `take_pattern(b\"literal-{hole:U8}-pattern\")`"
+                            "write the pattern directly: `take_pattern([U8].{\"literal-{hole:U8}-pattern\"})`"
                                 .to_string(),
                             Some(args[0].expr.span()),
                         ));

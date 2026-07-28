@@ -24,6 +24,7 @@ File id: `<skill>-YYYY-MM-DD`. Never overwrite another day's note.
 | Persona Audit | `persona-audit` | Persona status, push/pull, practical feel |
 | Spec Compliance Audit | `spec-compliance-audit` | Codebase vs ratified syntax/spec |
 | Mission Audit | `mission-audit` | Language and experience vs philosophy/mission |
+| Pragmatism Audit | `pragmatism-audit` | Finish real jobs across domains; default magic + reject/override |
 | Field Audit | `field-audit` | Leave/stay pressure + peer-strength gaps (one report) |
 | Surface Research | `surface-research` | Mine other languages for surface ideas |
 | Lessons Learned | `lessons-learned` | Peer failures Jet must not repeat |
@@ -44,6 +45,7 @@ are opt-in and outside this table.
 | Personas, push/pull, real-user feel | **Persona Audit** |
 | Ratified syntax/spec vs source | **Spec Compliance Audit** |
 | Philosophy / mission alignment | **Mission Audit** |
+| Getting work done / domain friction / missing defaults / reject+override | **Pragmatism Audit** |
 | Leave language X / peer strengths Jet lacks | **Field Audit** |
 | Mine languages for surface ideas | **Surface Research** |
 | Lineage / regrets / do-not-repeat | **Lessons Learned** |

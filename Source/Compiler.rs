@@ -387,7 +387,6 @@ fn token_kind_name(kind: &TokKind) -> &'static str {
         TokKind::KwModule => "keyword.module",
         TokKind::Ident(_) => "identifier",
         TokKind::Str(_) => "literal.string",
-        TokKind::BinStr(_) => "literal.binpattern",
         TokKind::Int(..) => "literal.int",
         TokKind::Float(_) => "literal.float",
         TokKind::UnitNumber { .. } => "literal.unit_number",

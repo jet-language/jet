@@ -295,8 +295,8 @@ renumbered, and no new `W` code may be allocated.
 | E0331 | parse | a payload on a variant group name (D-TAG1) |
 | E0332 | sema  | a group name used as a value (D-TAG1) |
 | E0333 | parse | a chained comparison changes direction (`a < b > c`) (D-CHAINCMP1) |
-| E0334 | sema  | a trailing `{ }` block argument's slot isn't a zero-parameter function (D-TRAILBLOCK1) |
-| E0335 | parse | a second trailing block, or a trailing block on a non-call (D-TRAILBLOCK1) |
+| E0334 | sema  | reserved (was trailing-block type mismatch under D-TRAILBLOCK1; superseded by D-TRAILBLOCK2=A) |
+| E0335 | parse | a bare `{ }` after a call — pass code with `() => { … }` inside the parentheses (D-TRAILBLOCK2=A) |
 | E0336 | sema  | `#Patchable` on a generic struct (D-PATCH1) |
 | E0337 | sema  | `#Patchable` struct has a function-typed field (D-PATCH1) |
 | E0338 | sema  | a cycle among computed-field formulas, including self-reference (D-FIELDPOL1) |
@@ -569,10 +569,10 @@ renumbered, and no new `W` code may be allocated.
 | E1004 | sema  | unknown item in core module |
 | E1005 | sema  | overflow opt-in not wrapping a single integer op |
 | E1006 | sema  | `use core.*` import or emitted helper exceeds package `runtime:` ceiling (D-RINGLAYER1) |
-| E1007 | parse | malformed bit width in a `b"…"` binary pattern hole — not `U<1..64>[be\|le]` or `...` (D-BINPAT1) |
+| E1007 | parse | malformed bit width in an `[U8].{"…"}` binary pattern hole — not `U<1..64>[be\|le]` or `...` (D-BINPAT1 / D-UNIFYLIT1) |
 | E1008 | parse | binary pattern read needs/misuses an endian suffix — multi-byte read without `be`/`le`, or `le`/`be` on a single-byte or non-byte-multiple read (D-BINPAT1) |
 | E1009 | parse | a `{name:...}` rest capture isn't the last part of a binary pattern (D-BINPAT1) |
-| E1010 | sema  | a `b"…"` binary pattern matched against a subject that isn't `[U8]` (D-BINPAT1) |
+| E1010 | sema  | an `[U8].{"…"}` binary pattern matched against a subject that isn't `[U8]` (D-BINPAT1 / D-UNIFYLIT1) |
 | E1011 | sema  | fixed bytes or a rest capture in a binary pattern don't start on a byte boundary (D-BINPAT1) |
 | E1301 | sema  | `ArgsSpec.flag` or `ParsedArgs.flag` called with wrong arity (D-ARGS1) |
 | E1302 | sema  | `ArgsSpec.option` or `ParsedArgs.option` called with wrong arity (D-ARGS1) |
@@ -758,6 +758,7 @@ D-LOOPEVAL1, D-LOOPSTATE1, and D-COMPREHENSION1.
 | E0986 | This callable marker is detached from its declaration head. | Layout must keep `=>`, `=[Effects]=>`, `=`, or the opening brace attached to the function head so the declaration boundary is unambiguous. | Move the marker or opening brace onto the same logical line as the closing `)`. |
 | E0987 | No enclosing loop is named `{name}`. | `break(name)` and `next(name)` can target only a visible `name :: loop`. Loop names are compile-time control targets. | Correct the name, or add `name ::` before the intended enclosing loop. |
 | E0988 | This uses a retired loop-label or dot-exit form. | Named exits are keyword-led: `break(name)`, `break(name, value)`, and `next(name)`. A loop name is not a runtime object. | Replace the dot or `@` form with the matching target-argument exit. Keep the declaration as `name :: loop`. |
+| E0335 | A bare `{ }` follows a call. | Code arguments are ordinary `() => { … }` lambdas inside the call's parentheses (D-TRAILBLOCK2). Trailing `{ }` sugar after a call is gone. | Write `callee(() => { … })`. Put each statement on its own line inside the block. |
 
 ## Editions and release policy (E2-M2)
 

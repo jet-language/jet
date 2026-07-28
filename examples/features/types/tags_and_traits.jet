@@ -1,12 +1,10 @@
-// D-QUAL2: the two kinds of qualifier. A `trait` has at least one method and
-// dispatches via a vtable; a `tag` has no methods and erases at runtime. The
-// beginner rule is one sentence: methods → trait, no methods → tag.
+// D-QUAL2: methods → trait; no methods → tag.
 //
-// Here `Reviewed` and `Internal` are marker tags — they carry no methods and
-// generate no code. `Greeter` is a trait, because it has a method to dispatch.
-tag Reviewed;
+// Tags mark intent on values (`#Reviewed String`) and erase at runtime —
+// the value is still a plain String. Traits add methods you actually call.
+tag Reviewed
 
-tag Internal {}
+tag Internal
 
 trait Greeter {
     fn greet(self) => String
@@ -20,7 +18,23 @@ impl Doc.Greeter {
     fn greet(self) => String = "reviewing: {self.title}"
 }
 
+// Tag on a return: callers see this string is marked reviewed / internal.
+fn stamp_reviewed(title: String) => #Reviewed String = ~title
+
+fn stash_internal(note: String) => #Internal String = ~note
+
+// Tag on a parameter: the API documents what kind of string it expects.
+fn announce(title: #Reviewed String) => String = "ship it: {title}"
+
+fn peek_internal(note: #Internal String) => String = "private: {note}"
+
 fn run() {
     d :: Doc.{title: "spec"}
     print(d.greet())
+
+    reviewed :: stamp_reviewed(d.title)
+    print(announce(reviewed))
+
+    secret :: stash_internal("editor notes")
+    print(peek_internal(secret))
 }

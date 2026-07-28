@@ -278,6 +278,29 @@ fn run() {}
     }
 
     #[test]
+    fn inlay_and_hover_for_inferred_struct_lit_from_place() {
+        let src = "\
+struct Point { x: Int y: Int }
+fn run() {
+    p := Point.{ x: 1, y: 2 }
+    p = .{ x: 3, y: 4 }
+}
+";
+        let (project, _, bundle, facts) = check_test_document(src);
+        let bundle = bundle.expect("bundle");
+        let db = build_symbol_db(&bundle, &facts);
+        let hints = db.inlay_hints_for(project.entry());
+        assert!(
+            hints.iter().any(|h| h.label.contains(": Point")),
+            "expected : Point inlay on inferred `.{{…}}` after place assign: {hints:?}"
+        );
+        assert!(
+            db.hover.iter().any(|h| h.text.contains("`Point`")),
+            "expected hover naming Point on inferred struct lit"
+        );
+    }
+
+    #[test]
     fn completion_includes_keywords() {
         let src = "fn run() {\n    \n}\n";
         let (project, _, bundle, facts) = check_test_document(src);

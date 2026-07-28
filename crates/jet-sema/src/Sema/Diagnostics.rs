@@ -74,8 +74,7 @@ pub(crate) fn typed_text_mismatch(want: &Type, got: &Type, span: Span) -> Option
             "interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one".to_string()
         },
         format!(
-            "write it as a literal with `{{value}}` holes, or use `{}.raw(\"…\")` if you have audited the text",
-            tn
+            "write `{tn}.{{\"...\"}}` with `{{value}}` holes, or use `{tn}.raw(\"…\")` if you have audited the text"
         ),
         Some(span),
     ))

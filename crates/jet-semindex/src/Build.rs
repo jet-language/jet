@@ -2034,9 +2034,40 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
                 for (_, expr) in fields { collect_expr(expr, mp, ctx); }
             });
         }
-        AST::Expr::StructLit { fields, .. } => {
+        AST::Expr::StructLit {
+            type_name,
+            type_args,
+            fields,
+            inferred,
+            span,
+            ..
+        } => {
+            // After sema fills `type_name` on inferred `.{…}`, surface it in IDE.
+            if *inferred && !type_name.is_empty() {
+                let ty_label = if type_args.is_empty() {
+                    type_name.clone()
+                } else {
+                    AST::Type::Apply {
+                        name: type_name.clone(),
+                        args: type_args.clone(),
+                    }
+                    .show()
+                };
+                ctx.db.hover.push(HoverEntry {
+                    span: *span,
+                    module_path: mp.to_string(),
+                    text: format!("`{}`", ty_label),
+                });
+                ctx.db.inlay.push(InlayHint {
+                    span: *span,
+                    module_path: mp.to_string(),
+                    label: format!(": {}", ty_label),
+                });
+            }
             structural_slot(ctx, "fields", StructuralSlotKind::List, |ctx| {
-                for (_, _, expr) in fields { collect_expr(expr, mp, ctx); }
+                for (_, _, expr) in fields {
+                    collect_expr(expr, mp, ctx);
+                }
             });
         }
         AST::Expr::TypedLit { body, .. } => {

@@ -2558,8 +2558,8 @@ impl<'a> Checker<'a> {
                 }
                 result
             }
-            // D-BINPAT1 (card #506): a `b"…"` binary pattern matches a `[U8]`
-            // subject. Each fixed-width hole binds an unsigned integer; a
+            // D-BINPAT1 / D-UNIFYLIT1=A: `[U8].{"…"}` binary pattern matches a
+            // `[U8]` subject. Each fixed-width hole binds an unsigned integer; a
             // `{rest:...}` hole binds `[U8]`. Always refutable; E0148 (missing
             // `else`) is enforced in `check_switch`.
             (_, Pattern::BinMatch { parts, .. }) => {
@@ -2572,8 +2572,10 @@ impl<'a> Checker<'a> {
                             "this pattern matches raw bytes, but the subject is {}",
                             subject_ty.show()
                         ),
-                        "a `b\"…\"` binary pattern only matches a `[U8]` byte buffer".to_string(),
-                        "match a `[U8]` subject, or use a pattern for this type instead".to_string(),
+                        "an `[U8].{\"…\"}` binary pattern only matches a `[U8]` byte buffer"
+                            .to_string(),
+                        "match a `[U8]` subject, or use a pattern for this type instead"
+                            .to_string(),
                         Some(span),
                     ));
                     return HashMap::new();

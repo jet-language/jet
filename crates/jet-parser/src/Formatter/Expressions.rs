@@ -262,6 +262,8 @@ impl<'a> Fmt<'a> {
     }
 
     pub(super) fn fmt_return_type(&mut self, ty: &Type) {
+        // D-RESULT-OPTION-CANON1: Optional returns are bare `T?`; fallible is
+        // spaced `T ?` / `T ? E`. No paren wrap needed to disambiguate.
         if let Type::Result { ok, err } = ty {
             self.fmt_type(ok);
             self.write(" ?");
@@ -269,10 +271,6 @@ impl<'a> Fmt<'a> {
                 self.write(" ");
                 self.fmt_type(err);
             }
-        } else if matches!(ty, Type::Option(_)) {
-            self.write("(");
-            self.fmt_type(ty);
-            self.write(")");
         } else {
             self.fmt_type(ty);
         }
@@ -485,26 +483,6 @@ impl<'a> Fmt<'a> {
                 self.write("]");
             }
             Expr::Ident(name, _) => self.write(name),
-            Expr::Call(c)
-                if matches!(
-                    c.name.as_str(),
-                    Syntax::TYPED_TEXT_SQL_PREFIX_CALL
-                        | Syntax::TYPED_TEXT_HTML_PREFIX_CALL
-                        | Syntax::TYPED_TEXT_SH_PREFIX_CALL
-                ) =>
-            {
-                self.write(match c.name.as_str() {
-                    Syntax::TYPED_TEXT_SQL_PREFIX_CALL => "sql",
-                    Syntax::TYPED_TEXT_HTML_PREFIX_CALL => "html",
-                    Syntax::TYPED_TEXT_SH_PREFIX_CALL => "sh",
-                    _ => unreachable!(),
-                });
-                if let Some(arg) = c.args.first() {
-                    if let Expr::Str(parts, _) = &arg.expr {
-                        self.fmt_str(parts);
-                    }
-                }
-            }
             Expr::Call(c) => self.fmt_call(c),
             Expr::Unary(op, inner, _) => {
                 let inner_prec = Prec::Unary;
@@ -1310,18 +1288,17 @@ impl<'a> Fmt<'a> {
             Pattern::StrMatch { parts, .. } => {
                 self.fmt_str_match_parts(parts);
             }
-            // D-BINPAT1 (card #506): a `b"…"` binary pattern.
+            // D-BINPAT1 / D-UNIFYLIT1=A: `[U8].{"…"}` binary pattern.
             Pattern::BinMatch { parts, .. } => {
                 self.fmt_bin_match_parts(parts);
             }
         }
     }
 
-    /// D-BINPAT1: render a `BinMatchPart` list as a `b"…"` literal —
-    /// fixed bytes as text, holes as `{name:U<width>[be|le]}` / `{name:...}`.
+    /// D-BINPAT1 / D-UNIFYLIT1=A: render a `BinMatchPart` list as `[U8].{"…"}`.
     pub(super) fn fmt_bin_match_parts(&mut self, parts: &[crate::AST::BinMatchPart]) {
         use crate::AST::{BinEndian, BinMatchPart, BinSpec};
-        self.write("b\"");
+        self.write("[U8].{\"");
         for part in parts {
             match part {
                 BinMatchPart::Lit(bytes) => {
@@ -1346,7 +1323,7 @@ impl<'a> Fmt<'a> {
                 }
             }
         }
-        self.write("\"");
+        self.write("\"}");
     }
 
     /// D-PARSESTR1 (shared with `Expr::StrMatchLit` — D-SHIFT1's
@@ -1421,11 +1398,9 @@ impl<'a> Fmt<'a> {
         self.fmt_view_or_call_args(method, args);
     }
 
-    /// D-TRAILBLOCK1: emit `(args) { … }` — or bare `{ … }` when the block is
-    /// the call's only argument — when the LAST arg is the desugared
-    /// trailing-block lambda; otherwise the ordinary `(args)`. Shared by
-    /// `Expr::Call`, `Expr::MethodCall`, and `Expr::CallValue` so all three
-    /// call shapes round-trip the sugar identically.
+    /// D-TRAILBLOCK2=A: trailing-block sugar is gone. The formatter still
+    /// recognizes a legacy `is_trailing_block` flag defensively, but the
+    /// parser no longer sets it — ordinary `(args)` with `() => { … }` wins.
     /// D-DYNARRAY1: `.view(a..b)` parses its two args from `start .. end`, not
     /// a comma list — round-trip that shape here, or `jet fmt` would silently
     /// rewrite `.view(0..9)` into the unparseable `.view(0, 9)` (own-memory
@@ -1443,28 +1418,8 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_call_args_or_trailing_block(&mut self, args: &[CallArg]) {
-        if let Some((last, init)) = args.split_last() {
-            if last.flags.is_trailing_block {
-                if !init.is_empty() {
-                    self.write("(");
-                    self.fmt_call_args(init);
-                    self.write(")");
-                }
-                self.write(" ");
-                if let Expr::Lambda(lam) = &last.expr {
-                    if let crate::AST::LambdaBody::Block(stmts) = &lam.body {
-                        self.write("{");
-                        self.newline();
-                        self.with_trailing_comment_limit(lam.span.end, |f| {
-                            f.with_indent(|f| f.fmt_block_stmts(stmts))
-                        });
-                        self.end_block();
-                        return;
-                    }
-                }
-                // Defensive: not the shape the parser produces, fall through.
-            }
-        }
+        // D-TRAILBLOCK2=A: always emit ordinary `(args)`. Trailing-block sugar
+        // no longer parses; never resurrect `) { … }` / bare `{ … }`.
         self.write("(");
         self.fmt_call_args(args);
         self.write(")");

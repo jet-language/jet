@@ -581,6 +581,7 @@ function viewBoard() {
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Board</h1>
       <span class="viewhead__sub">roadmap ledger × ops table</span>
       <div class="viewhead__actions">
+        <button class="btn btn--ghost" id="legend-btn" title="What the colors mean">Key</button>
         <button class="btn btn--ghost" id="radar-mode" title="Switch between table rows and card tiles">${cardsMode ? '☰ Table view' : '⊞ Card view'}</button>
         <button class="btn btn--red" id="new-card">+ New card</button>
       </div></div>
@@ -614,6 +615,7 @@ function viewBoard() {
     const c = await api('card/add', { title: 'New card', by: 'owner' });  // server defaults epoch to the active one
     if (c) showDetail(c.id);
   });
+  $('#legend-btn').addEventListener('click', openLegend);
   const fire = async () => {
     const i = $('#idea-input'); const t = i.value.trim(); if (!t) return; i.value = '';
     await api('idea/add', { text: t, by: 'owner' }); toast('captured');
@@ -684,6 +686,46 @@ function renderRadarBody() {
   if (focused) $('#radar-filter')?.focus();
 }
 
+// ---- legend / key ----------------------------------------------------------
+const STAGE_HELP = [
+  ['deciding', 'Deciding', 'Blocked on a decision (owner)'],
+  ['planning', 'Planning', 'Agent builds a plan + raises decisions'],
+  ['ready', 'Ready', 'Plan vetted, decisions cleared — implement it'],
+  ['building', 'Building', 'Implementation in progress'],
+  ['verify', 'Verify', 'Claimed done — verify 100%, then close'],
+  ['done', 'Done', 'Verified — hidden unless Show closed is on'],
+  ['frozen', 'Frozen', 'Owner-paused — untouched until you unfreeze it'],
+];
+
+function openLegend() {
+  const m = $('#detail');
+  openCard = null;
+  m.innerHTML = `<div class="modal__panel"><div class="modal__bar"><span class="num">KEY</span>
+      <span class="card__kind">what the colors mean</span>
+      <button class="modal__x" title="Close (Esc)">×</button></div>
+    <div class="modal__body">
+      <div class="modal__h">Left bar on a card = its stage</div>
+      <div class="legend">${STAGE_HELP.map(([id, name, desc]) => `<div class="legend__row"><span class="legend__bar" style="background:var(--s-${id})"></span><span class="legend__name">${name}</span><span class="legend__desc">${esc(desc)}</span></div>`).join('')}</div>
+      <div class="modal__h">Work order badge</div>
+      <p class="prose">The small number at the top-left of a card is its <b>work order</b> within its epoch — lower numbers come first. Cards without a number are unscheduled and sort last.</p>
+      <div class="modal__h">Glowing red = it needs you</div>
+      <p class="prose">A card <b style="color:var(--red)">glows red</b> when the next move is yours — a decision to record, or a visual/UX acceptance check. The same red drives the beacon, the “blocked on you” pill, and focus-mode dots.</p>
+      <div class="modal__h">Priority chips</div>
+      <div class="legend">
+        <div class="legend__row"><span class="prio prio-P0">P0</span><span class="legend__desc">Urgent — red (glows)</span></div>
+        <div class="legend__row"><span class="prio prio-P1">P1</span><span class="legend__desc">High — amber</span></div>
+        <div class="legend__row"><span class="prio prio-P2">P2</span><span class="legend__desc">Normal — muted</span></div>
+        <div class="legend__row"><span class="prio prio-P3">P3</span><span class="legend__desc">Low — faint</span></div>
+      </div>
+      <p class="prose" style="margin-top:8px">Only P0/P1 carry colour so the urgent ones pop; P2/P3 stay quiet on purpose.</p>
+      <div class="modal__h">Action tag (bottom of a card)</div>
+      <p class="prose"><span class="card__lane lane-owner"><span class="pip"></span>needs you</span> · <span class="card__lane lane-agent"><span class="pip"></span>an agent's</span> · <span class="card__lane lane-none"><span class="pip"></span>waiting / blocked</span>. It names the exact next move (e.g. “Decide”, “Ready to implement”, “Verify”).</p>
+    </div></div>`;
+  $('.modal__x', m).addEventListener('click', closeDetail);
+  m.onclick = (e) => { if (e.target === m) closeDetail(); };
+  m.hidden = false; $('#scrim').hidden = false;
+}
+
 function radarListSection(key, name, sub, shown, total, cardsMode, defOpen) {
   return collapsible(key, defOpen,
     `<span class="epoch__tag" style="color:var(--frost)">${esc(name)}</span><span class="epoch__name">${esc(sub)}</span><span class="epoch__count">${total}</span>`,
@@ -692,11 +734,17 @@ function radarListSection(key, name, sub, shown, total, cardsMode, defOpen) {
     });
 }
 
+function epochProgressLabel(r, { pct = false } = {}) {
+  const cardTotal = r.active + r.done;
+  const base = `${r.milestonesMet}/${r.milestoneTotal} milestones · ${r.done}/${cardTotal} cards`;
+  return pct ? `${base} · ${r.pct}%` : base;
+}
+
 function radarEpochSection(r, needle, cardsMode) {
   const e = S.epochs.find(x => x.id === r.id);
   return collapsible('radar:' + r.id, true,
     `<span class="epoch__tag">${esc(e ? epochTag(e) : r.id)}</span><span class="epoch__name">${esc(r.name)}</span>
-     <span class="epoch__count">${r.milestonesMet}/${r.milestoneTotal} milestones · ${r.pct}%</span>`,
+     <span class="epoch__count">${epochProgressLabel(r, { pct: true })}</span>`,
     '', (body) => {
       if (r.goal) body.appendChild(el(`<p class="epoch__goal">${esc(r.goal)}</p>`));
       body.appendChild(radarHead(r));
@@ -715,7 +763,7 @@ function radarEpochSection(r, needle, cardsMode) {
 
 function radarHead(r) {
   const wrap = el(`<div class="radar__head"></div>`);
-  wrap.appendChild(el(`<div class="epoch__prog"><div class="epoch__bar"><i style="width:${r.pct}%"></i></div><span class="epoch__pct">${r.milestonesMet}/${r.milestoneTotal} milestones</span></div>`));
+  wrap.appendChild(el(`<div class="epoch__prog"><div class="epoch__bar"><i style="width:${r.pct}%"></i></div><span class="epoch__pct">${epochProgressLabel(r)}</span></div>`));
   wrap.appendChild(radarSparkline(r.burndown));
   return wrap;
 }
@@ -1436,3 +1484,4 @@ loadDocsIndex().then(() => { if (S) renderChrome(); }).catch(() => {});
 const qs = new URLSearchParams(location.search);
 if (qs.get('focus') && S) focusAll(qs.get('focus'));
 if (qs.get('open') && S) { const c = S.cards.find(x => x.id === qs.get('open') || '#' + x.num === qs.get('open')); if (c) showDetail(c.id); }
+if (qs.get('legend')) openLegend();

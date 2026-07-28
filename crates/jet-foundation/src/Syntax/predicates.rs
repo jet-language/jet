@@ -18,8 +18,9 @@ pub fn is_stdlib_dsl_block_marker(name: &str) -> bool {
 /// exponent notation (`1e5`) and may never resolve as a unit name.
 pub const UNIT_SUFFIX_EXPONENT_RESERVED: &str = "e"; // D-UNITLIT1
 
-// D-TRAILBLOCK1: no new token — `{` directly after a call's `)` parses as the
-// trailing zero-parameter lambda argument. Parser-position rule, not lexical.
+// D-TRAILBLOCK2=A (amends D-TRAILBLOCK1): no new token — code arguments are
+// ordinary `() => { … }` lambdas inside call parentheses. A bare `{` after a
+// call is E0335 (retired trailing-block sugar), not a new lexical form.
 // D-DESTRUCT1: no new token — reuses the D-DOTCTOR1 `.{` sigil in pattern
 // position and `..` (OP_RANGE) as the now-mandatory partial-pattern rest
 // marker.

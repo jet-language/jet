@@ -1,5 +1,5 @@
 use super::super::{
-    AccessConvention, Call, CallArg, Diagnostic, Expr, Parser, Span, StrPart, StrTokPart, Syntax,
+    AccessConvention, CallArg, Diagnostic, Expr, Parser, Span, StrPart, StrTokPart, Syntax,
     TokKind, describe, retired_s14_teaching_enabled,
 };
 
@@ -27,43 +27,6 @@ impl<'a> Parser<'a> {
                     )?;
                     let full = Span::new(span.start, inner.span().end);
                     Ok(Expr::Present(Box::new(inner), full))
-                }
-                TokKind::Ident(name)
-                    if matches!(name.as_str(), "sql" | "html" | "sh")
-                        && matches!(
-                            self.toks.get(self.pos + 1).map(|t| &t.kind),
-                            Some(TokKind::Str(_))
-                        )
-                        && self
-                            .toks
-                            .get(self.pos + 1)
-                            .is_some_and(|next| self.peek().span.end == next.span.start) =>
-                {
-                    let prefix = self.bump();
-                    let str_tok = self.bump();
-                    let TokKind::Str(parts) = str_tok.kind else {
-                        unreachable!()
-                    };
-                    let str_expr = self.str_expr_from_parts(parts, str_tok.span)?;
-                    let name = match name.as_str() {
-                        "sql" => Syntax::TYPED_TEXT_SQL_PREFIX_CALL,
-                        "html" => Syntax::TYPED_TEXT_HTML_PREFIX_CALL,
-                        "sh" => Syntax::TYPED_TEXT_SH_PREFIX_CALL,
-                        _ => unreachable!(),
-                    };
-                    Ok(Expr::Call(Call {
-                        name: name.to_string(),
-                        name_span: prefix.span,
-                        args: vec![CallArg {
-                            convention: AccessConvention::Read,
-                            expr: str_expr,
-                            span: str_tok.span,
-                            flags: crate::AST::CallArgFlags::default(),
-                            label: None,
-                            spread: false,
-                        }],
-                        range_checked: false,
-                    }))
                 }
                 TokKind::KwNull => {
                     let span = self.bump().span;
@@ -424,10 +387,9 @@ impl<'a> Parser<'a> {
                     {
                         // D-DOTCTOR2: old dotless `Type { … }` form — teaching error E0320.
                         // Recover: parse the fields as if the user had written `Type.{ … }`.
-                        // A lowercase name falls through to a plain `Ident`, letting
-                        // `expr_postfix` read a following `{` as a D-TRAILBLOCK1 trailing
-                        // block (`callee { … }`) instead — same case-based split as the
-                        // turbofish check above.
+                        // A lowercase name falls through to a plain `Ident`. A following
+                        // `{` after a call is E0335 under D-TRAILBLOCK2 (retired trailing
+                        // sugar) — not a desugared lambda argument.
                         let brace_span = self.peek().span;
                         self.diags.push(Diagnostic::error(
                             "E0320",

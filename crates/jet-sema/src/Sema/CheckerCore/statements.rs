@@ -182,6 +182,19 @@ impl<'a> Checker<'a> {
             }
         }
 
+        /// Place type for assignment expected-type flow (`holder.value = .{…}`).
+        fn lvalue_type(&self, target: &LValue) -> Option<Type> {
+            match target {
+                LValue::Local { name, .. } => self.lookup(name).map(|info| info.ty.clone()),
+                LValue::Field { base, field, .. } => self.compound_field_type(base, field),
+                LValue::Index { base, .. } => match self.compound_expr_type(base)? {
+                    Type::List(elem) | Type::FixedList { elem, .. } => Some(*elem),
+                    Type::Map { value, .. } => Some(*value),
+                    _ => None,
+                },
+            }
+        }
+
         fn compound_field_type(&self, base: &Expr, field: &str) -> Option<Type> {
             let owner = self.compound_expr_type(base)?;
             self.compound_owner_field_type(&owner, field)
@@ -313,7 +326,12 @@ impl<'a> Checker<'a> {
                             .to_string(),
                         Some(*span),
                     ));
+                    let saved_expected = self.expected_type.clone();
+                    if let Some(place_ty) = self.compound_field_type(base, field) {
+                        self.expected_type = Some(place_ty);
+                    }
                     self.infer(value);
+                    self.expected_type = saved_expected;
                     return;
                 }
             }
@@ -418,11 +436,22 @@ impl<'a> Checker<'a> {
                             Some(*span),
                         ));
                         let _ = op;
+                        let saved_expected = self.expected_type.clone();
+                        if let Some(place_ty) = self.lvalue_type(target) {
+                            self.expected_type = Some(place_ty);
+                        }
                         self.infer(value);
+                        self.expected_type = saved_expected;
                         return;
                     }
                     self.check_lvalue_change(target, "be assigned");
+                    // Beginner magic: place type feeds `.{…}` / `.Variant` on the RHS.
+                    let saved_expected = self.expected_type.clone();
+                    if let Some(place_ty) = self.lvalue_type(target) {
+                        self.expected_type = Some(place_ty);
+                    }
                     let vt = self.infer(value);
+                    self.expected_type = saved_expected;
                     if !is_compound {
                         if vt
                             .as_ref()

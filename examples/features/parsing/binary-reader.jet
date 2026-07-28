@@ -21,22 +21,18 @@ fn run() {
     short :: [U8].{0x01}
     r2 :: Reader.over(short)
     if r2.read_u32_le() == {
-        .Ok(v) -> {
-            print("unexpected ok: {v}")
-        }
-        .Err(e) -> {
-            print("expected error: {e}")
-        }
+        .Ok(v) -> print("unexpected ok: {v}")
+        .Err(e) -> print("expected error: {e}")
     }
 
-    // D-BINPAT1 (card #506 follow-up): `take_pattern(b"…")` — the byte-mode
+    // D-BINPAT1 (card #506 follow-up): `take_pattern([U8].{"…"})` — the byte-mode
     // sibling of `Cursor.take_pattern`, reusing the D-BINPAT1 pattern engine
     // (`try_bin_match_pattern`'s `{name:U<width>}` holes) in CONSUME mode:
     // it advances the reader past the matched prefix instead of requiring
     // the whole remaining bytes to match, so more reads can follow.
     header :: [U8].{0x45, 0x00, 0x00, 0x28, 0xDE, 0xAD, 0xBE, 0xEF}
     r3 :: Reader.over(header)
-    parsed :: r3.take_pattern(b"{version:U4}{ihl:U4}{tos:U8}{len:U16be}") ?? panic("bad header")
+    parsed :: r3.take_pattern([U8].{"{version:U4}{ihl:U4}{tos:U8}{len:U16be}"}) ?? panic("bad header")
     print("IPv{parsed.version}, header {parsed.ihl} words, tos {parsed.tos}, len {parsed.len}")
     left :: r3.remaining()
     payload2 :: r3.take(left) ?? panic("short read")
