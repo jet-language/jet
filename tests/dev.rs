@@ -7794,46 +7794,39 @@ fn enum_variant_change_emits_e2210() {
 
 /// D-PERSIST1: `#Persist` is inert in a release build — the marker carries no
 /// AOT hooks. Dev-tier persistence lives in the shared `jet_foundation::Persist`
-/// store (not in generated Rust). Asserts release codegen is byte-identical
-/// with and without `#Persist`.
+/// store (not in generated Rust). `#Persist name := …` is the only module-level
+/// bare-binding form (D-BIND-BARE1), so there is no marker-free twin to diff
+/// against. The proof is that release codegen lowers the binding to a plain
+/// Rust `static` and emits no persist-store call.
 #[test]
 fn persist_marker_is_codegen_inert() {
     let dir = std::env::temp_dir().join(format!("jet_persist_parity_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
-    let compile = |src: &str, name: &str| {
-        let path = dir.join(name);
-        fs::write(&path, src).unwrap();
-        let shown = path.to_string_lossy().to_string();
-        jet::compile_with_path(src, &shown)
-            .unwrap_or_else(|diags| {
-                panic!(
-                    "front end rejected fixture:\n{}",
-                    jet::render_diagnostics(&shown, src, &diags)
-                )
-            })
-            .rust
-    };
-    // Same file name for both variants so the only possible difference in the
-    // generated `source=` comment is the content, not the path.
-    let strip_source_map = |rust: String| -> String {
-        rust.lines()
-            .filter(|l| !l.starts_with("// jet:source-map"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    let plain = strip_source_map(compile(
-        "const counter = 0;\nfn run() {\n    print(counter)\n}\n",
-        "counter.jet",
-    ));
-    fs::remove_file(dir.join("counter.jet")).ok();
-    let persisted = strip_source_map(compile(
-        "#Persist const counter = 0;\nfn run() {\n    print(counter)\n}\n",
-        "counter.jet",
-    ));
-    assert_eq!(
-        plain, persisted,
-        "#Persist must not change generated Rust (inert in release)"
+    let path = dir.join("counter.jet");
+    let src = "#Persist counter := 0\nfn run() {\n    print(counter)\n}\n";
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy().to_string();
+    let rust = jet::compile_with_path(src, &shown)
+        .unwrap_or_else(|diags| {
+            panic!(
+                "front end rejected fixture:\n{}",
+                jet::render_diagnostics(&shown, src, &diags)
+            )
+        })
+        .rust;
+    assert!(
+        rust.contains("static USER_COUNTER: i64 = 0i64;"),
+        "`#Persist` binding must lower to a plain release `static`:\n{rust}"
     );
+    let hooks: Vec<&str> = rust
+        .lines()
+        .filter(|l| l.contains("Persist::") || l.contains("jet_foundation::Persist"))
+        .collect();
+    assert!(
+        hooks.is_empty(),
+        "`#Persist` must emit no persist-store hooks in release Rust: {hooks:?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
 }
 
 /// D-PERSIST1: `#Persist` module bindings survive a real hot reload when the
@@ -7865,11 +7858,11 @@ fn persist_binding_survives_hot_swap_and_resets_on_shape_change() {
 
     jet_foundation::Persist::shared_clear();
 
-    write("#Persist const counter = 0\nfn run() {\n    print(counter)\n}\n");
+    write("#Persist counter := 0\nfn run() {\n    print(counter)\n}\n");
     let v1 = load_checked(&path);
-    write("#Persist const counter = 99\nfn run() {\n    print(counter)\n}\n");
+    write("#Persist counter := 99\nfn run() {\n    print(counter)\n}\n");
     let v2 = load_checked(&path);
-    write("#Persist const counter = true\nfn run() {\n    print(counter)\n}\n");
+    write("#Persist counter := true\nfn run() {\n    print(counter)\n}\n");
     let v3 = load_checked(&path);
 
     // Interpreter tier (always available): value must survive compatible reload.
