@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1255,
-    "rev": 18122,
+    "rev": 18137,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26017,12 +26017,32 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-agent-execution",
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nblockedBy: none — corpus design and baseline capture are leaf work. Freeze task inputs, expected outcomes, allowed dependencies, machines, and scoring before comparing languages. Prefer executable fixtures and hostile cases over prose. Use existing cards as the canonical implementation owners. Every Jet loss must link one live canonical card, reopen a falsely closed card, or record a ratified non-goal; never add a duplicate mechanism. The corpus is a gate and evidence source, not another test runner or benchmark framework when existing harnesses suffice.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-28",
+          "by": "burndown-orch-verify",
+          "text": "Closed by orchestrator after independent verification (verifier did not build). Suite re-run green 6/6 at c169f5da5; frozen-input contract proved by live mutation and reverted. Slice 1/10 only: domains #1165-#1169, baselines #1170-#1172, and OS matrix #1173 remain open on their own cards.\n\nTwo notes for the sibling cards. The .jet adapters were rewritten by unrelated arrow-syntax work in f71f39648 and still produce byte-exact output, so corpus adapters sit in the blast radius of syntax migrations. incident_report.jet now passes under the default lens, which narrows the remaining gap to core.files.walk() and core.process.cmd()."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-769-corpus2",
+          "text": "All three criteria met from fresh runs at c169f5da5. Slice 1/10 only: task schema, runner, scoring, and frozen inputs. Sibling scope untouched. Moving to verify for an independent reviewer."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-769-corpus2",
+          "text": "Found and closed a real hostile gap at c169f5da5. verify_checksum_closure rejected an absolute path, a dot-dot path, an empty path part, a duplicate row, and an unsplittable row, but no test covered any of those five branches. checksum_closure_rejects_drift_and_hostile_sums now proves each one, plus fixture drift and a removed declared fixture. The test was renamed from checksum_closure_rejects_an_extra_fixture to match its scope."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-769-corpus2",
+          "text": "Restored docs/agent-workload-corpus.md at 38408b5bb. It was deleted as collateral in the bulk commit d5f4e0964, not by any intentional change; recovered from 906b60def, its last legitimate edit. Then brought it up to date with the shipped corpus at c169f5da5: the five-test inventory, the 23-row checksum count, the mutation proofs, the successor cards that own each workload domain, and the current default-lens gap. Only three of the four Jet adapters still fail default jet run with E0956; incident_report.jet now runs under the dev lens, so the old blanket claim was stale."
+        },
         {
           "at": "2026-07-28",
           "by": "burndown-orch",
@@ -26143,29 +26163,29 @@
         {
           "n": 1,
           "text": "Agent corpus: task schema, runner, scoring, and frozen inputs works end to end through the existing production path.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T10:49:34.355Z"
+          "status": "verified",
+          "metBy": "e3-769-corpus2",
+          "verifiedBy": "burndown-orch-verify",
+          "evidence": "Independent re-run by orchestrator (did not build). 'JET_NIX_TMP_CLEANED=1 scripts/agent/jet-env cargo test --test agent_workloads' at c169f5da5: ok, 6 passed, 0 failed, 0 ignored, 0 filtered, 308.48s. equivalent_adapters_complete_declared_tasks exercises all 8 tasks across 4 adapters cold and warm through jet run --release.",
+          "at": "2026-07-28T09:42:11.152Z"
         },
         {
           "n": 2,
           "text": "Focused success, failure, hostile, and integration tests cover Agent corpus: task schema, runner, scoring, and frozen inputs without fallback or skip paths.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T10:49:34.355Z"
+          "status": "verified",
+          "metBy": "e3-769-corpus2",
+          "verifiedBy": "burndown-orch-verify",
+          "evidence": "Independent check. The suite reports 0 ignored and 0 filtered, so no skip path hides a case. Reviewed the diff at c169f5da5: checksum_closure_rejects_an_extra_fixture was renamed to checksum_closure_rejects_drift_and_hostile_sums and gained coverage for five previously untested rejection branches, including the duplicate-row case ('duplicate checksum path: inputs/task.txt') and unsplittable rows. Frozen-input contract proved by mutation: appending one byte to tests/agent_workloads/inputs/repository/notes/plan.md makes manifest_is_complete_frozen_and_non_vacuous fail with 'fixture drift: inputs/repository/notes/plan.md', exit 101. Tree restored and clean after. Note the drift check lives in manifest_is_complete_frozen_and_non_vacuous, not in checksum_closure_rejects_drift_and_hostile_sums, which runs on synthetic cases in 0.00s.",
+          "at": "2026-07-28T09:42:11.400Z"
         },
         {
           "n": 3,
           "text": "Documentation and audit evidence match Agent corpus: task schema, runner, scoring, and frozen inputs, and an independent reviewer verifies the result.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T10:49:34.355Z"
+          "status": "verified",
+          "metBy": "e3-769-corpus2",
+          "verifiedBy": "burndown-orch-verify",
+          "evidence": "Independent review by orchestrator, who did not build this card. docs/agent-workload-corpus.md was restored at 38408b5bb from 906b60def after I traced its deletion to collateral damage in bulk commit d5f4e0964, then reconciled against the shipped tree at c169f5da5. The update corrects two stale claims rather than restoring the old text unchanged: the default-lens rejection claim now says three of four Jet adapters, since incident_report.jet runs under the dev lens; and the coverage table now routes domains to their real owners #1165-#1169 and #1173 instead of pointing everything at #769.",
+          "at": "2026-07-28T09:42:11.639Z"
         }
       ],
       "refs": [
@@ -26175,9 +26195,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:00.999Z",
-      "updated": "2026-07-28T01:36:59.163Z",
+      "updated": "2026-07-28T09:42:19.013Z",
       "workOrder": 3769,
-      "updatedBy": "burndown-orch"
+      "updatedBy": "burndown-orch-verify"
     },
     {
       "id": "c0vrs94y",
@@ -26352,9 +26372,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:07.441Z",
-      "updated": "2026-07-28T04:22:07.847Z",
+      "updated": "2026-07-28T09:39:27.921Z",
       "workOrder": 3771,
-      "updatedBy": "burndown-orch"
+      "updatedBy": "owner"
     },
     {
       "id": "c0dixxk4",
@@ -54961,6 +54981,11 @@
         {
           "at": "2026-07-28",
           "by": "e3-1210-examples",
+          "text": "Coordinator's criterion 5 red was two pre-existing I2 violations, not a regression from today. Evidence: the four fixtures were last touched by 4940466c8, and each live example already carries the current shape the mirror lacks — .to_list() after a lazy adapter (D-ITERTOOLS1=A) and server.mux() instead of the retired http.router(). No commit from today touches iterator lowering or the HTTP router. Both violations are real and reachable from ordinary Jet, so both are fixed at the root: is_printable and is_displayable blessed any generic type whose arguments were showable, which swept Iter<T> in with real containers, and JetHTTPRouter had no Clone although everything it holds is cloneable. Seven stale mirrors refreshed from their live examples. Commit 14bf735ab plus the differential refresh."
+        },
+        {
+          "at": "2026-07-28",
+          "by": "e3-1210-examples",
           "text": "Standalone sweep with a freshly built compiler: 421 of 426 authored examples pass jet check, up from 406. The five remaining are the two scoped compiler features (build-time I/O builtins in the canonical TIR evaluator; build-plan-aware checking). Refreshed five stale valid-corpus mirrors from their live examples: ex_collections_index_hook, ex_effects_effect_levers, ex_errors_errors, ex_net_http_rest_service, ex_tooling_data_pipeline. tests/build_entry.rs passes 31 of 31. Two findings outside this card: twelve examples last touched by commit d5f4e0964 are not formatter-clean, and the four polyglot binder goldens fail in the default JIT lens on an E0956 ModuleCall gap while the AOT lens runs them correctly."
         },
         {
@@ -55043,9 +55068,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T21:32:31.859Z",
-      "updated": "2026-07-28T04:52:22.332Z",
+      "updated": "2026-07-28T09:31:24.144Z",
       "updatedBy": "e3-1210-examples",
-      "claimedAt": "2026-07-28T04:52:22.332Z"
+      "claimedAt": "2026-07-28T09:31:24.144Z"
     },
     {
       "id": "c0nv1ivk",
@@ -73287,6 +73312,17 @@
       "status": "open",
       "answer": "",
       "created": "2026-07-28T00:56:24.390Z"
+    },
+    {
+      "id": "q0s2ah7h",
+      "cardId": "c0ft6gme",
+      "decisionId": "D-PROCESS-SESSION2",
+      "by": "owner",
+      "kind": "question",
+      "text": "I dont understand what the \"facts\" things is. Also, we want to ensure an excellent exploration experience for quick prototyping and architecting, but also want to have strong typing & safety. Is there a way to erradicate the negative tradeoffs of option D?",
+      "status": "open",
+      "answer": "",
+      "created": "2026-07-28T09:39:27.921Z"
     }
   ],
   "ideas": [
@@ -73661,6 +73697,111 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-07-28T09:42:19.013Z",
+      "by": "burndown-orch-verify",
+      "action": "card.update",
+      "ref": "c0h9cjc7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T09:42:18.742Z",
+      "by": "burndown-orch-verify",
+      "action": "card.update",
+      "ref": "c0h9cjc7",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-28T09:42:11.639Z",
+      "by": "burndown-orch-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0h9cjc7",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-28T09:42:11.400Z",
+      "by": "burndown-orch-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0h9cjc7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T09:42:11.152Z",
+      "by": "burndown-orch-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0h9cjc7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T09:39:27.921Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q0s2ah7h",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T09:35:21.130Z",
+      "by": "e3-769-corpus2",
+      "action": "card.update",
+      "ref": "c0h9cjc7",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T09:35:16.116Z",
+      "by": "e3-769-corpus2",
+      "action": "card.criteria-meet",
+      "ref": "c0h9cjc7",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-28T09:35:07.286Z",
+      "by": "e3-769-corpus2",
+      "action": "card.criteria-meet",
+      "ref": "c0h9cjc7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T09:34:58.523Z",
+      "by": "e3-769-corpus2",
+      "action": "card.criteria-meet",
+      "ref": "c0h9cjc7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T09:34:49.636Z",
+      "by": "e3-769-corpus2",
+      "action": "card.update",
+      "ref": "c0h9cjc7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T09:34:49.347Z",
+      "by": "e3-769-corpus2",
+      "action": "card.update",
+      "ref": "c0h9cjc7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T09:31:24.145Z",
+      "by": "e3-1210-examples",
+      "action": "card.update",
+      "ref": "c0jlp4u3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T09:18:26.150Z",
+      "by": "e3-769-corpus2",
+      "action": "card.claim",
+      "ref": "c0h9cjc7",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T09:18:01.789Z",
+      "by": "e3-769-corpus2",
+      "action": "card.claim",
+      "ref": "c0h9cjc7",
+      "note": ""
+    },
     {
       "at": "2026-07-28T04:52:22.332Z",
       "by": "e3-1210-examples",
@@ -77055,111 +77196,6 @@
       "action": "card.add",
       "ref": "c01h50x5",
       "note": "JIT/AOT: collections/lazy_iter JetIter missing Clone (blocks #1230 c3)"
-    },
-    {
-      "at": "2026-07-27T20:17:48.375Z",
-      "by": "e3-1230-c3-grok",
-      "action": "card.claim",
-      "ref": "c08rt6iw",
-      "note": ""
-    },
-    {
-      "at": "2026-07-27T20:17:22.610Z",
-      "by": "e3-746-grok",
-      "action": "card.update",
-      "ref": "c0j80rjg",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:17:22.389Z",
-      "by": "e3-746-grok",
-      "action": "card.update",
-      "ref": "c0j80rjg",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-27T20:17:22.151Z",
-      "by": "e3-746-review",
-      "action": "card.criteria-verify",
-      "ref": "c0j80rjg",
-      "note": "#10"
-    },
-    {
-      "at": "2026-07-27T20:17:21.952Z",
-      "by": "e3-746-review",
-      "action": "card.criteria-verify",
-      "ref": "c0j80rjg",
-      "note": "#9"
-    },
-    {
-      "at": "2026-07-27T20:17:21.750Z",
-      "by": "e3-746-review",
-      "action": "card.criteria-verify",
-      "ref": "c0j80rjg",
-      "note": "#8"
-    },
-    {
-      "at": "2026-07-27T20:17:21.544Z",
-      "by": "e3-746-review",
-      "action": "card.criteria-verify",
-      "ref": "c0j80rjg",
-      "note": "#7"
-    },
-    {
-      "at": "2026-07-27T20:17:21.353Z",
-      "by": "e3-746-review",
-      "action": "card.criteria-verify",
-      "ref": "c0j80rjg",
-      "note": "#6"
-    },
-    {
-      "at": "2026-07-27T20:17:21.164Z",
-      "by": "e3-746-review",
-      "action": "card.criteria-verify",
-      "ref": "c0j80rjg",
-      "note": "#5"
-    },
-    {
-      "at": "2026-07-27T20:17:20.969Z",
-      "by": "e3-746-review",
-      "action": "card.criteria-verify",
-      "ref": "c0j80rjg",
-      "note": "#4"
-    },
-    {
-      "at": "2026-07-27T20:17:20.766Z",
-      "by": "e3-746-review",
-      "action": "card.criteria-verify",
-      "ref": "c0j80rjg",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-27T20:17:20.568Z",
-      "by": "e3-746-review",
-      "action": "card.criteria-verify",
-      "ref": "c0j80rjg",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-27T20:17:20.354Z",
-      "by": "e3-746-review",
-      "action": "card.criteria-verify",
-      "ref": "c0j80rjg",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-27T20:17:20.154Z",
-      "by": "e3-746-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0j80rjg",
-      "note": "#10"
-    },
-    {
-      "at": "2026-07-27T20:17:19.957Z",
-      "by": "e3-746-grok",
-      "action": "card.criteria-meet",
-      "ref": "c0j80rjg",
-      "note": "#9"
     }
   ],
   "nextNum": 368,
