@@ -1,10 +1,30 @@
-// D-ITERTOOLS1=A: an adapter hands back a one-pass view. Showing one would
-// consume it, so both `print` and bare interpolation refuse and teach
-// `.to_list()`.
+// One-pass sources cannot be shown because that would consume them.
+use core.http as http
+
+struct Box<T> {
+    value: T
+}
+
+fn count() => Stream<Int> {
+    yield 1
+}
+
 fn run() {
     nums :: [1, 2, 3]
     doubled :: nums.map((n: Int) => (n * 2))
     print(doubled)
     other :: nums.filter((n: Int) => (n > 1))
     print("view: {other}")
+
+    chunks :: http.Body.empty().chunks()
+    print(chunks)
+    print("chunks: {chunks}")
+
+    stream :: count()
+    print(stream)
+    print("stream: {stream}")
+
+    // Containers and unrelated generic applications remain printable.
+    print([1, 2, 3])
+    print(Box<Int>.{value: 1})
 }

@@ -274,14 +274,24 @@ impl<'a> Checker<'a> {
                                 "print a public operation label or key identifier instead".to_string(),
                                 Some(arg.expr.span()),
                             ));
-                        } else if let Some(call) =
-                            crate::Sema::Diagnostics::one_pass_materializer(&t)
-                        {
+                        } else if crate::Sema::Diagnostics::is_one_pass_source(&t) {
+                            let fix = crate::Sema::Diagnostics::one_pass_materializer(&t)
+                                .map_or_else(
+                                    || {
+                                        "consume it with a `loop` and print each item instead"
+                                            .to_string()
+                                    },
+                                    |call| {
+                                        format!(
+                                            "materialize it first: add `{call}` before printing"
+                                        )
+                                    },
+                                );
                             self.diags.push(Diagnostic::error(
                                 "E0112",
                                 format!("`{}` cannot show the one-pass source {}", Syntax::BUILTIN_PRINT, t.show()),
                                 "reading this value consumes it, so showing it would spend the only pass".to_string(),
-                                format!("materialize it first: add `{call}` before printing"),
+                                fix,
                                 Some(arg.expr.span()),
                             ));
                         } else {

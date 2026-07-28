@@ -657,14 +657,25 @@ impl<'a> Checker<'a> {
                                             ));
                                             continue;
                                         }
-                                        if let Some(call) =
-                                            crate::Sema::Diagnostics::one_pass_materializer(&t)
-                                        {
+                                        if crate::Sema::Diagnostics::is_one_pass_source(&t) {
+                                            let fix =
+                                                crate::Sema::Diagnostics::one_pass_materializer(&t)
+                                                    .map_or_else(
+                                                        || {
+                                                            "consume it with a `loop` and show each item instead"
+                                                                .to_string()
+                                                        },
+                                                        |call| {
+                                                            format!(
+                                                                "materialize it first: add `{call}` before the interpolation"
+                                                            )
+                                                        },
+                                                    );
                                             self.diags.push(Diagnostic::error(
                                                 "E0915",
                                                 format!("the one-pass source {} has no `Display` implementation", t.show()),
                                                 "reading this value consumes it, so showing it would spend the only pass".to_string(),
-                                                format!("materialize it first: add `{call}` before the interpolation"),
+                                                fix,
                                                 Some(inner.span()),
                                             ));
                                             continue;

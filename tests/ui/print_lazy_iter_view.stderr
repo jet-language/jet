@@ -1,15 +1,47 @@
 Error [E0112]: `print` cannot show the one-pass source `Iter`<Int>
-  --> tests/ui/print_lazy_iter_view.jet:7:11
+  --> tests/ui/print_lazy_iter_view.jet:15:11
     |
-  7 |     print(doubled)
+ 15 |     print(doubled)
     |           ^^^^^^^
  Why: reading this value consumes it, so showing it would spend the only pass
  Fix: materialize it first: add `.to_list()` before printing
 
 Error [E0915]: the one-pass source `Iter`<Int> has no `Display` implementation
-  --> tests/ui/print_lazy_iter_view.jet:9:19
+  --> tests/ui/print_lazy_iter_view.jet:17:19
     |
-  9 |     print("view: {other}")
+ 17 |     print("view: {other}")
     |                   ^^^^^
  Why: reading this value consumes it, so showing it would spend the only pass
  Fix: materialize it first: add `.to_list()` before the interpolation
+
+Error [E0112]: `print` cannot show the one-pass source `HTTPBodyChunks`
+  --> tests/ui/print_lazy_iter_view.jet:20:11
+    |
+ 20 |     print(chunks)
+    |           ^^^^^^
+ Why: reading this value consumes it, so showing it would spend the only pass
+ Fix: consume it with a `loop` and print each item instead
+
+Error [E0915]: the one-pass source `HTTPBodyChunks` has no `Display` implementation
+  --> tests/ui/print_lazy_iter_view.jet:21:21
+    |
+ 21 |     print("chunks: {chunks}")
+    |                     ^^^^^^
+ Why: reading this value consumes it, so showing it would spend the only pass
+ Fix: consume it with a `loop` and show each item instead
+
+Error [E0112]: `print` cannot show the one-pass source `Stream`<Int>
+  --> tests/ui/print_lazy_iter_view.jet:24:11
+    |
+ 24 |     print(stream)
+    |           ^^^^^^
+ Why: reading this value consumes it, so showing it would spend the only pass
+ Fix: consume it with a `loop` and print each item instead
+
+Error [E0915]: the one-pass source `Stream`<Int> has no `Display` implementation
+  --> tests/ui/print_lazy_iter_view.jet:25:21
+    |
+ 25 |     print("stream: {stream}")
+    |                     ^^^^^^
+ Why: reading this value consumes it, so showing it would spend the only pass
+ Fix: consume it with a `loop` and show each item instead

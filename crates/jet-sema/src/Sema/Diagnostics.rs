@@ -770,11 +770,22 @@ pub(crate) fn is_secret_bearing_crypto_type(ty: &Type) -> bool {
     }
 }
 
-/// Some Core values are one-pass sources: an iterator adapter view
-/// (D-ITERTOOLS1=A) and an HTTP body. Reading one consumes it, so neither can
-/// be shown from a read, and codegen has no `jet_show` to call. Sema refuses
-/// showing them (I3) and names the call that materializes the value, exactly
-/// as the examples already do.
+/// Some Core values are one-pass sources. Reading one consumes it, so it
+/// cannot be shown from a read, and codegen has no `jet_show` to call. Sema
+/// refuses showing it (I3).
+pub(crate) fn is_one_pass_source(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Apply { name, .. }
+            if name == Syntax::TYPE_ITER || name == Syntax::TYPE_STREAM
+    ) || matches!(
+        ty,
+        Type::Named(name) if matches!(name.as_str(), "HTTPBody" | "HTTPBodyChunks")
+    )
+}
+
+/// Name a real materializer when the one-pass type has one. `Stream<T>` and
+/// `HTTPBodyChunks` are consumed with a loop instead.
 pub(crate) fn one_pass_materializer(ty: &Type) -> Option<&'static str> {
     match ty {
         Type::Apply { name, .. } if name == Syntax::TYPE_ITER => Some(".to_list()"),
@@ -784,7 +795,7 @@ pub(crate) fn one_pass_materializer(ty: &Type) -> Option<&'static str> {
 }
 
 pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
-    if is_secret_bearing_crypto_type(ty) || one_pass_materializer(ty).is_some() {
+    if is_secret_bearing_crypto_type(ty) || is_one_pass_source(ty) {
         return false;
     }
     match ty {
@@ -815,7 +826,7 @@ pub(crate) fn is_displayable(
     type_reg: &TypeRegistry,
     trait_reg: &crate::Traits::TraitRegistry,
 ) -> bool {
-    if is_secret_bearing_crypto_type(ty) || one_pass_materializer(ty).is_some() {
+    if is_secret_bearing_crypto_type(ty) || is_one_pass_source(ty) {
         return false;
     }
     match ty {
