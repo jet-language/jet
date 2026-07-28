@@ -171,6 +171,11 @@ fn compiled_binary_output_with_stdin(
     if let Some(path) = stdin {
         run_cmd.stdin(fs::File::open(path).unwrap());
     }
+    // Match golden / ui_and_web three-way: GTK `present` opens a real window
+    // unless headless — AOT would hang the 30s timeout otherwise.
+    if stem == "ui/ui_native_linux" {
+        run_cmd.env("JET_UI_HEADLESS", "1");
+    }
     let run = command_output_with_timeout(
         run_cmd,
         DEV_DIFF_TIMEOUT,
