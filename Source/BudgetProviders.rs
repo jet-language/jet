@@ -242,12 +242,12 @@ fn read_bounded_isolated(path:&Path,timeout:Duration)->Result<Vec<u8>,ProviderFa
 
 #[cfg(target_os="linux")]
 fn run_isolated_bytes<F>(timeout:Duration,label:&str,work:F)->Result<Vec<u8>,ProviderFailure>where F:FnOnce()->Result<Vec<u8>,ProviderFailure>{
-    const O_NONBLOCK:i32=0o4000;const F_SETFL:i32=4;const WNOHANG:i32=1;const SIGKILL:i32=9;
-    extern "C"{fn pipe(fds:*mut i32)->i32;fn fork()->i32;fn close(fd:i32)->i32;fn read(fd:i32,buffer:*mut u8,count:usize)->isize;fn write(fd:i32,buffer:*const u8,count:usize)->isize;fn fcntl(fd:i32,command:i32,...)->i32;fn waitpid(pid:i32,status:*mut i32,options:i32)->i32;fn kill(pid:i32,signal:i32)->i32;fn setpgid(pid:i32,pgid:i32)->i32;fn _exit(status:i32)->!;}
+    const O_NONBLOCK:i32=0o4000;const F_SETFL:i32=4;const WNOHANG:i32=1;const SIGKILL:i32=9;const PR_SET_PDEATHSIG:i32=1;
+    extern "C"{fn pipe(fds:*mut i32)->i32;fn fork()->i32;fn close(fd:i32)->i32;fn read(fd:i32,buffer:*mut u8,count:usize)->isize;fn write(fd:i32,buffer:*const u8,count:usize)->isize;fn fcntl(fd:i32,command:i32,...)->i32;fn waitpid(pid:i32,status:*mut i32,options:i32)->i32;fn kill(pid:i32,signal:i32)->i32;fn setpgid(pid:i32,pgid:i32)->i32;fn getpid()->i32;fn getppid()->i32;fn prctl(option:i32,arg2:usize,arg3:usize,arg4:usize,arg5:usize)->i32;fn _exit(status:i32)->!;}
     fn class_byte(class:FailureClass)->u8{match class{FailureClass::Unavailable=>0,FailureClass::Malformed=>1,FailureClass::Panic=>2,FailureClass::Timeout=>3,FailureClass::Execution=>4,FailureClass::Incompatible=>5,FailureClass::Unsupported=>6,FailureClass::Unresolved=>7}}
     fn byte_class(value:u8)->Option<FailureClass>{Some(match value{0=>FailureClass::Unavailable,1=>FailureClass::Malformed,2=>FailureClass::Panic,3=>FailureClass::Timeout,4=>FailureClass::Execution,5=>FailureClass::Incompatible,6=>FailureClass::Unsupported,7=>FailureClass::Unresolved,_=>return None})}
-    let mut pipes=[-1,-1];if unsafe{pipe(pipes.as_mut_ptr())}!=0{return Err(ProviderFailure::operation(FailureClass::Execution,format!("cannot create isolated worker pipe: {}",std::io::Error::last_os_error())))}let pid=unsafe{fork()};if pid<0{unsafe{close(pipes[0]);close(pipes[1]);}return Err(ProviderFailure::operation(FailureClass::Execution,format!("cannot isolate {label}: {}",std::io::Error::last_os_error())))}
-    if pid==0{unsafe{close(pipes[0]);setpgid(0,0);close(2);let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).map_err(|_|ProviderFailure::operation(FailureClass::Panic,"isolated worker panicked")).and_then(|value|value);let frame=match result{Ok(bytes)=>{let mut frame=Vec::with_capacity(bytes.len()+1);frame.push(0);frame.extend_from_slice(&bytes);frame},Err(failure)=>{let mut frame=Vec::with_capacity(failure.reason.len()+2);frame.push(1);frame.push(class_byte(failure.class));frame.extend_from_slice(failure.reason.as_bytes());frame}};let mut at=0;while at<frame.len(){let sent=write(pipes[1],frame[at..].as_ptr(),frame.len()-at);if sent<=0{break}at+=sent as usize}close(pipes[1]);_exit(0)}}
+    let supervisor=unsafe{getpid()};let mut pipes=[-1,-1];if unsafe{pipe(pipes.as_mut_ptr())}!=0{return Err(ProviderFailure::operation(FailureClass::Execution,format!("cannot create isolated worker pipe: {}",std::io::Error::last_os_error())))}let pid=unsafe{fork()};if pid<0{unsafe{close(pipes[0]);close(pipes[1]);}return Err(ProviderFailure::operation(FailureClass::Execution,format!("cannot isolate {label}: {}",std::io::Error::last_os_error())))}
+    if pid==0{unsafe{if prctl(PR_SET_PDEATHSIG,SIGKILL as usize,0,0,0)!=0||getppid()!=supervisor{_exit(1)}close(pipes[0]);setpgid(0,0);close(2);let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).map_err(|_|ProviderFailure::operation(FailureClass::Panic,"isolated worker panicked")).and_then(|value|value);let frame=match result{Ok(bytes)=>{let mut frame=Vec::with_capacity(bytes.len()+1);frame.push(0);frame.extend_from_slice(&bytes);frame},Err(failure)=>{let mut frame=Vec::with_capacity(failure.reason.len()+2);frame.push(1);frame.push(class_byte(failure.class));frame.extend_from_slice(failure.reason.as_bytes());frame}};let mut at=0;while at<frame.len(){let sent=write(pipes[1],frame[at..].as_ptr(),frame.len()-at);if sent<=0{break}at+=sent as usize}close(pipes[1]);_exit(0)}}
     #[cfg(test)]let _active=ActiveIsolatedWorker::new();unsafe{close(pipes[1]);setpgid(pid,pid);fcntl(pipes[0],F_SETFL,O_NONBLOCK);}#[cfg(test)]LAST_ISOLATED_GROUP.store(pid as u64,AtomicOrdering::SeqCst);let deadline=Instant::now()+timeout;let mut frame=Vec::new();let mut worker_reaped=false;loop{let mut buffer=[0u8;8192];let count=unsafe{read(pipes[0],buffer.as_mut_ptr(),buffer.len())};if count>0{frame.extend_from_slice(&buffer[..count as usize]);continue}if count==0{unsafe{close(pipes[0]);}break}if !worker_reaped{let mut status=0;let waited=unsafe{waitpid(pid,&mut status,WNOHANG)};if waited==pid{worker_reaped=true}}if Instant::now()>=deadline{unsafe{kill(-pid,SIGKILL);if !worker_reaped{let mut status=0;waitpid(pid,&mut status,0);}close(pipes[0]);}return Err(ProviderFailure::operation(FailureClass::Timeout,format!("{label} timed out and its isolated process group was terminated")))}std::thread::sleep(Duration::from_millis(1));}if !worker_reaped{let mut status=0;unsafe{waitpid(pid,&mut status,0);}}
     match frame.first().copied(){Some(0)=>Ok(frame[1..].to_vec()),Some(1)=>{let class=frame.get(1).copied().and_then(byte_class).ok_or_else(||ProviderFailure::operation(FailureClass::Execution,"isolated worker returned an invalid failure class"))?;let reason=String::from_utf8(frame[2..].to_vec()).map_err(|_|ProviderFailure::operation(FailureClass::Execution,"isolated worker returned non-UTF-8 failure text"))?;Err(ProviderFailure::operation(class,reason))},_=>Err(ProviderFailure::operation(FailureClass::Execution,format!("{label} exited without a result")))}
 }
@@ -307,6 +307,50 @@ mod tests {
     fn unavailable_provider(request:&ProviderRequest,_:&ProviderCancellation)->Result<Vec<ProviderEvent>,ProviderFailure>{Ok(vec![ProviderEvent::Unavailable{spec:0,reason:"probe could not observe ready event".into(),details:vec![]},ProviderEvent::Complete{request_id:request.request_id.clone(),samples:0}])}
     fn temporary(name:&str)->PathBuf{static NEXT:AtomicU64=AtomicU64::new(0);std::env::temp_dir().join(format!("jet-budget-provider-{}-{name}-{}",std::process::id(),NEXT.fetch_add(1,Ordering::Relaxed)))}
     #[cfg(target_os="linux")]fn assert_last_group_gone(){extern "C"{fn kill(pid:i32,signal:i32)->i32;}let group=LAST_ISOLATED_GROUP.load(Ordering::SeqCst)as i32;let deadline=Instant::now()+Duration::from_millis(100);while unsafe{kill(-group,0)}==0&&Instant::now()<deadline{std::thread::yield_now()}assert_ne!(unsafe{kill(-group,0)},0,"isolated provider process group survived timeout");}
+
+    #[cfg(target_os="linux")]
+    #[test]
+    fn isolated_worker_dies_with_supervisor(){
+        const CHILD_ENV:&str="JET_TEST_ISOLATED_WORKER_SUPERVISOR";
+        const PID_PATH_ENV:&str="JET_TEST_ISOLATED_WORKER_PID_PATH";
+        if std::env::var_os(CHILD_ENV).is_some(){
+            let path=PathBuf::from(std::env::var_os(PID_PATH_ENV).expect("worker PID path"));
+            let _=run_isolated_bytes(Duration::from_secs(30),"parent-death regression",move||{
+                std::fs::write(&path,std::process::id().to_string()).map_err(|error|ProviderFailure::operation(FailureClass::Execution,format!("cannot publish isolated worker PID: {error}")))?;
+                loop{std::hint::spin_loop()}
+            });
+            return;
+        }
+
+        extern "C"{fn kill(pid:i32,signal:i32)->i32;}
+        const SIGKILL:i32=9;
+        let _guard=PROCESS_TEST_LOCK.lock().unwrap_or_else(|poisoned|poisoned.into_inner());
+        let path=temporary("isolated-worker-pid");
+        let mut supervisor=std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact","BudgetProviders::tests::isolated_worker_dies_with_supervisor","--nocapture"])
+            .env(CHILD_ENV,"1").env(PID_PATH_ENV,&path).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+        let publish_deadline=Instant::now()+Duration::from_secs(5);
+        let worker=loop{
+            if let Ok(text)=std::fs::read_to_string(&path){if let Ok(pid)=text.parse::<i32>(){break pid;}}
+            if Instant::now()>=publish_deadline{
+                let _=supervisor.kill();let _=supervisor.wait();let _=std::fs::remove_file(&path);
+                panic!("isolated worker did not publish its PID before the deadline");
+            }
+            assert!(supervisor.try_wait().unwrap().is_none(),"isolated worker supervisor exited before publishing its PID");
+            std::thread::sleep(Duration::from_millis(2));
+        };
+        supervisor.kill().unwrap();supervisor.wait().unwrap();
+        let exit_deadline=Instant::now()+Duration::from_secs(2);
+        while unsafe{kill(worker,0)}==0&&Instant::now()<exit_deadline{std::thread::sleep(Duration::from_millis(2));}
+        let gone=unsafe{kill(worker,0)}!=0;
+        if !gone{
+            unsafe{kill(-worker,SIGKILL);kill(worker,SIGKILL);}
+            let cleanup_deadline=Instant::now()+Duration::from_secs(2);
+            while unsafe{kill(worker,0)}==0&&Instant::now()<cleanup_deadline{std::thread::sleep(Duration::from_millis(2));}
+        }
+        let _=std::fs::remove_file(&path);
+        assert!(gone,"isolated worker survived its supervisor");
+    }
 
     #[test]
     fn file_transport_round_trips_and_rejects_hostile_frames(){
