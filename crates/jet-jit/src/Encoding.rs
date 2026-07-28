@@ -685,25 +685,27 @@ extern "C" fn jet_jit_csv_to_string(rows: i64) -> i64 {
 /// Typed `csv.to_string([T])` where `T` is `#Codable`: the encoded `DataTree` is
 /// an array of flat objects. Header comes from the first row's keys, then one
 /// record per element. Mirrors AOT `jet_enc_csv_to_string` cell for cell.
-fn csv_render_datatree(tree: &json_rt::DataTree) -> String {
+fn csv_render_datatree(tree: &json_rt::DataTree) -> Result<String, &'static str> {
     let json_rt::DataTree::Array(trees) = tree else {
-        return String::new();
+        return Err("csv.to_string needs rows or records");
     };
     let mut header: Vec<String> = Vec::new();
     if let Some(json_rt::DataTree::Object(entries)) = trees.first() {
         header = entries.iter().map(|(k, _)| k.clone()).collect();
+    } else if !trees.is_empty() {
+        return Err("csv.to_string needs rows or records");
     }
     let mut rows: Vec<Vec<String>> = vec![header.clone()];
     for tree in trees {
+        let json_rt::DataTree::Object(entries) = tree else {
+            return Err("csv.to_string needs rows or records");
+        };
         let mut record = Vec::with_capacity(header.len());
         for key in &header {
-            let cell = match tree {
-                json_rt::DataTree::Object(entries) => entries
-                    .iter()
-                    .find(|(k, _)| k == key)
-                    .map(|(_, v)| v.clone()),
-                _ => None,
-            };
+            let cell = entries
+                .iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.clone());
             record.push(match cell {
                 Some(json_rt::DataTree::Text(s)) => s,
                 Some(json_rt::DataTree::Int(n)) => n.to_string(),
@@ -715,14 +717,20 @@ fn csv_render_datatree(tree: &json_rt::DataTree) -> String {
         }
         rows.push(record);
     }
-    csv_render(&rows)
+    Ok(csv_render(&rows))
 }
 
 extern "C" fn jet_jit_csv_tree_to_string(tree: i64) -> i64 {
     let rendered = read_datatree(tree)
-        .map(|t| csv_render_datatree(&t))
-        .unwrap_or_default();
-    Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(rendered))
+        .ok_or("invalid DataTree")
+        .and_then(|t| csv_render_datatree(&t));
+    Concurrency::with_runtime_mut(|rt| match rendered {
+        Ok(rendered) => rt.heap.alloc_string(rendered),
+        Err(message) => {
+            rt.set_trap(message);
+            rt.heap.alloc_string(String::new())
+        }
+    })
 }
 
 // ── UUID (mirrors jet_std_uuid_v4 / jet_std_uuid_v7) ─────────────────────────
