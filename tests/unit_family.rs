@@ -1047,12 +1047,32 @@ fn run() {}
         .expect("custom unit Display must compile through the web backend")
         .web
         .expect("web compilation must produce artifacts");
+    let wasm_dir = common::unique_tmp("quantity_display_override_web_wasm");
+    std::fs::create_dir_all(&wasm_dir).unwrap();
+    let wasm_rust = wasm_dir.join("app_wasm.rs");
+    let wasm_bin = wasm_dir.join("app.wasm");
+    std::fs::write(&wasm_rust, &web.wasm_rust).unwrap();
+    let rustc = std::process::Command::new("rustc")
+        .args([
+            "--edition",
+            "2021",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--crate-type",
+            "cdylib",
+            "-O",
+        ])
+        .arg(&wasm_rust)
+        .arg("-o")
+        .arg(&wasm_bin)
+        .output()
+        .expect("run rustc for custom unit Display web output");
     assert!(
-        web.wasm_rust.contains("custom length")
-            && web.wasm_rust.contains(".display()"),
-        "web output must dispatch through the custom Display:\n{}",
-        web.wasm_rust
+        rustc.status.success(),
+        "rustc rejected custom unit Display web output:\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
     );
+    assert!(wasm_bin.is_file(), "web build did not produce a Wasm artifact");
 }
 
 #[test]

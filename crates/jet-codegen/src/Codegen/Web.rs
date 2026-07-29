@@ -668,16 +668,18 @@ fn web_wasm_expr_supported(
         }
         TIR::TExprKind::Call { name, args } => wasm_callee_bucket(bundle, &local_web_key(file_prefix, name)) == Some(WebBucket::Wasm)
             && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle, file_prefix, reconstructions)),
-        TIR::TExprKind::MethodCall { recv, args, .. } => {
-            web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions)
-                && args.iter().all(|arg| {
-                    web_wasm_expr_supported(
-                        &arg.value,
-                        bundle,
-                        file_prefix,
-                        reconstructions,
-                    )
-                })
+        TIR::TExprKind::MethodCall {
+            recv, method, args, ..
+        } => {
+            method.name == "display"
+                && !method.mangled
+                && args.is_empty()
+                && matches!(
+                    &recv.ty,
+                    Type::Named(type_name)
+                        if bundle_has_explicit_unit_display(bundle, type_name)
+                )
+                && web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions)
         }
         TIR::TExprKind::ModuleCall { form, args } => {
             let key = match form {
@@ -1450,6 +1452,41 @@ fn find_named_web_type(items: &[Item], name: &str) -> bool {
             .is_some_and(|body| find_named_web_type(body, name)),
         _ => false,
     })
+}
+
+fn items_have_explicit_unit_display(items: &[Item], type_name: &str) -> bool {
+    let unit = items.iter().any(|item| match item {
+        Item::UnitFamily(family) => family
+            .distinct_defs()
+            .iter()
+            .any(|definition| definition.name == type_name),
+        Item::CodeModule(module) => module
+            .body
+            .as_ref()
+            .is_some_and(|body| items_have_explicit_unit_display(body, type_name)),
+        _ => false,
+    });
+    let display = items.iter().any(|item| match item {
+        Item::Impl(implementation) => {
+            implementation.type_name == type_name
+                && implementation.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY)
+        }
+        Item::CodeModule(module) => module
+            .body
+            .as_ref()
+            .is_some_and(|body| items_have_explicit_unit_display(body, type_name)),
+        _ => false,
+    });
+    unit && display
+}
+
+fn bundle_has_explicit_unit_display(bundle: &ProgramBundle, type_name: &str) -> bool {
+    if let Some((alias, leaf)) = type_name.split_once('.') {
+        return bundle.modules.iter().any(|module| {
+            module.alias == alias && items_have_explicit_unit_display(&module.items, leaf)
+        });
+    }
+    items_have_explicit_unit_display(&bundle.modules[bundle.entry].items, type_name)
 }
 
 fn collect_wasm_unions(
