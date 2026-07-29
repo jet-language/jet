@@ -11,16 +11,16 @@
     pub struct F32x4(pub [f32; 4]);
     #[derive(Clone, Copy, Debug, PartialEq)]
     pub struct F64x2(pub [f64; 2]);
-    #[derive(Clone, Copy, Debug, PartialEq)]
+    #[derive(Clone, Copy, PartialEq)]
     pub struct Vec2(pub [f64; 2]);
-    #[derive(Clone, Copy, Debug, PartialEq)]
+    #[derive(Clone, Copy, PartialEq)]
     pub struct Vec3(pub [f64; 3]);
-    #[derive(Clone, Copy, Debug, PartialEq)]
+    #[derive(Clone, Copy, PartialEq)]
     pub struct Vec4(pub [f64; 4]);
     // Column-major: element (row r, col c) is `.0[c * N + r]`.
-    #[derive(Clone, Copy, Debug, PartialEq)]
+    #[derive(Clone, Copy, PartialEq)]
     pub struct Mat3(pub [f64; 9]);
-    #[derive(Clone, Copy, Debug, PartialEq)]
+    #[derive(Clone, Copy, PartialEq)]
     pub struct Mat4(pub [f64; 16]);
 
     macro_rules! jet_lane_ops {
@@ -193,31 +193,43 @@
             format!("F64x2({:?})", self.0)
         }
     }
-    impl super::JetShow for Vec2 {
-        fn jet_show(&self) -> String {
-            format!("Vec2({:?})", self.0)
-        }
+    macro_rules! jet_math_debug {
+        ($type:ident, $($field:literal => $index:literal),+ $(,)?) => {
+            impl std::fmt::Debug for $type {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    let mut debug = f.debug_struct(stringify!($type));
+                    $(debug.field($field, &self.0[$index]);)+
+                    debug.finish()
+                }
+            }
+            impl super::JetShow for $type {
+                fn jet_show(&self) -> String {
+                    format!("{self:?}")
+                }
+            }
+            impl super::JetDebug for $type {
+                fn jet_debug(&self) -> String {
+                    format!("{self:?}")
+                }
+            }
+        };
     }
-    impl super::JetShow for Vec3 {
-        fn jet_show(&self) -> String {
-            format!("Vec3({:?})", self.0)
-        }
-    }
-    impl super::JetShow for Vec4 {
-        fn jet_show(&self) -> String {
-            format!("Vec4({:?})", self.0)
-        }
-    }
-    impl super::JetShow for Mat3 {
-        fn jet_show(&self) -> String {
-            format!("Mat3({:?})", self.0)
-        }
-    }
-    impl super::JetShow for Mat4 {
-        fn jet_show(&self) -> String {
-            format!("Mat4({:?})", self.0)
-        }
-    }
+    jet_math_debug!(Vec2, "x" => 0, "y" => 1);
+    jet_math_debug!(Vec3, "x" => 0, "y" => 1, "z" => 2);
+    jet_math_debug!(Vec4, "x" => 0, "y" => 1, "z" => 2, "w" => 3);
+    jet_math_debug!(
+        Mat3,
+        "m00" => 0, "m10" => 1, "m20" => 2,
+        "m01" => 3, "m11" => 4, "m21" => 5,
+        "m02" => 6, "m12" => 7, "m22" => 8,
+    );
+    jet_math_debug!(
+        Mat4,
+        "m00" => 0, "m10" => 1, "m20" => 2, "m30" => 3,
+        "m01" => 4, "m11" => 5, "m21" => 6, "m31" => 7,
+        "m02" => 8, "m12" => 9, "m22" => 10, "m32" => 11,
+        "m03" => 12, "m13" => 13, "m23" => 14, "m33" => 15,
+    );
 
     pub struct JetTask<T: Send + 'static> {
         handle: Option<super::JetSchedulerJoin<T>>,
