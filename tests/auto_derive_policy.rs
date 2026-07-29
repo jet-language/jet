@@ -380,12 +380,18 @@ fn same_named_dependency_type_keeps_its_own_auto_derive_policy() {
     let workspace = project_dir("same_named_types");
     let app = workspace.join("app");
     let dep = workspace.join("dep");
+    let open_dep = workspace.join("open_dep");
     let _ = std::fs::remove_dir_all(&workspace);
     std::fs::create_dir_all(&app).unwrap();
     std::fs::create_dir_all(dep.join(".jet")).unwrap();
+    std::fs::create_dir_all(open_dep.join(".jet")).unwrap();
     std::fs::write(
         app.join("pkg.jet"),
-        "payload: { name: \"app\", version: \"1\" }\ndeps: { dep: ../dep }\n",
+        "payload: { name: \"app\", version: \"1\" }\n\
+         deps: {\n\
+             dep: ../dep,\n\
+             open_dep: ../open_dep,\n\
+         }\n",
     )
     .unwrap();
     std::fs::write(
@@ -396,6 +402,7 @@ use dep as vendor
 struct Token { value: Int }
 struct LocalEnvelope { token: Token }
 struct DependencyEnvelope { token: vendor.Token }
+struct SharedEnvelope { value: Shared<Int> }
 
 fn reject(value: vendor.Token) {
     print(value)
@@ -417,6 +424,16 @@ fn run() {
         "pub struct Token { value: Int }\n",
     )
     .unwrap();
+    std::fs::write(
+        open_dep.join("pkg.jet"),
+        "payload: { name: \"open_dep\", version: \"1\" }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        open_dep.join(".jet").join("main.jet"),
+        "pub struct Badge { pub value: Int }\n",
+    )
+    .unwrap();
 
     let mut bundle =
         jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
@@ -432,11 +449,21 @@ fn run() {
         1,
         "{errors:#?}"
     );
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle);
+    let app_facts = &facts[bundle.entry];
+    for selected in [
+        &app_facts.auto_printable,
+        &app_facts.auto_debug,
+        &app_facts.auto_equatable,
+    ] {
+        assert!(!selected.contains("SharedEnvelope"), "{selected:?}");
+    }
 
     std::fs::write(
         app.join("main.jet"),
         r#"
 use dep as vendor
+use open_dep as library
 
 struct Token { value: Int }
 struct LocalEnvelope { token: Token }
@@ -449,6 +476,20 @@ fn run() {
     print(token)
     print("{token#Debug}")
     print(token == Token.{ value: 7 })
+
+    badge :: library.Badge.{ value: 9 }
+    print(badge)
+    print("{badge#Debug}")
+    print(badge == library.Badge.{ value: 9 })
+
+    map :: MapEnvelope.{ values: [String: Int].{ "one": 1 } }
+    print(map)
+    print("{map#Debug}")
+
+    union :: UnionEnvelope.{ value: 3 }
+    print(union)
+    print("{union#Debug}")
+    print(union == UnionEnvelope.{ value: 3 })
 }
 "#,
     )
@@ -479,6 +520,7 @@ fn run() {
         assert!(selected.contains("UnionEnvelope"), "{selected:?}");
         assert!(!selected.contains("DependencyEnvelope"), "{selected:?}");
         assert!(!selected.contains("vendor.Token"), "{selected:?}");
+        assert!(selected.contains("library.Badge"), "{selected:?}");
     }
     assert!(app_facts.auto_printable.contains("MapEnvelope"));
     assert!(app_facts.auto_debug.contains("MapEnvelope"));
@@ -491,7 +533,18 @@ fn run() {
         assert!(!selected.contains("Token"), "{selected:?}");
     }
 
-    let expected = "Token { value: 7 }\nToken { value: 7 }\ntrue\n";
+    let expected = "\
+Token { value: 7 }\n\
+Token { value: 7 }\n\
+true\n\
+Badge { value: 9 }\n\
+Badge { value: 9 }\n\
+true\n\
+MapEnvelope { values: [:\"one\": 1] }\n\
+MapEnvelope { values: [:\"one\": 1] }\n\
+UnionEnvelope { value: 3 }\n\
+UnionEnvelope { value: 3 }\n\
+true\n";
     if let Some((exit, stdout)) = aot_output(&bundle, "same_named_types_aot") {
         assert_eq!(exit, 0);
         assert_eq!(stdout, expected);
