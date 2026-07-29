@@ -1007,7 +1007,7 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
         for m in &members {
             let tag = crate::AST::union_member_tag(m);
             out.push_str(&format!(
-                "            Self::{tag}(v) => v.jet_show(),\n"
+                "            Self::{tag}(v) => crate::jet_debug_union(v.jet_show()),\n"
             ));
         }
         out.push_str("        }\n    }\n}\n\n");
@@ -1017,7 +1017,7 @@ pub(crate) fn emit_anonymous_unions(cx: &Cx, items: &[Item], out: &mut String) {
         for m in &members {
             let tag = crate::AST::union_member_tag(m);
             out.push_str(&format!(
-                "            Self::{tag}(v) => v.jet_debug(),\n"
+                "            Self::{tag}(v) => crate::jet_debug_union(v.jet_debug()),\n"
             ));
         }
         out.push_str("        }\n    }\n}\n\n");
@@ -1817,18 +1817,18 @@ fn struct_jet_debug_body(s: &StructDef, has_fn_field: bool) -> String {
     if has_fn_field {
         return format!("\"{} {{ ... }}\".to_string()", s.name);
     }
-    if s.fields.is_empty() {
-        return format!("\"{} {{}}\".to_string()", s.name);
-    }
-    let parts: Vec<String> = s
+    let fields: Vec<String> = s
         .fields
         .iter()
         .map(|f| {
             if f.redact {
-                format!("\"{}: [redacted]\".to_string()", f.name)
+                format!(
+                    "({:?}.to_string(), \"[redacted]\".to_string())",
+                    f.name
+                )
             } else {
                 format!(
-                    "format!(\"{}: {{}}\", ({}).jet_debug())",
+                    "({:?}.to_string(), ({}).jet_debug())",
                     f.name,
                     field_self_read(f)
                 )
@@ -1836,9 +1836,9 @@ fn struct_jet_debug_body(s: &StructDef, has_fn_field: bool) -> String {
         })
         .collect();
     format!(
-        "format!(\"{} {{{{ {{}} }}}}\", [{}].join(\", \"))",
+        "crate::jet_debug_record({:?}, [{}])",
         s.name,
-        parts.join(", ")
+        fields.join(", ")
     )
 }
 

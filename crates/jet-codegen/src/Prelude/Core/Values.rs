@@ -261,29 +261,26 @@ impl<T: JetDebug> JetDebug for std::collections::VecDeque<T> {
 }
 impl<K: Ord + JetShow, V: JetShow> JetShow for std::collections::BTreeMap<K, V> {
     fn jet_show(&self) -> String {
-        let parts: Vec<String> = self
-            .iter()
-            .map(|(k, v)| format!("{}: {}", k.jet_show(), v.jet_show()))
-            .collect();
-        format!("[:{}]", parts.join(", "))
+        jet_debug_map(
+            self.iter()
+                .map(|(key, value)| (key.jet_show(), value.jet_show())),
+        )
     }
 }
 impl<K: Ord + JetDisplay, V: JetDisplay> JetDisplay for std::collections::BTreeMap<K, V> {
     fn jet_display(&self) -> String {
-        let parts: Vec<String> = self
-            .iter()
-            .map(|(k, v)| format!("{}: {}", k.jet_display(), v.jet_display()))
-            .collect();
-        format!("[:{}]", parts.join(", "))
+        jet_debug_map(
+            self.iter()
+                .map(|(key, value)| (key.jet_display(), value.jet_display())),
+        )
     }
 }
 impl<K: Ord + JetDebug, V: JetDebug> JetDebug for std::collections::BTreeMap<K, V> {
     fn jet_debug(&self) -> String {
-        let parts: Vec<String> = self
-            .iter()
-            .map(|(k, v)| format!("{}: {}", k.jet_debug(), v.jet_debug()))
-            .collect();
-        format!("[:{}]", parts.join(", "))
+        jet_debug_map(
+            self.iter()
+                .map(|(key, value)| (key.jet_debug(), value.jet_debug())),
+        )
     }
 }
 impl<T: JetShow> JetShow for Option<T> {
