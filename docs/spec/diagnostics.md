@@ -412,6 +412,7 @@ renumbered, and no new `W` code may be allocated.
 | E0725 | sema  | a `#Replayable` function reaches ambient `Time`/`Rand`/`Net`/`IO` (D-REPLAY1) |
 | E0731 | sema  | a `tag` is used where dispatch/methods are expected — `derive`d, or implemented/used as a trait (D-QUAL2) |
 | E0732 | sema  | a method is declared in a `tag` body, but tags have no methods (D-QUAL2) |
+| E0733 | sema  | a value tag in type position does not name a declared `tag`, with a suggestion from declared tags (D-QUAL2/D-QUAL4) |
 | E0745 | retired | *retired by D-SHAPE8=A* (was: `#Pure fn` combined with a non-empty `#(…)` effect list) |
 | E0746 | sema  | an irreversible effect (Net/FS/Exec) used directly inside a `#Transact { … }` block — can't be rolled back (D-TXN2) |
 | E0747 | sema  | a callback argument exceeds its parameter's effect bound (`fn(…) =[]=>` / `fn(…) =[E]=>`) (D-EFF2) |
@@ -1356,14 +1357,28 @@ so these are compile-time-only diagnostics. An unknown effect name in a
 There are exactly two kinds of qualifier. A **`trait`** has at least one method
 and dispatches via a vtable; a **`tag`** has no methods and erases at runtime.
 The beginner rule is one sentence: *methods → trait, no methods → tag.* A tag is
-a pure marker, so it may not carry methods (E0732) and may not stand where
+a pure marker, so it may not carry methods (E0732), may not stand where
 dispatch or method attachment is expected — `derive`d, or implemented/used as a
-trait (E0731). Both are compile-time-only; a tag generates no code.
+trait (E0731), and must be declared before it qualifies a type (E0733). These
+checks are compile-time-only; a tag generates no code.
 
 | Code | What | Why | Fix |
 |------|------|-----|-----|
 | E0731 | `{tag}` is a tag, but {context} needs a trait. | A `tag` is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`. | Declare `{tag}` as a `trait` with the method(s) it should provide. |
 | E0732 | The tag `{tag}` declares a method `{method}`, but tags have no methods. | A `tag` is a marker that erases at runtime; only a `trait` carries methods and dispatches. | Make `{tag}` a `trait` if `{method}` should dispatch, or remove the method to keep `{tag}` a marker tag. |
+| E0733 | There's no tag called `{tag}`. | A value tag in type position must name a declared `tag`. | Declare it first with `tag {tag}`, check the spelling, or use the suggested declared tag. |
+
+An undeclared value tag with a close declared tag (E0733):
+
+```
+Error [E0733]: there's no tag called `Sanitizd`
+  --> tags.jet:3:17
+    |
+  3 | fn clean(input: #Sanitizd String) => String = ~input
+    |                 ^^^^^^^^^^^^^^^^^
+ Why: a value tag in type position must name a declared `tag`
+ Fix: did you mean `Sanitized`?
+```
 
 A method written in a tag body (E0732):
 
