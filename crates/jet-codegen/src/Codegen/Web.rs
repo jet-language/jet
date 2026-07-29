@@ -668,6 +668,17 @@ fn web_wasm_expr_supported(
         }
         TIR::TExprKind::Call { name, args } => wasm_callee_bucket(bundle, &local_web_key(file_prefix, name)) == Some(WebBucket::Wasm)
             && args.iter().all(|a| web_wasm_expr_supported(&a.value, bundle, file_prefix, reconstructions)),
+        TIR::TExprKind::MethodCall { recv, args, .. } => {
+            web_wasm_expr_supported(recv, bundle, file_prefix, reconstructions)
+                && args.iter().all(|arg| {
+                    web_wasm_expr_supported(
+                        &arg.value,
+                        bundle,
+                        file_prefix,
+                        reconstructions,
+                    )
+                })
+        }
         TIR::TExprKind::ModuleCall { form, args } => {
             let key = match form {
                 TIR::TModuleCallForm::Qualified { rust_mod, rust_fn } => {
@@ -1429,6 +1440,10 @@ fn find_named_web_type(items: &[Item], name: &str) -> bool {
     items.iter().any(|item| match item {
         Item::Struct(def) => def.name == name && def.type_params.is_empty(),
         Item::Enum(def) => def.name == name && def.type_params.is_empty(),
+        Item::UnitFamily(family) => family
+            .distinct_defs()
+            .iter()
+            .any(|definition| definition.name == name),
         Item::CodeModule(module) => module
             .body
             .as_ref()
@@ -1580,6 +1595,14 @@ fn emit_wasm_named_types(items: &[Item], bundle: &ProgramBundle, out: &mut Strin
                     ));
                 }
             }
+            Item::UnitFamily(family) => {
+                for definition in family.distinct_defs() {
+                    out.push_str(&format!(
+                        "#[derive(Clone, Copy)]\nstruct {}(f64);\n\n",
+                        user_type_rust(&definition.name)
+                    ));
+                }
+            }
             Item::CodeModule(module) => {
                 if let Some(body) = &module.body {
                     emit_wasm_named_types(body, bundle, out);
@@ -1638,6 +1661,10 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
         out.push_str("#[no_mangle]\npub extern \"C\" fn jet_wasm_nop() {}\n");
         return Ok(out);
     }
+    out.push_str(
+        "trait user_Display { fn display(&self) -> String; }\n\
+         trait JetDisplay { fn jet_display(&self) -> String; }\n\n",
+    );
     let need_packed_abi = |pred: &dyn Fn(&Type) -> bool| {
         wasm_funcs.iter().any(|f| {
             let export = f.marker == Some(WebPartitionMarker::WasmExport)
@@ -1876,6 +1903,26 @@ fn emit_wasm_rust(bundle: &ProgramBundle, funcs: &[FuncWeb]) -> WebEmitResult<St
         );
     }
     emit_wasm_user_types(bundle, &mut out)?;
+    let extern_funcs = bundle_extern_funcs(bundle);
+    for (module_index, module) in bundle.modules.iter().enumerate() {
+        let mut cx = build_cx_items(
+            &module.items,
+            &module.source,
+            &module.display,
+            None,
+            &extern_funcs,
+        );
+        populate_cx_from_bundle(&mut cx, bundle, module_index);
+        for item in &module.items {
+            if let Item::Impl(implementation) = item {
+                if implementation.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY)
+                    && cx.unit_labels.contains_key(&implementation.type_name)
+                {
+                    super::Items::emit_external_trait_impl(&cx, implementation, None, &mut out);
+                }
+            }
+        }
+    }
     let mut emitted_structs = std::collections::HashSet::new();
     for f in &wasm_funcs {
         for reconstruction in &f.tir.web_param_reconstructions {
@@ -2965,6 +3012,17 @@ fn wasm_emit_expr(
             let symbol = format!("jet_wasm_{key}");
             format!("{symbol}({})", args.iter().map(|a| wasm_emit_call_arg(a, funcs, file_prefix, reconstructions)).collect::<Result<Vec<_>, _>>()?.join(", "))
         }
+        TIR::TExprKind::MethodCall {
+            recv, method, args, ..
+        } => format!(
+            "({}).{}({})",
+            wasm_emit_expr(recv, funcs, file_prefix, reconstructions)?,
+            method.rust(),
+            args.iter()
+                .map(|arg| wasm_emit_call_arg(arg, funcs, file_prefix, reconstructions))
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", ")
+        ),
         TIR::TExprKind::ModuleCall { form, args } => {
             let key = match form {
                 TIR::TModuleCallForm::Qualified { rust_mod, rust_fn } => {

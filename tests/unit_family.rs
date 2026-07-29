@@ -991,6 +991,68 @@ fn run() {
     let (code, stdout) = tir_support::build_and_run("quantity_display_override", explicit);
     assert_eq!(code, 0);
     assert_eq!(stdout, "custom length\ncustom length\n12\n");
+
+    let dir = common::unique_tmp("quantity_display_override_parity");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    std::fs::write(&path, explicit).unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let program = jet::Codegen::TIR::lower_jit_program(&bundle)
+        .expect("custom unit Display must lower through shared TIR");
+    let mut sink = jet::Comptime::DevSink::default();
+    jet::Codegen::TIR::run_program(
+        &program,
+        &bundle.project_root,
+        &mut sink,
+        std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
+        true,
+    )
+    .expect("custom unit Display must run in the evaluator");
+    assert_eq!(sink.stdout, "custom length\ncustom length\n12\n");
+
+    if jet_jit::cranelift_host_supported() {
+        use jet::JitBackend::JitBackend;
+        use jet::JitBackend::RunOutcome;
+
+        let mut backend = jet_jit::CraneliftBackend::new();
+        match backend.run(&bundle, false) {
+            RunOutcome::Ran { stdout, .. } => {
+                assert_eq!(stdout, "custom length\ncustom length\n12\n")
+            }
+            RunOutcome::Problems(diagnostics) => {
+                panic!("JIT rejected custom unit Display: {diagnostics:?}")
+            }
+        }
+    }
+
+    let web_src = r#"
+#Target(Web)
+#UnitFamily(Length, base: meter) { meter }
+
+impl Meter.Display {
+    fn display(self) => String = "custom length"
+}
+
+fn show(distance: Meter) {
+    print(distance)
+    print("{distance}")
+}
+
+fn run() {}
+"#;
+    let web = jet::compile_web_with_path(&web_src, "quantity_display_override_web.jet")
+        .expect("custom unit Display must compile through the web backend")
+        .web
+        .expect("web compilation must produce artifacts");
+    assert!(
+        web.wasm_rust.contains("custom length")
+            && web.wasm_rust.contains(".display()"),
+        "web output must dispatch through the custom Display:\n{}",
+        web.wasm_rust
+    );
 }
 
 #[test]

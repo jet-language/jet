@@ -1722,6 +1722,9 @@ impl<'a> EvalCtx<'a> {
                 if method.mangled {
                     names.push(format!("user_{}", method.name));
                 }
+                if let Type::Named(type_name) = &recv.ty {
+                    names.push(format!("{type_name}::{}", method.name));
+                }
                 if let CtValue::Struct { type_name, .. } = &r {
                     names.push(format!("{type_name}::{}", method.name));
                 }

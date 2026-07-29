@@ -18,6 +18,7 @@ use crate::Codegen::TIR::ListSpreadPart;
 use crate::Codegen::TIR::lower_enum_arg;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TLocal;
+use crate::Codegen::TIR::TMethodRef;
 use crate::Codegen::TIR::lower_extern_call_arg;
 use crate::Codegen::TIR::lower::is_binding_free_user_variant_pattern_test;
 use crate::Codegen::TIR::lower_lambda;
@@ -302,6 +303,31 @@ fn lower_unit_text(
     }
 }
 
+fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
+    if value.ty.quantity_parts().is_some() {
+        return lower_unit_text(value, crate::AST::UnitFormat::Symbol, cx);
+    }
+    let Type::Named(name) = &value.ty else {
+        return value;
+    };
+    if cx.unit_label(&value.ty).is_none() {
+        return value;
+    }
+    if !cx.display_types.contains(name) {
+        return lower_unit_text(value, crate::AST::UnitFormat::Symbol, cx);
+    }
+    TExpr {
+        ty: Type::String,
+        kind: TExprKind::MethodCall {
+            recv: Box::new(value),
+            method: TMethodRef::bare("display"),
+            args: Vec::new(),
+            source_first_string_literal: None,
+            operator_line: None,
+        },
+    }
+}
+
 fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     match e {
         Expr::Int(n, _, width, _) => TExpr {
@@ -355,21 +381,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         )
                     }
                     StrPart::Interp(e, crate::AST::StrFormat::Display) => {
-                        let value = lower_expr(e, cx, env);
-                        if value.ty.quantity_parts().is_some()
-                            || (cx.unit_label(&value.ty).is_some()
-                                && !matches!(
-                                    &value.ty,
-                                    Type::Named(name) if cx.display_types.contains(name)
-                                ))
-                        {
-                            TStrPart::Interp(
-                                lower_unit_text(value, crate::AST::UnitFormat::Symbol, cx),
-                                crate::AST::StrFormat::Display,
-                            )
-                        } else {
-                            TStrPart::Interp(value, crate::AST::StrFormat::Display)
-                        }
+                        TStrPart::Interp(
+                            lower_display_value(lower_expr(e, cx, env), cx),
+                            crate::AST::StrFormat::Display,
+                        )
                     }
                     StrPart::Interp(e, fmt) => TStrPart::Interp(lower_expr(e, cx, env), *fmt),
                 })
@@ -944,16 +959,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // `print` is ambient only when the user has not defined their own
             // `print` function (matches emit_call; sema enforces the shadowing).
             if call.name == Syntax::BUILTIN_PRINT && !cx.sigs.contains_key(&call.name) {
-                let mut arg = lower_expr(&call.args[0].expr, cx, env);
-                if arg.ty.quantity_parts().is_some()
-                    || (cx.unit_label(&arg.ty).is_some()
-                        && !matches!(
-                            &arg.ty,
-                            Type::Named(name) if cx.display_types.contains(name)
-                        ))
-                {
-                    arg = lower_unit_text(arg, crate::AST::UnitFormat::Symbol, cx);
-                }
+                let arg = lower_display_value(lower_expr(&call.args[0].expr, cx, env), cx);
                 return TExpr {
                     ty: unit_type(),
                     kind: TExprKind::Print(Box::new(arg)),
