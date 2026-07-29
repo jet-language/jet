@@ -241,6 +241,18 @@ pub fn core_fixed_sig(
         )),
         ("core.watcher", "set") => Some((vec![], Some(Type::Named("WatchSet".to_string())))),
         ("core.io", "args") => Some((vec![], Some(Type::List(Box::new(Type::String))))),
+        ("core.io", "confirm") => Some((vec![(read, Type::String)], Some(Type::Bool))),
+        ("core.io", "choose") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::List(Box::new(Type::String))),
+            ],
+            Some(result_ty(Type::String, io_error_ty())),
+        )),
+        ("core.io", "input_secret") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::String, io_error_ty())),
+        )),
         ("core.io", "read_all_input") => {
             Some((vec![], Some(result_ty(Type::String, io_error_ty()))))
         }

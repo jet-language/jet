@@ -551,8 +551,18 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     ) && matches!(&arg.ty, Type::String)
                         && resident_safe_expr(arg, callees));
             }
-            if module == "core.io" && method == "args" {
-                return args.is_empty();
+            if module == "core.io" {
+                return match method.as_str() {
+                    "args" => args.is_empty(),
+                    "confirm" | "input_secret" => {
+                        args.len() == 1 && resident_safe_expr(&args[0], callees)
+                    }
+                    "choose" => {
+                        args.len() == 2
+                            && args.iter().all(|arg| resident_safe_expr(arg, callees))
+                    }
+                    _ => false,
+                };
             }
             if module == "core.reflect" && method == "of" {
                 return args.len() == 1 && resident_safe_expr(&args[0], callees);

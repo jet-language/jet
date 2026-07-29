@@ -498,6 +498,18 @@ pub(crate) fn emit_tir_core_call(
                 format!("{}(Some(&({})))", helper("jet_std_io_input"), arg(0))
             }
         }
+        ("core.io", "confirm") => {
+            format!("{}(&({}))", helper("jet_std_io_confirm"), arg(0))
+        }
+        ("core.io", "choose") => format!(
+            "{}(&({}), &({}))",
+            helper("jet_std_io_choose"),
+            arg(0),
+            arg(1)
+        ),
+        ("core.io", "input_secret") => {
+            format!("{}(&({}))", helper("jet_std_io_input_secret"), arg(0))
+        }
         ("core.io", "read_all_input") => format!("{}()", helper("jet_std_io_read_all_input")),
         // D-STDIN1=A: io.stdin() → JetStdinReader handle.
         ("core.io", "stdin") => format!("{}()", helper("jet_std_io_stdin")),

@@ -8024,6 +8024,17 @@ impl LowerCtx<'_, '_> {
                         "progress" if args.len() == 1 => {
                             (self.host.io.progress, vec![self.lower_expr(&args[0])?])
                         }
+                        "confirm" if args.len() == 1 => {
+                            (self.host.io.confirm, vec![self.lower_expr(&args[0])?])
+                        }
+                        "choose" if args.len() == 2 => (
+                            self.host.io.choose,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "input_secret" if args.len() == 1 => (
+                            self.host.io.input_secret,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
                         _ => {
                             return Err(format!("jit core call unsupported: {module}.{method}"))
                         }

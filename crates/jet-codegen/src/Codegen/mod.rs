@@ -636,7 +636,10 @@ fn strip_unused_term_prelude(out: String) -> String {
     .min()
     .unwrap_or(out.len());
     let user_code = &out[prelude_end..];
-    if user_code.contains("jet_term_enter") || user_code.contains("jet_term_read_key") {
+    if user_code.contains("jet_term_enter")
+        || user_code.contains("jet_term_read_key")
+        || user_code.contains("jet_std_io_input_secret")
+    {
         return out;
     }
     // The term prelude is one contiguous block: the `#[cfg(unix)]` line above

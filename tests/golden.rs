@@ -384,7 +384,25 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     if needs_gtk {
         run_cmd.env("JET_UI_HEADLESS", "1");
     }
-    let run = run_cmd.output().unwrap();
+    let run = if stem == "io/terminal_parity" {
+        use std::io::Write;
+        use std::process::Stdio;
+        let mut child = run_cmd
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"\nnot-a-number\n3\n2\n")
+            .unwrap();
+        child.wait_with_output().unwrap()
+    } else {
+        run_cmd.output().unwrap()
+    };
     if needs_gtk && !run.status.success() && gtk_loader_unavailable(&run.stderr) {
         eprintln!("note: skipping examples/features/{stem}.jet run (gtk4 runtime loader unavailable)");
         return;

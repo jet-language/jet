@@ -1,4 +1,4 @@
-// D-COREIO1=A: stdout/stderr streams, TTY facts, style, progress, and terminal size.
+// D-COREIO1=A / D-IO-PROMPT1=A: terminal facts, streams, and interactive prompts.
 use core.env as env
 use core.io as io
 
@@ -6,6 +6,19 @@ fn run() {
     env.set("COLUMNS", "100")
     env.set("LINES", "40")
     env.set("NO_COLOR", "1")
+    confirmed :: io.confirm("Continue?")
+    print("confirm: {confirmed}")
+    choice :: io.choose("Choose a target:", ["staging", "production"]) ?? panic("choose failed")
+    print("choice: {choice}")
+    if io.input_secret("Secret: ") == {
+        .Ok(secret) -> { print("secret length: {secret.len()}") }
+        .Err(error) -> {
+            if error == {
+                .InvalidInput(_) -> { print("secret: non-tty") }
+                else -> { print("secret: other error") }
+            }
+        }
+    }
     out :: io.stdout()
     err_stream :: io.stderr()
     out.write("stdout") ?? panic("stdout write failed")

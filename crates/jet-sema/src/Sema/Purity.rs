@@ -84,7 +84,10 @@ pub(crate) fn is_impure_builtin(name: &str) -> bool {
 pub(crate) fn is_impure_core(module: &str, method: &str) -> bool {
     matches!(
         (module, method),
-        ("core.io", "stdin" | "input" | "read_all_input")
+        (
+            "core.io",
+            "stdin" | "input" | "confirm" | "choose" | "input_secret" | "read_all_input"
+        )
     )
 }
 
