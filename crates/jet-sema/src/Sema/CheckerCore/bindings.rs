@@ -13,6 +13,33 @@ fn direct_fixed_constructor(expr: &Expr) -> bool {
                 && matches!(method.as_str(), "new" | "over")
     )
 }
+
+fn contains_taskgroup(ty: &Type) -> bool {
+    match ty {
+        Type::Named(name) => name == Syntax::TYPE_TASKGROUP,
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::FixedList { elem: inner, .. }
+        | Type::Tagged { inner, .. } => contains_taskgroup(inner),
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            contains_taskgroup(key) || contains_taskgroup(value)
+        }
+        // Function signatures have their own direct TaskGroup parameter/return
+        // checks; do not duplicate those diagnostics at the binding site.
+        Type::Fn { .. } => false,
+        Type::Apply { args, .. } | Type::Union(args) => args.iter().any(contains_taskgroup),
+        Type::Tuple(fields) => fields.iter().any(|(_, field)| contains_taskgroup(field)),
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::TraitObject(_)
+        | Type::IntN { .. }
+        | Type::Float32 => false,
+    }
+}
 pub(crate) fn check_meta_attr_fields(meta: &MetaAttr) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     let mut seen_category = false;
@@ -522,6 +549,19 @@ impl<'a> Checker<'a> {
                 (None, Some(actual)) => actual,
                 (None, None) => Type::Int, // an error was already reported
             };
+            if contains_taskgroup(&final_ty)
+                && !matches!(&final_ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP)
+            {
+                self.diags.push(Diagnostic::error(
+                    "E1110",
+                    "`TaskGroup` cannot be stored inside another value".to_string(),
+                    "a taskgroup is call-stack-only spawn authority; aliases and aggregates could outlive its owner"
+                        .to_string(),
+                    "pass `group: TaskGroup` directly to a named helper and use it there"
+                        .to_string(),
+                    Some(b.name_span),
+                ));
+            }
             if b.ty.is_none() {
                 b.ty = Some(final_ty.clone());
             }

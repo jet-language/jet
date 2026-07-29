@@ -219,6 +219,8 @@ pub(crate) struct Cx {
     pub(crate) current_type_params: std::cell::RefCell<HashSet<String>>,
     /// c139 M4: spawn lambda bodies collected during TIR lowering (JIT order).
     pub(crate) jit_spawn_lambdas: std::cell::RefCell<Vec<crate::Codegen::TIR::TJitSpawnLambda>>,
+    /// Global offset for spawn sites lowered from an imported module.
+    pub(crate) jit_spawn_site_base: usize,
     /// Concrete generic owner methods reached while lowering executable TIR.
     /// The key is `Owner<Args>::method`, keeping discovery deterministic.
     pub(crate) jit_method_calls:
@@ -2281,6 +2283,7 @@ pub(crate) fn build_cx_items(
         struct_type_param_order: HashMap::new(),
         current_type_params: std::cell::RefCell::new(HashSet::new()),
         jit_spawn_lambdas: std::cell::RefCell::new(Vec::new()),
+        jit_spawn_site_base: 0,
         jit_method_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_canonical_deopt: std::cell::RefCell::new(HashSet::new()),

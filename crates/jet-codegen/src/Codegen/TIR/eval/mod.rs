@@ -18,7 +18,8 @@ mod range_semantics {
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 
 use crate::AST::{Expr, Func, ProgramBundle, Stmt, Type};
 use super::Cx;
@@ -179,7 +180,7 @@ pub(super) struct EvalCtx<'a> {
     #[allow(dead_code)]
     pub(super) base_dir: PathBuf,
     pub(super) fuel: u64,
-    pub(super) sink: Option<&'a mut DevSink>,
+    pub(super) sink: Option<Arc<Mutex<DevSink>>>,
     #[allow(dead_code)]
     pub(super) core_imports: &'a HashMap<String, String>,
     pub(super) globals: HashMap<String, CtValue>,
@@ -216,23 +217,16 @@ pub(super) struct EvalCtx<'a> {
     pub(super) distinct_ranges: HashMap<String, (i64, i64)>,
     /// Current `MixedSwitch` subject for structured field conditions.
     switch_subject: Option<CtValue>,
-    /// TIR-native callable values. Entries borrow the already-lowered program
-    /// and retain only the captured evaluator scope.
-    callables: Vec<EvalCallable<'a>>,
-    /// Generator calls are inert handles until a `ForIn` consumer drives them.
-    streams: Vec<EvalStream<'a>>,
-    /// Shared<T> values live behind evaluator-local handles so cloned handles
-    /// preserve aliasing across task capture scopes.
-    shared_values: Vec<CtValue>,
+    /// Handle-backed runtime state is shared by lexical task children. The TIR
+    /// and local variable scopes remain borrowed by each evaluator context.
+    runtime: Arc<Mutex<EvalRuntime<'a>>>,
     shared_transactions: Vec<HashMap<usize, CtValue>>,
-    /// Manual clocks are aliased handles so an ExpiringSecret observes later
-    /// ticks through the same clock instance.
-    clocks: Vec<i64>,
     /// Spawn bodies are lowered separately because native tiers compile them as
-    /// independent functions. The evaluator executes each site synchronously,
-    /// which is observationally exact at the task `wait` boundary.
+    /// independent functions. The evaluator records each outcome behind a task
+    /// handle, then observes it only at join/group boundaries.
     spawn_lambdas: &'a [TJitSpawnLambda],
-    spawn_site: usize,
+    task_sender: Option<mpsc::Sender<EvalTaskJob<'a>>>,
+    task_cancel: Option<Arc<AtomicBool>>,
     /// Direct yield delivery keeps generator evaluation streaming: no eager
     /// collection is materialized between producer and consumer.
     yield_consumer: Option<YieldConsumer<'a>>,
@@ -262,6 +256,68 @@ struct EvalStream<'a> {
     args: Vec<CtValue>,
 }
 
+struct EvalRuntime<'a> {
+    callables: Vec<EvalCallable<'a>>,
+    streams: Vec<EvalStream<'a>>,
+    shared_values: Vec<CtValue>,
+    clocks: Vec<i64>,
+    task_groups: Vec<Vec<usize>>,
+    tasks: Vec<Option<EvalTask>>,
+    completion_order: AtomicU64,
+}
+
+struct EvalTask {
+    completion: mpsc::Receiver<EvalTaskCompletion>,
+    cancel: Arc<AtomicBool>,
+}
+
+struct EvalTaskCompletion {
+    order: u64,
+    result: Result<CtValue, Diagnostic>,
+}
+
+struct EvalTaskJob<'a> {
+    lambda: &'a TJitSpawnLambda,
+    captured: HashMap<String, CtValue>,
+    completion: mpsc::SyncSender<EvalTaskCompletion>,
+    cancel: Arc<AtomicBool>,
+}
+
+#[derive(Clone)]
+struct EvalTaskConfig<'a> {
+    funcs: HashMap<String, &'a TFunc>,
+    base_dir: PathBuf,
+    sink: Option<Arc<Mutex<DevSink>>>,
+    core_imports: &'a HashMap<String, String>,
+    globals: HashMap<String, CtValue>,
+    allow_impure: bool,
+    impure_depth: usize,
+    runtime_execution: bool,
+    prefer_tir_calls: bool,
+    repl_mode: bool,
+    struct_fields: HashMap<String, Vec<(String, bool)>>,
+    struct_field_types: HashMap<String, Vec<(String, Type)>>,
+    codec_migrations: HashMap<String, TIR::TCodecMigrationPlan>,
+    distinct_bases: HashMap<String, Type>,
+    distinct_ranges: HashMap<String, (i64, i64)>,
+    spawn_lambdas: &'a [TJitSpawnLambda],
+    runtime: Arc<Mutex<EvalRuntime<'a>>>,
+}
+
+impl EvalRuntime<'_> {
+    fn new() -> Self {
+        Self {
+            callables: Vec::new(),
+            streams: Vec::new(),
+            shared_values: Vec::new(),
+            clocks: Vec::new(),
+            task_groups: Vec::new(),
+            tasks: Vec::new(),
+            completion_order: AtomicU64::new(0),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct YieldConsumer<'a> {
     var: String,
@@ -269,15 +325,124 @@ struct YieldConsumer<'a> {
 }
 
 impl<'a> EvalCtx<'a> {
+    fn task_wait_cancel_check(&self) -> Result<(), Diagnostic> {
+        if self
+            .task_cancel
+            .as_ref()
+            .is_some_and(|cancel| cancel.load(Ordering::Acquire))
+        {
+            Err(Diagnostic::error(
+                "TASK_CANCELLED",
+                "task cancelled".to_string(),
+                "the owning taskgroup stopped this task".to_string(),
+                String::new(),
+                Some(self.span()),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn task_config(&self) -> EvalTaskConfig<'a> {
+        EvalTaskConfig {
+            funcs: self.funcs.clone(),
+            base_dir: self.base_dir.clone(),
+            sink: self.sink.clone(),
+            core_imports: self.core_imports,
+            globals: self.globals.clone(),
+            allow_impure: self.allow_impure,
+            impure_depth: self.impure_depth,
+            runtime_execution: self.runtime_execution,
+            prefer_tir_calls: self.prefer_tir_calls,
+            repl_mode: self.repl_mode,
+            struct_fields: self.struct_fields.clone(),
+            struct_field_types: self.struct_field_types.clone(),
+            codec_migrations: self.codec_migrations.clone(),
+            distinct_bases: self.distinct_bases.clone(),
+            distinct_ranges: self.distinct_ranges.clone(),
+            spawn_lambdas: self.spawn_lambdas,
+            runtime: self.runtime.clone(),
+        }
+    }
+
+    fn run_task_job(config: EvalTaskConfig<'a>, job: EvalTaskJob<'a>) {
+        let mut ctx = EvalCtx {
+            funcs: config.funcs,
+            base_dir: config.base_dir,
+            fuel: DEV_FUEL,
+            sink: config.sink,
+            core_imports: config.core_imports,
+            globals: config.globals,
+            allow_impure: config.allow_impure,
+            impure_depth: config.impure_depth,
+            runtime_execution: config.runtime_execution,
+            prefer_tir_calls: config.prefer_tir_calls,
+            repl_mode: config.repl_mode,
+            pending_return: None,
+            deferred_closes: Vec::new(),
+            pending_flow: None,
+            collecting_items: Vec::new(),
+            call_depth: 0,
+            emitted_fragments: None,
+            embed_inputs: None,
+            struct_fields: config.struct_fields,
+            struct_field_types: config.struct_field_types,
+            codec_migrations: config.codec_migrations,
+            distinct_bases: config.distinct_bases,
+            distinct_ranges: config.distinct_ranges,
+            switch_subject: None,
+            runtime: config.runtime.clone(),
+            shared_transactions: Vec::new(),
+            spawn_lambdas: config.spawn_lambdas,
+            task_sender: None,
+            task_cancel: Some(job.cancel),
+            yield_consumer: None,
+            yield_scope: None,
+            scope_guards: Vec::new(),
+            txn_stack: Vec::new(),
+        };
+        let mut scope = job.captured;
+        let result = match &job.lambda.body {
+            TJitSpawnBody::Expr(expr) => ctx.eval_expr(expr, &mut scope),
+            TJitSpawnBody::Block { prefix, tail } => match ctx.exec_stmts(prefix, &mut scope) {
+                Ok(Flow::Return(value)) => Ok(value),
+                Ok(Flow::Normal) => match tail {
+                    Some(expr) => ctx.eval_expr(expr, &mut scope),
+                    None => Ok(CtValue::Unit),
+                },
+                Ok(other) => Err(unsupported(
+                    &format!("control flow {other:?} escaping spawn"),
+                    ctx.span(),
+                )),
+                Err(error) => Err(error),
+            },
+        };
+        let order = config
+            .runtime
+            .lock()
+            .expect("evaluator runtime poisoned")
+            .completion_order
+            .fetch_add(1, Ordering::AcqRel);
+        let _ = job.completion.send(EvalTaskCompletion { order, result });
+    }
+
     fn eval_spawn(
         &mut self,
+        site: usize,
+        group: Option<&'a TExpr>,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
+        let group = match group {
+            Some(group) => Some(
+                Self::taskgroup_index(&self.eval_expr(group, scope)?)
+                    .ok_or_else(|| unsupported("taskgroup handle", self.span()))?,
+            ),
+            None => None,
+        };
         let lam = self
             .spawn_lambdas
-            .get(self.spawn_site)
+            .get(site)
             .ok_or_else(|| unsupported("spawn body", self.span()))?;
-        self.spawn_site += 1;
         let mut child = HashMap::new();
         for capture in &lam.captures {
             child.insert(
@@ -289,26 +454,189 @@ impl<'a> EvalCtx<'a> {
                     .unwrap_or(CtValue::Unit),
             );
         }
-        let value = match &lam.body {
-            TJitSpawnBody::Expr(expr) => self.eval_expr(expr, &mut child)?,
-            TJitSpawnBody::Block { prefix, tail } => match self.exec_stmts(prefix, &mut child)? {
-                Flow::Return(value) => value,
-                Flow::Normal => match tail {
-                    Some(expr) => self.eval_expr(expr, &mut child)?,
-                    None => CtValue::Unit,
-                },
-                other => {
-                    return Err(unsupported(
-                        &format!("control flow {other:?} escaping spawn"),
-                        self.span(),
-                    ));
-                }
-            },
-        };
+        let sender = self
+            .task_sender
+            .as_ref()
+            .ok_or_else(|| unsupported("spawn outside a taskgroup", self.span()))?;
+        let (completion, receiver) = mpsc::sync_channel(1);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let task = runtime.tasks.len();
+        runtime.tasks.push(Some(EvalTask {
+            completion: receiver,
+            cancel: cancel.clone(),
+        }));
+        if let Some(group) = group {
+            runtime.task_groups[group].push(task);
+        }
+        drop(runtime);
+        sender
+            .send(EvalTaskJob {
+                lambda: lam,
+                captured: child,
+                completion,
+                cancel,
+            })
+            .map_err(|_| unsupported("closed taskgroup", self.span()))?;
         Ok(CtValue::Struct {
             type_name: "__JetTirTask".to_string(),
-            fields: vec![("value".to_string(), value)],
+            fields: vec![("index".to_string(), CtValue::Int(task as i64))],
         })
+    }
+
+    fn taskgroup_index(value: &CtValue) -> Option<usize> {
+        Self::internal_index(value, "__JetTirTaskGroup")
+    }
+
+    fn task_index(value: &CtValue) -> Option<usize> {
+        Self::internal_index(value, "__JetTirTask")
+    }
+
+    fn internal_index(value: &CtValue, expected: &str) -> Option<usize> {
+        let CtValue::Struct { type_name, fields } = value else {
+            return None;
+        };
+        if type_name != expected {
+            return None;
+        }
+        fields.iter().find_map(|(name, value)| match (name.as_str(), value) {
+            ("index", CtValue::Int(index)) => usize::try_from(*index).ok(),
+            _ => None,
+        })
+    }
+
+    fn new_taskgroup(&mut self) -> CtValue {
+        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let index = runtime.task_groups.len();
+        runtime.task_groups.push(Vec::new());
+        CtValue::Struct {
+            type_name: "__JetTirTaskGroup".to_string(),
+            fields: vec![("index".to_string(), CtValue::Int(index as i64))],
+        }
+    }
+
+    fn take_task_entry(&mut self, value: &CtValue) -> Result<EvalTask, Diagnostic> {
+        let index = Self::task_index(value)
+            .ok_or_else(|| unsupported("task receiver", self.span()))?;
+        self
+            .runtime
+            .lock()
+            .expect("evaluator runtime poisoned")
+            .tasks
+            .get_mut(index)
+            .and_then(Option::take)
+            .ok_or_else(|| unsupported("task already joined", self.span()))
+    }
+
+    pub(super) fn take_task(&mut self, value: &CtValue) -> Result<CtValue, Diagnostic> {
+        self.task_wait_cancel_check()?;
+        let task = self.take_task_entry(value)?;
+        let result = task.completion
+            .recv()
+            .map_err(|_| unsupported("task completion", self.span()))?
+            .result;
+        self.task_wait_cancel_check()?;
+        result
+    }
+
+    fn cancel_and_drain_tasks(tasks: Vec<EvalTask>) {
+        for task in &tasks {
+            task.cancel.store(true, Ordering::Release);
+        }
+        for task in tasks {
+            let _ = task.completion.recv();
+        }
+    }
+
+    pub(super) fn task_select(
+        &mut self,
+        values: &[CtValue],
+        mode: crate::task_group::JetTaskSelectMode,
+    ) -> Result<CtValue, Diagnostic> {
+        let mut tasks = values
+            .iter()
+            .map(|value| self.take_task_entry(value).map(Some))
+            .collect::<Result<Vec<_>, _>>()?;
+        if tasks.is_empty() {
+            return Err(unsupported("empty taskgroup combinator", self.span()));
+        }
+        let mut policy = crate::task_group::JetTaskSelectPolicy::new(mode, tasks.len());
+        loop {
+            self.task_wait_cancel_check()?;
+            let mut ready = Vec::new();
+            for (index, task) in tasks.iter().enumerate() {
+                let Some(task) = task else { continue };
+                match task.completion.try_recv() {
+                    Ok(completion) => ready.push((completion.order, index, completion.result)),
+                    Err(mpsc::TryRecvError::Empty) => {}
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        return Err(unsupported("task completion", self.span()));
+                    }
+                }
+            }
+            ready.sort_by_key(|(order, _, _)| *order);
+            if let Some((order, index, result)) = ready.into_iter().next() {
+                tasks[index] = None;
+                if let crate::task_group::JetTaskDecision::Finish(result) =
+                    policy.settle(order.into(), index, result)
+                {
+                    Self::cancel_and_drain_tasks(tasks.into_iter().flatten().collect());
+                    return result.map(|mut values| {
+                        if matches!(mode, crate::task_group::JetTaskSelectMode::All) {
+                            CtValue::List(values)
+                        } else {
+                            values.pop().expect("race/any result missing")
+                        }
+                    });
+                }
+            }
+            std::thread::yield_now();
+        }
+    }
+
+    fn close_taskgroup(&mut self, index: usize) -> Result<(), Diagnostic> {
+        let span = self.span();
+        let children = {
+            let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+            std::mem::take(
+                runtime
+                    .task_groups
+                    .get_mut(index)
+                    .ok_or_else(|| unsupported("taskgroup handle", span))?,
+            )
+        };
+        let mut first = None;
+        {
+            let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+            for child in &children {
+                if let Some(Some(task)) = runtime.tasks.get(*child) {
+                    task.cancel.store(true, Ordering::Release);
+                }
+            }
+        }
+        for child in children {
+            let task = self
+                .runtime
+                .lock()
+                .expect("evaluator runtime poisoned")
+                .tasks
+                .get_mut(child)
+                .and_then(Option::take);
+            let result = task.and_then(|task| task.completion.recv().ok());
+            if let Some(EvalTaskCompletion {
+                result: Err(error),
+                ..
+            }) = result
+            {
+                if first.is_none() {
+                    first = Some(error);
+                }
+            }
+        }
+        match first {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     pub(crate) fn span(&self) -> Span {
@@ -380,8 +708,9 @@ impl<'a> EvalCtx<'a> {
     }
 
     fn store_callable(&mut self, callable: EvalCallable<'a>) -> CtValue {
-        let index = self.callables.len() as i64;
-        self.callables.push(callable);
+        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let index = runtime.callables.len() as i64;
+        runtime.callables.push(callable);
         CtValue::Struct {
             type_name: "__JetTirCallable".to_string(),
             fields: vec![("index".to_string(), CtValue::Int(index))],
@@ -402,8 +731,9 @@ impl<'a> EvalCtx<'a> {
     }
 
     fn store_stream(&mut self, func: &'a TFunc, args: Vec<CtValue>) -> CtValue {
-        let index = self.streams.len() as i64;
-        self.streams.push(EvalStream { func, args });
+        let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+        let index = runtime.streams.len() as i64;
+        runtime.streams.push(EvalStream { func, args });
         CtValue::Struct {
             type_name: "__JetTirStream".to_string(),
             fields: vec![("index".to_string(), CtValue::Int(index))],
@@ -430,19 +760,27 @@ impl<'a> EvalCtx<'a> {
     ) -> Result<CtValue, Diagnostic> {
         let index = Self::callable_index(value)
             .ok_or_else(|| unsupported("calling this non-function value", self.span()))?;
-        let (lambda, named, mut captured) = match self.callables.get(index) {
-            Some(EvalCallable::Lambda { lambda, captured }) => {
-                (Some(*lambda), None, captured.clone())
+        let (lambda, named, mut captured) = {
+            let runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+            match runtime.callables.get(index) {
+                Some(EvalCallable::Lambda { lambda, captured }) => {
+                    (Some(*lambda), None, captured.clone())
+                }
+                Some(EvalCallable::Named(name)) => (None, Some(*name), HashMap::new()),
+                None => return Err(unsupported("calling an unknown function value", self.span())),
             }
-            Some(EvalCallable::Named(name)) => (None, Some(*name), HashMap::new()),
-            None => return Err(unsupported("calling an unknown function value", self.span())),
         };
         if let Some(lambda) = lambda {
             let result = self.eval_tlambda(lambda, args, &mut captured);
             if result.is_ok() {
                 if let Some(EvalCallable::Lambda {
                     captured: stored, ..
-                }) = self.callables.get_mut(index)
+                }) = self
+                    .runtime
+                    .lock()
+                    .expect("evaluator runtime poisoned")
+                    .callables
+                    .get_mut(index)
                 {
                     *stored = captured;
                 }
@@ -726,11 +1064,12 @@ pub fn run_program_with_structs(
             None,
         )
     })?;
+    let shared_sink = Arc::new(Mutex::new(std::mem::take(sink)));
     let mut ctx = EvalCtx {
         funcs,
         base_dir: base_dir.to_path_buf(),
         fuel: DEV_FUEL,
-        sink: Some(sink),
+        sink: Some(shared_sink.clone()),
         core_imports,
         globals,
         allow_impure,
@@ -753,20 +1092,22 @@ pub fn run_program_with_structs(
         distinct_bases: program.distinct_bases.clone(),
         distinct_ranges: program.distinct_ranges.clone(),
         switch_subject: None,
-        callables: Vec::new(),
-        streams: Vec::new(),
-        shared_values: Vec::new(),
+        runtime: Arc::new(Mutex::new(EvalRuntime::new())),
         shared_transactions: Vec::new(),
-        clocks: Vec::new(),
         spawn_lambdas: &program.spawn_lambdas,
-        spawn_site: 0,
+        task_sender: None,
+        task_cancel: None,
         yield_consumer: None,
         yield_scope: None,
         scope_guards: Vec::new(),
         txn_stack: Vec::new(),
     };
     let mut scope = HashMap::new();
-    ctx.run_func(entry, Vec::new(), &mut scope)
+    let result = ctx.run_func(entry, Vec::new(), &mut scope);
+    *sink = std::mem::take(
+        &mut *shared_sink.lock().expect("evaluator sink poisoned"),
+    );
+    result
 }
 
 /// Run one named function through the canonical TIR evaluator (#778 deopt).
@@ -788,11 +1129,12 @@ pub fn run_named_func(
         )
     })?;
     let core_imports = HashMap::new();
+    let shared_sink = Arc::new(Mutex::new(std::mem::take(sink)));
     let mut ctx = EvalCtx {
         funcs,
         base_dir: PathBuf::from("."),
         fuel: DEV_FUEL,
-        sink: Some(sink),
+        sink: Some(shared_sink.clone()),
         core_imports: &core_imports,
         globals: HashMap::new(),
         allow_impure: true,
@@ -815,20 +1157,22 @@ pub fn run_named_func(
         distinct_bases: program.distinct_bases.clone(),
         distinct_ranges: program.distinct_ranges.clone(),
         switch_subject: None,
-        callables: Vec::new(),
-        streams: Vec::new(),
-        shared_values: Vec::new(),
+        runtime: Arc::new(Mutex::new(EvalRuntime::new())),
         shared_transactions: Vec::new(),
-        clocks: Vec::new(),
         spawn_lambdas: &program.spawn_lambdas,
-        spawn_site: 0,
+        task_sender: None,
+        task_cancel: None,
         yield_consumer: None,
         yield_scope: None,
         scope_guards: Vec::new(),
         txn_stack: Vec::new(),
     };
     let mut scope = HashMap::new();
-    ctx.run_func(func, args, &mut scope)
+    let result = ctx.run_func(func, args, &mut scope);
+    *sink = std::mem::take(
+        &mut *shared_sink.lock().expect("evaluator sink poisoned"),
+    );
+    result
 }
 
 static INSTALLED: OnceLock<()> = OnceLock::new();
@@ -955,7 +1299,10 @@ fn eval_expr_hook(
     let allow_impure = req.allow_impure;
     let impure_depth = req.initial_impure_depth;
     let repl_mode = req.repl_mode;
-    let sink = req.sink.take();
+    let mut sink_target = req.sink.take();
+    let sink = sink_target
+        .as_deref_mut()
+        .map(|sink| Arc::new(Mutex::new(std::mem::take(sink))));
     let emitted_fragments = req.emitted_fragments.take();
     let embed_inputs = req.embed_inputs.take();
     let mut ctx = EvalCtx {
@@ -983,20 +1330,22 @@ fn eval_expr_hook(
         distinct_bases: HashMap::new(),
         distinct_ranges: HashMap::new(),
         switch_subject: None,
-        callables: Vec::new(),
-        streams: Vec::new(),
-        shared_values: Vec::new(),
+        runtime: Arc::new(Mutex::new(EvalRuntime::new())),
         shared_transactions: Vec::new(),
-        clocks: Vec::new(),
         spawn_lambdas: &[],
-        spawn_site: 0,
+        task_sender: None,
+        task_cancel: None,
         yield_consumer: None,
         yield_scope: None,
         scope_guards: Vec::new(),
         txn_stack: Vec::new(),
     };
     let mut scope = globals;
-    ctx.eval_expr(&tir, &mut scope)
+    let result = ctx.eval_expr(&tir, &mut scope);
+    if let (Some(target), Some(shared)) = (sink_target, ctx.sink.as_ref()) {
+        *target = std::mem::take(&mut *shared.lock().expect("evaluator sink poisoned"));
+    }
+    result
 }
 
 fn eval_block_hook(
@@ -1032,7 +1381,10 @@ fn eval_block_hook(
     let allow_impure = req.allow_impure;
     let impure_depth = req.impure_depth;
     let repl_mode = req.repl_mode;
-    let sink = req.sink.take();
+    let mut sink_target = req.sink.take();
+    let sink = sink_target
+        .as_deref_mut()
+        .map(|sink| Arc::new(Mutex::new(std::mem::take(sink))));
     let emitted_fragments = req.emitted_fragments.take();
     let embed_inputs = req.embed_inputs.take();
     let mut ctx = EvalCtx {
@@ -1060,25 +1412,27 @@ fn eval_block_hook(
         distinct_bases: HashMap::new(),
         distinct_ranges: HashMap::new(),
         switch_subject: None,
-        callables: Vec::new(),
-        streams: Vec::new(),
-        shared_values: Vec::new(),
+        runtime: Arc::new(Mutex::new(EvalRuntime::new())),
         shared_transactions: Vec::new(),
-        clocks: Vec::new(),
         spawn_lambdas: &[],
-        spawn_site: 0,
+        task_sender: None,
+        task_cancel: None,
         yield_consumer: None,
         yield_scope: None,
         scope_guards: Vec::new(),
         txn_stack: Vec::new(),
     };
     let mut scope = globals;
-    match ctx.exec_stmts(&tir, &mut scope)? {
+    let outcome = match ctx.exec_stmts(&tir, &mut scope)? {
         Flow::Normal => Ok(Comptime::TirBridge::StmtOutcome::Done(scope)),
         Flow::Return(value) => Ok(Comptime::TirBridge::StmtOutcome::Returned { value, scope }),
         other => Err(unsupported(
             &format!("control flow {other:?} in statement fragment"),
             ctx.span(),
         )),
+    };
+    if let (Some(target), Some(shared)) = (sink_target, ctx.sink.as_ref()) {
+        *target = std::mem::take(&mut *shared.lock().expect("evaluator sink poisoned"));
     }
+    outcome
 }

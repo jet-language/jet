@@ -335,7 +335,7 @@ const CORELIB_PRELUDE_PARTS: &[&str] = &[
     include_str!("../../../jet-foundation/src/RegexSyntax.rs"),
     "\n}\n",
     include_str!("../Prelude/CoreLib/JetStd/Open.rs"),
-    include_str!("../task_group.rs"),
+    include_str!("../Prelude/TaskGroup.rs"),
     include_str!("../Prelude/CoreLib/JetStd/UrlMime.rs"),
     include_str!("../Prelude/CoreLib/JetStd/JSONCodec.rs"),
     include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),

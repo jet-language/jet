@@ -2290,176 +2290,94 @@ impl<T> JetSchedulerJoin<T> {
     }
 }
 
-/// D-CONCCOMB1: join every handle in list order; fail fast and cancel siblings on error.
-pub fn jet_scheduler_all<T: Send + 'static>(
+fn jet_scheduler_select_tasks<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
+    mode: jet_std::JetTaskSelectMode,
 ) -> Vec<T> {
-    assert!(!entries.is_empty(), "all: empty task list");
-    let n = entries.len();
-    let mut out: Vec<Option<T>> = (0..n).map(|_| None).collect();
-    let mut pending = n;
+    use jet_std::{JetTaskDecision, JetTaskSelectPolicy};
+    assert!(!entries.is_empty(), "task selection: empty task list");
+    let mut settled = vec![false; entries.len()];
+    let mut policy = JetTaskSelectPolicy::new(mode, entries.len());
     loop {
-        for (i, (join, _)) in entries.iter().enumerate() {
-            if out[i].is_some() {
-                continue;
-            }
-            let Some(res) = join.try_recv() else {
-                continue;
-            };
-            match res {
-                JetSchedulerResult::Value(v) => {
-                    out[i] = Some(v);
-                    pending -= 1;
-                    if pending == 0 {
-                        for (join, _) in entries {
-                            join.drain();
+        let next = entries
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !settled[*index])
+            .filter_map(|(index, (join, _))| {
+                join.completion_order().map(|order| (order, index))
+            })
+            .min();
+        if let Some((order, index)) = next {
+            if let Some(result) = entries[index].0.try_recv() {
+                settled[index] = true;
+                let result = match result {
+                    JetSchedulerResult::Value(value) => Ok(value),
+                    JetSchedulerResult::Panicked => Err(JetSchedulerResult::Panicked),
+                    JetSchedulerResult::Cancelled => Err(JetSchedulerResult::Cancelled),
+                    JetSchedulerResult::Deadline(rendered) => {
+                        Err(JetSchedulerResult::Deadline(rendered))
+                    }
+                };
+                if let JetTaskDecision::Finish(result) =
+                    policy.settle(order, index, result)
+                {
+                    let cancel =
+                        result.is_err() || !matches!(mode, jet_std::JetTaskSelectMode::All);
+                    if cancel {
+                        for (task, (_, control)) in entries.iter().enumerate() {
+                            if !settled[task] {
+                                control.cancel();
+                            }
                         }
-                        return out
-                            .into_iter()
-                            .map(|v| v.expect("all: missing result"))
-                            .collect();
-                    }
-                }
-                JetSchedulerResult::Panicked => {
-                    for (_, ctrl) in &entries {
-                        ctrl.cancel();
                     }
                     for (join, _) in entries {
                         join.drain();
                     }
                     jet_scheduler_drain();
-                    jet_scheduler_fatal("a task panicked");
-                }
-                JetSchedulerResult::Cancelled => {
-                    for (_, ctrl) in &entries {
-                        ctrl.cancel();
-                    }
-                    for (join, _) in entries {
-                        join.drain();
-                    }
-                    jet_scheduler_drain();
-                    jet_scheduler_fatal("a task was cancelled");
-                }
-                JetSchedulerResult::Deadline(rendered) => {
-                    for (_, ctrl) in &entries {
-                        ctrl.cancel();
-                    }
-                    for (join, _) in entries {
-                        join.drain();
-                    }
-                    jet_scheduler_drain();
-                    jet_scheduler_propagate_deadline(rendered);
+                    return match result {
+                        Ok(values) => values,
+                        Err(JetSchedulerResult::Deadline(rendered)) => {
+                            jet_scheduler_propagate_deadline(rendered)
+                        }
+                        Err(JetSchedulerResult::Cancelled) => {
+                            jet_task_deliver_cancel();
+                            jet_scheduler_fatal("a task was cancelled")
+                        }
+                        Err(JetSchedulerResult::Panicked) => {
+                            jet_scheduler_fatal("a task panicked")
+                        }
+                        Err(JetSchedulerResult::Value(())) => unreachable!(),
+                    };
                 }
             }
         }
         thread::sleep(Duration::from_micros(50));
     }
+}
+
+/// D-CONCCOMB1: join every handle in list order; fail fast and cancel siblings on error.
+pub fn jet_scheduler_all<T: Send + 'static>(
+    entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
+) -> Vec<T> {
+    jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::All)
 }
 
 /// D-CONCCOMB1/D-RACEWIN1: first successful result wins; cancel losers.
 pub fn jet_scheduler_race<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
 ) -> T {
-    assert!(!entries.is_empty(), "race: empty task list");
-    let n = entries.len();
-    let mut settled = vec![false; n];
-    let mut settled_count = 0usize;
-    let mut deadline = None;
-    loop {
-        let next = entries
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| !settled[*i])
-            .filter_map(|(i, (join, _))| join.completion_order().map(|order| (order, i)))
-            .min()
-            .map(|(_, i)| i);
-        if let Some(i) = next {
-            if let Some(res) = entries[i].0.try_recv() {
-                match res {
-                    JetSchedulerResult::Value(v) => {
-                        for (j, (_, ctrl)) in entries.iter().enumerate() {
-                            if j != i {
-                                ctrl.cancel();
-                            }
-                        }
-                        let mut losers = Vec::new();
-                        for (j, (join, _)) in entries.into_iter().enumerate() {
-                            if j != i {
-                                losers.push(join);
-                            }
-                        }
-                        for join in losers {
-                            join.drain();
-                        }
-                        jet_scheduler_drain();
-                        return v;
-                    }
-                    JetSchedulerResult::Panicked | JetSchedulerResult::Cancelled => {
-                        settled[i] = true;
-                        settled_count += 1;
-                    }
-                    JetSchedulerResult::Deadline(rendered) => {
-                        deadline.get_or_insert(rendered);
-                        settled[i] = true;
-                        settled_count += 1;
-                    }
-                }
-            }
-        }
-        if settled_count == n {
-            if let Some(rendered) = deadline {
-                jet_scheduler_propagate_deadline(rendered);
-            }
-            jet_scheduler_fatal("a task panicked");
-        }
-        thread::sleep(Duration::from_micros(50));
-    }
+    jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::Race)
+        .pop()
+        .expect("race result missing")
 }
 
 /// D-CONCCOMB1: first completed result wins (success or failure path visible).
 pub fn jet_scheduler_any<T: Send + 'static>(
     entries: Vec<(JetSchedulerJoin<T>, Arc<JetTaskControl>)>,
 ) -> T {
-    assert!(!entries.is_empty(), "any: empty task list");
-    loop {
-        let next = entries
-            .iter()
-            .enumerate()
-            .filter_map(|(i, (join, _))| join.completion_order().map(|order| (order, i)))
-            .min()
-            .map(|(_, i)| i);
-        if let Some(i) = next {
-            let Some(res) = entries[i].0.try_recv() else {
-                thread::yield_now();
-                continue;
-            };
-            for (j, (_, ctrl)) in entries.iter().enumerate() {
-                if j != i {
-                    ctrl.cancel();
-                }
-            }
-            let mut losers = Vec::new();
-            for (j, (join, _)) in entries.into_iter().enumerate() {
-                if j != i {
-                    losers.push(join);
-                }
-            }
-            for join in losers {
-                join.drain();
-            }
-            jet_scheduler_drain();
-            return match res {
-                JetSchedulerResult::Value(v) => v,
-                JetSchedulerResult::Panicked | JetSchedulerResult::Cancelled => {
-                    jet_scheduler_fatal("a task panicked");
-                }
-                JetSchedulerResult::Deadline(rendered) => {
-                    jet_scheduler_propagate_deadline(rendered);
-                }
-            };
-        }
-        thread::sleep(Duration::from_micros(50));
-    }
+    jet_scheduler_select_tasks(entries, jet_std::JetTaskSelectMode::Any)
+        .pop()
+        .expect("any result missing")
 }
 
 /// D-CONCSELECT1=A: JIT/AOT entry for fluent `g.select()` over scheduler channels.

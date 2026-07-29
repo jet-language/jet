@@ -982,8 +982,6 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::ResourceNew(inner) => resident_safe_expr(inner, callees),
         TExprKind::ResourceTake(_) => jit_value_type(&expr.ty),
         TExprKind::Close(_) => true,
-        TExprKind::TaskGroupNew => true,
-        TExprKind::TaskGroupClose(group) => resident_safe_expr(group, callees),
         _ if !jit_value_type(&expr.ty) => false,
         TExprKind::IntLit(_, _)
         | TExprKind::FloatLit(_)
@@ -2236,7 +2234,8 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     .all(|(_, _, body)| body.iter().all(|s| resident_safe_stmt(s, callees)))
                 && else_body.iter().all(|s| resident_safe_stmt(s, callees))
         }
-        TStmt::Region(body)
+        TStmt::TaskGroup { body, .. }
+        | TStmt::Region(body)
         | TStmt::Impure(body)
         | TStmt::Inline(body)
         | TStmt::Unsafe(body)
@@ -2409,8 +2408,6 @@ fn expr_kind_tag(expr: &TExpr) -> &'static str {
             _ => "CoreClosure:Other",
         },
         TExprKind::HandleMethod { op, .. } => "HandleMethod",
-        TExprKind::TaskGroupNew => "TaskGroupNew",
-        TExprKind::TaskGroupClose(_) => "TaskGroupClose",
         TExprKind::Call { name, .. } => Box::leak(format!("Call:{name}").into_boxed_str()),
         TExprKind::Binary { .. } => "Binary",
         TExprKind::Local(_) => "Local",
@@ -2433,6 +2430,7 @@ fn stmt_kind_tag(stmt: &TStmt) -> &'static str {
         TStmt::Inline(_) => "Inline",
         TStmt::Impure(_) => "Impure",
         TStmt::Region(_) => "Region",
+        TStmt::TaskGroup { .. } => "TaskGroup",
         TStmt::Unsafe(_) => "Unsafe",
         _ => "Other",
     }
@@ -2444,7 +2442,11 @@ fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Optio
             continue;
         }
         match s {
-            TStmt::Inline(body) | TStmt::Impure(body) | TStmt::Region(body) | TStmt::Unsafe(body) => {
+            TStmt::Inline(body)
+            | TStmt::Impure(body)
+            | TStmt::Region(body)
+            | TStmt::TaskGroup { body, .. }
+            | TStmt::Unsafe(body) => {
                 if let Some(inner) = first_unsafe_stmt_detail(body, callees) {
                     return Some(format!("{}[{i}]>{inner}", stmt_kind_tag(s)));
                 }
@@ -2591,7 +2593,8 @@ fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut usize) {
                 }
                 count_spawn_sites_stmts(body, n);
             }
-            TStmt::Region(body)
+            TStmt::TaskGroup { body, .. }
+            | TStmt::Region(body)
             | TStmt::Impure(body)
             | TStmt::Inline(body)
             | TStmt::Unsafe(body)
@@ -2756,7 +2759,6 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
         TExprKind::TaskGroupAll { tasks }
         | TExprKind::TaskGroupRace { tasks }
         | TExprKind::TaskGroupAny { tasks } => count_spawn_sites_expr(tasks, n),
-        TExprKind::TaskGroupClose(group) => count_spawn_sites_expr(group, n),
         _ => {}
     }
 }

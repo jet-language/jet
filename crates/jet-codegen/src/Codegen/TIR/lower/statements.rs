@@ -1443,28 +1443,11 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let mut scoped = clone_env(env);
             let group_ty = Type::Named(Syntax::TYPE_TASKGROUP.to_string());
             let group = TLocal::user(name);
-            scoped.bind(name, group.clone(), Some(group_ty.clone()));
-            let mut statements = Vec::new();
-            statements.push(TStmt::Let {
-                name: name.clone(),
-                kw: "let",
-                let_ty: TLetTy::plain(group_ty.clone()),
-                init: TExpr {
-                    ty: group_ty.clone(),
-                    kind: TExprKind::TaskGroupNew,
-                },
-                gc_promotion: None,
-                gc_transferred: false,
-            });
-            statements.extend(lower_stmts(body, cx, &mut scoped));
-            statements.push(TStmt::ExprStmt(TExpr {
-                ty: Type::Named("Unit".to_string()),
-                kind: TExprKind::TaskGroupClose(Box::new(TExpr {
-                    ty: group_ty,
-                    kind: TExprKind::Local(group),
-                })),
-            }));
-            TStmt::Region(statements)
+            scoped.bind(name, group.clone(), Some(group_ty));
+            TStmt::TaskGroup {
+                group,
+                body: lower_stmts(body, cx, &mut scoped),
+            }
         }
         // D-LAYOUT1 / D-LAYOUT-GATES1: `layout name { … }` needs a public
         // runtime object (unlike the compiler-private TaskGroup handle) — bind `name`
