@@ -475,7 +475,11 @@ pub(crate) extern "C" fn jet_deopt_call(
             }
         }
         let mut sink = DevSink::new();
-        let value = match TIR::run_named_func(program, &func_name, args, &mut sink) {
+        let value = match jet_codegen::Comptime::with_ambient(
+            Some(crate::ambient_interp::ambient_core_call),
+            Some(crate::ambient_interp::ambient_handle),
+            || TIR::run_named_func(program, &func_name, args, &mut sink),
+        ) {
             Ok(v) => v,
             Err(d) => return Some(Err(d.what)),
         };

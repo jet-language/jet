@@ -12,7 +12,8 @@
 
 use std::fs;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::io::Write;
+use std::process::{Command, Output, Stdio};
 
 mod common;
 
@@ -95,6 +96,88 @@ fn run() {
         !jet_jit::fallback_invoked_for_test(),
         "a missing host entry deopts to tier 0, which then raises E0956"
     );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn prompt_helpers_preserve_behavior_through_named_deopt() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_prompt_named_deopt");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("prompts.jet");
+    fs::write(
+        &file,
+        r##"use core.io as io
+use core.text as text
+
+fn prompt_gap() => String {
+    confirmed :: io.confirm("Continue?")
+    choice :: io.choose("Choose:", ["staging", "production"]) ?? panic("choose failed")
+    secret_kind := "unexpected"
+    if io.input_secret("Secret: ") == {
+        .Ok(_) -> { secret_kind = "secret" }
+        .Err(error) -> {
+            if error == {
+                .InvalidInput(_) -> { secret_kind = "non-tty" }
+                else -> { secret_kind = "other" }
+            }
+        }
+    }
+    return "{confirmed}|{choice}|{secret_kind}|{text.casefold("Straße")}"
+}
+
+fn run() {
+    print(prompt_gap())
+}
+"##,
+    )
+    .unwrap();
+
+    let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).expect("prompt fixture loads");
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        !diags.iter().any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
+        "prompt fixture must check: {diags:?}"
+    );
+    let plan = jet_jit::plan_bundle_tiers(&bundle);
+    assert!(!plan.whole_interp, "regression needs named deopt: {plan:?}");
+    assert!(
+        plan.deopt.iter().any(|(name, _)| name == "prompt_gap"),
+        "prompt_gap must be assigned to named deopt: {plan:?}"
+    );
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("run")
+        .arg(&file)
+        .arg("--trace-tiers")
+        .env("NO_COLOR", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run prompt named-deopt fixture");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"\nnot-a-number\n3\n2\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Continue? [y/N] "), "{stdout}");
+    assert!(stdout.contains("  1) staging\n  2) production\n"), "{stdout}");
+    assert!(stdout.contains("Enter a number from 1 to 2."), "{stdout}");
+    assert!(stdout.ends_with("false|production|non-tty|strasse\n"), "{stdout}");
+    let trace = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        trace.contains("prompt_gap") && trace.contains("tier0 interp"),
+        "{trace}"
+    );
+    assert!(!trace.contains("E0956"), "{trace}");
 
     let _ = fs::remove_dir_all(&dir);
 }
