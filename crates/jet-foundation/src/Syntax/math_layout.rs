@@ -150,6 +150,8 @@ pub const TYPE_BIT_SET: &str = "BitSet";
 pub const TYPE_BYTE_BUFFER: &str = "ByteBuffer";
 /// D-ITERTOOLS1=A: lazy adapter view; materialize with `to_list`/`collect`/reducers.
 pub const TYPE_ITER: &str = "Iter";
+/// D-RANGE-VALUE1=A: one nominal integer range for inclusive and half-open values.
+pub const TYPE_RANGE: &str = "Range";
 
 /// S41 (ratified M5): character type.
 pub const TYPE_CHAR: &str = "Char";

@@ -94,6 +94,9 @@
 // position as TYPE_UNION_SEP. `T ? E1 | E2` parses as `T ? (E1 | E2)`.
 // D-REGEX-LIT1=D adds no punctuation. Regex patterns use the universal
 // `Type.{ body }` / inferred `.{ body }` form from D-DOTCTOR3.
+// D-RANGE-VALUE1=A makes `a..b` and `a..<b` construct one nominal Range
+// value. Range carries end inclusivity; arm heads and distinct constraints
+// keep their literal-only grammar.
 // D-FMT-INTERP1=A adds `Fixed` to the closed interpolation-selector set:
 // `{value#Fixed(n)}` reuses `#` and ordinary integer-call parentheses.
 // D-QUANTITY-PRINT1 adds `Unit(name)` and `Unit(bare)` to that same selector

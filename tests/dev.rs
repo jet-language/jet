@@ -3054,6 +3054,31 @@ fn unified_loop_jit_tiers_are_explicit_and_match_aot() {
 }
 
 #[test]
+fn range_values_run_in_resident_jit_without_fallback() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let src = r#"
+fn run() {
+    band :: 2..<5
+    print(band.start)
+    print(band.end)
+    print(band.contains(4))
+    print((5..2).contains(3))
+    total := 0
+    loop n; band {
+        total += n
+    }
+    print(total)
+    values :: [10, 20, 30, 40, 50, 60]
+    print(values[band])
+}
+"#;
+    let native = run_cranelift_without_fallback(src, "range_values");
+    assert_eq!(native.stdout, "2\n5\ntrue\nfalse\n9\n[30, 40, 50]\n");
+}
+
+#[test]
 fn subjectless_guards_match_aot_in_resident_jit() {
     if skip_if_cranelift_host_unsupported() || !have_rustc() {
         return;

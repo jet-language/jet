@@ -407,6 +407,9 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
                 || expr_has_comptime_evaluation(start)
                 || expr_has_comptime_evaluation(end)
         }
+        Expr::Range { start, end, .. } => {
+            expr_has_comptime_evaluation(start) || expr_has_comptime_evaluation(end)
+        }
         Expr::Call(call) => call.args.iter().any(argument),
         Expr::Binary(_, left, right, _) => {
             expr_has_comptime_evaluation(left) || expr_has_comptime_evaluation(right)

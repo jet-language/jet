@@ -283,18 +283,19 @@ struct Fmt<'a> {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Prec {
     OrFallback = 0,
-    Or = 1,
-    And = 2,
-    Cmp = 3,
-    BitOr = 4,
-    BitXor = 5,
-    BitAnd = 6,
-    Shift = 7,
-    Add = 8,
-    Mul = 9,
-    Unary = 10,
-    Postfix = 11,
-    Primary = 12,
+    Range = 1,
+    Or = 2,
+    And = 3,
+    Cmp = 4,
+    BitOr = 5,
+    BitXor = 6,
+    BitAnd = 7,
+    Shift = 8,
+    Add = 9,
+    Mul = 10,
+    Unary = 11,
+    Postfix = 12,
+    Primary = 13,
 }
 
 impl Prec {
@@ -944,6 +945,7 @@ impl Prec {
     fn add_rhs(self) -> Self {
         match self {
             Prec::OrFallback => Prec::OrFallback,
+            Prec::Range => Prec::Or,
             Prec::Or => Prec::And,
             Prec::And => Prec::Cmp,
             Prec::Cmp => Prec::BitOr,

@@ -1509,23 +1509,62 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::Slice {
-                base, start, end, ..
+                base, start, end, range, ..
             } => {
                 let b = self.eval_expr(base, scope)?;
-                let a = as_int(&self.eval_expr(start, scope)?, self.span())?;
-                let z = as_int(&self.eval_expr(end, scope)?, self.span())?;
+                let (a, z, exclusive) = if let Some(range) = range {
+                    let value = self.eval_expr(range, scope)?;
+                    let CtValue::Struct { type_name, fields } = value else {
+                        return Err(unsupported("Range slice", self.span()));
+                    };
+                    if type_name != crate::Syntax::TYPE_RANGE {
+                        return Err(unsupported("Range slice type", self.span()));
+                    }
+                    let field = |name: &str| {
+                        fields.iter().find(|(field, _)| field == name).map(|(_, value)| value)
+                    };
+                    (
+                        field("start")
+                            .ok_or_else(|| unsupported("Range.start", self.span()))
+                            .and_then(|value| as_int(value, self.span()))?,
+                        field("end")
+                            .ok_or_else(|| unsupported("Range.end", self.span()))
+                            .and_then(|value| as_int(value, self.span()))?,
+                        matches!(field("exclusive"), Some(CtValue::Bool(true))),
+                    )
+                } else {
+                    (
+                        as_int(&self.eval_expr(start, scope)?, self.span())?,
+                        as_int(&self.eval_expr(end, scope)?, self.span())?,
+                        false,
+                    )
+                };
                 match b {
                     CtValue::List(xs) => {
-                        if a < 0 || z < a || z as usize >= xs.len() {
+                        let end_valid = if exclusive {
+                            z as usize <= xs.len()
+                        } else {
+                            (z as usize) < xs.len()
+                        };
+                        if a < 0 || z < a || !end_valid {
                             Err(unsupported("slice bounds", self.span()))
+                        } else if exclusive {
+                            Ok(CtValue::List(xs[a as usize..z as usize].to_vec()))
                         } else {
                             Ok(CtValue::List(xs[a as usize..=z as usize].to_vec()))
                         }
                     }
                     CtValue::Str(s) => {
                         let chars: Vec<char> = s.chars().collect();
-                        if a < 0 || z < a || z as usize >= chars.len() {
+                        let end_valid = if exclusive {
+                            z as usize <= chars.len()
+                        } else {
+                            (z as usize) < chars.len()
+                        };
+                        if a < 0 || z < a || !end_valid {
                             Err(unsupported("slice bounds", self.span()))
+                        } else if exclusive {
+                            Ok(CtValue::Str(chars[a as usize..z as usize].iter().collect()))
                         } else {
                             Ok(CtValue::Str(
                                 chars[a as usize..=z as usize].iter().collect(),

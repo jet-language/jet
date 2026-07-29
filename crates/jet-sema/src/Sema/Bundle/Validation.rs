@@ -866,6 +866,10 @@ pub(crate) fn collect_core_expr(
             collect_core_expr(start, imports, used, spans, ffi_cb);
             collect_core_expr(end, imports, used, spans, ffi_cb);
         }
+        Expr::Range { start, end, .. } => {
+            collect_core_expr(start, imports, used, spans, ffi_cb);
+            collect_core_expr(end, imports, used, spans, ffi_cb);
+        }
         Expr::Str(parts, _) => {
             for part in parts {
                 if let StrPart::Interp(e, _) = part {

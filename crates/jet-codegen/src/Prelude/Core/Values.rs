@@ -18,6 +18,21 @@ trait JetQuantity: Sized {
     fn from_float(value: f64) -> Self;
 }
 
+// D-RANGE-VALUE1=A: one allocation-free integer range value. Both source
+// spellings use this type; `exclusive` selects the half-open end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct JetRange {
+    start: i64,
+    end: i64,
+    exclusive: bool,
+}
+impl JetRange {
+    fn contains(&self, value: &i64) -> bool {
+        *value >= self.start
+            && if self.exclusive { *value < self.end } else { *value <= self.end }
+    }
+}
+
 // D-SHAPE-RESOURCE2=A: scope-owned deferred close. `FnOnce` lives in Option so
 // Drop consumes it exactly once; declaration order gives reverse cleanup order.
 struct JetDeferredClose<F: FnOnce()> {

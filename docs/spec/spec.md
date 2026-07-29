@@ -101,7 +101,7 @@ loop-body= "loop" effect-body
 source-clauses = source-clause { "," source-clause } ;
 source-clause = ident [ "," ident ] ";" source [ ";" expr ] ;
 loop-result-body = effect-body | "->" value-arm-body ;
-source   = expr [ ".." expr ] ;
+source   = expr ;                              // a range literal is one Range expression (D-RANGE-VALUE1)
 break    = "break" [ expr | "(" ident [ "," expr ] ")" ] NL ;
 next     = "next" [ "(" ident ")" ] NL ;
 cond     = expr | "(" expr ")" ;                     // S68/D-SG2: optional parens, fmt strips them
@@ -167,7 +167,11 @@ keep code readable from top to bottom. See
   subject is exhaustive; result types unify. Braces group multiline bodies.
 - `loop` has infinite,
   conditional, source (`loop x; source [; stride]`), map-pair, and explicit-state
-  (`loop i := init; cond [; afterthought]`) headers. Range sources are inclusive.
+  (`loop i := init; cond [; afterthought]`) headers. `a..b` and `a..<b`
+  construct one `Range` value over `Int`; the first includes `b` and the second
+  excludes it. A Range may be stored, passed, returned, and used as a loop
+  source or slice bound. It exposes `.start`, `.end`, and `.contains(value)`.
+  Literal range loops still compile directly to jumps without allocation.
   Source/bounds/stride evaluate once left-to-right; stride must be positive `Int`
   and is checked before the first pull. `break`/`next`
   inside loops only (E0115, S23). A loop may carry an ordinary-name label
@@ -205,7 +209,9 @@ keep code readable from top to bottom. See
   the porting-hazard teaching errors: `..=` in an arm head is **E0318** (Jet's
   `..` is already inclusive — write `lo..hi`), `step` in an arm head is
   **E0319** (`step` is a loop modifier, not a band), and an inverted/empty band
-  `hi..lo` is **E0316**.
+  `hi..lo` is **E0316**. Arm heads accept range literals only. A
+  `distinct Int(0..10)` constraint also stays literal-only because a runtime
+  Range cannot determine a type declaration (D-RANGE-VALUE1=A).
 - **Ambient surface (D-PRELUDE-LAW1=A):** this registry is closed. Always
   ambient: `print`, `input`, `panic`, `require`. Comptime-gated ambient:
   `embed_file`, `embed_bytes`, `find`, `fetch`. A user declaration shadows an

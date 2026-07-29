@@ -176,6 +176,10 @@ pub(crate) fn walk_expr_for_const_refs(
             walk_expr_for_const_refs(inner, const_names, taken)
         }
         Expr::OptField { base, .. } => walk_expr_for_const_refs(base, const_names, taken),
+        Expr::Range { start, end, .. } => {
+            walk_expr_for_const_refs(start, const_names, taken);
+            walk_expr_for_const_refs(end, const_names, taken);
+        }
         Expr::MethodCall { receiver, args, .. } => {
             walk_expr_for_const_refs(receiver, const_names, taken);
             for a in args {
@@ -353,6 +357,9 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
         Expr::Slice {
             base, start, end, ..
         } => expr_refs_name(base, name) || expr_refs_name(start, name) || expr_refs_name(end, name),
+        Expr::Range { start, end, .. } => {
+            expr_refs_name(start, name) || expr_refs_name(end, name)
+        }
         Expr::ListLit(elems, _) => elems.iter().any(|el| expr_refs_name(el, name)),
         Expr::TupleLit(fields, _, _) => fields.iter().any(|(_, e)| expr_refs_name(e, name)),
         Expr::MapLit(entries, _) => entries

@@ -950,6 +950,10 @@ impl<'a> Checker<'a> {
                 self.collect_evaluated_expr_accesses(start, mode, bound, out);
                 self.collect_evaluated_expr_accesses(end, mode, bound, out);
             }
+            Expr::Range { start, end, .. } => {
+                self.collect_evaluated_expr_accesses(start, mode, bound, out);
+                self.collect_evaluated_expr_accesses(end, mode, bound, out);
+            }
             Expr::MapLit(entries, _) => {
                 for (key, value) in entries {
                     self.collect_evaluated_expr_accesses(key, mode, bound, out);

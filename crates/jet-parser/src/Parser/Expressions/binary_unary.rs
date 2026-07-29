@@ -42,7 +42,7 @@ fn leading_dot_variant(kind: &TokKind) -> Option<String> {
 impl<'a> Parser<'a> {
         /// S35/S71: the `??` fallback binds looser than `&&` / `||`.
         pub(super) fn expr_or_fallback(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
-            let mut lhs = self.expr_or(allow_struct_lit)?;
+            let mut lhs = self.expr_range(allow_struct_lit)?;
             loop {
                 match &self.peek().kind {
                     TokKind::QuestionQuestion => {}
@@ -132,7 +132,7 @@ impl<'a> Parser<'a> {
                 }
                 return Ok(OrFallback::Continue(self.bump().span));
             }
-            let e = self.expr_or(allow_struct_lit)?;
+            let e = self.expr_range(allow_struct_lit)?;
             if let Expr::Call(call) = &e {
                 if call.name == Syntax::BUILTIN_PANIC {
                     return Ok(OrFallback::Panic {
@@ -142,6 +142,27 @@ impl<'a> Parser<'a> {
                 }
             }
             Ok(OrFallback::Value(Box::new(e)))
+        }
+
+        /// D-RANGE-VALUE1=A: ranges are ordinary values and bind looser than
+        /// Boolean operators. Arm heads and distinct constraints keep their
+        /// dedicated literal-only parsers.
+        fn expr_range(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+            let start = self.expr_or(allow_struct_lit)?;
+            let exclusive = match self.peek().kind {
+                TokKind::DotDot => false,
+                TokKind::DotDotLt => true,
+                _ => return Ok(start),
+            };
+            self.bump();
+            let end = self.expr_or(allow_struct_lit)?;
+            let span = Span::new(start.span().start, end.span().end);
+            Ok(Expr::Range {
+                start: Box::new(start),
+                end: Box::new(end),
+                exclusive,
+                span,
+            })
         }
     
         fn expr_or(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {

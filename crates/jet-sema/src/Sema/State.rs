@@ -560,6 +560,10 @@ impl<'a> StateCtx<'a> {
                 self.check_expr(start);
                 self.check_expr(end);
             }
+            Expr::Range { start, end, .. } => {
+                self.check_expr(start);
+                self.check_expr(end);
+            }
             Expr::ListLit(elems, _) => elems.iter().for_each(|el| self.check_expr(el)),
             Expr::MapLit(entries, _) => entries.iter().for_each(|(k, v)| {
                 self.check_expr(k);

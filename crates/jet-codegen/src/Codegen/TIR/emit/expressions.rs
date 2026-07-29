@@ -1664,9 +1664,19 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             base,
             start,
             end,
+            range,
             line,
         } => {
             let b = emit_tir_expr(base, cx);
+            if let Some(range) = range {
+                return format!(
+                    "jet_slice_range(&({}), &({}), {:?}, {})",
+                    b,
+                    emit_tir_expr(range, cx),
+                    cx.file,
+                    line
+                );
+            }
             let a = emit_tir_expr(start, cx);
             let e = emit_tir_expr(end, cx);
             format!(

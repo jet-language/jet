@@ -283,6 +283,7 @@ impl<'a> EvalCtx<'a> {
             }
             TStmt::Range {
                 var,
+                source,
                 start,
                 end,
                 step,
@@ -290,8 +291,32 @@ impl<'a> EvalCtx<'a> {
                 body,
                 label,
             } => {
-                let mut i = as_int(&self.eval_expr(start, scope)?, self.span())?;
-                let end_v = as_int(&self.eval_expr(end, scope)?, self.span())?;
+                let (mut i, end_v, exclusive_v) = if let Some(source) = source {
+                    let value = self.eval_expr(source, scope)?;
+                    let CtValue::Struct { type_name, fields } = value else {
+                        return Err(unsupported("Range loop source", self.span()));
+                    };
+                    if type_name != crate::Syntax::TYPE_RANGE {
+                        return Err(unsupported("Range loop source type", self.span()));
+                    }
+                    let field = |name: &str| {
+                        fields.iter().find(|(field, _)| field == name).map(|(_, value)| value)
+                    };
+                    let start = field("start")
+                        .ok_or_else(|| unsupported("Range.start", self.span()))
+                        .and_then(|value| as_int(value, self.span()))?;
+                    let end = field("end")
+                        .ok_or_else(|| unsupported("Range.end", self.span()))
+                        .and_then(|value| as_int(value, self.span()))?;
+                    let exclusive = matches!(field("exclusive"), Some(CtValue::Bool(true)));
+                    (start, end, exclusive)
+                } else {
+                    (
+                        as_int(&self.eval_expr(start, scope)?, self.span())?,
+                        as_int(&self.eval_expr(end, scope)?, self.span())?,
+                        *exclusive,
+                    )
+                };
                 let step_v = match step {
                     Some(s) => as_int(&self.eval_expr(s, scope)?, self.span())?,
                     None => 1,
@@ -301,7 +326,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 // D-RANGE-EXCL1=C: exclusive `..<` stops before end; inclusive `..` includes it.
                 let in_range = |cur: i64| {
-                    if *exclusive {
+                    if exclusive_v {
                         if step_v > 0 { cur < end_v } else { cur > end_v }
                     } else if step_v > 0 {
                         cur <= end_v

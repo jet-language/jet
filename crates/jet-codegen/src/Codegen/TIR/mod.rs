@@ -2236,6 +2236,9 @@ pub enum TStmt {
     Range {
         label: Option<String>,
         var: String,
+        /// D-RANGE-VALUE1=A: `Some` evaluates one Range value once. Literal
+        /// ranges keep `None` and the direct start/end jump lowering.
+        source: Option<TExpr>,
         start: TExpr,
         end: TExpr,
         step: Option<TExpr>,
@@ -2925,6 +2928,9 @@ pub enum TExprKind {
         base: Box<TExpr>,
         start: Box<TExpr>,
         end: Box<TExpr>,
+        /// D-RANGE-VALUE1=A: a stored Range source, evaluated once. Literal
+        /// slices keep this empty and use start/end directly.
+        range: Option<Box<TExpr>>,
         line: usize,
     },
     /// c109 Phase 6: the sema-inserted `.clone()` on an owning non-Copy field read

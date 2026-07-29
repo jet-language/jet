@@ -216,6 +216,9 @@ impl<'a> TaintCtx<'a> {
             Expr::Slice {
                 base, start, end, ..
             } => self.is_tainted(base) || self.is_tainted(start) || self.is_tainted(end),
+            Expr::Range { start, end, .. } => {
+                self.is_tainted(start) || self.is_tainted(end)
+            }
             Expr::ListLit(elems, _) => elems.iter().any(|el| self.is_tainted(el)),
             Expr::MapLit(entries, _) => entries
                 .iter()
@@ -378,6 +381,10 @@ impl<'a> TaintCtx<'a> {
                 base, start, end, ..
             } => {
                 self.check_expr(base);
+                self.check_expr(start);
+                self.check_expr(end);
+            }
+            Expr::Range { start, end, .. } => {
                 self.check_expr(start);
                 self.check_expr(end);
             }

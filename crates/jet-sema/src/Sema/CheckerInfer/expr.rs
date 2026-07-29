@@ -1053,6 +1053,12 @@ impl<'a> Checker<'a> {
                 end,
                 span,
             } => self.infer_slice(base, start, end, *span),
+            Expr::Range {
+                start,
+                end,
+                span,
+                ..
+            } => self.infer_range(start, end, *span),
             Expr::Call(call) => {
                 let span = call.name_span;
                 // D-UNINIT1: a `mut` arg is the fill site, not a read.
@@ -2453,6 +2459,10 @@ impl<'a> Checker<'a> {
         match &base_ty {
             Type::List(inner) => {
                 *kind = IndexKind::List;
+                if idx_ty == Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
+                    *kind = IndexKind::Range;
+                    return Some(Type::List(inner.clone()));
+                }
                 if idx_ty != Type::Int {
                     self.diags.push(Diagnostic::error(
                         "E0505",
@@ -2737,6 +2747,28 @@ impl<'a> Checker<'a> {
                 None
             }
         }
+    }
+
+    fn infer_range(
+        &mut self,
+        start: &mut Box<Expr>,
+        end: &mut Box<Expr>,
+        _span: Span,
+    ) -> Option<Type> {
+        let mut valid = true;
+        for bound in [start.as_mut(), end.as_mut()] {
+            if self.infer(bound)? != Type::Int {
+                valid = false;
+                self.diags.push(Diagnostic::error(
+                    "E0505",
+                    "range bounds must be Int".to_string(),
+                    "a Range stores whole-number start and end bounds".to_string(),
+                    "use Int values on both sides of the range operator".to_string(),
+                    Some(bound.span()),
+                ));
+            }
+        }
+        valid.then(|| Type::Named(crate::Syntax::TYPE_RANGE.to_string()))
     }
 
     pub(crate) fn infer_field(

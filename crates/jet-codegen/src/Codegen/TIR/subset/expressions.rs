@@ -650,6 +650,12 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // type — E0501 — which a covered binding/param/return supplies, so the
         // resulting `vec![]` is type-inferred by Rust from that context.)
         Expr::ListLit(elems, _) => elems.iter().all(|e| expr_in_subset(e, cx, locals)),
+        // D-RANGE-VALUE1=A: a range value carries its checked Int bounds and
+        // inclusivity into TIR. Literal `loop` ranges remain `ForKind::Range`,
+        // so this admission does not change their direct-jump lowering.
+        Expr::Range { start, end, .. } => {
+            expr_in_subset(start, cx, locals) && expr_in_subset(end, cx, locals)
+        }
         // D-VARIADIC1: list/call spread — covered when the spread operand is in-subset.
         Expr::Spread(inner, _) => expr_in_subset(inner, cx, locals),
         // c109 Phase 23: a named-tuple literal `(x: 1, y: 2)` (S73/D-SG7). Covered when

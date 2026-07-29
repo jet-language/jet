@@ -3,7 +3,7 @@
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, build_and_run_full, have_rustc};
+use tir_support::{build_and_run, build_and_run_full, compile, have_rustc};
 
 /// Arithmetic + a helper call + interpolation. The helper `double` and `main`
 /// are both fully covered, so both route through the TIR.
@@ -399,6 +399,15 @@ fn run() {
     }
 }
 ";
+    let generated = compile("tir_ranges_codegen", src);
+    assert!(
+        generated.contains("for user_n in (1i64)..=(5i64) {"),
+        "literal range loop must remain a direct Rust range jump:\n{generated}"
+    );
+    assert!(
+        !generated.contains("let _jet_range = JetRange"),
+        "literal range loop must not allocate or construct a Range value:\n{generated}"
+    );
     let (code, stdout) = build_and_run("tir_ranges", src);
     assert_eq!(code, 0);
     // 1+2+3+4+5 = 15, then 0,2,4,6,8,10 (inclusive end).
@@ -429,6 +438,41 @@ fn run() {
     assert_eq!(code, 0);
     // 0+1+2+3+4 = 10; empty exclusive range runs 0 times.
     assert_eq!(stdout, "10\n0\n");
+}
+
+/// D-RANGE-VALUE1=A: both range spellings construct one storable `Range`.
+/// A Range keeps its bounds and inclusivity when passed, returned, looped,
+/// queried, and used as a slice bound.
+#[test]
+fn range_values_store_pass_return_loop_and_slice() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn identity(band: ^Range) => Range {
+    return band
+}
+fn run() {
+    bands :: [1..3, 8..<10]
+    print(bands[0].contains(3))
+    band :: identity(4..<7)
+    print(band.start)
+    print(band.end)
+    print(band.contains(6))
+    print(band.contains(7))
+    print((7..4).contains(5))
+    total := 0
+    loop n; band {
+        total = (total + n)
+    }
+    print(total)
+    xs :: [10, 20, 30, 40, 50, 60, 70, 80]
+    print(xs[band])
+}
+";
+    let (code, stdout) = build_and_run("tir_range_values", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "true\n4\n7\ntrue\nfalse\nfalse\n15\n[50, 60, 70]\n");
 }
 
 /// Named loops: `next(outer)` and `break(outer)` driving a nested
