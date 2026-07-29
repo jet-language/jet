@@ -200,6 +200,8 @@ pub(crate) struct Cx {
     /// Functions whose typed decode depends on the canonical TIR migration
     /// plan. The resident codec has no authority to reinterpret that plan.
     pub(crate) jit_canonical_deopt: std::cell::RefCell<HashSet<String>>,
+    /// Functions whose codec calls must stay on TIR if the function deopts.
+    pub(crate) jit_canonical_calls: std::cell::RefCell<HashSet<String>>,
     /// Resident-only prefix for calls between functions in an imported module.
     pub(crate) jit_local_call_prefix: Option<String>,
     /// Free-function type parameter names, used to give generic call results
@@ -2172,6 +2174,7 @@ pub(crate) fn build_cx_items(
         jit_method_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_canonical_deopt: std::cell::RefCell::new(HashSet::new()),
+        jit_canonical_calls: std::cell::RefCell::new(HashSet::new()),
         jit_local_call_prefix: None,
         fn_type_params: HashMap::new(),
         variadic_bound_fns: HashMap::new(),

@@ -119,6 +119,8 @@ pub(super) struct EvalCtx<'a> {
     /// True only for an actual dev/JIT runtime execution. Comptime may permit
     /// explicit I/O, but it must never open a Browser session while compiling.
     pub(super) runtime_execution: bool,
+    /// Keep calls inside a codec-sensitive named deopt on canonical TIR.
+    pub(super) prefer_tir_calls: bool,
     pub(super) repl_mode: bool,
     pub(super) pending_return: Option<CtValue>,
     /// `defer close(^…)` exprs scheduled in the current eval frame (LIFO).
@@ -665,6 +667,7 @@ pub fn run_program_with_structs(
         // Comptime purity still uses eval_expr/eval_block with explicit depths.
         impure_depth: if allow_impure { 1 } else { 0 },
         runtime_execution: true,
+        prefer_tir_calls: false,
         repl_mode: false,
         pending_return: None,
         deferred_closes: Vec::new(),
@@ -726,6 +729,7 @@ pub fn run_named_func(
         // matches AOT for env/fs/process (D-LENS-RUN2 / #778).
         impure_depth: 1,
         runtime_execution: true,
+        prefer_tir_calls: program.canonical_calls.contains(name),
         repl_mode: false,
         pending_return: None,
         deferred_closes: Vec::new(),
@@ -893,6 +897,7 @@ fn eval_expr_hook(
         allow_impure,
         impure_depth,
         runtime_execution: false,
+        prefer_tir_calls: false,
         repl_mode,
         pending_return: None,
         deferred_closes: Vec::new(),
@@ -969,6 +974,7 @@ fn eval_block_hook(
         allow_impure,
         impure_depth,
         runtime_execution: false,
+        prefer_tir_calls: false,
         repl_mode,
         pending_return: None,
         deferred_closes: Vec::new(),

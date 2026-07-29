@@ -3250,10 +3250,9 @@ impl<'a> EvalCtx<'a> {
             return Ok(CtValue::Unit);
         }
         let func = self.funcs.get(name).copied();
-        // A named deopt bundle contains the canonical definitions of its local
-        // callees. Keep those calls in TIR; the native hook only bridges a
-        // callee that is absent from the registered bundle.
-        if func.is_none() {
+        // Codec-sensitive named deopts must retain the canonical migration
+        // plan. Other deopts keep ordinary cross-tier native dispatch.
+        if !self.prefer_tir_calls || func.is_none() {
             if let Some(hook) = super::native_call_hook() {
                 if let Some(result) = hook(name, &argv) {
                     return result;

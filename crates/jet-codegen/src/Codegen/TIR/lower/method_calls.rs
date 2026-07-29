@@ -4076,6 +4076,9 @@ fn demand_generic_serde_codec(
     if !encoding {
         return;
     }
+    cx.jit_canonical_calls
+        .borrow_mut()
+        .insert(fn_name.to_string());
     if matches!(
         method,
         "to_string" | "to_string_pretty" | "to_bytes" | "to_bytes_canonical"
