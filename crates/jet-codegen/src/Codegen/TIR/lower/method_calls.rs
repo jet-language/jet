@@ -1348,7 +1348,14 @@ pub(crate) fn lower_method_call(
                 } else {
                     core_call_return_ty(&module, method)
                 };
-                demand_generic_serde_codec(cx, &module, method, &targs, &ty);
+                demand_generic_serde_codec(
+                    cx,
+                    &env.fn_name,
+                    &module,
+                    method,
+                    &targs,
+                    &ty,
+                );
                 return TExpr {
                     ty,
                     kind: TExprKind::CoreCall {
@@ -1379,7 +1386,14 @@ pub(crate) fn lower_method_call(
                 } else {
                     core_call_return_ty(&submodule, method)
                 };
-                demand_generic_serde_codec(cx, &submodule, method, &targs, &ty);
+                demand_generic_serde_codec(
+                    cx,
+                    &env.fn_name,
+                    &submodule,
+                    method,
+                    &targs,
+                    &ty,
+                );
                 return TExpr {
                     ty,
                     kind: TExprKind::CoreCall {
@@ -4045,6 +4059,7 @@ pub(crate) fn lower_method_call(
 /// a generic Apply type (JIT looks up `Wrap<Int>::encode`).
 fn demand_generic_serde_codec(
     cx: &Cx,
+    fn_name: &str,
     module: &str,
     method: &str,
     args: &[TExpr],
@@ -4076,6 +4091,11 @@ fn demand_generic_serde_codec(
     }
     if method == "decode" {
         if let Type::Result { ok, .. } = ret_ty {
+            if cx.migrations.contains_key(&ok.name()) {
+                cx.jit_canonical_deopt
+                    .borrow_mut()
+                    .insert(fn_name.to_string());
+            }
             if matches!(ok.as_ref(), Type::Apply { .. }) {
                 cx.jit_method_calls.borrow_mut().insert(
                     format!("{}::decode", ok.name()),

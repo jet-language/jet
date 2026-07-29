@@ -3249,13 +3249,18 @@ impl<'a> EvalCtx<'a> {
             }
             return Ok(CtValue::Unit);
         }
-        // #778: prefer Cranelift-native callees when the deopt tier installed a hook.
-        if let Some(hook) = super::native_call_hook() {
-            if let Some(result) = hook(name, &argv) {
-                return result;
+        let func = self.funcs.get(name).copied();
+        // A named deopt bundle contains the canonical definitions of its local
+        // callees. Keep those calls in TIR; the native hook only bridges a
+        // callee that is absent from the registered bundle.
+        if func.is_none() {
+            if let Some(hook) = super::native_call_hook() {
+                if let Some(result) = hook(name, &argv) {
+                    return result;
+                }
             }
         }
-        let Some(func) = self.funcs.get(name).copied() else {
+        let Some(func) = func else {
             return Err(unsupported(&format!("call `{name}`"), self.span()));
         };
         if matches!(

@@ -143,6 +143,17 @@ pub fn plan_tiers(bundle: &ProgramBundle, program: Option<&JitProgram>) -> TierP
     let mut rows = Vec::new();
 
     for f in &program.funcs {
+        if program.canonical_deopt.contains(&f.name) {
+            let reason = "typed decode uses the canonical TIR migration plan".to_string();
+            deopt.push((f.name.clone(), reason.clone()));
+            rows.push(TierRow {
+                function: f.name.clone(),
+                tier: Tier::Interp,
+                reason,
+                millis: 0.0,
+            });
+            continue;
+        }
         match resident_safe_func_detail(f, &names) {
             None => {
                 native.insert(f.name.clone());

@@ -101,6 +101,8 @@ pub struct JitProgram {
     pub enum_variants: std::collections::HashMap<String, Vec<String>>,
     /// M5: payload field types per `user_Type::user_Variant` pattern prefix.
     pub enum_variant_payload_types: std::collections::HashMap<String, Vec<Type>>,
+    /// Functions whose typed decode must use the canonical TIR migration plan.
+    pub canonical_deopt: std::collections::HashSet<String>,
     pub int_constants: std::collections::HashMap<String, i64>,
     pub constants: std::collections::HashMap<String, crate::AST::CtValue>,
     pub distinct_bases: std::collections::HashMap<String, Type>,
@@ -878,6 +880,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     cx.jit_spawn_lambdas.borrow_mut().clear();
     cx.jit_method_calls.borrow_mut().clear();
     cx.jit_generic_calls.borrow_mut().clear();
+    cx.jit_canonical_deopt.borrow_mut().clear();
     for item in &module.items {
         match item {
             Item::Func(f) => {
@@ -1468,6 +1471,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         })
         .collect();
     let codec_migrations = compile_codec_migrations(&cx, &module.items)?;
+    let canonical_deopt = cx.jit_canonical_deopt.borrow().clone();
     Some(JitProgram {
         instance_provenance: instance_provenance(bundle),
         source_file: module.display.clone(),
@@ -1478,6 +1482,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         struct_field_types,
         enum_variants,
         enum_variant_payload_types,
+        canonical_deopt,
         int_constants,
         constants,
         distinct_bases,
