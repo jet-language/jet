@@ -194,15 +194,26 @@ struct OuterNoDebug { inner: NoDebug }
 struct NoEquality { value: Int }
 struct OuterNoEquality { inner: NoEquality }
 
+struct OuterReader { reader: FileReader }
+
+#[!Printable, !Debug, !Equatable]
+struct Hidden<T> { value: T }
+struct OuterHidden { value: Hidden<Int> }
+
 fn reject_opaque_core(reader: FileReader) {
     print(reader)
     print("{reader#Debug}")
+}
+
+fn reject_outer_reader(value: OuterReader) {
+    print(value)
 }
 
 fn run() {
     print(OuterNoPrint.{ inner: NoPrint.{ value: 1 } })
     print("{OuterNoDebug.{ inner: NoDebug.{ value: 2 } }#Debug}")
     print(OuterNoEquality.{ inner: NoEquality.{ value: 3 } } == OuterNoEquality.{ inner: NoEquality.{ value: 3 } })
+    print(OuterHidden.{ value: Hidden.{ value: 4 } })
 }
 "#,
     );
@@ -211,10 +222,39 @@ fn run() {
             .iter()
             .filter(|code| code.as_str() == "E0112")
             .count()
-            >= 4,
+            >= 6,
         "{diagnostics:?}"
     );
     assert!(diagnostics.iter().any(|code| code == "E0312"), "{diagnostics:?}");
+
+    let entry = project_dir("reject_use").join("main.jet");
+    let bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(
+        bundle.modules.iter().map(|module| module.items.as_slice()),
+    );
+    for (type_name, selected) in [
+        ("OuterReader", &facts.auto_printable),
+        ("OuterHidden", &facts.auto_printable),
+        ("OuterHidden", &facts.auto_debug),
+        ("OuterHidden", &facts.auto_equatable),
+    ] {
+        assert!(!selected.contains(type_name), "{type_name}");
+    }
+    for (tier, force_interpreter) in [("JIT", false), ("interpreter", true)] {
+        let outcome =
+            jet::Interpreter::dev_iteration(entry.to_str().unwrap(), false, force_interpreter);
+        let jet::Interpreter::RunOutcome::Problems(diagnostics) = outcome else {
+            panic!("{tier} bypassed sema: {outcome:?}");
+        };
+        assert!(
+            diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "E0112")
+                .count()
+                >= 6,
+            "{tier}: {diagnostics:#?}"
+        );
+    }
 }
 
 #[test]
@@ -250,7 +290,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     let dep = workspace.join("dep");
     let _ = std::fs::remove_dir_all(&workspace);
     std::fs::create_dir_all(&app).unwrap();
-    std::fs::create_dir_all(&dep).unwrap();
+    std::fs::create_dir_all(dep.join(".jet")).unwrap();
     std::fs::write(
         app.join("pkg.jet"),
         "payload: { name: \"app\", version: \"1\" }\ndeps: { dep: ../dep }\npolicy: .{ auto_derive: true }\n",
@@ -258,7 +298,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
     .unwrap();
     std::fs::write(
         app.join("main.jet"),
-        "use dep;\nstruct AppType { value: Int }\nfn run() {}\n",
+        "use dep;\nstruct AppType { value: Int }\nstruct ImportedOuter { value: dep.DepType }\nfn reject(value: ImportedOuter) { print(value) }\nfn run() {}\n",
     )
     .unwrap();
     std::fs::write(
@@ -267,11 +307,11 @@ fn package_default_reaches_nested_and_dependency_modules() {
     )
     .unwrap();
     std::fs::write(
-        dep.join("dep.jet"),
+        dep.join(".jet").join("main.jet"),
         "pub struct DepType { value: Int }\n",
     )
     .unwrap();
-    let bundle = jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
+    let mut bundle = jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
     let mut by_module = std::collections::HashMap::new();
     for module in &bundle.modules {
         let mut module_defaults = Vec::new();
@@ -280,10 +320,25 @@ fn package_default_reaches_nested_and_dependency_modules() {
     }
     assert_eq!(
         by_module[&app.join("main.jet")],
-        vec![("AppType".to_string(), true)]
+        vec![
+            ("AppType".to_string(), true),
+            ("ImportedOuter".to_string(), true),
+        ]
     );
     assert_eq!(
-        by_module[&dep.join("dep.jet")],
+        by_module[&dep.join(".jet").join("main.jet")],
         vec![("DepType".to_string(), false)]
     );
+    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(
+        errors.iter().any(|diagnostic| diagnostic.code == "E0112"),
+        "{errors:#?}"
+    );
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(
+        bundle.modules.iter().map(|module| module.items.as_slice()),
+    );
+    assert!(!facts.auto_printable.contains("ImportedOuter"));
 }
