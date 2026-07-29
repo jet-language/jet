@@ -329,11 +329,26 @@ pub(crate) fn ast_arg_is_named_fn_value(e: &Expr, cx: &Cx, env: &LowerEnv) -> bo
 /// `Field` read) is `None` — exactly as `expr_jet_ty` does, so a `None`-typed
 /// receiver lands on the AST's default branch (the list/else arm).
 pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
+    fn dispatch_ty(ty: Type) -> Type {
+        // D-PROCESS-SESSION2=D: this internal tag exists only so sema can
+        // distinguish the terminal capability report from an arbitrary
+        // Set<String>. TIR dispatch must see the report's real collection
+        // type; the tag has no runtime representation.
+        match ty {
+            Type::Tagged { marker, inner }
+                if marker == crate::AST::TERMINAL_FACT_SET_MARKER =>
+            {
+                dispatch_ty(*inner)
+            }
+            other => other,
+        }
+    }
+
     match e {
-        Expr::Ident(name, _) => env.ty_of(name),
+        Expr::Ident(name, _) => env.ty_of(name).map(dispatch_ty),
         Expr::Str(_, _) => Some(Type::String),
         Expr::Char(_, _) => Some(Type::Char),
-        Expr::TupleLit(_, _, Some(ty)) => Some(ty.clone()),
+        Expr::TupleLit(_, _, Some(ty)) => Some(dispatch_ty(ty.clone())),
         Expr::MethodCall {
             receiver,
             method,
@@ -344,7 +359,7 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
             // `resolved_ret` exists only when sema persisted a result more exact
             // than the generic method table (or another required exact shape).
             if let Some(ty) = resolved_ret {
-                return Some(ty.clone());
+                return Some(dispatch_ty(ty.clone()));
             }
             // D-ITERTOOLS1=A: chained adapters (`nums.take(3).to_list()`) must
             // resolve as `Iter`, not fall through to the list receiver — otherwise
@@ -353,7 +368,7 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
                 if let Some(Some(ret)) =
                     crate::Collections::builtin_method_return(&recv_ty, method, args.len(), false)
                 {
-                    return Some(ret);
+                    return Some(dispatch_ty(ret));
                 }
             }
             if method == "chars" {
