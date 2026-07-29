@@ -562,6 +562,36 @@ impl<'a> EvalCtx<'a> {
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
                 }
+                if module == "core.encoding.cbor"
+                    && matches!(method.as_str(), "to_bytes" | "to_bytes_canonical")
+                {
+                    let value = argv.first().ok_or_else(|| {
+                        unsupported("core.encoding.cbor encoder missing its value", *source_span)
+                    })?;
+                    return Ok(match crate::Comptime::cbor_encode_typed_for_tir(
+                        value,
+                        self.structs,
+                        method == "to_bytes_canonical",
+                    ) {
+                        Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
+                        Err(reason) => CtValue::ResErr(Box::new(CtValue::Struct {
+                            type_name: "CBORError".to_string(),
+                            fields: vec![
+                                (
+                                    "kind".to_string(),
+                                    CtValue::Enum {
+                                        type_name: "CBORErrorKind".to_string(),
+                                        variant: "Unsupported".to_string(),
+                                        args: Vec::new(),
+                                    },
+                                ),
+                                ("byte_offset".to_string(), CtValue::Int(0)),
+                                ("path".to_string(), CtValue::Str("$".to_string())),
+                                ("reason".to_string(), CtValue::Str(reason)),
+                            ],
+                        })),
+                    });
+                }
                 if module == "jet.crypto"
                     && method == "__signing_generate"
                     && argv.is_empty()
@@ -666,6 +696,13 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::ListLit(elems) => {
+                if let [inner] = elems.as_slice() {
+                    // Early typed-list lowering wraps `T.{ value }` in one
+                    // ListLit. Preserve the value when it already has T.
+                    if expr.ty == inner.ty {
+                        return self.eval_expr(inner, scope);
+                    }
+                }
                 let mut out = Vec::with_capacity(elems.len());
                 for e in elems {
                     out.push(self.eval_expr(e, scope)?);
@@ -709,7 +746,7 @@ impl<'a> EvalCtx<'a> {
                     other => other,
                 };
                 let i = self.eval_expr(index, scope)?;
-                if *is_map {
+                if *is_map || matches!(&b, CtValue::Map(_)) {
                     let key = crate::AST::CtKey::from_value(i)
                         .ok_or_else(|| unsupported("map index key", self.span()))?;
                     match b {
@@ -2017,6 +2054,11 @@ impl<'a> EvalCtx<'a> {
                         ))
                     }
                     crate::Codegen::TIR::TStaticOwner::Prelude { path, .. } => {
+                        if let Some(value) =
+                            crate::Comptime::xml_safe_static_for_tir(path, &method.name)
+                        {
+                            return Ok(value);
+                        }
                         if path == "jet_std::JetShared" && method.name == "new" && argv.len() == 1 {
                             let index = self.shared_values.len();
                             self.shared_values.push(argv.remove(0));

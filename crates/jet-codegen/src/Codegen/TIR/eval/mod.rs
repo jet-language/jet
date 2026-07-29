@@ -135,6 +135,8 @@ pub(super) struct EvalCtx<'a> {
     pub(super) struct_fields: HashMap<String, Vec<(String, bool)>>,
     /// `TypeName -> [(field, Type)]` for `core.data.csv` / decode on deopt.
     pub(super) struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
+    /// Source struct definitions retained for schema-aware codecs such as CBOR.
+    pub(super) structs: &'a HashMap<String, &'a crate::AST::StructDef>,
     /// Current `MixedSwitch` subject for structured field conditions.
     switch_subject: Option<CtValue>,
     /// TIR-native callable values. Entries borrow the already-lowered program
@@ -590,6 +592,7 @@ pub fn run_program_with_structs(
     // Fresh EventLite stores per whole-program run (REPL / warm cache / workers).
     crate::Comptime::reset_event_lite();
     let _browser_session = browser::SessionGuard::new();
+    let structs = HashMap::new();
     let funcs = program_funcs(program);
     let entry = funcs.get(&program.entry).copied().ok_or_else(|| {
         Diagnostic::error(
@@ -622,6 +625,7 @@ pub fn run_program_with_structs(
         embed_inputs: None,
         struct_fields,
         struct_field_types,
+        structs: &structs,
         switch_subject: None,
         callables: Vec::new(),
         streams: Vec::new(),
@@ -658,6 +662,7 @@ pub fn run_named_func(
         )
     })?;
     let core_imports = HashMap::new();
+    let structs = HashMap::new();
     let mut ctx = EvalCtx {
         funcs,
         base_dir: PathBuf::from("."),
@@ -680,6 +685,7 @@ pub fn run_named_func(
         embed_inputs: None,
         struct_fields: HashMap::new(),
         struct_field_types: HashMap::new(),
+        structs: &structs,
         switch_subject: None,
         callables: Vec::new(),
         streams: Vec::new(),
@@ -830,6 +836,7 @@ fn eval_expr_hook(
         embed_inputs,
         struct_fields: HashMap::new(),
         struct_field_types: HashMap::new(),
+        structs: req.structs,
         switch_subject: None,
         callables: Vec::new(),
         streams: Vec::new(),
@@ -903,6 +910,7 @@ fn eval_block_hook(
         embed_inputs,
         struct_fields: HashMap::new(),
         struct_field_types: HashMap::new(),
+        structs: req.structs,
         switch_subject: None,
         callables: Vec::new(),
         streams: Vec::new(),

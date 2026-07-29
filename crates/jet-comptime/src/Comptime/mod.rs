@@ -280,6 +280,30 @@ static EMPTY_STRUCTS: std::sync::OnceLock<HashMap<String, &'static StructDef>> =
 fn empty_structs() -> &'static HashMap<String, &'static StructDef> {
     EMPTY_STRUCTS.get_or_init(HashMap::new)
 }
+
+/// TIR core-call bridge for schema-aware CBOR encoding. `CtValue` erases
+/// `[U8]` into an integer list, so the declared struct fields must cross the
+/// evaluator seam with the value.
+pub fn cbor_encode_typed_for_tir(
+    value: &CtValue,
+    structs: &HashMap<String, &StructDef>,
+    canonical: bool,
+) -> Result<Vec<u8>, String> {
+    EncodingLite::cbor_encode_typed(value, structs, canonical)
+}
+
+/// TIR static-call bridge for the three qualified XML safe constructors.
+pub fn xml_safe_static_for_tir(path: &str, method: &str) -> Option<CtValue> {
+    if method != "safe" {
+        return None;
+    }
+    match path {
+        "jet_std::XMLLimits" => Some(EncodingLite::xml_safe_limits_value()),
+        "jet_std::XMLParseOptions" => Some(EncodingLite::xml_safe_options_value()),
+        "jet_std::XMLRenderOptions" => Some(EncodingLite::xml_safe_render_options_value()),
+        _ => None,
+    }
+}
 static EMPTY_COMPUTED: std::sync::OnceLock<HashMap<(String, String), &'static Expr>> =
     std::sync::OnceLock::new();
 fn empty_computed() -> &'static HashMap<(String, String), &'static Expr> {

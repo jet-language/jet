@@ -48,7 +48,7 @@ const CASES: &[&str] = &[
     "\"héllo\".len()",
     "\"  trim me  \".trim()",
     "\"ab\".repeat(3)",
-    "\"a,b,c\".split(\",\")",
+    "\"a,b,c\".split(\",\").to_list()",
     "\"hello world\".replace(\"o\", \"0\")",
     // List values, ordering, and methods
     "[1, 2, 3]",
@@ -625,8 +625,8 @@ fn xml_hostile_error_matches_comptime_and_runtime() {
 
 fn show(result: DataTree ? XMLError) => String {
     if result == {
-        Ok(_) -> return "ok"
-        Err(e) -> {
+        .Ok(_) -> return "ok"
+        .Err(e) -> {
             return "{e.byte_offset}|{e.line}|{e.column}|{e.path}|{e.reason}"
         }
     }
@@ -654,7 +654,7 @@ fn cbor_generic_whole_decode_matches_comptime_and_aot() {
     // including normal-mode indefinite containers and preferred Float16,
     // is one R12 semantic path at comptime and AOT. This intentionally does
     // not exercise the retired untyped `decode(DataTree)` compatibility arm.
-    let src = "use core.encoding.cbor as cbor\ncomptime comptime_value = cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n\nfn run() {\n    r: [Float] := cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n";
+    let src = "use core.encoding.cbor as cbor\ncomptime comptime_value = cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n\nfn run() {\n    r :: cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n";
     check_comptime_src(2000, "generic CBOR indefinite Float16 decode", src);
 }
 
@@ -716,52 +716,52 @@ fn safe() => cbor.CBOROptions {
 
 fn show(bytes: [U8]) => String {
     if cbor.parse(bytes, safe()) == {
-        Ok(_) -> return "ok"
-        Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
 
 fn show_strict(bytes: [U8]) => String {
     if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }) == {
-        Ok(_) -> return "ok"
-        Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
 fn show_depth(bytes: [U8]) => String {
     if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 1, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }) == {
-        Ok(_) -> return "ok"
-        Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
 fn show_items(bytes: [U8]) => String {
     if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 2, max_bytes: 1073741824, require_canonical: false }) == {
-        Ok(_) -> return "ok"
-        Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
 fn show_bytes(bytes: [U8]) => String {
     if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 2, require_canonical: false }) == {
-        Ok(_) -> return "ok"
-        Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
 fn show_alloc(bytes: [U8]) => String {
     if cbor.parse(bytes, cbor.CBOROptions.{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }) == {
-        Ok(_) -> return "ok"
-        Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }
 
 fn show_ints(bytes: [U8]) => String {
     if cbor.decode<[Int]>(bytes, safe()) == {
-        Ok(_) -> return "ok"
-        Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
     }
     return "unreachable"
 }

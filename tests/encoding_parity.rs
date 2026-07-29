@@ -763,14 +763,14 @@ fn terminal_limit_probe() => String {
     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
     limit_err :: writer.write(encoding.DataEvent.Text("abcd"))
     if limit_err == {
-        Err(first) -> {
+        .Err(first) -> {
             again :: writer.finish()
             if again == {
-                Err(second) -> return "{first.reason == second.reason}"
-                Ok(_) -> return "terminal-missed"
+                .Err(second) -> return "{first.reason == second.reason}"
+                .Ok(_) -> return "terminal-missed"
             }
         }
-        Ok(_) -> return "limit-missed"
+        .Ok(_) -> return "limit-missed"
     }
     return "unreachable"
 }
@@ -780,14 +780,14 @@ fn malformed_reader_probe() => String {
     input :: files.open("@DIR@/malformed.json") ?? panic("open")
     reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
     if reader.next() == {
-        Err(error) -> {
+        .Err(error) -> {
             repeat :: reader.next()
             if repeat == {
-                Err(second) -> return "{error.kind == encoding.EncodingErrorKind.Syntax}|{error.path}|{error.reason == second.reason}"
-                Ok(_) -> return "repeat-missed"
+                .Err(second) -> return "{error.kind == encoding.EncodingErrorKind.Syntax}|{error.path}|{error.reason == second.reason}"
+                .Ok(_) -> return "repeat-missed"
             }
         }
-        Ok(_) -> return "malformed-missed"
+        .Ok(_) -> return "malformed-missed"
     }
     return "unreachable"
 }
