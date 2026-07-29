@@ -233,11 +233,22 @@ pub(super) fn from_lanes(type_name: &str, lanes: &[f64]) -> CtValue {
     let fields = lanes
         .iter()
         .enumerate()
-        .map(|(i, n)| (i.to_string(), float_value(type_name, *n)))
+        .map(|(i, n)| (field_name(type_name, i), float_value(type_name, *n)))
         .collect();
     CtValue::Struct {
         type_name: type_name.to_string(),
         fields,
+    }
+}
+
+fn field_name(type_name: &str, index: usize) -> String {
+    match type_name {
+        Syntax::LINALG_VEC2_TYPE | Syntax::LINALG_VEC3_TYPE | Syntax::LINALG_VEC4_TYPE => {
+            ["x", "y", "z", "w"][index].to_string()
+        }
+        Syntax::LINALG_MAT3_TYPE => format!("m{}{}", index % 3, index / 3),
+        Syntax::LINALG_MAT4_TYPE => format!("m{}{}", index % 4, index / 4),
+        _ => index.to_string(),
     }
 }
 
@@ -254,7 +265,7 @@ pub(super) fn lanes(value: &CtValue) -> Option<(&str, Vec<f64>)> {
     }
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
-        let key = i.to_string();
+        let key = field_name(type_name, i);
         let (_, v) = fields.iter().find(|(name, _)| name == &key)?;
         out.push(match v {
             CtValue::Float(f) => f.as_f64(),
