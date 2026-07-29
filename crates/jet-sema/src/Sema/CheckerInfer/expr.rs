@@ -2686,15 +2686,37 @@ impl<'a> Checker<'a> {
                 let mut empty = Vec::new();
                 return Some(self.check_enum_lit(type_name, member, &mut empty, span));
             }
-            if self.struct_owner_module(type_name, None).is_some() {
+            if let Some(owner_mod) = self.struct_owner_module(type_name, None) {
+                let is_declared_state = self
+                    .modules
+                    .and_then(|modules| modules.get(owner_mod))
+                    .and_then(|module| module.declared_states.get(type_name))
+                    .is_some_and(|states| states.iter().any(|state| state == member));
+                let (what, why, fix) = if is_declared_state {
+                    (
+                        format!("`{type_name}.{member}` is not a value"),
+                        "struct fields need a value before the dot; typestate names are compile-time facts, not runtime values"
+                            .to_string(),
+                        format!(
+                            "use a `{type_name}` value before a field, or call a static method on `{type_name}`"
+                        ),
+                    )
+                } else {
+                    (
+                        format!("`{type_name}` has no static member `{member}`"),
+                        format!(
+                            "`{type_name}` names a struct type; fields need a value before the dot"
+                        ),
+                        format!(
+                            "use a `{type_name}` value before an instance field, or call a static method that exists on `{type_name}`"
+                        ),
+                    )
+                };
                 self.diags.push(Diagnostic::error(
                     "E0302",
-                    format!("`{type_name}.{member}` is not a value"),
-                    "struct fields need a value before the dot; typestate names are compile-time facts, not runtime values"
-                        .to_string(),
-                    format!(
-                        "use a `{type_name}` value before a field, or call a static method on `{type_name}`"
-                    ),
+                    what,
+                    why,
+                    fix,
                     Some(span),
                 ));
                 return None;
