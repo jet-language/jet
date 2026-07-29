@@ -2810,6 +2810,9 @@ fn wasm_emit_expr(
                         let spec = match format {
                             crate::AST::StrFormat::Display => "{}",
                             crate::AST::StrFormat::Debug => "{:?}",
+                            crate::AST::StrFormat::Fixed(_) => {
+                                unreachable!("Fixed interpolation lowers to core.fmt.decimal")
+                            }
                         };
                         value.push_str(&format!(
                             "_jet_s.push_str(&format!({:?}, {})); ",

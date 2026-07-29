@@ -126,7 +126,7 @@ pub enum IncDecOp {
     Dec,
 }
 
-/// D-DISPLAYDBG2: which protocol hook an interpolated value uses.
+/// D-DISPLAYDBG2/D-FMT-INTERP1: how an interpolated value is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StrFormat {
     /// Bare `{value}` — calls `Display` (D-DISPLAY-SHAPE).
@@ -134,6 +134,8 @@ pub enum StrFormat {
     Display,
     /// `{value#Debug}` — calls auto-derived or explicit `Debug`.
     Debug,
+    /// `{value#Fixed(n)}` — uses `core.fmt.decimal(value, n)`.
+    Fixed(i64),
 }
 
 /// One piece of a string literal (S8): literal text or an interpolated

@@ -270,6 +270,26 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 .iter()
                 .map(|p| match p {
                     StrPart::Lit(s) => TStrPart::Lit(s.clone()),
+                    StrPart::Interp(e, crate::AST::StrFormat::Fixed(precision)) => {
+                        let source_span = e.span();
+                        let formatted = TExpr {
+                            ty: Type::String,
+                            kind: TExprKind::CoreCall {
+                                module: "core.fmt".to_string(),
+                                method: "decimal".to_string(),
+                                args: vec![
+                                    lower_expr(e, cx, env),
+                                    TExpr {
+                                        ty: Type::Int,
+                                        kind: TExprKind::IntLit(*precision, None),
+                                    },
+                                ],
+                                source_span,
+                                widen_to_vec: vec![false, false],
+                            },
+                        };
+                        TStrPart::Interp(formatted, crate::AST::StrFormat::Display)
+                    }
                     StrPart::Interp(e, fmt) => TStrPart::Interp(lower_expr(e, cx, env), *fmt),
                 })
                 .collect();

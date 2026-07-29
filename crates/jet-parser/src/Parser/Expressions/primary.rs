@@ -591,6 +591,33 @@ impl<'a> Parser<'a> {
                             let (sel, sel_span) = sub.expect_ident("after `#` in interpolation")?;
                             if sel == crate::Syntax::INTERP_SELECTOR_DEBUG {
                                 format = crate::AST::StrFormat::Debug;
+                            } else if sel == crate::Syntax::INTERP_SELECTOR_FIXED {
+                                sub.expect(
+                                    TokKind::LParen,
+                                    "after `#Fixed` in interpolation",
+                                )?;
+                                let precision = match sub.bump() {
+                                    crate::Lexer::Token {
+                                        kind: TokKind::Int(value, _),
+                                        ..
+                                    } => value,
+                                    token => {
+                                        return Err(Diagnostic::error(
+                                            "E0003",
+                                            "expected decimal places inside `#Fixed( )`"
+                                                .to_string(),
+                                            "`#Fixed(n)` takes one nonnegative integer literal"
+                                                .to_string(),
+                                            "write a precision such as `#Fixed(2)`".to_string(),
+                                            Some(token.span),
+                                        ));
+                                    }
+                                };
+                                sub.expect(
+                                    TokKind::RParen,
+                                    "after the decimal places in `#Fixed(n)`",
+                                )?;
+                                format = crate::AST::StrFormat::Fixed(precision);
                             } else {
                                 self.diags.push(crate::Generics::e0914(&sel, sel_span));
                             }
@@ -602,9 +629,9 @@ impl<'a> Parser<'a> {
                                     "unexpected {} inside this interpolated `{{ }}`",
                                     describe(&sub.peek().kind)
                                 ),
-                                "the braces hold exactly one value (and an optional `#Debug` selector)"
+                                "the braces hold exactly one value (and an optional `#Debug` or `#Fixed(n)` selector)"
                                     .to_string(),
-                                "keep one value per `{ }`, e.g. \"{a}\" or \"{a#Debug}\"".to_string(),
+                                "keep one value per `{ }`, e.g. \"{a}\", \"{a#Debug}\", or \"{a#Fixed(2)}\"".to_string(),
                                 Some(sub.peek().span),
                             ));
                         }

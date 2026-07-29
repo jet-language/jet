@@ -2487,6 +2487,48 @@ fn dev_default_interprets_display_debug_interpolation() {
 }
 
 #[test]
+fn fixed_interpolation_matches_interpreter_and_resident_jit_rounding() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let src = r#"
+fn run() {
+    lower_tie :: 1.125
+    upper_tie :: 1.375
+    grouped :: 1234.5678
+    print("{lower_tie#Fixed(2)}|{upper_tie#Fixed(2)}|{grouped#Fixed(2)}")
+}
+"#;
+    let expected = ProgramOutput::ran("1.12|1.38|1,234.57\n".into(), String::new(), 0);
+    let file = std::env::temp_dir().join("jet_fixed_interpolation_parity.jet");
+    fs::write(&file, src).unwrap();
+    let shown = file.to_string_lossy().to_string();
+    let interpreted = match dev_iteration(&shown, false, true) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => ProgramOutput::ran(stdout, stderr, exit_code),
+        RunOutcome::Problems(diags) => {
+            panic!("fixed interpolation must run in the interpreter: {diags:?}")
+        }
+    };
+
+    jet_jit::reset_jit_trace_for_test();
+    let resident = run_cranelift_without_fallback(src, "fixed_interpolation_parity");
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "fixed interpolation must execute in resident JIT"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
+        "fixed interpolation must not deopt or fall back"
+    );
+    assert_eq!(interpreted, expected);
+    assert_eq!(resident, expected);
+}
+
+#[test]
 fn dev_packed_enum_print_is_safe_across_run_processes() {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

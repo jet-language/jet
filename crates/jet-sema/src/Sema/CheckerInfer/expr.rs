@@ -809,6 +809,22 @@ impl<'a> Checker<'a> {
                                         ));
                                     }
                                 }
+                                crate::AST::StrFormat::Fixed(_) => {
+                                    if t != Type::Float {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0112",
+                                            format!(
+                                                "{} can't use `#Fixed(n)`",
+                                                t.show()
+                                            ),
+                                            "fixed interpolation uses `core.fmt.decimal`, which formats `Float` values"
+                                                .to_string(),
+                                            "pass a `Float`, or use bare interpolation for this value"
+                                                .to_string(),
+                                            Some(inner.span()),
+                                        ));
+                                    }
+                                }
                             }
                         }
                     }

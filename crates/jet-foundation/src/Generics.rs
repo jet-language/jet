@@ -413,18 +413,20 @@ pub fn e0913(trait_name: &str, missing: &[String], span: Span) -> Diagnostic {
     )
 }
 
-/// D-ATTR4=A: unknown interpolation selector after `#`.
+/// D-ATTR4=A/D-FMT-INTERP1=A: unknown interpolation selector after `#`.
 pub fn e0914(selector: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0914",
         format!("unknown interpolation selector `#{}`", selector),
         format!(
-            "string interpolation supports a closed selector set — use `#{}` for debug output",
-            crate::Syntax::INTERP_SELECTOR_DEBUG
+            "string interpolation supports a closed selector set — use `#{}` or `#{}(n)`",
+            crate::Syntax::INTERP_SELECTOR_DEBUG,
+            crate::Syntax::INTERP_SELECTOR_FIXED
         ),
         format!(
-            "write `{{value#{}}}` for debug formatting, or `{{value}}` for display",
-            crate::Syntax::INTERP_SELECTOR_DEBUG
+            "write `{{value#{}}}` for debug output, `{{value#{}(2)}}` for two decimal places, or `{{value}}` for display",
+            crate::Syntax::INTERP_SELECTOR_DEBUG,
+            crate::Syntax::INTERP_SELECTOR_FIXED
         ),
         Some(span),
     )

@@ -154,6 +154,9 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
                 let method = match fmt {
                     crate::AST::StrFormat::Display => "jet_display",
                     crate::AST::StrFormat::Debug => "jet_debug",
+                    crate::AST::StrFormat::Fixed(_) => {
+                        unreachable!("Fixed interpolation lowers to core.fmt.decimal")
+                    }
                 };
                 body.push_str(&format!(
                     "_jet_s.push_str(&({}).{method}()); ",

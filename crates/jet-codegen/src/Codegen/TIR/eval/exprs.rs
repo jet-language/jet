@@ -715,6 +715,9 @@ impl<'a> EvalCtx<'a> {
                                     show_typed_value(&v, &e.ty, false)
                                         .unwrap_or(self.show_value(&v, scope)?)
                                 }
+                                crate::AST::StrFormat::Fixed(_) => {
+                                    unreachable!("Fixed interpolation lowers to core.fmt.decimal")
+                                }
                             };
                             out.push_str(&text);
                         }

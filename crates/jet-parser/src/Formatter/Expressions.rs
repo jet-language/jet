@@ -1647,9 +1647,19 @@ impl<'a> Fmt<'a> {
                 StrPart::Interp(e, fmt) => {
                     self.write("{");
                     self.fmt_expr(e, Prec::OrFallback);
-                    if *fmt == crate::AST::StrFormat::Debug {
-                        self.write("#");
-                        self.write(crate::Syntax::INTERP_SELECTOR_DEBUG);
+                    match fmt {
+                        crate::AST::StrFormat::Display => {}
+                        crate::AST::StrFormat::Debug => {
+                            self.write("#");
+                            self.write(crate::Syntax::INTERP_SELECTOR_DEBUG);
+                        }
+                        crate::AST::StrFormat::Fixed(precision) => {
+                            self.write("#");
+                            self.write(crate::Syntax::INTERP_SELECTOR_FIXED);
+                            self.write("(");
+                            self.write(&precision.to_string());
+                            self.write(")");
+                        }
                     }
                     self.write("}");
                 }
@@ -1679,9 +1689,19 @@ impl<'a> Fmt<'a> {
                 StrPart::Interp(e, fmt) => {
                     self.write("{");
                     self.fmt_expr(e, Prec::OrFallback);
-                    if *fmt == crate::AST::StrFormat::Debug {
-                        self.write("#");
-                        self.write(crate::Syntax::INTERP_SELECTOR_DEBUG);
+                    match fmt {
+                        crate::AST::StrFormat::Display => {}
+                        crate::AST::StrFormat::Debug => {
+                            self.write("#");
+                            self.write(crate::Syntax::INTERP_SELECTOR_DEBUG);
+                        }
+                        crate::AST::StrFormat::Fixed(precision) => {
+                            self.write("#");
+                            self.write(crate::Syntax::INTERP_SELECTOR_FIXED);
+                            self.write("(");
+                            self.write(&precision.to_string());
+                            self.write(")");
+                        }
                     }
                     self.write("}");
                 }

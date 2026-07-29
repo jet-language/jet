@@ -1287,6 +1287,12 @@ New fields require a future ballot.
 debug interpolation is `{value#Debug}`. The retired `{value@Debug}` spelling
 teaches `{value#Debug}` because `@` belongs to the location/address/source plane.
 
+**D-FMT-INTERP1=A — Fixed-decimal interpolation selector** *(ratified
+2026-07-29, card #1278)*: `{value#Fixed(n)}` formats a `Float` with `n` decimal
+places through `core.fmt.decimal`. It uses the existing `#` selector rail.
+Unknown selectors report E0914 with the valid set. No `#Percent` sibling is
+defined.
+
 **D-MARK-TARGET1=A — one target-marker family** *(ratified 2026-07-11, card
 #498)*: `#Target(…)` is the only target-partition spelling, for every axis —
 `#Target(Wasm)`, `#Target(JS)`, `#Target(Web)`, `#Target(OS.Linux)`. The

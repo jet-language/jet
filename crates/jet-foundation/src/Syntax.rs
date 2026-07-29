@@ -88,6 +88,8 @@
 // position as TYPE_UNION_SEP. `T ? E1 | E2` parses as `T ? (E1 | E2)`.
 // D-REGEX-LIT1=D adds no punctuation. Regex patterns use the universal
 // `Type.{ body }` / inferred `.{ body }` form from D-DOTCTOR3.
+// D-FMT-INTERP1=A adds `Fixed` to the closed interpolation-selector set:
+// `{value#Fixed(n)}` reuses `#` and ordinary integer-call parentheses.
 pub const HTTP_ROUTE_PARAM_PREFIX: &str = ":";
 pub const HTTP_ROUTE_CATCH_ALL_PREFIX: &str = "*";
 

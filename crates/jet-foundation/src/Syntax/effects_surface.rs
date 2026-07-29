@@ -225,6 +225,8 @@ pub const TRAIT_IO_READER: &str = "Reader";
 pub const TRAIT_IO_WRITER: &str = "Writer";
 /// D-ATTR4=A: closed interpolation selector spelling after `#`.
 pub const INTERP_SELECTOR_DEBUG: &str = "Debug";
+/// D-FMT-INTERP1=A: fixed-decimal interpolation reuses the `#` selector rail.
+pub const INTERP_SELECTOR_FIXED: &str = "Fixed";
 /// D-DEBUG-REDACT / D-MARKERMOVE1 (contract plane, `#Redact`): hide a field
 /// from auto-derived Debug output.
 pub const ATTR_REDACT: &str = "Redact";
