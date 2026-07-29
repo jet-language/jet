@@ -611,6 +611,9 @@ pub fn apply_method(
     if let Some(result) = super::Methods::apply_core_pure_method(recv, method, &args, span) {
         return result;
     }
+    if let Some(result) = super::Methods::apply_regex_method(recv, method, &args, span) {
+        return result;
+    }
     if let Some(result) = super::Methods::apply_pool(recv, method, &args, span) {
         return result.map(|(value, _)| value);
     }

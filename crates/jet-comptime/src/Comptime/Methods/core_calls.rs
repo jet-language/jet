@@ -2096,7 +2096,39 @@ pub fn apply_core_call(
     }
 }
 
-fn regex_pattern(args: &[CtValue], span: Span) -> Result<super::super::RegexLite::RegexLite, Diagnostic> {
+pub(in super::super) fn apply_regex_method(
+    recv: &CtValue,
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if !matches!(
+        recv,
+        CtValue::Struct { type_name, .. } if type_name == "__JetRegex"
+    ) {
+        return None;
+    }
+    let mut call_args = Vec::with_capacity(args.len() + 1);
+    call_args.push(recv.clone());
+    call_args.extend_from_slice(args);
+    Some(match method {
+        "is_match" => regex_is_match(call_args, span),
+        "find" => regex_find(call_args, span),
+        "find_all" => regex_find_all(call_args, span),
+        "matches" => regex_matches(call_args, span),
+        "split" => regex_split(call_args, span),
+        "split_limit" => regex_split_limit(call_args, span),
+        "replace" => regex_replace(call_args, span, false),
+        "replace_all" => regex_replace(call_args, span, true),
+        "match" => regex_match(call_args, span),
+        _ => return None,
+    })
+}
+
+fn regex_pattern(
+    args: &[CtValue],
+    span: Span,
+) -> Result<super::super::RegexLite::RegexLite, Diagnostic> {
     let value = args
         .first()
         .ok_or_else(|| unsupported("regex call: missing pattern argument", span))?;

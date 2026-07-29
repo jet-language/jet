@@ -9,7 +9,9 @@ mod core_calls;
 #[path = "Methods/pool.rs"]
 mod pool;
 
-pub(super) use core_calls::{apply_core_pure_method, as_float, as_string, solver_require};
+pub(super) use core_calls::{
+    apply_core_pure_method, apply_regex_method, as_float, as_string, solver_require,
+};
 /// Public host entry for the TIR evaluator (#777).
 pub use core_calls::{apply_core_call, apply_impure_core_call, display_core_pure_value};
 pub use dispatch::apply_dollar_splices;

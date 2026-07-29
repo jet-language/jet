@@ -240,6 +240,10 @@ pub(super) fn alphabetic(cp: u32) -> bool {
     property(UNICODE_ALPHABETIC, cp)
 }
 
+pub(super) fn letter(cp: u32) -> bool {
+    property(UNICODE_LETTER, cp)
+}
+
 pub(super) fn numeric(cp: u32) -> bool {
     property(UNICODE_NUMERIC, cp)
 }

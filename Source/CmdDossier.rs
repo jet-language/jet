@@ -222,46 +222,12 @@ fn command_text(command: Option<&jet_foundation::CLISchema::CLICommandSchema>) -
     };
     let mut out = format!("command schema\n  entry: fn run(args: {})\n", command.entry_type);
     for input in &command.inputs {
-        let status = if input.required() { "required" } else { "optional" };
-        let default = input
-            .default_display()
-            .map(|value| format!(", default {value}"))
-            .unwrap_or_default();
-        let long = match &input.short {
-            Some(short) => format!("-{short} / --{}", input.flag),
-            None => format!("--{}", input.flag),
-        };
-        let form = match input.positional {
-            Some(order) => format!("positional#{order} / {long}"),
-            None => long,
-        };
-        let env = input
-            .env
-            .as_deref()
-            .map(|name| format!(", env {name}"))
-            .unwrap_or_default();
-        out.push_str(&format!(
-            "  {form}: {} ({status}{default}{env}) — {}\n",
-            input.value_kind().as_str(),
-            input.help,
-        ));
+        write_command_input(&mut out, input, "  ");
     }
     for subcommand in &command.commands {
         out.push_str(&format!("  command {}\n", subcommand.name));
         for input in &subcommand.inputs {
-            let long = match &input.short {
-                Some(short) => format!("-{short} / --{}", input.flag),
-                None => format!("--{}", input.flag),
-            };
-            let form = match input.positional {
-                Some(order) => format!("positional#{order} / {long}"),
-                None => long,
-            };
-            out.push_str(&format!(
-                "    {form}: {} — {}\n",
-                input.value_kind().as_str(),
-                input.help
-            ));
+            write_command_input(&mut out, input, "    ");
         }
     }
     out.push_str(&format!(
@@ -269,6 +235,36 @@ fn command_text(command: Option<&jet_foundation::CLISchema::CLICommandSchema>) -
         command.completion_words().join(" ")
     ));
     out
+}
+
+fn write_command_input(
+    out: &mut String,
+    input: &jet_foundation::CLISchema::CLIInputSchema,
+    indent: &str,
+) {
+    let status = if input.required() { "required" } else { "optional" };
+    let default = input
+        .default_display()
+        .map(|value| format!(", default {value}"))
+        .unwrap_or_default();
+    let long = match &input.short {
+        Some(short) => format!("-{short} / --{}", input.flag),
+        None => format!("--{}", input.flag),
+    };
+    let form = match input.positional {
+        Some(order) => format!("positional#{order} / {long}"),
+        None => long,
+    };
+    let env = input
+        .env
+        .as_deref()
+        .map(|name| format!(", env {name}"))
+        .unwrap_or_default();
+    out.push_str(&format!(
+        "{indent}{form}: {} ({status}{default}{env}) — {}\n",
+        input.value_kind().as_str(),
+        input.help,
+    ));
 }
 
 fn absolutize(path: &str) -> PathBuf {

@@ -21,7 +21,7 @@ enum Atom {
     Literal(char),
     Any,
     Class(Class),
-    Group(usize, Box<Node>),
+    Group(Option<usize>, Box<Node>),
     Start,
     End,
 }
@@ -39,6 +39,10 @@ enum ClassItem {
     Digit,
     Word,
     Space,
+    UnicodeLetter,
+    UnicodeNumber,
+    UnicodeAlphabetic,
+    UnicodeWhitespace,
 }
 
 #[derive(Clone, Copy)]
@@ -47,7 +51,10 @@ enum Quant {
     ZeroOrMore,
     OneOrMore,
     ZeroOrOne,
-    Exact(usize),
+    Range {
+        min: usize,
+        max: Option<usize>,
+    },
 }
 
 #[derive(Clone)]
@@ -65,6 +72,7 @@ pub(super) struct MatchLite {
 
 impl RegexLite {
     pub(super) fn parse(pattern: &str) -> Result<Self, String> {
+        jet_foundation::RegexSyntax::validate(pattern).map_err(|error| error.reason)?;
         let mut parser = Parser {
             chars: pattern.chars().collect(),
             pos: 0,
@@ -231,11 +239,7 @@ impl Parser {
             '.' => Ok(Atom::Any),
             '^' => Ok(Atom::Start),
             '$' => Ok(Atom::End),
-            '(' => {
-                self.groups += 1;
-                let idx = self.groups;
-                Ok(Atom::Group(idx, Box::new(self.parse_alt(Some(')'))?)))
-            }
+            '(' => self.parse_group(),
             ')' => Err("unmatched `)` in regex pattern".to_string()),
             '[' => Ok(Atom::Class(self.parse_class()?)),
             '\\' => self.parse_escape_atom(),
@@ -243,6 +247,54 @@ impl Parser {
             '{' => Err("regex `{n}` quantifier has nothing to repeat".to_string()),
             other => Ok(Atom::Literal(other)),
         }
+    }
+
+    fn parse_group(&mut self) -> Result<Atom, String> {
+        if self.peek() == Some('?') {
+            self.pos += 1;
+            return match self.bump() {
+                Some(':') => Ok(Atom::Group(None, Box::new(self.parse_alt(Some(')'))?))),
+                Some('<') => {
+                    self.parse_group_name()?;
+                    self.groups += 1;
+                    let idx = self.groups;
+                    Ok(Atom::Group(
+                        Some(idx),
+                        Box::new(self.parse_alt(Some(')'))?),
+                    ))
+                }
+                Some('=') | Some('!') => {
+                    Err("lookaround is not supported; use a linear rewrite".to_string())
+                }
+                Some(other) => Err(format!("unsupported regex group `?{other}`")),
+                None => Err("missing regex group kind after `?`".to_string()),
+            };
+        }
+        self.groups += 1;
+        let idx = self.groups;
+        Ok(Atom::Group(
+            Some(idx),
+            Box::new(self.parse_alt(Some(')'))?),
+        ))
+    }
+
+    fn parse_group_name(&mut self) -> Result<(), String> {
+        let start = self.pos;
+        while self.peek().is_some_and(|ch| ch != '>') {
+            self.pos += 1;
+        }
+        if self.bump() != Some('>') {
+            return Err("missing `>` in named regex group".to_string());
+        }
+        let name: String = self.chars[start..self.pos - 1].iter().collect();
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+        {
+            return Err("named regex group needs an identifier".to_string());
+        }
+        Ok(())
     }
 
     fn parse_quant(&mut self) -> Result<Quant, String> {
@@ -261,13 +313,24 @@ impl Parser {
             }
             Some('{') => {
                 self.pos += 1;
-                let n = self.parse_number()?;
+                let min = self.parse_number()?;
+                let max = if self.peek() == Some(',') {
+                    self.pos += 1;
+                    if self.peek() == Some('}') {
+                        None
+                    } else {
+                        Some(self.parse_number()?)
+                    }
+                } else {
+                    Some(min)
+                };
                 if self.bump() != Some('}') {
-                    return Err(
-                        "only exact `{n}` regex quantifiers are supported at comptime".to_string(),
-                    );
+                    return Err("missing `}` in regex quantifier".to_string());
                 }
-                Ok(Quant::Exact(n))
+                if max.is_some_and(|value| value < min) {
+                    return Err("regex quantifier max is below min".to_string());
+                }
+                Ok(Quant::Range { min, max })
             }
             _ => Ok(Quant::One),
         }
@@ -308,6 +371,10 @@ impl Parser {
                 Some('d') => Ok(ClassItem::Digit),
                 Some('w') => Ok(ClassItem::Word),
                 Some('s') => Ok(ClassItem::Space),
+                Some('p') => self.parse_unicode_class(),
+                Some('P') => {
+                    Err("negated Unicode classes belong outside `[]` today".to_string())
+                }
                 Some(ch) => Ok(ClassItem::Char(escaped_literal(ch))),
                 None => Err("missing regex escape".to_string()),
             };
@@ -352,8 +419,40 @@ impl Parser {
                 negated: true,
                 items: vec![ClassItem::Space],
             })),
+            Some('p') => Ok(Atom::Class(Class {
+                negated: false,
+                items: vec![self.parse_unicode_class()?],
+            })),
+            Some('P') => Ok(Atom::Class(Class {
+                negated: true,
+                items: vec![self.parse_unicode_class()?],
+            })),
+            Some(ch) if ch.is_ascii_digit() => {
+                Err("backreferences are not supported; captures stay linear".to_string())
+            }
             Some(ch) => Ok(Atom::Literal(escaped_literal(ch))),
             None => Err("missing regex escape".to_string()),
+        }
+    }
+
+    fn parse_unicode_class(&mut self) -> Result<ClassItem, String> {
+        if self.bump() != Some('{') {
+            return Err("Unicode regex class needs `{...}`".to_string());
+        }
+        let start = self.pos;
+        while self.peek().is_some_and(|ch| ch != '}') {
+            self.pos += 1;
+        }
+        if self.bump() != Some('}') {
+            return Err("missing `}` in Unicode regex class".to_string());
+        }
+        let name: String = self.chars[start..self.pos - 1].iter().collect();
+        match name.as_str() {
+            "L" | "Letter" => Ok(ClassItem::UnicodeLetter),
+            "N" | "Number" => Ok(ClassItem::UnicodeNumber),
+            "Alphabetic" => Ok(ClassItem::UnicodeAlphabetic),
+            "White_Space" | "Whitespace" => Ok(ClassItem::UnicodeWhitespace),
+            _ => Err(format!("unsupported Unicode regex class `{name}`")),
         }
     }
 
@@ -418,7 +517,7 @@ fn match_piece(piece: &Piece, text: &str, state: State) -> Vec<State> {
             out.push(state);
             out
         }
-        Quant::Exact(n) => repeat_atom(&piece.atom, text, state, n, Some(n)),
+        Quant::Range { min, max } => repeat_atom(&piece.atom, text, state, min, max),
     }
 }
 
@@ -451,7 +550,7 @@ fn repeat_atom(
             }
             rec(atom, text, next, count + 1, min, max, out);
         }
-        if count >= min && max.is_none() {
+        if count >= min {
             out.push(state);
         }
     }
@@ -485,7 +584,9 @@ fn match_atom(atom: &Atom, text: &str, state: State) -> Vec<State> {
             match_node(node, text, state)
                 .into_iter()
                 .map(|mut next| {
-                    next.caps[*idx] = Some((start, next.pos));
+                    if let Some(idx) = idx {
+                        next.caps[*idx] = Some((start, next.pos));
+                    }
                     next
                 })
                 .collect()
@@ -514,6 +615,10 @@ fn class_matches(class: &Class, ch: char) -> bool {
         ClassItem::Digit => ch.is_ascii_digit(),
         ClassItem::Word => ch == '_' || ch.is_ascii_alphanumeric(),
         ClassItem::Space => super::TextLite::whitespace(ch as u32),
+        ClassItem::UnicodeLetter => super::TextLite::letter(ch as u32),
+        ClassItem::UnicodeNumber => super::TextLite::numeric(ch as u32),
+        ClassItem::UnicodeAlphabetic => super::TextLite::alphabetic(ch as u32),
+        ClassItem::UnicodeWhitespace => super::TextLite::whitespace(ch as u32),
     });
     if class.negated {
         !yes

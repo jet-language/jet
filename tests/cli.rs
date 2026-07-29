@@ -1910,9 +1910,13 @@ fn external_completion_rejects_hostile_files_and_names() {
 fn external_completion_preserves_checked_subcommands() {
     let dir = isolated_cwd("shape_cli_subcommands");
     fs::write(dir.join("commands.jet"), r#"#CLI
-struct ServeArgs { port: Int }
+struct ServeArgs {
+    #[Doc("port to listen on"), Short("p"), Env("JET_SERVE_PORT"), Default(3000)] port: Int
+}
 #CLI
-struct ImportArgs { file: String }
+struct ImportArgs {
+    #[Doc("file to import")] file: String
+}
 enum Cmd { Serve(ServeArgs) Import(ImportArgs) }
 fn run(cmd: Cmd) {}
 "#).unwrap();
@@ -1951,6 +1955,21 @@ fn run(cmd: Cmd) {}
     assert!(dossier.contains("\"completion_words\":[\"--help\",\"serve\",\"import\"]"), "dossier flattened enum flags: {dossier}");
     for fact in ["\"commands\":[", "\"name\":\"serve\"", "\"name\":\"import\"", "\"flag\":\"--port\"", "\"flag\":\"--file\""] {
         assert!(dossier.contains(fact), "dossier omitted {fact}: {dossier}");
+    }
+    let dossier = Command::new(jet())
+        .args(["inspect", "dossier", "commands.jet", "run"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(dossier.status.success());
+    let dossier = String::from_utf8(dossier.stdout).unwrap();
+    for fact in [
+        "command serve",
+        "-p / --port: Int (optional, default 3000, env JET_SERVE_PORT) — port to listen on",
+        "command import",
+        "--file: String (required) — file to import",
+    ] {
+        assert!(dossier.contains(fact), "text dossier omitted {fact}: {dossier}");
     }
 }
 

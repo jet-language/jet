@@ -403,6 +403,24 @@ fn check_comptime_case(i: usize, expr: &str) {
     check_comptime_src(i, expr, &src);
 }
 
+#[test]
+fn reusable_regex_matches_across_comptime_tir_and_runtime() {
+    check_comptime_src(
+        34_000,
+        "typed Regex methods and canonical grammar",
+        r#"
+comptime comptime_value = Regex.{"^(?<word>\\p{{Alphabetic}}+)(?:_\\d{{2,4}})$"}.is_match("Jet_2026")
+
+fn run() {
+    regex :: Regex.{"^(?<word>\\p{{Alphabetic}}+)(?:_\\d{{2,4}})$"}
+    runtime_value :: regex.is_match("Jet_2026")
+    print("{comptime_value}")
+    print("{runtime_value}")
+}
+"#,
+    );
+}
+
 /// Shared by `check_comptime_case` (single-expression cases) and
 /// `check_comptime_module_case` (card #392's `use core.X as a; a.f(...)`
 /// cases, which need a full program — a bare `use` isn't an expression).
