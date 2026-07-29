@@ -209,6 +209,38 @@ fn jet_process_spec_run(
 ) -> Result<jet_std::ProcessResult, jet_std::IOError> {
     jet_process_spec_run_inner(spec)
 }
+fn jet_process_checked_stderr(errors: &str) -> String {
+    const LIMIT: usize = 4096;
+    if errors.len() <= LIMIT {
+        return errors.to_string();
+    }
+    let mut end = LIMIT;
+    while !errors.is_char_boundary(end) {
+        end -= 1;
+    }
+    errors[..end].to_string()
+}
+fn jet_process_spec_run_checked(
+    spec: &jet_std::ProcessSpec,
+) -> Result<jet_std::ProcessResult, jet_std::IOError> {
+    let result = jet_process_spec_run(spec)?;
+    if result.success {
+        return Ok(result);
+    }
+    let mut cause = format!("process exited unsuccessfully: code={}", result.code);
+    if let Some(signal) = result.signal {
+        cause.push_str(&format!(", signal={signal}"));
+    }
+    cause.push_str(&format!(
+        ", stderr={}",
+        jet_process_checked_stderr(&result.errors)
+    ));
+    Err(jet_std::IOError::other(
+        jet_std::IOOperation::Close,
+        spec.cmd.first().cloned(),
+        cause,
+    ))
+}
 fn jet_process_child_id(child: &jet_std::ProcessChild) -> i64 {
     child
         .inner
@@ -258,10 +290,14 @@ fn jet_process_child_wait(
     child.inner.borrow_mut().take();
     let (output, errors) = jet_process_collect_output(drains)?;
     let code = status.code().unwrap_or(-1) as i64;
+    #[cfg(unix)]
+    let signal = std::os::unix::process::ExitStatusExt::signal(&status).map(i64::from);
+    #[cfg(not(unix))]
+    let signal = None;
     Ok(jet_std::ProcessResult {
         code,
         success: status.success(),
-        signal: None,
+        signal,
         timed_out,
         output,
         errors,

@@ -153,7 +153,7 @@ pub(crate) fn is_process_handle_method_name(
             ("cwd" | "env_remove" | "stdin" | "stdout" | "stderr", 1)
                 | ("env", 2)
                 // D-PROCESS-SESSION1=A: `.terminal()` session opt-in.
-                | ("env_clear" | "detached" | "terminal" | "run" | "spawn", 0)
+                | ("env_clear" | "detached" | "terminal" | "run" | "run_checked" | "spawn", 0)
                 | ("timeout" | "output_limit", 1)
         ),
         Some("ProcessChild") => matches!(

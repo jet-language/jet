@@ -3132,7 +3132,10 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                         | "env_remove",
                     1,
                 ) | ("env", 2)
-                    | ("env_clear" | "detached" | "terminal" | "run" | "spawn", 0)
+                    | (
+                        "env_clear" | "detached" | "terminal" | "run" | "run_checked" | "spawn",
+                        0,
+                    )
             )
         }
         THandleOp::ProcessChildMethod { method } => {

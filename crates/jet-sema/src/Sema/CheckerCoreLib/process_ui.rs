@@ -255,7 +255,7 @@ pub(crate) fn process_spec_method_return(
         // default; the expert `TerminalPolicy` form is a later slice.
         ("env_clear" | "detached" | "terminal", 0) => Some(Some(spec_ty)),
         ("timeout" | "output_limit", 1) => Some(Some(spec_ty)),
-        ("run", 0) => Some(Some(result_ty(
+        ("run" | "run_checked", 0) => Some(Some(result_ty(
             Type::Named("ProcessResult".to_string()),
             io_error_ty(),
         ))),
@@ -271,7 +271,7 @@ pub(crate) fn process_spec_method_return(
             diags.push(wrong_core_arity(method, 2, n_args, span));
             Some(None)
         }
-        ("env_clear" | "detached" | "terminal" | "run" | "spawn", _) => {
+        ("env_clear" | "detached" | "terminal" | "run" | "run_checked" | "spawn", _) => {
             diags.push(wrong_core_arity(method, 0, n_args, span));
             Some(None)
         }

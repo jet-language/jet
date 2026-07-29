@@ -99,6 +99,115 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[cfg(unix)]
+#[test]
+fn process_run_checked_matches_default_and_aot_lenses() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_process_run_checked");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("run_checked.jet");
+    fs::write(
+        &file,
+        r#"use core.process as process
+
+fn run() {
+    ok :: process.cmd(["sh", "-c", "exit 0"]).run_checked() ?? panic("zero exit failed")
+    print(ok.success)
+    print(ok.code)
+
+    plain :: process.cmd(["sh", "-c", "exit 7"]).run() ?? panic("plain run failed")
+    print(plain.success)
+    print(plain.code)
+
+    if process.cmd(["sh", "-c", "printf 'checked-stderr-start:' >&2; printf '%05000d' 0 >&2; printf ':checked-stderr-end' >&2; exit 7"]).run_checked() == {
+        .Ok(v) -> { print("checked:unexpected") }
+        .Err(e) -> { print("checked-error") }
+        else -> {}
+    }
+
+    if process.cmd(["sh", "-c", "printf 'signal-stderr' >&2; kill -TERM $$"]).run_checked() == {
+        .Ok(v) -> { print("signal:unexpected") }
+        .Err(e) -> { print("signal-error") }
+        else -> {}
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    let default = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("run")
+        .arg(&file)
+        .arg("--trace-tiers")
+        .env("JET_RUN_CACHE_DIR", dir.join("cache"))
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run checked process fixture through default lens");
+    let release = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("run")
+        .arg("--release")
+        .arg(&file)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run checked process fixture through AOT lens");
+
+    assert_eq!(default.status.code(), Some(0), "{default:?}");
+    assert_eq!(release.status.code(), Some(0), "{release:?}");
+    assert_eq!(default.stdout, release.stdout);
+    assert_eq!(
+        String::from_utf8(default.stdout).unwrap(),
+        "true\n0\nfalse\n7\nchecked-error\nsignal-error\n"
+    );
+
+    let trace = String::from_utf8(default.stderr).unwrap();
+    assert!(
+        trace.contains("run") && trace.contains("tier1 native"),
+        "{trace}"
+    );
+    assert!(!trace.contains("tier0 interp"), "{trace}");
+    assert!(!trace.contains("E0956"), "{trace}");
+
+    let details = dir.join("run_checked_details.jet");
+    fs::write(
+        &details,
+        r#"use core.process as process
+
+fn run() {
+    if process.cmd(["sh", "-c", "printf 'checked-stderr-start:' >&2; printf '%05000d' 0 >&2; printf ':checked-stderr-end' >&2; exit 7"]).run_checked() == {
+        .Ok(v) -> { print("checked:unexpected") }
+        .Err(e) -> { print(e) }
+        else -> {}
+    }
+    if process.cmd(["sh", "-c", "printf 'signal-stderr' >&2; kill -TERM $$"]).run_checked() == {
+        .Ok(v) -> { print("signal:unexpected") }
+        .Err(e) -> { print(e) }
+        else -> {}
+    }
+}
+"#,
+    )
+    .unwrap();
+    let detailed = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("run")
+        .arg("--release")
+        .arg(&details)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("run checked error detail fixture through AOT lens");
+    assert_eq!(detailed.status.code(), Some(0), "{detailed:?}");
+    let stdout = String::from_utf8(detailed.stdout).unwrap();
+    assert!(stdout.contains("I/O error during close `sh`"), "{stdout}");
+    assert!(stdout.contains("code=7"), "{stdout}");
+    assert!(stdout.contains("stderr=checked-stderr-start:"), "{stdout}");
+    assert!(!stdout.contains("checked-stderr-end"), "{stdout}");
+    assert!(stdout.contains("code=-1, signal=15, stderr=signal-stderr"), "{stdout}");
+    assert!(stdout.len() < 5000, "checked stderr was not bounded: {}", stdout.len());
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn args_parse_or_exit_runs_resident_for_return_help_and_usage_error() {
     if skip_if_cranelift_host_unsupported() {

@@ -15136,6 +15136,7 @@ impl LowerCtx<'_, '_> {
                     "detached" => (self.host.process.spec_detached, 0),
                     "terminal" => (self.host.process.spec_terminal, 0),
                     "run" => (self.host.process.spec_run, 0),
+                    "run_checked" => (self.host.process.spec_run_checked, 0),
                     "spawn" => (self.host.process.spec_spawn, 0),
                     _ => return Err("jit handle method unsupported".to_string()),
                 };

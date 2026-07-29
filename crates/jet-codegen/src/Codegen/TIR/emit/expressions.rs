@@ -2528,6 +2528,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     // D-PROCESS-SESSION1=A: terminal-backed session opt-in.
                     "terminal" => format!("{}jet_process_spec_terminal({})", root, recv),
                     "run" => format!("{}jet_process_spec_run(&({}))", root, recv),
+                    "run_checked" => {
+                        format!("{}jet_process_spec_run_checked(&({}))", root, recv)
+                    }
                     "spawn" => format!("{}jet_process_spec_spawn(&({}))", root, recv),
                     _ => format!("/* unsupported ProcessSpec.{method} */ {{ unreachable!() }}"),
                 },
