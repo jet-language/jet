@@ -59,6 +59,7 @@ pub(crate) fn inject_patchable_types(items: &mut Vec<Item>, diags: &mut Vec<Diag
             methods: Vec::new(),
             trait_impls: Vec::new(),
             derives: Vec::new(),
+            auto_derive_default: s.auto_derive_default,
             is_published_schema: false,
             published_schema_span: None,
             is_single_use: false,

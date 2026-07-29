@@ -10,9 +10,9 @@
 //! visible in this build (D-METADERIVE1=A user derives are a legal, dynamic
 //! addition to the contract vocabulary, not typos).
 //!
-//! A retired `Debug` registry row is deliberately not flagged here: E0922
-//! (`crates/jet-foundation/src/Traits.rs`) already owns that retired name
-//! end to end, with its own text. Duplicating it here would double-report.
+//! D-AUTODERIVE-SYNTAX1=D restored `Debug` as an active signed type-site
+//! auto-derive control. It follows the same closed-vocabulary checks as
+//! `Printable` and `Equatable`.
 
 use crate::AST::{Item, Marker};
 use crate::Diagnostics::{Diagnostic, Span};
@@ -242,6 +242,7 @@ pub(crate) fn resolve_static_rule_products(
         facts.push(crate::AST::AppliedRuleApplication {
             marker: Marker {
                 name: name.to_string(),
+                negated: false,
                 name_span: span,
                 args: vec![expression],
                 arg_labels: vec![None],
@@ -550,7 +551,6 @@ fn is_legal_rule_name(name: &str, known_derive_names: &HashSet<String>) -> bool 
 /// legal, or already reported elsewhere:
 /// - a name known on the OTHER plane already got E0062/E0063 from the
 ///   parser's shared marker reader — never double-report.
-/// - `#Debug` is E0922's job (see module docs).
 fn check_one(m: &Marker, known_derive_names: &HashSet<String>) -> Option<Diagnostic> {
     let e0922_owns_debug = crate::Policy::applied_rule(&m.name).is_some_and(|row| {
         row.name == "Debug"

@@ -708,8 +708,23 @@ impl<'a> EvalCtx<'a> {
                             let v = self.eval_expr(e, scope)?;
                             let text = match fmt {
                                 crate::AST::StrFormat::Debug => {
-                                    show_typed_value(&v, &e.ty, true)
-                                        .unwrap_or_else(|| self.debug_value(&v))
+                                    let manual = match &e.ty {
+                                        Type::Named(type_name) => {
+                                            self.funcs.get(&format!("{type_name}::debug")).copied()
+                                        }
+                                        _ => None,
+                                    };
+                                    if let Some(func) = manual {
+                                        let mut child = HashMap::new();
+                                        child.insert("self".to_string(), v.clone());
+                                        match self.run_func(func, Vec::new(), &mut child)? {
+                                            CtValue::Str(text) => text,
+                                            _ => self.debug_value(&v),
+                                        }
+                                    } else {
+                                        show_typed_value(&v, &e.ty, true)
+                                            .unwrap_or_else(|| self.debug_value(&v))
+                                    }
                                 }
                                 crate::AST::StrFormat::Display => {
                                     show_typed_value(&v, &e.ty, false)

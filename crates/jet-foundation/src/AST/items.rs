@@ -1162,6 +1162,8 @@ impl EnumDef {
 #[derive(Debug, Clone)]
 pub struct Marker {
     pub name: String,
+    /// D-AUTODERIVE-SYNTAX1=D: `!Trait` rejects only automatic generation.
+    pub negated: bool,
     pub name_span: Span,
     pub args: Vec<Expr>,
     /// D-MARKSIG1=A: call-site labels paired with `args`. Marker arguments
@@ -1192,6 +1194,8 @@ pub struct StructDef {
     pub trait_impls: Vec<TraitImplBlock>,
     /// S55: `derive Comparable;` / `derive Serialize;` lines.
     pub derives: Vec<(String, Span)>,
+    /// D-AUTODERIVE1=E: package default for missing signed derive markers.
+    pub auto_derive_default: bool,
     /// D-MIGRATE1 (ratified 2026-06-22): `#PublishedSchema` marker was present
     /// before `struct`. The span is retained for pointing at the annotation in E0910.
     pub is_published_schema: bool,
@@ -1423,6 +1427,8 @@ pub struct EnumDef {
     pub methods: Vec<Func>,
     pub trait_impls: Vec<TraitImplBlock>,
     pub derives: Vec<(String, Span)>,
+    /// D-AUTODERIVE1=E: package default for missing signed derive markers.
+    pub auto_derive_default: bool,
     /// D-LIN1 (ratified 2026-06-21): `#SingleUse` marker before `enum`. See
     /// `StructDef::is_single_use`.
     pub is_single_use: bool,

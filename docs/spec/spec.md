@@ -654,10 +654,12 @@ impl Circle {
   `impl Type.Trait { … }` (qualify foreign types: `impl other.Point.Shape`).
   A trait name in type position (`[Shape]`, `fn f(s: Shape)`) means
   dynamic dispatch with invisible boxing. Generic params: `fn f<T: Bound>(…)`
-  and `struct Pair<T> { … }`. Built-in traits follow S55: auto
-  `Printable`/`Equatable`/`Debug` (D-MARK-DEBUG1=A: `Debug` auto-derives
-  whenever every field qualifies — no `#Debug` needed; a hand-written impl
-  overrides); explicit `#Comparable`, `#Codable`,
+  and `struct Pair<T> { … }`. Built-in traits follow S55:
+  `Printable`/`Equatable`/`Debug` auto-derive whenever every field qualifies.
+  The package default is on; `policy: .{ auto_derive: false }` disables silent
+  generation. A signed type marker opts one trait in or out (`#Debug`,
+  `#!Debug`), and a hand-written implementation wins (D-AUTODERIVE1=E,
+  D-AUTODERIVE-SYNTAX1=D). Other explicit derives are `#Comparable`, `#Codable`,
   `#Encode`, `#Decode`.
 - **Encoding traits (D-SERDE2/D-SERDE16):** `Encode.encode(self) => DataTree`
   and `Decode.decode(tree: DataTree) => Self ? DecodeError` are ordinary Jet

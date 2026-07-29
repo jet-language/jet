@@ -129,6 +129,9 @@ pub(crate) struct Cx {
     /// `rust_type` maps the list type and the list ops route to its inherent API.
     pub(crate) columnar: HashSet<String>,
     pub(crate) comparable: HashSet<String>,
+    pub(crate) auto_printable: HashSet<String>,
+    pub(crate) auto_debug: HashSet<String>,
+    pub(crate) auto_equatable: HashSet<String>,
     /// D-TAG1: types whose fields are all Eq+Hash-capable (comparable minus
     /// float fields) — gates `derive(Eq, Hash)` for `Bag<T>` keys.
     pub(crate) hashable: HashSet<String>,
@@ -2229,6 +2232,9 @@ pub(crate) fn build_cx_items(
         migrations: HashMap::new(),
         columnar: HashSet::new(),
         comparable: HashSet::new(),
+        auto_printable: HashSet::new(),
+        auto_debug: HashSet::new(),
+        auto_equatable: HashSet::new(),
         hashable: HashSet::new(),
         partial_ord: HashSet::new(),
         patchable: HashSet::new(),
@@ -2799,6 +2805,31 @@ pub(crate) fn build_cx_items(
                 if type_is_comparable_struct(s, &cx.type_names) {
                     cx.comparable.insert(s.name.clone());
                 }
+                if crate::Traits::struct_auto_derive_ok(s) {
+                    for (trait_name, selected) in [
+                        (Generics::PRINTABLE, &mut cx.auto_printable),
+                        (Generics::DEBUG, &mut cx.auto_debug),
+                        (Generics::EQUATABLE, &mut cx.auto_equatable),
+                    ] {
+                        if crate::Traits::auto_derive_requested(
+                            &s.type_markers,
+                            trait_name,
+                            s.auto_derive_default,
+                        ) && !items.iter().any(|item| match item {
+                            Item::Impl(i) => {
+                                i.type_name == s.name
+                                    && i.trait_name.as_deref() == Some(trait_name)
+                            }
+                            _ => false,
+                        }) && !s
+                            .trait_impls
+                            .iter()
+                            .any(|block| block.trait_name == trait_name)
+                        {
+                            selected.insert(s.name.clone());
+                        }
+                    }
+                }
                 for (t, _) in &s.derives {
                     if t == Generics::COMPARABLE {
                         cx.partial_ord.insert(s.name.clone());
@@ -2853,6 +2884,31 @@ pub(crate) fn build_cx_items(
                 }
                 if type_is_comparable_enum(e, &cx.type_names) {
                     cx.comparable.insert(e.name.clone());
+                }
+                if crate::Traits::enum_auto_derive_ok(e) {
+                    for (trait_name, selected) in [
+                        (Generics::PRINTABLE, &mut cx.auto_printable),
+                        (Generics::DEBUG, &mut cx.auto_debug),
+                        (Generics::EQUATABLE, &mut cx.auto_equatable),
+                    ] {
+                        if crate::Traits::auto_derive_requested(
+                            &e.type_markers,
+                            trait_name,
+                            e.auto_derive_default,
+                        ) && !items.iter().any(|item| match item {
+                            Item::Impl(i) => {
+                                i.type_name == e.name
+                                    && i.trait_name.as_deref() == Some(trait_name)
+                            }
+                            _ => false,
+                        }) && !e
+                            .trait_impls
+                            .iter()
+                            .any(|block| block.trait_name == trait_name)
+                        {
+                            selected.insert(e.name.clone());
+                        }
+                    }
                 }
                 if e.derives
                     .iter()

@@ -6621,6 +6621,20 @@ impl LowerCtx<'_, '_> {
             self.b.ins().call(push_ref, &[buf_id, text]);
             return Ok(());
         }
+        if matches!(fmt, StrFormat::Debug) {
+            let debug_key = format!("{type_name}::debug");
+            if let Some(&func_id) = self.func_ids.get(&debug_key) {
+                let recv = self.lower_expr(expr)?;
+                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+                let call = self.b.ins().call(func_ref, &[recv]);
+                let text = self.b.inst_results(call)[0];
+                let push_ref = self
+                    .module
+                    .declare_func_in_func(self.host.str_push_str, self.b.func);
+                self.b.ins().call(push_ref, &[buf_id, text]);
+                return Ok(());
+            }
+        }
         let (field_names, field_tys) = self.meta.struct_layout(type_name).ok_or_else(|| {
             format!("jit string interp type unsupported: Named({type_name:?})")
         })?;

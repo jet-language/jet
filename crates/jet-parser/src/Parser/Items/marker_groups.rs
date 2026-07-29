@@ -34,6 +34,10 @@ impl<'a> Parser<'a> {
         /// D-MARKSIG1=A: parse one marker with the ordinary call-argument
         /// reader; cursor sits on the name.
         pub(super) fn parse_one_marker(&mut self) -> Result<Marker, Diagnostic> {
+            let negated = matches!(self.peek().kind, TokKind::Bang);
+            if negated {
+                self.bump();
+            }
             let name_token = self.bump();
             let (name, name_span) = match name_token.kind {
                 TokKind::Ident(name) => (name, name_token.span),
@@ -49,7 +53,12 @@ impl<'a> Parser<'a> {
                     ));
                 }
             };
-            self.finish_rule_marker(name, name_span)
+            let mut marker = self.finish_rule_marker(name, name_span)?;
+            marker.negated = negated;
+            if let Some(application) = self.rule_facts.last_mut() {
+                application.marker.negated = negated;
+            }
+            Ok(marker)
         }
 
         /// Complete a marker after its name was consumed by a placement parser.
@@ -81,6 +90,7 @@ impl<'a> Parser<'a> {
             }
             let marker = Marker {
                 name,
+                negated: false,
                 name_span,
                 args,
                 arg_labels,
@@ -241,7 +251,11 @@ impl<'a> Parser<'a> {
             }
 
             if marker.args.is_empty() {
-                return Some(marker.name.clone());
+                return Some(format!(
+                    "{}{}",
+                    if marker.negated { "!" } else { "" },
+                    marker.name
+                ));
             }
             let mut args = Vec::new();
             for (argument, label) in marker.args.iter().zip(&marker.arg_labels) {
@@ -251,7 +265,12 @@ impl<'a> Parser<'a> {
                     None => value,
                 });
             }
-            Some(format!("{}({})", marker.name, args.join(", ")))
+            Some(format!(
+                "{}{}({})",
+                if marker.negated { "!" } else { "" },
+                marker.name,
+                args.join(", ")
+            ))
         }
 
         /// D-SHAPE2: parse one `#[ Name (, …)* ]` group; cursor on `@`.
@@ -417,7 +436,16 @@ impl<'a> Parser<'a> {
             ) {
                 return None;
             }
-            match self.toks.get(index + 1).map(|token| &token.kind) {
+            let name_index = index
+                + if matches!(
+                    self.toks.get(index + 1).map(|token| &token.kind),
+                    Some(TokKind::Bang)
+                ) {
+                    2
+                } else {
+                    1
+                };
+            match self.toks.get(name_index).map(|token| &token.kind) {
                 Some(TokKind::Ident(name)) => Some(name),
                 Some(TokKind::KwUnsafe) => Some(Syntax::KW_UNSAFE),
                 _ => None,
@@ -444,7 +472,15 @@ impl<'a> Parser<'a> {
                 return None;
             }
             self.marker_name_at(index)?;
-            let mut cursor = index + 2;
+            let mut cursor = index
+                + if matches!(
+                    self.toks.get(index + 1).map(|token| &token.kind),
+                    Some(TokKind::Bang)
+                ) {
+                    3
+                } else {
+                    2
+                };
             if matches!(self.toks.get(cursor).map(|token| &token.kind), Some(TokKind::LParen)) {
                 let mut depth = 0usize;
                 while let Some(token) = self.toks.get(cursor) {
@@ -477,11 +513,28 @@ impl<'a> Parser<'a> {
         ) -> bool {
             let mut cursor = open_index + 1;
             loop {
+                let negated = matches!(
+                    self.toks.get(cursor).map(|token| &token.kind),
+                    Some(TokKind::Bang)
+                );
+                if negated {
+                    cursor += 1;
+                }
                 let name = match self.toks.get(cursor).map(|token| &token.kind) {
                     Some(TokKind::Ident(name)) => name.as_str(),
                     Some(TokKind::KwUnsafe) => Syntax::KW_UNSAFE,
                     _ => return false,
                 };
+                if negated
+                    && !matches!(
+                        name,
+                        crate::Generics::PRINTABLE
+                            | crate::Generics::EQUATABLE
+                            | crate::Generics::DEBUG
+                    )
+                {
+                    return false;
+                }
                 if site == crate::Policy::RuleSite::Function
                     && self.target_marker_selects_file_web_at(cursor)
                 {
@@ -1100,6 +1153,16 @@ impl<'a> Parser<'a> {
         fn split_type_markers(markers: Vec<Marker>, derives: &mut Vec<(String, Span)>) -> Vec<Marker> {
             let mut serde = Vec::new();
             for m in markers {
+                if m.negated
+                    && matches!(
+                        m.name.as_str(),
+                        crate::Generics::PRINTABLE
+                            | crate::Generics::EQUATABLE
+                            | crate::Generics::DEBUG
+                    )
+                {
+                    continue;
+                }
                 match m.name.as_str() {
                     Syntax::ATTR_CODABLE => {
                         derives.push((Syntax::ATTR_ENCODE.to_string(), m.name_span));

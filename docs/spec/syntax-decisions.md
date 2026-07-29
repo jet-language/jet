@@ -1174,12 +1174,19 @@ for one trait to one field; `impl App.Logger using logger` top-level form.
 All-or-nothing in v1.
 
 **S55 — Built-in derive policy** *(D-SERDE-CANON1 vocabulary; amended by
-D-MARK-DEBUG1=A, 2026-07-11, card #498)*: silent auto-derive for
-`Printable`, `Equatable`, **and `Debug`** whenever every field qualifies; a
-hand-written impl overrides. `Debug` auto-derivation resolves the S55 ↔
-D-DISPLAYDBG1 contradiction in favor of auto (dev-facing tool, no ceremony;
-`#Redact` carries the secrets story); the standalone opt-in `#Debug`
-marker leaves the derive list. Explicit opt-in markers for the rest —
+D-AUTODERIVE1=E and D-AUTODERIVE-SYNTAX1=D, 2026-07-29, card #1267)*:
+`Printable`, `Equatable`, and `Debug` auto-derive whenever every field
+qualifies. The package default is on. `policy: .{ auto_derive: false }`
+turns silent generation off for that package. At a type site, a bare trait
+marker opts in and `!` opts out: `#!Printable` or
+`#[!Debug, !Equatable, Printable]`. A missing trait follows the package
+default. Positive markers generate only when fields qualify. Negative markers
+reject only compiler generation. A hand-written implementation wins over the
+package default and either sign. This narrowly amends D-MARK-DEBUG1=A because
+package-off gives the explicit `Debug` marker a required job.
+
+`Debug` remains the dev-facing lens; `#Redact` carries the secrets story.
+Explicit opt-in markers for the other derive families remain
 `#Comparable`, `#Summarize`, and the codability family `#Codable`
 (≡ `#[Encode, Decode]`), `#Encode`, `#Decode` (D-SERDE4, D-MARKERMOVE3).
 `Serialize`/`Deserialize` are not Jet words. Field-level wire markers stay on

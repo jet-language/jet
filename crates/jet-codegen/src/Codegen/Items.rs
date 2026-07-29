@@ -145,7 +145,7 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         out.push_str(&format!("    pub {}: {},\n", mangle(&f.name), field_ty));
     }
     out.push_str("}\n\n");
-    if cx.comparable.contains(&s.name)
+    if (cx.auto_equatable.contains(&s.name) || cx.partial_ord.contains(&s.name))
         && !cx
             .trait_methods
             .contains(&(s.name.clone(), "equal".to_string()))
@@ -239,13 +239,15 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         } else {
             tp_bounds
         };
-        out.push_str(&format!(
-            "impl{} JetShow for {}{} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
-            tp_bounds,
-            user_type_rust(&s.name),
-            tp_plain,
-            show_body
-        ));
+        if cx.auto_printable.contains(&s.name) {
+            out.push_str(&format!(
+                "impl{} JetShow for {}{} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
+                tp_bounds,
+                user_type_rust(&s.name),
+                tp_plain,
+                show_body
+            ));
+        }
         let jetdebug_extra = Generics::rust_extra_jetdebug_bounds(&s.type_params);
         let mut debug_impl_bounds = jetdebug_extra.clone();
         for (k, v) in &clone_extra {
@@ -259,14 +261,16 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
             debug_tp_bounds = add_view_lifetime_generic(debug_tp_bounds);
         }
         let debug_body = struct_jet_debug_body(s, has_fn_field);
-        out.push_str(&format!(
-            "impl{} JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
-            debug_tp_bounds,
-            user_type_rust(&s.name),
-            tp_plain,
-            debug_body
-        ));
-        if !cx.display_types.contains(&s.name) {
+        if cx.auto_debug.contains(&s.name) {
+            out.push_str(&format!(
+                "impl{} JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
+                debug_tp_bounds,
+                user_type_rust(&s.name),
+                tp_plain,
+                debug_body
+            ));
+        }
+        if cx.auto_printable.contains(&s.name) && !cx.display_types.contains(&s.name) {
             out.push_str(&format!(
                 "impl{} JetDisplay for {}{} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
                 tp_bounds,
@@ -280,18 +284,22 @@ pub(crate) fn emit_struct(cx: &Cx, s: &StructDef, out: &mut String) {
         let show_body = struct_jet_debug_body(s, has_fn_field);
         let impl_generic = if has_view_field { "<'__jet_view>" } else { "" };
         let type_arg = if has_view_field { "<'__jet_view>" } else { "" };
-        out.push_str(&format!(
-            "impl{impl_generic} JetShow for {}{type_arg} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
-            user_type_rust(&s.name),
-            show_body
-        ));
+        if cx.auto_printable.contains(&s.name) {
+            out.push_str(&format!(
+                "impl{impl_generic} JetShow for {}{type_arg} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
+                user_type_rust(&s.name),
+                show_body
+            ));
+        }
         let debug_body = struct_jet_debug_body(s, has_fn_field);
-        out.push_str(&format!(
-            "impl{impl_generic} JetDebug for {}{type_arg} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
-            user_type_rust(&s.name),
-            debug_body
-        ));
-        if !cx.display_types.contains(&s.name) {
+        if cx.auto_debug.contains(&s.name) {
+            out.push_str(&format!(
+                "impl{impl_generic} JetDebug for {}{type_arg} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
+                user_type_rust(&s.name),
+                debug_body
+            ));
+        }
+        if cx.auto_printable.contains(&s.name) && !cx.display_types.contains(&s.name) {
             out.push_str(&format!(
                 "impl{impl_generic} JetDisplay for {}{type_arg} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
                 user_type_rust(&s.name),
@@ -1244,7 +1252,7 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
         }
     }
     out.push_str("}\n\n");
-    if cx.comparable.contains(&e.name)
+    if (cx.auto_equatable.contains(&e.name) || cx.partial_ord.contains(&e.name))
         && !cx
             .trait_methods
             .contains(&(e.name.clone(), "equal".to_string()))
@@ -1264,17 +1272,21 @@ pub(crate) fn emit_enum(cx: &Cx, e: &EnumDef, out: &mut String) {
             e.name
         ));
     }
-    out.push_str(&format!(
-        "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
-        e.name,
-        enum_jet_render_body(e)
-    ));
-    out.push_str(&format!(
-        "impl JetDebug for user_{} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
-        e.name,
-        enum_jet_render_body(e)
-    ));
-    if !cx.display_types.contains(&e.name) {
+    if cx.auto_printable.contains(&e.name) {
+        out.push_str(&format!(
+            "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{ {} }}\n}}\n\n",
+            e.name,
+            enum_jet_render_body(e)
+        ));
+    }
+    if cx.auto_debug.contains(&e.name) {
+        out.push_str(&format!(
+            "impl JetDebug for user_{} {{\n    fn jet_debug(&self) -> String {{ {} }}\n}}\n\n",
+            e.name,
+            enum_jet_render_body(e)
+        ));
+    }
+    if cx.auto_printable.contains(&e.name) && !cx.display_types.contains(&e.name) {
         out.push_str(&format!(
             "impl JetDisplay for user_{} {{\n    fn jet_display(&self) -> String {{ self.jet_show() }}\n}}\n\n",
             e.name
@@ -1744,6 +1756,15 @@ pub(crate) fn emit_trait_impl(
             Generics::user_trait_rust(crate::Syntax::TRAIT_DISPLAY),
         ));
     }
+    if block.trait_name == crate::Syntax::TRAIT_DEBUG {
+        out.push_str(&format!(
+            "impl JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ <{}{} as user_Debug>::debug(self) }}\n}}\n\n",
+            user_type_rust(type_name),
+            tp_use,
+            user_type_rust(type_name),
+            tp_use,
+        ));
+    }
 }
 
 /// I2: render an enum value with Jet-source names. Rust's derived `Debug` would
@@ -1908,6 +1929,15 @@ pub(crate) fn emit_external_trait_impl(
             user_type_rust(&i.type_name),
             user_type_rust(&i.type_name),
             Generics::user_trait_rust(crate::Syntax::TRAIT_DISPLAY),
+        ));
+    }
+    if trait_name == crate::Syntax::TRAIT_DEBUG {
+        out.push_str(&format!(
+            "impl JetDebug for {}{} {{\n    fn jet_debug(&self) -> String {{ <{}{} as user_Debug>::debug(self) }}\n}}\n\n",
+            user_type_rust(&i.type_name),
+            tp_use,
+            user_type_rust(&i.type_name),
+            tp_use,
         ));
     }
 }
