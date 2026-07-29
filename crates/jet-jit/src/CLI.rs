@@ -38,12 +38,34 @@ mod runtime {
         Spec(jet_args_flag(spec.0, &name.to_string(), &help.to_string()))
     }
 
-    pub(super) fn option(spec: Spec, name: &str, help: &str, meta: &str) -> Spec {
-        Spec(jet_args_option(
+    pub(super) fn flag_short(spec: Spec, name: &str, short: &str, help: &str) -> Spec {
+        Spec(jet_args_flag_short(
             spec.0,
             &name.to_string(),
+            &short.to_string(),
+            &help.to_string(),
+        ))
+    }
+
+    pub(super) fn option(
+        spec: Spec,
+        name: &str,
+        short: Option<&str>,
+        help: &str,
+        meta: &str,
+        env: Option<&str>,
+    ) -> Spec {
+        Spec(jet_args_option_base(
+            spec.0,
+            &name.to_string(),
+            short.map(str::to_string),
             &help.to_string(),
             &meta.to_string(),
+            None,
+            env.map(str::to_string),
+            false,
+            false,
+            JetArgValueKind::String,
         ))
     }
 
@@ -74,8 +96,8 @@ mod runtime {
 }
 
 use runtime::{
-    empty_spec, flag, flag_set, help_text, option, option_val, parse, positional, program_name,
-    Parsed, Spec,
+    empty_spec, flag, flag_set, flag_short, help_text, option, option_val, parse, positional,
+    program_name, Parsed, Spec,
 };
 
 #[derive(Clone)]
@@ -171,17 +193,27 @@ fn build_spec(inputs: &[CLIInputSchema], prog: &str) -> Spec {
     let mut spec = empty_spec(prog);
     for input in inputs {
         let flag_name = input.flag.clone();
-        let help = input.help.clone();
+        let help = input.builder_help();
         match &input.shape {
             CLIInputShape::Flag => {
-                spec = flag(spec, &flag_name, &help);
+                spec = match &input.short {
+                    Some(short) => flag_short(spec, &flag_name, short, &help),
+                    None => flag(spec, &flag_name, &help),
+                };
             }
             CLIInputShape::Value { .. } => {
                 let meta = input
                     .metavar
                     .clone()
                     .unwrap_or_else(|| "VALUE".to_string());
-                spec = option(spec, &flag_name, &help, &meta);
+                spec = option(
+                    spec,
+                    &flag_name,
+                    input.short.as_deref(),
+                    &help,
+                    &meta,
+                    input.env.as_deref(),
+                );
                 if input.positional.is_some() {
                     spec = positional(spec, &flag_name, &help);
                 }
@@ -291,7 +323,11 @@ fn decode_struct(
             }
         };
         Concurrency::with_runtime_mut(|rt| {
-            let _ = rt.heap.record_set_int(rec, idx as i64, bits);
+            if matches!(fty, Type::Bool) {
+                let _ = rt.heap.record_set_bool(rec, idx as i64, bits != 0);
+            } else {
+                let _ = rt.heap.record_set_int(rec, idx as i64, bits);
+            }
         });
     }
     Ok(rec)

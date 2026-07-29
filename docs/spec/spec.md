@@ -2965,8 +2965,8 @@ entry; a program opts into CLI parsing by defining `fn run` with one parameter:
 ```jet
 #CLI
 struct ServeArgs {
-    #[Doc("port to listen on"), Default(3000)] port: Int
-    verbose: Bool
+    #[Doc("port to listen on"), Env("PORT"), Default(3000)] port: Int
+    #Short("v") verbose: Bool
     config: String?
 }
 
@@ -3049,6 +3049,14 @@ the checked `CLISchema` / dossier / embedded command metadata.
 Every generated CLI spec also registers `--help` automatically (rendering
 the struct's fields/types/`#Doc` text); a field named `help` collides
 with it and is **E1306**.
+
+`#Short("n")` adds the one-ASCII-letter `-n` form to the field's existing
+long form. `#Env("PORT")` reads `PORT` only when command input is absent.
+Explicit command input wins over the environment, and the environment wins
+over `#Default`. Generated help shows this precedence. The checked
+`CLISchema`, dossier, embedded metadata, and shell completion keep both marker
+values. An invalid or duplicate short name is **E1318**. These markers outside
+a `#CLI` struct, and `#Env` on a presence-only `Bool` flag, are **E1319**.
 
 **Nested `#CLI` structs are not supported in v1** — a field whose type is
 itself a `#CLI`-derived struct is E1305, same as any other unmapped type.

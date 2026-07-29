@@ -1508,7 +1508,7 @@ fn run(args: RunArgs) {
         "\"default\":\"2\"",
         "\"flag\":\"--verbose\"",
         "\"shape\":\"flag\"",
-        "\"completion_words\":[\"--help\",\"--name\",\"--retries\",\"--verbose\"]",
+        "\"completion_words\":[\"--help\",\"name\",\"--name\",\"--retries\",\"--verbose\"]",
     ] {
         assert!(
             dossier.contains(projected),
@@ -1557,6 +1557,78 @@ fn run(args: RunArgs) {
     assert!(plain_script.contains("--help"));
     assert!(!plain_script.contains("--name"));
     check_snapshot("shape_cli_for_plain.txt", &plain_script);
+}
+
+#[test]
+fn typed_cli_field_markers_add_short_and_env_inputs_with_pinned_precedence() {
+    let dir = isolated_cwd("typed_cli_short_env");
+    fs::write(
+        dir.join("typed.jet"),
+        r#"#CLI
+struct RunArgs {
+    #[Doc("print extra detail"), Short("v")] verbose: Bool
+    #[Doc("port to listen on"), Short("p"), Env("JET_TYPED_PORT"), Default(3000)] port: Int
+}
+
+fn run(args: RunArgs) {
+    print(args.verbose)
+    print(args.port)
+}
+"#,
+    )
+    .unwrap();
+
+    let run = |args: &[&str], env: Option<&str>, release: bool| {
+        let mut command = Command::new(jet());
+        command.arg("run");
+        if release {
+            command.arg("--release");
+        }
+        command.arg("typed.jet").arg("--").args(args).current_dir(&dir);
+        match env {
+            Some(value) => {
+                command.env("JET_TYPED_PORT", value);
+            }
+            None => {
+                command.env_remove("JET_TYPED_PORT");
+            }
+        }
+        command.output().unwrap()
+    };
+
+    for release in [false, true] {
+        let env_fallback = run(&["-v"], Some("4100"), release);
+        assert!(
+            env_fallback.status.success(),
+            "typed CLI env fallback failed: {}",
+            String::from_utf8_lossy(&env_fallback.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&env_fallback.stdout), "true\n4100\n");
+
+        let long_wins = run(&["--port", "4200"], Some("4100"), release);
+        assert!(long_wins.status.success());
+        assert_eq!(String::from_utf8_lossy(&long_wins.stdout), "false\n4200\n");
+
+        let short_wins = run(&["-p", "4300"], Some("4100"), release);
+        assert!(short_wins.status.success());
+        assert_eq!(String::from_utf8_lossy(&short_wins.stdout), "false\n4300\n");
+
+        let default = run(&[], None, release);
+        assert!(default.status.success());
+        assert_eq!(String::from_utf8_lossy(&default.stdout), "false\n3000\n");
+    }
+
+    let help = run(&["--help"], None, true);
+    assert!(help.status.success());
+    let help = String::from_utf8(help.stdout).unwrap();
+    for fact in [
+        "-v, --verbose",
+        "-p, --port PORT",
+        "[env: JET_TYPED_PORT]",
+        "[default: 3000]",
+    ] {
+        assert!(help.contains(fact), "typed CLI help omitted {fact}: {help}");
+    }
 }
 
 #[test]

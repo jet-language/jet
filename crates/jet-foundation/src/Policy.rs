@@ -574,6 +574,8 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Flatten", sig!(), FIELD_SITE, Bare),
     rule!("Doc", sig!(param!("text", String)), FIELD_SITE, Call),
     rule!("Flag", sig!(), FIELD_SITE, Bare),
+    rule!("Short", sig!(param!("name", String)), FIELD_SITE, Call),
+    rule!("Env", sig!(param!("name", String)), FIELD_SITE, Call),
     rule!("Persist", sig!(), DECLARATION_SITE, Bare),
     rule!("Track", sig!(), DECLARATION_SITE, Bare),
     rule!("Local", sig!(), DECLARATION_SITE, Bare),

@@ -19,7 +19,7 @@
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::Traits::TraitRegistry;
-use crate::AST::{Field, Item, Type};
+use crate::AST::{Expr, Field, Item, StrPart, Type};
 
 /// D-CLIFLAG1: the dashed `--flag` name for a snake_case Jet field name.
 /// `config_file` -> `config-file`. Pure textual transform, no rename markers
@@ -53,6 +53,20 @@ fn has_flag_marker(f: &Field) -> bool {
     f.serde_markers
         .iter()
         .any(|m| m.name == Syntax::CONTRACT_FLAG)
+}
+
+fn marker_string<'a>(
+    f: &'a Field,
+    name: &str,
+) -> Option<(&'a crate::AST::Marker, String)> {
+    let marker = f.serde_markers.iter().find(|marker| marker.name == name)?;
+    match marker.args.first() {
+        Some(Expr::Str(parts, _)) if parts.len() == 1 => match &parts[0] {
+            StrPart::Lit(value) => Some((marker, value.clone())),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// D-CLIFLAG1: classify one `#[CLI]` struct field for `core.args` codegen.
@@ -134,6 +148,40 @@ fn e1309(field_name: &str, span: Span) -> Diagnostic {
     )
 }
 
+/// E1318: two `#[CLI]` fields claim the same `#Short` spelling.
+fn e1318(short: &str, first: &str, second: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1318",
+        format!(
+            "`#Short(\"{short}\")` is used by both `{first}` and `{second}`"
+        ),
+        "each short option must select only one `#CLI` field.".to_string(),
+        format!("give `{first}` or `{second}` a different `#Short` value"),
+        Some(span),
+    )
+}
+
+fn e1318_invalid(short: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1318",
+        format!("`#Short(\"{short}\")` is not a one-letter option"),
+        "the shared command parser treats a short option as one ASCII letter.".to_string(),
+        "use one letter, such as `#Short(\"p\")`".to_string(),
+        Some(span),
+    )
+}
+
+/// E1319: a typed-CLI-only field marker has no builder mapping here.
+fn e1319(marker: &str, field: &str, why: &str, fix: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E1319",
+        format!("`#{marker}` has no CLI mapping for field `{field}`"),
+        why.to_string(),
+        fix.to_string(),
+        Some(span),
+    )
+}
+
 /// E1307: an `enum` used as a `fn run` subcommand parameter has a variant
 /// whose payload isn't a `#[CLI]`-derived struct.
 pub(crate) fn e1307(variant_name: &str, span: Span) -> Diagnostic {
@@ -176,10 +224,28 @@ pub(crate) fn validate_cli_items(items: &[Item], reg: &TraitRegistry) -> Vec<Dia
     for item in items {
         let Item::Struct(s) = item else { continue };
         if !s.derives.iter().any(|(t, _)| t == "CLI") {
+            for field in &s.fields {
+                for marker in &field.serde_markers {
+                    if matches!(
+                        marker.name.as_str(),
+                        Syntax::CONTRACT_SHORT | Syntax::CONTRACT_ENV
+                    ) {
+                        out.push(e1319(
+                            &marker.name,
+                            &field.name,
+                            "`#Short` and `#Env` describe generated command inputs, but this struct is not `#CLI`.",
+                            "remove the marker, or mark the command-input struct `#CLI`",
+                            marker.name_span,
+                        ));
+                    }
+                }
+            }
             continue;
         }
         let _ = reg; // shape validation here doesn't need the registry (no nested-CLI lookups in v1)
         let mut seen_flags: std::collections::HashMap<String, Span> =
+            std::collections::HashMap::new();
+        let mut seen_shorts: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         seen_flags.insert("help".to_string(), s.name_span);
         for f in &s.fields {
@@ -200,6 +266,24 @@ pub(crate) fn validate_cli_items(items: &[Item], reg: &TraitRegistry) -> Vec<Dia
             let flag = cli_flag_name(&f.name);
             if let Some(_prev) = seen_flags.insert(flag.clone(), f.name_span) {
                 out.push(e1306(&flag, f.name_span));
+            }
+            if let Some((marker, short)) = marker_string(f, Syntax::CONTRACT_SHORT) {
+                if short.len() != 1 || !short.as_bytes()[0].is_ascii_alphabetic() {
+                    out.push(e1318_invalid(&short, marker.name_span));
+                } else if let Some(first) = seen_shorts.insert(short.clone(), f.name.clone()) {
+                    out.push(e1318(&short, &first, &f.name, marker.name_span));
+                }
+            }
+            if matches!(kind, Some(CLIFieldKind::Flag)) {
+                if let Some((marker, _)) = marker_string(f, Syntax::CONTRACT_ENV) {
+                    out.push(e1319(
+                        "Env",
+                        &f.name,
+                        "a `Bool` command field is a presence flag, while `#Env` lowers to a value option.",
+                        "remove `#Env`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field",
+                        marker.name_span,
+                    ));
+                }
             }
         }
     }

@@ -47,6 +47,10 @@ pub const CONTRACT_DOC: &str = "Doc"; // D-CLIFLAG1
 /// required value field — `#[Flag]`. Without it, required scalars fill from
 /// bare argv in declaration order; with it, only `--field` is accepted.
 pub const CONTRACT_FLAG: &str = "Flag"; // D-CLI-POS1
+/// D-CLI-FIELD-MARKERS1=A: one-letter alias for a `#[CLI]` field.
+pub const CONTRACT_SHORT: &str = "Short"; // D-CLI-FIELD-MARKERS1
+/// D-CLI-FIELD-MARKERS1=A: environment fallback for a value `#[CLI]` field.
+pub const CONTRACT_ENV: &str = "Env"; // D-CLI-FIELD-MARKERS1
 
 /// D-CABI-PLATFORM1=A: per-function native calling-convention marker for C
 /// declarations. C remains the implicit default; alternate ABIs never inherit.

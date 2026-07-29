@@ -160,6 +160,16 @@ part of the command interface; the always-available named spelling keeps scripts
 stable across reorders. Help lists positionals before flags. Marker constant:
 `CONTRACT_FLAG` (`Flag`).
 
+**D-CLI-FIELD-MARKERS1=A — per-field short names and environment fallbacks**
+*(ratified 2026-07-28, card #1277)*: a `#CLI` field can use `#Short("n")`
+for a one-letter alias and `#Env("PORT")` for an environment fallback. Both
+rules use the existing field marker list and lower to the existing `core.args`
+builder. Explicit command input wins over the environment, and the environment
+wins over `#Default`. Help shows the short name, fallback, default, and
+precedence. A short name is one ASCII letter and cannot collide (E1318).
+Typed-CLI markers with no builder mapping are E1319. Marker constants:
+`CONTRACT_SHORT` (`Short`) and `CONTRACT_ENV` (`Env`).
+
 **D-SHAPE-CLI1=A — entry type owns command inputs** *(ratified 2026-07-14,
 card #541)*: when present, the resolved parameter type of `fn run(args: T)` is
 the single source for shell input names, types, defaults, parsing, help,

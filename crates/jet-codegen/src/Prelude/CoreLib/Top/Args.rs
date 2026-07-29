@@ -496,6 +496,8 @@ fn jet_args_completion(spec: &JetArgsSpec, shell: &String) -> String {
 fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArgs, String> {
     let mut flags: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
     let mut options: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let mut fallbacks: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     let mut positionals: Vec<String> = Vec::new();
     let mut subcommand: Option<String> = None;
 
@@ -508,8 +510,14 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
                 flags.insert(name.clone(), false);
             }
             JetArgKind::Option { name, default, env, .. } => {
-                if let Some(v) = default.clone().or_else(|| env.as_ref().and_then(|k| std::env::var(k).ok())) {
-                    options.insert(name.clone(), vec![v]);
+                // D-CLI-FIELD-MARKERS1=A: explicit argv is read below, then
+                // environment, then the declared default.
+                if let Some(v) = env
+                    .as_ref()
+                    .and_then(|key| std::env::var(key).ok())
+                    .or_else(|| default.clone())
+                {
+                    fallbacks.insert(name.clone(), v);
                 }
             }
             _ => {}
@@ -648,9 +656,14 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
                 options.insert(name.clone(), vec![value.clone()]);
             }
             bare_i += 1;
+        } else if let Some(value) = fallbacks.remove(name) {
+            options.insert(name.clone(), vec![value]);
         } else {
             missing.push(name.as_str());
         }
+    }
+    for (name, value) in fallbacks {
+        options.entry(name).or_insert_with(|| vec![value]);
     }
     if !missing.is_empty() && !flags.get("help").copied().unwrap_or(false) {
         return Err(format!(

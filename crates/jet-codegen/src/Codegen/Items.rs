@@ -447,6 +447,29 @@ fn cli_scalar_from_string(ty: &Type, var: &str, flag: &str, root_prefix: &str) -
     }
 }
 
+fn cli_option_spec_line(
+    root: &str,
+    input: &jet_foundation::CLISchema::CLIInputSchema,
+    metavar: &str,
+) -> String {
+    let help = input.builder_help();
+    let flag = &input.flag;
+    match (&input.short, &input.env) {
+        (Some(short), Some(env)) => format!(
+            "    let __s = {root}jet_args_option_base(__s, &{flag:?}.to_string(), Some({short:?}.to_string()), &{help:?}.to_string(), &{metavar:?}.to_string(), None, Some({env:?}.to_string()), false, false, {root}JetArgValueKind::String);\n"
+        ),
+        (Some(short), None) => format!(
+            "    let __s = {root}jet_args_option_short(__s, &{flag:?}.to_string(), &{short:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string());\n"
+        ),
+        (None, Some(env)) => format!(
+            "    let __s = {root}jet_args_option_env(__s, &{flag:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string(), &{env:?}.to_string());\n"
+        ),
+        (None, None) => format!(
+            "    let __s = {root}jet_args_option(__s, &{flag:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string());\n"
+        ),
+    }
+}
+
 /// D-CLIFLAG1: emit `__jet_cli_spec_<Name>`/`__jet_cli_decode_<Name>` for a
 /// `#[CLI]`-derived struct. See the pinned field-mapping rule in
 /// docs/spec/spec.md ("Typed entry-signature CLI parsing (D-CLIFLAG1)").
@@ -475,9 +498,15 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
 
         match &input.shape {
             jet_foundation::CLISchema::CLIInputShape::Flag => {
-                spec_body.push_str(&format!(
-                    "    let __s = {root}jet_args_flag(__s, &{flag:?}.to_string(), &{help:?}.to_string());\n"
-                ));
+                if let Some(short) = &input.short {
+                    spec_body.push_str(&format!(
+                        "    let __s = {root}jet_args_flag_short(__s, &{flag:?}.to_string(), &{short:?}.to_string(), &{help:?}.to_string());\n"
+                    ));
+                } else {
+                    spec_body.push_str(&format!(
+                        "    let __s = {root}jet_args_flag(__s, &{flag:?}.to_string(), &{help:?}.to_string());\n"
+                    ));
+                }
                 decode_lines.push_str(&format!(
                     "    let {m}: bool = {root}jet_parsed_flag(__parsed, &{flag:?}.to_string());\n"
                 ));
@@ -489,9 +518,7 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                     unreachable!("optional CLISchema input comes from an Option field")
                 };
                 let metavar = input.metavar.as_deref().unwrap_or("VALUE");
-                spec_body.push_str(&format!(
-                    "    let __s = {root}jet_args_option(__s, &{flag:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string());\n"
-                ));
+                spec_body.push_str(&cli_option_spec_line(root, input, metavar));
                 let rust = cx.rust_type(inner);
                 let conv = cli_scalar_from_string(inner, "__v", &flag, root);
                 decode_lines.push_str(&format!(
@@ -508,9 +535,7 @@ fn emit_struct_cli(cx: &Cx, s: &StructDef, out: &mut String) {
                 // Named `--flag` always accepted. Required values without a
                 // default also register a same-named positional (D-CLI-POS1=A)
                 // unless schema.positional is None (`#[Flag]` opt-out).
-                spec_body.push_str(&format!(
-                    "    let __s = {root}jet_args_option(__s, &{flag:?}.to_string(), &{help:?}.to_string(), &{metavar:?}.to_string());\n"
-                ));
+                spec_body.push_str(&cli_option_spec_line(root, input, metavar));
                 if input.positional.is_some() {
                     spec_body.push_str(&format!(
                         "    let __s = {root}jet_args_positional(__s, &{flag:?}.to_string(), &{help:?}.to_string());\n"

@@ -586,6 +586,8 @@ renumbered, and no new `W` code may be allocated.
 | E1307 | sema  | subcommand `enum` variant's payload isn't a `#CLI`-derived struct (D-CLIFLAG1) |
 | E1308 | sema  | `fn run`'s entry parameter isn't a `#CLI` struct or an enum of `#CLI` payloads (D-CLIFLAG1) |
 | E1309 | sema  | `#Flag` on a `#CLI` field that is already flag-only (D-CLI-POS1) |
+| E1318 | sema  | a `#Short` value is not one ASCII letter, or two `#CLI` fields use the same short name (D-CLI-FIELD-MARKERS1) |
+| E1319 | sema  | `#Short` or `#Env` has no typed-CLI builder mapping at its field (D-CLI-FIELD-MARKERS1) |
 | E1321 | sema  | a typed `Output` kind, payload, callable reference, callable contract, visibility, or singular selection is invalid (D-SHAPE-OUTPUT-CALLABLE1) |
 | E1101 | sema  | task capture needs ownership              |
 | E1102 | sema  | value crossing task/channel boundary is not sendable |
@@ -823,6 +825,8 @@ the `core.args` runtime-error voice above (no new code for that).
 | E1307 | a subcommand variant's payload isn't a `#CLI` struct | Each `enum Cmd { Variant(Payload) }` variant used as a `fn run` parameter needs a single `#CLI`-derived struct payload — that's where the subcommand's own flags come from. | Give the variant a single `#CLI` struct payload. |
 | E1308 | `` `run`'s parameter isn't a CLI-derived type `` | A typed `fn run(args: T)` entry only works when `T` is `#CLI`-derived, or an `enum` whose every variant carries a `#CLI` struct payload. | Mark the struct `#CLI`, or give the enum's variants `#CLI` struct payloads. |
 | E1309 | `` `#Flag` on `name` has nothing to opt out of `` | `#Flag` keeps a required value field flag-only (D-CLI-POS1=A). Bool fields, `T?` fields, and fields with `#Default(...)` are already flag-only. | Remove `#Flag`, or make the field a required scalar without `#Default`. |
+| E1318 | `` `#Short("name")` is not a one-letter option `` or `` `#Short("n")` is used by both `first` and `second` `` | The shared command parser treats a short option as one ASCII letter, and each spelling must select only one `#CLI` field. | Use one letter and give colliding fields different values. |
+| E1319 | `` `#Short` has no CLI mapping for field `name` `` | `#Short` and `#Env` describe generated command inputs. They do not apply outside a `#CLI` struct; `#Env` also cannot map a presence-only `Bool` flag to the builder's value-option fallback. | Remove the marker, mark the command-input struct `#CLI`, or move `#Env` to a value field. |
 
 ### Checked Output callables (D-SHAPE-OUTPUT-CALLABLE1)
 

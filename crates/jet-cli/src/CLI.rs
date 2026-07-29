@@ -910,13 +910,15 @@ pub fn completions_for_program(
             let root_condition = if schema.commands.is_empty() { "" } else { " -n '__fish_use_subcommand'" };
             out.push_str(&format!("complete -c {}{} -l help -d 'show help'\n", fish_single(command_name), root_condition));
             for input in &schema.inputs {
-                out.push_str(&format!("complete -c {} -l {} -d {}{}\n", fish_single(command_name), input.flag, fish_single(&input.help), if input.metavar.is_some() { " -r" } else { "" }));
+                let short = input.short.as_ref().map_or_else(String::new, |short| format!(" -s {short}"));
+                out.push_str(&format!("complete -c {} -l {}{} -d {}{}\n", fish_single(command_name), input.flag, short, fish_single(&input.help), if input.metavar.is_some() { " -r" } else { "" }));
             }
             for command in &schema.commands {
                 out.push_str(&format!("complete -c {} -n '__fish_use_subcommand' -a {}\n", fish_single(command_name), fish_single(&command.name)));
                 out.push_str(&format!("complete -c {} -n '__fish_seen_subcommand_from {}' -l help -d 'show help'\n", fish_single(command_name), command.name));
                 for input in &command.inputs {
-                    out.push_str(&format!("complete -c {} -n '__fish_seen_subcommand_from {}' -l {} -d {}{}\n", fish_single(command_name), command.name, input.flag, fish_single(&input.help), if input.metavar.is_some() { " -r" } else { "" }));
+                    let short = input.short.as_ref().map_or_else(String::new, |short| format!(" -s {short}"));
+                    out.push_str(&format!("complete -c {} -n '__fish_seen_subcommand_from {}' -l {}{} -d {}{}\n", fish_single(command_name), command.name, input.flag, short, fish_single(&input.help), if input.metavar.is_some() { " -r" } else { "" }));
                 }
             }
             Some(out)
@@ -962,6 +964,11 @@ fn input_words(inputs: &[jet_foundation::CLISchema::CLIInputSchema]) -> Vec<Stri
         words.push(input.flag.clone());
     }
     words.extend(inputs.iter().map(|input| format!("--{}", input.flag)));
+    words.extend(
+        inputs
+            .iter()
+            .filter_map(|input| input.short.as_ref().map(|short| format!("-{short}"))),
+    );
     words
 }
 
@@ -990,9 +997,13 @@ fn zsh_input_specs(inputs: &[jet_foundation::CLISchema::CLIInputSchema]) -> Vec<
             .as_deref()
             .map(|name| format!(":{}:", name.to_lowercase()))
             .unwrap_or_default();
+        let names = input.short.as_ref().map_or_else(
+            || format!("--{}", input.flag),
+            |short| format!("(-{short} --{}){{-{short},--{}}}", input.flag, input.flag),
+        );
         format!(
             "    '{}[{}]{}'",
-            zsh_single(&format!("--{}", input.flag)),
+            zsh_single(&names),
             zsh_bracket(&input.help),
             value
         )

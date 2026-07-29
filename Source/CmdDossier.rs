@@ -168,10 +168,22 @@ fn command_json(command: Option<&jet_foundation::CLISchema::CLICommandSchema>) -
                 .positional
                 .map(|order| order.to_string())
                 .unwrap_or_else(|| "null".to_string());
+            let short = input
+                .short
+                .as_deref()
+                .map(|short| json_string(&format!("-{short}")))
+                .unwrap_or_else(|| "null".to_string());
+            let env = input
+                .env
+                .as_deref()
+                .map(json_string)
+                .unwrap_or_else(|| "null".to_string());
             format!(
-                "{{\"field\":{},\"flag\":{},\"shape\":{},\"value_type\":{},\"required\":{},\"default\":{},\"metavar\":{},\"positional\":{},\"help\":{}}}",
+                "{{\"field\":{},\"flag\":{},\"short\":{},\"env\":{},\"shape\":{},\"value_type\":{},\"required\":{},\"default\":{},\"metavar\":{},\"positional\":{},\"help\":{}}}",
                 json_string(&input.field),
                 json_string(&format!("--{}", input.flag)),
+                short,
+                env,
                 json_string(shape),
                 json_string(input.value_kind().as_str()),
                 input.required(),
@@ -215,12 +227,21 @@ fn command_text(command: Option<&jet_foundation::CLISchema::CLICommandSchema>) -
             .default_display()
             .map(|value| format!(", default {value}"))
             .unwrap_or_default();
-        let form = match input.positional {
-            Some(order) => format!("positional#{order} / --{}", input.flag),
+        let long = match &input.short {
+            Some(short) => format!("-{short} / --{}", input.flag),
             None => format!("--{}", input.flag),
         };
+        let form = match input.positional {
+            Some(order) => format!("positional#{order} / {long}"),
+            None => long,
+        };
+        let env = input
+            .env
+            .as_deref()
+            .map(|name| format!(", env {name}"))
+            .unwrap_or_default();
         out.push_str(&format!(
-            "  {form}: {} ({status}{default}) — {}\n",
+            "  {form}: {} ({status}{default}{env}) — {}\n",
             input.value_kind().as_str(),
             input.help,
         ));
@@ -228,9 +249,13 @@ fn command_text(command: Option<&jet_foundation::CLISchema::CLICommandSchema>) -
     for subcommand in &command.commands {
         out.push_str(&format!("  command {}\n", subcommand.name));
         for input in &subcommand.inputs {
-            let form = match input.positional {
-                Some(order) => format!("positional#{order} / --{}", input.flag),
+            let long = match &input.short {
+                Some(short) => format!("-{short} / --{}", input.flag),
                 None => format!("--{}", input.flag),
+            };
+            let form = match input.positional {
+                Some(order) => format!("positional#{order} / {long}"),
+                None => long,
             };
             out.push_str(&format!(
                 "    {form}: {} — {}\n",

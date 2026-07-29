@@ -6,9 +6,9 @@ use crate::AST::{CtValue, Expr, Item, Marker, ProgramBundle, StrPart, StructDef,
 use crate::Syntax;
 
 const RECORD_MAGIC: &[u8; 8] = b"JETCMD\0\0";
-/// D-CLI-POS1=A bumps the record so positional eligibility/order is part of
-/// the checked command surface (help, completions, dossier, publish diff).
-pub const RECORD_VERSION: u16 = 2;
+/// D-CLI-FIELD-MARKERS1=A bumps the record so short names and environment
+/// fallbacks are part of help, completions, dossier, and publish diff.
+pub const RECORD_VERSION: u16 = 3;
 pub const ELF_SECTION: &str = ".jet_command";
 pub const PE_SECTION: &str = ".jetcmd";
 pub const MACH_SECTION: &str = "__jetcmd";
@@ -70,6 +70,10 @@ pub enum CLIInputShape {
 pub struct CLIInputSchema {
     pub field: String,
     pub flag: String,
+    /// D-CLI-FIELD-MARKERS1=A: one-letter alias from `#Short`.
+    pub short: Option<String>,
+    /// D-CLI-FIELD-MARKERS1=A: fallback variable from `#Env`.
+    pub env: Option<String>,
     pub help: String,
     pub metavar: Option<String>,
     pub shape: CLIInputShape,
@@ -80,6 +84,24 @@ pub struct CLIInputSchema {
 }
 
 impl CLIInputSchema {
+    /// Help passed to the shared `core.args` builder. The builder adds the
+    /// environment label; the typed layer adds its decoded default and the
+    /// ratified precedence law.
+    pub fn builder_help(&self) -> String {
+        let mut help = self.help.clone();
+        if let CLIInputShape::Value {
+            default: Some(default),
+            ..
+        } = &self.shape
+        {
+            help.push_str(&format!(" [default: {}]", default.display()));
+            if self.env.is_some() {
+                help.push_str(" [precedence: flag > env > default]");
+            }
+        }
+        help
+    }
+
     pub fn required(&self) -> bool {
         matches!(
             self.shape,
@@ -361,6 +383,8 @@ pub fn decode_record(record: &[u8]) -> Result<CLICommandSchema, MetadataError> {
 fn encode_input(payload: &mut Vec<u8>, input: &CLIInputSchema) {
     put_string(payload, &input.field);
     put_string(payload, &input.flag);
+    put_optional_string(payload, input.short.as_deref());
+    put_optional_string(payload, input.env.as_deref());
     put_string(payload, &input.help);
     put_optional_string(payload, input.metavar.as_deref());
     match &input.shape {
@@ -389,6 +413,8 @@ fn encode_input(payload: &mut Vec<u8>, input: &CLIInputSchema) {
 fn decode_input(cursor: &mut Cursor<'_>) -> Result<CLIInputSchema, MetadataError> {
         let field = cursor.string()?;
         let flag = cursor.string()?;
+        let short = cursor.optional_string()?;
+        let env = cursor.optional_string()?;
         let help = cursor.string()?;
         let metavar = cursor.optional_string()?;
         let shape = match cursor.byte()? {
@@ -422,7 +448,7 @@ fn decode_input(cursor: &mut Cursor<'_>) -> Result<CLIInputSchema, MetadataError
             }
             _ => return Err(MetadataError::Malformed("invalid positional bit")),
         };
-    Ok(CLIInputSchema { field, flag, help, metavar, shape, positional })
+    Ok(CLIInputSchema { field, flag, short, env, help, metavar, shape, positional })
 }
 
 fn put_u32(out: &mut Vec<u8>, value: u32) { out.extend_from_slice(&value.to_le_bytes()); }
@@ -708,6 +734,11 @@ impl CLICommandSchema {
             words.push(input.flag.clone());
         }
         words.extend(self.inputs.iter().map(|input| format!("--{}", input.flag)));
+        words.extend(
+            self.inputs
+                .iter()
+                .filter_map(|input| input.short.as_ref().map(|short| format!("-{short}"))),
+        );
         for command in &self.commands {
             words.push(command.name.clone());
         }
@@ -731,6 +762,10 @@ pub fn command_schema(structure: &StructDef) -> Option<CLICommandSchema> {
         .filter(|field| field.computed.is_none())
         .map(|field| {
             let flag = field.name.replace('_', "-");
+            let short = marker(&field.serde_markers, Syntax::CONTRACT_SHORT)
+                .and_then(marker_string);
+            let env = marker(&field.serde_markers, Syntax::CONTRACT_ENV)
+                .and_then(marker_string);
             let help = marker(&field.serde_markers, Syntax::CONTRACT_DOC)
                 .and_then(marker_string)
                 .unwrap_or_else(|| format!("value for --{flag}"));
@@ -768,6 +803,8 @@ pub fn command_schema(structure: &StructDef) -> Option<CLICommandSchema> {
             CLIInputSchema {
                 field: field.name.clone(),
                 flag,
+                short,
+                env,
                 help,
                 metavar: (!matches!(shape, CLIInputShape::Flag)).then_some(metavar),
                 shape,
@@ -826,6 +863,8 @@ mod tests {
             inputs: vec![CLIInputSchema {
                 field: "output_file".to_string(),
                 flag: "output-file".to_string(),
+                short: Some("o".to_string()),
+                env: Some("OUTPUT_FILE".to_string()),
                 help: "destination".to_string(),
                 metavar: Some("OUTPUT_FILE".to_string()),
                 shape: CLIInputShape::Value {
@@ -973,8 +1012,8 @@ mod tests {
         assert_eq!(read_executable(&nested_fat_mach(&record)), Err(MetadataError::Malformed("nested universal Mach-O slice")));
 
         let mut unsupported = record.clone();
-        unsupported[8..10].copy_from_slice(&3u16.to_le_bytes());
-        assert_eq!(decode_record(&unsupported), Err(MetadataError::UnsupportedVersion(3)));
+        unsupported[8..10].copy_from_slice(&4u16.to_le_bytes());
+        assert_eq!(decode_record(&unsupported), Err(MetadataError::UnsupportedVersion(4)));
         let mut corrupt = record;
         *corrupt.last_mut().unwrap() ^= 1;
         assert_eq!(decode_record(&corrupt), Err(MetadataError::Malformed("digest mismatch")));

@@ -1,0 +1,23 @@
+Error [E1319]: `#Short` has no CLI mapping for field `port`
+  --> tests/ui/cli_field_marker_misuse.jet:2:6
+    |
+  2 |     #Short("p") port: Int
+    |      ^^^^^
+ Why: `#Short` and `#Env` describe generated command inputs, but this struct is not `#CLI`.
+ Fix: remove the marker, or mark the command-input struct `#CLI`
+
+Error [E1318]: `#Short("port")` is not a one-letter option
+  --> tests/ui/cli_field_marker_misuse.jet:7:6
+    |
+  7 |     #Short("port") port: Int
+    |      ^^^^^
+ Why: the shared command parser treats a short option as one ASCII letter.
+ Fix: use one letter, such as `#Short("p")`
+
+Error [E1319]: `#Env` has no CLI mapping for field `verbose`
+  --> tests/ui/cli_field_marker_misuse.jet:8:6
+    |
+  8 |     #Env("VERBOSE") verbose: Bool
+    |      ^^^
+ Why: a `Bool` command field is a presence flag, while `#Env` lowers to a value option.
+ Fix: remove `#Env`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field
