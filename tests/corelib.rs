@@ -3307,6 +3307,71 @@ fn run() {
 }
 
 #[test]
+fn core_args_parse_or_exit_handles_cli_boundaries_and_keeps_parse_pure() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_corelib_args_exit_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let src = r#"
+use core.args as args
+use core.io as io
+
+fn run() {
+    spec :: args.spec()
+        .flag("verbose", "print extra detail")
+    parsed :: spec.parse_or_exit(io.args())
+    embedded :: spec.parse(["embedded", "--verbose"]) ?? panic("pure parse failed")
+    print(parsed.flag("verbose"))
+    print(embedded.flag("verbose"))
+}
+"#;
+    let path = dir.join("args_parse_or_exit.jet");
+    fs::write(&path, src).unwrap();
+    let shown = path.to_string_lossy();
+    let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
+        panic!(
+            "front end rejected parse_or_exit fixture:\n{}",
+            jet::render_diagnostics(&shown, src, &diags)
+        )
+    });
+    let rust = dir.join("args_parse_or_exit.rs");
+    let bin = dir.join("args_parse_or_exit");
+    fs::write(&rust, out.rust).unwrap();
+    let built = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rust)
+        .arg("-o")
+        .arg(&bin)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "rustc rejected generated code:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let normal = Command::new(&bin).arg("--verbose").output().unwrap();
+    assert_eq!(normal.status.code(), Some(0));
+    assert_eq!(String::from_utf8_lossy(&normal.stdout), "true\ntrue\n");
+    assert!(normal.stderr.is_empty());
+
+    let help = Command::new(&bin).arg("--help").output().unwrap();
+    assert_eq!(help.status.code(), Some(0));
+    let help_stdout = String::from_utf8_lossy(&help.stdout);
+    assert!(help_stdout.contains("Usage: args_parse_or_exit [options]"));
+    assert!(help_stdout.contains("--help"));
+    assert!(help.stderr.is_empty());
+
+    let bad = Command::new(&bin).arg("--verbse").output().unwrap();
+    assert_eq!(bad.status.code(), Some(2));
+    assert!(bad.stdout.is_empty());
+    let bad_stderr = String::from_utf8_lossy(&bad.stderr);
+    assert!(bad_stderr.contains("unknown option `--verbse`"));
+    assert!(bad_stderr.contains("did you mean `--verbose`?"));
+}
+
+#[test]
 fn core_args_nested_subcommand_does_not_overflow() {
     let src = r#"
 use core.args as args

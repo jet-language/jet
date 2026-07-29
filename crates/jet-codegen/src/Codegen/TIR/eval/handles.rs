@@ -25,6 +25,7 @@ fn handle_op_name(op: &THandleOp) -> &'static str {
         THandleOp::ArgsSpecCompletion => "ArgsSpecCompletion",
         THandleOp::ArgsSpecHelp => "ArgsSpecHelp",
         THandleOp::ArgsSpecParse => "ArgsSpecParse",
+        THandleOp::ArgsSpecParseOrExit => "ArgsSpecParseOrExit",
         THandleOp::ParsedArgsFlag => "ParsedArgsFlag",
         THandleOp::ParsedArgsOption => "ParsedArgsOption",
         THandleOp::ParsedArgsOptionInt => "ParsedArgsOptionInt",
@@ -409,6 +410,9 @@ pub(super) fn eval_handle(
         THandleOp::ArgsSpecCompletion => Err(unsupported("handle `ArgsSpecCompletion`", span)),
         THandleOp::ArgsSpecHelp => Err(unsupported("handle `ArgsSpecHelp`", span)),
         THandleOp::ArgsSpecParse => Err(unsupported("handle `ArgsSpecParse`", span)),
+        THandleOp::ArgsSpecParseOrExit => {
+            Err(unsupported("handle `ArgsSpecParseOrExit`", span))
+        }
         THandleOp::ParsedArgsFlag => Err(unsupported("handle `ParsedArgsFlag`", span)),
         THandleOp::ParsedArgsOption => Err(unsupported("handle `ParsedArgsOption`", span)),
         THandleOp::ParsedArgsOptionInt => Err(unsupported("handle `ParsedArgsOptionInt`", span)),

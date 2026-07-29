@@ -3171,7 +3171,10 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::ArgsSpecOptionDefault | THandleOp::ArgsSpecOptionChoice if args.len() == 4 => {
             true
         }
-        THandleOp::ArgsSpecVersion | THandleOp::ArgsSpecCompletion | THandleOp::ArgsSpecParse
+        THandleOp::ArgsSpecVersion
+        | THandleOp::ArgsSpecCompletion
+        | THandleOp::ArgsSpecParse
+        | THandleOp::ArgsSpecParseOrExit
             if args.len() == 1 =>
         {
             true

@@ -544,7 +544,7 @@ impl LowerCtx<'_, '_> {
             THandleOp::DataTreeBool | THandleOp::JSONBool => Some(Type::Bool),
             THandleOp::DataTreeFloat | THandleOp::JSONFloat => Some(Type::Float),
             // ParsedArgs handle lives in result bits (i64).
-            THandleOp::ArgsSpecParse => Some(Type::Int),
+            THandleOp::ArgsSpecParse | THandleOp::ArgsSpecParseOrExit => Some(Type::Int),
             _ => None,
         }
     }
@@ -601,7 +601,7 @@ impl LowerCtx<'_, '_> {
                 | THandleOp::ArgsSpecPositional
                 | THandleOp::ArgsSpecSubcommand
                 | THandleOp::ArgsSpecVersion => Some(Type::Int), // ArgsSpec handle
-                THandleOp::ArgsSpecParse => Some(Type::Int), // Result handle
+                THandleOp::ArgsSpecParse | THandleOp::ArgsSpecParseOrExit => Some(Type::Int),
                 // D-DET-CAPAPI: TIR may leave these as Unit; recover Int for print/interp.
                 THandleOp::ClockNow
                 | THandleOp::ClockTick
@@ -15056,6 +15056,14 @@ impl LowerCtx<'_, '_> {
             THandleOp::ArgsSpecParse => {
                 let a0 = self.lower_expr(&args[0])?;
                 let host = self.module.declare_func_in_func(self.host.args.parse, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, a0]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::ArgsSpecParseOrExit => {
+                let a0 = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.args.parse_or_exit, self.b.func);
                 let call = self.b.ins().call(host, &[recv_val, a0]);
                 Ok(self.b.inst_results(call)[0])
             }

@@ -1,7 +1,7 @@
 // ── D-ARGS1: declarative CLI arg parsing (ratified 2026-06-22) ───────────────
 // The builder accumulates a spec; `jet_args_parse` runs it against an argv
-// list, producing `ParsedArgs` or an error string (never exits — the caller
-// decides what to print and how to exit, which keeps the API testable).
+// list, producing `ParsedArgs` or an error string. `jet_args_parse_or_exit`
+// adds the conventional CLI boundary while keeping `jet_args_parse` pure.
 //
 // Design: builder methods take the spec BY VALUE and return a new one —
 // ownership-safe, no aliasing, works with both immutable (::) and mutable
@@ -677,6 +677,20 @@ fn jet_args_parse(spec: &JetArgsSpec, argv: &Vec<String>) -> Result<JetParsedArg
         positionals,
         subcommand,
     })
+}
+
+fn jet_args_parse_or_exit(spec: &JetArgsSpec, argv: &Vec<String>) -> JetParsedArgs {
+    match jet_args_parse(spec, argv) {
+        Ok(parsed) if jet_parsed_flag(&parsed, &"help".to_string()) => {
+            println!("{}", spec.help());
+            std::process::exit(0);
+        }
+        Ok(parsed) => parsed,
+        Err(message) => {
+            eprintln!("{}", message);
+            std::process::exit(2);
+        }
+    }
 }
 
 fn jet_args_find_flag<'a>(spec: &'a JetArgsSpec, name: &str) -> Option<&'a JetArgKind> {

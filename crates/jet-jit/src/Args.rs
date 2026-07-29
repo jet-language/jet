@@ -273,6 +273,13 @@ mod runtime {
         }
     }
 
+    pub(super) extern "C" fn jet_jit_args_parse_or_exit(h: i64, argv: i64) -> i64 {
+        push_parsed(jet_args_parse_or_exit(
+            &take_spec(h),
+            &list_of_strings(argv),
+        ))
+    }
+
     pub(super) extern "C" fn jet_jit_parsed_flag(h: i64, name: i64) -> i8 {
         with_parsed(h, |p| i8::from(jet_parsed_flag(p, &clone_str(name))))
     }
@@ -323,6 +330,7 @@ pub(crate) struct ArgsHostFns {
     pub help: FuncId,
     pub completion: FuncId,
     pub parse: FuncId,
+    pub parse_or_exit: FuncId,
     pub parsed_flag: FuncId,
     pub parsed_option: FuncId,
     pub parsed_option_int: FuncId,
@@ -368,6 +376,10 @@ pub(crate) fn register_args_symbols(builder: &mut JITBuilder) {
         runtime::jet_jit_args_completion as *const u8,
     );
     builder.symbol("jet_jit_args_parse", runtime::jet_jit_args_parse as *const u8);
+    builder.symbol(
+        "jet_jit_args_parse_or_exit",
+        runtime::jet_jit_args_parse_or_exit as *const u8,
+    );
     builder.symbol("jet_jit_parsed_flag", runtime::jet_jit_parsed_flag as *const u8);
     builder.symbol(
         "jet_jit_parsed_option",
@@ -445,6 +457,7 @@ pub(crate) fn declare_args_host_fns(module: &mut JITModule) -> Result<ArgsHostFn
         help: import("jet_jit_args_help", &unary)?,
         completion: import("jet_jit_args_completion", &binary)?,
         parse: import("jet_jit_args_parse", &binary)?,
+        parse_or_exit: import("jet_jit_args_parse_or_exit", &binary)?,
         parsed_flag: import("jet_jit_parsed_flag", &binary_i8)?,
         parsed_option: import("jet_jit_parsed_option", &binary)?,
         parsed_option_int: import("jet_jit_parsed_option_int", &binary)?,

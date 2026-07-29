@@ -2471,6 +2471,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ArgsSpecParse => {
                     format!("{}jet_args_parse(&({}), &({}))", root, recv, a(0))
                 }
+                THandleOp::ArgsSpecParseOrExit => {
+                    format!("{}jet_args_parse_or_exit(&({}), &({}))", root, recv, a(0))
+                }
                 // D-ARGS1: ParsedArgs query methods.
                 THandleOp::ParsedArgsFlag => {
                     format!("{}jet_parsed_flag(&({}), &({}))", root, recv, a(0))

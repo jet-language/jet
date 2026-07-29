@@ -11,16 +11,10 @@ use core.io as io
 fn run() {
     spec :: args.spec()
         .flag("verbose", "print extra detail")
-        .flag("help", "show this help and exit")
         .option("output", "write result to FILE", "FILE")
-    parsed :: spec.parse(io.args()) ?? panic("arg parse failed")
-    if {
-        parsed.flag("help") -> print(spec.help()) 
-        else -> {
-            verbose :: parsed.flag("verbose")
-            out :: parsed.option("output")
-            print(verbose)
-            print(out ?? "none")
-        }
-    }
+    parsed :: spec.parse_or_exit(io.args())
+    verbose :: parsed.flag("verbose")
+    out :: parsed.option("output")
+    print(verbose)
+    print(out ?? "none")
 }

@@ -3704,6 +3704,8 @@ pub enum THandleOp {
     ArgsSpecHelp,
     /// D-ARGS1: ArgsSpec `.parse(argv)` → `{root}jet_args_parse(&(recv), &(a0))` → `Result<JetParsedArgs, String>`.
     ArgsSpecParse,
+    /// D-ARGS-EXIT1: ArgsSpec `.parse_or_exit(argv)` → parsed args or process exit.
+    ArgsSpecParseOrExit,
     /// D-ARGS1: ParsedArgs `.flag(name)` → `{root}jet_args_flag(&(recv), &(a0))` → `bool`.
     ParsedArgsFlag,
     /// D-ARGS1: ParsedArgs `.option(name)` → `{root}jet_args_option(&(recv), &(a0))` → `Option<String>`.

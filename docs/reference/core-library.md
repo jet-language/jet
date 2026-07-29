@@ -869,6 +869,7 @@ returns a new one:
 | `.completion(shell)` | `(String) → String` | shell completion text for bash/zsh/fish-style generators |
 | `.help()` | `() → String` | formatted help text with defaults, env fallbacks, choices, and subcommands |
 | `.parse(argv)` | `([String]) → ParsedArgs ? String` | parses `argv` against the spec; unknown flags include suggestions |
+| `.parse_or_exit(argv)` | `([String]) → ParsedArgs` | prints help and exits 0 for `--help`; prints usage errors and exits 2 |
 
 `ParsedArgs` query methods:
 
@@ -882,10 +883,11 @@ returns a new one:
 | `.positional(idx)` | `(Int) → String?` | the nth positional (0-based), or `None` |
 | `.subcommand()` | `() → String?` | matched subcommand name |
 
-`--help` and `--version` are recognized automatically; parse does not exit the
-process, so tools can decide whether to print `spec.help()` or continue. `.parse`
-returns `ParsedArgs ? String`, where the error string carries the parse message
-(unknown flag with "did you mean", missing positional, bad typed value, …).
+`--help` and `--version` are recognized automatically. Use `.parse` for tests,
+embedders, or custom error handling because it does not exit the process. It
+returns `ParsedArgs ? String`, where the error string contains the parse message.
+Use `.parse_or_exit` for a command-line entry point. It prints help and exits 0
+for `--help`, or prints a usage error and exits 2 for invalid arguments.
 Wrong argument counts on builder/query methods are **E1301**–**E1304**.
 Examples: `examples/features/io/args_spec.jet`,
 `examples/features/io/args_audit.jet`, and typed entry-parameter CLIs under

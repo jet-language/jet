@@ -42,6 +42,7 @@ pub(crate) fn args_spec_method_return(
             Type::Named("ParsedArgs".to_string()),
             Type::String,
         ))),
+        ("parse_or_exit", 1) => Some(Some(Type::Named("ParsedArgs".to_string()))),
         // Arity mismatches
         ("flag", _) => {
             diags.push(Diagnostic::error(
