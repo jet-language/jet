@@ -624,6 +624,12 @@ pub(crate) use crate::Syntax::binary_text_handle_rust_type;
 pub(crate) use crate::Syntax::reflect_handle_rust_type;
 
 impl Cx {
+    fn imported_type_metadata_name(&self, name: &str) -> Option<String> {
+        let (qualifier, leaf) = name.split_once('.')?;
+        let module = self.import_mods.get(qualifier)?.strip_prefix("user_")?;
+        Some(format!("{module}.{leaf}"))
+    }
+
     pub(crate) fn quantity_dimension(&self, ty: &Type) -> Option<crate::AST::Dimension> {
         ty.quantity_parts()
             .map(|(_, dimension)| dimension)
@@ -631,7 +637,13 @@ impl Cx {
                 let Type::Named(name) = ty else {
                     return None;
                 };
-                self.unit_facts.get(name).map(|fact| fact.dimension)
+                self.unit_facts
+                    .get(name)
+                    .or_else(|| {
+                        self.imported_type_metadata_name(name)
+                            .and_then(|canonical| self.unit_facts.get(&canonical))
+                    })
+                    .map(|fact| fact.dimension)
             })
     }
 
@@ -639,7 +651,24 @@ impl Cx {
         let Type::Named(name) = ty else {
             return None;
         };
-        self.unit_labels.get(name)
+        self.unit_labels.get(name).or_else(|| {
+            self.imported_type_metadata_name(name)
+                .and_then(|canonical| self.unit_labels.get(&canonical))
+        })
+    }
+
+    pub(crate) fn has_display_type(&self, name: &str) -> bool {
+        self.display_types.contains(name)
+            || self
+                .imported_type_metadata_name(name)
+                .is_some_and(|canonical| self.display_types.contains(&canonical))
+    }
+
+    pub(crate) fn is_distinct_type_name(&self, name: &str) -> bool {
+        self.distinct_types.contains_key(name)
+            || self
+                .imported_type_metadata_name(name)
+                .is_some_and(|canonical| self.distinct_types.contains_key(&canonical))
     }
 
     pub(crate) fn quantity_unit_label(
@@ -1948,6 +1977,74 @@ pub(crate) fn foreign_binding_method_key(owner: &str, method: &str) -> String {
     format!("__jet_foreign_method__{owner}__{method}")
 }
 
+/// Add local and imported unit-family facts under the names used by this module.
+pub(crate) fn register_bundle_unit_metadata(
+    cx: &mut Cx,
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) {
+    let imported = bundle.modules[module_idx]
+        .imports
+        .iter()
+        .filter_map(|import| {
+            bundle
+                .import_targets
+                .get(&(module_idx, import.span))
+                .copied()
+                .map(|target| {
+                    let qualifier = bundle.modules[target].alias.clone();
+                    (target, Some(qualifier))
+                })
+        });
+    for (target, qualifier) in std::iter::once((module_idx, None)).chain(imported) {
+        let module = &bundle.modules[target];
+        for item in &module.items {
+            if let Item::UnitFamily(family) = item {
+                if qualifier.is_some() && !family.is_pub {
+                    continue;
+                }
+                let dimension = crate::AST::Dimension::for_family(&family.family);
+                for member in family.distinct_defs() {
+                    let name = qualifier.as_ref().map_or_else(
+                        || member.name.clone(),
+                        |qualifier| format!("{qualifier}.{}", member.name),
+                    );
+                    cx.type_names.insert(name.clone());
+                    cx.distinct_types
+                        .insert(name.clone(), (member.base.clone(), member.is_numeric));
+                    let kind = member
+                        .quantity
+                        .map(|(_, kind)| kind)
+                        .unwrap_or(crate::AST::QuantityKind::Linear);
+                    let Some(source) =
+                        unit_family_member_for_type(family, &member.name, kind)
+                    else {
+                        continue;
+                    };
+                    cx.unit_labels
+                        .insert(name.clone(), unit_label(family, source));
+                    if let Some(dimension) = dimension {
+                        cx.unit_facts.insert(name, unit_fact(family, source, dimension, kind));
+                    }
+                }
+            }
+        }
+        if let Some(qualifier) = &qualifier {
+            for item in &module.items {
+                let Item::Impl(implementation) = item else {
+                    continue;
+                };
+                let qualified = format!("{qualifier}.{}", implementation.type_name);
+                if implementation.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY)
+                    && cx.unit_labels.contains_key(&qualified)
+                {
+                    cx.display_types.insert(qualified);
+                }
+            }
+        }
+    }
+}
+
 /// Mirror the bundle-level import maps `emit_bundle` fills before lowering.
 /// `build_cx_items` alone leaves `core_imports` empty; without this, JIT
 /// lowering mis-gates `use core.tasks as tasks` spawn/channel calls.
@@ -1966,46 +2063,7 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     register_core_import_surfaces(cx);
     cx.used_core = bundle.used_core.clone();
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
-    // Keep imported nominal identities qualified: two modules may deliberately
-    // mint the same member leaf for different dimensions.
-    let imported = bundle.modules[module_idx]
-        .imports
-        .iter()
-        .filter_map(|import| {
-            bundle
-                .import_targets
-                .get(&(module_idx, import.span))
-                .copied()
-        });
-    for target in std::iter::once(module_idx).chain(imported) {
-        let module = &bundle.modules[target];
-        for item in &module.items {
-            if let Item::UnitFamily(family) = item {
-                let dimension = crate::AST::Dimension::for_family(&family.family);
-                for member in family.distinct_defs() {
-                    let name = if target == module_idx {
-                        member.name.clone()
-                    } else {
-                        format!("{}.{}", module.alias, member.name)
-                    };
-                    let kind = member
-                        .quantity
-                        .map(|(_, kind)| kind)
-                        .unwrap_or(crate::AST::QuantityKind::Linear);
-                    let Some(source) =
-                        unit_family_member_for_type(family, &member.name, kind)
-                    else {
-                        continue;
-                    };
-                    cx.unit_labels
-                        .insert(name.clone(), unit_label(family, source));
-                    if let Some(dimension) = dimension {
-                        cx.unit_facts.insert(name, unit_fact(family, source, dimension, kind));
-                    }
-                }
-            }
-        }
-    }
+    register_bundle_unit_metadata(cx, bundle, module_idx);
     register_imported_methods(cx, bundle, module_idx);
     let (uinline, ufile) = unqualified_import_maps(bundle, module_idx);
     cx.unqualified_inline = uinline;

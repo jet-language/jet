@@ -1376,6 +1376,35 @@ impl<'a> Checker<'a> {
         None
     }
 
+    pub(crate) fn is_unit_type_name(&self, name: &str) -> bool {
+        if self.registry.is_unit_type(name) {
+            return true;
+        }
+        let Some((module, leaf)) = name.split_once('.') else {
+            return false;
+        };
+        let Some(modules) = self.modules else {
+            return false;
+        };
+        let index = self.imports.get(module).copied().or_else(|| {
+            self.imports
+                .values()
+                .copied()
+                .find(|&index| modules[index].module_alias == module)
+        });
+        let Some(index) = index else {
+            return false;
+        };
+        modules.get(index).is_some_and(|candidate| {
+            candidate.registry.is_unit_type(leaf) && self.type_is_pub_in(index, leaf)
+        })
+    }
+
+    pub(crate) fn is_unit_type(&self, ty: &Type) -> bool {
+        matches!(ty, Type::Named(name) if self.is_unit_type_name(name))
+            || ty.quantity_parts().is_some()
+    }
+
     pub(crate) fn counterpart_unit_type(
         &self,
         source_name: &str,

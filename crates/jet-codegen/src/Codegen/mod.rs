@@ -2149,6 +2149,7 @@ pub fn emit_bundle_dbg(
         register_core_import_surfaces(&mut cx);
         cx.used_core = bundle.used_core.clone();
         cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
+        register_bundle_unit_metadata(&mut cx, bundle, i);
         cx.root_prefix = "super::".to_string();
         cx.active_os = active_os;
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
@@ -2179,6 +2180,38 @@ pub fn emit_bundle_dbg(
     register_core_import_surfaces(&mut cx);
     cx.used_core = bundle.used_core.clone();
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
+    register_bundle_unit_metadata(&mut cx, bundle, bundle.entry);
+    for import in &entry.imports {
+        let Some(&target) = bundle
+            .import_targets
+            .get(&(bundle.entry, import.span))
+        else {
+            continue;
+        };
+        let imported = &bundle.modules[target];
+        let has_unit_display = imported.items.iter().any(|item| {
+            let Item::Impl(implementation) = item else {
+                return false;
+            };
+            implementation.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY)
+                && imported.items.iter().any(|item| {
+                    matches!(
+                        item,
+                        Item::UnitFamily(family)
+                            if family.distinct_defs().iter().any(|definition| {
+                                definition.name == implementation.type_name
+                            })
+                    )
+                })
+        });
+        if !has_unit_display {
+            continue;
+        }
+        out.push_str(&format!(
+            "use user_{}::user_Display as _;\n",
+            imported.alias
+        ));
+    }
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;

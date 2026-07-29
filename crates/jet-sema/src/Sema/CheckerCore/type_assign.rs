@@ -191,6 +191,17 @@ impl<'a> Checker<'a> {
                     if self.registry.contains(n) {
                         return;
                     }
+                    if let Some((module, leaf)) = n.split_once('.') {
+                        if let (Some(modules), Some(&index)) =
+                            (self.modules, self.imports.get(module))
+                        {
+                            if modules[index].registry.contains(leaf)
+                                && self.type_is_pub_in(index, leaf)
+                            {
+                                return;
+                            }
+                        }
+                    }
                     // Check imported file-module registries for pub types.
                     if let Some(mods) = self.modules {
                         let found = self

@@ -1160,6 +1160,35 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                         funcs.push(lowered);
                     }
                 }
+                Item::Impl(implementation)
+                    if implementation.trait_name.as_deref()
+                        == Some(crate::Syntax::TRAIT_DISPLAY)
+                        && imported_cx
+                            .unit_labels
+                            .contains_key(&implementation.type_name) =>
+                {
+                    for method in &implementation.methods {
+                        if !tir_covers_trait_method(
+                            method,
+                            &implementation.type_name,
+                            &imported_cx,
+                            crate::Syntax::TRAIT_DISPLAY,
+                        ) {
+                            continue;
+                        }
+                        let mut lowered = lower_trait_method(
+                            method,
+                            &implementation.type_name,
+                            &imported_cx,
+                            crate::Syntax::TRAIT_DISPLAY,
+                        );
+                        lowered.name = format!(
+                            "{}.{}::{}",
+                            imported.alias, implementation.type_name, method.name
+                        );
+                        funcs.push(lowered);
+                    }
+                }
                 _ => {}
             }
         }
@@ -1408,20 +1437,11 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             fields.iter().map(|(_, ty)| ty.clone()).collect(),
         );
     }
-    let mut distinct_bases = std::collections::HashMap::new();
-    for item in &module.items {
-        match item {
-            Item::Distinct(def) => {
-                distinct_bases.insert(def.name.clone(), def.base.clone());
-            }
-            Item::UnitFamily(family) => {
-                for def in family.distinct_defs() {
-                    distinct_bases.insert(def.name, def.base);
-                }
-            }
-            _ => {}
-        }
-    }
+    let distinct_bases = cx
+        .distinct_types
+        .iter()
+        .map(|(name, (base, _))| (name.clone(), base.clone()))
+        .collect();
     let mut trait_method_owners =
         std::collections::HashMap::<(String, String), Vec<String>>::new();
     for item in &module.items {

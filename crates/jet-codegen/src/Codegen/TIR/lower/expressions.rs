@@ -314,7 +314,7 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
     if cx.unit_label(&value.ty).is_none() {
         return value;
     }
-    if !cx.display_types.contains(name) {
+    if !cx.has_display_type(name) {
         return lower_unit_text(value, crate::AST::UnitFormat::Symbol, cx);
     }
     TExpr {

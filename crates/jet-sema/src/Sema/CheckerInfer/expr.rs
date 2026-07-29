@@ -706,7 +706,9 @@ impl<'a> Checker<'a> {
                             }
                             match fmt {
                                 crate::AST::StrFormat::Display => {
-                                    if !is_displayable(&t, self.registry, self.trait_reg) {
+                                    if !is_displayable(&t, self.registry, self.trait_reg)
+                                        && !self.is_unit_type(&t)
+                                    {
                                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
                                             self.diags.push(Diagnostic::error(
                                                 "E0915",
@@ -826,12 +828,7 @@ impl<'a> Checker<'a> {
                                     }
                                 }
                                 crate::AST::StrFormat::Unit(_) => {
-                                    let is_unit = matches!(
-                                        &t,
-                                        Type::Named(name)
-                                            if self.registry.is_unit_type(name)
-                                    ) || t.quantity_parts().is_some();
-                                    if !is_unit {
+                                    if !self.is_unit_type(&t) {
                                         self.diags.push(Diagnostic::error(
                                             "E0112",
                                             format!(
@@ -2291,7 +2288,9 @@ impl<'a> Checker<'a> {
                 self.borrow_ctx = true;
                 for item in items.iter_mut() {
                     if let Some(t) = self.infer(item) {
-                        if !is_printable(&t, self.registry, self.trait_reg) {
+                        if !is_printable(&t, self.registry, self.trait_reg)
+                            && !self.is_unit_type(&t)
+                        {
                             if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
                                 self.diags.push(Diagnostic::error(
                                     "E0112",

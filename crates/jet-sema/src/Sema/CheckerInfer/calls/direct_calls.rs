@@ -266,7 +266,9 @@ impl<'a> Checker<'a> {
                 let arg = &mut call.args[0];
                 self.borrow_ctx = true; // print borrows via `.jet_show()`
                 if let Some(t) = self.infer(&mut arg.expr) {
-                    if !is_printable(&t, self.registry, self.trait_reg) {
+                    if !is_printable(&t, self.registry, self.trait_reg)
+                        && !self.is_unit_type(&t)
+                    {
                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
                             self.diags.push(Diagnostic::error(
                                 "E0112",

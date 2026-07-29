@@ -282,7 +282,7 @@ pub(crate) fn is_covered_generic_struct_ty(ty: &Type, cx: &Cx) -> bool {
 /// operator (`ast_operand_is_integer` returns `None` for a distinct-typed operand, so the
 /// overflow trap is never claimed — matching the AST path's plain `+`).
 pub(crate) fn is_covered_distinct_ty(ty: &Type, cx: &Cx) -> bool {
-    matches!(ty, Type::Named(name) if cx.distinct_types.contains_key(name))
+    matches!(ty, Type::Named(name) if cx.is_distinct_type_name(name))
 }
 
 /// c109 Phase 23: a named-tuple type `(x: Int, y: Int)` (S73/D-SG7, `Type::Tuple`)

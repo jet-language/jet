@@ -1577,7 +1577,9 @@ impl<'a> Checker<'a> {
                     if let Some(arg) = args.get_mut(0) {
                         self.borrow_ctx = true;
                         if let Some(ty) = self.infer(&mut arg.expr) {
-                            if !is_printable(&ty, self.registry, self.trait_reg) {
+                            if !is_printable(&ty, self.registry, self.trait_reg)
+                                && !self.is_unit_type(&ty)
+                            {
                                 self.diags.push(Diagnostic::error(
                                     "E0112",
                                     format!("{} can't be printed yet", ty.show()),
@@ -1598,7 +1600,9 @@ impl<'a> Checker<'a> {
                     if let Some(arg) = args.get_mut(0) {
                         self.borrow_ctx = true;
                         if let Some(ty) = self.infer(&mut arg.expr) {
-                            if !is_printable(&ty, self.registry, self.trait_reg) {
+                            if !is_printable(&ty, self.registry, self.trait_reg)
+                                && !self.is_unit_type(&ty)
+                            {
                                 self.diags.push(Diagnostic::error(
                                     "E0112",
                                     format!("{} can't be printed yet", ty.show()),
@@ -1631,7 +1635,9 @@ impl<'a> Checker<'a> {
                     }
                     let arg = &mut args[0];
                     if let Some(ty) = self.infer(&mut arg.expr) {
-                        if !is_displayable(&ty, self.registry, self.trait_reg) {
+                        if !is_displayable(&ty, self.registry, self.trait_reg)
+                            && !self.is_unit_type(&ty)
+                        {
                             if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&ty) {
                                 self.diags.push(Diagnostic::error(
                                     "E0112",
