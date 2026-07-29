@@ -81,6 +81,8 @@ const routes = {
   'question/add':    (s, p) => db.addQuestion(s, p),
   'question/answer': (s, p) => db.answerQuestion(s, p.id, p.answer, p.by),
   'question/delete': (s, p) => db.deleteQuestion(s, p.id, p.by),
+  'message/add':     (s, p) => db.addMessage(s, p),
+  'message/done':    (s, p) => db.doneMessage(s, p.id, p.by),
   'idea/add':        (s, p) => db.addIdea(s, p),
   'idea/update':     (s, p) => db.updateIdea(s, p.id, p),
   'idea/delete':     (s, p) => db.deleteIdea(s, p.id, p.by),
@@ -92,7 +94,7 @@ const routes = {
   'milestone/update': (s, p) => db.updateMilestone(s, p.id, p, p.by),
   'milestone/delete': (s, p) => db.deleteMilestone(s, p.id, p.by),
   'ui/toggle':       (s, p) => db.toggleOpen(s, p.key),
-  'digest/seen':     (s) => db.setDigestCursor(s),
+  'done/clear':      (s) => db.clearDoneQueue(s),
 };
 
 const STATUS = { E_NOT_FOUND: 404, E_INVALID: 400, E_USAGE: 400, E_CONFLICT: 409, E_CLAIMED: 409, E_NO_DATA: 500, E_CRITERIA: 409, E_CRITERIA_SELF: 400,
@@ -220,6 +222,12 @@ export function serve(store, port = 7878, open = false) {
       }
       if (req.method === 'GET' && url.pathname === '/api/events') {
         return send(res, 200, store.load().events.slice(0, Number(url.searchParams.get('limit') || 50)));
+      }
+      if (req.method === 'GET' && url.pathname === '/api/messages') {
+        return send(res, 200, db.listMessages(store.load(), {
+          cardId: url.searchParams.get('card') || undefined,
+          status: url.searchParams.has('status') ? url.searchParams.get('status') : 'open',
+        }));
       }
       if (req.method === 'GET' && url.pathname === '/api/stream') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });

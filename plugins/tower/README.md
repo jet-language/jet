@@ -98,12 +98,19 @@ tower brief [ref] [--agent me] [--json] [--no-claim]
 tower card      list|show|add|update|claim|release|delete
 tower decision  list|show|add|update|ratify|reopen|delete
 tower question  list|ask|answer|delete
+tower message   list|add|done
 tower idea      list|add|promote|delete
 tower epoch     list|add|update|current
 tower milestone list|add|update|delete
 tower archive   status | show <id> | restore <id>
 tower init | serve | import
 ```
+
+Agents can leave a durable card message with
+`tower message add '#N' --text "…" --by agent-name`. The Now page keeps each
+message until the owner marks it done. `tower message list` shows open
+messages. `tower message done <id> --by owner` closes one message. Clearing
+completed cards in the Now page does not clear messages.
 
 `tower brief` is the one-shot agent work packet (#462): card, live blocker
 state, exit criteria, every linked decision copied verbatim, open questions,
@@ -133,8 +140,9 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
 - **Git linking** — `tower githook` installs a post-commit hook: commits
   mentioning `#12` append themselves to that card's log.
 - **⌘K** — jump to any card, ballot, or view; `j/k` walk the Now queue.
-- **Catch up** — one current status row per card changed by agents at the top
-  of Now, with a Dismiss button. Done rows show only the card number and title.
+- **Done and messages** — Now shows completed cards since the last clear and
+  durable card-linked agent messages. Clearing completed cards does not clear
+  messages. The owner closes each message with its own Done button.
 - **Recently decided** — a quiet, collapsed strip on Now lists every ratified
   decision still on the live board ("reversible for N days") with a one-tap
   Reopen — the walk-back buffer, surfaced.
