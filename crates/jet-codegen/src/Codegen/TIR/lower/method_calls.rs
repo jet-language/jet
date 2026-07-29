@@ -212,6 +212,34 @@ pub(crate) fn lower_method_call(
     env: &mut LowerEnv,
     lowered_receiver: Option<TExpr>,
 ) -> TExpr {
+    // Comptime fragment globals carry values but no local type slot. Recover
+    // the two opaque regex receiver types from that canonical value instead
+    // of misclassifying `binding.method()` as a static call.
+    let fragment_recv_type = if recv_type.is_none() && super::is_eval_fragment() {
+        match receiver {
+            Expr::Ident(name, _) => match cx.const_values.get(name) {
+                Some(crate::Comptime::CtValue::Struct { type_name, .. })
+                    if type_name == "__JetRegex" =>
+                {
+                    Some(Syntax::TYPE_REGEX.to_string())
+                }
+                Some(crate::Comptime::CtValue::Struct { type_name, .. })
+                    if type_name == "Match" =>
+                {
+                    Some("Match".to_string())
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let recv_type = if recv_type.is_some() {
+        recv_type
+    } else {
+        &fragment_recv_type
+    };
     let lowered_receiver = std::cell::RefCell::new(lowered_receiver);
     let lower_expr = |expr: &Expr, cx: &Cx, env: &mut LowerEnv| {
         if std::ptr::eq(expr, receiver) {
