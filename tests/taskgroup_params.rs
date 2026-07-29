@@ -1,7 +1,9 @@
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, have_rustc, run_default_multi};
+use tir_support::{build_and_run, build_and_run_full, have_rustc, run_default_multi};
+use jet::Interpreter::{dev_iteration, RunOutcome};
+use std::fs;
 
 const OUTER_GROUP_HELPER: &str = r#"
 fn spawn_later(group: TaskGroup) => Shared<[Int]> {
@@ -35,6 +37,15 @@ fn error_codes(source: &str) -> Vec<String> {
         .into_iter()
         .map(|diagnostic| diagnostic.code)
         .collect()
+}
+
+fn interpreter_outcome(name: &str, source: &str) -> RunOutcome {
+    let path = std::env::temp_dir().join(format!(
+        "jet_taskgroup_{name}_{}.jet",
+        std::process::id()
+    ));
+    fs::write(&path, source).unwrap();
+    dev_iteration(path.to_str().unwrap(), false, true)
 }
 
 #[test]
@@ -136,8 +147,24 @@ fn taskgroup_type_is_second_class() {
             "fn run() { f :: (group: TaskGroup) => 0 }\n",
             &["E0119"][..],
         ),
+        (
+            "fn bad(group: TaskGroup) { alias :: group }\nfn run() {}\n",
+            &["E0120"][..],
+        ),
+        (
+            "fn bad(group: TaskGroup) { groups :: [group] }\nfn run() {}\n",
+            &["E1110"][..],
+        ),
+        (
+            "fn bad(group: TaskGroup) { pair :: (group: group, n: 1) }\nfn run() {}\n",
+            &["E1110"][..],
+        ),
+        (
+            "fn bad(group: TaskGroup) { maybe :: Val(group) }\nfn run() {}\n",
+            &["E1110"][..],
+        ),
     ] {
-        assert_eq!(error_codes(source), expected);
+        assert_eq!(error_codes(source), expected, "{source}");
     }
 }
 
@@ -153,4 +180,114 @@ fn escape(group: TaskGroup) => fn() => Int {
 fn run() {}
 "#;
     assert_eq!(error_codes(source), ["E1110"]);
+}
+
+#[test]
+fn evaluator_supports_taskgroup_combinators() {
+    let source = r#"
+use core.time as time
+
+fn slow_seven() => Int {
+    time.sleep(30)
+    return 7
+}
+
+fn slow_eleven() => Int {
+    time.sleep(30)
+    return 11
+}
+
+fn run() {
+    taskgroup all_group {
+        one :: all_group.task => 1
+        two :: all_group.task => 2
+        values :: all_group.all([one, two])
+        print(values[0] + values[1])
+    }
+    taskgroup race_group {
+        seven :: race_group.task => slow_seven()
+        eight :: race_group.task => 8
+        print(race_group.race([seven, eight]))
+    }
+    taskgroup any_group {
+        eleven :: any_group.task => slow_eleven()
+        twelve :: any_group.task => 12
+        print(any_group.any([eleven, twelve]))
+    }
+}
+"#;
+    let interpreted = match interpreter_outcome("combinators", source) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 0, "{stderr}");
+            stdout
+        }
+        RunOutcome::Problems(diags) => panic!("interpreter rejected taskgroups: {diags:?}"),
+    };
+    assert_eq!(interpreted, "3\n8\n12\n");
+
+    let (code, stdout, stderr) =
+        run_default_multi("taskgroup_combinators", "main.jet", &[("main.jet", source)]);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, interpreted, "{stderr}");
+
+    if have_rustc() {
+        let (code, stdout) = build_and_run("taskgroup_combinators", source);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, interpreted);
+    }
+}
+
+#[test]
+fn early_return_closes_group_before_caller_continues() {
+    let source = r#"
+fn spawn_bad(group: TaskGroup) {
+    bad :: group.task => panic("child")
+}
+
+fn leave() => Int {
+    taskgroup group {
+        spawn_bad(group)
+        total := 0
+        loop n; 0..<2000000 { total += n }
+        return 1
+    }
+    return 0
+}
+
+fn run() {
+    leave()
+    print("after")
+}
+"#;
+    let (interpreted_stdout, interpreted_stderr) = match interpreter_outcome("early_return", source) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(exit_code, 70, "{stderr}");
+            (stdout, stderr)
+        }
+        RunOutcome::Problems(diags) => panic!("interpreter rejected child panic: {diags:?}"),
+    };
+    assert!(!interpreted_stdout.contains("after"), "{interpreted_stdout:?}");
+    assert!(interpreted_stderr.starts_with("panic: child\n"), "{interpreted_stderr}");
+
+    let (code, stdout, stderr) =
+        run_default_multi("taskgroup_early_return", "main.jet", &[("main.jet", source)]);
+    assert_eq!(code, 70, "{stderr}");
+    assert!(!stdout.contains("after"), "{stdout:?}\n{stderr}");
+    assert!(stderr.contains("panic: child\n"), "{stderr}");
+
+    if have_rustc() {
+        let (code, stdout, stderr) =
+            build_and_run_full("jet_taskgroup", "taskgroup_early_return", source);
+        assert_eq!(code, 70, "{stderr}");
+        assert!(!stdout.contains("after"), "{stdout:?}\n{stderr}");
+        assert!(stderr.starts_with("panic: child\n"), "{stderr}");
+    }
 }

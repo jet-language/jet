@@ -619,7 +619,11 @@ impl<'a> EvalCtx<'a> {
                 let migration_trace_start = self
                     .codec_migrations
                     .contains_key(&ty.name())
-                    .then(|| self.sink.as_ref().map_or(0, |sink| sink.stderr.len()));
+                    .then(|| {
+                        self.sink.as_ref().map_or(0, |sink| {
+                            sink.lock().expect("evaluator sink poisoned").stderr.len()
+                        })
+                    });
                 let result = self.run_func(func, vec![tree.clone()], &mut child)?;
                 if matches!(result, CtValue::ResErr(_)) {
                     // The emitted migration walker probes the current shape
@@ -627,9 +631,8 @@ impl<'a> EvalCtx<'a> {
                     // failed field contributes a propagation frame. Generated
                     // Decode TIR can visit later fields while constructing the
                     // failed value; keep the same observable trace as AOT.
-                    if let (Some(start), Some(sink)) =
-                        (migration_trace_start, self.sink.as_mut())
-                    {
+                    if let (Some(start), Some(sink)) = (migration_trace_start, self.sink.as_ref()) {
+                        let mut sink = sink.lock().expect("evaluator sink poisoned");
                         if let Some(line_end) = sink.stderr[start..].find('\n') {
                             sink.stderr.truncate(start + line_end + 1);
                         }
@@ -820,14 +823,7 @@ impl<'a> EvalCtx<'a> {
                     },
                 }
             }
-            TExprKind::Unit
-            | TExprKind::TaskGroupNew
-            | TExprKind::DefaultLit
-            | TExprKind::Uninit => Ok(CtValue::Unit),
-            TExprKind::TaskGroupClose(group) => {
-                self.eval_expr(group, scope)?;
-                Ok(CtValue::Unit)
-            }
+            TExprKind::Unit | TExprKind::DefaultLit | TExprKind::Uninit => Ok(CtValue::Unit),
             TExprKind::CtLit(v) => Ok(v.clone()),
             TExprKind::ConstRef(name) => self
                 .globals
@@ -1057,7 +1053,8 @@ impl<'a> EvalCtx<'a> {
                         _ => None,
                     });
                     let span = self.span();
-                    let Some(clock) = self.clocks.get_mut(index) else {
+                    let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+                    let Some(clock) = runtime.clocks.get_mut(index) else {
                         return Err(unsupported("clock handle", span));
                     };
                     let result = match op {
@@ -1087,6 +1084,13 @@ impl<'a> EvalCtx<'a> {
                     return self.eval_event_method(method, &mut r, &argv);
                 }
                 match op {
+                    crate::Codegen::TIR::THandleOp::TaskJoin => {
+                        return self.take_task(&r);
+                    }
+                    crate::Codegen::TIR::THandleOp::TaskDetach => {
+                        let _ = self.take_task(&r)?;
+                        return Ok(CtValue::Unit);
+                    }
                     crate::Codegen::TIR::THandleOp::SerdeEncode => {
                         return self.eval_serde_encode_value(r, &recv.ty);
                     }
@@ -1111,6 +1115,9 @@ impl<'a> EvalCtx<'a> {
                         .and_then(|clock| handle_index(clock, "__JetTirClock"))
                         .ok_or_else(|| unsupported("expiring clock", self.span()))?;
                     let now = *self
+                        .runtime
+                        .lock()
+                        .expect("evaluator runtime poisoned")
                         .clocks
                         .get(clock_index)
                         .ok_or_else(|| unsupported("expiring clock handle", self.span()))?;
@@ -1335,13 +1342,17 @@ impl<'a> EvalCtx<'a> {
                 // ambient I/O matches AOT (env/fs/process). Pure comptime
                 // keeps depth 0 and stays on apply_core_call (E3410).
                 if self.impure_depth > 0 && self.allow_impure {
+                    let mut sink = self
+                        .sink
+                        .as_ref()
+                        .map(|sink| sink.lock().expect("evaluator sink poisoned"));
                     apply_impure_core_call(
                         module,
                         method,
                         argv,
                         *source_span,
                         &self.base_dir,
-                        self.sink.as_deref_mut(),
+                        sink.as_deref_mut(),
                         self.repl_mode,
                         None,
                         None,
@@ -1846,7 +1857,8 @@ impl<'a> EvalCtx<'a> {
                         let frame = format!(
                             "error propagated from: {fn_name} ({file}:{line}) via ?\n"
                         );
-                        if let Some(sink) = self.sink.as_mut() {
+                        if let Some(sink) = self.sink.as_ref() {
+                            let mut sink = sink.lock().expect("evaluator sink poisoned");
                             let skip = sink
                                 .stderr
                                 .ends_with(&frame);
@@ -2066,6 +2078,9 @@ impl<'a> EvalCtx<'a> {
                         let deadline = struct_int(&r, "deadline")
                             .ok_or_else(|| unsupported("expiring secret deadline", self.span()))?;
                         let valid = self
+                            .runtime
+                            .lock()
+                            .expect("evaluator runtime poisoned")
                             .clocks
                             .get(clock_index)
                             .is_some_and(|now| *now <= deadline);
@@ -2103,14 +2118,21 @@ impl<'a> EvalCtx<'a> {
                             })
                             .ok_or_else(|| unsupported("shared handle", self.span()))?;
                         let transactional = method == "edit_txn";
+                        let shared = self
+                            .runtime
+                            .lock()
+                            .expect("evaluator runtime poisoned")
+                            .shared_values
+                            .get(index)
+                            .cloned();
                         let current = if transactional {
                             self.shared_transactions
                                 .last()
                                 .and_then(|transaction| transaction.get(&index))
                                 .cloned()
-                                .or_else(|| self.shared_values.get(index).cloned())
+                                .or(shared)
                         } else {
-                            self.shared_values.get(index).cloned()
+                            shared
                         }
                         .ok_or_else(|| unsupported("shared value", self.span()))?;
                         let Some(TExpr {
@@ -2131,7 +2153,10 @@ impl<'a> EvalCtx<'a> {
                             };
                             transaction.insert(index, updated);
                         } else if method == "edit" {
-                            self.shared_values[index] = updated;
+                            self.runtime
+                                .lock()
+                                .expect("evaluator runtime poisoned")
+                                .shared_values[index] = updated;
                         }
                         return Ok(result);
                     }
@@ -2215,8 +2240,10 @@ impl<'a> EvalCtx<'a> {
                                 ));
                             }
                         };
-                        let index = self.clocks.len();
-                        self.clocks.push(seed);
+                        let mut runtime =
+                            self.runtime.lock().expect("evaluator runtime poisoned");
+                        let index = runtime.clocks.len();
+                        runtime.clocks.push(seed);
                         return Ok(CtValue::Struct {
                             type_name: "__JetTirClock".to_string(),
                             fields: vec![("index".to_string(), CtValue::Int(index as i64))],
@@ -2272,6 +2299,9 @@ impl<'a> EvalCtx<'a> {
                     let clock_index = handle_index(&clock, "__JetTirClock")
                         .ok_or_else(|| unsupported("expiring clock", self.span()))?;
                     let now = *self
+                        .runtime
+                        .lock()
+                        .expect("evaluator runtime poisoned")
                         .clocks
                         .get(clock_index)
                         .ok_or_else(|| unsupported("expiring clock handle", self.span()))?;
@@ -2469,7 +2499,8 @@ impl<'a> EvalCtx<'a> {
                     loc.line,
                     " ".repeat(col_offset)
                 );
-                if let Some(sink) = self.sink.as_mut() {
+                if let Some(sink) = self.sink.as_ref() {
+                    let mut sink = sink.lock().expect("evaluator sink poisoned");
                     sink.stderr.push_str(&rendered);
                     sink.exit_code = Some(70);
                     return Err(Diagnostic::error(
@@ -2807,8 +2838,10 @@ impl<'a> EvalCtx<'a> {
                             return Ok(value);
                         }
                         if path == "jet_std::JetShared" && method.name == "new" && argv.len() == 1 {
-                            let index = self.shared_values.len();
-                            self.shared_values.push(argv.remove(0));
+                            let mut runtime =
+                                self.runtime.lock().expect("evaluator runtime poisoned");
+                            let index = runtime.shared_values.len();
+                            runtime.shared_values.push(argv.remove(0));
                             return Ok(CtValue::Struct {
                                 type_name: "__JetTirShared".to_string(),
                                 fields: vec![("index".to_string(), CtValue::Int(index as i64))],
@@ -2959,8 +2992,8 @@ impl<'a> EvalCtx<'a> {
                 )
             }
             TExprKind::CoreClosureCall {
-                kind: TCoreClosureKind::Spawn { .. },
-            } => self.eval_spawn(scope),
+                kind: TCoreClosureKind::Spawn { group, site, .. },
+            } => self.eval_spawn(*site, group.as_deref(), scope),
             TExprKind::CoreClosureCall {
                 kind: TCoreClosureKind::Guard { executable, .. },
             } => {
@@ -2988,9 +3021,24 @@ impl<'a> EvalCtx<'a> {
             TExprKind::CoreClosureCall { .. } => {
                 Err(unsupported("expr `CoreClosureCall`", self.span()))
             }
-            TExprKind::TaskGroupAll { .. } => Err(unsupported("expr `TaskGroupAll`", self.span())),
-            TExprKind::TaskGroupRace { .. } => Err(unsupported("expr `TaskGroupRace`", self.span())),
-            TExprKind::TaskGroupAny { .. } => Err(unsupported("expr `TaskGroupAny`", self.span())),
+            TExprKind::TaskGroupAll { tasks } => {
+                let CtValue::List(tasks) = self.eval_expr(tasks, scope)? else {
+                    return Err(unsupported("taskgroup all list", self.span()));
+                };
+                self.task_select(&tasks, crate::task_group::JetTaskSelectMode::All)
+            }
+            TExprKind::TaskGroupRace { tasks } => {
+                let CtValue::List(tasks) = self.eval_expr(tasks, scope)? else {
+                    return Err(unsupported("taskgroup race list", self.span()));
+                };
+                self.task_select(&tasks, crate::task_group::JetTaskSelectMode::Race)
+            }
+            TExprKind::TaskGroupAny { tasks } => {
+                let CtValue::List(tasks) = self.eval_expr(tasks, scope)? else {
+                    return Err(unsupported("taskgroup any list", self.span()));
+                };
+                self.task_select(&tasks, crate::task_group::JetTaskSelectMode::Any)
+            }
             TExprKind::SelectStart => Err(unsupported("expr `SelectStart`", self.span())),
             TExprKind::SelectRecv { .. } => Err(unsupported("expr `SelectRecv`", self.span())),
             TExprKind::SelectAfter { .. } => Err(unsupported("expr `SelectAfter`", self.span())),
@@ -3239,9 +3287,10 @@ impl<'a> EvalCtx<'a> {
     }
 
     fn write_print(&mut self, text: &str, to_stderr: bool) -> Result<(), Diagnostic> {
-        let Some(sink) = self.sink.as_mut() else {
+        let Some(sink) = self.sink.as_ref() else {
             return Err(unsupported("print at comptime", self.span()));
         };
+        let mut sink = sink.lock().expect("evaluator sink poisoned");
         if to_stderr {
             sink.stderr.push_str(text);
             sink.stderr.push('\n');

@@ -450,12 +450,6 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             )
         }
         TExprKind::Unit => "()".to_string(),
-        TExprKind::TaskGroupNew => {
-            format!("{}jet_std::JetTaskGroup::new()", cx.root_prefix)
-        }
-        TExprKind::TaskGroupClose(group) => {
-            format!("({}).close()", emit_tir_expr(group, cx))
-        }
         TExprKind::DefaultLit => "Default::default()".to_string(),
         TExprKind::Uninit => format!(
             "unsafe {{ std::mem::MaybeUninit::<{}>::uninit().assume_init() }}",
@@ -3808,6 +3802,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             TCoreClosureKind::Spawn {
                 group,
                 spawn_closure,
+                ..
             } => match group {
                 Some(group) => format!(
                     "({}).spawn({})",

@@ -1319,6 +1319,17 @@ fn emit_tir_stmt(
                 pad, cx.root_prefix, closure
             ));
         }
+        TStmt::TaskGroup { group, body } => {
+            out.push_str(&format!("{}{{\n", pad));
+            out.push_str(&format!(
+                "{}    let {} = {}jet_std::JetTaskGroup::new();\n",
+                pad,
+                group.rust_place(),
+                cx.root_prefix
+            ));
+            emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);
+            out.push_str(&format!("{}}}\n", pad));
+        }
         TStmt::Region(body) | TStmt::Impure(body) => {
             out.push_str(&format!("{}{{\n", pad));
             emit_tir_stmts_nested(body, cx, out, indent + 1, active_deferred_closes);

@@ -473,7 +473,7 @@ extern "C" fn jet_jit_task_group_register(group: i64, task: i64) {
     });
 }
 
-extern "C" fn jet_jit_task_group_close(group: i64) -> i64 {
+fn close_task_group(group: i64) -> i64 {
     let group = with_runtime_mut(|rt| rt.task_groups[group as usize].take());
     let Some(group) = group else {
         return JitWaitStatus::Ready as i64;
@@ -491,11 +491,25 @@ extern "C" fn jet_jit_task_group_close(group: i64) -> i64 {
         |task| {
             let join = with_runtime_mut(|rt| rt.tasks[task as usize].take());
             if let Some(join) = join {
-                status = status.max(wait_status(|| join.join()));
+                let child = wait_status(|| join.join());
+                if status == JitWaitStatus::Ready as i64 {
+                    status = child;
+                }
             }
         },
     );
     status
+}
+
+extern "C" fn jet_jit_task_group_close(group: i64) -> i64 {
+    close_task_group(group)
+}
+
+pub(crate) fn close_active_task_groups() {
+    let len = with_runtime_mut(|rt| rt.task_groups.len());
+    for group in (0..len).rev() {
+        let _ = close_task_group(group as i64);
+    }
 }
 
 extern "C" fn jet_jit_task_cancel(task: i64) {

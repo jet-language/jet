@@ -93,6 +93,9 @@ pub(crate) struct LowerCtx<'a, 'b> {
     pub(crate) scope_guards: Vec<FuncId>,
     /// `defer close(^…)` — `(rust_place, resource_ty)`, run LIFO on exit.
     pub(crate) deferred_closes: Vec<(String, Type)>,
+    /// Native task-group handles active at this source point. Every non-local
+    /// edge closes them in LIFO order before leaving the function.
+    pub(crate) task_groups: Vec<Value>,
     /// Open `#Transact` frames: snapshot restores + commit/rollback hook funcs.
     pub(crate) txn_stack: Vec<TxnFrame>,
 }
@@ -2008,6 +2011,15 @@ impl LowerCtx<'_, '_> {
         Ok(())
     }
 
+    fn emit_taskgroup_closes(&mut self) {
+        let close = self
+            .module
+            .declare_func_in_func(self.host.conc.task_group_close, self.b.func);
+        for group in self.task_groups.iter().rev().copied().collect::<Vec<_>>() {
+            self.b.ins().call(close, &[group]);
+        }
+    }
+
     fn emit_txn_commit_hooks(&mut self) -> Result<(), String> {
         let Some(frame) = self.txn_stack.last_mut() else {
             return Ok(());
@@ -2171,6 +2183,7 @@ impl LowerCtx<'_, '_> {
         self.b.seal_block(epilogue);
         self.emit_shared_transaction_aborts_to(0);
         self.emit_shield_leaves_to(0);
+        self.emit_taskgroup_closes();
         self.emit_dummy_return();
 
         self.b.switch_to_block(cont);
@@ -2983,6 +2996,7 @@ impl LowerCtx<'_, '_> {
                 self.emit_txn_rollbacks_keep()?;
                 self.emit_shared_transaction_aborts_to(0);
                 self.emit_shield_leaves_to(0);
+                self.emit_taskgroup_closes();
                 self.emit_scope_guards()?;
                 if let Some(sender) = self.yield_sender {
                     let close = self
@@ -3009,6 +3023,7 @@ impl LowerCtx<'_, '_> {
                 self.emit_txn_rollbacks_keep()?;
                 self.emit_shared_transaction_aborts_to(0);
                 self.emit_shield_leaves_to(0);
+                self.emit_taskgroup_closes();
                 self.emit_scope_guards()?;
                 if let Some(sender) = self.yield_sender {
                     let close = self
@@ -4047,6 +4062,34 @@ impl LowerCtx<'_, '_> {
                     self.dead = true;
                 }
                 self.switch_subject = saved_subject;
+            }
+            TStmt::TaskGroup { group, body } => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.conc.task_group_new, self.b.func);
+                let call = self.b.ins().call(host, &[]);
+                let handle = self.b.inst_results(call)[0];
+                let var = self.fresh_var(types::I64);
+                self.b.def_var(var, handle);
+                let place = Self::local_key(group);
+                self.vars.insert(place.clone(), var);
+                self.var_tys
+                    .insert(
+                        place,
+                        Type::Named(jet_foundation::Syntax::TYPE_TASKGROUP.to_string()),
+                    );
+                self.task_groups.push(handle);
+                self.lower_stmts_scoped(body)?;
+                if !self.dead {
+                    let close = self.module.declare_func_in_func(
+                        self.host.conc.task_group_close,
+                        self.b.func,
+                    );
+                    let call = self.b.ins().call(close, &[handle]);
+                    let status = self.b.inst_results(call)[0];
+                    let _ = self.finish_wait_call(status);
+                }
+                self.task_groups.pop();
             }
             TStmt::Region(body) | TStmt::Impure(body) => {
                 self.lower_stmts_scoped(body)?;
@@ -11597,21 +11640,6 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::Absent => Ok(self.b.ins().iconst(types::I64, 0)),
             TExprKind::Unit => Ok(self.b.ins().iconst(types::I64, 0)),
-            TExprKind::TaskGroupNew => {
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.conc.task_group_new, self.b.func);
-                let call = self.b.ins().call(host, &[]);
-                Ok(self.b.inst_results(call)[0])
-            }
-            TExprKind::TaskGroupClose(group) => {
-                let group = self.lower_expr(group)?;
-                let host = self
-                    .module
-                    .declare_func_in_func(self.host.conc.task_group_close, self.b.func);
-                let call = self.b.ins().call(host, &[group]);
-                Ok(self.finish_wait_call(self.b.inst_results(call)[0]))
-            }
             TExprKind::CtLit(value) => self.lower_ct_value(value),
             TExprKind::Uninit => {
                 // D-UNINIT1 / GC promote: placeholder overwritten before read.

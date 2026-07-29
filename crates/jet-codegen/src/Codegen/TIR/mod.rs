@@ -1126,6 +1126,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             &extern_funcs,
         );
         populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+        imported_cx.jit_spawn_site_base = spawn_lambdas.len();
         for item in &imported.items {
             match item {
                 Item::Func(function)
@@ -2185,6 +2186,12 @@ pub enum TStmt {
     Return(Option<TExpr>),
     /// A call used for effect: `print(x);`, `helper(a);`.
     ExprStmt(TExpr),
+    /// D-TASKSCOPE1=A: a lexical structured-concurrency scope. Engines create
+    /// one group, run `body`, and close it on every exit path.
+    TaskGroup {
+        group: TLocal,
+        body: Vec<TStmt>,
+    },
     /// D-SHAPE-RESOURCE2=A: one sema-checked `defer close(^resource)` action.
     /// AOT emits a Drop guard; non-resident dev tiers use their named fallback.
     DeferClose {
@@ -2589,11 +2596,6 @@ pub enum TExprKind {
     /// Unit / default / uninit / comptime / host forms — structured facts only.
     /// Scalar comptime values use IntLit/BoolLit/CharLit via `lower_comptime_scalar`.
     Unit,
-    /// D-TASKGROUP-PARAM1=A: create the internal collector shared with helpers.
-    TaskGroupNew,
-    /// Close the lexical collector after its body. The AOT value also closes in
-    /// Drop so early exits preserve structured concurrency.
-    TaskGroupClose(Box<TExpr>),
     /// Compiler-private result block used by finite yielding loops. Unlike a
     /// lambda, it executes in the current function, so `return` and cleanup
     /// retain ordinary loop semantics.
@@ -3289,6 +3291,7 @@ pub enum TCoreClosureKind {
     /// internal group collector through every named helper call.
     Spawn {
         group: Option<Box<TExpr>>,
+        site: usize,
         spawn_closure: String,
     },
     /// `http.serve(addr, <lambda>)` → `{root}jet_http_serve(&(<addr>), <closure>)`.

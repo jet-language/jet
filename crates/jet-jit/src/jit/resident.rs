@@ -248,6 +248,10 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
             entry();
             None
         };
+        // A trap, deadline, cancellation, propagated error, or explicit early
+        // return may bypass a generated lexical epilogue. Drain any surviving
+        // groups before interpreting the run outcome.
+        Concurrency::close_active_task_groups();
         Concurrency::settle_pending_after_native();
         jet_codegen::scheduler::jet_scheduler_drain();
         Concurrency::set_active_runtime(None);
