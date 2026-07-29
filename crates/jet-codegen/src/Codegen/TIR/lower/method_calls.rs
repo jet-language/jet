@@ -221,6 +221,47 @@ pub(crate) fn lower_method_call(
         }
         crate::Codegen::TIR::lower_expr(expr, cx, env)
     };
+    let lower_core_arg =
+        |module: &str, method: &str, index: usize, expr: &Expr, cx: &Cx, env: &mut LowerEnv| {
+            // Comptime/TirBridge lowers core-call arguments before sema elaborates
+            // inferred typed literals. At a regex one-shot's first parameter, the
+            // expected type is unambiguously Regex; lower the same checked literal
+            // node that normal sema produces.
+            if module == "jet.regex"
+                && index == 0
+                && matches!(
+                    method,
+                    "is_match"
+                        | "match"
+                        | "find"
+                        | "find_all"
+                        | "matches"
+                        | "split"
+                        | "split_limit"
+                        | "replace"
+                        | "replace_all"
+                )
+            {
+                if let Expr::TypedLit {
+                    head: None,
+                    body: crate::AST::TypedLitBody::Value(pattern),
+                    span,
+                } = expr
+                {
+                    return TExpr {
+                        ty: Type::Named(Syntax::TYPE_REGEX.to_string()),
+                        kind: TExprKind::CoreCall {
+                            module: "jet.regex".to_string(),
+                            method: "literal".to_string(),
+                            args: vec![lower_expr(pattern, cx, env)],
+                            source_span: *span,
+                            widen_to_vec: vec![false],
+                        },
+                    };
+                }
+            }
+            lower_expr(expr, cx, env)
+        };
 
     if let Expr::Ident(name, _) = receiver {
         if env.is_gc(name) {
@@ -1180,8 +1221,13 @@ pub(crate) fn lower_method_call(
                 {
                     return t;
                 }
-                let targs: Vec<TExpr> =
-                    args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+                let targs: Vec<TExpr> = args
+                    .iter()
+                    .enumerate()
+                    .map(|(index, arg)| {
+                        lower_core_arg(&module, method, index, &arg.expr, cx, env)
+                    })
+                    .collect();
                 let widen_to_vec = core_widen_to_vec(&module, method, &targs);
                 let ty = if module == "core.mem" {
                     match method {
@@ -1230,7 +1276,13 @@ pub(crate) fn lower_method_call(
         if matches!(receiver, Expr::Field(..)) {
             if let Some(submodule) = core_module_path_from_receiver(receiver, &cx.core_imports, env)
             {
-                let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
+                let targs: Vec<TExpr> = args
+                    .iter()
+                    .enumerate()
+                    .map(|(index, arg)| {
+                        lower_core_arg(&submodule, method, index, &arg.expr, cx, env)
+                    })
+                    .collect();
                 let widen_to_vec = core_widen_to_vec(&submodule, method, &targs);
                 let ty = if crate::Sema::is_polymorphic_core_special(&submodule, method) {
                     resolved_ret.cloned().unwrap_or_else(|| core_call_return_ty(&submodule, method))

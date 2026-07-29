@@ -10097,6 +10097,10 @@ impl LowerCtx<'_, '_> {
                                 widen_bool(self, &args[2])?,
                             ],
                         ),
+                        "literal" if args.len() == 1 => (
+                            self.host.text.regex_literal,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
                         "is_match" if args.len() == 2 => (
                             self.host.text.regex_is_match,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
@@ -10109,9 +10113,17 @@ impl LowerCtx<'_, '_> {
                             self.host.text.regex_find_all,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
+                        "matches" if args.len() == 2 => (
+                            self.host.text.regex_matches,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
                         "match" if args.len() == 2 => (
                             self.host.text.regex_match,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "replace" if args.len() == 3 => (
+                            self.host.text.regex_replace,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?, self.lower_expr(&args[2])?],
                         ),
                         "replace_all" if args.len() == 3 => (
                             self.host.text.regex_replace_all,
@@ -10120,6 +10132,10 @@ impl LowerCtx<'_, '_> {
                         "split" if args.len() == 2 => (
                             self.host.text.regex_split,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
+                        "split_limit" if args.len() == 3 => (
+                            self.host.text.regex_split_limit,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?, self.lower_expr(&args[2])?],
                         ),
                         "compile" if args.len() == 1 => (
                             self.host.text.regex_compile,

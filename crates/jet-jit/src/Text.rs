@@ -8,6 +8,10 @@ use cranelift_module::{FuncId, Linkage, Module};
 
 /// Canonical text/unicode runtime — types stubbed, algorithm via include!
 pub(crate) mod text_rt {
+    mod jet_regex_syntax {
+        include!("../../jet-foundation/src/RegexSyntax.rs");
+    }
+
     pub mod jet_std {
         #[derive(Clone, Copy, Debug, PartialEq)]
         pub enum IOOperation {
@@ -337,6 +341,13 @@ fn with_regex<R: Default>(handle: i64, f: impl FnOnce(&RegexValue) -> R) -> R {
     })
 }
 
+fn clone_compiled_regex(handle: i64) -> Option<text_rt::jet_std::JetRegex> {
+    with_regex(handle, |value| match value {
+        RegexValue::Regex(regex) => Some(regex.clone()),
+        _ => None,
+    })
+}
+
 fn regex_result_ok(bits: u64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.results.push(super::JitResultValue { ok: true, bits });
@@ -377,63 +388,88 @@ extern "C" fn jet_jit_regex_flags(ci: i64, ml: i64, ds: i64) -> i64 {
     push_regex(RegexValue::Flags(text_rt::jet_std::jet_regex_flags(ci != 0, ml != 0, ds != 0)))
 }
 
-extern "C" fn jet_jit_regex_is_match(pat: i64, text: i64) -> i64 {
-    let p = clone_string(pat);
+extern "C" fn jet_jit_regex_literal(pat: i64) -> i64 {
+    push_regex(RegexValue::Regex(text_rt::jet_std::jet_regex_literal(
+        &clone_string(pat),
+    )))
+}
+
+extern "C" fn jet_jit_regex_is_match(pat: i64, text: i64) -> i8 {
     let t = clone_string(text);
-    match text_rt::jet_std::jet_regex_is_match(&p, &t) {
-        Ok(b) => regex_result_ok(u64::from(b)),
-        Err(e) => regex_result_err(e),
-    }
+    clone_compiled_regex(pat)
+        .map(|regex| i8::from(regex.is_match(&t)))
+        .unwrap_or_default()
 }
 
 extern "C" fn jet_jit_regex_find(pat: i64, text: i64) -> i64 {
-    let p = clone_string(pat);
     let t = clone_string(text);
-    match text_rt::jet_std::jet_regex_find(&p, &t) {
-        Ok(opt) => regex_result_ok(option_string_bits(opt) as u64),
-        Err(e) => regex_result_err(e),
-    }
+    clone_compiled_regex(pat)
+        .map(|regex| option_string_bits(regex.find(&t)))
+        .unwrap_or_default()
 }
 
 extern "C" fn jet_jit_regex_find_all(pat: i64, text: i64) -> i64 {
-    let p = clone_string(pat);
     let t = clone_string(text);
-    match text_rt::jet_std::jet_regex_find_all(&p, &t) {
-        Ok(items) => regex_result_ok(list_strings(items) as u64),
-        Err(e) => regex_result_err(e),
+    clone_compiled_regex(pat)
+        .map(|regex| list_strings(regex.find_all(&t)))
+        .unwrap_or_default()
+}
+
+extern "C" fn jet_jit_regex_matches(pat: i64, text: i64) -> i64 {
+    let text = clone_string(text);
+    let Some(regex) = clone_compiled_regex(pat) else {
+        return 0;
+    };
+    let list = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_empty_list());
+    for found in regex.matches(&text) {
+        let handle = push_regex(RegexValue::Match(found));
+        Concurrency::with_runtime_mut(|rt| {
+            let _ = rt.heap.list_push_int(list, handle);
+        });
     }
+    list
 }
 
 extern "C" fn jet_jit_regex_match(pat: i64, text: i64) -> i64 {
-    let p = clone_string(pat);
     let t = clone_string(text);
-    match text_rt::jet_std::jet_regex_match(&p, &t) {
-        Ok(None) => regex_result_ok(0),
-        Ok(Some(m)) => regex_result_ok(push_regex(RegexValue::Match(m)).wrapping_add(1) as u64),
-        Err(e) => regex_result_err(e),
-    }
+    clone_compiled_regex(pat)
+        .and_then(|regex| regex.match_value(&t))
+        .map(|found| push_regex(RegexValue::Match(found)).wrapping_add(1))
+        .unwrap_or_default()
 }
 
 extern "C" fn jet_jit_regex_replace_all(pat: i64, text: i64, repl: i64) -> i64 {
-    let p = clone_string(pat);
     let t = clone_string(text);
     let r = clone_string(repl);
-    match text_rt::jet_std::jet_regex_replace_all(&p, &t, &r) {
-        Ok(s) => {
-            let sid = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s));
-            regex_result_ok(sid as u64)
-        }
-        Err(e) => regex_result_err(e),
-    }
+    clone_compiled_regex(pat)
+        .map(|regex| {
+            Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(regex.replace_all(&t, &r)))
+        })
+        .unwrap_or_default()
+}
+
+extern "C" fn jet_jit_regex_replace(pat: i64, text: i64, repl: i64) -> i64 {
+    let text = clone_string(text);
+    let replacement = clone_string(repl);
+    clone_compiled_regex(pat)
+        .map(|regex| Concurrency::with_runtime_mut(|rt| {
+            rt.heap.alloc_string(regex.replace(&text, &replacement))
+        }))
+        .unwrap_or_default()
 }
 
 extern "C" fn jet_jit_regex_split(pat: i64, text: i64) -> i64 {
-    let p = clone_string(pat);
     let t = clone_string(text);
-    match text_rt::jet_std::jet_regex_split(&p, &t) {
-        Ok(items) => regex_result_ok(list_strings(items) as u64),
-        Err(e) => regex_result_err(e),
-    }
+    clone_compiled_regex(pat)
+        .map(|regex| list_strings(regex.split(&t)))
+        .unwrap_or_default()
+}
+
+extern "C" fn jet_jit_regex_split_limit(pat: i64, text: i64, limit: i64) -> i64 {
+    let text = clone_string(text);
+    clone_compiled_regex(pat)
+        .map(|regex| list_strings(regex.split_limit(&text, limit)))
+        .unwrap_or_default()
 }
 
 extern "C" fn jet_jit_regex_compile(pat: i64) -> i64 {
@@ -523,12 +559,16 @@ pub(crate) struct TextHostFns {
     pub starts_any: FuncId,
     pub char_indices: FuncId,
     pub regex_flags: FuncId,
+    pub regex_literal: FuncId,
     pub regex_is_match: FuncId,
     pub regex_find: FuncId,
     pub regex_find_all: FuncId,
+    pub regex_matches: FuncId,
     pub regex_match: FuncId,
+    pub regex_replace: FuncId,
     pub regex_replace_all: FuncId,
     pub regex_split: FuncId,
+    pub regex_split_limit: FuncId,
     pub regex_compile: FuncId,
     pub regex_compile_with: FuncId,
     pub regex_method: FuncId,
@@ -566,12 +606,16 @@ pub(crate) fn register_text_symbols(builder: &mut JITBuilder) {
         jet_jit_text_char_indices as *const u8,
     );
     builder.symbol("jet_jit_regex_flags", jet_jit_regex_flags as *const u8);
+    builder.symbol("jet_jit_regex_literal", jet_jit_regex_literal as *const u8);
     builder.symbol("jet_jit_regex_is_match", jet_jit_regex_is_match as *const u8);
     builder.symbol("jet_jit_regex_find", jet_jit_regex_find as *const u8);
     builder.symbol("jet_jit_regex_find_all", jet_jit_regex_find_all as *const u8);
+    builder.symbol("jet_jit_regex_matches", jet_jit_regex_matches as *const u8);
     builder.symbol("jet_jit_regex_match", jet_jit_regex_match as *const u8);
+    builder.symbol("jet_jit_regex_replace", jet_jit_regex_replace as *const u8);
     builder.symbol("jet_jit_regex_replace_all", jet_jit_regex_replace_all as *const u8);
     builder.symbol("jet_jit_regex_split", jet_jit_regex_split as *const u8);
+    builder.symbol("jet_jit_regex_split_limit", jet_jit_regex_split_limit as *const u8);
     builder.symbol("jet_jit_regex_compile", jet_jit_regex_compile as *const u8);
     builder.symbol("jet_jit_regex_compile_with", jet_jit_regex_compile_with as *const u8);
     builder.symbol("jet_jit_regex_method", jet_jit_regex_method as *const u8);
@@ -623,12 +667,16 @@ pub(crate) fn declare_text_host_fns(module: &mut JITModule) -> Result<TextHostFn
         starts_any: import("jet_jit_text_starts_any", &binary_i8)?,
         char_indices: import("jet_jit_text_char_indices", &unary)?,
         regex_flags: import("jet_jit_regex_flags", &ternary)?,
-        regex_is_match: import("jet_jit_regex_is_match", &binary)?,
+        regex_literal: import("jet_jit_regex_literal", &unary)?,
+        regex_is_match: import("jet_jit_regex_is_match", &binary_i8)?,
         regex_find: import("jet_jit_regex_find", &binary)?,
         regex_find_all: import("jet_jit_regex_find_all", &binary)?,
+        regex_matches: import("jet_jit_regex_matches", &binary)?,
         regex_match: import("jet_jit_regex_match", &binary)?,
+        regex_replace: import("jet_jit_regex_replace", &ternary)?,
         regex_replace_all: import("jet_jit_regex_replace_all", &ternary)?,
         regex_split: import("jet_jit_regex_split", &binary)?,
+        regex_split_limit: import("jet_jit_regex_split_limit", &ternary)?,
         regex_compile: import("jet_jit_regex_compile", &unary)?,
         regex_compile_with: import("jet_jit_regex_compile_with", &binary)?,
         regex_method: {

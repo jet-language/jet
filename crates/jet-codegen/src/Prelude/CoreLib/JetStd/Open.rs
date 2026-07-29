@@ -523,7 +523,20 @@ mod jet_std {
         jet_regex_compile_with(pattern, &RegexFlags::default())
     }
 
+    pub fn jet_regex_literal(pattern: &str) -> JetRegex {
+        match jet_regex_compile(pattern) {
+            Ok(regex) => regex,
+            Err(error) => unreachable!("sema accepted an invalid Regex literal: {error}"),
+        }
+    }
+
     pub fn jet_regex_compile_with(pattern: &str, flags: &RegexFlags) -> Result<JetRegex, String> {
+        super::jet_regex_syntax::validate(pattern).map_err(|error| {
+            format!(
+                "invalid regex `{pattern}` at position {}: {}",
+                error.offset, error.reason
+            )
+        })?;
         let mut parser = RegexParser {
             chars: pattern.chars().collect(),
             pos: 0,
@@ -550,44 +563,44 @@ mod jet_std {
         })
     }
 
-    pub fn jet_regex_is_match(pattern: &str, text: &str) -> Result<bool, String> {
-        Ok(jet_regex_compile(pattern)?.is_match(text))
+    pub fn jet_regex_is_match(pattern: &JetRegex, text: &str) -> bool {
+        pattern.is_match(text)
     }
 
-    pub fn jet_regex_match(pattern: &str, text: &str) -> Result<Option<JetRegexMatch>, String> {
-        Ok(jet_regex_compile(pattern)?.match_value(text))
+    pub fn jet_regex_match(pattern: &JetRegex, text: &str) -> Option<JetRegexMatch> {
+        pattern.match_value(text)
     }
 
-    pub fn jet_regex_find(pattern: &str, text: &str) -> Result<Option<String>, String> {
-        Ok(jet_regex_compile(pattern)?.find(text))
+    pub fn jet_regex_find(pattern: &JetRegex, text: &str) -> Option<String> {
+        pattern.find(text)
     }
 
-    pub fn jet_regex_find_all(pattern: &str, text: &str) -> Result<Vec<String>, String> {
-        Ok(jet_regex_compile(pattern)?.find_all(text))
+    pub fn jet_regex_find_all(pattern: &JetRegex, text: &str) -> Vec<String> {
+        pattern.find_all(text)
     }
 
-    pub fn jet_regex_matches(pattern: &str, text: &str) -> Result<Vec<JetRegexMatch>, String> {
-        Ok(jet_regex_compile(pattern)?.matches(text))
+    pub fn jet_regex_matches(pattern: &JetRegex, text: &str) -> Vec<JetRegexMatch> {
+        pattern.matches(text)
     }
 
-    pub fn jet_regex_replace(pattern: &str, text: &str, repl: &str) -> Result<String, String> {
-        Ok(jet_regex_compile(pattern)?.replace(text, repl))
+    pub fn jet_regex_replace(pattern: &JetRegex, text: &str, repl: &str) -> String {
+        pattern.replace(text, repl)
     }
 
-    pub fn jet_regex_replace_all(pattern: &str, text: &str, repl: &str) -> Result<String, String> {
-        Ok(jet_regex_compile(pattern)?.replace_all(text, repl))
+    pub fn jet_regex_replace_all(pattern: &JetRegex, text: &str, repl: &str) -> String {
+        pattern.replace_all(text, repl)
     }
 
-    pub fn jet_regex_split(pattern: &str, text: &str) -> Result<Vec<String>, String> {
-        Ok(jet_regex_compile(pattern)?.split(text))
+    pub fn jet_regex_split(pattern: &JetRegex, text: &str) -> Vec<String> {
+        pattern.split(text)
     }
 
     pub fn jet_regex_split_limit(
-        pattern: &str,
+        pattern: &JetRegex,
         text: &str,
         limit: i64,
-    ) -> Result<Vec<String>, String> {
-        Ok(jet_regex_compile(pattern)?.split_limit(text, limit))
+    ) -> Vec<String> {
+        pattern.split_limit(text, limit)
     }
 
     struct RegexParser {

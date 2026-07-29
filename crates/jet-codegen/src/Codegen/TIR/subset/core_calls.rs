@@ -179,6 +179,14 @@ pub(super) fn core_call_args_in_subset(
     cx: &Cx,
     locals: &std::collections::HashSet<String>,
 ) -> bool {
+    // D-REGEX-LIT1=D: regex one-shot calls support the ordinary documentation-only
+    // labels (`pattern:`, `text:`). Sema has already checked each label against its
+    // positional parameter; lowering erases labels.
+    if module == "jet.regex" {
+        return args
+            .iter()
+            .all(|arg| expr_in_subset(&arg.expr, cx, locals));
+    }
     if module == "core.auth" && matches!(method, "verify_jwt" | "verify_paseto") {
         let labels: &[Option<&str>] = if method == "verify_jwt" {
             &[None, Some("key"), Some("audience"), Some("issuer"), Some("clock_skew")]

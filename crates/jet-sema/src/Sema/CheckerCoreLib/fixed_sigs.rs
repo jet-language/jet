@@ -1663,8 +1663,8 @@ pub fn core_fixed_sig(
         // serve blocks until the listener is closed; handler is called per request.
         // The handler type is resolved at the call site (lambda / fn pointer).
         ("jet.http", "serve") => None, // special-cased in check_core_call
-        // D-REGEXENGINE1=A: core.regex — std-only linear regex. Every parsing
-        // call returns a Result; the `Err` is a bad-pattern message at the boundary.
+        // D-REGEXENGINE1=A / D-REGEX-LIT1=D: runtime compilation stays
+        // fallible; one-shot calls take a compile-checked Regex value.
         ("jet.regex", "flags") => Some((
             vec![(read, Type::Bool), (read, Type::Bool), (read, Type::Bool)],
             Some(Type::Named("RegexFlags".to_string())),
@@ -1681,51 +1681,57 @@ pub fn core_fixed_sig(
             Some(result_ty(Type::Named("Regex".to_string()), Type::String)),
         )),
         ("jet.regex", "is_match") => Some((
-            vec![(read, Type::String), (read, Type::String)],
-            Some(result_ty(Type::Bool, Type::String)),
+            vec![
+                (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
+                (read, Type::String),
+            ],
+            Some(Type::Bool),
         )),
         // First match anywhere: `Match?` (none when nothing matches).
         ("jet.regex", "match") => Some((
-            vec![(read, Type::String), (read, Type::String)],
-            Some(result_ty(
-                Type::Option(Box::new(Type::Named("Match".to_string()))),
-                Type::String,
-            )),
+            vec![
+                (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
+                (read, Type::String),
+            ],
+            Some(Type::Option(Box::new(Type::Named("Match".to_string())))),
         )),
         // First matched substring, or none.
         ("jet.regex", "find") => Some((
-            vec![(read, Type::String), (read, Type::String)],
-            Some(result_ty(
-                Type::Option(Box::new(Type::String)),
-                Type::String,
-            )),
+            vec![
+                (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
+                (read, Type::String),
+            ],
+            Some(Type::Option(Box::new(Type::String))),
         )),
         ("jet.regex", "find_all" | "split") => Some((
-            vec![(read, Type::String), (read, Type::String)],
-            Some(result_ty(Type::List(Box::new(Type::String)), Type::String)),
+            vec![
+                (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
+                (read, Type::String),
+            ],
+            Some(Type::List(Box::new(Type::String))),
         )),
         ("jet.regex", "matches") => Some((
-            vec![(read, Type::String), (read, Type::String)],
-            Some(result_ty(
-                Type::List(Box::new(Type::Named("Match".to_string()))),
-                Type::String,
-            )),
+            vec![
+                (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
+                (read, Type::String),
+            ],
+            Some(Type::List(Box::new(Type::Named("Match".to_string())))),
         )),
         ("jet.regex", "split_limit") => Some((
             vec![
-                (read, Type::String),
+                (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),
                 (read, Type::Int),
             ],
-            Some(result_ty(Type::List(Box::new(Type::String)), Type::String)),
+            Some(Type::List(Box::new(Type::String))),
         )),
         ("jet.regex", "replace" | "replace_all") => Some((
             vec![
-                (read, Type::String),
+                (read, Type::Named(Syntax::TYPE_REGEX.to_string())),
                 (read, Type::String),
                 (read, Type::String),
             ],
-            Some(result_ty(Type::String, Type::String)),
+            Some(Type::String),
         )),
         // D-CORE-COMPRESS1=A / D-DEP-ARCHIVE1=A: core.archive owns only
         // container formats. Stream gzip lives in core.compress.gzip.

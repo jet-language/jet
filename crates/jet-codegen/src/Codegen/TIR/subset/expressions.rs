@@ -186,6 +186,11 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             let is_typed_text_ctor = !locals.contains(&c.name)
                 && (c.name == "SQL" || c.name == "HTML" || c.name == "Sh")
                 && !cx.type_names.contains(&c.name);
+            // D-REGEX-LIT1=D: sema rewrites a checked Regex typed literal to
+            // this compiler-owned one-argument constructor.
+            let is_regex_literal_ctor = !locals.contains(&c.name)
+                && c.name == Syntax::TYPE_REGEX
+                && !cx.type_names.contains(&c.name);
             // c109 Phase 14: FFI extern + unqualified module-import calls are now
             // covered. Each lowers to its own resolved call form (`emit_call`'s
             // `extern_funcs`/`unqualified_inline`/`unqualified_file` arms). The
@@ -225,6 +230,7 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                 || is_math_ctor
                 || is_precise_ctor
                 || is_typed_text_ctor
+                || is_regex_literal_ctor
                 || is_extern
                 || is_unqual_inline
                 || is_unqual_file)

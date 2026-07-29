@@ -2288,6 +2288,13 @@ pub(crate) fn emit_tir_core_call(
                 arg(1)
             )
         }
+        ("jet.regex", "literal") => {
+            format!(
+                "{}jet_std::jet_regex_literal(&({}))",
+                cx.root_prefix,
+                arg(0)
+            )
+        }
         ("jet.regex", "is_match") => {
             format!(
                 "{}jet_std::jet_regex_is_match(&({}), &({}))",

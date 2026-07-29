@@ -940,6 +940,15 @@ position (retires `b"…"`). Text patterns keep plain `"…"` convenience and
 optional `String.{"…"}`. Amends D-TYPEDTEXT1/2 and D-BINPAT1; supersedes
 D-LITERAL-PREFIX1's prefix-first surface.
 
+**D-REGEX-LIT1=D — checked Regex literals** *(ratified 2026-07-28, card
+#1283)*: a regex pattern is always a typed literal. `Regex.{"…"}` names a
+reusable pattern value. The head can be inferred as `.{"…"}` at a
+Regex-typed positional or named argument. Sema validates the complete literal
+with the linear engine grammar, and reports E0152 with the pattern offset.
+One-shot `core.regex` calls take `Regex` and return their match value directly.
+A bare `String` is E0152. Runtime text remains fallible through
+`core.regex.compile` or `compile_with`.
+
 **D-SHIFT1 — Shift-style stream parsing (ratified 2026-07-01, c7shift)**: the
 Jai `shift` idiom lands as a core cursor surface, not an operator (option C —
 `r >> U32` punctuation — rejected). `Reader.over(bytes)` wraps a `[U8]` with a

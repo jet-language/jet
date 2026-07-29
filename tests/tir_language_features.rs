@@ -459,7 +459,7 @@ fn regex_match_group() {
 use core.regex as re
 fn run() {
     text :: \"order 42 shipped\"
-    m :: re.match(\"(\\\\d+) shipped\", text) ?? panic(\"bad pattern\")
+    m :: re.match(.{\"(\\\\d+) shipped\"}, text)
     if m == Val(mat) {
         whole :: mat.group(0) ?? \"none\"
         print(whole)

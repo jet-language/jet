@@ -84,10 +84,10 @@ fn run() {
 
     // is_match. NB: `{N}` regex quantifiers are written `{{N}}` in Jet source —
     // single braces are string interpolation (S8).
-    print(re.is_match("\\d{{4}}", text) ?? panic("p"))
+    print(re.is_match(pattern: .{"\\d{{4}}"}, text: text))
 
     // match + capture groups: whole + each group
-    m :: re.match("(\\d{{4}})-(\\d{{2}})-(\\d{{2}})", text) ?? panic("p")
+    m :: re.match(.{"(\\d{{4}})-(\\d{{2}})-(\\d{{2}})"}, text)
     if m == Val(mat) {
         print(mat.group(0) ?? "x")
         print(mat.group(1) ?? "x")
@@ -98,23 +98,23 @@ fn run() {
     }
 
     // no match -> None optional
-    none_match :: re.match("zzz", text) ?? panic("p")
+    none_match :: re.match(.{"zzz"}, text)
     if none_match == None {
         print("no-match")
     }
 
     // find / find_all
-    first :: re.find("\\d+", text) ?? panic("p")
+    first :: re.find(.{"\\d+"}, text)
     print(first ?? "none")
-    nums :: re.find_all("\\d+", text) ?? panic("p")
+    nums :: re.find_all(.{"\\d+"}, text)
     print(nums.len())
 
     // replace / replace_all (with group reference)
-    print(re.replace("ok", text, "done") ?? panic("p"))
-    print(re.replace_all("\\d", text, "#") ?? panic("p"))
+    print(re.replace(.{"ok"}, text, "done"))
+    print(re.replace_all(.{"\\d"}, text, "#"))
 
     // split
-    parts :: re.split("-", "a-b-c") ?? panic("p")
+    parts :: re.split(.{"-"}, "a-b-c")
     print(parts.len())
 }
 "##;
@@ -140,21 +140,46 @@ fn bad_pattern_is_a_recoverable_error_not_a_crash() {
         eprintln!("note: cargo/rustc not found; skipping jet.regex error test");
         return;
     }
-    // An unbalanced paren is a bad pattern: it must surface as the Result `Err`
-    // branch at the boundary (linear-time crate, no panic), which `??` turns into
-    // our own message — never a rustc/runtime crash (I2).
+    // Runtime-built text stays fallible at the explicit compilation boundary.
     let src = r##"
 use core.regex as re
 
 fn run() {
-    if re.is_match("(unclosed", "abc") == {
-        Ok(_) -> { print("unexpected-ok") }
-        Err(e) -> { print("caught") }
+    pattern :: "(unclosed"
+    if re.compile(pattern) == {
+        .Ok(_) -> { print("unexpected-ok") }
+        .Err(e) -> { print("caught") }
     }
 }
 "##;
     let out = run_regex(src);
     assert_eq!(out.trim(), "caught", "bad pattern surfaces as Err");
+}
+
+#[test]
+fn inferred_and_explicit_regex_literals_are_direct_values() {
+    if !have_toolchain() {
+        eprintln!("note: cargo/rustc not found; skipping typed Regex literal test");
+        return;
+    }
+    let src = r##"
+use core.regex as re
+
+fn run() {
+    print(re.find(.{"\\d+"}, "id=42") ?? "none")
+    print(re.find(pattern: .{"[a-z]+"}, text: "123jet") ?? "none")
+    digits :: Regex.{"\\d+"}
+    print(digits.is_match("room 7"))
+    runtime_pattern :: "\\w+"
+    runtime :: re.compile(runtime_pattern)
+    if runtime == .Ok(_) { print("runtime-result") }
+}
+"##;
+    assert_eq!(
+        run_regex(src),
+        "42\njet\ntrue\nruntime-result\n",
+        "typed patterns are direct; runtime compilation stays fallible"
+    );
 }
 
 #[test]

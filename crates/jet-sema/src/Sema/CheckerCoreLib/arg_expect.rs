@@ -1,7 +1,7 @@
 use crate::AST::{AccessConvention, Expr, Type};
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Sema::Checker;
-use crate::Sema::Diagnostics::type_fix_hint;
+use crate::Sema::Diagnostics::{type_fix_hint, typed_text_mismatch};
 use crate::Syntax;
 
 /// A plain binding or ownership-preserving place chain that a consuming Core
@@ -216,19 +216,23 @@ impl<'a> Checker<'a> {
                     && !union_widens
                     && !reads_expiring_secret_loan
                 {
-                    self.diags.push(Diagnostic::error(
-                        "E0112",
-                        format!(
-                            "`{}` wants {} for argument {}, but this is {}",
-                            call_name,
-                            param_ty.show(),
-                            idx + 1,
-                            got.show()
-                        ),
-                        "every argument must match its parameter's type".to_string(),
-                        type_fix_hint(param_ty, &got),
-                        Some(arg.expr.span()),
-                    ));
+                    if let Some(diag) = typed_text_mismatch(param_ty, &got, arg.expr.span()) {
+                        self.diags.push(diag);
+                    } else {
+                        self.diags.push(Diagnostic::error(
+                            "E0112",
+                            format!(
+                                "`{}` wants {} for argument {}, but this is {}",
+                                call_name,
+                                param_ty.show(),
+                                idx + 1,
+                                got.show()
+                            ),
+                            "every argument must match its parameter's type".to_string(),
+                            type_fix_hint(param_ty, &got),
+                            Some(arg.expr.span()),
+                        ));
+                    }
                 }
             }
             // A std constructor that stores a non-scalar payload (e.g. `JSON.Text`

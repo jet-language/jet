@@ -101,18 +101,52 @@ impl RegexLite {
         out
     }
 
-    pub(super) fn split<'a>(&self, text: &'a str) -> Vec<&'a str> {
+    pub(super) fn matches(&self, text: &str) -> Vec<MatchLite> {
         let mut out = Vec::new();
         let mut pos = 0;
         while pos <= text.len() {
+            let Some(found) = self.find_from(text, pos) else {
+                break;
+            };
+            pos = next_search_pos(text, found.start, found.end);
+            out.push(found);
+        }
+        out
+    }
+
+    pub(super) fn split<'a>(&self, text: &'a str) -> Vec<&'a str> {
+        self.split_limit(text, 0)
+    }
+
+    pub(super) fn split_limit<'a>(&self, text: &'a str, limit: i64) -> Vec<&'a str> {
+        let mut out = Vec::new();
+        let mut pos = 0;
+        let mut splits = 0i64;
+        while pos <= text.len() {
+            if limit > 0 && splits >= limit - 1 {
+                break;
+            }
             let Some(m) = self.find_from(text, pos) else {
                 break;
             };
             out.push(&text[pos..m.start]);
             pos = next_search_pos(text, m.start, m.end);
+            splits += 1;
         }
         out.push(&text[pos.min(text.len())..]);
         out
+    }
+
+    pub(super) fn replace(&self, text: &str, repl: &str) -> String {
+        let Some(found) = self.find(text) else {
+            return text.to_string();
+        };
+        format!(
+            "{}{}{}",
+            &text[..found.start],
+            repl,
+            &text[found.end..]
+        )
     }
 
     pub(super) fn replace_all(&self, text: &str, repl: &str) -> String {

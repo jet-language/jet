@@ -823,6 +823,23 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     })),
                 };
             }
+            // D-REGEX-LIT1=D: sema already validated this complete literal.
+            // Keep one Regex value through AOT/JIT instead of a fallible Result.
+            if call.name == Syntax::TYPE_REGEX
+                && !cx.sigs.contains_key(&call.name)
+                && call.args.len() == 1
+            {
+                return TExpr {
+                    ty: Type::Named(Syntax::TYPE_REGEX.to_string()),
+                    kind: TExprKind::CoreCall {
+                        module: "jet.regex".to_string(),
+                        method: "literal".to_string(),
+                        args: vec![lower_expr(&call.args[0].expr, cx, env)],
+                        source_span: call.name_span,
+                        widen_to_vec: vec![false],
+                    },
+                };
+            }
             // `print` is ambient only when the user has not defined their own
             // `print` function (matches emit_call; sema enforces the shadowing).
             if call.name == Syntax::BUILTIN_PRINT && !cx.sigs.contains_key(&call.name) {

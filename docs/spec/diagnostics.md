@@ -232,6 +232,7 @@ renumbered, and no new `W` code may be allocated.
 | E0149 | sema  | a runtime `String` used where `SQL`/`HTML` is expected (D-TYPEDTEXT1) |
 | E0150 | sema  | typestate: an operation is called on a value in the wrong state (D-STATE1) |
 | E0151 | sema  | typestate: `#State(X)` or `#Transition(A, B)` references a state not in the `state TypeName { … }` declaration (D-STATE-DECL) |
+| E0152 | sema  | a bare `String`, interpolated pattern, or invalid pattern is used as a typed `Regex` literal (D-REGEX-LIT1) |
 | E0153 | sema  | protocol expansion failed to parse a generated handle fragment (D-PROTO1) |
 | E0160 | sema  | `++`/`--` operand is not an assignable lvalue (D-INCR1) |
 | E0161 | sema  | `++`/`--` on an immutable binding or read-only parameter (D-INCR1) |

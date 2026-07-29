@@ -62,6 +62,17 @@ pub(crate) fn typed_text_mismatch(want: &Type, got: &Type, span: Span) -> Option
     let Type::Named(tn) = want else {
         return None;
     };
+    if tn == Syntax::TYPE_REGEX && *got == Type::String {
+        return Some(Diagnostic::error(
+            "E0152",
+            "a `String` is not a `Regex` pattern".to_string(),
+            "regex patterns are typed literals, so Jet can validate them before the program runs"
+                .to_string(),
+            "write `.{\"...\"}` here, or call `re.compile(text)` for a pattern built at run time"
+                .to_string(),
+            Some(span),
+        ));
+    }
     if (tn != "SQL" && tn != "HTML" && tn != Syntax::TYPE_SH) || *got != Type::String {
         return None;
     }

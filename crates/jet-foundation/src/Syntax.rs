@@ -86,6 +86,8 @@
 // `x == Val(v)` instead. Facts reach the right side of `&&` only, not `||`.
 // D-UNIONTYPE1=A reuses the existing `|` token (TokKind::Pipe / BitOr) in type
 // position as TYPE_UNION_SEP. `T ? E1 | E2` parses as `T ? (E1 | E2)`.
+// D-REGEX-LIT1=D adds no punctuation. Regex patterns use the universal
+// `Type.{ body }` / inferred `.{ body }` form from D-DOTCTOR3.
 pub const HTTP_ROUTE_PARAM_PREFIX: &str = ":";
 pub const HTTP_ROUTE_CATCH_ALL_PREFIX: &str = "*";
 

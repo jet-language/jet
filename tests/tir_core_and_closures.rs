@@ -74,7 +74,7 @@ fn run() {
     assert_eq!(stdout, "missing\n");
 }
 
-// NOTE: regex calls (`re.is_match(…)?? …`) route through the TIR and now emit
+// NOTE: typed regex calls (`re.is_match(.{…}, …)`) route through the TIR and emit
 // `jet_std::jet_regex_*` helpers, so regex-only programs build without an FFI bridge.
 
 // ===================================================================

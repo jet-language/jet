@@ -384,6 +384,9 @@ pub const STDLIB_DSL_BLOCK_MARKERS: &[&str] = &[DSL_BLOCK_SQL, ATTR_HTML];
 /// D-FFI-SH1=A: `Sh` is D-TYPEDTEXT1's argv-safe shell-command instance.
 pub const TYPE_SH: &str = "Sh";
 
+/// D-REGEX-LIT1=D: `Regex.{"…"}` is a compile-checked pattern value.
+pub const TYPE_REGEX: &str = "Regex";
+
 
 /// D-OSTARGET1=A (ratified 2026-07-01, c134): `#Target(OS. … )` namespace — the
 /// second, mutually-exclusive axis of the `#Target(...)` marker family

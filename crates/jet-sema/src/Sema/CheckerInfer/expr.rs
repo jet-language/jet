@@ -134,6 +134,69 @@ impl<'a> Checker<'a> {
         Some(Type::Named(type_name))
     }
 
+    /// D-REGEX-LIT1=D: validate `Regex.{"…"}` / inferred `.{"…"}` with the
+    /// same grammar gate used by the generated linear runtime.
+    pub(crate) fn rewrite_regex_literal(
+        &mut self,
+        e: &mut Expr,
+        span: Span,
+    ) -> Option<Type> {
+        let old = std::mem::replace(e, Expr::Absent(span));
+        let Expr::Str(parts, literal_span) = old else {
+            *e = old;
+            self.diags.push(Diagnostic::error(
+                "E0152",
+                "`Regex.{ … }` needs one quoted pattern".to_string(),
+                "a regex typed literal contains pattern text, not another expression shape"
+                    .to_string(),
+                "write `Regex.{\"...\"}`".to_string(),
+                Some(span),
+            ));
+            return None;
+        };
+        let [StrPart::Lit(pattern)] = parts.as_slice() else {
+            *e = Expr::Str(parts, literal_span);
+            self.diags.push(Diagnostic::error(
+                "E0152",
+                "a `Regex` literal cannot contain interpolation".to_string(),
+                "the compiler must know the complete pattern before the program runs"
+                    .to_string(),
+                "use a fixed `Regex.{\"...\"}` pattern, or build text and call `re.compile(text)`"
+                    .to_string(),
+                Some(literal_span),
+            ));
+            return None;
+        };
+        if let Err(error) = jet_foundation::RegexSyntax::validate(pattern) {
+            *e = Expr::Str(parts, literal_span);
+            self.diags.push(Diagnostic::error(
+                "E0152",
+                format!(
+                    "this regex pattern is invalid at position {}",
+                    error.offset
+                ),
+                error.reason,
+                "fix the pattern at the reported position".to_string(),
+                Some(literal_span),
+            ));
+            return None;
+        }
+        *e = Expr::Call(Call {
+            name: Syntax::TYPE_REGEX.to_string(),
+            name_span: span,
+            args: vec![CallArg {
+                convention: AccessConvention::Read,
+                expr: Expr::Str(parts, literal_span),
+                span: literal_span,
+                flags: CallArgFlags::default(),
+                label: None,
+                spread: false,
+            }],
+            range_checked: false,
+        });
+        Some(Type::Named(Syntax::TYPE_REGEX.to_string()))
+    }
+
     /// Infer and check an expression. Returns None when a problem was
     /// already reported (avoids error cascades).
     ///
@@ -1813,6 +1876,14 @@ impl<'a> Checker<'a> {
             {
                 *e = *inner;
                 return self.rewrite_typed_text_literal(e, type_name.clone(), span);
+            }
+            (
+                Type::Named(ref type_name),
+                TypedLitBody::Value(inner),
+            ) if type_name == Syntax::TYPE_REGEX =>
+            {
+                *e = *inner;
+                return self.rewrite_regex_literal(e, span);
             }
             (_, TypedLitBody::Value(inner)) => {
                 *e = *inner;
