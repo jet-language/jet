@@ -11,6 +11,7 @@ mod regex_ops;
 mod stmts;
 
 mod range_semantics {
+    use jet_foundation::StructuralDebug::jet_debug_range;
     include!("../../../Prelude/Core/RangeBounds.rs");
 }
 

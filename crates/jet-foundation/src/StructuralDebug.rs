@@ -27,3 +27,15 @@ pub fn jet_debug_map(entries: impl IntoIterator<Item = (String, String)>) -> Str
 pub fn jet_debug_union(payload: String) -> String {
     payload
 }
+
+/// D-RANGE-VALUE1=A: the standard structural record form for `Range`.
+pub fn jet_debug_range(start: i64, end: i64, exclusive: bool) -> String {
+    jet_debug_record(
+        "Range",
+        [
+            ("start".to_string(), start.to_string()),
+            ("end".to_string(), end.to_string()),
+            ("exclusive".to_string(), exclusive.to_string()),
+        ],
+    )
+}

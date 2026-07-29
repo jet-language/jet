@@ -21,3 +21,20 @@ pub(crate) fn jet_range_contains(
 ) -> bool {
     value >= start && if exclusive { value < end } else { value <= end }
 }
+
+pub(crate) fn jet_range_structural_text(start: i64, end: i64, exclusive: bool) -> String {
+    jet_debug_range(start, end, exclusive)
+}
+
+pub(crate) fn jet_range_equal(
+    left_start: i64,
+    left_end: i64,
+    left_exclusive: bool,
+    right_start: i64,
+    right_end: i64,
+    right_exclusive: bool,
+) -> bool {
+    left_start == right_start
+        && left_end == right_end
+        && left_exclusive == right_exclusive
+}

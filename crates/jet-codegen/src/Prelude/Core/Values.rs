@@ -30,6 +30,42 @@ impl JetRange {
     fn contains(&self, value: &i64) -> bool {
         jet_range_contains(self.start, self.end, self.exclusive, *value)
     }
+
+    fn structural_text(&self) -> String {
+        jet_range_structural_text(self.start, self.end, self.exclusive)
+    }
+}
+impl JetShow for JetRange {
+    fn jet_show(&self) -> String {
+        self.structural_text()
+    }
+}
+impl user_Display for JetRange {
+    fn display(&self) -> String {
+        self.structural_text()
+    }
+}
+impl JetDisplay for JetRange {
+    fn jet_display(&self) -> String {
+        <Self as user_Display>::display(self)
+    }
+}
+impl JetDebug for JetRange {
+    fn jet_debug(&self) -> String {
+        self.structural_text()
+    }
+}
+impl user_Equatable for JetRange {
+    fn equal(&self, rhs: &Self) -> bool {
+        jet_range_equal(
+            self.start,
+            self.end,
+            self.exclusive,
+            rhs.start,
+            rhs.end,
+            rhs.exclusive,
+        )
+    }
 }
 
 // D-SHAPE-RESOURCE2=A: scope-owned deferred close. `FnOnce` lives in Option so

@@ -1,6 +1,6 @@
 //! Exhaustive TExprKind evaluation (#777).
 use std::collections::HashMap;
-use crate::AST::{CtFloat, Type, UnOp};
+use crate::AST::{BinOp, CtFloat, Type, UnOp};
 use crate::Codegen::TIR::{
     ListSpreadPart, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFnValueKind, TModuleCallForm,
     TPlace, TStrPart,
@@ -11,6 +11,31 @@ use crate::Diagnostics::Diagnostic;
 use super::builtins::eval_builtin;
 use super::handles::eval_handle;
 use super::{materialize_view_mut_window, unsupported, EvalCallable, EvalCtx, Flow};
+
+fn range_parts(value: &CtValue) -> Option<(i64, i64, bool)> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != crate::Syntax::TYPE_RANGE {
+        return None;
+    }
+    let field = |wanted: &str| {
+        fields
+            .iter()
+            .find(|(name, _)| name == wanted)
+            .map(|(_, value)| value)
+    };
+    let (Some(CtValue::Int(start)), Some(CtValue::Int(end))) =
+        (field("start"), field("end"))
+    else {
+        return None;
+    };
+    Some((
+        *start,
+        *end,
+        matches!(field("exclusive"), Some(CtValue::Bool(true))),
+    ))
+}
 
 fn datatree(variant: &str, payload: Option<CtValue>) -> CtValue {
     CtValue::Enum {
@@ -860,6 +885,32 @@ impl<'a> EvalCtx<'a> {
             TExprKind::Binary { op, lhs, rhs, .. } => {
                 let l = self.eval_expr(lhs, scope)?;
                 let r = self.eval_expr(rhs, scope)?;
+                if matches!(op, BinOp::Eq | BinOp::Ne)
+                    && matches!(
+                        &lhs.ty,
+                        Type::Named(name) if name == crate::Syntax::TYPE_RANGE
+                    )
+                {
+                    let Some((left_start, left_end, left_exclusive)) = range_parts(&l) else {
+                        return Err(unsupported("Range equality", self.span()));
+                    };
+                    let Some((right_start, right_end, right_exclusive)) = range_parts(&r) else {
+                        return Err(unsupported("Range equality", self.span()));
+                    };
+                    let equal = super::range_semantics::jet_range_equal(
+                        left_start,
+                        left_end,
+                        left_exclusive,
+                        right_start,
+                        right_end,
+                        right_exclusive,
+                    );
+                    return Ok(CtValue::Bool(if matches!(op, BinOp::Eq) {
+                        equal
+                    } else {
+                        !equal
+                    }));
+                }
                 if let Type::IntN { signed, bits } = &lhs.ty {
                     let a = as_int(&l, self.span())?;
                     let b = as_int(&r, self.span())?;
@@ -3406,6 +3457,15 @@ impl<'a> EvalCtx<'a> {
         match v {
             CtValue::Struct { type_name, fields } => {
                 let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
+                if ty == crate::Syntax::TYPE_RANGE {
+                    if let Some((start, end, exclusive)) = range_parts(v) {
+                        return super::range_semantics::jet_range_structural_text(
+                            start,
+                            end,
+                            exclusive,
+                        );
+                    }
+                }
                 let Some(defs) = self.struct_fields.get(ty) else {
                     // Builtin struct with no declared fields on hand (Vec3, …).
                     // Adapt its fields to the same record assembler AOT uses.

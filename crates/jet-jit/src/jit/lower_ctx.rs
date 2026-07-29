@@ -6561,6 +6561,15 @@ impl LowerCtx<'_, '_> {
         type_name: &str,
         fmt: StrFormat,
     ) -> Result<(), String> {
+        if type_name == jet_foundation::Syntax::TYPE_RANGE {
+            let handle = self.lower_expr(expr)?;
+            let text = self.lower_range_show(handle)?;
+            let push_ref = self
+                .module
+                .declare_func_in_func(self.host.str_push_str, self.b.func);
+            self.b.ins().call(push_ref, &[buf_id, text]);
+            return Ok(());
+        }
         if matches!(fmt, StrFormat::Display) {
             if type_name == "EncodingError" {
                 let recv = self.lower_expr(expr)?;
@@ -17352,6 +17361,35 @@ impl LowerCtx<'_, '_> {
                 right_signed,
             );
         }
+        if matches!(op, BinOp::Eq | BinOp::Ne)
+            && matches!(&lhs_ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE)
+        {
+            let [left_start, left_end, left_exclusive] = self.lower_range_fields(l)?;
+            let [right_start, right_end, right_exclusive] = self.lower_range_fields(r)?;
+            let left_exclusive = self.b.ins().uextend(types::I64, left_exclusive);
+            let right_exclusive = self.b.ins().uextend(types::I64, right_exclusive);
+            let host = self
+                .module
+                .declare_func_in_func(self.host.coll.range_equal, self.b.func);
+            let call = self.b.ins().call(
+                host,
+                &[
+                    left_start,
+                    left_end,
+                    left_exclusive,
+                    right_start,
+                    right_end,
+                    right_exclusive,
+                ],
+            );
+            let equal = self.b.inst_results(call)[0];
+            return Ok(if matches!(op, BinOp::Eq) {
+                equal
+            } else {
+                let one = self.b.ins().iconst(types::I8, 1);
+                self.b.ins().isub(one, equal)
+            });
+        }
         if overflow {
             let host_id = match op {
                 BinOp::Add => self.host.add_i64,
@@ -17533,6 +17571,24 @@ impl LowerCtx<'_, '_> {
         self.b.ins().select(cmp, one, zero)
     }
 
+    fn lower_range_fields(&mut self, handle: Value) -> Result<[Value; 3], String> {
+        Ok([
+            self.lower_record_field(handle, "Range", "start", &Type::Int)?,
+            self.lower_record_field(handle, "Range", "end", &Type::Int)?,
+            self.lower_record_field(handle, "Range", "exclusive", &Type::Bool)?,
+        ])
+    }
+
+    fn lower_range_show(&mut self, handle: Value) -> Result<Value, String> {
+        let [start, end, exclusive] = self.lower_range_fields(handle)?;
+        let exclusive = self.b.ins().uextend(types::I64, exclusive);
+        let host = self
+            .module
+            .declare_func_in_func(self.host.coll.range_show, self.b.func);
+        let call = self.b.ins().call(host, &[start, end, exclusive]);
+        Ok(self.b.inst_results(call)[0])
+    }
+
     /// `TExprKind::Print` payload lowering: literal-kind exprs (`IntLit`/
     /// `FloatLit`/…) print without a materialized `Value` round-trip; the
     /// fallback arm lowers the expr once and dispatches on its result `Type`
@@ -17590,6 +17646,17 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().call(print, &[val]);
                         return Ok(());
                     }
+                    return Ok(());
+                }
+                if matches!(
+                    &print_ty,
+                    Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE
+                ) {
+                    let text = self.lower_range_show(val)?;
+                    let print = self
+                        .module
+                        .declare_func_in_func(self.host.print_str, self.b.func);
+                    self.b.ins().call(print, &[text]);
                     return Ok(());
                 }
                 // List / materialized Iter — same jet_show `[a, b, c]` AOT uses.
