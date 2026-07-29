@@ -576,11 +576,15 @@ fn collect_expr_idents(expr: &Expr, out: &mut HashSet<String>) {
             collect_expr_idents(index, out);
         }
         Expr::Slice {
-            base, start, end, ..
+            base, start, end, range, ..
         } => {
             collect_expr_idents(base, out);
-            collect_expr_idents(start, out);
-            collect_expr_idents(end, out);
+            if let Some(range) = range {
+                collect_expr_idents(range, out);
+            } else {
+                collect_expr_idents(start, out);
+                collect_expr_idents(end, out);
+            }
         }
         Expr::ListLit(items, _) => {
             for item in items {

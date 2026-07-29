@@ -827,9 +827,15 @@ impl<'a> Checker<'a> {
                 Expr::Index { index, .. } => {
                     self.collect_evaluated_expr_accesses(index, mode, bound, out);
                 }
-                Expr::Slice { start, end, .. } => {
-                    self.collect_evaluated_expr_accesses(start, mode, bound, out);
-                    self.collect_evaluated_expr_accesses(end, mode, bound, out);
+                Expr::Slice {
+                    start, end, range, ..
+                } => {
+                    if let Some(range) = range {
+                        self.collect_evaluated_expr_accesses(range, mode, bound, out);
+                    } else {
+                        self.collect_evaluated_expr_accesses(start, mode, bound, out);
+                        self.collect_evaluated_expr_accesses(end, mode, bound, out);
+                    }
                 }
                 _ => {}
             }
@@ -944,11 +950,19 @@ impl<'a> Checker<'a> {
                 self.collect_evaluated_expr_accesses(index, mode, bound, out);
             }
             Expr::Slice {
-                base, start, end, ..
+                base,
+                start,
+                end,
+                range,
+                ..
             } => {
                 self.collect_evaluated_expr_accesses(base, mode, bound, out);
-                self.collect_evaluated_expr_accesses(start, mode, bound, out);
-                self.collect_evaluated_expr_accesses(end, mode, bound, out);
+                if let Some(range) = range {
+                    self.collect_evaluated_expr_accesses(range, mode, bound, out);
+                } else {
+                    self.collect_evaluated_expr_accesses(start, mode, bound, out);
+                    self.collect_evaluated_expr_accesses(end, mode, bound, out);
+                }
             }
             Expr::Range { start, end, .. } => {
                 self.collect_evaluated_expr_accesses(start, mode, bound, out);
@@ -1510,21 +1524,34 @@ impl<'a> Checker<'a> {
                 );
             }
             Expr::Slice {
-                base, start, end, ..
+                base,
+                start,
+                end,
+                range,
+                ..
             } => {
                 self.collect_call_projection_accesses(base, accesses);
-                self.collect_evaluated_expr_accesses(
-                    start,
-                    AccessWalkMode::EvaluateNow,
-                    &HashSet::new(),
-                    accesses,
-                );
-                self.collect_evaluated_expr_accesses(
-                    end,
-                    AccessWalkMode::EvaluateNow,
-                    &HashSet::new(),
-                    accesses,
-                );
+                if let Some(range) = range {
+                    self.collect_evaluated_expr_accesses(
+                        range,
+                        AccessWalkMode::EvaluateNow,
+                        &HashSet::new(),
+                        accesses,
+                    );
+                } else {
+                    self.collect_evaluated_expr_accesses(
+                        start,
+                        AccessWalkMode::EvaluateNow,
+                        &HashSet::new(),
+                        accesses,
+                    );
+                    self.collect_evaluated_expr_accesses(
+                        end,
+                        AccessWalkMode::EvaluateNow,
+                        &HashSet::new(),
+                        accesses,
+                    );
+                }
             }
             Expr::Field(base, _, _)
             | Expr::Place(base, _, _)
@@ -1683,11 +1710,34 @@ impl<'a> Checker<'a> {
                 });
                 Some(place)
             }
-            Expr::Slice { base, start, end, span } => {
+            Expr::Slice {
+                base,
+                start,
+                end,
+                range,
+                span,
+            } => {
                 let mut place = self.place_from_expr(base)?;
+                let (start, end) = match range.as_deref() {
+                    Some(Expr::Range {
+                        start,
+                        end,
+                        exclusive,
+                        ..
+                    }) => {
+                        let start = const_place_int(start);
+                        let mut end = const_place_int(end);
+                        if *exclusive {
+                            end = end.and_then(|value| value.checked_sub(1));
+                        }
+                        (start, end)
+                    }
+                    Some(_) => (None, None),
+                    None => (const_place_int(start), const_place_int(end)),
+                };
                 place.projections.push(ViewProjection::Range {
-                    start: const_place_int(start),
-                    end: const_place_int(end),
+                    start,
+                    end,
                     span: *span,
                 });
                 Some(place)

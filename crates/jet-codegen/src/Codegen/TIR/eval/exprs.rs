@@ -971,8 +971,6 @@ impl<'a> EvalCtx<'a> {
                         },
                         _ => return Err(unsupported("view-mut base", self.span())),
                     };
-                    let start = as_int(&self.eval_expr(&args[0], scope)?, self.span())?;
-                    let end = as_int(&self.eval_expr(&args[1], scope)?, self.span())?;
                     let CtValue::List(xs) = scope
                         .get(&base_name)
                         .cloned()
@@ -980,9 +978,18 @@ impl<'a> EvalCtx<'a> {
                     else {
                         return Err(unsupported("view-mut list base", self.span()));
                     };
-                    if start < 0 || end < start || end as usize >= xs.len() {
-                        return Err(unsupported("view-mut bounds", self.span()));
-                    }
+                    let (start, end_exclusive) = if args.len() == 1 {
+                        let range = self.eval_expr(&args[0], scope)?;
+                        super::range_window(&range, xs.len(), self.span())?
+                    } else {
+                        let start = as_int(&self.eval_expr(&args[0], scope)?, self.span())?;
+                        let end = as_int(&self.eval_expr(&args[1], scope)?, self.span())?;
+                        if start < 0 || end < start || end as usize >= xs.len() {
+                            return Err(unsupported("view-mut bounds", self.span()));
+                        }
+                        (start, end + 1)
+                    };
+                    let end = end_exclusive - 1;
                     return Ok(CtValue::Struct {
                         type_name: "__JetViewMut".into(),
                         fields: vec![

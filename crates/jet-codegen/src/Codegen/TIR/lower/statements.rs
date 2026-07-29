@@ -159,8 +159,28 @@ fn split_view_candidate(stmt: &Stmt, stmt_index: usize, cx: &Cx) -> Option<Split
     };
     let (base, start, end, single) = match inner.as_ref() {
         Expr::Slice {
-            base, start, end, ..
-        } => (base.as_ref(), const_place_bound(start)?, const_place_bound(end)?, false),
+            base,
+            start,
+            end,
+            range,
+            ..
+        } => {
+            let (start, end) = match range.as_deref() {
+                Some(Expr::Range {
+                    start,
+                    end,
+                    exclusive,
+                    ..
+                }) => {
+                    let start = const_place_bound(start)?;
+                    let end = const_place_bound(end)?;
+                    (start, if *exclusive { end.checked_sub(1)? } else { end })
+                }
+                Some(_) => return None,
+                None => (const_place_bound(start)?, const_place_bound(end)?),
+            };
+            (base.as_ref(), start, end, false)
+        }
         Expr::Index { base, index, .. } => {
             let index = const_place_bound(index)?;
             (base.as_ref(), index, index, true)

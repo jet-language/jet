@@ -2910,8 +2910,8 @@ impl LowerCtx<'_, '_> {
                 let index = self.lower_expr(&assign.index)?;
                 // ViewMut write-through: absolute index = window.start + idx.
                 let (list, abs_index) = if Self::is_view_mut_ty(&assign.base.ty) {
-                    let (list, start, _) = self.unpack_view_mut(base)?;
-                    (list, self.b.ins().iadd(start, index))
+                    let (list, start, end) = self.unpack_view_mut(base)?;
+                    (list, self.checked_view_mut_index(start, end, index))
                 } else {
                     (base, index)
                 };
@@ -3461,9 +3461,9 @@ impl LowerCtx<'_, '_> {
                     // ViewMut write-through: absolute index = window.start + idx.
                     if Self::is_view_mut_ty(&base.ty) {
                         let handle = self.lower_expr(base)?;
-                        let (list, start, _) = self.unpack_view_mut(handle)?;
+                        let (list, start, end) = self.unpack_view_mut(handle)?;
                         let idx = self.lower_expr(index)?;
-                        let abs = self.b.ins().iadd(start, idx);
+                        let abs = self.checked_view_mut_index(start, end, idx);
                         let val = self.lower_expr(value)?;
                         let line = self.b.ins().iconst(types::I32, 1);
                         let host_id = match &value.ty {
@@ -6781,6 +6781,31 @@ impl LowerCtx<'_, '_> {
         matches!(ty, Type::Apply { name, .. } if name == "__JetFieldMut")
     }
 
+    fn lower_range_window(
+        &mut self,
+        list: Value,
+        range: &TExpr,
+        line: usize,
+    ) -> Result<(Value, Value), String> {
+        let handle = self.lower_expr(range)?;
+        let start = self.lower_record_field(handle, "Range", "start", &Type::Int)?;
+        let end = self.lower_record_field(handle, "Range", "end", &Type::Int)?;
+        let exclusive =
+            self.lower_record_field(handle, "Range", "exclusive", &Type::Bool)?;
+        let exclusive = self.b.ins().uextend(types::I64, exclusive);
+        let line = self.b.ins().iconst(types::I32, line as i64);
+        let host = self
+            .module
+            .declare_func_in_func(self.host.coll.list_range_end, self.b.func);
+        let call = self
+            .b
+            .ins()
+            .call(host, &[list, start, end, exclusive, line]);
+        let end_exclusive = self.b.inst_results(call)[0];
+        self.emit_trap_check()?;
+        Ok((start, end_exclusive))
+    }
+
     /// Write-through window: heap record `[list, start, end]` (inclusive ends).
     fn emit_view_mut_window(
         &mut self,
@@ -6820,6 +6845,22 @@ impl LowerCtx<'_, '_> {
         let call2 = self.b.ins().call(get, &[handle, two]);
         let end = self.b.inst_results(call2)[0];
         Ok((list, start, end))
+    }
+
+    fn checked_view_mut_index(&mut self, start: Value, end: Value, index: Value) -> Value {
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let nonnegative = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, index, zero);
+        let absolute = self.b.ins().iadd(start, index);
+        let within_end = self
+            .b
+            .ins()
+            .icmp(IntCC::SignedLessThanOrEqual, absolute, end);
+        let valid = self.b.ins().band(nonnegative, within_end);
+        let invalid = self.b.ins().iconst(types::I64, -1);
+        self.b.ins().select(valid, absolute, invalid)
     }
 
     /// Write-through field place: heap record `[struct, field_index]`.
@@ -10939,8 +10980,8 @@ impl LowerCtx<'_, '_> {
                 let idx = self.lower_expr(index)?;
                 let line_const = self.b.ins().iconst(types::I32, *line as i64);
                 let (list, idx) = if Self::is_view_mut_ty(&base.ty) {
-                    let (inner, start, _) = self.unpack_view_mut(list)?;
-                    (inner, self.b.ins().iadd(start, idx))
+                    let (inner, start, end) = self.unpack_view_mut(list)?;
+                    (inner, self.checked_view_mut_index(start, end, idx))
                 } else {
                     (list, idx)
                 };
@@ -10963,28 +11004,7 @@ impl LowerCtx<'_, '_> {
             } => {
                 let list = self.lower_expr(base)?;
                 let (s, end_excl) = if let Some(range) = range {
-                    let handle = self.lower_expr(range)?;
-                    let s = self.lower_record_field(
-                        handle,
-                        "Range",
-                        "start",
-                        &Type::Int,
-                    )?;
-                    let e = self.lower_record_field(
-                        handle,
-                        "Range",
-                        "end",
-                        &Type::Int,
-                    )?;
-                    let exclusive = self.lower_record_field(
-                        handle,
-                        "Range",
-                        "exclusive",
-                        &Type::Bool,
-                    )?;
-                    let one = self.b.ins().iconst(types::I64, 1);
-                    let inclusive_end = self.b.ins().iadd(e, one);
-                    (s, self.b.ins().select(exclusive, e, inclusive_end))
+                    self.lower_range_window(list, range, *line)?
                 } else {
                     let s = self.lower_expr(start)?;
                     let e = self.lower_expr(end)?;
@@ -13060,19 +13080,15 @@ impl LowerCtx<'_, '_> {
                     let exclusive =
                         self.lower_record_field(recv_val, "Range", "exclusive", &Type::Bool)?;
                     let needle = self.lower_expr(&args[0])?;
-
-                    let above_start =
-                        self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, needle, start);
-                    let below_end = self.b.ins().icmp(IntCC::SignedLessThan, needle, end);
-                    let through_end =
-                        self.b.ins().icmp(IntCC::SignedLessThanOrEqual, needle, end);
-                    let exclusive_inside = self.b.ins().band(above_start, below_end);
-                    let inclusive_inside = self.b.ins().band(above_start, through_end);
-                    return Ok(self.b.ins().select(
-                        exclusive,
-                        exclusive_inside,
-                        inclusive_inside,
-                    ));
+                    let exclusive = self.b.ins().uextend(types::I64, exclusive);
+                    let host = self
+                        .module
+                        .declare_func_in_func(self.host.coll.range_contains, self.b.func);
+                    let call = self
+                        .b
+                        .ins()
+                        .call(host, &[start, end, exclusive, needle]);
+                    return Ok(self.b.inst_results(call)[0]);
                 }
                 // Set.has(x) / SortedSet.has — Int elems.
                 if matches!(&recv.ty, Type::Apply { name, .. } if name == "Set") {
@@ -13659,16 +13675,20 @@ impl LowerCtx<'_, '_> {
             TBuiltinOp::ViewNew { line } => {
                 // Inclusive window → exclusive list_slice end. Materialized list
                 // handle matches Iter/View JIT ABI (safety.rs).
-                let start = args
-                    .first()
-                    .ok_or_else(|| "jit view needs start".to_string())?;
-                let end = args
-                    .get(1)
-                    .ok_or_else(|| "jit view needs end".to_string())?;
-                let s = self.lower_expr(start)?;
-                let e = self.lower_expr(end)?;
-                let one = self.b.ins().iconst(types::I64, 1);
-                let end_excl = self.b.ins().iadd(e, one);
+                let (s, end_excl) = if let [range] = args {
+                    self.lower_range_window(recv_val, range, *line)?
+                } else {
+                    let start = args
+                        .first()
+                        .ok_or_else(|| "jit view needs start".to_string())?;
+                    let end = args
+                        .get(1)
+                        .ok_or_else(|| "jit view needs end".to_string())?;
+                    let start = self.lower_expr(start)?;
+                    let end = self.lower_expr(end)?;
+                    let one = self.b.ins().iconst(types::I64, 1);
+                    (start, self.b.ins().iadd(end, one))
+                };
                 let line_c = self.b.ins().iconst(types::I32, *line as i64);
                 let host_ref = self
                     .module
@@ -13681,16 +13701,22 @@ impl LowerCtx<'_, '_> {
                 self.emit_trap_check()?;
                 Ok(result)
             }
-            TBuiltinOp::ViewMutNew { .. } => {
-                let start = args
-                    .first()
-                    .ok_or_else(|| "jit view-mut needs start".to_string())?;
-                let end = args
-                    .get(1)
-                    .ok_or_else(|| "jit view-mut needs end".to_string())?;
-                let s = self.lower_expr(start)?;
-                let e = self.lower_expr(end)?;
-                self.emit_view_mut_window(recv_val, s, e)
+            TBuiltinOp::ViewMutNew { line } => {
+                let (start, end) = if let [range] = args {
+                    let (start, end_exclusive) =
+                        self.lower_range_window(recv_val, range, *line)?;
+                    let one = self.b.ins().iconst(types::I64, 1);
+                    (start, self.b.ins().isub(end_exclusive, one))
+                } else {
+                    let start = args
+                        .first()
+                        .ok_or_else(|| "jit view-mut needs start".to_string())?;
+                    let end = args
+                        .get(1)
+                        .ok_or_else(|| "jit view-mut needs end".to_string())?;
+                    (self.lower_expr(start)?, self.lower_expr(end)?)
+                };
+                self.emit_view_mut_window(recv_val, start, end)
             }
             // D-ITERTOOLS1=A: JIT ABI can't carry true JetIter handles. Producers
             // (String.split, list adapters) already return list handles of the same

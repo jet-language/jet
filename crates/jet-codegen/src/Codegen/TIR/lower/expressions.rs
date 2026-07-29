@@ -621,7 +621,14 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             TExpr { ty, kind }
         }
         Expr::Place(inner, access, span) => {
-            if let Expr::Slice { base, start, end, .. } = inner.as_ref() {
+            if let Expr::Slice {
+                base,
+                start,
+                end,
+                range,
+                ..
+            } = inner.as_ref()
+            {
                 let recv = lower_expr(base, cx, env);
                 let elem = match &recv.ty {
                     Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
@@ -629,6 +636,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 };
                 let mutable = *access == crate::AST::PlaceAccess::Write;
                 let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+                let args = if let Some(range) = range {
+                    vec![lower_expr(range, cx, env)]
+                } else {
+                    vec![lower_expr(start, cx, env), lower_expr(end, cx, env)]
+                };
                 TExpr {
                     ty: Type::Apply {
                         name: if mutable { "ViewMut" } else { "View" }.to_string(),
@@ -641,7 +653,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         } else {
                             TBuiltinOp::ViewNew { line }
                         },
-                        args: vec![lower_expr(start, cx, env), lower_expr(end, cx, env)],
+                        args,
                     },
                 }
             } else {
@@ -2359,17 +2371,19 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 },
             }
         }
-        // c109 Phase 5: an inclusive copy slice `coll[a..b]` (lists). Lowers to the
-        // `jet_slice_vec` helper; the result is a list of the same element type.
+        // Owned slicing lowers here. Place contexts are handled above and use
+        // ViewNew/ViewMutNew, preserving the owner's storage.
         Expr::Slice {
             base,
             start,
             end,
+            range,
             span,
         } => {
             let base_t = lower_expr(base, cx, env);
             let start_t = lower_expr(start, cx, env);
             let end_t = lower_expr(end, cx, env);
+            let range_t = range.as_ref().map(|range| Box::new(lower_expr(range, cx, env)));
             let result_ty = base_t.ty.clone();
             let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
             TExpr {
@@ -2378,7 +2392,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     base: Box::new(base_t),
                     start: Box::new(start_t),
                     end: Box::new(end_t),
-                    range: None,
+                    range: range_t,
                     line,
                 },
             }

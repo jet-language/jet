@@ -374,11 +374,16 @@ fn expr_references_ident(e: &Expr, name: &str) -> bool {
             expr_references_ident(base, name) || expr_references_ident(index, name)
         }
         Expr::Slice {
-            base, start, end, ..
+            base, start, end, range, ..
         } => {
             expr_references_ident(base, name)
-                || expr_references_ident(start, name)
-                || expr_references_ident(end, name)
+                || range.as_deref().map_or_else(
+                    || {
+                        expr_references_ident(start, name)
+                            || expr_references_ident(end, name)
+                    },
+                    |range| expr_references_ident(range, name),
+                )
         }
         Expr::ListLit(items, _) => items.iter().any(|i| expr_references_ident(i, name)),
         Expr::MapLit(pairs, _) => pairs

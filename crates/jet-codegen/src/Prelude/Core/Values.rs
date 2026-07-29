@@ -28,8 +28,7 @@ struct JetRange {
 }
 impl JetRange {
     fn contains(&self, value: &i64) -> bool {
-        *value >= self.start
-            && if self.exclusive { *value < self.end } else { *value <= self.end }
+        jet_range_contains(self.start, self.end, self.exclusive, *value)
     }
 }
 

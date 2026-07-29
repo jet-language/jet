@@ -1879,11 +1879,15 @@ fn walk_expr_children_for_multi_input(
             find_multi_input_in_expr(index, node_span, out);
         }
         Expr::Slice {
-            base, start, end, ..
+            base, start, end, range, ..
         } => {
             find_multi_input_in_expr(base, node_span, out);
-            find_multi_input_in_expr(start, node_span, out);
-            find_multi_input_in_expr(end, node_span, out);
+            if let Some(range) = range {
+                find_multi_input_in_expr(range, node_span, out);
+            } else {
+                find_multi_input_in_expr(start, node_span, out);
+                find_multi_input_in_expr(end, node_span, out);
+            }
         }
         Expr::MapLit(items, _) => {
             for (key, value) in items {

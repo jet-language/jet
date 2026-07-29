@@ -709,11 +709,15 @@ fn expr_uses(e: &Expr, name: &str, other: &mut Vec<Span>) {
             expr_uses(index, name, other);
         }
         Expr::Slice {
-            base, start, end, ..
+            base, start, end, range, ..
         } => {
             expr_uses(base, name, other);
-            expr_uses(start, name, other);
-            expr_uses(end, name, other);
+            if let Some(range) = range {
+                expr_uses(range, name, other);
+            } else {
+                expr_uses(start, name, other);
+                expr_uses(end, name, other);
+            }
         }
         Expr::ListLit(items, _) => {
             for i in items {

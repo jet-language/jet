@@ -822,24 +822,32 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     || jit_list_record_type(&base.ty)
                     || jit_list_iter_elem_type(&base.ty).is_some()
                     || jit_closure_elem_type(&base.ty).is_some())
-                    && !matches!(
-                        &base.ty,
-                        Type::Apply { name, .. } if name == "ViewMut"
-                    )
                     && matches!(&index.ty, Type::Int)
                     && resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
             }
         }
         TExprKind::Slice {
-            base, start, end, ..
+            base,
+            start,
+            end,
+            range,
+            ..
         } => {
             (jit_list_native_type(&base.ty) || jit_list_record_type(&base.ty))
-                && matches!(&start.ty, Type::Int)
-                && matches!(&end.ty, Type::Int)
                 && resident_safe_expr(base, callees)
-                && resident_safe_expr(start, callees)
-                && resident_safe_expr(end, callees)
+                && range.as_deref().map_or_else(
+                    || {
+                        matches!(&start.ty, Type::Int)
+                            && matches!(&end.ty, Type::Int)
+                            && resident_safe_expr(start, callees)
+                            && resident_safe_expr(end, callees)
+                    },
+                    |range| {
+                        matches!(&range.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE)
+                            && resident_safe_expr(range, callees)
+                    },
+                )
         }
         TExprKind::BuiltinMethod { recv, op, args } => {
             resident_safe_builtin_op(op, recv, args, callees)
@@ -895,7 +903,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
         TExprKind::StructLit { fields, .. } => {
-            (jit_struct_type(&expr.ty) || matches!(&expr.ty, Type::TraitObject(_)))
+            (jit_struct_type(&expr.ty)
+                || matches!(&expr.ty, Type::TraitObject(_))
+                || matches!(&expr.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE))
                 && fields
                     .iter()
                     .all(|(_, v, _)| resident_safe_expr(v, callees))
@@ -1680,11 +1690,20 @@ fn resident_safe_builtin_op(
         // JIT ABI: View/ViewMut materialize as owned list handles (inclusive slice).
         TBuiltinOp::ViewNew { .. } | TBuiltinOp::ViewMutNew { .. } => {
             (jit_list_native_type(&recv.ty) || jit_list_record_type(&recv.ty))
-                && args.len() == 2
-                && matches!(&args[0].ty, Type::Int)
-                && matches!(&args[1].ty, Type::Int)
-                && resident_safe_expr(&args[0], callees)
-                && resident_safe_expr(&args[1], callees)
+                && match args {
+                    [range]
+                        if matches!(&range.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) =>
+                    {
+                        resident_safe_expr(range, callees)
+                    }
+                    [start, end] => {
+                        matches!(&start.ty, Type::Int)
+                            && matches!(&end.ty, Type::Int)
+                            && resident_safe_expr(start, callees)
+                            && resident_safe_expr(end, callees)
+                    }
+                    _ => false,
+                }
         }
         // D-COLLBREADTH1=A: Set / Deque / list.remove — Int elems only.
         TBuiltinOp::RemoveList { .. } => {
@@ -2076,10 +2095,6 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 (jit_list_native_type(&base.ty)
                     || jit_list_iter_elem_type(&base.ty).is_some()
                     || jit_closure_elem_type(&base.ty).is_some())
-                    && !matches!(
-                        &base.ty,
-                        Type::Apply { name, .. } if name == "ViewMut"
-                    )
                     && matches!(&index.ty, Type::Int)
                     && matches!(&value.ty, Type::Int | Type::Float | Type::String | Type::Char)
                     && resident_safe_expr(base, callees)

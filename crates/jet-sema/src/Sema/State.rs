@@ -554,11 +554,15 @@ impl<'a> StateCtx<'a> {
                 self.check_expr(index);
             }
             Expr::Slice {
-                base, start, end, ..
+                base, start, end, range, ..
             } => {
                 self.check_expr(base);
-                self.check_expr(start);
-                self.check_expr(end);
+                if let Some(range) = range {
+                    self.check_expr(range);
+                } else {
+                    self.check_expr(start);
+                    self.check_expr(end);
+                }
             }
             Expr::Range { start, end, .. } => {
                 self.check_expr(start);

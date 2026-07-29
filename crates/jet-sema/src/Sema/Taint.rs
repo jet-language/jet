@@ -214,8 +214,12 @@ impl<'a> TaintCtx<'a> {
             Expr::OptField { base, .. } => self.is_tainted(base),
             Expr::Index { base, index, .. } => self.is_tainted(base) || self.is_tainted(index),
             Expr::Slice {
-                base, start, end, ..
-            } => self.is_tainted(base) || self.is_tainted(start) || self.is_tainted(end),
+                base, start, end, range, ..
+            } => self.is_tainted(base)
+                || range.as_deref().map_or_else(
+                    || self.is_tainted(start) || self.is_tainted(end),
+                    |range| self.is_tainted(range),
+                ),
             Expr::Range { start, end, .. } => {
                 self.is_tainted(start) || self.is_tainted(end)
             }
@@ -378,11 +382,15 @@ impl<'a> TaintCtx<'a> {
                 self.check_expr(index);
             }
             Expr::Slice {
-                base, start, end, ..
+                base, start, end, range, ..
             } => {
                 self.check_expr(base);
-                self.check_expr(start);
-                self.check_expr(end);
+                if let Some(range) = range {
+                    self.check_expr(range);
+                } else {
+                    self.check_expr(start);
+                    self.check_expr(end);
+                }
             }
             Expr::Range { start, end, .. } => {
                 self.check_expr(start);

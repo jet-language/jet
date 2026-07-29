@@ -313,7 +313,10 @@ stored, passed, returned, looped, or used as a slice bound. Literal loop ranges
 still lower directly to jumps; no iterator object or allocation is added.
 Range arm heads and `distinct Int(0..10)` constraints stay literal-only.
 D-SHAPE-PLACE1's retired `.view(range)` method remains retired; bracket slicing
-is the one live range-place surface.
+is the one live range-place surface. A bare place projection such as
+`window :: values[range]` is a no-copy `View`; `&values[range]` is a
+write-through `ViewMut`. Write `~values[range]` when an independent list copy
+must outlive or detach from the owner.
 
 **D-RANGE-EXCL1=C — Exclusive range + index idioms**: half-open `a..<b` runs
 `a` through `b-1` and is empty when `a >= b`. Inclusive `..` (S22) is unchanged.

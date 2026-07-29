@@ -3,6 +3,10 @@
 use super::Concurrency;
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 
+mod range_semantics {
+    include!("../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
+}
+
 fn option_i64(rt: &mut crate::JitRuntime, value: Option<i64>) -> i64 {
     crate::runtime_host::alloc_jit_result(
         rt,
@@ -236,6 +240,36 @@ extern "C" fn jet_jit_list_slice(list: i64, start: i64, end: i64, _line: u32) ->
             }
         }
     })
+}
+
+extern "C" fn jet_jit_list_range_end(
+    list: i64,
+    start: i64,
+    end: i64,
+    exclusive: i64,
+    _line: u32,
+) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(len) = rt.heap.list_len(list) else {
+            jet_foundation::ice!(None, "jit Range window: bad list handle");
+        };
+        match range_semantics::jet_range_bounds(start, end, exclusive != 0, len) {
+            Some((_, end_exclusive)) => end_exclusive,
+            None => {
+                rt.set_trap("range out of bounds: the range is outside the list");
+                0
+            }
+        }
+    })
+}
+
+extern "C" fn jet_jit_range_contains(
+    start: i64,
+    end: i64,
+    exclusive: i64,
+    value: i64,
+) -> i8 {
+    range_semantics::jet_range_contains(start, end, exclusive != 0, value) as i8
 }
 
 extern "C" fn jet_jit_list_join_str(list: i64, sep_id: i64) -> i64 {
@@ -1461,6 +1495,8 @@ pub(crate) struct CollectionsHostFns {
     pub list_sort_str: cranelift_module::FuncId,
     pub list_clone: cranelift_module::FuncId,
     pub list_slice: cranelift_module::FuncId,
+    pub list_range_end: cranelift_module::FuncId,
+    pub range_contains: cranelift_module::FuncId,
     pub list_join_str: cranelift_module::FuncId,
     pub loop_stride_check: cranelift_module::FuncId,
     pub map_new: cranelift_module::FuncId,
@@ -1566,6 +1602,8 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_list_sort_str", jet_jit_list_sort_str as *const u8);
     builder.symbol("jet_jit_list_clone", jet_jit_list_clone as *const u8);
     builder.symbol("jet_jit_list_slice", jet_jit_list_slice as *const u8);
+    builder.symbol("jet_jit_list_range_end", jet_jit_list_range_end as *const u8);
+    builder.symbol("jet_jit_range_contains", jet_jit_range_contains as *const u8);
     builder.symbol("jet_jit_list_join_str", jet_jit_list_join_str as *const u8);
     builder.symbol("jet_jit_loop_stride_check", jet_jit_loop_stride_check as *const u8);
     builder.symbol("jet_jit_map_new", jet_jit_map_new as *const u8);
@@ -1716,6 +1754,18 @@ pub(crate) fn declare_collections_host_fns(
     sig_slice.params.push(AbiParam::new(types::I64));
     sig_slice.params.push(AbiParam::new(types::I32));
     sig_slice.returns.push(AbiParam::new(types::I64));
+    let mut sig_range_end = Signature::new(cc);
+    sig_range_end.params.push(AbiParam::new(types::I64));
+    sig_range_end.params.push(AbiParam::new(types::I64));
+    sig_range_end.params.push(AbiParam::new(types::I64));
+    sig_range_end.params.push(AbiParam::new(types::I64));
+    sig_range_end.params.push(AbiParam::new(types::I32));
+    sig_range_end.returns.push(AbiParam::new(types::I64));
+    let mut sig_range_contains = Signature::new(cc);
+    for _ in 0..4 {
+        sig_range_contains.params.push(AbiParam::new(types::I64));
+    }
+    sig_range_contains.returns.push(AbiParam::new(types::I8));
     let mut sig_join = sig_len.clone();
     sig_join.params.push(AbiParam::new(types::I64));
     let mut sig_map_insert = Signature::new(cc);
@@ -1760,6 +1810,8 @@ pub(crate) fn declare_collections_host_fns(
         list_sort_str: import("jet_jit_list_sort_str", &sig_sort)?,
         list_clone: import("jet_jit_list_clone", &sig_len)?,
         list_slice: import("jet_jit_list_slice", &sig_slice)?,
+        list_range_end: import("jet_jit_list_range_end", &sig_range_end)?,
+        range_contains: import("jet_jit_range_contains", &sig_range_contains)?,
         list_join_str: import("jet_jit_list_join_str", &sig_join)?,
         loop_stride_check: import("jet_jit_loop_stride_check", &sig_len)?,
         map_new: import("jet_jit_map_new", &sig_new)?,

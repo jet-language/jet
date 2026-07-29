@@ -10,6 +10,10 @@ mod handles;
 mod regex_ops;
 mod stmts;
 
+mod range_semantics {
+    include!("../../../Prelude/Core/RangeBounds.rs");
+}
+
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -58,6 +62,64 @@ pub(super) fn unsupported(what: &str, span: Span) -> Diagnostic {
     )
 }
 
+pub(super) fn range_window(
+    value: &CtValue,
+    len: usize,
+    span: Span,
+) -> Result<(i64, i64), Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("Range window", span));
+    };
+    if type_name != crate::Syntax::TYPE_RANGE {
+        return Err(unsupported("Range window type", span));
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value)
+    };
+    let start = match field("start") {
+        Some(CtValue::Int(value)) => *value,
+        _ => return Err(unsupported("Range.start", span)),
+    };
+    let end = match field("end") {
+        Some(CtValue::Int(value)) => *value,
+        _ => return Err(unsupported("Range.end", span)),
+    };
+    let exclusive = matches!(field("exclusive"), Some(CtValue::Bool(true)));
+    range_semantics::jet_range_bounds(start, end, exclusive, len as i64)
+        .ok_or_else(|| unsupported("Range window bounds", span))
+}
+
+pub(super) fn range_contains(
+    value: &CtValue,
+    needle: &CtValue,
+    span: Span,
+) -> Result<bool, Diagnostic> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return Err(unsupported("Range.contains receiver", span));
+    };
+    if type_name != crate::Syntax::TYPE_RANGE {
+        return Err(unsupported("Range.contains receiver", span));
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value)
+    };
+    let (Some(CtValue::Int(start)), Some(CtValue::Int(end)), CtValue::Int(needle)) =
+        (field("start"), field("end"), needle)
+    else {
+        return Err(unsupported("Range.contains arguments", span));
+    };
+    let exclusive = matches!(field("exclusive"), Some(CtValue::Bool(true)));
+    Ok(range_semantics::jet_range_contains(
+        *start, *end, exclusive, *needle,
+    ))
+}
+
 /// Resolve a `__JetViewMut { base, start, end }` handle to the inclusive window List.
 pub(super) fn materialize_view_mut_window(
     fields: &[(String, CtValue)],
@@ -82,10 +144,18 @@ pub(super) fn materialize_view_mut_window(
     let Some(CtValue::List(items)) = scope.get(&base) else {
         return Err(unsupported("view-mut owner", span));
     };
-    if start < 0 || end < start || end as usize >= items.len() {
+    if start < 0
+        || end < start - 1
+        || (end >= start && end as usize >= items.len())
+        || start as usize > items.len()
+    {
         return Err(unsupported("view-mut bounds", span));
     }
-    Ok(CtValue::List(items[start as usize..=end as usize].to_vec()))
+    if end < start {
+        Ok(CtValue::List(Vec::new()))
+    } else {
+        Ok(CtValue::List(items[start as usize..=end as usize].to_vec()))
+    }
 }
 
 #[derive(Debug)]

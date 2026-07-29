@@ -1506,9 +1506,16 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         Expr::Index { base, index, .. } => {
             expr_handle_escape(base, handle).or_else(|| expr_handle_escape(index, handle))
         }
-        Expr::Slice { base, start, end, .. } => expr_handle_escape(base, handle)
-            .or_else(|| expr_handle_escape(start, handle))
-            .or_else(|| expr_handle_escape(end, handle)),
+        Expr::Slice { base, start, end, range, .. } => expr_handle_escape(base, handle)
+            .or_else(|| {
+                range.as_deref().map_or_else(
+                    || {
+                        expr_handle_escape(start, handle)
+                            .or_else(|| expr_handle_escape(end, handle))
+                    },
+                    |range| expr_handle_escape(range, handle),
+                )
+            }),
         Expr::Range { start, end, .. } => {
             expr_handle_escape(start, handle).or_else(|| expr_handle_escape(end, handle))
         }

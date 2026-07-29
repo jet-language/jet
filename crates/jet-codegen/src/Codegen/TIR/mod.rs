@@ -2921,15 +2921,14 @@ pub enum TExprKind {
         recv: Box<TExpr>,
         lanes: Vec<u8>,
     },
-    /// c109 Phase 5: an inclusive copy slice `coll[a..b]` (`Expr::Slice`). Lowers
-    /// to the `jet_slice_vec` helper. `line` is the source line for the bounds
-    /// panic, resolved at lowering.
+    /// An owned slice expression. Place contexts lower the same source shape to
+    /// `ViewNew` or `ViewMutNew`; explicit copy stays here. `line` identifies
+    /// bounds failures.
     Slice {
         base: Box<TExpr>,
         start: Box<TExpr>,
         end: Box<TExpr>,
-        /// D-RANGE-VALUE1=A: a stored Range source, evaluated once. Literal
-        /// slices keep this empty and use start/end directly.
+        /// D-RANGE-VALUE1=A: a stored Range source, evaluated once.
         range: Option<Box<TExpr>>,
         line: usize,
     },
