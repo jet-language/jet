@@ -169,6 +169,75 @@ fn isolated_cwd(tag: &str) -> PathBuf {
 }
 
 #[test]
+fn tasks_lists_documented_scheduled_project_tasks_and_matches_run_outside_projects() {
+    let project = isolated_cwd("tasks_project");
+    fs::write(
+        project.join("pkg.jet"),
+        "payload: { name: \"task_runner\", version: \"0.1.0\" }\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("run.jet"),
+        include_str!("../examples/features/devloop/task_runner.jet"),
+    )
+    .unwrap();
+
+    let listed = Command::new(jet())
+        .arg("tasks")
+        .current_dir(&project)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        listed.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(listed.stdout).unwrap(),
+        "greet  Say hello from a project task\nseed   Seed local data (every 5min)\n"
+    );
+
+    let unknown = Command::new(jet())
+        .args(["run", "--task", "missing", "run.jet"])
+        .current_dir(&project)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let unknown_stderr = String::from_utf8_lossy(&unknown.stderr);
+    assert!(!unknown.status.success(), "{unknown_stderr}");
+    assert!(unknown_stderr.contains("E1294"), "{unknown_stderr}");
+    assert!(
+        unknown_stderr.contains("declared tasks: greet, seed"),
+        "{unknown_stderr}"
+    );
+
+    let help = Command::new(jet()).arg("help").output().unwrap();
+    assert!(help.status.success());
+    assert!(
+        String::from_utf8_lossy(&help.stdout).contains("jet tasks"),
+        "jet help must list task discovery"
+    );
+
+    let outside = isolated_cwd("tasks_outside_project");
+    let tasks_error = Command::new(jet())
+        .arg("tasks")
+        .current_dir(&outside)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let run_error = Command::new(jet())
+        .arg("run")
+        .current_dir(&outside)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(tasks_error.status.code(), run_error.status.code());
+    assert_eq!(tasks_error.stderr, run_error.stderr);
+}
+
+#[test]
 fn project_parts_lists_skipped_explicit_and_conflicting_modules() {
     let dir = isolated_cwd("project_parts");
     fs::write(dir.join("main.jet"), "module app { }\nfn run() {}\n").unwrap();

@@ -40,7 +40,7 @@ mod EngineDispatch;
 use CmdCodemod::run_codemod;
 use CmdCompile::{
     run_build_query, run_compile_cmd, run_debug_native, run_dev_entry, run_dev_web, run_fix, run_fmt,
-    run_fuzz, run_new, run_task_entry, run_test, run_test_opts, FuzzRunOpts, TestRunOpts,
+    run_fuzz, run_new, run_task_entry, run_tasks, run_test, run_test_opts, FuzzRunOpts, TestRunOpts,
 };
 use CmdDevTools::{
     run_bench, run_bind, run_completions, run_dev, run_devtools, run_doctor, run_emit_rust,
@@ -385,6 +385,7 @@ usage:
   {bin} run   <file.{ext}> -- ...   everything after `--` is forwarded to the program (D-CLI1)
   {bin} run   <file.{ext}> --gc-trace   record bounded automatic-GC promotion evidence
   {bin} run   <file.{ext}> --trace-tiers  expert: per-function tier, reason, timing
+  {bin} tasks                       list project `#Task` functions
   {bin} test  <file|dir>            compile and run top-level test blocks (recurses into subdirs)
   {bin} test  <file|dir>  -- ...    `--` forwards to the test runner
   {bin} test  <file> --filter=foo   only run tests whose name contains `foo`
@@ -1177,7 +1178,7 @@ fn main() {
     // pinned `jet` toolchain before any manifest-driven verb runs. A running
     // `jet` in the pinned channel runs natively; a genuine version mismatch
     // realizes the pinned prebuilt (never a source build) and re-execs into it.
-    if matches!(cmd, "run" | "build" | "test" | "check") {
+    if matches!(cmd, "run" | "build" | "test" | "check" | "tasks") {
         maybe_dispatch_pinned_toolchain(&raw);
     }
 
@@ -1242,6 +1243,13 @@ fn main() {
             }
             print!("{}", usage());
             exit(ExitCodes::OK);
+        }
+        "tasks" => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let entry = resolve_bare_entry("run", &cwd, None)
+                .unwrap_or_else(|| missing_bare_entry("run", &cwd));
+            run_tasks(&entry.to_string_lossy(), mode);
+            return;
         }
         "doctor" => {
             let online = raw.iter().any(|a| a == "--online");
@@ -1981,22 +1989,7 @@ fn main() {
                             }
                         }
                     } else {
-                        // D-JPK-FILENAME2=B (A2): a retired manifest filename in
-                        // place of `pkg.jet` gets the E1226 teaching diagnostic
-                        // instead of the generic "no pkg.jet found" message.
-                        if let Some(msg) = jet::Loader::stale_manifest_name_message(&cwd) {
-                            eprint!("{}", msg);
-                            exit(ExitCodes::USAGE);
-                        }
-                        eprintln!(
-                            "error: no file given and no `pkg.jet` found in this directory or above"
-                        );
-                        eprintln!(
-                            " fix: run `jet {} <file.{}>` or cd into a project",
-                            cmd,
-                            jet::Syntax::FILE_EXT
-                        );
-                        exit(ExitCodes::USAGE);
+                        missing_bare_entry(cmd, &cwd);
                     }
                 }
                 _ => {
@@ -2466,6 +2459,22 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
         }
     }
     jet::Loader::find_manifest_root(cwd).map(|root| find_project_entry(&root))
+}
+
+fn missing_bare_entry(cmd: &str, cwd: &Path) -> ! {
+    // D-JPK-FILENAME2=B (A2): a retired manifest filename in place of
+    // `pkg.jet` gets the E1226 teaching diagnostic.
+    if let Some(msg) = jet::Loader::stale_manifest_name_message(cwd) {
+        eprint!("{}", msg);
+        exit(ExitCodes::USAGE);
+    }
+    eprintln!("error: no file given and no `pkg.jet` found in this directory or above");
+    eprintln!(
+        " fix: run `jet {} <file.{}>` or cd into a project",
+        cmd,
+        jet::Syntax::FILE_EXT
+    );
+    exit(ExitCodes::USAGE);
 }
 
 fn run_version() {

@@ -675,18 +675,22 @@ pub(crate) fn run_task_entry(
         }
     };
     let declared = list_task_names(&src);
-    let is_marked = match task_is_marked(&src, task) {
-        Some(v) => v,
-        None => {
-            // Parse failed — let compile_with_entry surface real diagnostics.
-            true
-        }
-    };
+    // Parse failures still flow through `compile_with_entry`, which owns the
+    // full source diagnostic. Successful discovery is the E1294 authority.
+    let is_marked = declared
+        .as_ref()
+        .map(|tasks| tasks.iter().any(|item| item.name == task))
+        .unwrap_or(true);
     if !is_marked {
+        let declared = declared.expect("successful task discovery");
         let list = if declared.is_empty() {
             "(none)".to_string()
         } else {
-            declared.join(", ")
+            declared
+                .iter()
+                .map(|item| item.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         };
         let diag = jet::Diagnostics::Diagnostic::error(
             "E1294",
@@ -740,35 +744,101 @@ pub(crate) fn run_task_entry(
     exit(status.code().unwrap_or(ExitCodes::OK));
 }
 
-/// Cheap lex+parse: names of top-level `#Task fn`s in `src`.
-fn list_task_names(src: &str) -> Vec<String> {
-    let (toks, lex_diags) = jet::Lexer::lex(src);
-    if !lex_diags.is_empty() {
-        return Vec::new();
-    }
-    let Ok(prog) = jet::Parser::parse(&toks) else {
-        return Vec::new();
-    };
-    prog.items
-        .iter()
-        .filter_map(|i| match i {
-            jet::AST::Item::Func(f) if f.is_task => Some(f.name.clone()),
-            _ => None,
-        })
-        .collect()
+#[derive(Debug)]
+struct TaskListing {
+    name: String,
+    doc: Option<String>,
+    schedule: Option<String>,
 }
 
-/// `Some(true)` if `name` is a `#Task fn`; `Some(false)` if the file parsed
-/// but has no such task; `None` on lex/parse failure.
-fn task_is_marked(src: &str, name: &str) -> Option<bool> {
+fn marker_string(marker: &jet::AST::Marker) -> Option<String> {
+    match marker.args.first() {
+        Some(jet::AST::Expr::Str(parts, _)) if parts.len() == 1 => match &parts[0] {
+            jet::AST::StrPart::Lit(value) => Some(value.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn schedule_text(marker: &jet::AST::EveryMarker) -> Option<String> {
+    match &marker.arg {
+        jet::AST::EveryArg::Duration {
+            int,
+            float,
+            suffix,
+            ..
+        } => Some(format!(
+            "{}{suffix}",
+            int.map(|value| value.to_string())
+                .or_else(|| float.map(|value| value.to_string()))
+                .unwrap_or_default()
+        )),
+        jet::AST::EveryArg::WallClock { text, .. } => Some(format!("day {text}")),
+        jet::AST::EveryArg::Expression(_) => None,
+    }
+}
+
+/// D-TASKS-LIST1=A: one lex+parse source for E1294 and `jet tasks`.
+/// Source order, `#Doc`, and `#Every` metadata all come from this program.
+fn list_task_names(src: &str) -> Result<Vec<TaskListing>, Vec<jet::Diagnostics::Diagnostic>> {
     let (toks, lex_diags) = jet::Lexer::lex(src);
     if !lex_diags.is_empty() {
-        return None;
+        return Err(lex_diags);
     }
-    let prog = jet::Parser::parse(&toks).ok()?;
-    Some(prog.items.iter().any(
-        |i| matches!(i, jet::AST::Item::Func(f) if f.is_task && f.name == name),
-    ))
+    let prog = jet::Parser::parse(&toks)?;
+    Ok(prog
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            jet::AST::Item::Func(f) if f.is_task => {
+                let doc = prog
+                    .applied_rules
+                    .iter()
+                    .find(|application| {
+                        application.target == Some(f.span)
+                            && application.marker.name == jet::Syntax::CONTRACT_DOC
+                    })
+                    .and_then(|application| marker_string(&application.marker));
+                Some(TaskListing {
+                    name: f.name.clone(),
+                    doc,
+                    schedule: f.every.as_ref().and_then(schedule_text),
+                })
+            }
+            _ => None,
+        })
+        .collect())
+}
+
+pub(crate) fn run_tasks(file: &str, mode: OutputMode) {
+    let src = fs::read_to_string(file).unwrap_or_else(|_| {
+        eprintln!("error: can't find the file `{file}`");
+        exit(ExitCodes::USER_ERROR);
+    });
+    let tasks = list_task_names(&src).unwrap_or_else(|diags| {
+        report_problems(mode, file, &src, &diags);
+        exit(ExitCodes::USER_ERROR);
+    });
+    if tasks.is_empty() {
+        println!("No tasks declared.");
+        return;
+    }
+    let width = tasks.iter().map(|task| task.name.len()).max().unwrap_or(0);
+    for task in tasks {
+        let mut detail = task.doc.unwrap_or_default();
+        if let Some(schedule) = task.schedule {
+            if !detail.is_empty() {
+                detail.push(' ');
+            }
+            detail.push_str(&format!("(every {schedule})"));
+        }
+        if detail.is_empty() {
+            println!("{}", task.name);
+        } else {
+            println!("{:<width$}  {}", task.name, detail);
+        }
+    }
 }
 
 /// D-SUPPLY1 — write an SPDX SBOM next to the freshly built binary.

@@ -2856,7 +2856,7 @@ fn fmt_preserves_schedule_markers() {
     // — same inline-marker convention as `#Reactive`/`#Sanitizer`/
     // `#Replayable`/`#State(…)` (one space-separated line before `fn`).
     let src = "\
-#[Task, Every(5min)] fn prune_sessions() {
+#[Task, Doc(\"Prune old sessions\"), Every(5min)] fn prune_sessions() {
     print(\"pruning\")
 }
 
@@ -2874,7 +2874,7 @@ fn run() {
     manual_only()
 }
 ";
-    assert_fmt_stable(src, "#Task/#Every schedule markers (D-SCHEDULE1)");
+    assert_fmt_stable(src, "#Task/#Doc/#Every task markers (D-TASKS-LIST1)");
 }
 
 #[test]

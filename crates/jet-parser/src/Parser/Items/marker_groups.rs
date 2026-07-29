@@ -788,6 +788,9 @@ impl<'a> Parser<'a> {
                         function.is_task = true;
                         function.task_span = Some(marker.span);
                     }
+                    // D-TASKS-LIST1=A: `#Doc` stays in `applied_rules`; task
+                    // discovery reads that shared marker metadata by target.
+                    Syntax::CONTRACT_DOC => {}
                     Syntax::ATTR_EVERY => {
                         let Some(schedule) = arguments.parameter(0) else {
                             return Err(crate::Policy::marker_argument_shape_error(
@@ -993,6 +996,7 @@ impl<'a> Parser<'a> {
                     | Syntax::CONTRACT_PRE
                     | Syntax::CONTRACT_POST
                     | Syntax::CONTRACT_INLINE
+                    | Syntax::CONTRACT_DOC
                     | Syntax::KW_TASK
                     | Syntax::ATTR_EVERY
                     | Syntax::ATTR_REPLAYABLE

@@ -259,6 +259,11 @@ pub const COMMANDS: &[CommandSpec] = &[
         headline: true,
     },
     CommandSpec {
+        name: "tasks",
+        summary: "List project tasks",
+        headline: false,
+    },
+    CommandSpec {
         name: "check",
         summary: "Check code without creating a binary",
         headline: true,

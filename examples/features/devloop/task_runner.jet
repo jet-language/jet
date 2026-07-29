@@ -1,12 +1,13 @@
 // D-JPK-TASKRUN1 (card #476) — project tasks are Jet `#Task fn`s.
+// Discover inside a project with `jet tasks`.
 // Invoke: `jet run --task greet <this-file>` / `jet run --task seed <this-file>`.
 // Cross-task dependency = a plain call (`seed` calls `greet` below).
 // I5 golden runs both --task paths (see tests/golden.rs).
-#Task fn greet() {
+#[Task, Doc("Say hello from a project task")] fn greet() {
     print("hello from task")
 }
 
-#Task fn seed() {
+#[Task, Doc("Seed local data"), Every(5min)] fn seed() {
     greet()
     print("seeded")
 }
