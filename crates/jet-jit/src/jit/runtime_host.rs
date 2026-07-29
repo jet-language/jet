@@ -80,6 +80,8 @@ pub(crate) struct JitRuntime {
     pub(crate) senders: Vec<Option<JetSchedulerSender<i64>>>,
     pub(crate) tasks: Vec<Option<JetSchedulerJoin<i64>>>,
     pub(crate) task_controls: Vec<std::sync::Arc<JetTaskControl>>,
+    pub(crate) task_groups:
+        Vec<Option<jet_codegen::task_group::JetTaskGroupRuntime<i64>>>,
     /// General `Result<T, E>` ABI arena. Handles are one-based indices; payload
     /// bits are interpreted from checked TIR types, never dynamically guessed.
     pub(crate) results: Vec<JitResultValue>,

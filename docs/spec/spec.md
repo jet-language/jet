@@ -2045,13 +2045,30 @@ serialization or implicit capture merge; callers
 return data, use `para_partition` or `para_fold`, or choose explicit synchronized
 state.
 
-### Taskgroups and structured combinators (D-TASKSCOPE1, D-CONCCOMB1, D-RACEWIN1, D-CONCSELECT1; verified 2026-06-30)
+### Taskgroups and structured combinators (D-TASKSCOPE1, D-TASKGROUP-PARAM1, D-CONCCOMB1, D-RACEWIN1, D-CONCSELECT1; verified 2026-07-29)
 
 Structured concurrency uses a scoped `taskgroup` (D-TASKSCOPE1=A). Inside
 `taskgroup g { … }`, `g.task => expression` or `g.task => { … }` spawns a
 child owned by the
 group. Unjoined handles at scope exit are cancelled and joined before the block
 returns.
+
+`TaskGroup` may also be written as a direct parameter of a named function
+(D-TASKGROUP-PARAM1=A). This lets a lexical group flow down the call stack:
+
+```jet
+fn add_work(group: TaskGroup, value: Int) {
+    task :: group.task => value + 1
+    print(task.join())
+}
+```
+
+A spawn through a `TaskGroup` parameter may capture only copied or moved owned
+values. It may not capture a `view`. `TaskGroup` remains a scoped authority, not
+a general value: it is illegal in fields, returns, local declarations, lambda
+parameters, and escaping closures. The parameter carries the lexical group's
+internal collector. A task spawned by a helper therefore remains owned by the
+caller's group and is cancelled and joined at that outer scope's exit.
 
 Combinators are methods on the group handle only (no detached work):
 

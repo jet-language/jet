@@ -712,13 +712,17 @@ pub(crate) fn lower_method_call(
             let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
             cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
             let spawn_closure = render_spawn_lambda(lam, cx, env);
+            let group = lower_expr(receiver, cx, env);
             return TExpr {
                 ty: Type::Apply {
                     name: "Task".to_string(),
                     args: vec![body_ty],
                 },
                 kind: TExprKind::CoreClosureCall {
-                    kind: TCoreClosureKind::Spawn { spawn_closure },
+                    kind: TCoreClosureKind::Spawn {
+                        group: Some(Box::new(group)),
+                        spawn_closure,
+                    },
                 },
             };
         }

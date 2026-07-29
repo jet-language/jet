@@ -9,4 +9,6 @@ pub mod Codegen;
 mod BrowserHost;
 /// D-ASYNCRT1=A: M:N scheduler substrate for jet-jit host shims.
 pub mod scheduler;
+/// D-TASKGROUP-PARAM1=A: canonical structured task ownership policy.
+pub mod task_group;
 // Prelude/ contains include_str-embedded text files, not Rust modules.

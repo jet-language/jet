@@ -122,8 +122,11 @@ pub const GRANT_BIND_SEPARATOR: &str = ":";
 /// in codegen (I3). Mirrors `TXN_HANDLE_TYPE`.
 pub const CAP_HANDLE_TYPE: &str = "Capability";
 
-/// D-TASKSCOPE1=A / D-NURSERY1=A: the sema-only handle type bound by
-/// `taskgroup g { … }`. Erased in codegen (I3); routes `g.task` / `g.all`.
+/// D-TASKSCOPE1=A / D-NURSERY1=A / D-TASKGROUP-PARAM1=A: the compiler-private
+/// handle type bound by `taskgroup g { … }` and accepted as a direct
+/// named-function parameter. It routes `g.task` / `g.all` and carries the
+/// lexical group's internal collector through lowering; it is not a public
+/// first-class value.
 pub const TYPE_TASKGROUP: &str = "TaskGroup";
 
 /// D-TASKSCOPE1=A + D-ARROW-CONTROL1=A: scoped spawn method on a taskgroup

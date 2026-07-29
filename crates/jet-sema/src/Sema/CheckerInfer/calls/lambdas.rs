@@ -150,6 +150,19 @@ use std::collections::HashSet;
                     let Some((cap_ty, cap_sendable, cap_conv)) = cap else {
                         continue;
                     };
+                    if matches!(&cap_ty, Type::Named(ty) if ty == Syntax::TYPE_TASKGROUP) {
+                        self.diags.push(Diagnostic::error(
+                            "E1110",
+                            format!("`{name}` is a `TaskGroup` and cannot escape in a lambda"),
+                            "a taskgroup is a scoped spawn authority that may flow only through direct named-function calls"
+                                .to_string(),
+                            format!(
+                                "move this work to `fn helper({name}: TaskGroup)` and call the helper directly"
+                            ),
+                            Some(lam.span),
+                        ));
+                        continue;
+                    }
                     let taken = take_set.contains(name);
                     let cloneable = is_cloneable(&cap_ty, self.registry);
                     if !cap_ty.is_scalar()

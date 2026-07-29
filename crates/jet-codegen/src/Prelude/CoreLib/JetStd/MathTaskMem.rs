@@ -231,20 +231,81 @@
         "m03" => 12, "m13" => 13, "m23" => 14, "m33" => 15,
     );
 
-    pub struct JetTask<T: Send + 'static> {
-        handle: Option<super::JetSchedulerJoin<T>>,
+    struct JetTaskState<T: Send + 'static> {
+        handle: std::sync::Mutex<Option<super::JetSchedulerJoin<T>>>,
         control: std::sync::Arc<super::JetTaskControl>,
         // Typed operations such as AsyncEvent convert their inherited deadline
         // into their own result value. Re-checking the caller deadline after
         // join would replace that value with E3003 and violate the typed API.
         skip_join_deadline: bool,
     }
+
+    trait JetTaskGroupChild: Send + Sync {
+        fn cancel(&self);
+        fn join(&self);
+    }
+
+    impl<T: Send + 'static> JetTaskGroupChild for JetTaskState<T> {
+        fn cancel(&self) {
+            if self.handle.lock().unwrap().is_some() {
+                self.control.cancel();
+            }
+        }
+
+        fn join(&self) {
+            if let Some(handle) = self.handle.lock().unwrap().take() {
+                handle.join();
+            }
+        }
+    }
+
+    /// D-TASKSCOPE1=A / D-TASKGROUP-PARAM1=A: the internal runtime identity
+    /// shared by a lexical taskgroup and every named helper that receives it.
+    pub struct JetTaskGroup {
+        children: JetTaskGroupRuntime<std::sync::Arc<dyn JetTaskGroupChild>>,
+    }
+
+    impl JetTaskGroup {
+        pub fn new() -> Self {
+            Self {
+                children: JetTaskGroupRuntime::new(),
+            }
+        }
+
+        pub fn spawn<F, T>(&self, f: F) -> JetTask<T>
+        where
+            F: FnOnce() -> T + Send + 'static,
+            T: Send + 'static,
+        {
+            let task = JetTask::spawn(f);
+            self.children.register(task.state.clone());
+            task
+        }
+
+        pub fn close(&self) {
+            self.children
+                .close_with(|child| child.cancel(), |child| child.join());
+        }
+    }
+
+    impl Drop for JetTaskGroup {
+        fn drop(&mut self) {
+            self.close();
+        }
+    }
+
+    pub struct JetTask<T: Send + 'static> {
+        state: std::sync::Arc<JetTaskState<T>>,
+    }
+
     impl<T: Send + 'static> Default for JetTask<T> {
         fn default() -> Self {
             JetTask {
-                handle: None,
-                control: super::JetTaskControl::new(),
-                skip_join_deadline: false,
+                state: std::sync::Arc::new(JetTaskState {
+                    handle: std::sync::Mutex::new(None),
+                    control: super::JetTaskControl::new(),
+                    skip_join_deadline: false,
+                }),
             }
         }
     }
@@ -253,15 +314,20 @@
             let inherited_deadline = super::jet_ctx_deadline_ms();
             let control = super::JetTaskControl::new();
             JetTask {
-                handle: Some(super::jet_scheduler_spawn_blocking_with_control(
-                    move || {
-                        let _deadline_guard = inherited_deadline.map(super::jet_ctx_push_deadline);
-                        f()
-                    },
-                    control.clone(),
-                )),
-                control,
-                skip_join_deadline: false,
+                state: std::sync::Arc::new(JetTaskState {
+                    handle: std::sync::Mutex::new(Some(
+                        super::jet_scheduler_spawn_blocking_with_control(
+                            move || {
+                                let _deadline_guard =
+                                    inherited_deadline.map(super::jet_ctx_push_deadline);
+                                f()
+                            },
+                            control.clone(),
+                        ),
+                    )),
+                    control,
+                    skip_join_deadline: false,
+                }),
             }
         }
         pub(crate) fn spawn_typed_deadline<F: FnOnce() -> T + Send + 'static>(
@@ -270,48 +336,66 @@
         ) -> JetTask<T> {
             let inherited_deadline = super::jet_ctx_deadline_ms();
             JetTask {
-                handle: Some(super::jet_scheduler_spawn_blocking_with_control(
-                    move || {
-                        let _deadline_guard = inherited_deadline.map(super::jet_ctx_push_deadline);
-                        let _typed_deadline_boundary = super::JetTypedDeadlineBoundary::enter();
-                        f()
-                    },
-                    control.clone(),
-                )),
-                control,
-                skip_join_deadline: true,
+                state: std::sync::Arc::new(JetTaskState {
+                    handle: std::sync::Mutex::new(Some(
+                        super::jet_scheduler_spawn_blocking_with_control(
+                            move || {
+                                let _deadline_guard =
+                                    inherited_deadline.map(super::jet_ctx_push_deadline);
+                                let _typed_deadline_boundary =
+                                    super::JetTypedDeadlineBoundary::enter();
+                                f()
+                            },
+                            control.clone(),
+                        ),
+                    )),
+                    control,
+                    skip_join_deadline: true,
+                }),
             }
         }
         // D-COROUTINE1=A: control-plane hooks on the M:N scheduler substrate.
         pub fn pause(&self) {
-            self.control.pause();
+            self.state.control.pause();
         }
         pub fn resume(&self) {
-            self.control.resume();
+            self.state.control.resume();
         }
         pub fn cancel(&self) {
-            self.control.cancel();
+            self.state.control.cancel();
         }
         pub fn trace(&self) -> String {
             let paused = self
+                .state
                 .control
                 .paused
                 .load(std::sync::atomic::Ordering::Relaxed);
             let cancel = self
+                .state
                 .control
                 .cancelled
                 .load(std::sync::atomic::Ordering::Relaxed);
             format!("paused={},cancel={}", paused, cancel)
         }
-        pub fn join(mut self) -> T {
-            if !self.skip_join_deadline {
+        pub fn join(self) -> T {
+            if !self.state.skip_join_deadline {
                 super::jet_deadline_check("task join");
             }
-            let v = self.handle.take().unwrap().join();
-            if !self.skip_join_deadline {
+            let v = self
+                .state
+                .handle
+                .lock()
+                .unwrap()
+                .take()
+                .expect("task already joined")
+                .join();
+            if !self.state.skip_join_deadline {
                 super::jet_deadline_check("task join");
             }
             v
+        }
+        pub fn detach(self) {
+            let _ = self.state.handle.lock().unwrap().take();
         }
     }
 
@@ -319,10 +403,15 @@
     pub fn jet_task_all<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> Vec<T> {
         let entries: Vec<_> = tasks
             .into_iter()
-            .map(|mut t| {
+            .map(|t| {
                 (
-                    t.handle.take().expect("all: task already joined"),
-                    t.control,
+                    t.state
+                        .handle
+                        .lock()
+                        .unwrap()
+                        .take()
+                        .expect("all: task already joined"),
+                    t.state.control.clone(),
                 )
             })
             .collect();
@@ -333,10 +422,15 @@
     pub fn jet_task_race<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> T {
         let entries: Vec<_> = tasks
             .into_iter()
-            .map(|mut t| {
+            .map(|t| {
                 (
-                    t.handle.take().expect("race: task already joined"),
-                    t.control,
+                    t.state
+                        .handle
+                        .lock()
+                        .unwrap()
+                        .take()
+                        .expect("race: task already joined"),
+                    t.state.control.clone(),
                 )
             })
             .collect();
@@ -347,10 +441,15 @@
     pub fn jet_task_any<T: Send + 'static>(tasks: Vec<JetTask<T>>) -> T {
         let entries: Vec<_> = tasks
             .into_iter()
-            .map(|mut t| {
+            .map(|t| {
                 (
-                    t.handle.take().expect("any: task already joined"),
-                    t.control,
+                    t.state
+                        .handle
+                        .lock()
+                        .unwrap()
+                        .take()
+                        .expect("any: task already joined"),
+                    t.state.control.clone(),
                 )
             })
             .collect();

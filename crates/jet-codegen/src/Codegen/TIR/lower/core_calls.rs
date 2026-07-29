@@ -81,7 +81,10 @@ pub(crate) fn lower_core_closure_call(
             return Some(TExpr {
                 ty: core_closure_call_return_ty(module, method, body_ty),
                 kind: TExprKind::CoreClosureCall {
-                    kind: TCoreClosureKind::Spawn { spawn_closure },
+                    kind: TCoreClosureKind::Spawn {
+                        group: None,
+                        spawn_closure,
+                    },
                 },
             });
         }

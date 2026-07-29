@@ -608,6 +608,8 @@ pub fn jit_expr_tag(expr: &TExpr) -> &'static str {
         TExprKind::CoreClosureCall { .. } => "CoreClosureCall",
         TExprKind::HandleMethod { .. } => "HandleMethod",
         TExprKind::ListLit(_) => "ListLit",
+        TExprKind::TaskGroupNew => "TaskGroupNew",
+        TExprKind::TaskGroupClose(_) => "TaskGroupClose",
         TExprKind::TaskGroupAll { .. } => "TaskGroupAll",
         TExprKind::TaskGroupRace { .. } => "TaskGroupRace",
         TExprKind::TaskGroupAny { .. } => "TaskGroupAny",

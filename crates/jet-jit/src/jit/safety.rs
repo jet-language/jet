@@ -982,6 +982,8 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
         TExprKind::ResourceNew(inner) => resident_safe_expr(inner, callees),
         TExprKind::ResourceTake(_) => jit_value_type(&expr.ty),
         TExprKind::Close(_) => true,
+        TExprKind::TaskGroupNew => true,
+        TExprKind::TaskGroupClose(group) => resident_safe_expr(group, callees),
         _ if !jit_value_type(&expr.ty) => false,
         TExprKind::IntLit(_, _)
         | TExprKind::FloatLit(_)
@@ -2407,6 +2409,8 @@ fn expr_kind_tag(expr: &TExpr) -> &'static str {
             _ => "CoreClosure:Other",
         },
         TExprKind::HandleMethod { op, .. } => "HandleMethod",
+        TExprKind::TaskGroupNew => "TaskGroupNew",
+        TExprKind::TaskGroupClose(_) => "TaskGroupClose",
         TExprKind::Call { name, .. } => Box::leak(format!("Call:{name}").into_boxed_str()),
         TExprKind::Binary { .. } => "Binary",
         TExprKind::Local(_) => "Local",
@@ -2752,6 +2756,7 @@ fn count_spawn_sites_expr(expr: &TExpr, n: &mut usize) {
         TExprKind::TaskGroupAll { tasks }
         | TExprKind::TaskGroupRace { tasks }
         | TExprKind::TaskGroupAny { tasks } => count_spawn_sites_expr(tasks, n),
+        TExprKind::TaskGroupClose(group) => count_spawn_sites_expr(group, n),
         _ => {}
     }
 }

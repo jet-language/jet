@@ -1437,13 +1437,37 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let mut scoped = clone_env(env);
             TStmt::Region(lower_stmts(body, cx, &mut scoped))
         }
-        // D-TASKSCOPE1=A: taskgroup erases to a plain block at codegen (I3).
-        Stmt::TaskGroup { body, .. } => {
+        // D-TASKSCOPE1=A / D-TASKGROUP-PARAM1=A: the lexical block owns one
+        // internal collector. Helpers borrow this same value.
+        Stmt::TaskGroup { name, body, .. } => {
             let mut scoped = clone_env(env);
-            TStmt::Region(lower_stmts(body, cx, &mut scoped))
+            let group_ty = Type::Named(Syntax::TYPE_TASKGROUP.to_string());
+            let group = TLocal::user(name);
+            scoped.bind(name, group.clone(), Some(group_ty.clone()));
+            let mut statements = Vec::new();
+            statements.push(TStmt::Let {
+                name: name.clone(),
+                kw: "let",
+                let_ty: TLetTy::plain(group_ty.clone()),
+                init: TExpr {
+                    ty: group_ty.clone(),
+                    kind: TExprKind::TaskGroupNew,
+                },
+                gc_promotion: None,
+                gc_transferred: false,
+            });
+            statements.extend(lower_stmts(body, cx, &mut scoped));
+            statements.push(TStmt::ExprStmt(TExpr {
+                ty: Type::Named("Unit".to_string()),
+                kind: TExprKind::TaskGroupClose(Box::new(TExpr {
+                    ty: group_ty,
+                    kind: TExprKind::Local(group),
+                })),
+            }));
+            TStmt::Region(statements)
         }
-        // D-LAYOUT1 / D-LAYOUT-GATES1: `layout name { … }` needs a REAL
-        // runtime object (unlike Region/TaskGroup, which erase) — bind `name`
+        // D-LAYOUT1 / D-LAYOUT-GATES1: `layout name { … }` needs a public
+        // runtime object (unlike the compiler-private TaskGroup handle) — bind `name`
         // to a fresh `jet_layout::Handle` BEFORE lowering the body, so the
         // desugared `name.h(box, anchor)` calls inside resolve to it, exactly
         // like an ordinary `name :: jet_layout::Handle::new(…)` binding would.
