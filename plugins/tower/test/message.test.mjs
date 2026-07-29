@@ -71,6 +71,30 @@ test('an uncleared completion stays live past retirement age', () => {
   assert.equal(store.load().cards.length, 0, 'clear cursor allows normal retirement');
 });
 
+test('a pending completion keeps its ratified decisions live', () => {
+  const { store } = fresh({ retireAfterDays: 0 });
+  store.mutate((s, cfg) => addCard(s, { title: 'Ship it', by: 'agent' }, cfg));
+  store.mutate((s) => setCompletionCursor(s, '2026-07-25T10:00:00.000Z'));
+  store.mutate((s, cfg) => updateCard(s, '#1', { phase: 'done', by: 'agent' }, cfg));
+  store.mutate((s) => {
+    s.cards[0].updated = '2020-01-01';
+    s.decisions.push({
+      id: 'D-OLD',
+      cardId: s.cards[0].id,
+      title: 'Old ruling',
+      status: 'ratified',
+      ratifiedAt: '2020-01-01',
+    });
+  });
+  assert.equal(store.load().cards.length, 1);
+  assert.equal(store.load().decisions.length, 1, 'live card keeps its decision view whole');
+
+  store.mutate((s) => setCompletionCursor(s, '2099-01-01T00:00:00.000Z'));
+  assert.equal(store.load().cards.length, 0);
+  assert.equal(store.load().decisions.length, 0);
+  assert.equal(store.loadHistory().decisions[0].id, 'D-OLD');
+});
+
 test('only the owner can mark a message done', () => {
   const { store } = fresh();
   store.mutate((s, cfg) => addCard(s, { title: 'Ship it', by: 'agent' }, cfg));

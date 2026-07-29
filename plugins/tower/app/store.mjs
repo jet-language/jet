@@ -207,14 +207,14 @@ function retire(s, config, dataDir) {
     s.questions = s.questions.filter(q => !retireCardIds.has(q.cardId));
   }
 
-  // (a) standalone ratified decisions aged out on their own — only once
-  // their card is done (or gone); a still-active card keeps its decisions
-  // live no matter how old, so the card's own view stays whole.
+  // (a) standalone ratified decisions age out only when their card is gone.
+  // A live card keeps its decisions until the card retires, so its view can
+  // never become half-archived while a completion or message holds it live.
   const liveCardById = new Map(s.cards.map(c => [c.id, c]));
   const standaloneIds = new Set(s.decisions.filter(d => {
     if (d.status !== 'ratified' || !isOlderThanDays(d.ratifiedAt, days)) return false;
     const c = liveCardById.get(d.cardId);
-    return !c || c.phase === 'done';
+    return !c;
   }).map(d => d.id));
   if (standaloneIds.size) {
     for (const d of s.decisions) {
