@@ -725,7 +725,7 @@ pub fn run_named_func(
         emitted_fragments: None,
         embed_inputs: None,
         struct_fields: HashMap::new(),
-        struct_field_types: HashMap::new(),
+        struct_field_types: program_struct_field_types(program),
         switch_subject: None,
         callables: Vec::new(),
         streams: Vec::new(),

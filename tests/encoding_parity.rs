@@ -385,6 +385,7 @@ fn cbor_typed_schema_matches_comptime_default_dev_and_deopt() {
     let source = r#"
 use core.encoding.cbor as cbor
 use core.encoding.hex as hex
+use core.text as text
 
 #Codable
 struct Packet {
@@ -395,15 +396,28 @@ struct Packet {
 comptime root = hex.encode(cbor.to_bytes_canonical([U8].{222, 173}) ?? panic("root"))
 comptime packet = hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("packet"))
 
-fn run() {
+fn gap() => String {
+    folded :: text.casefold("Straße")
+    if folded != "strasse" { panic("casefold") }
     actual_root := hex.encode(cbor.to_bytes_canonical([U8].{222, 173}) ?? panic("root"))
     actual_packet := hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("packet"))
+    return "{actual_root}|{actual_packet}"
+}
+
+fn run() {
     print("{root}|{packet}")
-    print("{actual_root}|{actual_packet}")
+    print(gap())
 }
 "#;
     let scratch = Scratch::new("cbor_typed_schema");
     let path = scratch.write_project("2026", source);
+    let bundle = checked_bundle(path.to_str().unwrap());
+    let plan = plan_bundle_tiers(&bundle);
+    assert!(!plan.whole_interp, "regression needs mixed named-function deopt: {plan:?}");
+    assert!(
+        plan.deopt.iter().any(|(name, _)| name == "gap"),
+        "regression needs `gap` on the named deopt tier: {plan:?}"
+    );
     let expected = "42dead|a262696407677061796c6f616442dead\n42dead|a262696407677061796c6f616442dead\n";
     let aot = run_aot(&path, scratch.path());
     assert_eq!(aot.exit, 0, "typed CBOR AOT failed: {}", aot.stderr);
@@ -411,9 +425,11 @@ fn run() {
     let (backend, dev) = run_default_dev(path.to_str().unwrap());
     assert_eq!(dev.exit, 0, "typed CBOR default-dev failed: {}", dev.stderr);
     assert_eq!(dev.stdout, expected, "default-dev backend: {backend:?}");
-    let deopt = run_forced_interpreter(path.to_str().unwrap());
-    assert_eq!(deopt.exit, 0, "typed CBOR deopt failed: {}", deopt.stderr);
-    assert_eq!(deopt.stdout, expected);
+    assert_eq!(backend, DevBackend::DeoptInterp);
+    assert!(
+        deopt_invoked_for_test(),
+        "typed CBOR regression must execute named-function deopt"
+    );
 }
 
 /// `csv.to_string` takes either the dynamic `[[String]]` rows form or a typed
