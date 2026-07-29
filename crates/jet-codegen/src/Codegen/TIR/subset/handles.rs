@@ -329,6 +329,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("ArgsSpec", "completion", 1) => THandleOp::ArgsSpecCompletion,
         ("ArgsSpec", "help", 0) => THandleOp::ArgsSpecHelp,
         ("ArgsSpec", "parse", 1) => THandleOp::ArgsSpecParse,
+        ("ArgsSpec", "parse_or_exit", 1) => THandleOp::ArgsSpecParseOrExit,
         // D-ANY-JAI1 (c7jaiany §6): reflect.of(x)'s Value/Field handle methods.
         ("Value", "type_name", 0) => THandleOp::ReflectValueTypeName,
         ("Value", "display", 0) => THandleOp::ReflectValueDisplay,
