@@ -1136,9 +1136,10 @@ if plan.capabilities().has(TerminalFact.resize) {
 `.Cooked` policy. `capabilities()` returns a `Set[String]`. Use the checked
 keys `TerminalFact.terminal`, `TerminalFact.resize`, and `TerminalFact.raw`
 for stable facts. String keys remain open for preview facts without adding a
-second report type. `ProcessChild.terminal` holds a terminal session only for
-a terminal-backed child, so its type is `TerminalSession?`. After unwrapping
-it, `resize(size)` returns `Unit ? IOError`.
+second report type; a close literal typo suggests the nearest stable key.
+`ProcessChild.terminal` holds a terminal session only for a terminal-backed
+child, so its type is `TerminalSession?`. After unwrapping it, `resize(size)`
+returns `Unit ? IOError`.
 
 A terminal session needs a Unix PTY or a Windows ConPTY. While no such backend
 is present, every launch path that asks for a terminal — `run()`, `spawn()`,

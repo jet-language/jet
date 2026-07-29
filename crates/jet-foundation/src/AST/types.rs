@@ -103,6 +103,10 @@ pub const SYSTEM_CLOCK_MARKER: &str = "\0clock.system";
 /// `ExpiringSecret.with`. It cannot be named in source or stored anywhere.
 pub const EXPIRING_SECRET_LOAN_MARKER: &str = "\0expiring_secret.loan";
 
+/// Internal provenance for the open terminal capability-key set.
+/// The NUL prefix keeps the marker unspellable in Jet source.
+pub const TERMINAL_FACT_SET_MARKER: &str = "\0terminal.fact_set";
+
 /// Compiler-owned representation tag used by generated C++ facade functions.
 /// The tag keeps the source-level callback shape while telling the backend that
 /// this parameter is already a raw C function pointer, not a boxed Jet closure.
@@ -568,6 +572,7 @@ impl Type {
                         | DETERMINISTIC_CLOCK_MARKER
                         | EXPIRING_SECRET_LOAN_MARKER
                         | SYSTEM_CLOCK_MARKER
+                        | TERMINAL_FACT_SET_MARKER
                 ) =>
             {
                 inner.show()
@@ -644,6 +649,7 @@ impl Type {
                         | DETERMINISTIC_CLOCK_MARKER
                         | EXPIRING_SECRET_LOAN_MARKER
                         | SYSTEM_CLOCK_MARKER
+                        | TERMINAL_FACT_SET_MARKER
                 ) =>
             {
                 inner.name()

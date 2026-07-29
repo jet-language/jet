@@ -200,7 +200,15 @@ pub fn canonical_api_type_name(ty: &Type, dimensions: &ApiUnitDimensions) -> Str
         Type::Apply { name, args } => format!("{}<{}>", name, args.iter().map(|ty| canonical_api_type_name(ty, dimensions)).collect::<Vec<_>>().join(", ")),
         Type::Tuple(fields) => format!("({})", fields.iter().map(|(name, ty)| format!("{name}: {}", canonical_api_type_name(ty, dimensions))).collect::<Vec<_>>().join(", ")),
         Type::FixedList { elem, len, len_symbol } => format!("[{}#{}]", canonical_api_type_name(elem, dimensions), len_symbol.as_ref().map(|v| v.0.as_str()).map_or_else(|| len.to_string(), str::to_string)),
-        Type::Tagged { marker, inner } if marker == crate::AST::CORE_CRYPTO_NOMINAL_MARKER => canonical_api_type_name(inner, dimensions),
+        Type::Tagged { marker, inner }
+            if matches!(
+                marker.as_str(),
+                crate::AST::CORE_CRYPTO_NOMINAL_MARKER
+                    | crate::AST::TERMINAL_FACT_SET_MARKER
+            ) =>
+        {
+            canonical_api_type_name(inner, dimensions)
+        }
         Type::Tagged { marker, inner } => format!("#{marker} {}", canonical_api_type_name(inner, dimensions)),
         _ => ty.name(),
     }

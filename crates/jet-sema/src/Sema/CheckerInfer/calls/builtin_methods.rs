@@ -1,4 +1,4 @@
-use crate::AST::{Expr, Type};
+use crate::AST::{Expr, StrPart, Type};
 use crate::Collections;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::substitute_type;
@@ -6,7 +6,9 @@ use crate::Sema::Captures::{lambda_body_refs_name, lambda_collect_captures};
 use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::Checker;
 use crate::Sema::CheckerCoreLib::wrong_core_arity;
-use crate::Sema::Diagnostics::{collection_changed_in_loop, expr_root_ident, type_fix_hint};
+use crate::Sema::Diagnostics::{
+    collection_changed_in_loop, expr_root_ident, suggest_field, type_fix_hint,
+};
 use crate::Syntax;
 use std::collections::HashSet;
 impl<'a> Checker<'a> {
@@ -314,6 +316,35 @@ impl<'a> Checker<'a> {
                             ));
                         }
                     }
+                }
+            }
+            // D-PROCESS-SESSION2=D: the capability report stays an open
+            // Set<String>, but a close literal typo of a stable fact gets a
+            // nearest-key diagnostic. Dynamic and non-close preview keys stay
+            // open.
+            if matches!(
+                recv_ty,
+                Type::Tagged { marker, .. }
+                    if marker == crate::AST::TERMINAL_FACT_SET_MARKER
+            ) && method == "has"
+                && let [arg] = args
+                && let Expr::Str(parts, _) = &arg.expr
+                && let [StrPart::Lit(key)] = parts.as_slice()
+                && Syntax::terminal_fact(key).is_none()
+            {
+                let candidates = Syntax::TERMINAL_FACTS
+                    .iter()
+                    .map(|fact| (*fact).to_string())
+                    .collect::<Vec<_>>();
+                if let Some(fact) = suggest_field(key, &candidates) {
+                    self.diags.push(Diagnostic::error(
+                        "E0302",
+                        format!("terminal capability key `{key}` looks like `{fact}`"),
+                        "preview string keys stay open, but close spellings of stable facts are probably typos"
+                            .to_string(),
+                        format!("write `TerminalFact.{fact}`"),
+                        Some(arg.span),
+                    ));
                 }
             }
             if let Type::Apply { name, .. } = recv_ty {

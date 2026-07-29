@@ -255,9 +255,12 @@ pub(crate) fn process_spec_method_return(
         // size and mode on the same ProcessSpec.
         ("terminal", 0 | 1) => Some(Some(spec_ty.clone())),
         ("env_clear" | "detached", 0) => Some(Some(spec_ty)),
-        ("capabilities", 0) => Some(Some(Type::Apply {
-            name: "Set".to_string(),
-            args: vec![Type::String],
+        ("capabilities", 0) => Some(Some(Type::Tagged {
+            marker: crate::AST::TERMINAL_FACT_SET_MARKER.to_string(),
+            inner: Box::new(Type::Apply {
+                name: "Set".to_string(),
+                args: vec![Type::String],
+            }),
         })),
         ("timeout" | "output_limit", 1) => Some(Some(spec_ty)),
         ("run" | "run_checked", 0) => Some(Some(result_ty(

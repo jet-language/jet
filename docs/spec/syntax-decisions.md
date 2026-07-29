@@ -2511,7 +2511,7 @@ index, not a substitute for that law.
   when that child was launched with a terminal.
   `ProcessSpec.capabilities()` returns an open keyed report. Stable keys use
   `TerminalFact` constants; string keys allow preview facts without a parallel
-  report type.
+  report type, and close literal typos suggest the nearest stable key.
 - **D-MATHLIB2=A**: `core.math` is the canonical callable surface for libm and
   explicit checked/saturating/wrapping integer families. Value-context docs,
   LSP completion, and snippets may discover helpers, but emitted code uses the

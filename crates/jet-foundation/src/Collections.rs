@@ -1199,6 +1199,9 @@ fn deque_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option
 
 /// Whether a built-in method mutates its receiver (needs `var` binding).
 pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
+    if let Type::Tagged { inner, .. } = recv_ty {
+        return builtin_method_mutates(inner, method);
+    }
     match recv_ty {
         Type::List(_) => matches!(
             method,

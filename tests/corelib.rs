@@ -6047,6 +6047,24 @@ fn run() {
         "{typo:?}"
     );
 
+    let preview_typo = jet::compile(
+        r#"use core.process as process
+fn run() {
+    facts :: process.cmd(["echo", "x"]).capabilities()
+    print(facts.has("reszie"))
+}
+"#,
+    )
+    .expect_err("close preview-string typos must suggest the stable fact");
+    assert!(
+        preview_typo.iter().any(|diag| {
+            diag.code == "E0302"
+                && diag.what.contains("`reszie` looks like `resize`")
+                && diag.fix.contains("`TerminalFact.resize`")
+        }),
+        "{preview_typo:?}"
+    );
+
     let plain_child_terminal = jet::compile(
         r#"use core.process as process
 fn run() {
