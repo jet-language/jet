@@ -123,6 +123,27 @@ fn run() {
     );
 }
 
+#[test]
+fn pure_fn_checks_calls_in_range_bounds() {
+    let src = r#"
+fn read_bound() => Int {
+    print("side effect")
+    return 2
+}
+fn bad() =[]=> Range {
+    return 0..read_bound()
+}
+fn run() {
+    print(bad())
+}
+"#;
+    let diags = jet::compile(src).expect_err("an impure range bound must fail");
+    assert!(
+        diags.iter().any(|d| d.code == "E3401"),
+        "expected E3401, got {diags:?}"
+    );
+}
+
 // ── Transitive impurity traces (check_pure_program_root) ─────────────────────
 
 /// 3-level transitive chain: main → a → b → print must produce E3401 showing
@@ -214,15 +235,19 @@ fn run() {
     );
 }
 
-/// 2-level transitive: run → helper → print.
+/// Calls nested in range bounds remain visible to transitive purity analysis.
 #[test]
-fn transitive_chain_2_levels() {
+fn transitive_range_bound_is_e3401() {
     use jet::AST;
     use std::collections::HashMap;
 
     let src = r#"
-fn helper() {
+fn impure_bound() => Int {
     print("oops")
+    return 2
+}
+fn helper() {
+    band :: 0..impure_bound()
 }
 fn run() {
     helper()
@@ -284,7 +309,7 @@ fn run() {
     assert!(!diags.is_empty(), "expected E3401");
     let why = &diags[0].why;
     assert!(
-        why.contains("run") && why.contains("helper"),
+        why.contains("run") && why.contains("helper") && why.contains("impure_bound"),
         "chain missing in why: {:?}",
         why
     );

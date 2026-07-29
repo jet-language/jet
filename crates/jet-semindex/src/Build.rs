@@ -2002,11 +2002,15 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             structural_slot(ctx, "index", StructuralSlotKind::Scalar, |ctx| collect_expr(index, mp, ctx));
         }
         AST::Expr::Slice {
-            base, start, end, ..
+            base, start, end, range, ..
         } => {
             structural_slot(ctx, "base", StructuralSlotKind::Scalar, |ctx| collect_expr(base, mp, ctx));
-            structural_slot(ctx, "start", StructuralSlotKind::Scalar, |ctx| collect_expr(start, mp, ctx));
-            structural_slot(ctx, "end", StructuralSlotKind::Scalar, |ctx| collect_expr(end, mp, ctx));
+            if let Some(range) = range {
+                structural_slot(ctx, "range", StructuralSlotKind::Scalar, |ctx| collect_expr(range, mp, ctx));
+            } else {
+                structural_slot(ctx, "start", StructuralSlotKind::Scalar, |ctx| collect_expr(start, mp, ctx));
+                structural_slot(ctx, "end", StructuralSlotKind::Scalar, |ctx| collect_expr(end, mp, ctx));
+            }
         }
         AST::Expr::Range { start, end, .. } => {
             structural_slot(ctx, "start", StructuralSlotKind::Scalar, |ctx| collect_expr(start, mp, ctx));

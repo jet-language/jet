@@ -1046,13 +1046,64 @@ impl<'a> Checker<'a> {
                 index,
                 span,
                 kind,
-            } => self.infer_index(base, index, span, kind),
+            } => {
+                let result = self.infer_index(base, index, span, kind);
+                if matches!(kind, IndexKind::Range) {
+                    let span = *span;
+                    let base = std::mem::replace(base, Box::new(Expr::Absent(span)));
+                    let range = std::mem::replace(index, Box::new(Expr::Absent(span)));
+                    let zero = || Box::new(Expr::Int(0, span, None, None));
+                    *e = Expr::Slice {
+                        base,
+                        start: zero(),
+                        end: zero(),
+                        range: Some(range),
+                        span,
+                    };
+                }
+                result
+            }
             Expr::Slice {
                 base,
                 start,
                 end,
+                range,
                 span,
-            } => self.infer_slice(base, start, end, *span),
+            } => {
+                if let Some(range) = range {
+                    let base_ty = {
+                        self.borrow_ctx = true;
+                        self.infer(base)?
+                    };
+                    let range_ty = self.infer(range)?;
+                    if range_ty != Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
+                        self.diags.push(Diagnostic::error(
+                            "E0505",
+                            format!("slice bound must be Range, not {}", range_ty.show()),
+                            "a stored slice bound carries its start, end, and end behavior in one Range value".to_string(),
+                            "use `a..b`, `a..<b`, or a Range value".to_string(),
+                            Some(range.span()),
+                        ));
+                        return None;
+                    }
+                    match base_ty {
+                        Type::List(inner) => Some(Type::List(inner)),
+                        Type::String => Some(Type::String),
+                        other => {
+                            self.diags.push(Diagnostic::error(
+                                "E0505",
+                                format!("only lists and strings can be sliced, not {}", other.show()),
+                                "a Range projects a window from indexed storage".to_string(),
+                                "use `xs[range]` on a list or `s.slice(range)` on text".to_string(),
+                                Some(*span),
+                            ));
+                            None
+                        }
+                    }
+                } else {
+                    self.infer_slice(base, start, end, *span)
+                }
+            }
             Expr::Range {
                 start,
                 end,
@@ -2740,8 +2791,8 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0505",
                     format!("only lists and strings can be sliced, not {}", other.show()),
-                    "slicing copies a range (S40)".to_string(),
-                    "use `xs[a..b]` on a list or `s.slice(a..b)` on text".to_string(),
+                    "a Range can project a window only from indexed storage".to_string(),
+                    "use `xs[a..b]` on a list or a text range operation on String".to_string(),
                     Some(span),
                 ));
                 None

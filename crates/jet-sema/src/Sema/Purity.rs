@@ -426,8 +426,19 @@ fn check_pure_expr_with_path(
         Expr::Unary(_, operand, _) | Expr::IncDec { operand, .. } => rec!(operand),
         Expr::Index { base, index, .. } => rec!(base).or_else(|| rec!(index)),
         Expr::Slice {
-            base, start, end, ..
-        } => rec!(base).or_else(|| rec!(start)).or_else(|| rec!(end)),
+            base,
+            start,
+            end,
+            range,
+            ..
+        } => rec!(base).or_else(|| {
+            if let Some(range) = range {
+                rec!(range)
+            } else {
+                rec!(start).or_else(|| rec!(end))
+            }
+        }),
+        Expr::Range { start, end, .. } => rec!(start).or_else(|| rec!(end)),
         Expr::Field(inner, _, _)
         | Expr::Deref(inner, _)
         | Expr::RawOf(inner, _)
@@ -949,12 +960,30 @@ fn walk_expr_for_calls(
             }
         }
         Expr::Slice {
-            base, start, end, ..
+            base,
+            start,
+            end,
+            range,
+            ..
         } => {
             walk_expr_for_calls(base, root_fn, funcs_sig, ast_funcs, path, visited, diags);
-            if diags.is_empty() {
-                walk_expr_for_calls(start, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+            if let Some(range) = range {
+                if diags.is_empty() {
+                    walk_expr_for_calls(
+                        range, root_fn, funcs_sig, ast_funcs, path, visited, diags,
+                    );
+                }
+            } else {
+                if diags.is_empty() {
+                    walk_expr_for_calls(start, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+                }
+                if diags.is_empty() {
+                    walk_expr_for_calls(end, root_fn, funcs_sig, ast_funcs, path, visited, diags);
+                }
             }
+        }
+        Expr::Range { start, end, .. } => {
+            walk_expr_for_calls(start, root_fn, funcs_sig, ast_funcs, path, visited, diags);
             if diags.is_empty() {
                 walk_expr_for_calls(end, root_fn, funcs_sig, ast_funcs, path, visited, diags);
             }

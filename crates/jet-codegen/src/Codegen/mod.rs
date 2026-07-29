@@ -50,6 +50,7 @@ pub use Web::{
 const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/UnicodeString.rs"),
     include_str!("../Prelude/Core/Values.rs"),
+    include_str!("../Prelude/Core/RangeBounds.rs"),
     include_str!("../Prelude/Core/ExpiringSecret.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/Core/Collections.rs"),

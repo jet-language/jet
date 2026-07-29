@@ -320,7 +320,16 @@ fn collect_expr_operations(expression: &Expr, out: &mut Vec<(&'static str, Span,
         Expr::Binary(_, left, right, _) => { collect_expr_operations(left, out); collect_expr_operations(right, out); }
         Expr::CompareChain { operands, .. } | Expr::ListLit(operands, _) => for operand in operands { collect_expr_operations(operand, out); },
         Expr::Index { base, index, .. } => { collect_expr_operations(base, out); collect_expr_operations(index, out); }
-        Expr::Slice { base, start, end, .. } => { collect_expr_operations(base, out); collect_expr_operations(start, out); collect_expr_operations(end, out); }
+        Expr::Slice { base, start, end, range, .. } => {
+            collect_expr_operations(base, out);
+            if let Some(range) = range {
+                collect_expr_operations(range, out);
+            } else {
+                collect_expr_operations(start, out);
+                collect_expr_operations(end, out);
+            }
+        }
+        Expr::Range { start, end, .. } => { collect_expr_operations(start, out); collect_expr_operations(end, out); }
         Expr::Unary(_, inner, _) | Expr::Copy(inner, _) | Expr::Place(inner, _, _) | Expr::Field(inner, _, _) | Expr::OptField { base: inner, .. } | Expr::Paren(inner, _) | Expr::Spread(inner, _) => collect_expr_operations(inner, out),
         Expr::StructLit { fields, .. } => for (_, _, value) in fields { collect_expr_operations(value, out); },
         Expr::TypedLit { body, .. } => body.for_each_expr(|value| collect_expr_operations(value, out)),

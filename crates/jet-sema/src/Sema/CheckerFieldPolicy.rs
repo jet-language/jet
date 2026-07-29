@@ -243,11 +243,15 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
             rewrite_field_refs(index, names, receiver);
         }
         Expr::Slice {
-            base, start, end, ..
+            base, start, end, range, ..
         } => {
             rewrite_field_refs(base, names, receiver);
-            rewrite_field_refs(start, names, receiver);
-            rewrite_field_refs(end, names, receiver);
+            if let Some(range) = range {
+                rewrite_field_refs(range, names, receiver);
+            } else {
+                rewrite_field_refs(start, names, receiver);
+                rewrite_field_refs(end, names, receiver);
+            }
         }
         Expr::ListLit(elems, _) => {
             for e in elems {

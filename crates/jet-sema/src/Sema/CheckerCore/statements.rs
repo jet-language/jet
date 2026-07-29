@@ -2791,10 +2791,15 @@ fn expr_indexes_root_with(expr: &Expr, root: &str, index_var: &str) -> bool {
         Expr::TupleLit(items, _, _) => items
             .iter()
             .any(|(_, e)| expr_indexes_root_with(e, root, index_var)),
-        Expr::Slice { base, start, end, .. } => {
+        Expr::Slice { base, start, end, range, .. } => {
             expr_indexes_root_with(base, root, index_var)
-                || expr_indexes_root_with(start, root, index_var)
-                || expr_indexes_root_with(end, root, index_var)
+                || range.as_deref().map_or_else(
+                    || {
+                        expr_indexes_root_with(start, root, index_var)
+                            || expr_indexes_root_with(end, root, index_var)
+                    },
+                    |range| expr_indexes_root_with(range, root, index_var),
+                )
         }
         Expr::OrFallback { value, .. } => expr_indexes_root_with(value, root, index_var),
         Expr::If {

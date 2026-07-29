@@ -323,11 +323,14 @@ pub enum Expr {
         /// Filled by sema so codegen picks the right runtime helper.
         kind: IndexKind,
     },
-    /// S40: inclusive copy slice `xs[a..b]`.
+    /// S40/D-SHAPE-PLACE1: range projection `xs[a..b]` or `xs[range]`.
     Slice {
         base: Box<Expr>,
         start: Box<Expr>,
         end: Box<Expr>,
+        /// D-RANGE-VALUE1=A: `Some` carries one Range expression. Legacy
+        /// literal slices keep direct bounds in `start`/`end`.
+        range: Option<Box<Expr>>,
         span: Span,
     },
     /// D-RANGE-VALUE1=A: one nominal `Range` value over `Int`.

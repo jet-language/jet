@@ -115,10 +115,14 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
             collect_tuple_shapes_from_expr(base, out);
             collect_tuple_shapes_from_expr(index, out);
         }
-        Expr::Slice { base, start, end, .. } => {
+        Expr::Slice { base, start, end, range, .. } => {
             collect_tuple_shapes_from_expr(base, out);
-            collect_tuple_shapes_from_expr(start, out);
-            collect_tuple_shapes_from_expr(end, out);
+            if let Some(range) = range {
+                collect_tuple_shapes_from_expr(range, out);
+            } else {
+                collect_tuple_shapes_from_expr(start, out);
+                collect_tuple_shapes_from_expr(end, out);
+            }
         }
         Expr::Range { start, end, .. } => {
             collect_tuple_shapes_from_expr(start, out);

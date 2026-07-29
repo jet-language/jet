@@ -383,8 +383,13 @@ fn expr_names(expr: &Expr, out: &mut Vec<Diagnostic>) {
             expr_names(key, out); expr_names(value, out);
         },
         Expr::Index { base, index, .. } => { expr_names(base, out); expr_names(index, out); }
-        Expr::Slice { base, start, end, .. } => {
-            expr_names(base, out); expr_names(start, out); expr_names(end, out);
+        Expr::Slice { base, start, end, range, .. } => {
+            expr_names(base, out);
+            if let Some(range) = range {
+                expr_names(range, out);
+            } else {
+                expr_names(start, out); expr_names(end, out);
+            }
         }
         Expr::Range { start, end, .. } => {
             expr_names(start, out); expr_names(end, out);

@@ -686,11 +686,16 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
         // c109 Phase 5: an inclusive copy slice `coll[a..b]` (lists only — the AST
         // path's `jet_slice_vec` is list-specific). Base/start/end must be in-subset.
         Expr::Slice {
-            base, start, end, ..
+            base, start, end, range, ..
         } => {
             expr_in_subset(base, cx, locals)
-                && expr_in_subset(start, cx, locals)
-                && expr_in_subset(end, cx, locals)
+                && range.as_deref().map_or_else(
+                    || {
+                        expr_in_subset(start, cx, locals)
+                            && expr_in_subset(end, cx, locals)
+                    },
+                    |range| expr_in_subset(range, cx, locals),
+                )
         }
         // c109 Phase 6: a method call. Covered in exactly two shapes:
         //   (a) the sema-inserted `.clone()` (an owning non-Copy field read /

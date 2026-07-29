@@ -3070,12 +3070,39 @@ fn run() {
         total += n
     }
     print(total)
-    values :: [10, 20, 30, 40, 50, 60]
-    print(values[band])
+    values := [10, 20, 30, 40, 50, 60]
+    window :: values[band]
+    print(window)
+    edit :: &values[band]
+    edit[0] = 99
+    print(values)
 }
 "#;
+    let proof = std::env::temp_dir().join("jet_jit_range_value_safety.jet");
+    fs::write(&proof, src).unwrap();
+    let bundle = checked_bundle_from_path(&proof.to_string_lossy());
+    assert_eq!(
+        jet_jit::resident_jit_func_safety_detail(&bundle, "run"),
+        None,
+        "Range values and windows must stay in resident JIT"
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|error| panic!("Range resident compilation failed: {error}"));
     let native = run_cranelift_without_fallback(src, "range_values");
-    assert_eq!(native.stdout, "2\n5\ntrue\nfalse\n9\n[30, 40, 50]\n");
+    let expected = "2\n5\ntrue\nfalse\n9\n[30, 40, 50]\n[10, 20, 99, 40, 50, 60]\n";
+    assert_eq!(native.stdout, expected);
+
+    let dir = common::unique_tmp("jet_range_value_interpreter");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    fs::write(&path, src).unwrap();
+    match dev_iteration(&path.to_string_lossy(), false, true) {
+        RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, expected),
+        RunOutcome::Problems(diags) => {
+            panic!("Range views must run in the canonical evaluator: {diags:?}")
+        }
+    }
+    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]

@@ -860,11 +860,15 @@ pub(crate) fn collect_core_expr(
             }
         }
         Expr::Slice {
-            base, start, end, ..
+            base, start, end, range, ..
         } => {
             collect_core_expr(base, imports, used, spans, ffi_cb);
-            collect_core_expr(start, imports, used, spans, ffi_cb);
-            collect_core_expr(end, imports, used, spans, ffi_cb);
+            if let Some(range) = range {
+                collect_core_expr(range, imports, used, spans, ffi_cb);
+            } else {
+                collect_core_expr(start, imports, used, spans, ffi_cb);
+                collect_core_expr(end, imports, used, spans, ffi_cb);
+            }
         }
         Expr::Range { start, end, .. } => {
             collect_core_expr(start, imports, used, spans, ffi_cb);

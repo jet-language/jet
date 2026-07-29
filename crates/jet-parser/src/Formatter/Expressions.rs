@@ -653,13 +653,21 @@ impl<'a> Fmt<'a> {
                 self.write("]");
             }
             Expr::Slice {
-                base, start, end, ..
+                base,
+                start,
+                end,
+                range,
+                ..
             } => {
                 self.fmt_expr(base, Prec::Postfix);
                 self.write("[");
-                self.fmt_expr(start, Prec::OrFallback);
-                self.write("..");
-                self.fmt_expr(end, Prec::OrFallback);
+                if let Some(range) = range {
+                    self.fmt_expr(range, Prec::OrFallback);
+                } else {
+                    self.fmt_expr(start, Prec::OrFallback);
+                    self.write("..");
+                    self.fmt_expr(end, Prec::OrFallback);
+                }
                 self.write("]");
             }
             Expr::Range {

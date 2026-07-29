@@ -1020,22 +1020,46 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // D-DYNARRAY1: `list.view(a..b)` — zero-copy window constructor.
                 // `&(recv)` (not `.clone()`): the window borrows the list's OWN
                 // backing storage, it never makes a second copy of it.
-                TBuiltinOp::ViewNew { line } => format!(
-                    "jet_view_new(&({}), {}, {}, {:?}, {})",
-                    recv,
-                    a(0),
-                    a(1),
-                    cx.file,
-                    line
-                ),
-                TBuiltinOp::ViewMutNew { line } => format!(
-                    "jet_view_mut_new(&mut ({}), {}, {}, {:?}, {})",
-                    recv,
-                    a(0),
-                    a(1),
-                    cx.file,
-                    line
-                ),
+                TBuiltinOp::ViewNew { line } => {
+                    if args.len() == 1 {
+                        format!(
+                            "jet_view_range_new(&({}), &({}), {:?}, {})",
+                            recv,
+                            a(0),
+                            cx.file,
+                            line
+                        )
+                    } else {
+                        format!(
+                            "jet_view_new(&({}), {}, {}, {:?}, {})",
+                            recv,
+                            a(0),
+                            a(1),
+                            cx.file,
+                            line
+                        )
+                    }
+                }
+                TBuiltinOp::ViewMutNew { line } => {
+                    if args.len() == 1 {
+                        format!(
+                            "jet_view_mut_range_new(&mut ({}), &({}), {:?}, {})",
+                            recv,
+                            a(0),
+                            cx.file,
+                            line
+                        )
+                    } else {
+                        format!(
+                            "jet_view_mut_new(&mut ({}), {}, {}, {:?}, {})",
+                            recv,
+                            a(0),
+                            a(1),
+                            cx.file,
+                            line
+                        )
+                    }
+                }
                 // D-ITERTOOLS1=A: non-closure lazy adapters return JetIter (no eager Vec).
                 TBuiltinOp::Take => format!("jet_iter_take({as_iter}, {})", a(0)),
                 TBuiltinOp::Skip => format!("jet_iter_skip({as_iter}, {})", a(0)),

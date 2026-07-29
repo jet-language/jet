@@ -27,6 +27,36 @@ fn run() {
     assert_eq!(stdout, "sum 19\n38\n");
 }
 
+#[test]
+fn range_value_windows_are_no_copy_and_write_through() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+fn run() {
+    values := [10, 20, 30, 40, 50]
+    band :: 1..<4
+    window :: values[band]
+    print(window)
+    edit :: &values[band]
+    edit[1] = 99
+    print(values)
+}
+"#;
+    let rust = compile("tir_range_value_windows", src);
+    assert!(
+        rust.contains("let user_window = jet_view_range_new"),
+        "bare Range projection must borrow without copying: {rust}"
+    );
+    assert!(
+        rust.contains("let user_edit = jet_view_mut_range_new"),
+        "write Range projection must borrow the owner: {rust}"
+    );
+    let (code, stdout) = build_and_run("tir_range_value_windows", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "[20, 30, 40]\n[10, 20, 99, 40, 50]\n");
+}
+
 /// An if-expression (S68) bound to a local, plus a String param helper.
 #[test]
 fn if_expression_and_string_param() {

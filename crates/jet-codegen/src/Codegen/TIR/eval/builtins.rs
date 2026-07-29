@@ -28,6 +28,12 @@ pub(super) fn eval_builtin(
         TBuiltinOp::GetList => apply_method(recv, "get", args, span),
         TBuiltinOp::First => apply_method(recv, "first", args, span),
         TBuiltinOp::Last => apply_method(recv, "last", args, span),
+        TBuiltinOp::Contains
+            if matches!(recv, CtValue::Struct { type_name, .. } if type_name == Syntax::TYPE_RANGE) =>
+        {
+            let needle = args.first().unwrap_or(&CtValue::Int(0));
+            super::range_contains(recv, needle, span).map(CtValue::Bool)
+        }
         TBuiltinOp::Contains => apply_method(recv, "contains", args, span),
         TBuiltinOp::IndexOf => apply_method(recv, "index_of", args, span),
         TBuiltinOp::Reverse => apply_mutating(recv, "reverse", args, span),
@@ -153,18 +159,24 @@ pub(super) fn eval_builtin(
                 return Err(unsupported("view receiver", span));
             };
             let mut it = args.into_iter();
-            let a = match it.next() {
-                Some(CtValue::Int(n)) => n,
-                _ => return Err(unsupported("view start", span)),
+            let first = it.next().ok_or_else(|| unsupported("view start", span))?;
+            let (a, end_exclusive) = if let Some(second) = it.next() {
+                let CtValue::Int(a) = first else {
+                    return Err(unsupported("view start", span));
+                };
+                let CtValue::Int(z) = second else {
+                    return Err(unsupported("view end", span));
+                };
+                if a < 0 || z < a || z as usize >= xs.len() {
+                    return Err(unsupported("view bounds", span));
+                }
+                (a, z + 1)
+            } else {
+                super::range_window(&first, xs.len(), span)?
             };
-            let z = match it.next() {
-                Some(CtValue::Int(n)) => n,
-                _ => return Err(unsupported("view end", span)),
-            };
-            if a < 0 || z < a || z as usize >= xs.len() {
-                return Err(unsupported("view bounds", span));
-            }
-            Ok(CtValue::List(xs[a as usize..=z as usize].to_vec()))
+            Ok(CtValue::List(
+                xs[a as usize..end_exclusive as usize].to_vec(),
+            ))
         }
     }
 }

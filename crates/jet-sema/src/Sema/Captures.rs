@@ -277,11 +277,15 @@ pub(crate) fn walk_expr_for_const_refs(
             walk_expr_for_const_refs(index, const_names, taken);
         }
         Expr::Slice {
-            base, start, end, ..
+            base, start, end, range, ..
         } => {
             walk_expr_for_const_refs(base, const_names, taken);
-            walk_expr_for_const_refs(start, const_names, taken);
-            walk_expr_for_const_refs(end, const_names, taken);
+            if let Some(range) = range {
+                walk_expr_for_const_refs(range, const_names, taken);
+            } else {
+                walk_expr_for_const_refs(start, const_names, taken);
+                walk_expr_for_const_refs(end, const_names, taken);
+            }
         }
         Expr::CallValue { callee, args, .. } => {
             walk_expr_for_const_refs(callee, const_names, taken);
@@ -355,8 +359,12 @@ pub(crate) fn expr_refs_name(e: &Expr, name: &str) -> bool {
             expr_refs_name(base, name) || expr_refs_name(index, name)
         }
         Expr::Slice {
-            base, start, end, ..
-        } => expr_refs_name(base, name) || expr_refs_name(start, name) || expr_refs_name(end, name),
+            base, start, end, range, ..
+        } => expr_refs_name(base, name)
+            || range.as_deref().map_or_else(
+                || expr_refs_name(start, name) || expr_refs_name(end, name),
+                |range| expr_refs_name(range, name),
+            ),
         Expr::Range { start, end, .. } => {
             expr_refs_name(start, name) || expr_refs_name(end, name)
         }
@@ -677,11 +685,15 @@ pub(crate) fn expr_collect_captures(
             expr_collect_captures(index, bound, read, mut_cap);
         }
         Expr::Slice {
-            base, start, end, ..
+            base, start, end, range, ..
         } => {
             expr_collect_captures(base, bound, read, mut_cap);
-            expr_collect_captures(start, bound, read, mut_cap);
-            expr_collect_captures(end, bound, read, mut_cap);
+            if let Some(range) = range {
+                expr_collect_captures(range, bound, read, mut_cap);
+            } else {
+                expr_collect_captures(start, bound, read, mut_cap);
+                expr_collect_captures(end, bound, read, mut_cap);
+            }
         }
         Expr::ListLit(elems, _) => {
             for el in elems {

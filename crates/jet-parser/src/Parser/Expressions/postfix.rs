@@ -338,6 +338,7 @@ impl<'a> Parser<'a> {
                                 base: Box::new(expr),
                                 start: Box::new(start),
                                 end: Box::new(end),
+                                range: None,
                                 span,
                             };
                         } else {

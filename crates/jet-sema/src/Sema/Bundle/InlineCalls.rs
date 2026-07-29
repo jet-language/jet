@@ -287,10 +287,14 @@ pub(crate) fn rewrite_inline_calls_expr(
             rewrite_inline_calls_expr(base, siblings, modname);
             rewrite_inline_calls_expr(index, siblings, modname);
         }
-        Expr::Slice { base, start, end, .. } => {
+        Expr::Slice { base, start, end, range, .. } => {
             rewrite_inline_calls_expr(base, siblings, modname);
-            rewrite_inline_calls_expr(start, siblings, modname);
-            rewrite_inline_calls_expr(end, siblings, modname);
+            if let Some(range) = range {
+                rewrite_inline_calls_expr(range, siblings, modname);
+            } else {
+                rewrite_inline_calls_expr(start, siblings, modname);
+                rewrite_inline_calls_expr(end, siblings, modname);
+            }
         }
         Expr::CallValue { callee, args, .. } => {
             rewrite_inline_calls_expr(callee, siblings, modname);

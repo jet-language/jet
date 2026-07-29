@@ -401,11 +401,16 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
             expr_has_comptime_evaluation(base) || expr_has_comptime_evaluation(index)
         }
         Expr::Slice {
-            base, start, end, ..
+            base, start, end, range, ..
         } => {
             expr_has_comptime_evaluation(base)
-                || expr_has_comptime_evaluation(start)
-                || expr_has_comptime_evaluation(end)
+                || range.as_deref().map_or_else(
+                    || {
+                        expr_has_comptime_evaluation(start)
+                            || expr_has_comptime_evaluation(end)
+                    },
+                    expr_has_comptime_evaluation,
+                )
         }
         Expr::Range { start, end, .. } => {
             expr_has_comptime_evaluation(start) || expr_has_comptime_evaluation(end)
