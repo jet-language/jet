@@ -1763,6 +1763,64 @@ fn run(cmd: Cmd) {}
 }
 
 #[test]
+fn derived_help_uses_program_basename_for_compiled_and_jet_run_paths() {
+    let dir = isolated_cwd("shape_cli_help_program_name");
+    fs::write(
+        dir.join("typed.jet"),
+        "#CLI\nstruct RunArgs { verbose: Bool }\nfn run(args: RunArgs) {}\n",
+    )
+    .unwrap();
+
+    let build = Command::new(jet())
+        .args(["build", "typed.jet"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "typed build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let built = dir.join("build/typed").canonicalize().unwrap();
+    let compiled_help = Command::new(&built)
+        .arg("--help")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        compiled_help.status.success(),
+        "compiled typed help failed: {}",
+        String::from_utf8_lossy(&compiled_help.stderr)
+    );
+
+    let run_help = Command::new(jet())
+        .args(["run", "typed.jet", "--", "--help"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        run_help.status.success(),
+        "jet run typed help failed: {}",
+        String::from_utf8_lossy(&run_help.stderr)
+    );
+
+    let program_names = format!(
+        "compiled: {}\njet run: {}\n",
+        String::from_utf8(compiled_help.stdout)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap(),
+        String::from_utf8(run_help.stdout)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+    );
+    check_snapshot("shape_cli_help_program_names.txt", &program_names);
+}
+
+#[test]
 fn moved_bare_commands_are_teaching_errors_not_aliases() {
     for (verb, replacement) in [
         ("publish", "jet registry publish"),
