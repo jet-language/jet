@@ -20,6 +20,43 @@ Model and review policy follow `AGENTS.md` and the owner's current instruction.
 - Use `scripts/agent/jet-env`; it uses nix-direnv's cached environment when
   available. `full` selects browser/FFI/VM tooling.
 
+## I9 — Execution-tier parity (hard gate)
+
+AOT, Cranelift JIT (`jet run` / `jet dev`), the interpreter, and web (when
+applicable) must share one meaning. **Semantics live only in Prelude/CoreLib**
+(`crates/jet-codegen/src/Prelude/**`). Engines are dumb adapters.
+
+Before claiming done:
+
+- Do **not** add or keep a new `tests/jit_gaps.txt` / corpus-gate exclusion for
+  the change. Parking “JIT owed later” is an invariant violation.
+- Prove the feature example under default quick-run (`jet run`) as well as AOT
+  (`jet run --release` / compiled binary) when the program is runnable there.
+- If deopt runs the surface, prove interpreter ambient calls the same Prelude
+  symbol. An ambient implementation of the behavior is not parity.
+- Web-facing surfaces need the matching web proof, not AOT alone.
+- When adding Core coverage to Cranelift hosts or interpreter ambient:
+  1. Name the **same Prelude symbol** AOT emit already calls (search
+     `emit/core_calls.rs` / `emit/expressions.rs`).
+  2. Make the host/ambient path **only marshal and call that symbol** (or the
+     thin Prelude helper AOT uses). No forked defaults, policy checks, or error
+     maps in the engine.
+  3. If AOT and the host disagree on a result for the same inputs, the host is
+     wrong — fix the adapter, do not “fix” semantics in the engine.
+
+Owner-ratified carve-outs that name a tier that cannot apply are the only
+exception. See AGENTS.md I9 and architecture R12.
+
+**I9 reviewer reject list (any one fails the card):**
+- Host/ambient body reimplements validation, CORS/policy, content-types, status
+  meaning, or defaults that already exist under `Prelude/**`.
+- AOT emit calls Prelude symbol `X`, but JIT/ambient invents a parallel path
+  that does not call `X` (or the thin shared `runtime_*` wrapper that only
+  calls `X`).
+- Example/golden green under `--release` only; default `jet run` unproved.
+- Diff adds a line to `tests/jit_gaps.txt` (or corpus exclusion) for this
+  feature without an owner-ratified I9 carve-out on the card.
+
 ## Test strategy
 
 - **Per card / change:** scoped targeted tests only —

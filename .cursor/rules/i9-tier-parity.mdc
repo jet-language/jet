@@ -1,0 +1,21 @@
+---
+description: I9 execution-tier parity — one Prelude, dumb engines; ban AOT-only / jit_gaps parking
+alwaysApply: true
+---
+
+# I9 — Execution-tier parity (hard)
+
+Semantics for Core/runtime live **only** in `crates/jet-codegen/src/Prelude/**`.
+AOT emit, Cranelift hosts, and interpreter ambient are **marshalling adapters**:
+call the same Prelude `jet_*` / `*_defaulted` symbol AOT uses. Do not re-encode
+policy, defaults, validation, or error maps in an engine.
+
+Forbidden without an owner-ratified I9 carve-out that names a tier that cannot apply:
+
+- Closing a feature AOT-only or with “JIT/interpreter later”
+- Adding or keeping a durable `tests/jit_gaps.txt` / corpus exclusion for the change
+- Parallel HTTP/net/Core logic in JIT hosts or ambient that does not call Prelude
+
+Before claiming done: prove default `jet run` and AOT (`jet run --release`) against
+the example golden when runnable. Reviewers reject I9 drift (see AGENTS.md I9,
+architecture R12, `.claude/skills/verify/SKILL.md`).

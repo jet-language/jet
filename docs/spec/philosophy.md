@@ -75,12 +75,19 @@ to build" as a drawback; weigh only the ranked priorities above (safety,
 beginner experience, performance, one path, long-term correctness).
 
 **Do it right the first time.** Build features fully and end-to-end — parser →
-sema → codegen → diagnostics → examples → tests → docs — the first time. Never
-ship a stub, a partial slice, or a "ratified, milestone-pending" placeholder
-with the intent to "come back later," unless the work is genuinely blocked on an
-unratified upstream decision (name the gate). Half-building and revisiting is
-slower and worse than doing it completely once. "We'll finish it later" is not a
-plan; finishing it now is.
+sema → TIR → AOT codegen → JIT/dev → interpreter → web (when applicable) →
+diagnostics → examples → tests → docs — the first time. Never ship a stub, a
+partial slice, an AOT-only path, or a "ratified, milestone-pending" /
+"JIT owed later" placeholder with the intent to "come back later," unless the
+work is genuinely blocked on an unratified upstream decision (name the gate).
+Execution-tier parity is invariant I9: AOT, Cranelift JIT, the interpreter, and
+web share one meaning, and that meaning lives once in Prelude/CoreLib. Engines
+are dumb adapters that call those functions — they must not re-encode policy,
+defaults, or error behavior. Parking a feature in `tests/jit_gaps.txt` is not
+done. Prove AOT and default `jet run`. If deopt reaches the surface, interpreter
+ambient must call the same Prelude function. Half-building and revisiting is
+slower and worse than doing it completely once. "We'll finish it later" is not
+a plan; finishing it now is.
 
 ## Resolved conflicts (do not relitigate without owner sign-off)
 

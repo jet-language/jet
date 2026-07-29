@@ -76,7 +76,8 @@ Violating an invariant means stop and fix it.
 - **I4 — Diagnostics are products.** Every diagnostic has a registered code,
   what/why/fix text, and a UI snapshot. No snapshot means no diagnostic.
 - **I5 — Examples are executable specs.** Every feature ships with an example
-  and golden-tested output.
+  and golden-tested output. That example must prove the same meaning on every
+  applicable execution tier (see I9), not only AOT.
 - **I6 — Compiler seams are dependency-free.** The root compiler and compiler
   seam crates accept only path dependencies. Existing ratified stdlib bootstrap
   dependencies remain temporary; any new stdlib external dependency requires
@@ -87,6 +88,22 @@ Violating an invariant means stop and fix it.
   spelling and organization. Keep the beginner surface small and safe; expose
   expert control through explicit opt-in. New mechanisms require a roadmap slot
   or owner approval.
+- **I9 — Execution-tier parity (one Prelude, dumb engines).** AOT, Cranelift
+  JIT (`jet run` / `jet dev`), the interpreter (TIR-eval deopt / ambient), and
+  web targets preserve one executable meaning for every language feature and
+  Core library API. **Semantics live only in** `crates/jet-codegen/src/Prelude/**`
+  (and ratified CoreLib). AOT emit, Cranelift hosts, and interpreter ambient are
+  **marshalling adapters only**: they convert arguments/results and call those
+  Prelude functions. Re-encoding validation, policy, defaults, or error meaning
+  in an engine is an invariant violation — not a “host helper.” Parking work in
+  `tests/jit_gaps.txt`, marking an example AOT-only, or closing a card with
+  “JIT/interpreter owed later” is also a violation. A change is incomplete until
+  parser → sema → TIR → AOT emit → JIT/dev → interpreter (and web when the
+  feature touches web) all honor the same Prelude semantics. Prove AOT and
+  default `jet run`; if deopt reaches the surface, interpreter ambient must call
+  the same Prelude symbol. The only allowed
+  exception is an owner-ratified carve-out that names a tier that cannot apply
+  to that surface (for example native `#Unsafe` on a pure web target).
 
 ## Workflow ownership
 
@@ -102,8 +119,9 @@ solution: standard library and existing mechanisms before dependencies or abstra
 safety, necessary tests, or end-to-end behavior. No stubs, facades, speculative extension points, or parallel mechanisms.
 
 Write a failing behavioral test or executable example first when feasible, then the smallest complete vertical slice.
-Language features preserve parser → sema → TIR/codegen → JIT/dev parity and update touched docs. Difficulty and
-duration do not lower the outcome.
+Language features preserve full I9 parity — parser → sema → TIR → AOT → JIT/dev →
+interpreter → web when applicable — and update touched docs. Difficulty and
+duration do not lower the outcome. Never close with a new `jit_gaps` entry.
 
 Before plans, ballots, or public frontend acceptance, run both passes:
 
@@ -117,11 +135,13 @@ ANSI/`NO_COLOR` where relevant—not prose or a selected screenshot.
 ## Owner gates
 
 Before coding, enumerate new syntax, a new stdlib external dependency, an
-invariant carve-out, and any other owner-only call. For Jet project work, make
-each choice ballot-ready in Tower, then pause only the gated slice. Work on
-independent ungated slices meanwhile. Never hand-edit `plugins/tower/.tower/` data.
+invariant carve-out (including any I9 tier-parity exception), and any other
+owner-only call. For Jet project work, make each choice ballot-ready in Tower,
+then pause only the gated slice. Work on independent ungated slices meanwhile.
+Never hand-edit `plugins/tower/.tower/` data.
 
-Kill a design slice before ballot or code when it breaks an invariant,
+Kill a design slice before ballot or code when it breaks an invariant
+(including shipping AOT-only or parking a feature in `jit_gaps`),
 duplicates a mechanism, burdens the beginner default without necessity, or
 hides expert control or auditability. Otherwise, unresolved owner choices go
 through the Tower ballot workflow; a ratified verdict and its acceptance terms
@@ -182,8 +202,12 @@ Every completed change has one implementer and one fresh-context reviewer:
 2. The implementer fixes findings; the reviewer rechecks material fixes.
 
 The reviewer does not implement. They check missing paths, semantic and safety bugs,
-false-green tests, stale decisions, accidental scope, duplicate mechanisms, and
-orphaned work. A green build never waives review.
+false-green tests, stale decisions, accidental scope, duplicate mechanisms,
+orphaned work, and **I9 drift**: new Core behavior implemented only in AOT emit,
+re-encoded policy/defaults/error behavior inside Cranelift hosts or interpreter
+ambient (instead of calling the same Prelude `jet_*` symbol), new or retained
+`tests/jit_gaps.txt` parking for the change, or closing with “JIT/interpreter
+later.” A green build never waives review.
 
 Technical verification is agent-owned: the implementer runs every machine-verifiable
 requirement, however many there are, and the independent reviewer validates the
@@ -215,3 +239,17 @@ Be terse and precise. Say each rule once. Plain std-only Rust; small modules; no
 cleverness in codegen. Treat error text as snapshot-tested product copy. When in
 doubt, `docs/spec/philosophy.md` decides: effort is expendable; safety and the
 beginner experience are not.
+
+## Agent skills
+
+### Issue tracker
+
+Work lives on the Tower board (`node plugins/tower/tower.mjs`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage roles map to Tower card tags and `kind` (not phases). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.

@@ -532,19 +532,30 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   build-time steps (S56 user derives, comptime). (D-CTCODEGEN1=A, ratified
   2026-06-25; pairs with D-METADERIVE1=A, which makes a user derive's output a
   source fragment for exactly this reason.)
-- **R12 — One semantic core, every engine an exhaustive consumer.** TIR is the
-  single structured IR after sema. Every executable variant carries semantic
+- **R12 — One semantic core, every engine a dumb exhaustive consumer.** TIR is
+  the single structured IR after sema. Every executable variant carries semantic
   facts (places, types, patterns, method identities) — never pre-rendered Rust
-  source text. Rust spelling lives only in the AOT emit layer. Every engine
-  (Rust emitter, Cranelift JIT, and the canonical interpreter) must consume that
-  IR exhaustively: either real lowering or a named unsupported reason that falls
-  through to the next tier. The interpreter is the reference semantics for
-  `jet run`/`jet dev` parity. A feature PR is incomplete unless its
-  example/golden proves the AOT path and
-  `tests/dev.rs::dev_default_matches_compiled_binary` proves default `jet dev`
-  has the same stdout, stderr, exit code, diagnostics, panics, and side effects.
-  Native JIT coverage is a performance tier; semantic parity is mandatory.
-  (D-ONECORE1=A, ratified 2026-07-24.)
+  source text. **Core/runtime meaning lives only in Prelude/CoreLib**
+  (`crates/jet-codegen/src/Prelude/**`). Rust spelling lives only in the AOT emit
+  layer as calls into that Prelude. Cranelift JIT hosts and interpreter ambient
+  bindings are the same kind of layer: marshal args, call the identical
+  `jet_*` / Prelude function AOT would call, marshal results. They must not
+  fork defaults, CORS/policy checks, error meaning, or other Core behavior.
+  Every engine (Rust emitter, Cranelift JIT, the canonical interpreter, and web
+  when the surface applies) must consume TIR exhaustively with real lowering that
+  preserves one meaning (AGENTS.md invariant I9 / `claim.tier-parity`). A named
+  unsupported fall-through is only a temporary implementation state while the
+  owning card is still open — never a closed feature, never an AOT-only ship,
+  and never a durable `tests/jit_gaps.txt` parking lot. The interpreter is the
+  reference semantics for `jet run`/`jet dev` parity. A feature PR is incomplete
+  unless its example/golden proves the AOT path and
+  `tests/dev.rs::dev_default_matches_compiled_binary` proves default `jet run` /
+  `jet dev` has the same stdout, stderr, exit code, diagnostics, panics, and
+  side effects. If deopt runs that surface, interpreter ambient must call the
+  same Prelude symbol as AOT emit. Web-facing surfaces prove the web target the same way. Native
+  JIT is a performance tier; semantic parity across AOT, JIT, interpreter, and
+  web is mandatory. (D-ONECORE1=A, ratified 2026-07-24; I9 owner-directed
+  2026-07-29; dumb-adapter rule owner-directed 2026-07-29.)
   Living core-vs-desugar inventory for the #668 freeze: `docs/spec/tir.md`.
 
 ## Exit codes (stable contract)

@@ -14,7 +14,7 @@ no exceptions, no hidden control flow.
 <!-- CAPABILITY_CLAIM: claim.syntax-law | Unbuilt syntax notes are machine inventoried. -->
 <!-- CAPABILITY_CLAIM: claim.examples-spec | Feature examples declare expected output artifacts. -->
 <!-- CAPABILITY_CLAIM: claim.native-language | Jet compiles safe source to native programs. -->
-<!-- CAPABILITY_CLAIM: claim.tier-parity | Execution tiers target one semantic meaning. -->
+<!-- CAPABILITY_CLAIM: claim.tier-parity | AOT, JIT, interpreter, and web share one Prelude/CoreLib meaning (I9/R12); engines only marshal and call it. -->
 <!-- CAPABILITY_CLAIM: claim.static-guarantees | Static guarantees share one facts model. -->
 <!-- CAPABILITY_CLAIM: claim.discard-control | Must-use discard is explicit and audited. -->
 <!-- CAPABILITY_CLAIM: claim.prelude-control | Prelude defaults and opt-out share one loader. -->
