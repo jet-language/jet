@@ -272,7 +272,11 @@ impl<'a> Checker<'a> {
         /// argument against its fixed parameter type, with the same E0112
         /// fallback the general call path uses — `check_type_assignable` only
         /// reports its special shapes, so a plain mismatch (String where `[U8]`
-        /// is wanted, `U16` where `Int` is wanted) must not pass silently.
+        /// is wanted) must not pass silently.
+        ///
+        /// D-BINREAD-LEN1=A: `Reader.take` alone accepts U8/U16/U32 as a
+        /// length. These widths always widen to Int; U64 and signed sized
+        /// integers keep S42's explicit conversion rule.
         pub(super) fn check_shift_arg(&mut self, label: &str, want: &Type, arg: &mut crate::AST::CallArg) {
             let saved = self.expected_type.replace(want.clone());
             let got = self.infer(&mut arg.expr);
@@ -288,7 +292,20 @@ impl<'a> Checker<'a> {
                 &want,
                 Type::Union(members) if members.iter().any(|m| m == &got)
             );
-            if !reported && got != want && !fixed_widens && !union_widens {
+            let reader_length_widens = label == "Reader.take"
+                && matches!(
+                    &got,
+                    Type::IntN {
+                        signed: false,
+                        bits: 8 | 16 | 32
+                    }
+                );
+            if !reported
+                && got != want
+                && !fixed_widens
+                && !union_widens
+                && !reader_length_widens
+            {
                 self.diags.push(Diagnostic::error(
                     "E0112",
                     format!(

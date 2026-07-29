@@ -936,6 +936,9 @@ Jai `shift` idiom lands as a core cursor surface, not an operator (option C —
 position: `read_u8`/`read_u16_le|be`/`read_u32_le|be`/`read_u64_le|be`,
 `take(n: Int)`, `remaining()`, `is_at_end()`; every read advances and is
 fallible (`T ? String`) — a bounds miss is an ordinary error value.
+**D-BINREAD-LEN1=A** narrowly extends the `take` length slot to accept
+`U8`/`U16`/`U32`, which widen internally to `Int`; `U64` remains an explicit
+conversion, and S42 sized-int separation is unchanged everywhere else.
 `Cursor.over(s)` is the text sibling: `take_until(delim)`, `skip_ws()`, and
 `take_pattern("…{hole:Type}…")`, which reuses the D-PARSESTR1 pattern grammar
 and matcher engine (I8 — one engine) in consume mode: it matches a *prefix*

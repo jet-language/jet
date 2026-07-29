@@ -2117,8 +2117,8 @@ impl<'a> Checker<'a> {
             }
             // D-SHIFT1 (c7shift): `binary.Reader` instance methods (every read
             // fallible — bounds miss is an ordinary `?` error, not a panic).
-            // `take(n)` wants an `Int` — sized ints convert explicitly per S42
-            // (`Int.from_u16(count)`), never implicitly.
+            // D-BINREAD-LEN1=A: `take(n)` accepts Int plus U8/U16/U32 lengths;
+            // the unsigned sized values widen internally. U64 stays explicit.
             if let Type::Named(handle_ty) = &recv_ty {
                 if let Some(ret) = binary_reader_method_return(handle_ty, method, args.len()) {
                     for a in args.iter_mut() {

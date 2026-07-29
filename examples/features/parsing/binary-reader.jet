@@ -13,10 +13,19 @@ fn run() {
     r :: Reader.over(packet)
     magic :: r.read_u32_le() ?? panic("bad packet: no magic")
     count :: r.read_u16_le() ?? panic("bad packet: no count")
-    // `take` wants an `Int` length; sized ints convert explicitly (S42).
-    payload :: r.take(Int.from_u16(count)) ?? panic("bad packet: short payload")
+    // D-BINREAD-LEN1=A: unsigned wire lengths through U32 widen internally.
+    payload :: r.take(count) ?? panic("bad packet: short payload")
     print("magic={magic} count={count} payload_len={payload.len()}")
     print("remaining={r.remaining()} is_at_end={r.is_at_end()}")
+
+    counted8 :: Reader.over([U8].{0x01, 0xA0})
+    length8 :: counted8.read_u8() ?? panic("bad U8 count")
+    payload8 :: counted8.take(length8) ?? panic("bad U8 payload")
+    counted32 :: Reader.over([U8].{0x02, 0x00, 0x00, 0x00, 0xB0, 0xC0})
+    length32 :: counted32.read_u32_le() ?? panic("bad U32 count")
+    payload32 :: counted32.take(length32) ?? panic("bad U32 payload")
+    print("sized payloads={payload8.len()}/{payload.len()}/{payload32.len()}")
+
     // A bounds miss is an ordinary error value — `?`-composable, never a panic.
     short :: [U8].{0x01}
     r2 :: Reader.over(short)

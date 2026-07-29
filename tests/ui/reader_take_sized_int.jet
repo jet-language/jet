@@ -1,9 +1,9 @@
-// D-SHIFT1 + S42: `take` wants an `Int` length; sized ints convert
-// explicitly (`Int.from_u16(count)`), never implicitly.
+// D-BINREAD-LEN1=A: U64 remains explicit because it may not fit Int on a
+// 32-bit target. The U8/U16/U32 length carve does not include it.
 fn run() {
-    bytes :: [U8].{0x01, 0x02, 0x03, 0x04}
+    bytes :: [U8].{0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
     r :: Reader.over(bytes)
-    count :: r.read_u16_le() ?? panic("short")
+    count :: r.read_u64_le() ?? panic("short")
     tail :: r.take(count) ?? panic("short")
     print("{tail.len()}")
 }

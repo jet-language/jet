@@ -3604,7 +3604,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     format!("{}jet_reader_read_u64_be(&mut ({}))", root, recv)
                 }
                 THandleOp::ReaderTake => {
-                    format!("{}jet_reader_take(&mut ({}), {})", root, recv, a(0))
+                    // D-BINREAD-LEN1=A: sema admits only Int/U8/U16/U32 here.
+                    // The host boundary widens the accepted unsigned lengths
+                    // to Reader.take's internal Int representation.
+                    format!("{}jet_reader_take(&mut ({}), ({}) as i64)", root, recv, a(0))
                 }
                 THandleOp::ReaderRemaining => format!("{}jet_reader_remaining(&({}))", root, recv),
                 THandleOp::ReaderAtEnd => format!("{}jet_reader_at_end(&({}))", root, recv),

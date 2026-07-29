@@ -2670,7 +2670,7 @@ fn run() {
 | `r.read_u16_le()` / `_be()` | `U16 ? String` | Two bytes, little/big-endian |
 | `r.read_u32_le()` / `_be()` | `U32 ? String` | Four bytes |
 | `r.read_u64_le()` / `_be()` | `U64 ? String` | Eight bytes |
-| `r.take(n)` | `[U8] ? String` | Next `n` bytes (`n: Int`; sized ints widen with `Int.from_u*(n)`) |
+| `r.take(n)` | `[U8] ? String` | Next `n` bytes (`n`: `Int`, `U8`, `U16`, or `U32`; sized lengths widen internally, while `U64` stays explicit) |
 | `r.take_pattern([U8].{"…{h:U<w>}…"})` | `(holes…) ? String` | Match + consume a prefix; literal pattern only |
 | `r.remaining()` | `Int` | Bytes left |
 | `r.is_at_end()` | `Bool` | Position at buffer end |
