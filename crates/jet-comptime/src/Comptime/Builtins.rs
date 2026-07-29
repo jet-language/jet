@@ -5,6 +5,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{BinOp, CtFloat, Type};
 
 use super::Diagnostics::{comptime_panic, divide_by_zero, index_oob, overflow, unsupported};
+use super::Methods::as_string;
 use super::Value::{CtKey, CtValue};
 
 pub fn as_bool(v: &CtValue, span: Span) -> Result<bool, Diagnostic> {
