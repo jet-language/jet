@@ -742,6 +742,14 @@ renumbered, and no new `W` code may be allocated.
 | E2935 | parse | teaching: retired `layout NAME { … }` → `name :: Layout.{ … }` (D-LAYOUT-CTOR1) |
 | E2936 | sema  | teaching: retired `LayoutHandle` → `Layout` (D-LAYOUT-CTOR1) |
 
+Contextual fixes for the two general lookup codes are part of their registered
+copy:
+
+- E0107 uses the known Core module list when an unresolved name is a unique
+  module alias. It says `Fix: add use core.files as fs`, not `declare it first`.
+- E0102 says `Fix: call .to_list() first` for a missing method on the lazy
+  stdlib `Iter`. User types keep `define it inside struct T or impl T`.
+
 ## Callable and control syntax diagnostics
 
 These diagnostics migrate the clean break ratified by D-ARROW-CONTROL1,
