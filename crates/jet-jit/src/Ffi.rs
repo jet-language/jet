@@ -230,7 +230,6 @@ extern "C" fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
         ));
         return 0;
     }
-
     // Materialize owned string args so pointers stay live for the call.
     let mut owned_strings: Vec<String> = Vec::new();
     for (i, abi) in entry.params.iter().enumerate() {
@@ -238,8 +237,6 @@ extern "C" fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
             owned_strings.push(clone_string(argv[i]));
         }
     }
-    let mut str_i = 0usize;
-
     // Specialized fast paths for the shapes examples use.
     match (entry.params.as_slice(), entry.ret) {
         ([ParamAbi::String], RetAbi::String) => {
@@ -275,6 +272,43 @@ extern "C" fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
             let f: FnII = unsafe { std::mem::transmute(entry.ptr) };
             return unsafe { f(argv[0], argv[1]) };
         }
+        ([ParamAbi::Int], RetAbi::Unit) => {
+            type FnI = unsafe extern "C" fn(i64);
+            let f: FnI = unsafe { std::mem::transmute(entry.ptr) };
+            unsafe { f(argv[0]) };
+            return 0;
+        }
+        ([ParamAbi::Float], RetAbi::Float) => {
+            type FnF = unsafe extern "C" fn(f64) -> f64;
+            let f: FnF = unsafe { std::mem::transmute(entry.ptr) };
+            let value = unsafe { f(f64::from_bits(argv[0] as u64)) };
+            return value.to_bits() as i64;
+        }
+        (
+            [
+                ParamAbi::Float,
+                ParamAbi::Float,
+                ParamAbi::Float,
+                ParamAbi::Float,
+                ParamAbi::Float,
+                ParamAbi::Float,
+            ],
+            RetAbi::Float,
+        ) => {
+            type Fn6F = unsafe extern "C" fn(f64, f64, f64, f64, f64, f64) -> f64;
+            let f: Fn6F = unsafe { std::mem::transmute(entry.ptr) };
+            let value = unsafe {
+                f(
+                    f64::from_bits(argv[0] as u64),
+                    f64::from_bits(argv[1] as u64),
+                    f64::from_bits(argv[2] as u64),
+                    f64::from_bits(argv[3] as u64),
+                    f64::from_bits(argv[4] as u64),
+                    f64::from_bits(argv[5] as u64),
+                )
+            };
+            return value.to_bits() as i64;
+        }
         _ => {}
     }
 
@@ -285,31 +319,25 @@ extern "C" fn jet_jit_extern_call(wrapper: i64, args: i64) -> i64 {
         trap(&format!("jit ffi: unsupported signature for `{name}`"));
         return 0;
     }
-    match (entry.params.len(), entry.ret) {
-        (0, RetAbi::Unit) => {
+    match (entry.params.as_slice(), entry.ret) {
+        ([], RetAbi::Unit) => {
             type Fn0 = unsafe extern "C" fn();
             let f: Fn0 = unsafe { std::mem::transmute(entry.ptr) };
             unsafe { f() };
             0
         }
-        (0, RetAbi::Int) => {
+        ([], RetAbi::Int) => {
             type Fn0 = unsafe extern "C" fn() -> i64;
             let f: Fn0 = unsafe { std::mem::transmute(entry.ptr) };
             unsafe { f() }
         }
-        (1, RetAbi::Int) => {
+        ([ParamAbi::Int], RetAbi::Int) => {
             type Fn1 = unsafe extern "C" fn(i64) -> i64;
             let f: Fn1 = unsafe { std::mem::transmute(entry.ptr) };
             unsafe { f(argv[0]) }
         }
-        (2, RetAbi::Int) => {
-            type Fn2 = unsafe extern "C" fn(i64, i64) -> i64;
-            let f: Fn2 = unsafe { std::mem::transmute(entry.ptr) };
-            unsafe { f(argv[0], argv[1]) }
-        }
         _ => {
-            let _ = str_i;
-            trap(&format!("jit ffi: unsupported arity for `{name}`"));
+            trap(&format!("jit ffi: unsupported signature for `{name}`"));
             0
         }
     }

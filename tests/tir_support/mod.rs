@@ -152,6 +152,34 @@ pub fn build_and_run_multi(
     )
 }
 
+/// Run a multi-file program through the default `jet run` lens.
+pub fn run_default_multi(
+    name: &str,
+    entry: &str,
+    files: &[(&str, &str)],
+) -> (i32, String, String) {
+    let dir = unique_tmp(&format!("jet_jit_multi_{name}"));
+    fs::create_dir_all(&dir).unwrap();
+    for (rel, src) in files {
+        let path = dir.join(rel);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&path, src).unwrap();
+    }
+    let run = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["run", entry, "--trace-tiers"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    (
+        run.status.code().unwrap_or(1),
+        String::from_utf8_lossy(&run.stdout).into_owned(),
+        String::from_utf8_lossy(&run.stderr).into_owned(),
+    )
+}
+
 pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     fn strip_mod(src: &str, name: &str) -> String {
         let Some(start) = src.find(&format!("mod {name}")) else {

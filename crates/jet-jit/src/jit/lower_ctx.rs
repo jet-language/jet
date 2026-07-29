@@ -12113,7 +12113,21 @@ impl LowerCtx<'_, '_> {
                     self.emit_trap_check()?;
                     Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
                 }
-                TModuleCallForm::Qualified { .. } => Err("jit file-module call unsupported".to_string()),
+                TModuleCallForm::Qualified { rust_mod, rust_fn } => {
+                    let key = format!("{rust_mod}::{rust_fn}");
+                    let func_id = self
+                        .func_ids
+                        .get(&key)
+                        .copied()
+                        .ok_or_else(|| format!("jit file-module call target missing `{key}`"))?;
+                    let arg_vals: Result<Vec<_>, _> =
+                        args.iter().map(|arg| self.lower_call_arg(arg)).collect();
+                    let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+                    let call = self.b.ins().call(func_ref, &arg_vals?);
+                    let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
+                    self.emit_trap_check()?;
+                    Ok(result.unwrap_or_else(|| self.b.ins().iconst(types::I8, 0)))
+                }
             },
             TExprKind::ExternCall { wrapper, args } => {
                 let wid = self.runtime.heap.alloc_string(wrapper.clone());

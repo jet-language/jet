@@ -2,7 +2,8 @@
 use std::collections::HashMap;
 use crate::AST::{CtFloat, Type, UnOp};
 use crate::Codegen::TIR::{
-    ListSpreadPart, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFnValueKind, TPlace, TStrPart,
+    ListSpreadPart, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFnValueKind, TModuleCallForm,
+    TPlace, TStrPart,
 };
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::{apply_core_call, apply_impure_core_call, CtValue};
@@ -2266,7 +2267,15 @@ impl<'a> EvalCtx<'a> {
                     self.call_callable(&callable, argv)
                 }
             },
-            TExprKind::ModuleCall { .. } => Err(unsupported("expr `ModuleCall`", self.span())),
+            TExprKind::ModuleCall { form, args } => {
+                let target = match form {
+                    TModuleCallForm::Qualified { rust_mod, rust_fn } => {
+                        format!("{rust_mod}::{rust_fn}")
+                    }
+                    TModuleCallForm::InlineMangled { mangled } => mangled.clone(),
+                };
+                self.eval_call(&target, args, scope)
+            }
             TExprKind::ExternCall { .. } => Err(unsupported("expr `ExternCall`", self.span())),
         }
     }

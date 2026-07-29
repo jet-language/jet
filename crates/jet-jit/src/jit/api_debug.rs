@@ -1,5 +1,5 @@
 use jet_codegen::Codegen::TIR::{self, TEnumPayload, TExpr, TExprKind, TIfCond, TStmt, TStrPart};
-use jet_foundation::{JitBackend::RunOutcome, AST::{Item, ProgramBundle, Type}};
+use jet_foundation::{JitBackend::RunOutcome, AST::{ProgramBundle, Type}};
 use std::collections::HashSet;
 
 use super::gap::{entry_run_name, JitGap};
@@ -677,20 +677,6 @@ pub fn resident_jit_safe_bundle(bundle: &ProgramBundle) -> bool {
 /// Test hook: empty string when covered; otherwise a short failure reason.
 #[doc(hidden)]
 pub fn resident_jit_safe_bundle_detail(bundle: &ProgramBundle) -> String {
-    if bundle
-        .modules
-        .iter()
-        .flat_map(|module| &module.items)
-        .any(|item| match item {
-            // gtk4 is hosted by jet-jit Ui (headless under JET_UI_HEADLESS); the
-            // CModule only names the native link key for AOT.
-            Item::CModule(cm) if cm.lib == "gtk4" => false,
-            // Prepared Rust/inline FFI loads via cdylib; bare CModule still AOT-only.
-            Item::CModule(_) => true,
-            _ => false,
-        })    {
-        return "C module ABI requires the native build/link path; resident JIT resolves only the prepared Rust/inline FFI cdylib".to_string();
-    }
     let Some(program) = TIR::lower_jit_program(bundle) else {
         return format!(
             "lower_jit_program returned None ({})",

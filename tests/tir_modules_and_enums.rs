@@ -5,7 +5,7 @@ mod tir_support;
 
 use std::fs;
 
-use tir_support::{build_and_run, build_and_run_multi, have_rustc};
+use tir_support::{build_and_run, build_and_run_multi, have_rustc, run_default_multi};
 
 #[test]
 fn soft_public_imports_warn_once_per_outside_use() {
@@ -272,6 +272,8 @@ module math
 fn run() {
     print(math.clamp(15, 0, 10))
     print(math.label(\"x\", 5))
+    print(math.checked(7) ?? -1)
+    print(math.checked(-1) ?? -2)
 }
 ";
     let math_src = "\
@@ -287,6 +289,15 @@ pub fn clamp(x: Int, lo: Int, hi: Int) => Int {
 pub fn label(prefix: String, n: Int) => String {
     return \"{prefix}:{n}\"
 }
+pub fn checked(value: Int) => Int ? String {
+    if value < 0 {
+        return Err(message(value))
+    }
+    return Ok(value)
+}
+fn message(value: Int) => String {
+    return \"bad {value}\"
+}
 ";
     let (code, stdout) = build_and_run_multi(
         "tir_file_mod",
@@ -294,7 +305,58 @@ pub fn label(prefix: String, n: Int) => String {
         &[("main.jet", main_src), ("math.jet", math_src)],
     );
     assert_eq!(code, 0);
-    assert_eq!(stdout, "10\nx:5\n");
+    assert_eq!(stdout, "10\nx:5\n7\n-2\n");
+}
+
+#[test]
+fn file_module_qualified_call_runs_under_default_lens() {
+    let main_src = "\
+module math
+fn run() {
+    print(math.clamp(15, 0, 10))
+    print(math.label(\"x\", 5))
+    print(math.checked(7) ?? -1)
+    print(math.checked(-1) ?? -2)
+}
+";
+    let math_src = "\
+pub fn clamp(x: Int, lo: Int, hi: Int) => Int {
+    if (x < lo) {
+        return lo
+    }
+    if (x > hi) {
+        return hi
+    }
+    return x
+}
+pub fn label(prefix: String, n: Int) => String {
+    return \"{prefix}:{n}\"
+}
+pub fn checked(value: Int) => Int ? String {
+    if value < 0 {
+        return Err(message(value))
+    }
+    return Ok(value)
+}
+fn message(value: Int) => String {
+    return \"bad {value}\"
+}
+";
+    let (code, stdout, stderr) = run_default_multi(
+        "qualified_call",
+        "main.jet",
+        &[("main.jet", main_src), ("math.jet", math_src)],
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "10\nx:5\n7\n-2\n");
+    assert!(
+        stderr
+            .lines()
+            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("tier0 interp"), "{stderr}");
+    assert!(!stderr.contains("E0956"), "{stderr}");
 }
 
 /// c109 Phase 14: an unqualified file-module import `use mathlib.{clamp, lo, hi}`

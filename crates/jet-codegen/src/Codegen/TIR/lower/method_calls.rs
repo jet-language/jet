@@ -21,6 +21,7 @@ use crate::Codegen::TIR::is_civil_time_method_name;
 use crate::Codegen::TIR::is_concurrency_method_name;
 use crate::Codegen::TIR::is_devserver_method_name;
 use crate::Codegen::TIR::is_webapp_method_name;
+use crate::Codegen::TIR::lower_extern_call_arg;
 use crate::Codegen::TIR::is_event_handle_type;
 use crate::Codegen::TIR::is_event_method_name;
 use crate::Codegen::TIR::is_http_method_name;
@@ -1279,6 +1280,36 @@ pub(crate) fn lower_method_call(
                         .import_sigs
                         .get(&(alias.clone(), method.to_string()))
                         .cloned();
+                    if let Some(wrapper) = cx
+                        .extern_funcs
+                        .get(&format!("{mod_name}::{method}"))
+                        .cloned()
+                    {
+                        let eargs = args
+                            .iter()
+                            .enumerate()
+                            .map(|(index, arg)| {
+                                let conv = sig
+                                    .as_ref()
+                                    .and_then(|params| params.get(index))
+                                    .map(|(convention, ty)| (*convention, ty.clone()));
+                                lower_extern_call_arg(arg, conv, env, cx)
+                            })
+                            .collect();
+                        let ty = cx
+                            .import_rets
+                            .get(&(alias.clone(), method.to_string()))
+                            .cloned()
+                            .flatten()
+                            .unwrap_or_else(unit_type);
+                        return TExpr {
+                            ty,
+                            kind: TExprKind::ExternCall {
+                                wrapper,
+                                args: eargs,
+                            },
+                        };
+                    }
                     let targs = lower_module_args(args, sig.as_deref(), env, cx);
                     let ret = cx
                         .import_rets

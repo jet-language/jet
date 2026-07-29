@@ -431,8 +431,17 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
             }
             args.iter().all(|a| resident_safe_call_arg(a, callees))
         }
-        TExprKind::ModuleCall { form: TModuleCallForm::InlineMangled { mangled }, args } => {
-            callees.contains(mangled) && args.iter().all(|arg| resident_safe_call_arg(arg, callees))
+        TExprKind::ModuleCall { form, args } => {
+            let target = match form {
+                TModuleCallForm::Qualified { rust_mod, rust_fn } => {
+                    format!("{rust_mod}::{rust_fn}")
+                }
+                TModuleCallForm::InlineMangled { mangled } => mangled.clone(),
+            };
+            callees.contains(&target)
+                && args
+                    .iter()
+                    .all(|arg| resident_safe_call_arg(arg, callees))
         }
         TExprKind::CoreCall {
             module,

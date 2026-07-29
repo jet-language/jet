@@ -979,7 +979,62 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
     if !entry_ok {
         return None;
     }
-    let spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
+    let mut spawn_lambdas = std::mem::take(&mut *cx.jit_spawn_lambdas.borrow_mut());
+    // File-module calls carry their already-resolved Rust path in TIR. Give the
+    // resident JIT the same qualified target instead of forcing the whole
+    // program through the interpreter, which cannot execute foreign binders.
+    for (module_idx, imported) in bundle.modules.iter().enumerate() {
+        if module_idx == bundle.entry {
+            continue;
+        }
+        let mut imported_cx = build_cx_items(
+            &imported.items,
+            &imported.source,
+            &imported.display,
+            None,
+            &extern_funcs,
+        );
+        populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+        for item in &imported.items {
+            match item {
+                Item::Func(function)
+                    if function.type_params.is_empty() && tir_covers(function, &imported_cx) =>
+                {
+                    imported_cx.jit_local_call_prefix =
+                        Some(format!("user_{}::", imported.alias));
+                    let mut lowered = lower_func(function, &imported_cx);
+                    lowered.name =
+                        format!("user_{}::{}", imported.alias, mangle(&function.name));
+                    funcs.push(lowered);
+                }
+                Item::CodeModule(code_module) => {
+                    let Some(body) = &code_module.body else {
+                        continue;
+                    };
+                    for inner in body {
+                        let Item::Func(function) = inner else {
+                            continue;
+                        };
+                        if !function.type_params.is_empty()
+                            || !tir_covers(function, &imported_cx)
+                        {
+                            continue;
+                        }
+                        imported_cx.jit_local_call_prefix =
+                            Some(format!("user_{}::", code_module.name));
+                        let mut lowered = lower_func(function, &imported_cx);
+                        lowered.name =
+                            format!("user_{}::{}", code_module.name, mangle(&function.name));
+                        funcs.push(lowered);
+                    }
+                }
+                _ => {}
+            }
+        }
+        spawn_lambdas.extend(std::mem::take(
+            &mut *imported_cx.jit_spawn_lambdas.borrow_mut(),
+        ));
+    }
     let mut struct_fields = std::collections::HashMap::new();
     let mut struct_field_types = std::collections::HashMap::new();
     let mut enum_variants = std::collections::HashMap::new();
@@ -1124,6 +1179,82 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                 }
             }
             _ => {}
+        }
+    }
+    for (module_idx, imported) in bundle.modules.iter().enumerate() {
+        if module_idx == bundle.entry {
+            continue;
+        }
+        for item in &imported.items {
+            match item {
+                Item::Struct(s) if s.type_params.is_empty() => {
+                    struct_fields.insert(
+                        s.name.clone(),
+                        s.fields
+                            .iter()
+                            .map(|field| format!("user_{}", field.name))
+                            .collect(),
+                    );
+                    struct_field_types.insert(
+                        s.name.clone(),
+                        s.fields.iter().map(|field| field.ty.clone()).collect(),
+                    );
+                    for field in &s.fields {
+                        register_union_type(
+                            &field.ty,
+                            &mut enum_variants,
+                            &mut enum_variant_payload_types,
+                        );
+                    }
+                }
+                Item::Enum(e) if e.type_params.is_empty() => {
+                    register_enum_variants(
+                        &e.name,
+                        &e.variants,
+                        &mut enum_variants,
+                        &mut enum_variant_payload_types,
+                    );
+                }
+                Item::CodeModule(code_module) => {
+                    let Some(body) = &code_module.body else {
+                        continue;
+                    };
+                    for inner in body {
+                        match inner {
+                            Item::Struct(s) if s.type_params.is_empty() => {
+                                struct_fields.insert(
+                                    s.name.clone(),
+                                    s.fields
+                                        .iter()
+                                        .map(|field| format!("user_{}", field.name))
+                                        .collect(),
+                                );
+                                struct_field_types.insert(
+                                    s.name.clone(),
+                                    s.fields.iter().map(|field| field.ty.clone()).collect(),
+                                );
+                                for field in &s.fields {
+                                    register_union_type(
+                                        &field.ty,
+                                        &mut enum_variants,
+                                        &mut enum_variant_payload_types,
+                                    );
+                                }
+                            }
+                            Item::Enum(e) if e.type_params.is_empty() => {
+                                register_enum_variants(
+                                    &e.name,
+                                    &e.variants,
+                                    &mut enum_variants,
+                                    &mut enum_variant_payload_types,
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
     }
     for (_, fields) in type_shapes.tuples {

@@ -29,6 +29,8 @@ pub struct ExternEntry {
     /// Human-facing hint for E0705 (`extern` line context).
     pub line_hint: String,
     pub inline: Option<InlineEntry>,
+    /// The declaration names a native C symbol assembled by CFFI.
+    pub c_abi: bool,
 }
 /// A `#FFI` body carried through the existing hidden bridge. Keeping it on the
 /// same entry prevents a second call/link mechanism from growing beside S50.
@@ -107,6 +109,28 @@ pub fn collect_externs(bundle: &ProgramBundle) -> Vec<ExternEntry> {
                                 source: inline.source.clone(),
                                 param_names: f.params.iter().map(|p| p.name.clone()).collect(),
                             }),
+                            c_abi: false,
+                        });
+                    }
+                } else if let Item::CModule(c_module) = item {
+                    for function in &c_module.functions {
+                        out.push(ExternEntry {
+                            jet_name: function.name.clone(),
+                            rust_path: function.rust_path.clone(),
+                            wrapper_name: format!("jet_ffi_{}", function.name),
+                            params: function
+                                .params
+                                .iter()
+                                .map(|param| (param.convention, param.ty.clone()))
+                                .collect(),
+                            return_type: function.return_type.clone(),
+                            crate_spec: "std".to_string(),
+                            line_hint: format!(
+                                "`{}` in C module `{}`",
+                                function.name, c_module.lib
+                            ),
+                            inline: None,
+                            c_abi: true,
                         });
                     }
                 }
@@ -134,6 +158,7 @@ fn extern_entry(ef: &ExternFn, block: &ExternRustBlock, _file: &str) -> ExternEn
         crate_spec: block.crate_spec.clone(),
         line_hint: format!("`{}` in `extern rust \"{}\"`", ef.name, block.crate_spec),
         inline: None,
+        c_abi: false,
     }
 }
 
@@ -260,6 +285,11 @@ pub fn prepare_for_target(
     if let Some(diagnostic) = inline_asm_target_diagnostic(&entries, target) {
         return Err(vec![diagnostic]);
     }
+    let native_link_args = if entries.iter().any(|entry| entry.c_abi) {
+        crate::CFFI::rustc_link_args_for_target(&bundle.cffi, &bundle.project_root, target)?
+    } else {
+        Vec::new()
+    };
 
     build_bridge_full(
         &entries,
@@ -273,6 +303,7 @@ pub fn prepare_for_target(
         needs_compress,
         needs_plugin,
         needs_secrets,
+        &native_link_args,
         target,
     )
     .map(Some)
@@ -312,6 +343,7 @@ mod inline_asm_target_tests {
                 source: "mov rax, {value}; -> return".into(),
                 param_names: vec!["value".into()],
             }),
+            c_abi: false,
         }
     }
 
@@ -1469,6 +1501,7 @@ pub fn build_bridge(
         needs_compress,
         needs_plugin,
         needs_secrets,
+        &[],
         &target,
     )
 }
@@ -1500,6 +1533,7 @@ pub fn cached_crypto_helper_path() -> PathBuf {
         false,
         &target,
         None,
+        &[],
     );
     cache_dir()
         .join(format!("{key:016x}"))
@@ -1520,6 +1554,7 @@ fn build_bridge_full(
     needs_compress: bool,
     needs_plugin: bool,
     needs_secrets: bool,
+    native_link_args: &[String],
     selected_target: &str,
 ) -> Result<FfiLink, Vec<Diagnostic>> {
     let mut deps = collect_crate_deps(entries);
@@ -1632,6 +1667,7 @@ fn build_bridge_full(
         needs_secrets,
         selected_target,
         native_toolchain.as_ref(),
+        native_link_args,
     );
     let cache_root = cache_dir().join(format!("{:016x}", key));
     let crate_name = format!("jet_ffi_{:016x}", key);
@@ -1842,14 +1878,19 @@ fn build_bridge_full(
         .map_err(|e| tool_error(&format!("couldn't write the secrets helper: {}", e)))?;
     }
 
-    let out = Command::new("cargo")
+    let mut cargo = Command::new("cargo");
+    cargo
         .arg("build")
         .arg("--release")
         .arg("--target")
         .arg(selected_target)
         .arg("--manifest-path")
         .arg(&manifest)
-        .env("CARGO_TARGET_DIR", &target_dir)
+        .env("CARGO_TARGET_DIR", &target_dir);
+    if !native_link_args.is_empty() {
+        cargo.env("CARGO_ENCODED_RUSTFLAGS", native_link_args.join("\u{1f}"));
+    }
+    let out = cargo
         .output()
         .map_err(|e| {
             vec![Diagnostic::error(
@@ -2283,6 +2324,7 @@ fn cache_key_full(
     needs_secrets: bool,
     selected_target: &str,
     native_toolchain: Option<&InlineNativeToolchain>,
+    native_link_args: &[String],
 ) -> u64 {
     let mut h = DefaultHasher::new();
     INLINE_BRIDGE_SCHEMA.hash(&mut h);
@@ -2292,6 +2334,8 @@ fn cache_key_full(
         inline_toolchain_identity(toolchain).hash(&mut h);
         emit_inline_build_rs(entries, toolchain).hash(&mut h);
     }
+    native_link_args.hash(&mut h);
+    hash_static_link_inputs(native_link_args, &mut h);
     // Only perturb the key when a ring module is actually needed, so programs
     // without those modules keep their historical cache key. The dep is already
     // in `deps`; the flag guards the (currently impossible) empty-deps case.
@@ -2350,6 +2394,7 @@ fn cache_key_full(
         e.wrapper_name.hash(&mut h);
         e.rust_path.hash(&mut h);
         e.crate_spec.hash(&mut h);
+        e.c_abi.hash(&mut h);
         if let Some(inline) = &e.inline {
             INLINE_BRIDGE_SCHEMA.hash(&mut h);
             inline.lang.hash(&mut h);
@@ -2365,6 +2410,38 @@ fn cache_key_full(
         }
     }
     h.finish()
+}
+
+fn hash_static_link_inputs(args: &[String], hasher: &mut impl Hasher) {
+    let mut dirs = Vec::new();
+    let mut static_libs = Vec::new();
+    for pair in args.windows(2) {
+        match pair[0].as_str() {
+            "-L" => {
+                if let Some(dir) = pair[1].strip_prefix("native=") {
+                    dirs.push(PathBuf::from(dir));
+                }
+            }
+            "-l" => {
+                if let Some(name) = pair[1].strip_prefix("static=") {
+                    static_libs.push(name);
+                }
+            }
+            _ => {}
+        }
+    }
+    for name in static_libs {
+        if let Some(path) = dirs
+            .iter()
+            .map(|dir| dir.join(format!("lib{name}.a")))
+            .find(|path| path.is_file())
+        {
+            path.hash(hasher);
+            if let Ok(bytes) = fs::read(path) {
+                bytes.hash(hasher);
+            }
+        }
+    }
 }
 
 fn type_key(ty: &Type) -> String {
@@ -2659,8 +2736,10 @@ fn emit_wrapper_lib(
     for e in entries {
         if let Some(inline) = &e.inline {
             out.push_str(&emit_inline_wrapper_fn(e, inline));
+        } else if e.c_abi {
+            out.push_str(&emit_c_wrapper_fn(e, &names));
         } else {
-        out.push_str(&emit_wrapper_fn(e, &names));
+            out.push_str(&emit_wrapper_fn(e, &names));
         }
         if let Some(cabi) = emit_cabi_trampoline(e, &names) {
             out.push_str(&cabi);
@@ -2669,6 +2748,83 @@ fn emit_wrapper_lib(
         out.push('\n');
     }
     out
+}
+
+fn emit_c_wrapper_fn(entry: &ExternEntry, user_types: &HashSet<String>) -> String {
+    fn raw_type(ty: &Type, user_types: &HashSet<String>) -> String {
+        match ty {
+            Type::String => "*const std::os::raw::c_char".to_string(),
+            Type::Char => "u32".to_string(),
+            _ => rust_type(ty, user_types),
+        }
+    }
+
+    let params = entry
+        .params
+        .iter()
+        .enumerate()
+        .map(|(index, (_, ty))| format!("p{index}: {}", rust_type(ty, user_types)))
+        .collect::<Vec<_>>();
+    let raw_params = entry
+        .params
+        .iter()
+        .enumerate()
+        .map(|(index, (_, ty))| format!("p{index}: {}", raw_type(ty, user_types)))
+        .collect::<Vec<_>>();
+    let raw_ret = entry
+        .return_type
+        .as_ref()
+        .map(|ty| format!(" -> {}", raw_type(ty, user_types)))
+        .unwrap_or_default();
+    let ret = entry
+        .return_type
+        .as_ref()
+        .map(|ty| format!(" -> {}", rust_type(ty, user_types)))
+        .unwrap_or_default();
+    let mut setup = Vec::new();
+    let mut call_args = Vec::new();
+    for (index, (_, ty)) in entry.params.iter().enumerate() {
+        match ty {
+            Type::String => {
+                setup.push(format!(
+                    "    let c{index} = std::ffi::CString::new(p{index}).unwrap_or_else(|_| ffi_panic());"
+                ));
+                call_args.push(format!("c{index}.as_ptr()"));
+            }
+            Type::Char => call_args.push(format!("p{index} as u32")),
+            _ => call_args.push(format!("p{index}")),
+        }
+    }
+    let raw_call = format!(
+        "unsafe {{ {}({}) }}",
+        entry.rust_path,
+        call_args.join(", ")
+    );
+    let call = match &entry.return_type {
+        Some(Type::String) => format!(
+            "    let ptr = {raw_call};\n    if ptr.is_null() {{ ffi_panic(); }}\n    unsafe {{ std::ffi::CStr::from_ptr(ptr) }}.to_str().unwrap_or_else(|_| ffi_panic()).to_owned()"
+        ),
+        Some(Type::Char) => format!(
+            "    char::from_u32({raw_call}).unwrap_or_else(|| ffi_panic())"
+        ),
+        Some(_) => format!("    {raw_call}"),
+        None => format!("    {raw_call};"),
+    };
+    let body = if setup.is_empty() {
+        call
+    } else {
+        format!("{}\n{call}", setup.join("\n"))
+    };
+    format!(
+        "unsafe extern \"C\" {{\n    fn {}({}){};\n}}\n\npub fn {}({}){} {{\n{}\n}}\n",
+        entry.rust_path,
+        raw_params.join(", "),
+        raw_ret,
+        entry.wrapper_name,
+        params.join(", "),
+        ret,
+        body
+    )
 }
 
 fn emit_inline_wrapper_fn(entry: &ExternEntry, inline: &InlineEntry) -> String {
@@ -3383,6 +3539,7 @@ mod tests {
                 source: "int64_t probe(int64_t value) { return value; }".into(),
                 param_names: vec!["value".into()],
             }),
+            c_abi: false,
         };
         let mut cpp_entry = entry.clone();
         cpp_entry.jet_name = "cpp_probe".into();
@@ -3433,6 +3590,7 @@ mod tests {
                 false,
                 &toolchain.target,
                 Some(toolchain),
+                &[],
             )
         };
         let first = key(&toolchain);

@@ -131,8 +131,8 @@ static void fail(JNIEnv*e){{last_error=1;if(e&&(*e)->ExceptionCheck(e))(*e)->Exc
 static void shutdown(void){{if(!vm)return;JNIEnv*e=0;if((*vm)->GetEnv(vm,(void**)&e,JNI_VERSION_1_8)==JNI_OK){{for(int i=0;i<1024;i++)if(handles[i]){{(*e)->DeleteGlobalRef(e,handles[i]);handles[i]=0;}}}}(*vm)->DestroyJavaVM(vm);vm=0;}}
 static JNIEnv* env(void){{JNIEnv*e=0;pthread_mutex_lock(&lock);if(!vm){{JavaVMOption opt;JavaVMInitArgs a;char cp[]="-Djava.class.path={}";opt.optionString=cp;memset(&a,0,sizeof(a));a.version=JNI_VERSION_1_8;a.nOptions=1;a.options=&opt;a.ignoreUnrecognized=JNI_FALSE;if(JNI_CreateJavaVM(&vm,(void**)&e,&a)!=JNI_OK){{pthread_mutex_unlock(&lock);fail(0);return 0;}}atexit(shutdown);}}pthread_mutex_unlock(&lock);if((*vm)->GetEnv(vm,(void**)&e,JNI_VERSION_1_8)==JNI_EDETACHED&&(*vm)->AttachCurrentThread(vm,(void**)&e,0)!=JNI_OK){{fail(0);return 0;}}return e;}}
 static jobject get_handle(JNIEnv*e,int64_t h){{if(h<1||h>1024){{fail(e);return 0;}}pthread_mutex_lock(&lock);jobject v=handles[h-1];pthread_mutex_unlock(&lock);if(!v)fail(e);return v;}}
-int64_t {abi}_take_error(void){{int64_t v=last_error;last_error=0;return v;}}
-void {abi}_close(int64_t h){{JNIEnv*e=env();if(!e||h<1||h>1024)return;pthread_mutex_lock(&lock);jobject v=handles[h-1];handles[h-1]=0;pthread_mutex_unlock(&lock);if(v)(*e)->DeleteGlobalRef(e,v);}}
+int64_t {abi}_take_error(void){{int64_t v=last_error;last_error=0;if(vm)(*vm)->DetachCurrentThread(vm);return v;}}
+void {abi}_close(int64_t h){{JNIEnv*e=env();if(!e||h<1||h>1024)return;pthread_mutex_lock(&lock);jobject v=handles[h-1];handles[h-1]=0;pthread_mutex_unlock(&lock);if(v)(*e)->DeleteGlobalRef(e,v);(*vm)->DetachCurrentThread(vm);}}
 "#,c_escape(&classes.to_string_lossy()));
     o.push_str(&format!("int64_t {abi}_new("));
     params_c(&mut o,&s.ctor,0);

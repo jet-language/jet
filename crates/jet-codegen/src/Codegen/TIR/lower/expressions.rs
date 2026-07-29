@@ -1199,7 +1199,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             TExpr {
                 ty: ret,
                 kind: TExprKind::Call {
-                    name: call.name.clone(),
+                    name: cx.jit_local_call_prefix.as_ref().map_or_else(
+                        || call.name.clone(),
+                        |prefix| format!("{prefix}{}", mangle(&call.name)),
+                    ),
                     args,
                 },
             }

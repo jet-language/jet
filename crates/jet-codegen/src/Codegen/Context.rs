@@ -197,6 +197,8 @@ pub(crate) struct Cx {
     /// these facts to admit one native specialization per concrete call shape.
     pub(crate) jit_generic_calls:
         std::cell::RefCell<std::collections::BTreeMap<String, Vec<Vec<Type>>>>,
+    /// Resident-only prefix for calls between functions in an imported module.
+    pub(crate) jit_local_call_prefix: Option<String>,
     /// Free-function type parameter names, used to give generic call results
     /// their concrete TIR type at the call site.
     pub(crate) fn_type_params: HashMap<String, HashSet<String>>,
@@ -1777,25 +1779,43 @@ pub(crate) fn build_cx(prog: &Program, src: &str, file: &str) -> Cx {
 }
 
 fn extern_func_map(items: &[Item]) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    for item in items {
-        if let Item::ExternRust(block) = item {
-            for ef in &block.functions {
-                map.insert(ef.name.clone(), format!("jet_ffi_{}", ef.name));
-            }
-        } else if let Item::Func(func) = item {
-            if func.inline_foreign.is_some() {
-                map.insert(func.name.clone(), format!("jet_ffi_{}", func.name));
+    fn collect(items: &[Item], map: &mut HashMap<String, String>) {
+        for item in items {
+            if let Item::ExternRust(block) = item {
+                for ef in &block.functions {
+                    map.insert(ef.name.clone(), format!("jet_ffi_{}", ef.name));
+                }
+            } else if let Item::Func(func) = item {
+                if func.inline_foreign.is_some() {
+                    map.insert(func.name.clone(), format!("jet_ffi_{}", func.name));
+                }
+            } else if let Item::CModule(module) = item {
+                for function in &module.functions {
+                    map.insert(
+                        function.name.clone(),
+                        format!("jet_ffi_{}", function.name),
+                    );
+                }
+            } else if let Item::CodeModule(module) = item {
+                if let Some(body) = &module.body {
+                    collect(body, map);
+                }
             }
         }
     }
+    let mut map = HashMap::new();
+    collect(items, &mut map);
     map
 }
 
 pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for module in &bundle.modules {
-        map.extend(extern_func_map(&module.items));
+        let module_funcs = extern_func_map(&module.items);
+        for (name, wrapper) in module_funcs {
+            map.insert(name.clone(), wrapper.clone());
+            map.insert(format!("user_{}::{name}", module.alias), wrapper);
+        }
         if module.display.starts_with("cpp.") {
             for item in &module.items {
                 if let Item::Impl(def) = item {
@@ -2142,6 +2162,7 @@ pub(crate) fn build_cx_items(
         jit_spawn_lambdas: std::cell::RefCell::new(Vec::new()),
         jit_method_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
+        jit_local_call_prefix: None,
         fn_type_params: HashMap::new(),
         variadic_bound_fns: HashMap::new(),
         needed_variadic_arities: std::cell::RefCell::new(std::collections::BTreeMap::new()),
