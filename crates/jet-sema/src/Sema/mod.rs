@@ -1056,6 +1056,8 @@ pub(crate) struct ModuleState {
     core_imports: HashMap<String, String>,
     tests: HashMap<String, Span>,
     trait_reg: TraitRegistry,
+    /// D-STATE-DECL: declared typestate labels by owning type.
+    declared_states: HashMap<String, Vec<String>>,
     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     rule_facts: Vec<crate::AST::AppliedRuleApplication>,
     /// D-MOD2: inline code module aliases present in this file (alias → module name).

@@ -733,6 +733,21 @@ fn check_bundle_opts_for_output_inner(
             core_imports: HashMap::new(),
             tests: HashMap::new(),
             trait_reg: TraitRegistry::default(),
+            declared_states: m
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::StateDecl(state) => Some((
+                        state.type_name.clone(),
+                        state
+                            .states
+                            .iter()
+                            .map(|(name, _)| name.clone())
+                            .collect(),
+                    )),
+                    _ => None,
+                })
+                .collect(),
             policy_declarations: m.policy_declarations.clone(),
             rule_facts: m.rule_facts.clone(),
             code_modules: HashMap::new(),
