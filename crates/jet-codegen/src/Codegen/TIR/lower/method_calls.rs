@@ -1663,7 +1663,7 @@ pub(crate) fn lower_method_call(
         let recv_t = lower_expr(receiver, cx, env);
         let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
         let result_ty = match (recv_type.as_deref(), method) {
-            (Some("ProcessSpec"), "run") => Type::Result {
+            (Some("ProcessSpec"), "run" | "run_checked") => Type::Result {
                 ok: Box::new(Type::Named("ProcessResult".to_string())),
                 err: Box::new(Type::Named("IOError".to_string())),
             },

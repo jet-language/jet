@@ -1100,7 +1100,14 @@ parent's stream), or `.Capture` (pipe it — collect into `ProcessResult` at
 `run()`/`wait()`). `stdin` defaults to closed (no `.stdin(...)` call — the
 child gets no stdin at all, never the parent's terminal by accident).
 `timeout` takes a `Duration` (e.g. `Duration.seconds(30)?`). A spec can
-`run()` to collect a `ProcessResult` or `spawn()` to return a `ProcessChild`.
+`run()` to collect a `ProcessResult`, `run_checked()` to reject a failed exit,
+or `spawn()` to return a `ProcessChild`.
+
+Use `run()` when you need the full result and will inspect `success` yourself.
+It returns `ProcessResult` for a nonzero exit with `success` set to `false`.
+Use `run_checked()` when a nonzero exit must take the error path. Its `IOError`
+includes the exit code, the signal when present, and at most 4096 bytes of
+captured stderr.
 
 **Terminal sessions (D-PROCESS-SESSION1=A).** Argv execution with no terminal
 is the default and stays the safe path. Interactive programs — a debugger, a

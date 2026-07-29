@@ -80,6 +80,7 @@ struct RunOutcome {
     output: String,
     errors: String,
     success: bool,
+    signal: Option<i64>,
     timed_out: bool,
 }
 
@@ -138,7 +139,8 @@ fn alloc_process_result(out: &RunOutcome) -> i64 {
         let eid = rt.heap.alloc_string(out.errors.clone());
         let _ = rt.heap.record_set_string(rec, 2, eid);
         let _ = rt.heap.record_set_bool(rec, 3, out.success);
-        let _ = rt.heap.record_set_int(rec, 4, 0); // signal = None
+        let signal = out.signal.map(|value| value.wrapping_add(1)).unwrap_or(0);
+        let _ = rt.heap.record_set_int(rec, 4, signal);
         let _ = rt.heap.record_set_bool(rec, 5, out.timed_out);
         rec
     })
@@ -320,11 +322,16 @@ fn run_spec(spec: &JitProcessSpec) -> Result<RunOutcome, String> {
             return Err("process output exceeded output_limit".to_string());
         }
     }
+    #[cfg(unix)]
+    let signal = std::os::unix::process::ExitStatusExt::signal(&status).map(i64::from);
+    #[cfg(not(unix))]
+    let signal = None;
     Ok(RunOutcome {
         code: status.code().unwrap_or(-1) as i64,
         output,
         errors,
         success: status.success(),
+        signal,
         timed_out,
     })
 }
@@ -364,11 +371,16 @@ fn run_pipeline(specs: &[JitProcessSpec]) -> Result<RunOutcome, String> {
     let status = last_status.ok_or_else(|| "empty pipeline".to_string())?;
     let output = join_drain(stdout_drain, "stdout")?;
     let errors = join_drain(stderr_drain, "stderr")?;
+    #[cfg(unix)]
+    let signal = std::os::unix::process::ExitStatusExt::signal(&status).map(i64::from);
+    #[cfg(not(unix))]
+    let signal = None;
     Ok(RunOutcome {
         code: status.code().unwrap_or(-1) as i64,
         output,
         errors,
         success: status.success(),
+        signal,
         timed_out: false,
     })
 }
@@ -449,6 +461,37 @@ extern "C" fn jet_jit_process_spec_run(spec: i64) -> i64 {
     };
     match run_spec(&s) {
         Ok(out) => outcome_to_result(out),
+        Err(e) => result_err_msg(&e),
+    }
+}
+
+fn checked_stderr(errors: &str) -> String {
+    const LIMIT: usize = 4096;
+    if errors.len() <= LIMIT {
+        return errors.to_string();
+    }
+    let mut end = LIMIT;
+    while !errors.is_char_boundary(end) {
+        end -= 1;
+    }
+    errors[..end].to_string()
+}
+
+extern "C" fn jet_jit_process_spec_run_checked(spec: i64) -> i64 {
+    let Some(s) = clone_spec(spec) else {
+        return result_err_msg("invalid ProcessSpec");
+    };
+    match run_spec(&s) {
+        Ok(out) if out.success => outcome_to_result(out),
+        Ok(out) => {
+            let mut cause = format!("process exited unsuccessfully: code={}", out.code);
+            if let Some(signal) = out.signal {
+                cause.push_str(&format!(", signal={signal}"));
+            }
+            cause.push_str(&format!(", stderr={}", checked_stderr(&out.errors)));
+            let command = s.cmd.first().cloned().unwrap_or_default();
+            result_err_msg(&format!("I/O error during close `{command}`: {cause}"))
+        }
         Err(e) => result_err_msg(&e),
     }
 }
@@ -637,6 +680,7 @@ extern "C" fn jet_jit_process_child_wait(child: i64) -> i64 {
                     output: String::new(),
                     errors: String::new(),
                     success: true,
+                    signal: None,
                     timed_out: false,
                 });
             };
@@ -646,6 +690,7 @@ extern "C" fn jet_jit_process_child_wait(child: i64) -> i64 {
                     output: String::new(),
                     errors: String::new(),
                     success: true,
+                    signal: None,
                     timed_out: false,
                 });
             };
@@ -667,6 +712,7 @@ extern "C" fn jet_jit_process_child_wait(child: i64) -> i64 {
                                 output: e,
                                 errors: String::new(),
                                 success: false,
+                                signal: None,
                                 timed_out: false,
                             })
                         }
@@ -679,15 +725,22 @@ extern "C" fn jet_jit_process_child_wait(child: i64) -> i64 {
                                 output,
                                 errors: e,
                                 success: false,
+                                signal: None,
                                 timed_out: false,
                             })
                         }
                     };
+                    #[cfg(unix)]
+                    let signal =
+                        std::os::unix::process::ExitStatusExt::signal(&status).map(i64::from);
+                    #[cfg(not(unix))]
+                    let signal = None;
                     WaitPoll::Done(RunOutcome {
                         code: status.code().unwrap_or(-1) as i64,
                         output,
                         errors,
                         success: status.success(),
+                        signal,
                         timed_out: false,
                     })
                 }
@@ -705,6 +758,7 @@ extern "C" fn jet_jit_process_child_wait(child: i64) -> i64 {
                                         output: String::new(),
                                         errors: String::new(),
                                         success: false,
+                                        signal: None,
                                         timed_out: true,
                                     })
                                 }
@@ -714,11 +768,17 @@ extern "C" fn jet_jit_process_child_wait(child: i64) -> i64 {
                             let stderr = slot.stderr.take();
                             let output = join_drain(drain_reader(stdout), "stdout").unwrap_or_default();
                             let errors = join_drain(drain_reader(stderr), "stderr").unwrap_or_default();
+                            #[cfg(unix)]
+                            let signal = std::os::unix::process::ExitStatusExt::signal(&status)
+                                .map(i64::from);
+                            #[cfg(not(unix))]
+                            let signal = None;
                             return WaitPoll::Done(RunOutcome {
                                 code: status.code().unwrap_or(-1) as i64,
                                 output,
                                 errors,
                                 success: false,
+                                signal,
                                 timed_out: true,
                             });
                         }
@@ -730,6 +790,7 @@ extern "C" fn jet_jit_process_child_wait(child: i64) -> i64 {
                     output: String::new(),
                     errors: String::new(),
                     success: false,
+                    signal: None,
                     timed_out: false,
                 }),
             }
@@ -757,6 +818,7 @@ pub(crate) struct ProcessHostFns {
     pub spec_detached: cranelift_module::FuncId,
     pub spec_terminal: cranelift_module::FuncId,
     pub spec_run: cranelift_module::FuncId,
+    pub spec_run_checked: cranelift_module::FuncId,
     pub spec_spawn: cranelift_module::FuncId,
     pub child_id: cranelift_module::FuncId,
     pub child_kill: cranelift_module::FuncId,
@@ -795,6 +857,10 @@ pub(crate) fn register_process_symbols(builder: &mut cranelift_jit::JITBuilder) 
         jet_jit_process_spec_terminal as *const u8,
     );
     builder.symbol("jet_jit_process_spec_run", jet_jit_process_spec_run as *const u8);
+    builder.symbol(
+        "jet_jit_process_spec_run_checked",
+        jet_jit_process_spec_run_checked as *const u8,
+    );
     builder.symbol("jet_jit_process_spec_spawn", jet_jit_process_spec_spawn as *const u8);
     builder.symbol("jet_jit_process_child_id", jet_jit_process_child_id as *const u8);
     builder.symbol("jet_jit_process_child_kill", jet_jit_process_child_kill as *const u8);
@@ -844,6 +910,7 @@ pub(crate) fn declare_process_host_fns(
         spec_detached: import("jet_jit_process_spec_detached", &sig_unary)?,
         spec_terminal: import("jet_jit_process_spec_terminal", &sig_unary)?,
         spec_run: import("jet_jit_process_spec_run", &sig_unary)?,
+        spec_run_checked: import("jet_jit_process_spec_run_checked", &sig_unary)?,
         spec_spawn: import("jet_jit_process_spec_spawn", &sig_unary)?,
         child_id: import("jet_jit_process_child_id", &sig_unary)?,
         child_kill: import("jet_jit_process_child_kill", &sig_unary)?,
