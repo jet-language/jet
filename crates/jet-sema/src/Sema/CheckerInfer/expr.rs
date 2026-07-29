@@ -2224,7 +2224,7 @@ impl<'a> Checker<'a> {
                 self.borrow_ctx = true;
                 for item in items.iter_mut() {
                     if let Some(t) = self.infer(item) {
-                        if !is_printable(&t, self.registry) {
+                        if !is_printable(&t, self.registry, self.trait_reg) {
                             if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
                                 self.diags.push(Diagnostic::error(
                                     "E0112",

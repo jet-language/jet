@@ -1,0 +1,23 @@
+Error [E0112]: `print` doesn't know how to show `NoPrint`
+  --> tests/ui/auto_derive_opt_out_use.jet:11:11
+    |
+ 11 |     print(NoPrint.{ value: 1 })
+    |           ^^^^^^^^^^^^^^^^^^^^
+ Why: print shows values that have a display
+ Fix: print one of its parts instead
+
+Error [E0112]: `NoDebug` can't be shown with #Debug yet
+  --> tests/ui/auto_derive_opt_out_use.jet:12:13
+    |
+ 12 |     print("{NoDebug.{ value: 2 }#Debug}")
+    |             ^^^^^^^^^^^^^^^^^^^^
+ Why: debug interpolation needs a debuggable value
+ Fix: implement `Debug` or use a debuggable part
+
+Error [E0312]: `NoEquality` doesn't support `==`
+  --> tests/ui/auto_derive_opt_out_use.jet:13:11
+    |
+ 13 |     print(NoEquality.{ value: 3 } == NoEquality.{ value: 3 })
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: value equality requires the Equatable trait
+ Fix: add `#Equatable` before the type, implement `Equatable` by hand, or compare individual fields

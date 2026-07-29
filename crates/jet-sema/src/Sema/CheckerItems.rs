@@ -2788,7 +2788,11 @@ impl<'a> Checker<'a> {
                         "convert one side, or compare fields that have the same type".to_string(),
                         Some(call.name_span),
                     ));
-                } else if !types_comparable(&lt, self.registry) {
+                } else if !crate::Sema::Diagnostics::is_equatable(
+                    &lt,
+                    self.registry,
+                    self.trait_reg,
+                ) {
                     if let Some(field) = incomparable_field(&lt, self.registry) {
                         self.diags.push(Diagnostic::error(
                             "E0312",

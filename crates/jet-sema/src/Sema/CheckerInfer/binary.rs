@@ -936,7 +936,11 @@ impl<'a> Checker<'a> {
             }
             BinOp::Eq | BinOp::Ne => {
                 if lt == rt {
-                    if !types_comparable(&lt, self.registry) {
+                    if !crate::Sema::Diagnostics::is_equatable(
+                        &lt,
+                        self.registry,
+                        self.trait_reg,
+                    ) {
                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&lt) {
                             self.diags.push(Diagnostic::error(
                                 "E0312",
@@ -954,7 +958,13 @@ impl<'a> Checker<'a> {
                                 Some(span),
                             ));
                         } else {
-                            self.op_mismatch(op, &lt, &rt, span);
+                            self.diags.push(Diagnostic::error(
+                                "E0312",
+                                format!("`{}` doesn't support `{}`", lt.name(), op.spell()),
+                                "value equality requires the Equatable trait".to_string(),
+                                "add `#Equatable` before the type, implement `Equatable` by hand, or compare individual fields".to_string(),
+                                Some(span),
+                            ));
                         }
                         return None;
                     }

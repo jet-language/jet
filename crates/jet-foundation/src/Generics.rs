@@ -451,28 +451,16 @@ pub fn e0915(type_show: &str, span: Span) -> Diagnostic {
     )
 }
 
-/// D-MARK-DEBUG1=A (ratified 2026-07-11, card #498): `Debug` no longer has an
-/// explicit derive spelling — `#Debug`, `#[.., Debug]`, and a body
-/// `derive Debug;` line all land here (a struct/enum's `derives` list can
-/// only contain the literal name "Debug" via one of those three explicit
-/// forms; auto-derive never writes into `derives`, see
-/// `Traits::compute_auto_derives`).
+/// D-AUTODERIVE-SYNTAX1=D restores signed `Debug` type markers but keeps the
+/// old body-level `derive Debug;` spelling retired.
 pub fn e0922(span: Span) -> Diagnostic {
-    let fix = crate::Policy::applied_rule("Debug")
-        .and_then(|row| match row.status {
-            crate::Policy::RuleStatus::Retired { replacement } => Some(replacement),
-            crate::Policy::RuleStatus::Active => None,
-        })
-        .unwrap_or("remove the marker");
     Diagnostic::error(
         "E0922",
-        "`Debug` derives automatically — writing it explicitly is retired".to_string(),
-        "auto-derived `Debug` covers every type whose fields are all debuggable (S55); \
-         D-MARK-DEBUG1 retired the explicit opt-in spelling so there's exactly one way to \
-         get it (I8)."
+        "`derive Debug` inside a type body is retired".to_string(),
+        "signed type markers are the one control for compiler-generated Debug implementations"
             .to_string(),
-        format!("{fix}; printing already works via `{{value#Debug}}` interpolation; implement \
-                 `Debug` by hand only if you need custom output"),
+        "write `#Debug` before the type to opt in, `#!Debug` to opt out, or implement `Debug` by hand"
+            .to_string(),
         Some(span),
     )
 }

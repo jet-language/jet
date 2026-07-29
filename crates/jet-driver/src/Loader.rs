@@ -214,7 +214,14 @@ fn load_entry_with_overlays_mode(
                 "E0355",
                 "invalid package memory policy".to_string(),
                 detail,
-                "use `policy: .{ no_alloc: true, zero_rc: true, arena_bounded: 65536, gc: true, unsafe: .Forbid }` in `package.jet`".to_string(),
+                "use `policy: .{ no_alloc: true, zero_rc: true, arena_bounded: 65536, gc: true, unsafe: .Forbid }` in `pkg.jet`".to_string(),
+                None,
+            )]),
+            Err(crate::PackageManifest::ManifestError::BadAutoDerivePolicy { detail }) => return Err(vec![Diagnostic::error(
+                "E0355",
+                "invalid package auto-derive policy".to_string(),
+                detail,
+                "set `policy: .{ auto_derive: true }` or `policy: .{ auto_derive: false }` in `pkg.jet`".to_string(),
                 None,
             )]),
             Err(_) => crate::PackageManifest::PackManifest::default(),
@@ -731,6 +738,45 @@ fn project_resolution(project_root: &Path) -> (HashMap<String, PathBuf>, PkgReso
     (dep_dirs, collect_pkg_resolution(&raw))
 }
 
+fn auto_derive_default_for_file(
+    path: &Path,
+    project_root: &Path,
+    project_default: bool,
+    dependency_roots: &HashMap<String, PathBuf>,
+) -> bool {
+    let dependency_root = dependency_roots
+        .values()
+        .filter(|root| path.starts_with(root))
+        .max_by_key(|root| root.components().count());
+    if let Some(root) = dependency_root {
+        return crate::PackageManifest::PackManifest::load(root)
+            .and_then(Result::ok)
+            .and_then(|manifest| manifest.auto_derive)
+            .unwrap_or(true);
+    }
+    if path.starts_with(project_root) {
+        project_default
+    } else {
+        true
+    }
+}
+
+fn apply_auto_derive_default(items: &mut [Item], default: bool) {
+    for item in items {
+        match item {
+            Item::Struct(def) => def.auto_derive_default = default,
+            Item::Enum(def) => def.auto_derive_default = default,
+            Item::CodeModule(module) => {
+                if let Some(body) = &mut module.body {
+                    apply_auto_derive_default(body, default);
+                }
+            }
+            Item::GenericModule(module) => apply_auto_derive_default(&mut module.body, default),
+            _ => {}
+        }
+    }
+}
+
 fn load_file(
     path: &Path,
     display: &str,
@@ -810,19 +856,13 @@ fn load_file(
             Err(diags) => return Err(diags),
         }
     };
-    // Package policy governs this package, not imported dependency source.
-    let auto_derive_default = if norm.starts_with(project_root) {
-        package_auto_derive
-    } else {
-        true
-    };
-    for item in &mut prog.items {
-        match item {
-            Item::Struct(def) => def.auto_derive_default = auto_derive_default,
-            Item::Enum(def) => def.auto_derive_default = auto_derive_default,
-            _ => {}
-        }
-    }
+    let auto_derive_default = auto_derive_default_for_file(
+        &norm,
+        project_root,
+        package_auto_derive,
+        pkg_dep_dirs,
+    );
+    apply_auto_derive_default(&mut prog.items, auto_derive_default);
 
     let alias = default_module_alias(path);
     stack.push(norm.clone());
