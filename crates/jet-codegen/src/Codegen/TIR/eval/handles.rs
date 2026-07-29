@@ -622,12 +622,12 @@ mod tests {
         }
     }
 
-    fn decode_reason(value: CtValue) -> String {
+    fn decode_reason(value: CtValue) -> Option<String> {
         let CtValue::ResErr(error) = value else {
-            panic!("expected decode error");
+            return None;
         };
         let CtValue::Struct { fields, .. } = *error else {
-            panic!("expected DecodeError");
+            return None;
         };
         fields
             .into_iter()
@@ -635,7 +635,6 @@ mod tests {
                 ("reason", CtValue::Str(reason)) => Some(reason),
                 _ => None,
             })
-            .expect("DecodeError reason")
     }
 
     #[test]
@@ -649,14 +648,14 @@ mod tests {
                 "Float",
                 CtValue::Float(CtFloat::f64(7.0)),
             ))),
-            "expected int, got 7.0"
+            Some("expected int, got 7.0".to_string())
         );
         assert_eq!(
             decode_reason(datatree_int_result(&tree(
                 "Text",
                 CtValue::Str("7".to_string()),
             ))),
-            "expected int, got \"7\""
+            Some("expected int, got \"7\"".to_string())
         );
     }
 }
