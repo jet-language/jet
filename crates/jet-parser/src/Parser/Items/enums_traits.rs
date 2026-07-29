@@ -510,15 +510,6 @@ impl<'a> Parser<'a> {
                 };
                 (name, self.pos + 2)
             };
-            if !matches!(
-                name.as_str(),
-                crate::Generics::PRINTABLE
-                    | crate::Generics::EQUATABLE
-                    | crate::Generics::DEBUG
-            ) && matches!(self.peek2().kind, TokKind::Bang)
-            {
-                return false;
-            }
             if !Self::is_pascal_type_marker_name(name) || Self::is_reserved_item_rule_prefix(name) {
                 return false;
             }

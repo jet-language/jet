@@ -1577,7 +1577,7 @@ impl<'a> Checker<'a> {
                     if let Some(arg) = args.get_mut(0) {
                         self.borrow_ctx = true;
                         if let Some(ty) = self.infer(&mut arg.expr) {
-                            if !is_printable(&ty, self.registry) {
+                            if !is_printable(&ty, self.registry, self.trait_reg) {
                                 self.diags.push(Diagnostic::error(
                                     "E0112",
                                     format!("{} can't be printed yet", ty.show()),
@@ -1598,7 +1598,7 @@ impl<'a> Checker<'a> {
                     if let Some(arg) = args.get_mut(0) {
                         self.borrow_ctx = true;
                         if let Some(ty) = self.infer(&mut arg.expr) {
-                            if !is_printable(&ty, self.registry) {
+                            if !is_printable(&ty, self.registry, self.trait_reg) {
                                 self.diags.push(Diagnostic::error(
                                     "E0112",
                                     format!("{} can't be printed yet", ty.show()),

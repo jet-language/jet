@@ -167,14 +167,20 @@ impl TraitRegistry {
         // D-QUAL2: `derive X` attaches method impls, so X must be a trait. A tag
         // has no methods — deriving one is E0731.
         for item in items {
-            let derives: &[(String, Span)] = match item {
-                Item::Struct(s) => &s.derives,
-                Item::Enum(e) => &e.derives,
+            let (derives, markers): (&[(String, Span)], &[crate::AST::Marker]) = match item {
+                Item::Struct(s) => (&s.derives, &s.type_markers),
+                Item::Enum(e) => (&e.derives, &e.type_markers),
                 _ => continue,
             };
             for (name, span) in derives {
                 if self.local_tags.contains(name) {
                     diags.push(Generics::e0731(name, "`derive`", *span));
+                } else if name == DEBUG
+                    && !markers.iter().any(|marker| {
+                        marker.name == DEBUG && !marker.negated && marker.name_span == *span
+                    })
+                {
+                    diags.push(Generics::e0922(*span));
                 }
             }
         }
@@ -736,38 +742,87 @@ impl TraitRegistry {
     }
 
     fn compute_auto_derives(&mut self, items: &[Item]) {
-        for item in items {
-            let (name, markers, default, qualifies) = match item {
-                Item::Struct(s) => (
-                    &s.name,
-                    &s.type_markers,
-                    s.auto_derive_default,
-                    struct_auto_derive_ok(s),
-                ),
-                Item::Enum(e) => (
-                    &e.name,
-                    &e.type_markers,
-                    e.auto_derive_default,
-                    enum_auto_derive_ok(e),
-                ),
-                _ => continue,
-            };
-            if !qualifies {
-                continue;
-            }
-            for (trait_name, derived) in [
-                (PRINTABLE, &mut self.auto_printable),
-                (EQUATABLE, &mut self.auto_equatable),
-                (DEBUG, &mut self.auto_debug),
-            ] {
-                if auto_derive_requested(markers, trait_name, default)
-                    && !self
-                        .trait_impls
-                        .contains(&(name.clone(), trait_name.to_string()))
-                {
-                    derived.insert(name.clone());
+        for trait_name in [PRINTABLE, EQUATABLE, DEBUG] {
+            loop {
+                let mut changed = false;
+                for item in items {
+                    let (name, markers, default, qualifies) = match item {
+                        Item::Struct(s) => (
+                            &s.name,
+                            &s.type_markers,
+                            s.auto_derive_default,
+                            struct_auto_derive_ok(s),
+                        ),
+                        Item::Enum(e) => (
+                            &e.name,
+                            &e.type_markers,
+                            e.auto_derive_default,
+                            enum_auto_derive_ok(e),
+                        ),
+                        _ => continue,
+                    };
+                    if !qualifies
+                        || !auto_derive_requested(markers, trait_name, default)
+                        || self
+                            .trait_impls
+                            .contains(&(name.clone(), trait_name.to_string()))
+                        || !self.auto_derive_dependencies_ready(item, trait_name)
+                    {
+                        continue;
+                    }
+                    changed |= match trait_name {
+                        PRINTABLE => self.auto_printable.insert(name.clone()),
+                        EQUATABLE => self.auto_equatable.insert(name.clone()),
+                        DEBUG => self.auto_debug.insert(name.clone()),
+                        _ => false,
+                    };
+                }
+                if !changed {
+                    break;
                 }
             }
+        }
+    }
+
+    fn auto_derive_dependencies_ready(&self, item: &Item, trait_name: &str) -> bool {
+        let supports = |ty: &Type| self.auto_derive_type_ready(ty, trait_name);
+        match item {
+            Item::Struct(s) => s
+                .fields
+                .iter()
+                .filter(|field| field.computed.is_none())
+                .all(|field| supports(&field.ty)),
+            Item::Enum(e) => e.variants.iter().all(|variant| match &variant.payload {
+                crate::AST::VariantPayload::Unit => true,
+                crate::AST::VariantPayload::Single(ty, _) => supports(ty),
+                crate::AST::VariantPayload::Named(fields) => {
+                    fields.iter().all(|field| supports(&field.ty))
+                }
+            }),
+            _ => false,
+        }
+    }
+
+    fn auto_derive_type_ready(&self, ty: &Type, trait_name: &str) -> bool {
+        match ty {
+            Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. } => {
+                self.auto_derive_type_ready(inner, trait_name)
+            }
+            Type::Result { ok, err } => {
+                self.auto_derive_type_ready(ok, trait_name)
+                    && self.auto_derive_type_ready(err, trait_name)
+            }
+            Type::Tuple(fields) => fields
+                .iter()
+                .all(|(_, field)| self.auto_derive_type_ready(field, trait_name)),
+            Type::Apply { args, .. } => args
+                .iter()
+                .all(|arg| self.auto_derive_type_ready(arg, trait_name)),
+            Type::Tagged { inner, .. } => self.auto_derive_type_ready(inner, trait_name),
+            Type::Named(name) if self.local_types.contains(name) => {
+                self.implements_trait(name, trait_name)
+            }
+            _ => true,
         }
     }
 
@@ -824,7 +879,15 @@ impl TraitRegistry {
             DISPLAY => self
                 .trait_impls
                 .contains(&(type_name.to_string(), DISPLAY.to_string())),
-            EQUATABLE if self.auto_equatable.contains(type_name) => true,
+            EQUATABLE
+                if self.auto_equatable.contains(type_name)
+                    || self
+                        .derives
+                        .get(type_name)
+                        .is_some_and(|derives| derives.contains(COMPARABLE)) =>
+            {
+                true
+            }
             COMPARABLE | SERIALIZE | ENCODE | DECODE => self
                 .derives
                 .get(type_name)
@@ -1156,6 +1219,139 @@ impl TraitRegistry {
             Some(Type::String),
             AccessConvention::Move,
         );
+        // Keep sema's named-type admission tied to real prelude protocol
+        // implementations. Compiler-known handles such as Range are types, but
+        // do not become printable merely by being known to the compiler.
+        for ty in [
+            "ArgsSpec",
+            "AriaRole",
+            "BigInt",
+            "BitSet",
+            "BrowserError",
+            "ByteBuffer",
+            "Clock",
+            "Closed",
+            "CountMinSketch",
+            "DBError",
+            "DBValue",
+            "DataError",
+            "DataErrorKind",
+            "DataTree",
+            "Date",
+            "DateTime",
+            "Decimal",
+            "DecodeError",
+            "DirEntry",
+            "DNSSrv",
+            "Duration",
+            "EncodingError",
+            "EnvError",
+            "EventResult",
+            "F32x4",
+            "F64x2",
+            "Field",
+            "FileLock",
+            "GameAssets",
+            "GameBackend",
+            "GameFrame",
+            "GameImage",
+            "GameInputMap",
+            "GameInputSnapshot",
+            "GameReplay",
+            "GameScene",
+            "GameSound",
+            "HTTPError",
+            "HTTPHeaderName",
+            "HTTPHeaderValue",
+            "HTTPMethod",
+            "HTTPRequest",
+            "HTTPResponse",
+            "HTTPRouter",
+            "HTTPStatus",
+            "HTTPVersion",
+            "HyperLogLog",
+            "Id",
+            "Instant",
+            "IOError",
+            "IPAddr",
+            "JSON",
+            "JSONError",
+            "Key",
+            "LocalDate",
+            "LocalTime",
+            "Lru",
+            "Mat3",
+            "Mat4",
+            "Measurement",
+            "MIME",
+            "NetError",
+            "ParsedArgs",
+            "Path",
+            "Period",
+            "Point",
+            "Pool",
+            "ProcessChild",
+            "ProcessResult",
+            "ProcessSpec",
+            "Quat",
+            "RangeError",
+            "Rect",
+            "ReflectField",
+            "ReflectValue",
+            "Regex",
+            "RegexFlags",
+            "RegexMatch",
+            "ReservoirSampler",
+            "Rng",
+            "Size",
+            "SocketAddr",
+            "Solver",
+            "Stat",
+            "Stopwatch",
+            "TcpListener",
+            "TcpStream",
+            "TDigest",
+            "TempDir",
+            "TempFile",
+            "TextError",
+            "TLSStream",
+            "UDPPacket",
+            "UdpSocket",
+            "UnixListener",
+            "UnixStream",
+            "URL",
+            "UTF8Error",
+            "Value",
+            "Vec2",
+            "Vec3",
+            "Vec4",
+            "WalkEntry",
+            "WatchEvent",
+            "WsError",
+            "Zone",
+            "ZonedDateTime",
+        ] {
+            self.auto_printable.insert(ty.to_string());
+        }
+        for ty in [
+            "BitSet",
+            "ByteBuffer",
+            "Clock",
+            "Decimal",
+            "GameImage",
+            "GameSound",
+            "Id",
+            "IOError",
+            "Lru",
+            "Mat3",
+            "Mat4",
+            "Quat",
+            "Vec2",
+            "Vec3",
+            "Vec4",
+        ] {
+            self.auto_debug.insert(ty.to_string());
+        }
         // D-ENCSTREAM-SURFACE1=A: EncodingError Display is the exact stream error
         // projection law; Format/Kind/Cause/Error compare by value.
         self.trait_impls

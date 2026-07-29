@@ -97,7 +97,7 @@ pub(super) fn parse_auto_derive_policy(body: &str) -> Result<Option<bool>, Manif
         .map(|(_, raw)| match raw.trim() {
             "true" => Ok(true),
             "false" => Ok(false),
-            _ => Err(ManifestError::BadMemoryPolicy {
+            _ => Err(ManifestError::BadAutoDerivePolicy {
                 detail: "`auto_derive` must be `true` or `false`".to_string(),
             }),
         })
@@ -105,7 +105,7 @@ pub(super) fn parse_auto_derive_policy(body: &str) -> Result<Option<bool>, Manif
     match values.as_slice() {
         [] => Ok(None),
         [value] => Ok(Some(*value)),
-        _ => Err(ManifestError::BadMemoryPolicy {
+        _ => Err(ManifestError::BadAutoDerivePolicy {
             detail: "`auto_derive` may be declared once".to_string(),
         }),
     }

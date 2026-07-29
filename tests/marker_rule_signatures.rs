@@ -46,6 +46,18 @@ fn signed_auto_derive_markers_parse_on_types() {
 }
 
 #[test]
+fn negative_sign_is_reserved_for_auto_derive_traits() {
+    for source in [
+        "#!Pure\nfn run() {}",
+        "#[!Inline]\nfn run() {}",
+        "#!Comparable\nstruct Bad { value: Int }\nfn run() {}",
+    ] {
+        let diagnostics = parse_codes(source);
+        assert_eq!(diagnostics, vec!["E0931"], "{diagnostics:?}\n{source}");
+    }
+}
+
+#[test]
 fn field_and_variant_sites_reject_every_non_applicable_example() {
     for source in [
         "#[Task, Static] struct Bad { value: Int }\nfn run() {}",

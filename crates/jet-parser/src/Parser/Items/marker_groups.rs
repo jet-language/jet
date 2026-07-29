@@ -35,6 +35,7 @@ impl<'a> Parser<'a> {
         /// reader; cursor sits on the name.
         pub(super) fn parse_one_marker(&mut self) -> Result<Marker, Diagnostic> {
             let negated = matches!(self.peek().kind, TokKind::Bang);
+            let negated_span = self.peek().span;
             if negated {
                 self.bump();
             }
@@ -53,6 +54,23 @@ impl<'a> Parser<'a> {
                     ));
                 }
             };
+            if negated
+                && !matches!(
+                    name.as_str(),
+                    crate::Generics::PRINTABLE
+                        | crate::Generics::EQUATABLE
+                        | crate::Generics::DEBUG
+                )
+            {
+                return Err(Diagnostic::error(
+                    "E0931",
+                    format!("`!{name}` is not a signed auto-derive trait"),
+                    "`!` rejects compiler generation only for Printable, Equatable, or Debug"
+                        .to_string(),
+                    format!("remove `!` from `#{name}`, or use it with an auto-derived trait"),
+                    Some(Span::new(negated_span.start, name_span.end)),
+                ));
+            }
             let mut marker = self.finish_rule_marker(name, name_span)?;
             marker.negated = negated;
             if let Some(application) = self.rule_facts.last_mut() {
@@ -525,16 +543,6 @@ impl<'a> Parser<'a> {
                     Some(TokKind::KwUnsafe) => Syntax::KW_UNSAFE,
                     _ => return false,
                 };
-                if negated
-                    && !matches!(
-                        name,
-                        crate::Generics::PRINTABLE
-                            | crate::Generics::EQUATABLE
-                            | crate::Generics::DEBUG
-                    )
-                {
-                    return false;
-                }
                 if site == crate::Policy::RuleSite::Function
                     && self.target_marker_selects_file_web_at(cursor)
                 {
