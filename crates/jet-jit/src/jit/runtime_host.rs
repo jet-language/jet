@@ -489,6 +489,14 @@ extern "C" fn jet_jit_str_push_f64(buf_id: i64, v: f64) {
     });
 }
 
+extern "C" fn jet_jit_str_push_compact_f64(buf_id: i64, v: f64) {
+    with_runtime_trap(|rt| {
+        if let Some(buf) = rt.heap.get_string_mut(buf_id) {
+            buf.push_str(&v.to_string());
+        }
+    });
+}
+
 extern "C" fn jet_jit_str_push_bool(buf_id: i64, v: i8) {
     with_runtime_mut(|rt| {
         if let Some(buf) = rt.heap.get_string_mut(buf_id) {
@@ -1459,6 +1467,7 @@ pub(crate) struct HostFns {
     pub(crate) str_push_lit: FuncId,
     pub(crate) str_push_i64: FuncId,
     pub(crate) str_push_f64: FuncId,
+    pub(crate) str_push_compact_f64: FuncId,
     pub(crate) str_push_bool: FuncId,
     pub(crate) str_push_char: FuncId,
     pub(crate) str_push_str: FuncId,
@@ -1607,6 +1616,10 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_push_lit", jet_jit_str_push_lit as *const u8);
     builder.symbol("jet_jit_str_push_i64", jet_jit_str_push_i64 as *const u8);
     builder.symbol("jet_jit_str_push_f64", jet_jit_str_push_f64 as *const u8);
+    builder.symbol(
+        "jet_jit_str_push_compact_f64",
+        jet_jit_str_push_compact_f64 as *const u8,
+    );
     builder.symbol("jet_jit_str_push_bool", jet_jit_str_push_bool as *const u8);
     builder.symbol("jet_jit_str_push_char", jet_jit_str_push_char as *const u8);
     builder.symbol("jet_jit_str_push_str", jet_jit_str_push_str as *const u8);
@@ -2268,6 +2281,10 @@ fn declare_host_fns(
         str_push_lit: import("jet_jit_str_push_lit", &sig_str_push_lit)?,
         str_push_i64: import("jet_jit_str_push_i64", &sig_str_push_i64)?,
         str_push_f64: import("jet_jit_str_push_f64", &sig_str_push_f64)?,
+        str_push_compact_f64: import(
+            "jet_jit_str_push_compact_f64",
+            &sig_str_push_f64,
+        )?,
         str_push_bool: import("jet_jit_str_push_bool", &sig_str_push_bool)?,
         str_push_char: import("jet_jit_str_push_char", &sig_str_push_char)?,
         str_push_str: import("jet_jit_str_push_str", &sig_str_push_lit)?,

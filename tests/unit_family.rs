@@ -1076,6 +1076,59 @@ fn run() {}
 }
 
 #[test]
+fn dimensional_quantities_example_stays_in_native_jit() {
+    if !jet_jit::cranelift_host_supported() {
+        return;
+    }
+    use jet::JitBackend::JitBackend;
+    use jet::JitBackend::RunOutcome;
+
+    let path = "examples/features/types/dimensional_quantities.jet";
+    let mut bundle = jet::Loader::load_entry(path).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "dimensional quantities must stay resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|reason| panic!("dimensional quantities must JIT-compile: {reason}"));
+
+    jet_jit::reset_jit_trace_for_test();
+    let mut backend = jet_jit::CraneliftBackend::new();
+    match backend.run(&bundle, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(
+                stdout,
+                "12 meter\n4 meter/second\n12 meter\n766 px\n12 Meter\n12\n12.0\n"
+            );
+            assert!(stderr.is_empty());
+            assert_eq!(exit_code, 0);
+        }
+        RunOutcome::Problems(diagnostics) => {
+            panic!("JIT rejected dimensional quantities: {diagnostics:?}")
+        }
+    }
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "dimensional quantities did not execute native JIT code"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test(),
+        "dimensional quantities deoptimized to the interpreter"
+    );
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "dimensional quantities invoked a forbidden fallback"
+    );
+}
+
+#[test]
 fn imported_public_units_keep_display_metadata_across_tiers() {
     let units = r#"
 pub #UnitFamily(Length, base: meter) { meter }

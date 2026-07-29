@@ -8115,6 +8115,28 @@ impl LowerCtx<'_, '_> {
                 if module == "core.reflect" && method == "of" && args.len() == 1 {
                     return self.lower_reflect_of(&args[0]);
                 }
+                if module == "jet.unit" && method == "magnitude" && args.len() == 1 {
+                    let value = self.lower_expr(&args[0])?;
+                    let begin = self
+                        .module
+                        .declare_func_in_func(self.host.str_begin, self.b.func);
+                    let call = self.b.ins().call(begin, &[]);
+                    let text = self.b.inst_results(call)[0];
+                    let push = match self.meta.clif_ty(&args[0].ty) {
+                        Some(ty) if ty == types::I64 => self.host.str_push_i64,
+                        Some(ty) if ty == types::F64 => {
+                            self.host.str_push_compact_f64
+                        }
+                        _ => {
+                            return Err(
+                                "jit unit magnitude numeric type unsupported".to_string()
+                            )
+                        }
+                    };
+                    let push = self.module.declare_func_in_func(push, self.b.func);
+                    self.b.ins().call(push, &[text, value]);
+                    return Ok(text);
+                }
                 if module == "core.testing" {
                     return self.lower_testing_call(method, args, &expr.ty);
                 }
