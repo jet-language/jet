@@ -3027,7 +3027,7 @@ pub(crate) fn build_cx_items(
 
     collect_iter_index_hooks(&mut cx, items);
     register_core_event_enums(&mut cx);
-    let auto_derives = crate::Traits::TraitRegistry::bundle_auto_derives([items]);
+    let auto_derives = crate::Traits::TraitRegistry::auto_derives_for_items(items);
     apply_auto_derives(&mut cx, &auto_derives);
 
     cx

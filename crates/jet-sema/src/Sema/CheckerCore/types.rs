@@ -113,7 +113,9 @@ impl<'a> Checker<'a> {
                         }) {
                             Type::TraitObject(vec![leaf.to_string()])
                         } else {
-                            Type::Named(leaf.to_string())
+                            // File-module qualification is nominal identity.
+                            // A local type may deliberately use the same leaf.
+                            Type::Named(n)
                         }
                     }
                 Type::Named(n) if self.trait_reg.is_trait_name(&n) && !self.registry.contains(&n) => {
@@ -122,16 +124,6 @@ impl<'a> Checker<'a> {
                 Type::List(inner) => Type::List(Box::new(self.resolve_type(*inner))),
                 Type::Shared(inner) => Type::Shared(Box::new(self.resolve_type(*inner))),
                 Type::Apply { name, args } => {
-                    let name = name
-                        .rsplit_once('.')
-                        .and_then(|(alias, leaf)| {
-                            self.imports.get(alias).and_then(|&idx| {
-                                self.modules
-                                    .filter(|modules| modules[idx].registry.contains(leaf))
-                                    .map(|_| leaf.to_string())
-                            })
-                        })
-                        .unwrap_or(name);
                     if self.registry.is_type_alias(&name) {
                         if let Some((params, target)) = self.registry.type_alias(&name) {
                             let subst: std::collections::HashMap<String, Type> = params
