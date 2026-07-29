@@ -115,11 +115,17 @@ fn datatree_int_result(recv: &CtValue) -> CtValue {
             variant,
             args,
             ..
-        } if variant == "Int" => match args.as_slice() {
-            [(_, CtValue::Int(value))] => Ok(CtValue::Int(*value)),
-            _ => Err("invalid int payload".to_string()),
+        } => match (variant.as_str(), args.as_slice()) {
+            ("Int", [(_, CtValue::Int(value))]) => Ok(CtValue::Int(*value)),
+            _ => Err(format!(
+                "expected int, got {}",
+                crate::Comptime::render_datatree_for_tir(recv)
+            )),
         },
-        _ => Err("expected int".to_string()),
+        _ => Err(format!(
+            "expected int, got {}",
+            crate::Comptime::render_datatree_for_tir(recv)
+        )),
     };
     match result {
         Ok(value) => CtValue::ResOk(Box::new(value)),
@@ -601,4 +607,56 @@ fn duration_new(
             )],
         })),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::datatree_int_result;
+    use crate::AST::{CtFloat, CtValue};
+
+    fn tree(variant: &str, value: CtValue) -> CtValue {
+        CtValue::Enum {
+            type_name: "DataTree".to_string(),
+            variant: variant.to_string(),
+            args: vec![(None, value)],
+        }
+    }
+
+    fn decode_reason(value: CtValue) -> String {
+        let CtValue::ResErr(error) = value else {
+            panic!("expected decode error");
+        };
+        let CtValue::Struct { fields, .. } = *error else {
+            panic!("expected DecodeError");
+        };
+        fields
+            .into_iter()
+            .find_map(|(name, value)| match (name.as_str(), value) {
+                ("reason", CtValue::Str(reason)) => Some(reason),
+                _ => None,
+            })
+            .expect("DecodeError reason")
+    }
+
+    #[test]
+    fn datatree_int_rejects_float_and_text_with_canonical_reasons() {
+        assert_eq!(
+            datatree_int_result(&tree("Int", CtValue::Int(7))),
+            CtValue::ResOk(Box::new(CtValue::Int(7)))
+        );
+        assert_eq!(
+            decode_reason(datatree_int_result(&tree(
+                "Float",
+                CtValue::Float(CtFloat::f64(7.0)),
+            ))),
+            "expected int, got 7.0"
+        );
+        assert_eq!(
+            decode_reason(datatree_int_result(&tree(
+                "Text",
+                CtValue::Str("7".to_string()),
+            ))),
+            "expected int, got \"7\""
+        );
+    }
 }

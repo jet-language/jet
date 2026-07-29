@@ -48,6 +48,36 @@ fn data_error_at(kind: &str, operation: &str, index: Option<i64>, reason: &str) 
     }
 }
 
+fn checked_neumaier_sum(values: &[f64]) -> Result<f64, CtValue> {
+    let mut sum = 0.0f64;
+    let mut compensation = 0.0f64;
+    for value in values.iter().copied() {
+        let total = sum + value;
+        if sum.abs() >= value.abs() {
+            compensation += (sum - total) + value;
+        } else {
+            compensation += (value - total) + sum;
+        }
+        sum = total;
+        if !sum.is_finite() || !compensation.is_finite() {
+            return Err(data_error(
+                "Overflow",
+                "sum",
+                "finite overflow while summing",
+            ));
+        }
+    }
+    let total = sum + compensation;
+    if !total.is_finite() {
+        return Err(data_error(
+            "Overflow",
+            "sum",
+            "finite overflow while summing",
+        ));
+    }
+    Ok(if total == 0.0 { 0.0 } else { total })
+}
+
 fn ok(v: CtValue) -> CtValue {
     CtValue::ResOk(Box::new(v))
 }
@@ -232,8 +262,25 @@ impl<'a> EvalCtx<'a> {
                             "numeric input must be finite",
                         )));
                     }
+                    let width = width as usize;
+                    let mut out = Vec::with_capacity(values.len());
+                    for index in 0..values.len() {
+                        let start = index.saturating_add(1).saturating_sub(width);
+                        let window = &values[start..=index];
+                        let sum = match checked_neumaier_sum(window) {
+                            Ok(sum) => sum,
+                            Err(error) => return Ok(err(error)),
+                        };
+                        let mean = sum / window.len() as f64;
+                        out.push(CtValue::Float(CtFloat::f64(if mean == 0.0 {
+                            0.0
+                        } else {
+                            mean
+                        })));
+                    }
+                    return Ok(ok(CtValue::List(out)));
                 }
-                let value = apply_core_call(
+                apply_core_call(
                     "core.data",
                     "rolling_mean",
                     vec![
@@ -247,12 +294,7 @@ impl<'a> EvalCtx<'a> {
                     ],
                     span,
                     self.repl_mode,
-                )?;
-                if checked {
-                    Ok(ok(value))
-                } else {
-                    Ok(value)
-                }
+                )
             }
             "group_count" | "group_sum" | "group_mean" => {
                 let rows = match self.eval_expr(&args[0], scope)? {

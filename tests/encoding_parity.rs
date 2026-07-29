@@ -14,7 +14,7 @@ use jet::Interpreter::{dev_iteration, RunOutcome};
 use jet_jit::{
     deopt_invoked_for_test, fallback_invoked_for_test, jit_executed_for_test, plan_bundle_tiers,
     reset_jit_trace_for_test, resident_jit_safe_bundle, resident_jit_safe_bundle_detail,
-    set_trace_tiers, take_last_trace, Tier,
+    set_trace_tiers, take_last_trace, try_compile_bundle, Tier,
 };
 
 mod common;
@@ -452,6 +452,107 @@ fn run() {
         deopt_invoked_for_test(),
         "typed CBOR regression must execute named-function deopt"
     );
+}
+
+#[test]
+fn datatree_int_accessor_matches_aot_without_coercion() {
+    on_encoding_stack(datatree_int_accessor_matches_aot_without_coercion_inner);
+}
+
+fn datatree_int_accessor_matches_aot_without_coercion_inner() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping DataTree Int accessor parity (need rustc)");
+        return;
+    }
+    let source = r#"
+fn run() {
+    if DataTree.Int(7).int() == {
+        .Ok(value) -> print(value)
+        .Err(error) -> print(error)
+    }
+    if DataTree.Float(7.0).int() == {
+        .Ok(value) -> print(value)
+        .Err(error) -> print(error)
+    }
+    if DataTree.Text("7").int() == {
+        .Ok(value) -> print(value)
+        .Err(error) -> print(error)
+    }
+}
+"#;
+    let scratch = Scratch::new("datatree_int");
+    let path = scratch.write_project("2026", source);
+    let bundle = checked_bundle(path.to_str().unwrap());
+    let plan = plan_bundle_tiers(&bundle);
+    assert!(
+        plan.deopt.is_empty() && !plan.whole_interp,
+        "DataTree Int accessor must stay resident: {plan:?}"
+    );
+    try_compile_bundle(&bundle).expect("DataTree Int accessor must compile for resident JIT");
+    let aot = run_aot(&path, scratch.path());
+    assert_eq!(aot.exit, 0, "DataTree Int AOT failed: {}", aot.stderr);
+    assert_eq!(
+        aot.stdout,
+        "7\nexpected int, got 7.0\nexpected int, got \"7\"\n"
+    );
+    let (backend, dev) = run_default_dev(path.to_str().unwrap());
+    assert_eq!(backend, DevBackend::ResidentJit);
+    assert_eq!(dev, aot);
+}
+
+#[test]
+fn datatree_int_accessor_matches_aot_on_named_deopt() {
+    on_encoding_stack(datatree_int_accessor_matches_aot_on_named_deopt_inner);
+}
+
+fn datatree_int_accessor_matches_aot_on_named_deopt_inner() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping DataTree Int deopt parity (need rustc)");
+        return;
+    }
+    let source = r#"
+use core.text as text
+
+fn gap() {
+    folded :: text.casefold("Straße")
+    if folded != "strasse" { panic("casefold") }
+    if DataTree.Int(7).int() == {
+        .Ok(value) -> print(value)
+        .Err(error) -> print(error)
+    }
+    if DataTree.Float(7.0).int() == {
+        .Ok(value) -> print(value)
+        .Err(error) -> print(error)
+    }
+    if DataTree.Text("7").int() == {
+        .Ok(value) -> print(value)
+        .Err(error) -> print(error)
+    }
+}
+
+fn run() {
+    gap()
+}
+"#;
+    let scratch = Scratch::new("datatree_int_deopt");
+    let path = scratch.write_project("2026", source);
+    let bundle = checked_bundle(path.to_str().unwrap());
+    let plan = plan_bundle_tiers(&bundle);
+    assert!(!plan.whole_interp, "regression needs named-function deopt: {plan:?}");
+    assert!(
+        plan.deopt.iter().any(|(name, _)| name == "gap"),
+        "regression needs `gap` on the named deopt tier: {plan:?}"
+    );
+    let aot = run_aot(&path, scratch.path());
+    assert_eq!(aot.exit, 0, "DataTree Int deopt AOT failed: {}", aot.stderr);
+    assert_eq!(
+        aot.stdout,
+        "7\nexpected int, got 7.0\nexpected int, got \"7\"\n"
+    );
+    let (backend, dev) = run_default_dev(path.to_str().unwrap());
+    assert_eq!(backend, DevBackend::DeoptInterp);
+    assert_eq!(dev, aot);
+    assert!(deopt_invoked_for_test());
 }
 
 /// `csv.to_string` takes either the dynamic `[[String]]` rows form or a typed

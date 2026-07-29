@@ -14,7 +14,7 @@
 //! exactly AOT's `DataTree` shape (see `datatree_from_json`), so no separate
 //! value type is needed at this tier.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 use crate::AST::{CtFloat, CtKey, Field, Marker, MigrationDecl, MigrationOp, StructDef, Type};
 use crate::Diagnostics::{Diagnostic, Span};
@@ -171,7 +171,6 @@ fn datatree_kind(tree: &CtValue) -> &'static str {
 }
 fn object_pairs(tree: &CtValue) -> Option<Vec<(String, CtValue)>> {
     match json_payload(tree, "Object") {
-        Some(CtValue::Struct { fields, .. }) => Some(fields.clone()),
         Some(CtValue::Map(m)) => Some(
             m.iter()
                 .map(|(k, v)| {
@@ -190,9 +189,6 @@ fn object_pairs(tree: &CtValue) -> Option<Vec<(String, CtValue)>> {
 }
 fn object_get<'a>(tree: &'a CtValue, key: &str) -> Option<&'a CtValue> {
     match json_payload(tree, "Object") {
-        Some(CtValue::Struct { fields, .. }) => fields
-            .iter()
-            .find_map(|(name, value)| (name == key).then_some(value)),
         Some(CtValue::Map(m)) => m.get(&CtKey::Str(key.to_string())),
         _ => None,
     }
@@ -320,23 +316,15 @@ pub(super) fn typed_decode_builtin_value(
     ty: &Type,
     tree: &CtValue,
 ) -> Option<Result<CtValue, CtValue>> {
-    typed_decode_schema_value(ty, tree, &HashMap::new())
-}
-
-pub(super) fn typed_decode_schema_value(
-    ty: &Type,
-    tree: &CtValue,
-    struct_fields: &HashMap<String, Vec<(String, Type)>>,
-) -> Option<Result<CtValue, CtValue>> {
     Some(match ty {
-        Type::Int | Type::IntN { .. } => decode_int(tree),
+        Type::Int => decode_int(tree),
         Type::Float => decode_float(tree),
         Type::Bool => decode_bool(tree),
         Type::String => decode_string(tree),
         Type::Char => decode_char(tree),
         Type::Option(inner) => match variant_of(tree) {
             Some(("Null", _)) => Ok(CtValue::None((**inner).clone())),
-            _ => typed_decode_schema_value(inner, tree, struct_fields)?
+            _ => typed_decode_builtin_value(inner, tree)?
                 .map(|value| CtValue::Some(Box::new(value))),
         },
         Type::List(inner)
@@ -362,7 +350,7 @@ pub(super) fn typed_decode_schema_value(
             Some(("Array", Some(CtValue::List(items)))) => {
                 let mut out = Vec::with_capacity(items.len());
                 for (index, item) in items.iter().enumerate() {
-                    match typed_decode_schema_value(inner, item, struct_fields)? {
+                    match typed_decode_builtin_value(inner, item)? {
                         Ok(value) => out.push(value),
                         Err(error) => {
                             return Some(Err(decode_error_under(
@@ -379,41 +367,6 @@ pub(super) fn typed_decode_schema_value(
                 datatree_kind(tree)
             ))),
         },
-        Type::Named(name) => {
-            let fields = struct_fields.get(name)?;
-            if object_pairs(tree).is_none() {
-                return Some(Err(decode_error(format!(
-                    "expected an object, found {}",
-                    datatree_kind(tree)
-                ))));
-            }
-            let mut out = Vec::with_capacity(fields.len());
-            for (field, field_ty) in fields {
-                let value = match object_get(tree, field) {
-                    Some(value) => {
-                        match typed_decode_schema_value(field_ty, value, struct_fields)? {
-                            Ok(value) => value,
-                            Err(error) => {
-                                return Some(Err(decode_error_under(field, error)))
-                            }
-                        }
-                    }
-                    None => match field_ty {
-                        Type::Option(inner) => CtValue::None((**inner).clone()),
-                        _ => {
-                            return Some(Err(decode_error(format!(
-                                "E2410: missing required field `{field}`"
-                            ))))
-                        }
-                    },
-                };
-                out.push((field.clone(), value));
-            }
-            Ok(CtValue::Struct {
-                type_name: name.clone(),
-                fields: out,
-            })
-        }
         _ => return None,
     })
 }

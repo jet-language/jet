@@ -293,6 +293,25 @@ pub fn cbor_encode_typed_for_tir(
     EncodingLite::cbor_encode_typed(value, Some(root_ty), struct_fields, canonical)
 }
 
+pub fn render_datatree_for_tir(value: &CtValue) -> String {
+    JSONInterp::render_json_pretty(value, false, 0)
+}
+
+/// TIR/JIT bridge for the canonical whole-value CBOR parser.
+///
+/// Keep options validation, limits, deterministic-form checks, and error
+/// construction in the same implementation used by comptime evaluation.
+pub fn cbor_parse_for_tir(
+    bytes: &[u8],
+    options: Option<&CtValue>,
+    allow_bytes: bool,
+) -> Result<CtValue, CtValue> {
+    let options =
+        EncodingLite::cbor_options(options).map_err(EncodingLite::cbor_error_value)?;
+    EncodingLite::cbor_decode(bytes, &options, allow_bytes)
+        .map_err(EncodingLite::cbor_error_value)
+}
+
 /// TIR core-call bridge for generic CBOR decode. TIR retains the resolved
 /// `Result<T, CBORError>` type, so use its `T` with the shared typed decoder
 /// instead of returning the parser's internal `DataTree` representation.
@@ -300,7 +319,6 @@ pub fn cbor_decode_typed_for_tir(
     bytes: &[u8],
     options: Option<&CtValue>,
     root_ty: &Type,
-    struct_fields: &HashMap<String, Vec<(String, Type)>>,
 ) -> CtValue {
     let options = match EncodingLite::cbor_options(options) {
         Ok(options) => options,
@@ -314,7 +332,7 @@ pub fn cbor_decode_typed_for_tir(
             return CtValue::ResErr(Box::new(EncodingLite::cbor_error_value(error)));
         }
     };
-    match TypedDecode::typed_decode_schema_value(root_ty, &tree, struct_fields) {
+    match TypedDecode::typed_decode_builtin_value(root_ty, &tree) {
         Some(Ok(value)) => CtValue::ResOk(Box::new(value)),
         Some(Err(CtValue::Struct { fields, .. })) => {
             let path = fields

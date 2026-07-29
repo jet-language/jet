@@ -314,7 +314,11 @@ pub(super) fn render_json_pretty(v: &CtValue, pretty: bool, depth: usize) -> Str
             type_name,
             variant,
             args,
-        } if type_name == "JSON" => match variant.as_str() {
+        } if matches!(
+            type_name.as_str(),
+            "DataTree" | "JSON" | "TOML" | "YAML" | "CSV"
+        ) =>
+        match variant.as_str() {
             "Null" => "null".to_string(),
             _ => match args.first() {
                 Some((_, payload)) => render_json_pretty(payload, pretty, depth),

@@ -145,18 +145,27 @@ fn rolling_mean_nonfinite_matches_aot_and_default_dev() {
 use core.data as data
 
 fn run() {
-    result := data.rolling_mean([1.0, Float.NAN, 3.0], 2)
-    if result == {
+    nonfinite := data.rolling_mean([1.0, Float.NAN, 3.0], 2)
+    if nonfinite == {
         .Ok(_) -> print("unexpected ok")
         .Err(error) -> print("{error}")
     }
+    compensated := data.rolling_mean([10000000000000000.0, 1.0, -10000000000000000.0], 3) ?? panic("compensated")
+    print(compensated[2])
+    overflow := data.rolling_mean([Float.MAX, Float.MAX], 2)
+    if overflow == {
+        .Ok(_) -> print("unexpected overflow ok")
+        .Err(error) -> print("{error}")
+    }
+    zero := data.rolling_mean([-0.0, -0.0], 2) ?? panic("zero")
+    print(zero[1])
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "rolling_nonfinite", source);
     assert_eq!(code, 0, "rolling_mean AOT failed: {stderr}");
     assert_eq!(
         stdout,
-        "NonFinite rolling_mean, index 1: numeric input must be finite\n"
+        "NonFinite rolling_mean, index 1: numeric input must be finite\n0.3333333333333333\nOverflow sum: finite overflow while summing\n0.0\n"
     );
     let path = dir.join("rolling_nonfinite.jet");
     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {

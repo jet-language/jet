@@ -857,6 +857,21 @@ impl LowerCtx<'_, '_> {
                 self.b.seal_block(merge);
                 Ok(self.b.block_params(merge)[0])
             }
+            Type::List(elem) | Type::FixedList { elem, .. }
+                if matches!(
+                    elem.as_ref(),
+                    Type::IntN {
+                        signed: false,
+                        bits: 8
+                    }
+                ) || matches!(elem.as_ref(), Type::Named(name) if name == "U8") =>
+            {
+                let host_ref = self
+                    .module
+                    .declare_func_in_func(self.host.encoding.bytes_datatree, self.b.func);
+                let call = self.b.ins().call(host_ref, &[val]);
+                Ok(self.b.inst_results(call)[0])
+            }
             Type::List(elem) | Type::FixedList { elem, .. } => {
                 self.lower_serde_encode_list(val, elem)
             }
@@ -1656,8 +1671,17 @@ impl LowerCtx<'_, '_> {
         parse_host: FuncId,
     ) -> Result<Value, String> {
         let text_v = self.lower_expr(text)?;
+        self.lower_typed_tree_decode_values(&[text_v], ok_ty, parse_host)
+    }
+
+    fn lower_typed_tree_decode_values(
+        &mut self,
+        parse_args: &[Value],
+        ok_ty: &Type,
+        parse_host: FuncId,
+    ) -> Result<Value, String> {
         let host_ref = self.module.declare_func_in_func(parse_host, self.b.func);
-        let parse_call = self.b.ins().call(host_ref, &[text_v]);
+        let parse_call = self.b.ins().call(host_ref, parse_args);
         let parsed = self.b.inst_results(parse_call)[0];
         let status_ref = self
             .module
@@ -8875,8 +8899,41 @@ impl LowerCtx<'_, '_> {
                                         bits: 8
                                     }
                                 ) || matches!(elem.as_ref(), Type::Named(n) if n == "U8")
-                        )
+                            )
                     });
+                    if method == "decode"
+                        && matches!(args.len(), 1 | 2)
+                        && bytes_arg
+                        && !datatree_ok
+                    {
+                        if let Type::Result { ok, .. } = &expr.ty {
+                            if args.len() == 1 {
+                                return self.lower_typed_tree_decode(
+                                    &args[0],
+                                    ok,
+                                    self.host.encoding.cbor_decode_tree,
+                                );
+                            }
+                            let parse_args =
+                                [self.lower_expr(&args[0])?, self.lower_expr(&args[1])?];
+                            return self.lower_typed_tree_decode_values(
+                                &parse_args,
+                                ok,
+                                self.host.encoding.cbor_decode_tree_options,
+                            );
+                        }
+                    }
+                    if matches!(method.as_str(), "to_bytes" | "to_bytes_canonical")
+                        && args.len() == 1
+                        && !datatree_arg
+                    {
+                        let render_host = if method == "to_bytes" {
+                            self.host.encoding.cbor_to_bytes
+                        } else {
+                            self.host.encoding.cbor_to_bytes_canonical
+                        };
+                        return self.lower_typed_tree_to_string(&args[0], render_host);
+                    }
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "to_bytes" if args.len() == 1 && datatree_arg => (
                             self.host.encoding.cbor_to_bytes,
@@ -8889,6 +8946,10 @@ impl LowerCtx<'_, '_> {
                         "parse" if args.len() == 1 && bytes_arg && datatree_ok => {
                             (self.host.encoding.cbor_parse, vec![self.lower_expr(&args[0])?])
                         }
+                        "parse" if args.len() == 2 && bytes_arg && datatree_ok => (
+                            self.host.encoding.cbor_parse_options,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
+                        ),
                         "writer" if args.len() == 1 || args.len() == 2 => {
                             let file = self.lower_expr(&args[0])?;
                             let limits = if args.len() == 2 {
@@ -12326,11 +12387,14 @@ impl LowerCtx<'_, '_> {
         else_body: Option<&[TStmt]>,
         fallthrough: bool,
     ) -> Result<(), String> {
-        let Type::Result { ok, err } = &scrutinee.ty else {
-            return Err("jit result enum match on non-Result".to_string());
+        let (ok_ty, err_ty) = match &scrutinee.ty {
+            Type::Result { ok, err } => (ok.as_ref().clone(), err.as_ref().clone()),
+            _ => {
+                let ok = Self::result_ok_ty_recover(scrutinee)
+                    .ok_or_else(|| "jit result enum match on non-Result".to_string())?;
+                (ok, Type::Named("DecodeError".to_string()))
+            }
         };
-        let ok_ty = ok.as_ref().clone();
-        let err_ty = err.as_ref().clone();
         let handle = self.lower_expr(scrutinee)?;
         let status_ref = self
             .module
@@ -17383,6 +17447,18 @@ impl LowerCtx<'_, '_> {
                             .module
                             .declare_func_in_func(self.host.print_str, self.b.func);
                         self.b.ins().call(print_ref, &[s]);
+                        return Ok(());
+                    }
+                    Type::Named(n) if n == "DecodeError" => {
+                        let show_ref = self
+                            .module
+                            .declare_func_in_func(self.host.encoding.decode_error_show, self.b.func);
+                        let call = self.b.ins().call(show_ref, &[val]);
+                        let shown = self.b.inst_results(call)[0];
+                        let print_ref = self
+                            .module
+                            .declare_func_in_func(self.host.print_str, self.b.func);
+                        self.b.ins().call(print_ref, &[shown]);
                         return Ok(());
                     }
                     _ => {

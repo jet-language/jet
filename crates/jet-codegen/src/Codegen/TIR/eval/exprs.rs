@@ -629,7 +629,6 @@ impl<'a> EvalCtx<'a> {
                         &bytes,
                         argv.get(1),
                         ok,
-                        &self.struct_field_types,
                     ));
                 }
                 if module == "jet.crypto"
@@ -2652,6 +2651,25 @@ impl<'a> EvalCtx<'a> {
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<String, Diagnostic> {
         let _ = scope;
+        if let CtValue::Struct { type_name, fields } = v {
+            if type_name == "DecodeError" {
+                let string_field = |name: &str| {
+                    fields.iter().find_map(|(field, value)| {
+                        (field == name).then_some(value).and_then(|value| match value {
+                            CtValue::Str(text) => Some(text.as_str()),
+                            _ => None,
+                        })
+                    })
+                };
+                let path = string_field("path").unwrap_or_default();
+                let reason = string_field("reason").unwrap_or_default();
+                return Ok(if path.is_empty() {
+                    reason.to_string()
+                } else {
+                    format!("at `{path}`: {reason}")
+                });
+            }
+        }
         if let Some(text) = crate::Comptime::display_core_pure_value(v) {
             return Ok(text);
         }
