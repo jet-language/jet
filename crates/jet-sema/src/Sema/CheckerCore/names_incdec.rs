@@ -298,22 +298,24 @@ impl<'a> Checker<'a> {
         }
 }
 
+const CORE_DIAGNOSTIC_ALIASES: &[(&str, &str)] = &[
+    ("fs", "core.files"),
+    ("ar", "core.archive"),
+    ("gz", "core.compress.gzip"),
+    ("re", "core.regex"),
+];
+
 fn unique_core_module_for_alias(alias: &str) -> Option<&'static str> {
-    let mut chars = alias.chars();
-    let shorthand = match (chars.next(), chars.next(), chars.next()) {
-        (Some(first), Some(last), None) => Some((first, last)),
-        _ => None,
-    };
-    let mut matches = Syntax::KNOWN_CORE_MODULES.iter().copied().filter(|module| {
-        let leaf = module.rsplit('.').next().unwrap_or(module);
-        leaf == alias
-            || shorthand.is_some_and(|(first, last)| {
-                let mut leaf_chars = leaf.chars();
-                leaf_chars.next() == Some(first)
-                    && leaf_chars.next_back() == Some(last)
-                    && leaf_chars.next().is_some()
-            })
-    });
+    for &(known_alias, module) in CORE_DIAGNOSTIC_ALIASES {
+        if known_alias == alias && Syntax::KNOWN_CORE_MODULES.contains(&module) {
+            return Some(module);
+        }
+    }
+
+    let mut matches = Syntax::KNOWN_CORE_MODULES
+        .iter()
+        .copied()
+        .filter(|module| module.rsplit('.').next().unwrap_or(module) == alias);
     let module = matches.next()?;
     matches.next().is_none().then_some(module)
 }
