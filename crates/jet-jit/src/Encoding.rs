@@ -1555,17 +1555,69 @@ fn cbor_ct_datatree(value: &CtValue) -> Option<json_rt::DataTree> {
     }
 }
 
-fn cbor_error_reason(value: CtValue) -> String {
+fn cbor_error_parts(value: CtValue) -> (i64, i64, String, String) {
     let CtValue::Struct { fields, .. } = value else {
-        return "CBOR parse failed".to_string();
+        return (
+            2,
+            0,
+            "$".to_string(),
+            "CBOR parse failed".to_string(),
+        );
     };
-    fields
-        .into_iter()
-        .find_map(|(name, value)| match (name.as_str(), value) {
-            ("reason", CtValue::Str(reason)) => Some(reason),
-            _ => None,
-        })
-        .unwrap_or_else(|| "CBOR parse failed".to_string())
+    let mut kind = 2;
+    let mut byte_offset = 0;
+    let mut path = "$".to_string();
+    let mut reason = "CBOR parse failed".to_string();
+    for (name, value) in fields {
+        match (name.as_str(), value) {
+            (
+                "kind",
+                CtValue::Enum {
+                    variant,
+                    args,
+                    ..
+                },
+            ) if args.is_empty() => {
+                kind = match variant.as_str() {
+                    "Syntax" => 0,
+                    "Truncated" => 1,
+                    "Unsupported" => 2,
+                    "Limit" => 3,
+                    "TypeMismatch" => 4,
+                    "TrailingData" => 5,
+                    "NonCanonical" => 6,
+                    _ => 2,
+                };
+            }
+            ("byte_offset", CtValue::Int(offset)) => byte_offset = offset,
+            ("path", CtValue::Str(value)) => path = value,
+            ("reason", CtValue::Str(value)) => reason = value,
+            _ => {}
+        }
+    }
+    (kind, byte_offset, path, reason)
+}
+
+fn result_err_cbor_parts(kind: i64, byte_offset: i64, path: String, reason: String) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let path = rt.heap.alloc_string(path);
+        let reason = rt.heap.alloc_string(reason);
+        let error = rt.heap.alloc_record(4);
+        let _ = rt.heap.record_set_int(error, 0, kind);
+        let _ = rt.heap.record_set_int(error, 1, byte_offset);
+        let _ = rt.heap.record_set_string(error, 2, path);
+        let _ = rt.heap.record_set_string(error, 3, reason);
+        rt.results.push(super::JitResultValue {
+            ok: false,
+            bits: error as u64,
+        });
+        rt.results.len() as i64
+    })
+}
+
+fn result_err_cbor(value: CtValue) -> i64 {
+    let (kind, byte_offset, path, reason) = cbor_error_parts(value);
+    result_err_cbor_parts(kind, byte_offset, path, reason)
 }
 
 fn jet_jit_cbor_parse_impl(bytes: i64, options: Option<i64>, allow_bytes: bool) -> i64 {
@@ -1598,9 +1650,14 @@ fn jet_jit_cbor_parse_impl(bytes: i64, options: Option<i64>, allow_bytes: bool) 
     match jet_codegen::Comptime::cbor_parse_for_tir(&input, options.as_ref(), allow_bytes) {
         Ok(tree) => match cbor_ct_datatree(&tree) {
             Some(tree) => result_ok_bits(alloc_datatree(&tree) as u64),
-            None => result_err_msg("invalid DataTree from CBOR parser"),
+            None => result_err_cbor_parts(
+                2,
+                0,
+                "$".to_string(),
+                "invalid DataTree from CBOR parser".to_string(),
+            ),
         },
-        Err(error) => result_err_msg(&cbor_error_reason(error)),
+        Err(error) => result_err_cbor(error),
     }
 }
 
@@ -1618,6 +1675,43 @@ extern "C" fn jet_jit_cbor_decode_tree(bytes: i64) -> i64 {
 
 extern "C" fn jet_jit_cbor_decode_tree_options(bytes: i64, options: i64) -> i64 {
     jet_jit_cbor_parse_impl(bytes, Some(options), true)
+}
+
+/// Project `Result<T, DecodeError>` to `Result<T, CBORError>` after typed decode.
+extern "C" fn jet_jit_cbor_project_decode_error(result: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(value) = result
+            .checked_sub(1)
+            .and_then(|index| rt.results.get(index as usize))
+        else {
+            return result;
+        };
+        if value.ok {
+            return result;
+        }
+        let decode_error = value.bits as i64;
+        let path_id = rt.heap.record_get_string(decode_error, 0).unwrap_or(0);
+        let reason_id = rt.heap.record_get_string(decode_error, 1).unwrap_or(0);
+        let path = rt.heap.clone_string(path_id).unwrap_or_default();
+        let reason = rt.heap.clone_string(reason_id).unwrap_or_default();
+        let path = if path.is_empty() {
+            "$".to_string()
+        } else {
+            format!("${path}")
+        };
+        let path = rt.heap.alloc_string(path);
+        let reason = rt.heap.alloc_string(reason);
+        let error = rt.heap.alloc_record(4);
+        let _ = rt.heap.record_set_int(error, 0, 4);
+        let _ = rt.heap.record_set_int(error, 1, 0);
+        let _ = rt.heap.record_set_string(error, 2, path);
+        let _ = rt.heap.record_set_string(error, 3, reason);
+        rt.results.push(super::JitResultValue {
+            ok: false,
+            bits: error as u64,
+        });
+        rt.results.len() as i64
+    })
 }
 
 /// CSV typed decode front half: header+rows → `[DataTree]` of Text-cell objects
@@ -1714,6 +1808,82 @@ extern "C" fn jet_jit_datatree_int(tree: i64) -> i64 {
         ),
         None => result_err_decode("", "invalid DataTree"),
     }
+}
+
+fn typed_datatree_kind(tree: &json_rt::DataTree) -> &'static str {
+    match tree {
+        json_rt::DataTree::Null => "null",
+        json_rt::DataTree::Bool(_) => "Bool",
+        json_rt::DataTree::Int(_) => "Int",
+        json_rt::DataTree::Float(_) => "Float",
+        json_rt::DataTree::Text(_) => "Text",
+        json_rt::DataTree::Bytes(_) => "value",
+        json_rt::DataTree::Array(_) => "a list",
+        json_rt::DataTree::Object(_) => "an object",
+    }
+}
+
+/// `user_Decode for Int`, distinct from strict `DataTree.int()`.
+extern "C" fn jet_jit_datatree_decode_int(tree: i64) -> i64 {
+    match read_datatree(tree) {
+        Some(json_rt::DataTree::Int(value)) => result_ok_bits(value as u64),
+        Some(json_rt::DataTree::Float(value)) if value.fract() == 0.0 => {
+            result_ok_bits((value as i64) as u64)
+        }
+        Some(json_rt::DataTree::Text(value)) => match value.trim().parse::<i64>() {
+            Ok(value) => result_ok_bits(value as u64),
+            Err(_) => result_err_decode("", &format!("expected Int, found text {value:?}")),
+        },
+        Some(other) => result_err_decode(
+            "",
+            &format!("expected Int, found {}", typed_datatree_kind(&other)),
+        ),
+        None => result_err_decode("", "expected Int, found value"),
+    }
+}
+
+extern "C" fn jet_jit_datatree_decode_list_error(tree: i64) -> i64 {
+    let reason = read_datatree(tree)
+        .map(|tree| format!("expected a list, found {}", typed_datatree_kind(&tree)))
+        .unwrap_or_else(|| "expected a list, found value".to_string());
+    result_err_decode("", &reason)
+}
+
+extern "C" fn jet_jit_decode_error_under(result: i64, index: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        let Some(value) = result
+            .checked_sub(1)
+            .and_then(|result_index| rt.results.get(result_index as usize))
+        else {
+            return result;
+        };
+        if value.ok {
+            return result;
+        }
+        let error = value.bits as i64;
+        let path_id = rt.heap.record_get_string(error, 0).unwrap_or(0);
+        let reason_id = rt.heap.record_get_string(error, 1).unwrap_or(0);
+        let path = rt.heap.clone_string(path_id).unwrap_or_default();
+        let reason = rt.heap.clone_string(reason_id).unwrap_or_default();
+        let segment = format!("[{index}]");
+        let path = if path.is_empty() {
+            segment
+        } else if path.starts_with('[') {
+            format!("{segment}{path}")
+        } else {
+            format!("{segment}.{path}")
+        };
+        let path = rt.heap.alloc_string(path);
+        let reason = rt.heap.alloc_string(reason);
+        let framed = rt.heap.alloc_record(2);
+        let _ = rt.heap.record_set_string(framed, 0, path);
+        let _ = rt.heap.record_set_string(framed, 1, reason);
+        rt.results.push(super::JitResultValue {
+            ok: false,
+            bits: framed as u64,
+        });
+        rt.results.len() as i64
+    })
 }
 
 extern "C" fn jet_jit_datatree_text(tree: i64) -> i64 {
@@ -1885,11 +2055,15 @@ pub(crate) struct EncodingHostFns {
     pub cbor_parse_options: cranelift_module::FuncId,
     pub cbor_decode_tree: cranelift_module::FuncId,
     pub cbor_decode_tree_options: cranelift_module::FuncId,
+    pub cbor_project_decode_error: cranelift_module::FuncId,
     pub bytes_datatree: cranelift_module::FuncId,
     pub csv_decode_trees: cranelift_module::FuncId,
     pub datatree_field: cranelift_module::FuncId,
     pub datatree_at: cranelift_module::FuncId,
     pub datatree_int: cranelift_module::FuncId,
+    pub datatree_decode_int: cranelift_module::FuncId,
+    pub datatree_decode_list_error: cranelift_module::FuncId,
+    pub decode_error_under: cranelift_module::FuncId,
     pub datatree_text: cranelift_module::FuncId,
     pub datatree_bool: cranelift_module::FuncId,
     pub datatree_float: cranelift_module::FuncId,
@@ -1961,6 +2135,10 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
         jet_jit_cbor_decode_tree_options as *const u8,
     );
     builder.symbol(
+        "jet_jit_cbor_project_decode_error",
+        jet_jit_cbor_project_decode_error as *const u8,
+    );
+    builder.symbol(
         "jet_jit_bytes_datatree",
         jet_jit_bytes_datatree as *const u8,
     );
@@ -1968,6 +2146,18 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
     builder.symbol("jet_jit_datatree_field", jet_jit_datatree_field as *const u8);
     builder.symbol("jet_jit_datatree_at", jet_jit_datatree_at as *const u8);
     builder.symbol("jet_jit_datatree_int", jet_jit_datatree_int as *const u8);
+    builder.symbol(
+        "jet_jit_datatree_decode_int",
+        jet_jit_datatree_decode_int as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_datatree_decode_list_error",
+        jet_jit_datatree_decode_list_error as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_decode_error_under",
+        jet_jit_decode_error_under as *const u8,
+    );
     builder.symbol("jet_jit_datatree_text", jet_jit_datatree_text as *const u8);
     builder.symbol("jet_jit_datatree_bool", jet_jit_datatree_bool as *const u8);
     builder.symbol("jet_jit_datatree_float", jet_jit_datatree_float as *const u8);
@@ -2325,11 +2515,18 @@ pub(crate) fn declare_encoding_host_fns(
         cbor_parse_options: import("jet_jit_cbor_parse_options", &sig_binary)?,
         cbor_decode_tree: import("jet_jit_cbor_decode_tree", &sig_unary)?,
         cbor_decode_tree_options: import("jet_jit_cbor_decode_tree_options", &sig_binary)?,
+        cbor_project_decode_error: import("jet_jit_cbor_project_decode_error", &sig_unary)?,
         bytes_datatree: import("jet_jit_bytes_datatree", &sig_unary)?,
         csv_decode_trees: import("jet_jit_csv_decode_trees", &sig_unary)?,
         datatree_field: import("jet_jit_datatree_field", &sig_binary)?,
         datatree_at: import("jet_jit_datatree_at", &sig_binary)?,
         datatree_int: import("jet_jit_datatree_int", &sig_unary)?,
+        datatree_decode_int: import("jet_jit_datatree_decode_int", &sig_unary)?,
+        datatree_decode_list_error: import(
+            "jet_jit_datatree_decode_list_error",
+            &sig_unary,
+        )?,
+        decode_error_under: import("jet_jit_decode_error_under", &sig_binary)?,
         datatree_text: import("jet_jit_datatree_text", &sig_unary)?,
         datatree_bool: import("jet_jit_datatree_bool", &sig_unary)?,
         datatree_float: import("jet_jit_datatree_float", &sig_unary)?,

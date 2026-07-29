@@ -2798,16 +2798,35 @@ fn run() {
     // 0x18 0x01 is valid CBOR for 1, but not shortest/Core deterministic.
     rejected := cbor.parse([24, 1], strict) ?? DataTree.Int(-1)
     print(rejected.int() ?? -2)
+    strict_decode := cbor.CBOROptions.{
+        max_depth: 256,
+        max_items: 1000000,
+        max_bytes: 1073741824,
+        require_canonical: true,
+    }
+    if cbor.decode<[Int]>([129, 97, 120], strict_decode) == {
+        .Ok(_) -> print("unexpected success")
+        .Err(error) -> print("{error.byte_offset}|{error.path}|{error.reason}")
+    }
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "cbor_whole", source, &[], None);
     assert_eq!(code, 0, "CBOR whole-value program failed: {stderr}");
     assert_eq!(
         stdout,
-        "[162, 98, 105, 100, 7, 103, 112, 97, 121, 108, 111, 97, 100, 66, 222, 173]\ntrue\n7\n[222, 173]\n[1, 2, 255]\n-1\n"
+        "[162, 98, 105, 100, 7, 103, 112, 97, 121, 108, 111, 97, 100, 66, 222, 173]\ntrue\n7\n[222, 173]\n[1, 2, 255]\n-1\n0|$[0]|expected Int, found text \"x\"\n"
     );
     let path = dir.join("cbor_whole.jet");
     fs::write(&path, source).unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).expect("CBOR fixture loads");
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diag| !matches!(diag.severity, jet::Diagnostics::Severity::Error)),
+        "CBOR fixture must type-check: {diagnostics:?}"
+    );
+    jet_jit::try_compile_bundle(&bundle).expect("CBOR fixture must compile for resident JIT");
     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: dev_stdout,
@@ -2961,16 +2980,16 @@ fn wire(values: [Int]) => [U8] {
 
 fn accepted(values: [Int]) => Bool {
     if cbor.parse(wire(values)) == {
-        Ok(_) -> return true
-        Err(_) -> return false
+        .Ok(_) -> return true
+        .Err(_) -> return false
     }
     return false
 }
 
 fn rejected(values: [Int], offset: Int, path: String, reason: String) => Bool {
     if cbor.parse(wire(values)) == {
-        Ok(_) -> return false
-        Err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
+        .Ok(_) -> return false
+        .Err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
     }
     return false
 }
@@ -2983,8 +3002,8 @@ fn canonical_rejected(values: [Int], offset: Int, path: String, reason: String) 
         require_canonical: true,
     }
     if cbor.parse(wire(values), strict) == {
-        Ok(_) -> return false
-        Err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
+        .Ok(_) -> return false
+        .Err(error) -> return error.byte_offset == offset && error.path == path && error.reason == reason
     }
     return false
 }

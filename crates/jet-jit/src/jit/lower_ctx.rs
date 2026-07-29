@@ -1031,7 +1031,7 @@ impl LowerCtx<'_, '_> {
             Type::Int | Type::IntN { .. } => {
                 let host_ref = self
                     .module
-                    .declare_func_in_func(self.host.encoding.datatree_int, self.b.func);
+                    .declare_func_in_func(self.host.encoding.datatree_decode_int, self.b.func);
                 let call = self.b.ins().call(host_ref, &[tree]);
                 Ok(self.b.inst_results(call)[0])
             }
@@ -1246,13 +1246,10 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(bad_block);
         self.b.seal_block(bad_block);
-        let sid = self.runtime.heap.alloc_string("expected array".to_string());
-        let msg = self.b.ins().iconst(types::I64, sid);
-        let tag = self.b.ins().iconst(types::I8, 0);
         let host_ref = self
             .module
-            .declare_func_in_func(self.host.result_new_i64, self.b.func);
-        let err = self.b.ins().call(host_ref, &[tag, msg]);
+            .declare_func_in_func(self.host.encoding.datatree_decode_list_error, self.b.func);
+        let err = self.b.ins().call(host_ref, &[tree]);
         let err = self.b.inst_results(err)[0];
         self.b.ins().jump(merge, &[err]);
 
@@ -1362,7 +1359,13 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(fail);
         self.b.seal_block(fail);
         let err = self.b.block_params(fail)[0];
-        self.b.ins().jump(merge, &[err]);
+        let idx = self.b.use_var(idx_var);
+        let under_ref = self
+            .module
+            .declare_func_in_func(self.host.encoding.decode_error_under, self.b.func);
+        let framed = self.b.ins().call(under_ref, &[err, idx]);
+        let framed = self.b.inst_results(framed)[0];
+        self.b.ins().jump(merge, &[framed]);
 
         self.b.switch_to_block(merge);
         self.b.seal_block(merge);
@@ -1671,7 +1674,7 @@ impl LowerCtx<'_, '_> {
         parse_host: FuncId,
     ) -> Result<Value, String> {
         let text_v = self.lower_expr(text)?;
-        self.lower_typed_tree_decode_values(&[text_v], ok_ty, parse_host)
+        self.lower_typed_tree_decode_values(&[text_v], ok_ty, parse_host, None)
     }
 
     fn lower_typed_tree_decode_values(
@@ -1679,6 +1682,7 @@ impl LowerCtx<'_, '_> {
         parse_args: &[Value],
         ok_ty: &Type,
         parse_host: FuncId,
+        error_project: Option<FuncId>,
     ) -> Result<Value, String> {
         let host_ref = self.module.declare_func_in_func(parse_host, self.b.func);
         let parse_call = self.b.ins().call(host_ref, parse_args);
@@ -1702,7 +1706,12 @@ impl LowerCtx<'_, '_> {
         self.b.switch_to_block(ok_block);
         self.b.seal_block(ok_block);
         let tree = self.result_payload(parsed, &Type::Named("DataTree".into()))?;
-        let decoded = self.lower_datatree_decode_migrating(tree, ok_ty)?;
+        let mut decoded = self.lower_datatree_decode_migrating(tree, ok_ty)?;
+        if let Some(project) = error_project {
+            let project_ref = self.module.declare_func_in_func(project, self.b.func);
+            let project_call = self.b.ins().call(project_ref, &[decoded]);
+            decoded = self.b.inst_results(project_call)[0];
+        }
         self.b.ins().jump(merge, &[decoded]);
 
         self.b.switch_to_block(merge);
@@ -8908,10 +8917,12 @@ impl LowerCtx<'_, '_> {
                     {
                         if let Type::Result { ok, .. } = &expr.ty {
                             if args.len() == 1 {
-                                return self.lower_typed_tree_decode(
-                                    &args[0],
+                                let parse_args = [self.lower_expr(&args[0])?];
+                                return self.lower_typed_tree_decode_values(
+                                    &parse_args,
                                     ok,
                                     self.host.encoding.cbor_decode_tree,
+                                    Some(self.host.encoding.cbor_project_decode_error),
                                 );
                             }
                             let parse_args =
@@ -8920,6 +8931,7 @@ impl LowerCtx<'_, '_> {
                                 &parse_args,
                                 ok,
                                 self.host.encoding.cbor_decode_tree_options,
+                                Some(self.host.encoding.cbor_project_decode_error),
                             );
                         }
                     }
@@ -19312,6 +19324,7 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "reason",
             "cause",
         ],
+        "CBORError" => &["kind", "byte_offset", "path", "reason"],
         "FieldError" | "DecodeError" => &["path", "reason"],
         "MigrationStatus" => &["migrated", "from", "steps"],
         "DecodeResult" => &["value", "migration"],

@@ -832,6 +832,7 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
             "reason",
             "cause",
         ],
+        "CBORError" => &["kind", "byte_offset", "path", "reason"],
         // D-VALIDATE1 / D-SERDE2 — path+reason records.
         "FieldError" | "DecodeError" => &["path", "reason"],
         // D-MIGRATE3=A.
@@ -983,6 +984,12 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
             "line" | "column" => Some(Type::Option(Box::new(Type::Int))),
             "path" | "reason" => Some(Type::String),
             "cause" => Some(Type::Option(Box::new(Type::Named("EncodingCause".into())))),
+            _ => None,
+        },
+        "CBORError" => match field {
+            "kind" => Some(Type::Named("CBORErrorKind".into())),
+            "byte_offset" => Some(Type::Int),
+            "path" | "reason" => Some(Type::String),
             _ => None,
         },
         "FieldError" | "DecodeError" => match field {
