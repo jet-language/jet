@@ -1,10 +1,11 @@
 ---
 name: tower-burndown
 description: >-
-  Orchestrate closing Tower cards with one-layer subagents: claim, implement,
-  verify, update board, merge worktrees. Use when asked to burn down, close out,
-  work the backlog, or when invoked as /tower-burndown. Executes work; ranking
-  is tower-rank and prep is tower-prep.
+  Orchestrate closing Tower cards in efficient 3–5-card batches with one-layer
+  implementers, one batch reviewer, one grouped verification, honest board
+  updates, and prompt worktree integration. Use when asked to burn down, close
+  out, work the backlog, or when invoked as /tower-burndown. Executes work;
+  ranking is tower-rank and prep is tower-prep.
 ---
 
 # Tower — burn down cards
@@ -55,6 +56,17 @@ rank/prep or invokes those skills.
   `.agent-worktrees/`). Never create sibling `jet-*` / `jet-bd-*` folders
   beside the main clone. Relocate leaks immediately with `git worktree move`.
 
+## No BS
+
+- Ship the complete accepted behavior. No facades, stubs, placeholders,
+  “follow-up will make it real,” fake-green tests, or report-only closeout.
+- Do not shrink ratified scope because the real path is difficult. Do not add
+  speculative machinery outside it.
+- A card is not implemented when only its API shape, happy path, mock, or
+  fallback exists. Close the production path end to end.
+- Say exactly what is implemented, red, blocked, or deferred. Never launder a
+  technical gap into owner acceptance.
+
 ## Forced skills (every participant)
 
 | Surface | Skill |
@@ -69,6 +81,24 @@ rank/prep or invokes those skills.
 Pass these by name in every worker brief. If `model` was set, pass that model
 into every Task/subagent spawn. Effort: medium default; low for mechanical;
 high for hard semantics/architecture/debug.
+
+## Token and prose discipline
+
+Strive for token efficiency without cutting substance:
+
+- Use **caveman** for agent-to-agent messages, status updates, handoffs, and
+  review findings. Report decisions, evidence, hashes, and blockers; do not
+  paste routine logs or retell context the recipient already has.
+- Use **ponytail** throughout coding and review. Choose the shortest complete
+  production path, reuse existing mechanisms, and avoid speculative
+  abstractions. Minimal does not mean partial: no facades, stubs, or reduced
+  acceptance scope.
+- Use **simple** for every user-facing message and every user-visible artifact:
+  documentation, Tower plans and logs, diagnostics, examples, commit and PR
+  text, owner questions, progress reports, and final reports. Keep that prose
+  clear and controlled; do not write user-facing text in caveman shorthand.
+- Load and pass only the context needed for the assigned card or batch. Return
+  compact evidence instead of full command output.
 
 ## Reference index
 
@@ -97,6 +127,31 @@ high for hard semantics/architecture/debug.
 5. Prefer law/syntax/structure cards that later work builds on when redo risk
    is real; otherwise follow `workOrder` and critical path.
 
+## Batch loop
+
+Default to a declared batch of **3–5 cards in Tower work order**. Choose similar
+cards when that saves setup, compilation, review, or verification work.
+
+1. Name the 3–5 cards and their order before dispatch.
+2. Implement every card in the batch before starting review.
+   - Parallelize only disjoint paths.
+   - Serialize shared mechanisms on stacked branches/worktrees in card order.
+   - A completed card may wait in `verify` for the batch reviewer. Do not start
+     work beyond the declared batch while it waits.
+3. Spawn **one fresh reviewer agent for the whole batch**. That reviewer
+   reviews every card separately, then the composed stack. Do not spawn one
+   reviewer per card.
+4. Route findings to the original implementers. The same batch reviewer
+   rechecks material fixes and final conflict resolutions.
+5. Integrate the reviewed cards in work order.
+6. Run **one grouped verification pass** for the batch. Do not repeat the same
+   targets in each worker, reviewer, and orchestrator.
+7. Verify criteria, close all proved cards, remove worktrees/branches, then
+   declare the next 3–5-card batch.
+
+Use a smaller final batch only when fewer than three actionable cards remain or
+genuine owner gates prevent filling it. Never pad a batch with unrelated work.
+
 ## Dispatch brief (every worker)
 
 Workers get zero ambiguity. Each brief states:
@@ -106,7 +161,8 @@ Workers get zero ambiguity. Each brief states:
 - Exact writable paths; everything else read-only
 - Model + effort; **ponytail** + **caveman** + **simple** (for user-facing text)
 - **No nested subagents. No stubs, facades, placeholders, or fake-green.**
-- Exact targeted test commands (see **Command hygiene** below)
+- The minimum targeted red/green command needed while implementing; do not
+  duplicate already-proved commands merely for reassurance
 - Tower update commands to run on progress (`criteria --meet`, `--log`, phase)
 - Worktree path/branch if used (must be under `.claude/worktrees/`); merge + remove before reporting done
 - Return shape: commits, tests run, criteria met, handoff, blockers
@@ -150,24 +206,33 @@ streams **only when write paths and tests are disjoint**.
 - Never `git add -A`. Never stage, commit, overwrite, or touch another stream's
   paths.
 - Integrate one clean branch at a time. **Do not start a new stream while a
-  finished patch is waiting to integrate.**
+  finished patch is waiting outside the declared batch.** Within a declared
+  batch, completed patches wait in `verify` for the one batch reviewer.
 - Cap retries: reject once or twice with a tighter brief; then escalate or
   re-scope.
 
 ## Proof and review (burndown policy)
 
-Owner override for this skill (outranks generic “review everything” habits):
+One fresh reviewer agent reviews **all cards in the 3–5-card batch**. The
+reviewer does not implement and does not rerun every implementer's tests.
+Review acceptance terms, diffs, invariants, false-green risk, generated files,
+and the composed stack. Fix findings; use the same reviewer for recheck.
 
-| Kind | Proof |
-|---|---|
-| Covered by targeted tests / golden / criteria evidence | Independent **reviewer subagent not required**. Meet criteria with evidence; when the card has criteria, `--verify` still needs a **different** agent identity than `--meet` (board `E_CRITERIA_SELF`). Orchestrator may be the verifier when they did not build. |
-| High-impact / hard / architectural / safety-sensitive | Spawn a fresh reviewer (same pinned `model` if set). Reviewer does not implement. Fix findings; recheck. |
-| Batch / major milestone | After **3–5** integrated closures, or at a major-push boundary, orchestrator runs `scripts/agent/jet-env full scripts/agent/verify-full.sh` once (with Command hygiene: `JET_NIX_TMP_CLEANED=1`, `timeout`, no `tail`-only wait). Workers never run the full suite “to be safe,” and nobody retries it in a silent loop. |
+After review and integration, run the union of required proof **once**:
 
-Never trust a worker's green alone for closeout: re-read diff scope, confirm
-named tests, spot-check evidence. Rebuild before `jet` smoke when binaries
-matter. Known out-of-scope reds stay out of scope — fix or card them, do not
-bless around them.
+- Prefer one grouped targeted command when it proves the batch.
+- At a 3–5-card or major-push boundary, run
+  `scripts/agent/jet-env full scripts/agent/verify-full.sh` once when required
+  by the host `verify` skill or project `AGENTS.md`.
+- Do not run targeted groups and then rerun the same groups through several
+  agents. Do not restart a broad suite “to be safe.” If it finds a concrete
+  failure, fix the cause and rerun only the failing group unless the host
+  verification policy explicitly requires another full pass.
+
+Never trust worker greens alone. The batch reviewer checks evidence; the
+orchestrator checks final integration and grouped proof. Rebuild before `jet`
+smoke when binaries matter. Known out-of-scope reds stay out of scope — fix or
+card them, never bless around them.
 
 ## Board honesty
 
