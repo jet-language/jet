@@ -282,14 +282,15 @@ fn empty_structs() -> &'static HashMap<String, &'static StructDef> {
 }
 
 /// TIR core-call bridge for schema-aware CBOR encoding. `CtValue` erases
-/// `[U8]` into an integer list, so the declared struct fields must cross the
-/// evaluator seam with the value.
+/// `[U8]` into an integer list, so the root type and normalized field schema
+/// must cross the evaluator seam with the value.
 pub fn cbor_encode_typed_for_tir(
     value: &CtValue,
-    structs: &HashMap<String, &StructDef>,
+    root_ty: &Type,
+    struct_fields: &HashMap<String, Vec<(String, Type)>>,
     canonical: bool,
 ) -> Result<Vec<u8>, String> {
-    EncodingLite::cbor_encode_typed(value, structs, canonical)
+    EncodingLite::cbor_encode_typed(value, Some(root_ty), struct_fields, canonical)
 }
 
 /// TIR static-call bridge for the three qualified XML safe constructors.

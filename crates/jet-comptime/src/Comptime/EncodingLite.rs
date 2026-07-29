@@ -2354,7 +2354,7 @@ fn cbor_is_u8_list(ty: Option<&Type>) -> bool {
 fn cbor_codable_value(
     value: &CtValue,
     ty: Option<&Type>,
-    structs: &HashMap<String, &StructDef>,
+    struct_fields: &HashMap<String, Vec<(String, Type)>>,
 ) -> Result<CtValue, String> {
     let ty = match ty {
         Some(Type::Shared(inner) | Type::Tagged { inner, .. }) => Some(inner.as_ref()),
@@ -2376,7 +2376,7 @@ fn cbor_codable_value(
             };
             items
                 .iter()
-                .map(|item| cbor_codable_value(item, elem_ty, structs))
+                .map(|item| cbor_codable_value(item, elem_ty, struct_fields))
                 .collect::<Result<Vec<_>, _>>()
                 .map(CtValue::List)
         }
@@ -2390,24 +2390,26 @@ fn cbor_codable_value(
                 if !matches!(key, CtKey::Str(_)) {
                     return Err("CBOR Codable maps require text keys".to_string());
                 }
-                mapped.insert(key.clone(), cbor_codable_value(value, value_ty, structs)?);
+                mapped.insert(
+                    key.clone(),
+                    cbor_codable_value(value, value_ty, struct_fields)?,
+                );
             }
             Ok(CtValue::Map(mapped))
         }
         CtValue::Struct { type_name, fields } => {
-            let definition = structs
+            let definition = struct_fields
                 .get(type_name)
                 .ok_or_else(|| format!("CBOR comptime encoder has no schema for `{type_name}`"))?;
             let mut mapped = Vec::with_capacity(fields.len());
             for (name, value) in fields {
                 let field_ty = definition
-                    .fields
                     .iter()
-                    .find(|field| field.name == *name)
-                    .map(|field| &field.ty);
+                    .find(|(field, _)| field == name)
+                    .map(|(_, ty)| ty);
                 mapped.push((
                     name.clone(),
-                    cbor_codable_value(value, field_ty, structs)?,
+                    cbor_codable_value(value, field_ty, struct_fields)?,
                 ));
             }
             Ok(CtValue::Struct {
@@ -2421,7 +2423,7 @@ fn cbor_codable_value(
                 Some(Type::Option(inner)) => Some(inner.as_ref()),
                 _ => None,
             },
-            structs,
+            struct_fields,
         )?))),
         CtValue::None(_) => Ok(value.clone()),
         CtValue::BigInt(_) => Err("CBOR cannot encode BigInt outside Jet Int".to_string()),
@@ -2445,15 +2447,34 @@ fn cbor_codable_value(
 
 pub(super) fn cbor_encode_typed(
     value: &CtValue,
-    structs: &HashMap<String, &StructDef>,
+    root_ty: Option<&Type>,
+    struct_fields: &HashMap<String, Vec<(String, Type)>>,
     canonical: bool,
 ) -> Result<Vec<u8>, String> {
-    let value = cbor_codable_value(value, None, structs)?;
+    let value = cbor_codable_value(value, root_ty, struct_fields)?;
     Ok(if canonical {
         cbor_encode_canonical(&value)
     } else {
         cbor_encode(&value)
     })
+}
+
+pub(super) fn cbor_struct_fields(
+    structs: &HashMap<String, &StructDef>,
+) -> HashMap<String, Vec<(String, Type)>> {
+    structs
+        .iter()
+        .map(|(name, definition)| {
+            (
+                name.clone(),
+                definition
+                    .fields
+                    .iter()
+                    .map(|field| (field.name.clone(), field.ty.clone()))
+                    .collect(),
+            )
+        })
+        .collect()
 }
 #[derive(Clone)]
 pub(super) struct CBOROptions {

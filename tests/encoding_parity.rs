@@ -376,6 +376,46 @@ fn whole_value_codecs_match_aot_comptime_and_default_dev() {
     assert_default_dev_matches_aot_or_honest_gap("whole-value", &path, scratch.path(), &aot, true);
 }
 
+#[test]
+fn cbor_typed_schema_matches_comptime_default_dev_and_deopt() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping typed CBOR schema parity (need rustc)");
+        return;
+    }
+    let source = r#"
+use core.encoding.cbor as cbor
+use core.encoding.hex as hex
+
+#Codable
+struct Packet {
+    id: Int
+    payload: [U8]
+}
+
+comptime root = hex.encode(cbor.to_bytes_canonical([U8].{222, 173}) ?? panic("root"))
+comptime packet = hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("packet"))
+
+fn run() {
+    actual_root := hex.encode(cbor.to_bytes_canonical([U8].{222, 173}) ?? panic("root"))
+    actual_packet := hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("packet"))
+    print("{root}|{packet}")
+    print("{actual_root}|{actual_packet}")
+}
+"#;
+    let scratch = Scratch::new("cbor_typed_schema");
+    let path = scratch.write_project("2026", source);
+    let expected = "42dead|a262696407677061796c6f616442dead\n42dead|a262696407677061796c6f616442dead\n";
+    let aot = run_aot(&path, scratch.path());
+    assert_eq!(aot.exit, 0, "typed CBOR AOT failed: {}", aot.stderr);
+    assert_eq!(aot.stdout, expected);
+    let (backend, dev) = run_default_dev(path.to_str().unwrap());
+    assert_eq!(dev.exit, 0, "typed CBOR default-dev failed: {}", dev.stderr);
+    assert_eq!(dev.stdout, expected, "default-dev backend: {backend:?}");
+    let deopt = run_forced_interpreter(path.to_str().unwrap());
+    assert_eq!(deopt.exit, 0, "typed CBOR deopt failed: {}", deopt.stderr);
+    assert_eq!(deopt.stdout, expected);
+}
+
 /// `csv.to_string` takes either the dynamic `[[String]]` rows form or a typed
 /// `[T]` list of `#Codable` values. The resident JIT used to send both to the
 /// rows host, so a typed list rendered "" and still reported success — silent

@@ -570,7 +570,8 @@ impl<'a> EvalCtx<'a> {
                     })?;
                     return Ok(match crate::Comptime::cbor_encode_typed_for_tir(
                         value,
-                        self.structs,
+                        &args[0].ty,
+                        &self.struct_field_types,
                         method == "to_bytes_canonical",
                     ) {
                         Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
