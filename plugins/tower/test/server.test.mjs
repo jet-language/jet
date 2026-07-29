@@ -78,8 +78,8 @@ test('message API adds, lists, and closes independently of done-card clearing', 
   const done = await post('message/done', { id: add.json.result.id, by: 'owner' });
   assert.equal(done.status, 200);
   assert.equal(done.json.result.status, 'done');
-  assert.deepEqual(await (await fetch(url('/api/messages'))).json(), []);
-  const all = await (await fetch(url('/api/messages?status='))).json();
+  assert.deepEqual(await (await fetch(url('/api/messages?open=1'))).json(), []);
+  const all = await (await fetch(url('/api/messages'))).json();
   assert.equal(all[0].doneBy, 'owner');
 });
 

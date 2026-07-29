@@ -354,7 +354,7 @@ function cmdMessage(store, { pos, flags }) {
     case 'list': {
       const messages = db.listMessages(store.load(), {
         cardId: flags.card,
-        status: flags.all ? null : (flags.status || 'open'),
+        status: flags.open ? 'open' : null,
       });
       if (flags.json) return out(flags, null, messages);
       for (const message of messages)
@@ -864,7 +864,9 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   tower repair apply --manifest FILE --expect-rev N --by X [--dry-run]
                                             exact, rev-guarded two-store leaf repair
   tower question list|ask|answer|delete
-  tower message  list|add|done
+  tower message  add '#N' --text "…" --by agent
+                 list [--open]
+                 done <id> --by owner
   tower idea     list|add|promote|delete
   tower epoch    list|add|update|current
   tower milestone list|add|update|delete

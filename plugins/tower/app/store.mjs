@@ -287,7 +287,7 @@ export function normalize(s) {
     s.meta.completionCursor = s.meta.digestCursor;
   delete s.meta.digestCursor;
   for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'events']) s[k] ||= [];
-  delete s.messages;   // messaging was removed; drop the legacy key on next write
+  delete s.messages;   // keep the retired parallel inbox out; messages use questions[]
   // D-TWR-OPS1=A: active epoch is derived solely from epoch.status === 'active'.
   // One-time reconcile of the retired meta.currentEpoch pointer, then drop it so
   // the two-source-of-truth drift (null pointer vs an active epoch) cannot recur.
@@ -1028,9 +1028,11 @@ export function createAcceptanceResolver() {
     d.provenanceHistory = [...(d.provenanceHistory || []), Object.freeze({ ...provenance })];
     if (outcome === 'accept') {
       c.phase = 'done';
+      c.completedAt = now();
       c.log.unshift({ at: today(), by: 'owner', text: `Accepted — ${d.id} resolved through owner verification UI.` });
     } else {
       c.phase = 'building';
+      delete c.completedAt;
       c.log.unshift({ at: today(), by: 'owner', text: `Bounced back to building: ${comment || '(no comment)'}` });
     }
     touchCard(c, 'owner');

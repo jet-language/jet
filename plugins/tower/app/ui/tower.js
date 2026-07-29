@@ -352,13 +352,10 @@ function doneMessageBlock() {
       </button>
       <button class="btn btn--sm" data-message-done="${esc(item.id)}">Done</button>
     </div>`).join('');
-  const since = cursor
-    ? ` since ${new Date(cursor).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
-    : '';
   const node = el(`<div class="queue">
       <div class="queue__head">
-        <div class="queue__h"><span class="queue__signal" aria-hidden="true">✦</span>Done and messages</div>
-        <span class="queue__count">${done.length} done${since} · ${messages.length} message${messages.length === 1 ? '' : 's'}</span>
+        <div class="queue__h">Done &amp; messages</div>
+        <span class="queue__count">${done.length} done · ${messages.length} message${messages.length === 1 ? '' : 's'}</span>
         ${done.length ? '<button class="btn btn--sm" data-clear-done>Clear done cards</button>' : ''}
       </div>
       ${done.length ? `<div class="queue__section"><div class="queue__label">Completed</div>${doneRows}</div>` : ''}

@@ -226,7 +226,7 @@ export function serve(store, port = 7878, open = false) {
       if (req.method === 'GET' && url.pathname === '/api/messages') {
         return send(res, 200, db.listMessages(store.load(), {
           cardId: url.searchParams.get('card') || undefined,
-          status: url.searchParams.has('status') ? url.searchParams.get('status') : 'open',
+          status: url.searchParams.get('open') === '1' ? 'open' : null,
         }));
       }
       if (req.method === 'GET' && url.pathname === '/api/stream') {
