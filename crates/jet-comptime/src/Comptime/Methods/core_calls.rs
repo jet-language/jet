@@ -2120,9 +2120,45 @@ pub(in super::super) fn apply_regex_method(
         "split_limit" => regex_split_limit(call_args, span),
         "replace" => regex_replace(call_args, span, false),
         "replace_all" => regex_replace(call_args, span, true),
+        "replace_all_with" => {
+            return Some(Err(unsupported(
+                "regex.replace_all_with callback outside the TIR evaluator",
+                span,
+            )));
+        }
         "match" => regex_match(call_args, span),
         _ => return None,
     })
+}
+
+pub fn eval_regex_replace_all_with(
+    recv: &CtValue,
+    args: &[CtValue],
+    span: Span,
+    invoke: &mut impl FnMut(CtValue, Vec<CtValue>) -> Result<CtValue, Diagnostic>,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if !matches!(
+        recv,
+        CtValue::Struct { type_name, .. } if type_name == "__JetRegex"
+    ) {
+        return None;
+    }
+    Some((|| {
+        let re = regex_pattern(std::slice::from_ref(recv), span)?;
+        let text = as_string(
+            args.first()
+                .ok_or_else(|| unsupported("regex.replace_all_with: missing text argument", span))?,
+            span,
+        )?;
+        let callback = args.get(1).ok_or_else(|| {
+            unsupported("regex.replace_all_with: missing callback argument", span)
+        })?;
+        let replaced = re.replace_all_with(text, |found| {
+            let value = invoke(callback.clone(), vec![regex_match_value(text, found)])?;
+            Ok::<String, Diagnostic>(as_string(&value, span)?.to_string())
+        })?;
+        Ok(CtValue::Str(replaced))
+    })())
 }
 
 fn regex_pattern(
@@ -2289,9 +2325,39 @@ fn regex_match_value(text: &str, found: super::super::RegexLite::MatchLite) -> C
             .unwrap_or_else(|| CtValue::None(crate::AST::Type::String))
         })
         .collect();
+    let spans = found
+        .groups
+        .iter()
+        .map(|item| {
+            item.map(|(start, end)| {
+                CtValue::Some(Box::new(CtValue::Struct {
+                    type_name: "__RegexSpan".to_string(),
+                    fields: vec![
+                        ("start".to_string(), CtValue::Int(start as i64)),
+                        ("end".to_string(), CtValue::Int(end as i64)),
+                    ],
+                }))
+            })
+            .unwrap_or_else(|| {
+                CtValue::None(crate::AST::Type::Named("__RegexSpan".to_string()))
+            })
+        })
+        .collect();
+    let names = found
+        .names
+        .into_iter()
+        .map(|name| {
+            name.map(|name| CtValue::Some(Box::new(CtValue::Str(name))))
+                .unwrap_or_else(|| CtValue::None(crate::AST::Type::String))
+        })
+        .collect();
     CtValue::Struct {
         type_name: "Match".to_string(),
-        fields: vec![("groups".to_string(), CtValue::List(groups))],
+        fields: vec![
+            ("groups".to_string(), CtValue::List(groups)),
+            ("spans".to_string(), CtValue::List(spans)),
+            ("names".to_string(), CtValue::List(names)),
+        ],
     }
 }
 

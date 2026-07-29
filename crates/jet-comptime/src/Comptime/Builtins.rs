@@ -1146,19 +1146,83 @@ pub fn apply_method(
             }
             Ok(CtValue::Bool(false))
         }
-        (CtValue::Struct { type_name, fields }, "group") if type_name == "Match" => {
-            let idx = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-            let groups = fields
-                .iter()
-                .find(|(n, _)| n == "groups")
-                .and_then(|(_, v)| match v {
-                    CtValue::List(xs) => Some(xs),
-                    _ => None,
-                });
-            Ok(match groups.and_then(|g| g.get(idx as usize)) {
-                Some(v) => v.clone(),
-                None => CtValue::None(crate::AST::Type::String),
-            })
+        (CtValue::Struct { type_name, fields }, method)
+            if type_name == "Match"
+                && matches!(
+                    method,
+                    "group" | "name" | "start" | "end" | "group_start" | "group_end"
+                ) =>
+        {
+            let list_field = |name: &str| {
+                fields
+                    .iter()
+                    .find(|(field, _)| field == name)
+                    .and_then(|(_, value)| match value {
+                        CtValue::List(items) => Some(items.as_slice()),
+                        _ => None,
+                    })
+            };
+            let index = || {
+                as_int(args.first().unwrap_or(&CtValue::Int(0)), span)
+                    .ok()
+                    .and_then(|value| usize::try_from(value).ok())
+            };
+            let span_value = |index: usize, field: &str| {
+                list_field("spans")
+                    .and_then(|spans| spans.get(index))
+                    .and_then(|value| match value {
+                        CtValue::Some(value) => Some(value.as_ref()),
+                        _ => None,
+                    })
+                    .and_then(|value| match value {
+                        CtValue::Struct { fields, .. } => fields
+                            .iter()
+                            .find_map(|(name, value)| (name == field).then_some(value)),
+                        _ => None,
+                    })
+                    .and_then(|value| match value {
+                        CtValue::Int(value) => Some(*value),
+                        _ => None,
+                    })
+            };
+            match method {
+                "group" => Ok(index()
+                    .and_then(|index| list_field("groups")?.get(index).cloned())
+                    .unwrap_or_else(|| CtValue::None(crate::AST::Type::String))),
+                "name" => {
+                    let name = as_string(
+                        args.first()
+                            .ok_or_else(|| unsupported("Match.name argument", span))?,
+                        span,
+                    )?;
+                    let found = list_field("names")
+                        .and_then(|names| {
+                            names.iter().position(|value| {
+                                matches!(
+                                    value,
+                                    CtValue::Some(value)
+                                        if matches!(value.as_ref(), CtValue::Str(item) if item == name)
+                                )
+                            })
+                        })
+                        .and_then(|index| list_field("groups")?.get(index).cloned());
+                    Ok(found.unwrap_or_else(|| CtValue::None(crate::AST::Type::String)))
+                }
+                "start" => Ok(CtValue::Int(span_value(0, "start").unwrap_or(-1))),
+                "end" => Ok(CtValue::Int(span_value(0, "end").unwrap_or(-1))),
+                "group_start" | "group_end" => {
+                    let field = if method == "group_start" {
+                        "start"
+                    } else {
+                        "end"
+                    };
+                    Ok(index()
+                        .and_then(|index| span_value(index, field))
+                        .map(|value| CtValue::Some(Box::new(CtValue::Int(value))))
+                        .unwrap_or_else(|| CtValue::None(crate::AST::Type::Int)))
+                }
+                _ => unreachable!("guarded Match method"),
+            }
         }
         (CtValue::Enum { type_name, variant, .. }, method)
             if type_name == "Loadable"

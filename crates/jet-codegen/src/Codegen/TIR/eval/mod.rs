@@ -7,6 +7,7 @@ mod data_calls;
 mod event_ops;
 mod exprs;
 mod handles;
+mod regex_ops;
 mod stmts;
 
 use std::cell::Cell;

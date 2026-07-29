@@ -1070,6 +1070,11 @@ impl<'a> EvalCtx<'a> {
                     }
                     _ => {}
                 }
+                if let crate::Codegen::TIR::THandleOp::RegexMethod { method, .. } = op {
+                    if method == "replace_all_with" {
+                        return self.eval_regex_replace_all_with(&r, &argv);
+                    }
+                }
                 if matches!(
                     op,
                     crate::Codegen::TIR::THandleOp::ExpiringMethod { .. }

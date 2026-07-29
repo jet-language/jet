@@ -2,6 +2,7 @@
 pub(super) struct RegexLite {
     root: Node,
     groups: usize,
+    names: Vec<Option<String>>,
 }
 
 #[derive(Clone)]
@@ -68,6 +69,7 @@ pub(super) struct MatchLite {
     pub(super) start: usize,
     pub(super) end: usize,
     pub(super) groups: Vec<Option<(usize, usize)>>,
+    pub(super) names: Vec<Option<String>>,
 }
 
 impl RegexLite {
@@ -77,6 +79,7 @@ impl RegexLite {
             chars: pattern.chars().collect(),
             pos: 0,
             groups: 0,
+            names: vec![None],
         };
         let root = parser.parse_alt(None)?;
         if parser.pos != parser.chars.len() {
@@ -85,6 +88,7 @@ impl RegexLite {
         Ok(Self {
             root,
             groups: parser.groups,
+            names: parser.names,
         })
     }
 
@@ -149,11 +153,12 @@ impl RegexLite {
         let Some(found) = self.find(text) else {
             return text.to_string();
         };
+        let next = next_search_pos(text, found.start, found.end);
         format!(
             "{}{}{}",
             &text[..found.start],
-            repl,
-            &text[found.end..]
+            expand_replacement(repl, text, &found),
+            &text[next.min(text.len())..]
         )
     }
 
@@ -165,11 +170,31 @@ impl RegexLite {
                 break;
             };
             out.push_str(&text[pos..m.start]);
-            out.push_str(repl);
+            out.push_str(&expand_replacement(repl, text, &m));
             pos = next_search_pos(text, m.start, m.end);
         }
         out.push_str(&text[pos.min(text.len())..]);
         out
+    }
+
+    pub(super) fn replace_all_with<E>(
+        &self,
+        text: &str,
+        mut replace: impl FnMut(MatchLite) -> Result<String, E>,
+    ) -> Result<String, E> {
+        let mut out = String::new();
+        let mut pos = 0;
+        while pos <= text.len() {
+            let Some(found) = self.find_from(text, pos) else {
+                break;
+            };
+            out.push_str(&text[pos..found.start]);
+            let next = next_search_pos(text, found.start, found.end);
+            out.push_str(&replace(found)?);
+            pos = next;
+        }
+        out.push_str(&text[pos.min(text.len())..]);
+        Ok(out)
     }
 
     fn find_from(&self, text: &str, start: usize) -> Option<MatchLite> {
@@ -185,6 +210,7 @@ impl RegexLite {
                     start: pos,
                     end: found.pos,
                     groups: found.caps,
+                    names: self.names.clone(),
                 });
             };
         }
@@ -196,6 +222,7 @@ struct Parser {
     chars: Vec<char>,
     pos: usize,
     groups: usize,
+    names: Vec<Option<String>>,
 }
 
 impl Parser {
@@ -255,9 +282,10 @@ impl Parser {
             return match self.bump() {
                 Some(':') => Ok(Atom::Group(None, Box::new(self.parse_alt(Some(')'))?))),
                 Some('<') => {
-                    self.parse_group_name()?;
+                    let name = self.parse_group_name()?;
                     self.groups += 1;
                     let idx = self.groups;
+                    self.names.push(Some(name));
                     Ok(Atom::Group(
                         Some(idx),
                         Box::new(self.parse_alt(Some(')'))?),
@@ -272,13 +300,14 @@ impl Parser {
         }
         self.groups += 1;
         let idx = self.groups;
+        self.names.push(None);
         Ok(Atom::Group(
             Some(idx),
             Box::new(self.parse_alt(Some(')'))?),
         ))
     }
 
-    fn parse_group_name(&mut self) -> Result<(), String> {
+    fn parse_group_name(&mut self) -> Result<String, String> {
         let start = self.pos;
         while self.peek().is_some_and(|ch| ch != '>') {
             self.pos += 1;
@@ -294,7 +323,7 @@ impl Parser {
         {
             return Err("named regex group needs an identifier".to_string());
         }
-        Ok(())
+        Ok(name)
     }
 
     fn parse_quant(&mut self) -> Result<Quant, String> {
@@ -625,6 +654,60 @@ fn class_matches(class: &Class, ch: char) -> bool {
     } else {
         yes
     }
+}
+
+fn expand_replacement(repl: &str, text: &str, found: &MatchLite) -> String {
+    let group = |index: usize| {
+        found
+            .groups
+            .get(index)
+            .copied()
+            .flatten()
+            .map(|(start, end)| &text[start..end])
+    };
+    let mut out = String::new();
+    let mut chars = repl.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '$' {
+            out.push(ch);
+            continue;
+        }
+        match chars.peek().copied() {
+            Some('$') => {
+                chars.next();
+                out.push('$');
+            }
+            Some('{') => {
+                chars.next();
+                let mut name = String::new();
+                for ch in chars.by_ref() {
+                    if ch == '}' {
+                        break;
+                    }
+                    name.push(ch);
+                }
+                if let Some(value) = found
+                    .names
+                    .iter()
+                    .position(|item| item.as_deref() == Some(name.as_str()))
+                    .and_then(group)
+                {
+                    out.push_str(value);
+                }
+            }
+            Some(ch) if ch.is_ascii_digit() => {
+                let mut number = String::new();
+                while chars.peek().is_some_and(|ch| ch.is_ascii_digit()) {
+                    number.push(chars.next().expect("peeked digit"));
+                }
+                if let Some(value) = number.parse::<usize>().ok().and_then(group) {
+                    out.push_str(value);
+                }
+            }
+            _ => out.push('$'),
+        }
+    }
+    out
 }
 
 fn escaped_literal(ch: char) -> char {
