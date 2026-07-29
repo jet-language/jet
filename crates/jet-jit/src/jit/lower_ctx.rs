@@ -8366,6 +8366,10 @@ impl LowerCtx<'_, '_> {
                         "read" if args.len() == 1 => {
                             (self.host.core.fs_read, vec![self.lower_expr(&args[0])?])
                         }
+                        "read_bytes" if args.len() == 1 => (
+                            self.host.core.fs_read_bytes,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
                         "write" if args.len() == 2 => (
                             self.host.core.fs_write,
                             vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
@@ -8876,6 +8880,10 @@ impl LowerCtx<'_, '_> {
                     let (host_id, arg_vals): (FuncId, Vec<Value>) = match method.as_str() {
                         "to_bytes" if args.len() == 1 && datatree_arg => (
                             self.host.encoding.cbor_to_bytes,
+                            vec![self.lower_expr(&args[0])?],
+                        ),
+                        "to_bytes_canonical" if args.len() == 1 && datatree_arg => (
+                            self.host.encoding.cbor_to_bytes_canonical,
                             vec![self.lower_expr(&args[0])?],
                         ),
                         "parse" if args.len() == 1 && bytes_arg && datatree_ok => {

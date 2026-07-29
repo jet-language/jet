@@ -1861,16 +1861,22 @@ pub(crate) fn expand_generic_module_aliases(
                 })
                 .collect();
             let mut source_values = HashMap::new();
-            for item in &module.items {
-                if let Item::Const(def) = item {
-                    if let Ok(value) = crate::Comptime::evaluate(
-                        &def.value,
-                        &funcs,
-                        &HashSet::new(),
-                        Path::new("."),
-                        &source_values,
-                    ) {
-                        source_values.insert(def.name.clone(), value);
+            if module
+                .items
+                .iter()
+                .any(|item| matches!(item, Item::GenericModule(_)))
+            {
+                for item in &module.items {
+                    if let Item::Const(def) = item {
+                        if let Ok(value) = crate::Comptime::evaluate(
+                            &def.value,
+                            &funcs,
+                            &HashSet::new(),
+                            Path::new("."),
+                            &source_values,
+                        ) {
+                            source_values.insert(def.name.clone(), value);
+                        }
                     }
                 }
             }
@@ -1951,7 +1957,16 @@ pub(crate) fn expand_generic_module_aliases(
         traits.register_items(&module.items,&mut Vec::new());
         let enums:HashMap<String,bool>=module.items.iter().filter_map(|item|if let Item::Enum(def)=item{Some((def.name.clone(),def.variants.iter().all(|v|matches!(v.payload,VariantPayload::Unit))))}else{None}).collect();
         let funcs:HashMap<String,&Func>=module.items.iter().filter_map(|item|if let Item::Func(f)=item{Some((f.name.clone(),f))}else{None}).collect();
-        let mut globals:HashMap<String,crate::AST::CtValue>=HashMap::new();for item in &module.items{if let Item::Const(c)=item{if let Ok(value)=crate::Comptime::evaluate(&c.value,&funcs,&HashSet::new(),Path::new("."),&globals){globals.insert(c.name.clone(),value);}}}
+        let mut globals:HashMap<String,crate::AST::CtValue>=HashMap::new();
+        if module.items.iter().any(|item| matches!(item, Item::ModuleAlias(_))) {
+            for item in &module.items {
+                if let Item::Const(c)=item {
+                    if let Ok(value)=crate::Comptime::evaluate(&c.value,&funcs,&HashSet::new(),Path::new("."),&globals) {
+                        globals.insert(c.name.clone(),value);
+                    }
+                }
+            }
+        }
         // Parameter declarations were resolved once in the immutable prepass.
         // Reuse that result locally so invalid declarations emit one diagnostic.
         let mut templates = template_snapshots[module_idx].clone();

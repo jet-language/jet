@@ -156,15 +156,15 @@ const MODULE_CASES: &[&str] = &[
     // by every builtin struct type, not specific to `core.data` — see
     // `UrlLite.rs`'s note) — covered instead by
     // `tests/repl.rs::repl_core_data_dispatch`.
-    "use core.data as data\ncomptime comptime_value = data.sum([1.0, 2.0, 3.5])\n\nfn run() {\n    r :: data.sum([1.0, 2.0, 3.5])\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\ncomptime comptime_value = data.mean([1.0, 2.0, 3.0, 4.0])\n\nfn run() {\n    r :: data.mean([1.0, 2.0, 3.0, 4.0])\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\ncomptime comptime_value = data.median([5.0, 1.0, 3.0, 2.0])\n\nfn run() {\n    r :: data.median([5.0, 1.0, 3.0, 2.0])\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\ncomptime comptime_value = data.variance([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])\n\nfn run() {\n    r :: data.variance([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\ncomptime comptime_value = data.stddev([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])\n\nfn run() {\n    r :: data.stddev([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0])\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\ncomptime comptime_value = data.quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.25)\n\nfn run() {\n    r :: data.quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.25)\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\ncomptime comptime_value = data.rolling_mean([1.0, 2.0, 3.0, 4.0], 2)\n\nfn run() {\n    r :: data.rolling_mean([1.0, 2.0, 3.0, 4.0], 2)\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\ncomptime comptime_value = data.min([3.0, -1.0, 5.0])\n\nfn run() {\n    r :: data.min([3.0, -1.0, 5.0])\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
-    "use core.data as data\ncomptime comptime_value = data.max([3.0, -1.0, 5.0])\n\nfn run() {\n    r :: data.max([3.0, -1.0, 5.0])\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.sum([1.0, 2.0, 3.5]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.sum([1.0, 2.0, 3.5]) ?? panic(\"data\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.mean([1.0, 2.0, 3.0, 4.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.mean([1.0, 2.0, 3.0, 4.0]) ?? panic(\"data\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.median([5.0, 1.0, 3.0, 2.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.median([5.0, 1.0, 3.0, 2.0]) ?? panic(\"data\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.variance([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.variance([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]) ?? panic(\"data\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.stddev([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.stddev([2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]) ?? panic(\"data\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.25) ?? panic(\"data\")\n\nfn run() {\n    r :: data.quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.25) ?? panic(\"data\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.rolling_mean([1.0, 2.0, 3.0, 4.0], 2) ?? panic(\"data\")\n\nfn run() {\n    r :: data.rolling_mean([1.0, 2.0, 3.0, 4.0], 2) ?? panic(\"data\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.min([3.0, -1.0, 5.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.min([3.0, -1.0, 5.0]) ?? panic(\"data\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
+    "use core.data as data\ncomptime comptime_value = data.max([3.0, -1.0, 5.0]) ?? panic(\"data\")\n\nfn run() {\n    r :: data.max([3.0, -1.0, 5.0]) ?? panic(\"data\")\n    print(\"{comptime_value}\")\n    print(\"{r}\")\n}\n",
     // card #392 pass 4: `core.encoding.{csv,toml,yaml,xml,cbor,jsonl}` +
     // `core.encoding.json.{canonical,events}`, ported verbatim from AOT's
     // `jet_ring_csv_*`/`toml`/`yaml` mods/`jet_std_xml_*`/`jet_cbor_*`/
@@ -410,11 +410,24 @@ fn check_comptime_src(i: usize, label: &str, src: &str) {
     let (_, user_diags) = jet::Lexer::lex(src);
     assert!(user_diags.is_empty(), "invalid differential fixture: {user_diags:?}");
     let src = framed_comptime_src(src);
-    let compiled = match jet::Driver::compile_generated_src(
-        &src,
-        "comptime_diff.jet",
-        jet::Sema::CompileMode::Run,
-    ) {
+    // The comptime interpreter and sema both recurse over typed expressions.
+    // Libtest workers have much smaller stacks than the compiler process, so
+    // run this shared compile boundary with the same headroom as golden tests.
+    let compile = std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn_scoped(scope, || {
+                jet::Driver::compile_generated_src(
+                    &src,
+                    "comptime_diff.jet",
+                    jet::Sema::CompileMode::Run,
+                )
+            })
+            .expect("spawn comptime differential compiler")
+            .join()
+            .expect("comptime differential compiler panicked")
+    });
+    let compiled = match compile {
         Ok(c) => c,
         Err(diags) => panic!(
             "case {} `{}` failed the front end:\n{}",

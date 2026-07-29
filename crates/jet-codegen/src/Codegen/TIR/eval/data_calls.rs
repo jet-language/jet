@@ -199,6 +199,40 @@ impl<'a> EvalCtx<'a> {
                 };
                 self.eval_quantile(&values, q, checked)
             }
+            "rolling_mean" => {
+                let values = as_float_list(&self.eval_expr(&args[0], scope)?, span)?;
+                let width = match self.eval_expr(&args[1], scope)? {
+                    CtValue::Int(width) => width,
+                    _ => return Err(unsupported("rolling_mean width", span)),
+                };
+                if checked && width < 1 {
+                    return Ok(err(data_error(
+                        "InvalidArgument",
+                        "rolling_mean",
+                        "rolling width must be positive",
+                    )));
+                }
+                let value = apply_core_call(
+                    "core.data",
+                    "rolling_mean",
+                    vec![
+                        CtValue::List(
+                            values
+                                .into_iter()
+                                .map(|value| CtValue::Float(CtFloat::f64(value)))
+                                .collect(),
+                        ),
+                        CtValue::Int(width),
+                    ],
+                    span,
+                    self.repl_mode,
+                )?;
+                if checked {
+                    Ok(ok(value))
+                } else {
+                    Ok(value)
+                }
+            }
             "group_count" | "group_sum" | "group_mean" => {
                 let rows = match self.eval_expr(&args[0], scope)? {
                     CtValue::List(xs) => xs,
@@ -358,7 +392,7 @@ impl<'a> EvalCtx<'a> {
             }
             "table" | "rows" | "series" | "values" | "schema" | "missing_count" | "lazy"
             | "plan" | "lazy_filter" | "lazy_sort_by" | "collect" | "sort_by" | "inner_join"
-            | "left_join" | "describe" | "rolling_mean" | "csv_reader"
+            | "left_join" | "describe" | "csv_reader"
             | "json_reader" => Err(unsupported(
                 &format!("`core.data.{method}()` at comptime (impure tier)"),
                 span,

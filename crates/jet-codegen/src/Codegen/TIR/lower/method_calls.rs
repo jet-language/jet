@@ -1193,6 +1193,14 @@ pub(crate) fn lower_method_call(
                         "volatile_write" => unit_type(),
                         _ => core_call_return_ty(&module, method),
                     }
+                } else if module == "core.encoding.cbor"
+                    && method == "decode"
+                    && !type_args.is_empty()
+                {
+                    Type::Result {
+                        ok: Box::new(type_args[0].clone()),
+                        err: Box::new(Type::Named("CBORError".to_string())),
+                    }
                 } else if crate::Sema::is_polymorphic_core_special(&module, method) {
                     resolved_ret.cloned().unwrap_or_else(unit_type)
                 } else if module == "core.event"

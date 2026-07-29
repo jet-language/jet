@@ -436,6 +436,14 @@ extern "C" fn jet_jit_fs_read(path: i64) -> i64 {
     }
 }
 
+extern "C" fn jet_jit_fs_read_bytes(path: i64) -> i64 {
+    let p = clone_heap_string(path);
+    match std::fs::read(&p) {
+        Ok(bytes) => result_ok_bits(alloc_byte_list(&bytes) as u64),
+        Err(e) => result_err_msg(&format!("read_bytes {p}: {e}")),
+    }
+}
+
 extern "C" fn jet_jit_fs_write(path: i64, text: i64) -> i64 {
     let p = clone_heap_string(path);
     let t = clone_heap_string(text);
@@ -1438,6 +1446,7 @@ pub(crate) struct CoreHostFns {
     pub log_info_fields: cranelift_module::FuncId,
     pub fs_exists: cranelift_module::FuncId,
     pub fs_read: cranelift_module::FuncId,
+    pub fs_read_bytes: cranelift_module::FuncId,
     pub fs_write: cranelift_module::FuncId,
     pub fs_create_dir: cranelift_module::FuncId,
     pub fs_list_dir: cranelift_module::FuncId,
@@ -1535,6 +1544,7 @@ pub(crate) fn register_core_host_symbols(builder: &mut cranelift_jit::JITBuilder
     );
     builder.symbol("jet_jit_fs_exists", jet_jit_fs_exists as *const u8);
     builder.symbol("jet_jit_fs_read", jet_jit_fs_read as *const u8);
+    builder.symbol("jet_jit_fs_read_bytes", jet_jit_fs_read_bytes as *const u8);
     builder.symbol("jet_jit_fs_write", jet_jit_fs_write as *const u8);
     builder.symbol("jet_jit_fs_create_dir", jet_jit_fs_create_dir as *const u8);
     builder.symbol("jet_jit_fs_list_dir", jet_jit_fs_list_dir as *const u8);
@@ -1707,6 +1717,7 @@ pub(crate) fn declare_core_host_fns(
         log_info_fields: import("jet_jit_log_info_fields", &sig_void_i64_i64)?,
         fs_exists: import("jet_jit_fs_exists", &sig_i64_i8)?,
         fs_read: import("jet_jit_fs_read", &sig_unary_i64)?,
+        fs_read_bytes: import("jet_jit_fs_read_bytes", &sig_unary_i64)?,
         fs_write: import("jet_jit_fs_write", &sig_i64_i64_i64)?,
         fs_create_dir: import("jet_jit_fs_create_dir", &sig_unary_i64)?,
         fs_list_dir: import("jet_jit_fs_list_dir", &sig_unary_i64)?,

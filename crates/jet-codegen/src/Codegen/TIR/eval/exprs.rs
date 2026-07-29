@@ -594,6 +594,43 @@ impl<'a> EvalCtx<'a> {
                         })),
                     });
                 }
+                if module == "core.encoding.cbor" && method == "decode" {
+                    let Type::Result { ok, .. } = &expr.ty else {
+                        return Err(unsupported(
+                            "core.encoding.cbor.decode resolved return type",
+                            *source_span,
+                        ));
+                    };
+                    let bytes = match argv.first() {
+                        Some(CtValue::Bytes(bytes)) => bytes.clone(),
+                        Some(CtValue::List(values)) => values
+                            .iter()
+                            .map(|value| match value {
+                                CtValue::Int(byte) => u8::try_from(*byte).map_err(|_| {
+                                    unsupported(
+                                        "core.encoding.cbor.decode byte argument",
+                                        *source_span,
+                                    )
+                                }),
+                                _ => Err(unsupported(
+                                    "core.encoding.cbor.decode byte argument",
+                                    *source_span,
+                                )),
+                            })
+                            .collect::<Result<Vec<_>, _>>()?,
+                        _ => {
+                            return Err(unsupported(
+                                "core.encoding.cbor.decode byte argument",
+                                *source_span,
+                            ))
+                        }
+                    };
+                    return Ok(crate::Comptime::cbor_decode_typed_for_tir(
+                        &bytes,
+                        argv.get(1),
+                        ok,
+                    ));
+                }
                 if module == "jet.crypto"
                     && method == "__signing_generate"
                     && argv.is_empty()

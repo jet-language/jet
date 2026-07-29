@@ -1168,17 +1168,80 @@ fn cbor_push_len(out: &mut Vec<u8>, major: u8, n: u64) {
     }
 }
 
-fn cbor_encode_val(v: &json_rt::DataTree, out: &mut Vec<u8>) -> Result<(), String> {
+fn cbor_f32_to_half_bits(value: f32) -> u16 {
+    let bits = value.to_bits();
+    let sign = ((bits >> 16) & 0x8000) as u16;
+    let exp = ((bits >> 23) & 255) as i32;
+    let frac = bits & 0x7fffff;
+    if exp == 255 {
+        return sign | 0x7c00 | if frac == 0 { 0 } else { 0x0200 };
+    }
+    let half_exp = exp - 127 + 15;
+    if half_exp >= 31 {
+        return sign | 0x7c00;
+    }
+    if half_exp <= 0 {
+        if half_exp < -10 {
+            return sign;
+        }
+        let mant = frac | 0x800000;
+        let shift = (14 - half_exp) as u32;
+        let mut rounded = mant >> shift;
+        let rem = mant & ((1u32 << shift) - 1);
+        let halfway = 1u32 << (shift - 1);
+        if rem > halfway || (rem == halfway && rounded & 1 != 0) {
+            rounded += 1;
+        }
+        return sign | rounded as u16;
+    }
+    let mut rounded = frac >> 13;
+    let rem = frac & 0x1fff;
+    if rem > 0x1000 || (rem == 0x1000 && rounded & 1 != 0) {
+        rounded += 1;
+    }
+    if rounded == 0x0400 {
+        return sign | (((half_exp + 1) as u16) << 10);
+    }
+    sign | ((half_exp as u16) << 10) | rounded as u16
+}
+
+fn cbor_half_exact(value: f64) -> Option<u16> {
+    if value.is_nan() {
+        return Some(0x7e00);
+    }
+    let narrowed = value as f32;
+    if (narrowed as f64).to_bits() != value.to_bits() {
+        return None;
+    }
+    let bits = cbor_f32_to_half_bits(narrowed);
+    (cbor_half_to_f64(bits).to_bits() == value.to_bits()).then_some(bits)
+}
+
+fn cbor_push_preferred_float(out: &mut Vec<u8>, value: f64) {
+    if let Some(bits) = cbor_half_exact(value) {
+        out.push(0xf9);
+        out.extend_from_slice(&bits.to_be_bytes());
+    } else if ((value as f32) as f64).to_bits() == value.to_bits() {
+        out.push(0xfa);
+        out.extend_from_slice(&(value as f32).to_bits().to_be_bytes());
+    } else {
+        out.push(0xfb);
+        out.extend_from_slice(&value.to_bits().to_be_bytes());
+    }
+}
+
+fn cbor_encode_val(
+    v: &json_rt::DataTree,
+    out: &mut Vec<u8>,
+    canonical: bool,
+) -> Result<(), String> {
     match v {
         json_rt::DataTree::Null => out.push(0xf6),
         json_rt::DataTree::Bool(false) => out.push(0xf4),
         json_rt::DataTree::Bool(true) => out.push(0xf5),
         json_rt::DataTree::Int(n) if *n >= 0 => cbor_push_len(out, 0, *n as u64),
         json_rt::DataTree::Int(n) => cbor_push_len(out, 1, (-1 - *n) as u64),
-        json_rt::DataTree::Float(f) => {
-            out.push((7 << 5) | 27);
-            out.extend_from_slice(&f.to_bits().to_be_bytes());
-        }
+        json_rt::DataTree::Float(f) => cbor_push_preferred_float(out, *f),
         json_rt::DataTree::Text(s) => {
             cbor_push_len(out, 3, s.len() as u64);
             out.extend_from_slice(s.as_bytes());
@@ -1190,14 +1253,32 @@ fn cbor_encode_val(v: &json_rt::DataTree, out: &mut Vec<u8>) -> Result<(), Strin
         json_rt::DataTree::Array(xs) => {
             cbor_push_len(out, 4, xs.len() as u64);
             for x in xs {
-                cbor_encode_val(x, out)?;
+                cbor_encode_val(x, out, canonical)?;
             }
         }
         json_rt::DataTree::Object(es) => {
-            cbor_push_len(out, 5, es.len() as u64);
+            let mut encoded = Vec::with_capacity(es.len());
             for (k, v) in es {
-                cbor_encode_val(&json_rt::DataTree::Text(k.clone()), out)?;
-                cbor_encode_val(v, out)?;
+                let mut key = Vec::new();
+                cbor_encode_val(
+                    &json_rt::DataTree::Text(k.clone()),
+                    &mut key,
+                    canonical,
+                )?;
+                let mut value = Vec::new();
+                cbor_encode_val(v, &mut value, canonical)?;
+                encoded.push((key, value));
+            }
+            if canonical {
+                encoded.sort_by(|a, b| a.0.cmp(&b.0));
+            }
+            if encoded.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+                return Err("duplicate encoded CBOR map key".to_string());
+            }
+            cbor_push_len(out, 5, encoded.len() as u64);
+            for (key, value) in encoded {
+                out.extend_from_slice(&key);
+                out.extend_from_slice(&value);
             }
         }
     }
@@ -1330,39 +1411,41 @@ fn cbor_decode_val(input: &[u8], i: &mut usize, depth: i64) -> Result<json_rt::D
 }
 
 fn cbor_half_to_f64(bits: u16) -> f64 {
-    let sign = (bits >> 15) & 1;
-    let exp = ((bits >> 10) & 0x1f) as i32;
-    let frac = (bits & 0x3ff) as u32;
-    let value = if exp == 0 {
+    let sign = ((bits >> 15) as u64) << 63;
+    let exp = (bits >> 10) & 31;
+    let frac = bits & 1023;
+    if exp == 0 {
         if frac == 0 {
-            0.0
-        } else {
-            (frac as f64) * f64::from_bits(0x3e20_0000_0000_0000) // 2^-24
+            return f64::from_bits(sign);
         }
+        let mut mant = frac as u64;
+        let mut exponent = -14i32;
+        while mant & 1024 == 0 {
+            mant <<= 1;
+            exponent -= 1;
+        }
+        mant &= 1023;
+        f64::from_bits(sign | (((exponent + 1023) as u64) << 52) | (mant << 42))
     } else if exp == 31 {
-        if frac == 0 {
-            f64::INFINITY
-        } else {
-            f64::NAN
-        }
+        f64::from_bits(sign | (0x7ffu64 << 52) | ((frac as u64) << 42))
     } else {
-        let fbits = ((sign as u64) << 63)
-            | (((exp - 15 + 1023) as u64) << 52)
-            | ((frac as u64) << 42);
-        f64::from_bits(fbits)
-    };
-    if sign != 0 && value != 0.0 {
-        -value
-    } else {
-        value
+        f64::from_bits(sign | (((exp as i32 - 15 + 1023) as u64) << 52) | ((frac as u64) << 42))
     }
 }
 
 extern "C" fn jet_jit_cbor_to_bytes(tree: i64) -> i64 {
+    jet_jit_cbor_to_bytes_impl(tree, false)
+}
+
+extern "C" fn jet_jit_cbor_to_bytes_canonical(tree: i64) -> i64 {
+    jet_jit_cbor_to_bytes_impl(tree, true)
+}
+
+fn jet_jit_cbor_to_bytes_impl(tree: i64, canonical: bool) -> i64 {
     match read_datatree(tree) {
         Some(t) => {
             let mut out = Vec::new();
-            match cbor_encode_val(&t, &mut out) {
+            match cbor_encode_val(&t, &mut out, canonical) {
                 Ok(()) => result_ok_bits(alloc_byte_list(&out) as u64),
                 Err(e) => result_err_msg(&e),
             }
@@ -1615,6 +1698,7 @@ pub(crate) struct EncodingHostFns {
     pub xml_project: cranelift_module::FuncId,
     pub xml_project_bytes: cranelift_module::FuncId,
     pub cbor_to_bytes: cranelift_module::FuncId,
+    pub cbor_to_bytes_canonical: cranelift_module::FuncId,
     pub cbor_parse: cranelift_module::FuncId,
     pub csv_decode_trees: cranelift_module::FuncId,
     pub datatree_field: cranelift_module::FuncId,
@@ -1672,6 +1756,10 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
     builder.symbol("jet_jit_xml_project", jet_jit_xml_project as *const u8);
     builder.symbol("jet_jit_xml_project_bytes", jet_jit_xml_project_bytes as *const u8);
     builder.symbol("jet_jit_cbor_to_bytes", jet_jit_cbor_to_bytes as *const u8);
+    builder.symbol(
+        "jet_jit_cbor_to_bytes_canonical",
+        jet_jit_cbor_to_bytes_canonical as *const u8,
+    );
     builder.symbol("jet_jit_cbor_parse", jet_jit_cbor_parse as *const u8);
     builder.symbol("jet_jit_csv_decode_trees", jet_jit_csv_decode_trees as *const u8);
     builder.symbol("jet_jit_datatree_field", jet_jit_datatree_field as *const u8);
@@ -2025,6 +2113,7 @@ pub(crate) fn declare_encoding_host_fns(
         xml_project: import("jet_jit_xml_project", &sig_unary)?,
         xml_project_bytes: import("jet_jit_xml_project_bytes", &sig_unary)?,
         cbor_to_bytes: import("jet_jit_cbor_to_bytes", &sig_unary)?,
+        cbor_to_bytes_canonical: import("jet_jit_cbor_to_bytes_canonical", &sig_unary)?,
         cbor_parse: import("jet_jit_cbor_parse", &sig_unary)?,
         csv_decode_trees: import("jet_jit_csv_decode_trees", &sig_unary)?,
         datatree_field: import("jet_jit_datatree_field", &sig_binary)?,

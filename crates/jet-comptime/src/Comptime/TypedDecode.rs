@@ -308,6 +308,50 @@ fn decode_char(tree: &CtValue) -> Result<CtValue, CtValue> {
     }
 }
 
+/// Decode the closed primitive/container subset without an interpreter-owned
+/// struct registry. TIR core calls retain their resolved return type but not
+/// source turbofish syntax, so CBOR uses this same scalar/list walker instead
+/// of falling through to an untyped `DataTree`.
+pub(super) fn typed_decode_builtin_value(
+    ty: &Type,
+    tree: &CtValue,
+) -> Option<Result<CtValue, CtValue>> {
+    Some(match ty {
+        Type::Int => decode_int(tree),
+        Type::Float => decode_float(tree),
+        Type::Bool => decode_bool(tree),
+        Type::String => decode_string(tree),
+        Type::Char => decode_char(tree),
+        Type::Option(inner) => match variant_of(tree) {
+            Some(("Null", _)) => Ok(CtValue::None((**inner).clone())),
+            _ => typed_decode_builtin_value(inner, tree)?
+                .map(|value| CtValue::Some(Box::new(value))),
+        },
+        Type::List(inner) => match variant_of(tree) {
+            Some(("Array", Some(CtValue::List(items)))) => {
+                let mut out = Vec::with_capacity(items.len());
+                for (index, item) in items.iter().enumerate() {
+                    match typed_decode_builtin_value(inner, item)? {
+                        Ok(value) => out.push(value),
+                        Err(error) => {
+                            return Some(Err(decode_error_under(
+                                &format!("[{index}]"),
+                                error,
+                            )));
+                        }
+                    }
+                }
+                Ok(CtValue::List(out))
+            }
+            _ => Err(decode_error(format!(
+                "expected a list, found {}",
+                datatree_kind(tree)
+            ))),
+        },
+        _ => return None,
+    })
+}
+
 /// A reasonable zero value for a type with no `#[Default(expr)]` argument —
 /// mirrors what `Default::default()` would build for AOT's Rust field type.
 fn zero_value(ty: &Type) -> CtValue {
@@ -329,12 +373,10 @@ impl<'a> Interp<'a> {
     /// `decode_traced<T>`/`decode<T>` entry point (`typed_decode_top`) is what
     /// additionally tries the `#PublishedSchema` migration chain on failure.
     pub(super) fn typed_decode_value(&mut self, ty: &Type, tree: &CtValue, span: Span) -> Result<CtValue, CtValue> {
+        if let Some(decoded) = typed_decode_builtin_value(ty, tree) {
+            return decoded;
+        }
         match ty {
-            Type::Int => decode_int(tree),
-            Type::Float => decode_float(tree),
-            Type::Bool => decode_bool(tree),
-            Type::String => decode_string(tree),
-            Type::Char => decode_char(tree),
             Type::Option(inner) => match variant_of(tree) {
                 Some(("Null", _)) => Ok(CtValue::None((**inner).clone())),
                 _ => Ok(CtValue::Some(Box::new(self.typed_decode_value(inner, tree, span)?))),

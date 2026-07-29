@@ -293,6 +293,93 @@ pub fn cbor_encode_typed_for_tir(
     EncodingLite::cbor_encode_typed(value, Some(root_ty), struct_fields, canonical)
 }
 
+/// TIR core-call bridge for generic CBOR decode. TIR retains the resolved
+/// `Result<T, CBORError>` type, so use its `T` with the shared typed decoder
+/// instead of returning the parser's internal `DataTree` representation.
+pub fn cbor_decode_typed_for_tir(
+    bytes: &[u8],
+    options: Option<&CtValue>,
+    root_ty: &Type,
+) -> CtValue {
+    let options = match EncodingLite::cbor_options(options) {
+        Ok(options) => options,
+        Err(error) => {
+            return CtValue::ResErr(Box::new(EncodingLite::cbor_error_value(error)));
+        }
+    };
+    let tree = match EncodingLite::cbor_decode(bytes, &options, true) {
+        Ok(tree) => tree,
+        Err(error) => {
+            return CtValue::ResErr(Box::new(EncodingLite::cbor_error_value(error)));
+        }
+    };
+    match TypedDecode::typed_decode_builtin_value(root_ty, &tree) {
+        Some(Ok(value)) => CtValue::ResOk(Box::new(value)),
+        Some(Err(CtValue::Struct { fields, .. })) => {
+            let path = fields
+                .iter()
+                .find_map(|(name, value)| match (name.as_str(), value) {
+                    ("path", CtValue::Str(path)) => Some(path.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default();
+            let reason = fields
+                .iter()
+                .find_map(|(name, value)| match (name.as_str(), value) {
+                    ("reason", CtValue::Str(reason)) => Some(reason.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "CBOR value does not match requested type".to_string());
+            CtValue::ResErr(Box::new(CtValue::Struct {
+                type_name: "CBORError".to_string(),
+                fields: vec![
+                    (
+                        "kind".to_string(),
+                        CtValue::Enum {
+                            type_name: "CBORErrorKind".to_string(),
+                            variant: "TypeMismatch".to_string(),
+                            args: Vec::new(),
+                        },
+                    ),
+                    ("byte_offset".to_string(), CtValue::Int(0)),
+                    (
+                        "path".to_string(),
+                        CtValue::Str(if path.is_empty() {
+                            "$".to_string()
+                        } else {
+                            format!("${path}")
+                        }),
+                    ),
+                    ("reason".to_string(), CtValue::Str(reason)),
+                ],
+            }))
+        }
+        Some(Err(error)) => CtValue::ResErr(Box::new(error)),
+        None => CtValue::ResErr(Box::new(CtValue::Struct {
+            type_name: "CBORError".to_string(),
+            fields: vec![
+                (
+                    "kind".to_string(),
+                    CtValue::Enum {
+                        type_name: "CBORErrorKind".to_string(),
+                        variant: "Unsupported".to_string(),
+                        args: Vec::new(),
+                    },
+                ),
+                ("byte_offset".to_string(), CtValue::Int(0)),
+                ("path".to_string(), CtValue::Str("$".to_string())),
+                (
+                    "reason".to_string(),
+                    CtValue::Str(format!(
+                        "comptime can't decode `{}` yet",
+                        root_ty.name()
+                    )),
+                ),
+            ],
+        })),
+    }
+}
+
 /// TIR static-call bridge for the three qualified XML safe constructors.
 pub fn xml_safe_static_for_tir(path: &str, method: &str) -> Option<CtValue> {
     if method != "safe" {

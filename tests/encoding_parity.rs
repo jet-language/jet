@@ -81,6 +81,20 @@ enum DevBackend {
     DeoptInterp,
 }
 
+fn on_encoding_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
+    let result = std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn_scoped(scope, work)
+            .expect("spawn encoding parity worker")
+            .join()
+    });
+    match result {
+        Ok(value) => value,
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
 fn run_aot(jet_path: &Path, cwd: &Path) -> ProgramOutput {
     assert!(common::have_rustc(), "AOT parity requires rustc");
     let src = fs::read_to_string(jet_path).unwrap();
@@ -359,6 +373,10 @@ fn run() {
 
 #[test]
 fn whole_value_codecs_match_aot_comptime_and_default_dev() {
+    on_encoding_stack(whole_value_codecs_match_aot_comptime_and_default_dev_inner);
+}
+
+fn whole_value_codecs_match_aot_comptime_and_default_dev_inner() {
     if !common::have_rustc() {
         eprintln!("note: skipping whole-value encoding parity (need rustc)");
         return;
@@ -378,6 +396,10 @@ fn whole_value_codecs_match_aot_comptime_and_default_dev() {
 
 #[test]
 fn cbor_typed_schema_matches_comptime_default_dev_and_deopt() {
+    on_encoding_stack(cbor_typed_schema_matches_comptime_default_dev_and_deopt_inner);
+}
+
+fn cbor_typed_schema_matches_comptime_default_dev_and_deopt_inner() {
     if !common::have_rustc() {
         eprintln!("note: skipping typed CBOR schema parity (need rustc)");
         return;
@@ -458,6 +480,10 @@ fn run() {
 
 #[test]
 fn typed_csv_encode_matches_aot_and_default_dev() {
+    on_encoding_stack(typed_csv_encode_matches_aot_and_default_dev_inner);
+}
+
+fn typed_csv_encode_matches_aot_and_default_dev_inner() {
     if !common::have_rustc() {
         eprintln!("note: skipping typed CSV encode parity (need rustc)");
         return;
@@ -523,6 +549,10 @@ use core.files as files
 }
 
 fn assert_aot_dev_stream_parity(label: &str, source: &str) {
+    on_encoding_stack(|| assert_aot_dev_stream_parity_inner(label, source));
+}
+
+fn assert_aot_dev_stream_parity_inner(label: &str, source: &str) {
     if !common::have_rustc() {
         eprintln!("note: skipping {label} stream parity (need rustc)");
         return;
@@ -657,8 +687,14 @@ fn run() {
     output :: files.create(path) ?? panic("create")
     writer :: fmt.writer(^output) ?? panic("writer")
     writer.write(encoding.DataEvent.ObjectStart) ?? panic("start")
-    writer.write(encoding.DataEvent.Key("a")) ?? panic("key")
-    writer.write(encoding.DataEvent.Int(1)) ?? panic("int")
+    writer.write(encoding.DataEvent.Key("aa")) ?? panic("key aa")
+    writer.write(encoding.DataEvent.Int(1)) ?? panic("int aa")
+    writer.write(encoding.DataEvent.Key("b")) ?? panic("key b")
+    writer.write(encoding.DataEvent.Int(2)) ?? panic("int b")
+    writer.write(encoding.DataEvent.Key("f")) ?? panic("key f")
+    writer.write(encoding.DataEvent.Float(1.5)) ?? panic("float f")
+    writer.write(encoding.DataEvent.Key("z")) ?? panic("key z")
+    writer.write(encoding.DataEvent.Float(-0.0)) ?? panic("float z")
     writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
     writer.finish() ?? panic("finish")
     input :: files.open(path) ?? panic("open")
@@ -668,7 +704,12 @@ fn run() {
         Val(_) -> print(true)
         None -> print(false)
     }
-    whole := DataTree.Object(["a": DataTree.Int(1)])
+    whole := DataTree.Object([
+        "aa": DataTree.Int(1),
+        "b": DataTree.Int(2),
+        "f": DataTree.Float(1.5),
+        "z": DataTree.Float(-0.0),
+    ])
     print((fmt.to_bytes_canonical(whole) ?? panic("whole")) == (files.read_bytes(path) ?? panic("bytes")))
 }
 "#;
@@ -677,6 +718,10 @@ fn run() {
 
 #[test]
 fn collect_stream_and_unfold_whole_share_canonical_law() {
+    on_encoding_stack(collect_stream_and_unfold_whole_share_canonical_law_inner);
+}
+
+fn collect_stream_and_unfold_whole_share_canonical_law_inner() {
     if !common::have_rustc() {
         eprintln!("note: skipping collect/unfold parity (need rustc)");
         return;
@@ -755,6 +800,10 @@ fn comptime_rejects_file_backed_streams_at_named_boundary() {
 
 #[test]
 fn default_dev_encoding_probes_record_backend_without_silent_fallback() {
+    on_encoding_stack(default_dev_encoding_probes_record_backend_without_silent_fallback_inner);
+}
+
+fn default_dev_encoding_probes_record_backend_without_silent_fallback_inner() {
     if !common::have_rustc() {
         eprintln!("note: skipping backend attribution probe (need rustc)");
         return;
@@ -801,6 +850,10 @@ fn default_dev_encoding_probes_record_backend_without_silent_fallback() {
 
 #[test]
 fn malformed_limits_and_terminal_errors_match_across_applicable_tiers() {
+    on_encoding_stack(malformed_limits_and_terminal_errors_match_across_applicable_tiers_inner);
+}
+
+fn malformed_limits_and_terminal_errors_match_across_applicable_tiers_inner() {
     if !common::have_rustc() {
         eprintln!("note: skipping differential hostile parity (need rustc)");
         return;
