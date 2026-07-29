@@ -268,11 +268,11 @@ struct EvalRuntime<'a> {
 
 struct EvalTask {
     completion: mpsc::Receiver<EvalTaskCompletion>,
+    completion_order: Arc<OnceLock<u64>>,
     cancel: Arc<AtomicBool>,
 }
 
 struct EvalTaskCompletion {
-    order: u64,
     result: Result<CtValue, Diagnostic>,
 }
 
@@ -280,7 +280,72 @@ struct EvalTaskJob<'a> {
     lambda: &'a TJitSpawnLambda,
     captured: HashMap<String, CtValue>,
     completion: mpsc::SyncSender<EvalTaskCompletion>,
+    completion_order: Arc<OnceLock<u64>>,
     cancel: Arc<AtomicBool>,
+}
+
+fn cancel_and_drain_eval_tasks(tasks: Vec<EvalTask>) {
+    for task in &tasks {
+        task.cancel.store(true, Ordering::Release);
+    }
+    for task in tasks {
+        let _ = task.completion.recv();
+    }
+}
+
+fn select_eval_tasks(
+    mut tasks: Vec<Option<EvalTask>>,
+    mode: crate::task_group::JetTaskSelectMode,
+    span: Span,
+    mut wait_check: impl FnMut() -> Result<(), Diagnostic>,
+) -> Result<Vec<CtValue>, Diagnostic> {
+    let mut pending = std::iter::repeat_with(|| None)
+        .take(tasks.len())
+        .collect::<Vec<Option<EvalTaskCompletion>>>();
+    let mut policy = crate::task_group::JetTaskSelectPolicy::new(mode, tasks.len());
+    loop {
+        wait_check()?;
+        for (index, task) in tasks.iter().enumerate() {
+            let Some(task) = task else { continue };
+            if pending[index].is_some() {
+                continue;
+            }
+            match task.completion.try_recv() {
+                Ok(completion) => pending[index] = Some(completion),
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    return Err(unsupported("task completion", span));
+                }
+            }
+        }
+
+        let next = tasks
+            .iter()
+            .enumerate()
+            .filter_map(|(index, task)| {
+                task.as_ref()
+                    .and_then(|task| task.completion_order.get().copied())
+                    .map(|order| (order, index))
+            })
+            .min();
+        if let Some((order, index)) = next {
+            if let Some(completion) = pending[index].take() {
+                tasks[index] = None;
+                if let crate::task_group::JetTaskDecision::Finish(result) =
+                    policy.settle(order.into(), index, completion.result)
+                {
+                    for (index, completion) in pending.iter_mut().enumerate() {
+                        if completion.take().is_some() {
+                            tasks[index] = None;
+                        }
+                    }
+                    cancel_and_drain_eval_tasks(tasks.into_iter().flatten().collect());
+                    return result;
+                }
+            }
+        }
+        std::thread::yield_now();
+    }
 }
 
 #[derive(Clone)]
@@ -423,7 +488,10 @@ impl<'a> EvalCtx<'a> {
             .expect("evaluator runtime poisoned")
             .completion_order
             .fetch_add(1, Ordering::AcqRel);
-        let _ = job.completion.send(EvalTaskCompletion { order, result });
+        job.completion_order
+            .set(order)
+            .expect("task completion recorded twice");
+        let _ = job.completion.send(EvalTaskCompletion { result });
     }
 
     fn eval_spawn(
@@ -459,11 +527,13 @@ impl<'a> EvalCtx<'a> {
             .as_ref()
             .ok_or_else(|| unsupported("spawn outside a taskgroup", self.span()))?;
         let (completion, receiver) = mpsc::sync_channel(1);
+        let completion_order = Arc::new(OnceLock::new());
         let cancel = Arc::new(AtomicBool::new(false));
         let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
         let task = runtime.tasks.len();
         runtime.tasks.push(Some(EvalTask {
             completion: receiver,
+            completion_order: completion_order.clone(),
             cancel: cancel.clone(),
         }));
         if let Some(group) = group {
@@ -475,6 +545,7 @@ impl<'a> EvalCtx<'a> {
                 lambda: lam,
                 captured: child,
                 completion,
+                completion_order,
                 cancel,
             })
             .map_err(|_| unsupported("closed taskgroup", self.span()))?;
@@ -539,59 +610,27 @@ impl<'a> EvalCtx<'a> {
         result
     }
 
-    fn cancel_and_drain_tasks(tasks: Vec<EvalTask>) {
-        for task in &tasks {
-            task.cancel.store(true, Ordering::Release);
-        }
-        for task in tasks {
-            let _ = task.completion.recv();
-        }
-    }
-
     pub(super) fn task_select(
         &mut self,
         values: &[CtValue],
         mode: crate::task_group::JetTaskSelectMode,
     ) -> Result<CtValue, Diagnostic> {
-        let mut tasks = values
+        let tasks = values
             .iter()
             .map(|value| self.take_task_entry(value).map(Some))
             .collect::<Result<Vec<_>, _>>()?;
         if tasks.is_empty() {
             return Err(unsupported("empty taskgroup combinator", self.span()));
         }
-        let mut policy = crate::task_group::JetTaskSelectPolicy::new(mode, tasks.len());
-        loop {
-            self.task_wait_cancel_check()?;
-            let mut ready = Vec::new();
-            for (index, task) in tasks.iter().enumerate() {
-                let Some(task) = task else { continue };
-                match task.completion.try_recv() {
-                    Ok(completion) => ready.push((completion.order, index, completion.result)),
-                    Err(mpsc::TryRecvError::Empty) => {}
-                    Err(mpsc::TryRecvError::Disconnected) => {
-                        return Err(unsupported("task completion", self.span()));
-                    }
+        select_eval_tasks(tasks, mode, self.span(), || self.task_wait_cancel_check()).map(
+            |mut values| {
+                if matches!(mode, crate::task_group::JetTaskSelectMode::All) {
+                    CtValue::List(values)
+                } else {
+                    values.pop().expect("race/any result missing")
                 }
-            }
-            ready.sort_by_key(|(order, _, _)| *order);
-            if let Some((order, index, result)) = ready.into_iter().next() {
-                tasks[index] = None;
-                if let crate::task_group::JetTaskDecision::Finish(result) =
-                    policy.settle(order.into(), index, result)
-                {
-                    Self::cancel_and_drain_tasks(tasks.into_iter().flatten().collect());
-                    return result.map(|mut values| {
-                        if matches!(mode, crate::task_group::JetTaskSelectMode::All) {
-                            CtValue::List(values)
-                        } else {
-                            values.pop().expect("race/any result missing")
-                        }
-                    });
-                }
-            }
-            std::thread::yield_now();
-        }
+            },
+        )
     }
 
     fn close_taskgroup(&mut self, index: usize) -> Result<(), Diagnostic> {
@@ -1435,4 +1474,58 @@ fn eval_block_hook(
         *target = std::mem::take(&mut *shared.lock().expect("evaluator sink poisoned"));
     }
     outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        mpsc, select_eval_tasks, unsupported, Arc, AtomicBool, CtValue, EvalTask,
+        EvalTaskCompletion, OnceLock, Span,
+    };
+    use crate::task_group::JetTaskSelectMode;
+
+    fn ready_task(
+        order: u64,
+        result: Result<CtValue, crate::Diagnostics::Diagnostic>,
+    ) -> EvalTask {
+        let (sender, completion) = mpsc::sync_channel(1);
+        let completion_order = Arc::new(OnceLock::new());
+        completion_order.set(order).unwrap();
+        sender.send(EvalTaskCompletion { result }).unwrap();
+        EvalTask {
+            completion,
+            completion_order,
+            cancel: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    #[test]
+    fn selection_keeps_every_already_ready_completion() {
+        let all = select_eval_tasks(
+            vec![
+                Some(ready_task(1, Ok(CtValue::Int(10)))),
+                Some(ready_task(0, Ok(CtValue::Int(20)))),
+            ],
+            JetTaskSelectMode::All,
+            Span::new(0, 0),
+            || Ok(()),
+        )
+        .unwrap();
+        assert_eq!(all, [CtValue::Int(10), CtValue::Int(20)]);
+
+        let race = select_eval_tasks(
+            vec![
+                Some(ready_task(
+                    0,
+                    Err(unsupported("first completion failed", Span::new(0, 0))),
+                )),
+                Some(ready_task(1, Ok(CtValue::Int(22)))),
+            ],
+            JetTaskSelectMode::Race,
+            Span::new(0, 0),
+            || Ok(()),
+        )
+        .unwrap();
+        assert_eq!(race, [CtValue::Int(22)]);
+    }
 }
