@@ -37140,6 +37140,74 @@
       "outcome": "A",
       "ratifiedAt": "2026-07-26",
       "retiredAt": "2026-07-29T00:01:23.814Z"
+    },
+    {
+      "id": "D-PROCESS-SESSION1",
+      "cardId": "c0ft6gme",
+      "group": "runtime",
+      "title": "Interactive sessions inside the one process model",
+      "gist": "Choose one process API with a simple terminal option and full expert control of sessions, streams, trees, limits, and native capabilities.",
+      "lesson": "Pipes carry bytes. Interactive programs often require a terminal and change their output when no terminal is present.\n\nUnix provides a pseudoterminal. Windows provides a pseudoconsole called ConPTY. Both need resize events, byte streams, signals, and complete process-tree cleanup.\n\nA beginner should request a terminal with one option. An expert needs encoding, raw mode, stream layout, limits, transcript policy, signal stages, and backend facts.\n\nThese are launch capabilities, not a second kind of process. The choice is whether `ProcessSpec` and `ProcessChild` remain the one lifecycle.",
+      "explainer": "",
+      "story": "Lea launches a debugger with `.terminal()`. Her test harness later fixes size, records a bounded transcript, sends an interrupt, and proves every descendant exited.",
+      "inWild": "child :: process.cmd([\"lldb\", app])\n  .terminal()\n  .spawn()?\n\nexpert :: process.cmd([\"lldb\", app])\n  .terminal(TerminalPolicy.{ size: .{ cols: 120, rows: 40 }, mode: .Raw })\n  .limits(.{ wall_time: 30.seconds, output: 8.mebibytes })\n  .spawn()?\nexpert.terminal.resize(160, 50)?",
+      "detail": "Adversarial pass: optional terminal operations can become null-like traps, platform APIs can leak, and drop can orphan grandchildren. The winner must expose a typed capability result and keep bytes lossless. Cancellation must bind to the complete tree. Unsupported limits must be known before use.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Progressive terminal capability on ProcessSpec",
+          "detail": "`.terminal()` selects safe portable defaults. Passing `TerminalPolicy` exposes size, raw mode, encoding, stream layout, transcript, signals, and limits. The returned child carries a typed terminal handle only when requested. Process-tree lifecycle remains shared.",
+          "technical": "Unix PTY and Windows ConPTY lower to one terminal capability. Native handles stay behind explicit expert adapters. Limits return support facts during planning. Interrupt, terminate, kill, wait, timeout, cancellation, and drop target the contained tree.",
+          "code": "// beginner\nchild :: process.cmd(args).terminal().spawn()?\n\n// expert\nplan :: process.cmd(args)\n  .terminal(TerminalPolicy.{ size, mode: .Raw, transcript: .Bounded(8.mebibytes) })\n  .limits(limits)\nprint(plan.capabilities())"
+        },
+        {
+          "key": "B",
+          "name": "Separate TerminalSession launch API",
+          "detail": "A session type makes terminal use prominent and can specialize its methods. It repeats launch, environment, streams, limits, cancellation, cleanup, and child identity beside `core.process`.",
+          "code": "session :: terminal.Session.spawn(args, size)?\n\n// separate spawn and cancellation model"
+        },
+        {
+          "key": "C",
+          "name": "Platform-specific PTY and ConPTY APIs",
+          "detail": "Experts get every native control directly. Portable callers must branch, rebuild lifecycle rules, and understand host details before launching a debugger or REPL.",
+          "code": "session :: if windows { conpty.spawn(args)? } else { pty.spawn(args)? }"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "`os/exec` owns process lifecycle, while PTY packages sit outside it and can diverge on cleanup.",
+          "code": "cmd := exec.Command(\"sh\")\npty.Start(cmd)"
+        },
+        {
+          "lang": "Windows",
+          "note": "ConPTY supplies terminal streams and resize. The host still owns handles, the child tree, and shutdown order.",
+          "code": "CreatePseudoConsole(size, input, output, flags, &hpc)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps a one-call terminal for beginners and every expert control inside the same process, authority, stream, cancellation, and receipt model.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A sibling launch API repeats process lifecycle and creates drift."
+          },
+          {
+            "key": "C",
+            "reason": "Direct host APIs make portable callers rebuild the product layer."
+          }
+        ],
+        "tradeoff": "`ProcessSpec` and `ProcessChild` gain capability-aware terminal types. Non-terminal code does not see or pay for them."
+      },
+      "hybrid": null,
+      "checkInstructions": "If A wins, prove portable defaults, raw bytes, resize, backpressure, unsupported limits, and terminal handle typing. Also prove tree-wide signals, cancellation races, parent-drop cleanup, bounded transcripts, and native platform facts.",
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-07-25T20:26:58.208Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-07-26",
+      "retiredAt": "2026-07-29T16:42:22.332Z"
     }
   ],
   "cards": [
@@ -222654,6 +222722,1518 @@
       "action": "card.update",
       "ref": "c0b698t4",
       "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:14.475Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0kodh8n",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:14.773Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0cc6n6t",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:15.074Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0v25706",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:15.370Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0om2gxe",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:15.714Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c04ucjza",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:16.018Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0aatck7",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:16.415Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0uzefny",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:16.718Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0jsg61e",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:17.011Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0p1zm2a",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:17.317Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0u8cs6x",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:17.632Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c013gf7s",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:17.957Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0r7qh3o",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:18.256Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0xnjpjq",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:18.578Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c08en8ex",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:18.899Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0gqfgov",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:19.214Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0eli2fh",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:19.506Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c051psx0",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:19.803Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0ae8vxy",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:20.093Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0fp9sb3",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:20.387Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0kbw9dr",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:20.682Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0pfw87t",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:20.965Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0pfsrnc",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:21.263Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0a4dfud",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:21.550Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0fr9gl2",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:21.859Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0lm8b0h",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:22.189Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c6q02qhw",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:22.486Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0ttmmhd",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:22.807Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0zbbsy1",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:23.099Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c04phsyd",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:23.425Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0254elb",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:23.727Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0rec6tv",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:24.022Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0x0ur5x",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:24.312Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0gtqigv",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:24.609Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0ze7k0c",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:24.901Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c04s3toz",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:25.193Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0dhzann",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:25.499Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0hzhedp",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:25.798Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0ppv63p",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:26.089Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0lgsfwe",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:26.375Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c04du0jb",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:26.659Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0x1bnix",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:26.977Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0rvu7rz",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:27.255Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0fryjkw",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:27.578Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0kv3mji",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:27.890Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0txfavt",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:28.176Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c09hoi6l",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:28.485Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0qs8j6u",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:28.774Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0vb58xt",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:29.073Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c00xg57g",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:29.388Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c06791le",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:29.678Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0svh6c4",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:29.977Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0ufilnz",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:30.260Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0zu27v0",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:30.542Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0i0ho3h",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:30.859Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0x0y1os",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:31.154Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c02h4gry",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:31.476Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c05hqpe6",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:31.776Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0dwvyof",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:32.069Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c08ehiis",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:32.373Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c038yftr",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:32.684Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c07a88xb",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:32.994Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0cslm3b",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:33.281Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0i3v9v2",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:33.591Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0njkjtb",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:33.899Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0qqwe62",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:34.204Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0vquonw",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:34.507Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c013frzw",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:34.822Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0nlrm12",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:35.154Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0fdw5bn",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:35.479Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0kwrsnd",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:35.791Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0q1ctbc",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:36.108Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0v77oqp",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:36.392Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0m3ug2h",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:36.708Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0bf48a4",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:37.034Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0h2hvwv",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:37.325Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0mvpscb",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:37.614Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0kbaab0",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:37.894Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c06eyg3s",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:38.189Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0stzzp4",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:38.466Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0a6y94o",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:38.787Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0fltx8v",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:39.094Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0tfsrts",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:39.408Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0lc8k7l",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:39.706Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0ocarv7",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:40.027Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0cyg5be",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:40.315Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0fzoku6",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:40.635Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c00307he",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:40.932Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0wbf3js",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:41.259Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0zljh8e",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:41.573Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c054l5zl",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:41.889Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0898o9k",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:42.193Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c03lwujm",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:42.483Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0y9w2ur",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:42.786Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0dapzh5",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:43.083Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0ioe6u4",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:43.375Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0zpnwk9",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:43.690Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0s5vucj",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:44.005Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0xhxzyu",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:44.304Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0esw9hj",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:44.624Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0u0y3s6",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:44.950Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0pvrl7q",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:45.325Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0v5rsny",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:45.692Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0yl88cz",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:46.007Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0ewd6kd",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:46.303Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0nc6a15",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:46.595Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0snu52d",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:46.922Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0ycigaw",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:47.225Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0sad0nq",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:47.539Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0ly7q8a",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:47.858Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0rx4dw2",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:48.152Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0xuaz2s",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:48.502Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c03vf9gh",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:48.822Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0a8hfb2",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:49.158Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0zti5r8",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:49.468Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0obyhse",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:49.749Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0tooj7e",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:50.072Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "ccq07pav",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:50.395Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0lpd9yg",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:50.689Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c06tpil4",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:50.984Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0ci2vkk",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:51.322Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0hxk6vx",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:51.637Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0njm2a6",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:51.923Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0t85k0p",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:52.252Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0yhhgx9",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:52.538Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c044eho4",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:52.818Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c09sm31b",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:53.104Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0utsmdj",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:53.394Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0kne6oz",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:53.684Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0q9cyd5",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:53.986Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0vrgh9b",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:54.293Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0jsiyel",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:54.571Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0rzz168",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:54.860Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c00cnpnb",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:55.165Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0xty2bs",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:55.462Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c08olnwg",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:55.748Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0j678mt",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:56.076Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0p12web",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:56.383Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0bfcs5p",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:56.681Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0gutf6c",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:56.983Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0noev0x",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:57.286Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0syq510",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:57.572Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0y6j175",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:57.873Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c03jur1b",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:58.172Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c08s1yhj",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:58.470Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0e4xqox",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:58.783Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0jk3869",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:59.087Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0tpn16q",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:59.403Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0oqtn3i",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:59.684Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c09e6r36",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:55:59.974Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0h0fx3k",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:56:00.307Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0n7wnrd",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:56:00.596Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0t5hjqu",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T21:56:00.912Z",
+      "by": "tower-prep",
+      "action": "card.update",
+      "ref": "c0znklrg",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-28T22:00:31.613Z",
+      "by": "e3-bd-verify",
+      "action": "card.update",
+      "ref": "c07pjh6w",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:00:34.701Z",
+      "by": "e3-bd-verify",
+      "action": "card.release",
+      "ref": "c07pjh6w",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T22:00:45.345Z",
+      "by": "e3-bd-verify",
+      "action": "card.update",
+      "ref": "c0zxpxpq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:00:50.039Z",
+      "by": "e3-bd-verify",
+      "action": "card.release",
+      "ref": "c0zxpxpq",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T22:02:08.993Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.claim",
+      "ref": "c07pjh6w",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T22:02:09.246Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.claim",
+      "ref": "c0zxpxpq",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T22:02:09.503Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.update",
+      "ref": "c07pjh6w",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:02:09.771Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.update",
+      "ref": "c0zxpxpq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:02:59.823Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.claim",
+      "ref": "c07pjh6w",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T22:02:59.983Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.claim",
+      "ref": "c0zxpxpq",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T22:08:23.621Z",
+      "by": "e3-bd-1307",
+      "action": "card.criteria-meet",
+      "ref": "c08z8u2c",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-28T22:08:23.800Z",
+      "by": "e3-bd-1307",
+      "action": "card.update",
+      "ref": "c0q4t3oj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T22:08:33.728Z",
+      "by": "e3-bd-1307",
+      "action": "card.update",
+      "ref": "c08z8u2c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T22:08:33.925Z",
+      "by": "e3-bd-1307",
+      "action": "card.release",
+      "ref": "c08z8u2c",
+      "note": "[handoff] logged"
+    },
+    {
+      "at": "2026-07-28T22:10:24.802Z",
+      "by": "e3-bd-1302",
+      "action": "card.update",
+      "ref": "c0tsprkx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T22:10:25.068Z",
+      "by": "e3-bd-1302",
+      "action": "card.update",
+      "ref": "c0tsprkx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T22:10:25.334Z",
+      "by": "e3-bd-1302",
+      "action": "card.update",
+      "ref": "c0tsprkx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T22:10:25.594Z",
+      "by": "e3-bd-1302",
+      "action": "card.update",
+      "ref": "c0tsprkx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T22:10:25.856Z",
+      "by": "e3-bd-1302",
+      "action": "card.update",
+      "ref": "c0tsprkx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T22:10:34.040Z",
+      "by": "e3-bd-1302",
+      "action": "card.criteria-meet",
+      "ref": "c0tsprkx",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T22:10:34.278Z",
+      "by": "e3-bd-1302",
+      "action": "card.criteria-meet",
+      "ref": "c0tsprkx",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T22:10:34.514Z",
+      "by": "e3-bd-1302",
+      "action": "card.criteria-meet",
+      "ref": "c0tsprkx",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-28T22:10:34.774Z",
+      "by": "e3-bd-1302",
+      "action": "card.update",
+      "ref": "c0tsprkx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:12:25.163Z",
+      "by": "e3-bd-root-review",
+      "action": "card.criteria-verify",
+      "ref": "c0tsprkx",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T22:12:25.402Z",
+      "by": "e3-bd-root-review",
+      "action": "card.criteria-verify",
+      "ref": "c0tsprkx",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T22:12:25.643Z",
+      "by": "e3-bd-root-review",
+      "action": "card.criteria-verify",
+      "ref": "c0tsprkx",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-28T22:12:25.908Z",
+      "by": "e3-bd-root-review",
+      "action": "card.update",
+      "ref": "c0tsprkx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:12:58.039Z",
+      "by": "e3-bd-1291",
+      "action": "card.claim",
+      "ref": "c00cz0ap",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T22:12:58.306Z",
+      "by": "e3-bd-1291",
+      "action": "card.update",
+      "ref": "c00cz0ap",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:15:19.212Z",
+      "by": "e3-bd-1291",
+      "action": "card.criteria-meet",
+      "ref": "c00cz0ap",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T22:15:23.730Z",
+      "by": "e3-bd-1291",
+      "action": "card.update",
+      "ref": "c00cz0ap",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:16:04.452Z",
+      "by": "e3-bd-root-review",
+      "action": "card.criteria-meet",
+      "ref": "c00cz0ap",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T22:17:46.026Z",
+      "by": "e3-bd-1291-review",
+      "action": "card.update",
+      "ref": "c00cz0ap",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T22:18:17.162Z",
+      "by": "e3-bd-1291",
+      "action": "card.update",
+      "ref": "c00cz0ap",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:18:44.156Z",
+      "by": "cursor-parity",
+      "action": "card.update",
+      "ref": "c07z598z",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T22:19:06.413Z",
+      "by": "e3-bd-1291",
+      "action": "card.criteria-meet",
+      "ref": "c00cz0ap",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T22:19:13.740Z",
+      "by": "e3-bd-1291",
+      "action": "card.update",
+      "ref": "c00cz0ap",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:20:02.168Z",
+      "by": "e3-bd-1291-review",
+      "action": "card.criteria-verify",
+      "ref": "c00cz0ap",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T22:20:02.359Z",
+      "by": "e3-bd-1291-review",
+      "action": "card.criteria-verify",
+      "ref": "c00cz0ap",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-28T22:20:02.575Z",
+      "by": "e3-bd-1291-review",
+      "action": "card.update",
+      "ref": "c00cz0ap",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:23:51.646Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.claim",
+      "ref": "c07pjh6w",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T22:23:51.846Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.claim",
+      "ref": "c0zxpxpq",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T22:24:08.775Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.criteria-meet",
+      "ref": "c07pjh6w",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-28T22:24:08.979Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.criteria-meet",
+      "ref": "c07pjh6w",
+      "note": "#6"
+    },
+    {
+      "at": "2026-07-28T22:24:09.175Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.criteria-meet",
+      "ref": "c0zxpxpq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T22:24:17.400Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.update",
+      "ref": "c07pjh6w",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:24:17.618Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.update",
+      "ref": "c0zxpxpq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:27:20.650Z",
+      "by": "e3-bd-verify",
+      "action": "card.update",
+      "ref": "c07pjh6w",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:27:26.637Z",
+      "by": "e3-bd-verify",
+      "action": "card.update",
+      "ref": "c0zxpxpq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:27:58.140Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.update",
+      "ref": "c07pjh6w",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:27:58.427Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.update",
+      "ref": "c0zxpxpq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:29:58.811Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.claim",
+      "ref": "c07pjh6w",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T22:29:59.025Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.claim",
+      "ref": "c0zxpxpq",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T22:30:00.034Z",
+      "by": "cursor-parity",
+      "action": "card.update",
+      "ref": "c07z598z",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-28T22:30:10.889Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.criteria-meet",
+      "ref": "c07pjh6w",
+      "note": "#5"
+    },
+    {
+      "at": "2026-07-28T22:30:11.086Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.criteria-meet",
+      "ref": "c0zxpxpq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T22:30:11.316Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.update",
+      "ref": "c07pjh6w",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:30:11.546Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.update",
+      "ref": "c0zxpxpq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:36:29.115Z",
+      "by": "e3-bd-verify",
+      "action": "card.criteria-verify",
+      "ref": "c0zxpxpq",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-28T22:36:33.562Z",
+      "by": "e3-bd-verify",
+      "action": "card.update",
+      "ref": "c0zxpxpq",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:38:37.914Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.update",
+      "ref": "c07pjh6w",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-28T22:38:38.153Z",
+      "by": "e3-bd-top-fix",
+      "action": "card.release",
+      "ref": "c07pjh6w",
+      "note": ""
+    },
+    {
+      "at": "2026-07-28T22:40:48.936Z",
+      "by": "e3-bd-1302",
+      "action": "card.claim",
+      "ref": "c0tsprkx",
+      "note": ""
     }
   ]
 }
