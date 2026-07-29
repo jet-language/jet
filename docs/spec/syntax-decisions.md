@@ -1293,6 +1293,17 @@ places through `core.fmt.decimal`. It uses the existing `#` selector rail.
 Unknown selectors report E0914 with the valid set. No `#Percent` sibling is
 defined.
 
+**D-QUANTITY-PRINT1=A+D — Quantity and unit display** *(ratified 2026-07-29,
+card #1268)*: `print` and bare interpolation show a quantity's magnitude and
+declared unit symbol by default. Derived dimensions use a normalized product
+or quotient, such as `4 meter/second`. An explicit `Display` implementation
+replaces this default for its concrete unit type.
+
+`{value#Unit(name)}` uses the generated unit type name.
+`{value#Unit(bare)}` shows only the magnitude. The default symbol form uses
+bare interpolation, so there is no second symbol selector. All three styles
+use the same Display path. `.raw()` still extracts the unchanged numeric value.
+
 **D-MARK-TARGET1=A — one target-marker family** *(ratified 2026-07-11, card
 #498)*: `#Target(…)` is the only target-partition spelling, for every axis —
 `#Target(Wasm)`, `#Target(JS)`, `#Target(Web)`, `#Target(OS.Linux)`. The

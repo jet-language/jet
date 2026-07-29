@@ -166,6 +166,8 @@ impl UnitFact {
 
 pub(crate) struct TypeRegistry {
     types: HashMap<String, TypeDef>,
+    /// D-QUANTITY-PRINT1: all concrete types minted by `#UnitFamily`.
+    unit_types: HashSet<String>,
     /// #603: the one normalized source of truth for concrete unit conversion,
     /// package identity, dimension, affine kind, and algebra facts.
     unit_facts: HashMap<String, UnitFact>,
@@ -184,6 +186,10 @@ impl TypeRegistry {
 
     pub(crate) fn unit_dimension(&self, name: &str) -> Option<crate::AST::Dimension> {
         self.unit_facts.get(name).map(|fact| fact.dimension)
+    }
+
+    pub(crate) fn is_unit_type(&self, name: &str) -> bool {
+        self.unit_types.contains(name)
     }
 
     pub(crate) fn unit_fact(&self, name: &str) -> Option<&UnitFact> {

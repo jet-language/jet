@@ -46,6 +46,10 @@ impl Dimension {
             .find_map(|(family, exponents)| (*exponents == self.0).then_some(*family))
     }
 
+    pub fn exponents(self) -> [i32; 3] {
+        self.0
+    }
+
     /// Stable, package-independent identity used by API/type serialization.
     pub fn identity(self) -> String {
         if self.0[2] == 0 {

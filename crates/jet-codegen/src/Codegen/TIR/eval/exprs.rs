@@ -718,6 +718,9 @@ impl<'a> EvalCtx<'a> {
                                 crate::AST::StrFormat::Fixed(_) => {
                                     unreachable!("Fixed interpolation lowers to core.fmt.decimal")
                                 }
+                                crate::AST::StrFormat::Unit(_) => {
+                                    unreachable!("Unit interpolation lowers to a String")
+                                }
                             };
                             out.push_str(&text);
                         }

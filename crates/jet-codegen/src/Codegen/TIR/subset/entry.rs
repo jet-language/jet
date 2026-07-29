@@ -186,11 +186,12 @@ pub(crate) fn tir_covers_trait_method(
     if !f.type_params.is_empty() && !serde_generic_owner {
         return false;
     }
-    // The owning type must be a covered struct or enum.
+    // The owning type must be a covered struct, enum, or distinct type.
     let owner_ty = Type::Named(type_name.to_string());
     if !serde_generic_owner
         && !is_covered_struct_ty(&owner_ty, cx)
         && !is_covered_enum_ty(&owner_ty, cx)
+        && !cx.distinct_types.contains_key(type_name)
     {
         return false;
     }

@@ -799,6 +799,7 @@ pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
         Type::List(inner) => is_printable(inner, registry),
         Type::Map { value, .. } => is_printable(value, registry),
         Type::Named(n) => registry.contains(n) || core_type_known(n),
+        Type::Apply { .. } if ty.quantity_parts().is_some() => true,
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
             (name == "View"
@@ -833,7 +834,8 @@ pub(crate) fn is_displayable(
         Type::List(inner) => is_displayable(inner, type_reg, trait_reg),
         Type::Map { value, .. } => is_displayable(value, type_reg, trait_reg),
         Type::Named(n) => {
-            trait_reg.implements_trait(n, Generics::DISPLAY)
+            type_reg.is_unit_type(n)
+                || trait_reg.implements_trait(n, Generics::DISPLAY)
                 || matches!(
                     n.as_str(),
                     Syntax::TYPE_INT
@@ -843,6 +845,7 @@ pub(crate) fn is_displayable(
                         | Syntax::TYPE_CHAR
                 )
         }
+        Type::Apply { .. } if ty.quantity_parts().is_some() => true,
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
             (name == "View"

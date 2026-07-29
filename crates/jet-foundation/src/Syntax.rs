@@ -90,6 +90,8 @@
 // `Type.{ body }` / inferred `.{ body }` form from D-DOTCTOR3.
 // D-FMT-INTERP1=A adds `Fixed` to the closed interpolation-selector set:
 // `{value#Fixed(n)}` reuses `#` and ordinary integer-call parentheses.
+// D-QUANTITY-PRINT1 adds `Unit(name)` and `Unit(bare)` to that same selector
+// rail. Bare interpolation keeps the declared symbol as the default.
 pub const HTTP_ROUTE_PARAM_PREFIX: &str = ":";
 pub const HTTP_ROUTE_CATCH_ALL_PREFIX: &str = "*";
 

@@ -727,6 +727,9 @@ pub fn apply_core_call(
     };
 
     match (module, method) {
+        ("jet.unit", "magnitude") => {
+            Ok(CtValue::Str(as_float(one(0)?, span)?.to_string()))
+        }
         // D-CORE-COMPRESS1=A / card #392 C4: pure gzip stays inside
         // tier-0. No native bridge, Boundary classification, or AOT fallback.
         ("core.compress.gzip", "compress") => Ok(CtValue::Bytes(

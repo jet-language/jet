@@ -516,7 +516,7 @@ renumbered, and no new `W` code may be allocated.
 | E0911 | parse | migration block uses an unknown verb (`drop`→`remove`, `reorder` not needed) |
 | E0912 | sema  | *retired by D-MEM1/S2* (was: frozen public capability signature drift under `library { api: stable/explicit }`, D-CAP8/c129; the `api:` field and capability freeze are gone — `ApiFreeze`'s snapshot survives as unconditional pub-fn semver diffing, E1218/E2601) |
 | E0913 | sema  | trait impl missing associated type (D-LIB2) |
-| E0914 | parse | unknown interpolation selector after `#` (D-DISPLAYDBG2/D-FMT-INTERP1) |
+| E0914 | parse | unknown interpolation selector after `#` (D-DISPLAYDBG2/D-FMT-INTERP1/D-QUANTITY-PRINT1) |
 | E0915 | sema  | bare `{value}` on a type without `Display` (D-DISPLAY-SHAPE) |
 | E0916 | sema  | auto-derived `Debug` blocked by a non-debuggable field (D-DEBUG-REDACT) — *defined, not yet emitted* |
 | E0917 | sema  | `#Inline(Always) fn` calls itself — inlining a recursive call has no fixed expansion (D-METHODMACRO1) |
@@ -1788,11 +1788,11 @@ diagnostic.
 | `reorder` (D-MIGRATE2F) | `reorder` isn't a migration verb — field order isn't a breaking change. | A `#PublishedSchema` record is keyed by field name, so reordering is safe. | Delete the `reorder` line; write the fields in any order. |
 | other | `{op}` isn't a known migration verb. | A migration block contains `rename`, `add`, `remove`, or `change` operations. | Use one of those four verbs. |
 
-### E0914 — Unknown interpolation selector (D-DISPLAYDBG2/D-FMT-INTERP1)
+### E0914 — Unknown interpolation selector (D-DISPLAYDBG2/D-FMT-INTERP1/D-QUANTITY-PRINT1)
 
 | What | Why | Fix |
 |------|-----|-----|
-| Unknown interpolation selector `#…`. | String interpolation supports a closed selector set: `#Debug` and `#Fixed(n)`. | Write `{value#Debug}` for debug output, `{value#Fixed(2)}` for two decimal places, or `{value}` for display. |
+| Unknown interpolation selector `#…`. | String interpolation supports a closed selector set: `#Debug`, `#Fixed(n)`, `#Unit(name)`, and `#Unit(bare)`. | Write `{value#Debug}`, `{value#Fixed(2)}`, `{value#Unit(name)}`, `{value#Unit(bare)}`, or `{value}`. |
 
 ### E0915 — No Display implementation (D-DISPLAY-SHAPE)
 

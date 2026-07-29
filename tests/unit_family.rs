@@ -926,6 +926,74 @@ fn run() {
 }
 
 #[test]
+fn quantities_display_units_styles_and_explicit_overrides() {
+    let defaults = r#"
+#UnitFamily(Length, base: meter) { meter px(scale: 1) }
+#UnitFamily(Time, base: second) { second }
+#UnitFamily(Currency) { usd }
+
+fn run() {
+    distance :: 12meter
+    elapsed :: 3second
+    speed :: distance / elapsed
+    pixels :: 766px
+    price :: 5usd
+    print(distance)
+    print("{speed}")
+    print(pixels)
+    print(price)
+    print("{distance#Unit(name)}")
+    print("{distance#Unit(bare)}")
+    print(distance.raw())
+}
+"#;
+    let (code, stdout) = tir_support::build_and_run("quantity_display_defaults", defaults);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "12 meter\n4 meter/second\n766 px\n5 usd\n12 Meter\n12\n12.0\n"
+    );
+    if jet_jit::cranelift_host_supported() {
+        use jet::JitBackend::JitBackend;
+        use jet::JitBackend::RunOutcome;
+
+        let dir = common::unique_tmp("quantity_display_jit");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("main.jet");
+        std::fs::write(&path, defaults).unwrap();
+        let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+        let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let mut backend = jet_jit::CraneliftBackend::new();
+        match backend.run(&bundle, false) {
+            RunOutcome::Ran { stdout, .. } => assert_eq!(
+                stdout,
+                "12 meter\n4 meter/second\n766 px\n5 usd\n12 Meter\n12\n12.0\n"
+            ),
+            RunOutcome::Problems(diagnostics) => panic!("JIT rejected unit display: {diagnostics:?}"),
+        }
+    }
+
+    let explicit = r#"
+#UnitFamily(Length, base: meter) { meter }
+
+impl Meter.Display {
+    fn display(self) => String = "custom length"
+}
+
+fn run() {
+    distance :: 12meter
+    print(distance)
+    print("{distance}")
+    print("{distance#Unit(bare)}")
+}
+"#;
+    let (code, stdout) = tir_support::build_and_run("quantity_display_override", explicit);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "custom length\ncustom length\n12\n");
+}
+
+#[test]
 fn physical_dimension_mismatch_is_rejected_in_sema() {
     let src = r#"
 #UnitFamily(Length) { meter }

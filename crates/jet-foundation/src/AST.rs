@@ -54,7 +54,7 @@ pub use lvalues::{Binding, ForKind, GcPromotion, GcPromotionEdge, IndexKind, LVa
 #[path = "AST/expressions.rs"]
 mod expressions;
 pub use expressions::{
-    Call, CallArgFlags, CallArg, BinOp, UnOp, IncDecOp, StrFormat, StrPart, LambdaParam,
+    Call, CallArgFlags, CallArg, BinOp, UnOp, IncDecOp, StrFormat, UnitFormat, StrPart, LambdaParam,
     LambdaBody, LambdaMeta, Lambda, PlaceAccess, Expr, TypedLitBody,
 };
 

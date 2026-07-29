@@ -163,6 +163,7 @@ pub(crate) fn emit_tir_core_call(
         _ => "_".to_string(),
     };
     match (module, method) {
+        ("jet.unit", "magnitude") => format!("({}).to_string()", arg(0)),
         // c109 Phase 18 (S58, E2-M13): low-level pointer ops, byte-for-byte
         // `emit_core_call`. `address_of` is an inert address cast (no `unsafe`);
         // `volatile_read`/`volatile_write` access through a `Ptr<T>` — the volatile ops are

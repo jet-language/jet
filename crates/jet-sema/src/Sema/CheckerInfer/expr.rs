@@ -825,6 +825,27 @@ impl<'a> Checker<'a> {
                                         ));
                                     }
                                 }
+                                crate::AST::StrFormat::Unit(_) => {
+                                    let is_unit = matches!(
+                                        &t,
+                                        Type::Named(name)
+                                            if self.registry.is_unit_type(name)
+                                    ) || t.quantity_parts().is_some();
+                                    if !is_unit {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0112",
+                                            format!(
+                                                "{} can't use `#Unit(…)`",
+                                                t.show()
+                                            ),
+                                            "unit formatting needs a quantity or a `#UnitFamily` value"
+                                                .to_string(),
+                                            "use bare interpolation, or pass a value that has a unit"
+                                                .to_string(),
+                                            Some(inner.span()),
+                                        ));
+                                    }
+                                }
                             }
                         }
                     }

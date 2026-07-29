@@ -227,6 +227,10 @@ pub const TRAIT_IO_WRITER: &str = "Writer";
 pub const INTERP_SELECTOR_DEBUG: &str = "Debug";
 /// D-FMT-INTERP1=A: fixed-decimal interpolation reuses the `#` selector rail.
 pub const INTERP_SELECTOR_FIXED: &str = "Fixed";
+/// D-QUANTITY-PRINT1=A+D: quantity style selection on the interpolation rail.
+pub const INTERP_SELECTOR_UNIT: &str = "Unit";
+pub const INTERP_UNIT_STYLE_NAME: &str = "name";
+pub const INTERP_UNIT_STYLE_BARE: &str = "bare";
 /// D-DEBUG-REDACT / D-MARKERMOVE1 (contract plane, `#Redact`): hide a field
 /// from auto-derived Debug output.
 pub const ATTR_REDACT: &str = "Redact";

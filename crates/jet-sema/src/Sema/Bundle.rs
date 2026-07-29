@@ -523,7 +523,12 @@ fn builtin_type_registry() -> TypeRegistry {
         groups: HashMap::new(), methods: HashMap::new(), single_use: false,
         must_use: false, c_layout_tag: None,
     });
-    TypeRegistry { types, unit_facts: HashMap::new(), computed_fields: HashMap::new() }
+    TypeRegistry {
+        types,
+        unit_types: HashSet::new(),
+        unit_facts: HashMap::new(),
+        computed_fields: HashMap::new(),
+    }
 }
 
 fn unit_fact(
@@ -1022,6 +1027,7 @@ fn check_bundle_opts_for_output_inner(
                     let dimension = crate::AST::Dimension::for_family(&uf.family);
                     for d in uf.distinct_defs() {
                         register_distinct(&d, &mut st.registry, &mut diags, &st.funcs, &st.consts);
+                        st.registry.unit_types.insert(d.name.clone());
                         if let Some(dimension) = dimension {
                             if let Some(fact) = unit_fact(
                                 uf,
@@ -1082,6 +1088,7 @@ fn check_bundle_opts_for_output_inner(
                         }
                         TypeRegistry {
                             types,
+                            unit_types: st.registry.unit_types.clone(),
                             unit_facts: st.registry.unit_facts.clone(),
                             computed_fields: st.registry.computed_fields.clone(),
                         }
@@ -1352,6 +1359,11 @@ fn check_bundle_opts_for_output_inner(
         st.trait_reg.register_synthetic_iter_index();
         st.trait_reg.register_synthetic_io();
         st.trait_reg.register_items(&module.items, &mut diags);
+        for type_name in &st.registry.unit_types {
+            st.trait_reg
+                .trait_impls
+                .insert((type_name.clone(), crate::Generics::DISPLAY.to_string()));
+        }
         for (type_name, fact) in &st.registry.unit_facts {
             if let Some(dimension) = fact.dimension.family_name() {
                 st.trait_reg.trait_impls.insert((

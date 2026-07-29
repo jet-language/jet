@@ -157,6 +157,9 @@ pub(crate) fn emit_tir_str(parts: &[TStrPart], cx: &Cx) -> String {
                     crate::AST::StrFormat::Fixed(_) => {
                         unreachable!("Fixed interpolation lowers to core.fmt.decimal")
                     }
+                    crate::AST::StrFormat::Unit(_) => {
+                        unreachable!("Unit interpolation lowers to a String")
+                    }
                 };
                 body.push_str(&format!(
                     "_jet_s.push_str(&({}).{method}()); ",

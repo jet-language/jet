@@ -1,8 +1,11 @@
 // D-SHAPE-QUANTITY1: physical unit families carry compiler-known dimensions.
 // Multiplication and division derive dimensions; all metadata erases at runtime.
-#UnitFamily(Length) { meter }
+#UnitFamily(Length, base: meter) {
+    meter
+    px(scale: 1)
+}
 
-#UnitFamily(Time) { second }
+#UnitFamily(Time, base: second) { second }
 
 fn run() {
     distance :: 12meter
@@ -10,7 +13,13 @@ fn run() {
     speed :: distance / elapsed
     area :: distance * distance
     recovered :: speed * elapsed
+    pixels :: 766px
     // Values remain ordinary zero-overhead numeric data after checking.
-    print("dimensional algebra checked")
+    print(distance)
+    print(speed)
     print(recovered)
+    print(pixels)
+    print("{distance#Unit(name)}")
+    print("{distance#Unit(bare)}")
+    print(distance.raw())
 }

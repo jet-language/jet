@@ -1213,6 +1213,28 @@ Example: `examples/features/math/math_audit.jet`.
 
 ---
 
+### Unit families and physical quantities
+
+`#UnitFamily` makes named unit types. Printing a unit value shows its magnitude
+and declared symbol. Physical arithmetic also shows a normalized derived unit.
+
+```jet
+#UnitFamily(Length, base: meter) { meter px(scale: 1) }
+#UnitFamily(Time, base: second) { second }
+
+fn run() {
+    distance :: 12meter
+    speed :: distance / 3second
+    print(distance) // 12 meter
+    print(speed)    // 4 meter/second
+}
+```
+
+Bare interpolation uses the symbol form. `{value#Unit(name)}` uses the
+generated unit type name. `{value#Unit(bare)}` omits the unit. A hand-written
+`Display` implementation replaces the default for its concrete unit type.
+`.raw()` still returns the unchanged numeric value.
+
 ### Linear algebra — `Vec2`/`Vec3`/`Vec4`, `Mat3`/`Mat4` (D-LINALG1)
 
 Built-in value types — no import. Components are `Float` (F64); matrices are
@@ -1856,6 +1878,8 @@ fn run() {
 D-HUMANFMT1 keeps formatting as library calls, not a second syntax inside
 interpolation. The beginner path is the thing report and CLI authors need every
 day: readable numbers, bytes, durations, ordinals, plural phrases, and padding.
+Two checked selectors cover language-owned values: `{value#Fixed(n)}` formats
+a `Float`, and `{value#Unit(name)}` or `{value#Unit(bare)}` selects a unit style.
 
 | Function | Returns | What it does |
 |----------|---------|--------------|

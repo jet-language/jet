@@ -245,6 +245,63 @@ fn expr_tag(e: &Expr) -> &'static str {
     }
 }
 
+fn lower_unit_text(
+    value: TExpr,
+    style: crate::AST::UnitFormat,
+    cx: &Cx,
+) -> TExpr {
+    let original_ty = value.ty.clone();
+    let raw = if let Type::Named(name) = &original_ty {
+        let base = cx
+            .distinct_types
+            .get(name)
+            .map(|(base, _)| base.clone())
+            .unwrap_or(Type::Float);
+        TExpr {
+            ty: base,
+            kind: TExprKind::DistinctRaw(Box::new(value)),
+        }
+    } else {
+        value
+    };
+    let source_span = crate::Diagnostics::Span::new(0, 0);
+    let magnitude = TExpr {
+        ty: Type::String,
+        kind: TExprKind::CoreCall {
+            module: "jet.unit".to_string(),
+            method: "magnitude".to_string(),
+            args: vec![raw],
+            source_span,
+            widen_to_vec: vec![false],
+        },
+    };
+    let mut parts = vec![TStrPart::Interp(
+        magnitude,
+        crate::AST::StrFormat::Display,
+    )];
+    if style != crate::AST::UnitFormat::Bare {
+        let label = cx
+            .unit_label(&original_ty)
+            .map(|label| match style {
+                crate::AST::UnitFormat::Name => label.name.clone(),
+                crate::AST::UnitFormat::Symbol | crate::AST::UnitFormat::Bare => {
+                    label.symbol.clone()
+                }
+            })
+            .or_else(|| {
+                original_ty
+                    .quantity_parts()
+                    .map(|(_, dimension)| cx.quantity_unit_label(dimension, style))
+            })
+            .expect("sema accepted unit formatting only for unit values");
+        parts.push(TStrPart::Lit(format!(" {label}")));
+    }
+    TExpr {
+        ty: Type::String,
+        kind: TExprKind::StrLit(parts),
+    }
+}
+
 fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
     match e {
         Expr::Int(n, _, width, _) => TExpr {
@@ -289,6 +346,30 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             },
                         };
                         TStrPart::Interp(formatted, crate::AST::StrFormat::Display)
+                    }
+                    StrPart::Interp(e, crate::AST::StrFormat::Unit(style)) => {
+                        let value = lower_expr(e, cx, env);
+                        TStrPart::Interp(
+                            lower_unit_text(value, *style, cx),
+                            crate::AST::StrFormat::Display,
+                        )
+                    }
+                    StrPart::Interp(e, crate::AST::StrFormat::Display) => {
+                        let value = lower_expr(e, cx, env);
+                        if value.ty.quantity_parts().is_some()
+                            || (cx.unit_label(&value.ty).is_some()
+                                && !matches!(
+                                    &value.ty,
+                                    Type::Named(name) if cx.display_types.contains(name)
+                                ))
+                        {
+                            TStrPart::Interp(
+                                lower_unit_text(value, crate::AST::UnitFormat::Symbol, cx),
+                                crate::AST::StrFormat::Display,
+                            )
+                        } else {
+                            TStrPart::Interp(value, crate::AST::StrFormat::Display)
+                        }
                     }
                     StrPart::Interp(e, fmt) => TStrPart::Interp(lower_expr(e, cx, env), *fmt),
                 })
@@ -863,7 +944,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // `print` is ambient only when the user has not defined their own
             // `print` function (matches emit_call; sema enforces the shadowing).
             if call.name == Syntax::BUILTIN_PRINT && !cx.sigs.contains_key(&call.name) {
-                let arg = lower_expr(&call.args[0].expr, cx, env);
+                let mut arg = lower_expr(&call.args[0].expr, cx, env);
+                if arg.ty.quantity_parts().is_some()
+                    || (cx.unit_label(&arg.ty).is_some()
+                        && !matches!(
+                            &arg.ty,
+                            Type::Named(name) if cx.display_types.contains(name)
+                        ))
+                {
+                    arg = lower_unit_text(arg, crate::AST::UnitFormat::Symbol, cx);
+                }
                 return TExpr {
                     ty: unit_type(),
                     kind: TExprKind::Print(Box::new(arg)),

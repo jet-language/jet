@@ -618,6 +618,40 @@ impl<'a> Parser<'a> {
                                     "after the decimal places in `#Fixed(n)`",
                                 )?;
                                 format = crate::AST::StrFormat::Fixed(precision);
+                            } else if sel == crate::Syntax::INTERP_SELECTOR_UNIT {
+                                sub.expect(
+                                    TokKind::LParen,
+                                    "after `#Unit` in interpolation",
+                                )?;
+                                let (style, style_span) =
+                                    sub.expect_ident("inside `#Unit( )`")?;
+                                format = match style.as_str() {
+                                    crate::Syntax::INTERP_UNIT_STYLE_NAME => {
+                                        crate::AST::StrFormat::Unit(
+                                            crate::AST::UnitFormat::Name,
+                                        )
+                                    }
+                                    crate::Syntax::INTERP_UNIT_STYLE_BARE => {
+                                        crate::AST::StrFormat::Unit(
+                                            crate::AST::UnitFormat::Bare,
+                                        )
+                                    }
+                                    _ => {
+                                        return Err(Diagnostic::error(
+                                            "E0003",
+                                            format!("unknown unit style `{style}`"),
+                                            "`#Unit` accepts `name` or `bare`"
+                                                .to_string(),
+                                            "write `#Unit(name)` or `#Unit(bare)`"
+                                                .to_string(),
+                                            Some(style_span),
+                                        ));
+                                    }
+                                };
+                                sub.expect(
+                                    TokKind::RParen,
+                                    "after the style in `#Unit( )`",
+                                )?;
                             } else {
                                 self.diags.push(crate::Generics::e0914(&sel, sel_span));
                             }
@@ -629,9 +663,9 @@ impl<'a> Parser<'a> {
                                     "unexpected {} inside this interpolated `{{ }}`",
                                     describe(&sub.peek().kind)
                                 ),
-                                "the braces hold exactly one value (and an optional `#Debug` or `#Fixed(n)` selector)"
+                                "the braces hold exactly one value and one optional format selector"
                                     .to_string(),
-                                "keep one value per `{ }`, e.g. \"{a}\", \"{a#Debug}\", or \"{a#Fixed(2)}\"".to_string(),
+                                "keep one value per `{ }`, for example \"{a}\" or \"{a#Unit(bare)}\"".to_string(),
                                 Some(sub.peek().span),
                             ));
                         }

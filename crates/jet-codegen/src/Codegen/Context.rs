@@ -18,6 +18,31 @@ pub(crate) struct UnitFact {
     pub(crate) offset: crate::AST::UnitRatio,
 }
 
+#[derive(Clone)]
+pub(crate) struct UnitLabel {
+    pub(crate) symbol: String,
+    pub(crate) name: String,
+    pub(crate) family: String,
+    pub(crate) is_base: bool,
+}
+
+fn unit_label(
+    family: &crate::AST::UnitFamilyDef,
+    member: &crate::AST::UnitFamilyMember,
+) -> UnitLabel {
+    let base = family
+        .base
+        .as_ref()
+        .map(|base| base.0.as_str())
+        .or_else(|| family.members.first().map(|member| member.name.as_str()));
+    UnitLabel {
+        symbol: member.name.clone(),
+        name: crate::AST::UnitFamilyDef::type_name(&member.name),
+        family: family.family.clone(),
+        is_base: base == Some(member.name.as_str()),
+    }
+}
+
 fn unit_family_member_for_type<'a>(
     family: &'a crate::AST::UnitFamilyDef,
     type_name: &str,
@@ -81,6 +106,8 @@ pub(crate) struct Cx {
     /// D-SHAPE-QUANTITY1=A: the one backend registry for physical unit facts.
     /// Consulted only while lowering; facts erase from emitted Rust.
     pub(crate) unit_facts: HashMap<String, UnitFact>,
+    /// D-QUANTITY-PRINT1: labels for all unit-family types.
+    pub(crate) unit_labels: HashMap<String, UnitLabel>,
     /// D-TYPEALIAS1: transparent generic alias name -> (params, target).
     pub(crate) type_aliases: HashMap<String, (Vec<crate::AST::TypeParam>, Type)>,
     pub(crate) trait_names: HashSet<String>,
@@ -601,6 +628,61 @@ impl Cx {
                 };
                 self.unit_facts.get(name).map(|fact| fact.dimension)
             })
+    }
+
+    pub(crate) fn unit_label(&self, ty: &Type) -> Option<&UnitLabel> {
+        let Type::Named(name) = ty else {
+            return None;
+        };
+        self.unit_labels.get(name)
+    }
+
+    pub(crate) fn quantity_unit_label(
+        &self,
+        dimension: crate::AST::Dimension,
+        style: crate::AST::UnitFormat,
+    ) -> String {
+        let exponents = dimension.exponents();
+        let mut numerator = Vec::new();
+        let mut denominator = Vec::new();
+        for (index, family) in ["Length", "Time", "Temperature"].iter().enumerate() {
+            let exponent = exponents[index];
+            if exponent == 0 {
+                continue;
+            }
+            let label = self
+                .unit_labels
+                .values()
+                .filter(|label| label.family == *family && label.is_base)
+                .min_by(|left, right| left.symbol.cmp(&right.symbol))
+                .map(|label| match style {
+                    crate::AST::UnitFormat::Name => label.name.clone(),
+                    crate::AST::UnitFormat::Symbol | crate::AST::UnitFormat::Bare => {
+                        label.symbol.clone()
+                    }
+                })
+                .unwrap_or_else(|| family.to_ascii_lowercase());
+            let part = if exponent.abs() == 1 {
+                label
+            } else {
+                format!("{label}^{}", exponent.abs())
+            };
+            if exponent > 0 {
+                numerator.push(part);
+            } else {
+                denominator.push(part);
+            }
+        }
+        let numerator = if numerator.is_empty() {
+            "1".to_string()
+        } else {
+            numerator.join("*")
+        };
+        if denominator.is_empty() {
+            numerator
+        } else {
+            format!("{numerator}/{}", denominator.join("*"))
+        }
     }
 
     pub(crate) fn core_qualified_rust_type_name(&self, name: &str) -> Option<&'static str> {
@@ -1882,18 +1964,25 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
         let module = &bundle.modules[target];
         for item in &module.items {
             if let Item::UnitFamily(family) = item {
-                if let Some(dimension) = crate::AST::Dimension::for_family(&family.family) {
-                    for member in family.distinct_defs() {
-                        let name = if target == module_idx {
-                            member.name.clone()
-                        } else {
-                            format!("{}.{}", module.alias, member.name)
-                        };
-                        let Some((_, kind)) = member.quantity else { continue };
-                        let Some(source) = unit_family_member_for_type(family, &member.name, kind)
-                        else {
-                            continue;
-                        };
+                let dimension = crate::AST::Dimension::for_family(&family.family);
+                for member in family.distinct_defs() {
+                    let name = if target == module_idx {
+                        member.name.clone()
+                    } else {
+                        format!("{}.{}", module.alias, member.name)
+                    };
+                    let kind = member
+                        .quantity
+                        .map(|(_, kind)| kind)
+                        .unwrap_or(crate::AST::QuantityKind::Linear);
+                    let Some(source) =
+                        unit_family_member_for_type(family, &member.name, kind)
+                    else {
+                        continue;
+                    };
+                    cx.unit_labels
+                        .insert(name.clone(), unit_label(family, source));
+                    if let Some(dimension) = dimension {
                         cx.unit_facts.insert(name, unit_fact(family, source, dimension, kind));
                     }
                 }
@@ -2128,6 +2217,7 @@ pub(crate) fn build_cx_items(
         distinct_types: HashMap::new(),
         distinct_ranges: HashMap::new(),
         unit_facts: HashMap::new(),
+        unit_labels: HashMap::new(),
         type_aliases: HashMap::new(),
         trait_names: HashSet::new(),
         struct_fields: HashMap::new(),
@@ -2655,6 +2745,14 @@ pub(crate) fn build_cx_items(
                     cx.type_names.insert(d.name.clone());
                     cx.distinct_types
                         .insert(d.name.clone(), (d.base.clone(), d.is_numeric));
+                    let kind = d
+                        .quantity
+                        .map(|(_, kind)| kind)
+                        .unwrap_or(crate::AST::QuantityKind::Linear);
+                    if let Some(member) = unit_family_member_for_type(uf, &d.name, kind) {
+                        cx.unit_labels
+                            .insert(d.name.clone(), unit_label(uf, member));
+                    }
                     if let (Some(dimension), Some((_, kind))) = (dimension, d.quantity) {
                         if let Some(member) = unit_family_member_for_type(uf, &d.name, kind) {
                             cx.unit_facts.insert(

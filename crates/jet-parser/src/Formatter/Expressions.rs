@@ -1660,6 +1660,23 @@ impl<'a> Fmt<'a> {
                             self.write(&precision.to_string());
                             self.write(")");
                         }
+                        crate::AST::StrFormat::Unit(style) => {
+                            self.write("#");
+                            self.write(crate::Syntax::INTERP_SELECTOR_UNIT);
+                            self.write("(");
+                            self.write(match style {
+                                crate::AST::UnitFormat::Symbol => {
+                                    unreachable!("symbol is bare interpolation")
+                                }
+                                crate::AST::UnitFormat::Name => {
+                                    crate::Syntax::INTERP_UNIT_STYLE_NAME
+                                }
+                                crate::AST::UnitFormat::Bare => {
+                                    crate::Syntax::INTERP_UNIT_STYLE_BARE
+                                }
+                            });
+                            self.write(")");
+                        }
                     }
                     self.write("}");
                 }
@@ -1700,6 +1717,23 @@ impl<'a> Fmt<'a> {
                             self.write(crate::Syntax::INTERP_SELECTOR_FIXED);
                             self.write("(");
                             self.write(&precision.to_string());
+                            self.write(")");
+                        }
+                        crate::AST::StrFormat::Unit(style) => {
+                            self.write("#");
+                            self.write(crate::Syntax::INTERP_SELECTOR_UNIT);
+                            self.write("(");
+                            self.write(match style {
+                                crate::AST::UnitFormat::Symbol => {
+                                    unreachable!("symbol is bare interpolation")
+                                }
+                                crate::AST::UnitFormat::Name => {
+                                    crate::Syntax::INTERP_UNIT_STYLE_NAME
+                                }
+                                crate::AST::UnitFormat::Bare => {
+                                    crate::Syntax::INTERP_UNIT_STYLE_BARE
+                                }
+                            });
                             self.write(")");
                         }
                     }

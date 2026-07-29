@@ -2813,6 +2813,9 @@ fn wasm_emit_expr(
                             crate::AST::StrFormat::Fixed(_) => {
                                 unreachable!("Fixed interpolation lowers to core.fmt.decimal")
                             }
+                            crate::AST::StrFormat::Unit(_) => {
+                                unreachable!("Unit interpolation lowers to a String")
+                            }
                         };
                         value.push_str(&format!(
                             "_jet_s.push_str(&format!({:?}, {})); ",

@@ -126,7 +126,18 @@ pub enum IncDecOp {
     Dec,
 }
 
-/// D-DISPLAYDBG2/D-FMT-INTERP1: how an interpolated value is shown.
+/// D-QUANTITY-PRINT1: explicit unit formatting styles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnitFormat {
+    /// Declared unit symbol, such as `meter` or `px`.
+    Symbol,
+    /// Generated unit type name, such as `Meter` or `Px`.
+    Name,
+    /// Numeric magnitude without a unit.
+    Bare,
+}
+
+/// D-DISPLAYDBG2/D-FMT-INTERP1/D-QUANTITY-PRINT1: how an interpolated value is shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StrFormat {
     /// Bare `{value}` — calls `Display` (D-DISPLAY-SHAPE).
@@ -136,6 +147,8 @@ pub enum StrFormat {
     Debug,
     /// `{value#Fixed(n)}` — uses `core.fmt.decimal(value, n)`.
     Fixed(i64),
+    /// `{value#Unit(name)}` / `{value#Unit(bare)}`.
+    Unit(UnitFormat),
 }
 
 /// One piece of a string literal (S8): literal text or an interpolated

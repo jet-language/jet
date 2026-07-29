@@ -1972,11 +1972,20 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
             d.name
         ));
     }
-    // JetShow: display the base value wrapped in the type name.
-    out.push_str(&format!(
-        "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{\n        format!(\"{}({{}})\", (self.0).jet_show())\n    }}\n}}\n\n",
-        d.name, d.name
-    ));
+    // Unit-family print follows Display so an explicit Display impl overrides
+    // the generated magnitude + symbol default. Other distinct types keep
+    // their existing debug-shaped JetShow output.
+    if cx.unit_labels.contains_key(&d.name) {
+        out.push_str(&format!(
+            "impl JetShow for user_{0} {{\n    fn jet_show(&self) -> String {{ self.jet_display() }}\n}}\n\n",
+            d.name
+        ));
+    } else {
+        out.push_str(&format!(
+            "impl JetShow for user_{} {{\n    fn jet_show(&self) -> String {{\n        format!(\"{}({{}})\", (self.0).jet_show())\n    }}\n}}\n\n",
+            d.name, d.name
+        ));
+    }
     // JetDebug: a distinct type wrapped in a struct/enum field is debug-rendered
     // via the derived container `jet_debug`, which calls `.jet_debug()` on each
     // field. D-STYLEUNIT1 (Tower c134) makes a distinct field a covered value
@@ -2037,6 +2046,15 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
                     op = op
                 ));
             }
+        }
+    }
+    if let Some(label) = cx.unit_labels.get(&d.name) {
+        if !cx.display_types.contains(&d.name) {
+            out.push_str(&format!(
+                "impl JetDisplay for user_{n} {{\n    fn jet_display(&self) -> String {{ format!(\"{{}} {symbol}\", (self.0).to_string()) }}\n}}\n\n",
+                n = d.name,
+                symbol = label.symbol,
+            ));
         }
     }
     // D-CAPBUNDLE1 `#Printable`: forward `{value}` interpolation (JetDisplay)
