@@ -26,7 +26,7 @@ fn datatree_variant(value: &CtValue) -> Option<(&str, Option<&CtValue>)> {
             type_name,
             variant,
             args,
-        } if type_name == "JSON" => {
+        } if type_name == "JSON" || type_name == "DataTree" => {
             Some((variant.as_str(), args.first().map(|(_, value)| value)))
         }
         CtValue::Bytes(_) => Some(("Bytes", Some(value))),
@@ -83,6 +83,35 @@ fn datatree_kind(value: &CtValue) -> &'static str {
         Some(("Bytes", _)) => "Bytes",
         _ => "value",
     }
+}
+
+fn datatree_object_pairs(value: &CtValue) -> Option<Vec<(String, CtValue)>> {
+    let ("Object", Some(payload)) = datatree_variant(value)? else {
+        return None;
+    };
+    match payload {
+        CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
+            Some(fields.clone())
+        }
+        CtValue::Map(fields) => fields
+            .iter()
+            .map(|(key, value)| match key {
+                crate::AST::CtKey::Str(key) => Some((key.clone(), value.clone())),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
+    }
+}
+
+fn datatree_object(pairs: Vec<(String, CtValue)>) -> CtValue {
+    datatree(
+        "Object",
+        Some(CtValue::Struct {
+            type_name: "JSONObject".to_string(),
+            fields: pairs,
+        }),
+    )
 }
 
 fn handle_index(value: &CtValue, type_name: &str) -> Option<usize> {
@@ -224,6 +253,11 @@ impl<'a> EvalCtx<'a> {
             }
             Type::Tagged { inner, .. } => self.eval_serde_encode_value(value, inner),
             Type::Named(_) | Type::Apply { .. } => {
+                if let Type::Named(name) = ty {
+                    if let Some(base) = self.distinct_bases.get(name).cloned() {
+                        return self.eval_serde_encode_value(value, &base);
+                    }
+                }
                 let func = self
                     .serde_codec(ty, "encode")
                     .ok_or_else(|| unsupported(&format!("Encode body for `{}`", ty.name()), self.span()))?;
@@ -233,6 +267,89 @@ impl<'a> EvalCtx<'a> {
             }
             _ => Err(unsupported(&format!("Encode `{}`", ty.name()), self.span())),
         }
+    }
+
+    fn apply_codec_migration(
+        &mut self,
+        type_name: &str,
+        tree: &CtValue,
+    ) -> Result<Option<CtValue>, Diagnostic> {
+        let Some(plan) = self.codec_migrations.get(type_name).cloned() else {
+            return Ok(None);
+        };
+        let Some(mut pairs) = datatree_object_pairs(tree) else {
+            return Ok(None);
+        };
+        let keys: std::collections::BTreeSet<&str> =
+            pairs.iter().map(|(key, _)| key.as_str()).collect();
+        let Some(start) = (0..plan.historical_shapes.len()).rev().find(|index| {
+            let shape = &plan.historical_shapes[*index];
+            shape.len() == keys.len() && shape.iter().all(|key| keys.contains(key.as_str()))
+        }) else {
+            return Ok(None);
+        };
+        for step in plan.steps.iter().skip(start) {
+            for op in step {
+                match op {
+                    crate::Codegen::TIR::TCodecMigrationOp::Rename {
+                        from_key,
+                        to_key,
+                    } => {
+                        if let Some((key, _)) =
+                            pairs.iter_mut().find(|(key, _)| key == from_key)
+                        {
+                            *key = to_key.clone();
+                        }
+                    }
+                    crate::Codegen::TIR::TCodecMigrationOp::Remove { key } => {
+                        pairs.retain(|(field, _)| field != key);
+                    }
+                    crate::Codegen::TIR::TCodecMigrationOp::Add {
+                        key,
+                        ty,
+                        default_fn,
+                    } => {
+                        let func = self.funcs.get(default_fn).copied().ok_or_else(|| {
+                            unsupported(
+                                &format!("migration default `{default_fn}`"),
+                                self.span(),
+                            )
+                        })?;
+                        let mut child = HashMap::new();
+                        let value = self.run_func(func, Vec::new(), &mut child)?;
+                        let encoded = self.eval_serde_encode_value(value, ty)?;
+                        pairs.push((key.clone(), encoded));
+                    }
+                    crate::Codegen::TIR::TCodecMigrationOp::Change {
+                        key,
+                        from_ty,
+                        to_ty,
+                        converter_fn,
+                    } => {
+                        let Some((_, encoded)) =
+                            pairs.iter_mut().find(|(field, _)| field == key)
+                        else {
+                            return Ok(None);
+                        };
+                        let old = match self.eval_datatree_decode(encoded.clone(), from_ty)? {
+                            CtValue::ResOk(value) => *value,
+                            CtValue::ResErr(_) => return Ok(None),
+                            _ => unreachable!(),
+                        };
+                        let func = self.funcs.get(converter_fn).copied().ok_or_else(|| {
+                            unsupported(
+                                &format!("migration converter `{converter_fn}`"),
+                                self.span(),
+                            )
+                        })?;
+                        let mut child = HashMap::new();
+                        let converted = self.run_func(func, vec![old], &mut child)?;
+                        *encoded = self.eval_serde_encode_value(converted, to_ty)?;
+                    }
+                }
+            }
+        }
+        Ok(Some(datatree_object(pairs)))
     }
 
     fn eval_datatree_decode(
@@ -276,26 +393,41 @@ impl<'a> EvalCtx<'a> {
                     format!("expected {}, found {}", ty.name(), datatree_kind(&tree)),
                 )),
             },
-            Type::Float | Type::Float32 => match datatree_variant(&tree) {
-                Some(("Float", Some(CtValue::Float(value)))) => Ok(CtValue::Float(
-                    if matches!(ty, Type::Float32) {
-                        CtFloat::f32(value.as_f64() as f32)
-                    } else {
-                        CtFloat::f64(value.as_f64())
-                    },
-                )),
-                Some(("Int", Some(CtValue::Int(value)))) => Ok(CtValue::Float(
-                    if matches!(ty, Type::Float32) {
-                        CtFloat::f32(*value as f32)
-                    } else {
-                        CtFloat::f64(*value as f64)
-                    },
-                )),
+            Type::Float => match datatree_variant(&tree) {
+                Some(("Float", Some(CtValue::Float(value)))) => {
+                    Ok(CtValue::Float(CtFloat::f64(value.as_f64())))
+                }
+                Some(("Int", Some(CtValue::Int(value)))) => {
+                    Ok(CtValue::Float(CtFloat::f64(*value as f64)))
+                }
                 _ => Err(decode_error(
                     "",
                     format!("expected {}, found {}", ty.name(), datatree_kind(&tree)),
                 )),
             },
+            Type::Float32 => {
+                let value = match datatree_variant(&tree) {
+                    Some(("Float", Some(CtValue::Float(value)))) => value.as_f64(),
+                    Some(("Int", Some(CtValue::Int(value)))) => *value as f64,
+                    _ => {
+                        return Ok(CtValue::ResErr(Box::new(decode_error(
+                            "",
+                            format!("expected F32, found {}", datatree_kind(&tree)),
+                        ))));
+                    }
+                };
+                if value.is_finite()
+                    && value >= -(f32::MAX as f64)
+                    && value <= f32::MAX as f64
+                {
+                    Ok(CtValue::Float(CtFloat::f32(value as f32)))
+                } else {
+                    Err(decode_error(
+                        "",
+                        "expected F32, found out-of-range Float",
+                    ))
+                }
+            }
             Type::Bool => match datatree_variant(&tree) {
                 Some(("Bool", Some(CtValue::Bool(value)))) => Ok(CtValue::Bool(*value)),
                 _ => Err(decode_error(
@@ -398,27 +530,39 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             Type::Map { key, value: item, .. } if matches!(key.as_ref(), Type::String) => {
-                let Some(("Object", Some(CtValue::Map(values)))) = datatree_variant(&tree) else {
+                let Some(("Object", Some(object))) = datatree_variant(&tree) else {
                     return Ok(CtValue::ResErr(Box::new(decode_error(
                         "",
                         format!("expected an object, found {}", datatree_kind(&tree)),
                     ))));
                 };
-                let mut out = std::collections::BTreeMap::new();
-                for (key, value) in values {
-                    let crate::AST::CtKey::Str(key) = key else {
+                let values: Vec<(String, CtValue)> = match object {
+                    CtValue::Map(values) => values
+                        .iter()
+                        .filter_map(|(key, value)| match key {
+                            crate::AST::CtKey::Str(key) => Some((key.clone(), value.clone())),
+                            _ => None,
+                        })
+                        .collect(),
+                    CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
+                        fields.clone()
+                    }
+                    _ => {
                         return Ok(CtValue::ResErr(Box::new(decode_error(
                             "",
-                            "expected Text map key",
+                            format!("expected an object, found {}", datatree_kind(&tree)),
                         ))));
-                    };
-                    match self.eval_datatree_decode(value.clone(), item)? {
+                    }
+                };
+                let mut out = std::collections::BTreeMap::new();
+                for (key, value) in values {
+                    match self.eval_datatree_decode(value, item)? {
                         CtValue::ResOk(value) => {
                             out.insert(crate::AST::CtKey::Str(key.clone()), *value);
                         }
                         CtValue::ResErr(error) => {
                             return Ok(CtValue::ResErr(Box::new(decode_error_under(
-                                key,
+                                &key,
                                 *error,
                             ))));
                         }
@@ -431,11 +575,55 @@ impl<'a> EvalCtx<'a> {
                 return self.eval_datatree_decode(tree, inner);
             }
             Type::Named(_) | Type::Apply { .. } => {
+                if let Type::Named(name) = ty {
+                    if let Some(base) = self.distinct_bases.get(name).cloned() {
+                        let decoded = self.eval_datatree_decode(tree, &base)?;
+                        if let (
+                            Some((lo, hi)),
+                            CtValue::ResOk(value),
+                        ) = (self.distinct_ranges.get(name), &decoded)
+                        {
+                            if !matches!(value.as_ref(), CtValue::Int(n) if (*lo..=*hi).contains(n))
+                            {
+                                return Ok(CtValue::ResErr(Box::new(decode_error(
+                                    "",
+                                    format!("expected {name} within {lo}..{hi}"),
+                                ))));
+                            }
+                        }
+                        return Ok(decoded);
+                    }
+                }
                 let func = self
                     .serde_codec(ty, "decode")
                     .ok_or_else(|| unsupported(&format!("Decode body for `{}`", ty.name()), self.span()))?;
                 let mut child = HashMap::new();
-                return self.run_func(func, vec![tree], &mut child);
+                let migration_trace_start = self
+                    .codec_migrations
+                    .contains_key(&ty.name())
+                    .then(|| self.sink.as_ref().map_or(0, |sink| sink.stderr.len()));
+                let result = self.run_func(func, vec![tree.clone()], &mut child)?;
+                if matches!(result, CtValue::ResErr(_)) {
+                    // The emitted migration walker probes the current shape
+                    // through Rust's short-circuiting `?`, so only its first
+                    // failed field contributes a propagation frame. Generated
+                    // Decode TIR can visit later fields while constructing the
+                    // failed value; keep the same observable trace as AOT.
+                    if let (Some(start), Some(sink)) =
+                        (migration_trace_start, self.sink.as_mut())
+                    {
+                        if let Some(line_end) = sink.stderr[start..].find('\n') {
+                            sink.stderr.truncate(start + line_end + 1);
+                        }
+                    }
+                    if let Some(migrated) =
+                        self.apply_codec_migration(&ty.name(), &tree)?
+                    {
+                        let mut child = HashMap::new();
+                        return self.run_func(func, vec![migrated], &mut child);
+                    }
+                }
+                return Ok(result);
             }
             _ => Err(decode_error(
                 "",

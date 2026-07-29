@@ -1018,6 +1018,68 @@ impl LowerCtx<'_, '_> {
 
     /// `DataTree` → typed value Result (primitives via hosts; user types via `T::decode`).
     fn lower_datatree_decode(&mut self, tree: Value, target: &Type) -> Result<Value, String> {
+        if let Type::IntN { signed, bits } = target {
+            let decoded = self.lower_datatree_decode(tree, &Type::Int)?;
+            let (lo, hi) = if *signed {
+                if *bits == 64 {
+                    (i64::MIN, i64::MAX)
+                } else {
+                    let limit = 1_i64 << (*bits - 1);
+                    (-limit, limit - 1)
+                }
+            } else if *bits >= 63 {
+                (0, i64::MAX)
+            } else {
+                (0, (1_i64 << *bits) - 1)
+            };
+            let lo = self.b.ins().iconst(types::I64, lo);
+            let hi = self.b.ins().iconst(types::I64, hi);
+            let name = self.runtime.heap.alloc_string(target.name());
+            let name = self.b.ins().iconst(types::I64, name);
+            let host = self
+                .module
+                .declare_func_in_func(self.host.encoding.decode_int_range, self.b.func);
+            let call = self.b.ins().call(host, &[decoded, lo, hi, name]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if matches!(target, Type::Float32) {
+            let decoded = self.lower_datatree_decode(tree, &Type::Float)?;
+            let host = self
+                .module
+                .declare_func_in_func(self.host.encoding.decode_f32_range, self.b.func);
+            let call = self.b.ins().call(host, &[decoded]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if let Type::FixedList { elem, len, .. } = target {
+            let decoded = self.lower_datatree_decode_list(tree, elem)?;
+            let len = i64::try_from(*len)
+                .map_err(|_| format!("jit fixed-list length `{len}` exceeds I64"))?;
+            let len = self.b.ins().iconst(types::I64, len);
+            let host = self
+                .module
+                .declare_func_in_func(self.host.encoding.decode_fixed_len, self.b.func);
+            let call = self.b.ins().call(host, &[decoded, len]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
+        if let Type::Named(name) = target {
+            if let Some((lo, hi)) = self.meta.distinct_range(name) {
+                let base = self
+                    .meta
+                    .distinct_base(name)
+                    .cloned()
+                    .ok_or_else(|| format!("jit missing distinct base `{name}`"))?;
+                let decoded = self.lower_datatree_decode(tree, &base)?;
+                let lo = self.b.ins().iconst(types::I64, lo);
+                let hi = self.b.ins().iconst(types::I64, hi);
+                let name = self.runtime.heap.alloc_string(name.clone());
+                let name = self.b.ins().iconst(types::I64, name);
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.encoding.decode_int_range, self.b.func);
+                let call = self.b.ins().call(host, &[decoded, lo, hi, name]);
+                return Ok(self.b.inst_results(call)[0]);
+            }
+        }
         let target = self.erase_distinct_ty(target);
         if Self::is_datatree_value_ty(&target) {
             let tag = self.b.ins().iconst(types::I8, 1);

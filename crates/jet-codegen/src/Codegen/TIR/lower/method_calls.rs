@@ -3921,11 +3921,15 @@ fn demand_generic_serde_codec(
             | "core.encoding.toml"
             | "core.encoding.yaml"
             | "core.encoding.csv"
+            | "core.encoding.cbor"
     );
     if !encoding {
         return;
     }
-    if matches!(method, "to_string" | "to_string_pretty") {
+    if matches!(
+        method,
+        "to_string" | "to_string_pretty" | "to_bytes" | "to_bytes_canonical"
+    ) {
         if let Some(arg) = args.first() {
             if matches!(&arg.ty, Type::Apply { .. }) {
                 cx.jit_method_calls.borrow_mut().insert(

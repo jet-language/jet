@@ -1335,13 +1335,13 @@ fn apply_rename_all(style: &str, name: &str) -> String {
         _ => crate::Syntax::to_snake_acronym(name),
     }
 }
-fn container_rename_all(markers: &[Marker]) -> Option<String> {
+pub(super) fn container_rename_all(markers: &[Marker]) -> Option<String> {
     serde_marker(markers, crate::Syntax::ATTR_RENAME_ALL).and_then(|m| match m.args.first() {
         Some(Expr::Ident(n, _)) => Some(n.clone()),
         _ => None,
     })
 }
-fn field_wire_key(style: Option<&str>, f: &Field) -> String {
+pub(super) fn field_wire_key(style: Option<&str>, f: &Field) -> String {
     if let Some(m) = serde_marker(&f.serde_markers, crate::Syntax::ATTR_RENAME) {
         if let Some(s) = marker_str_arg(m) {
             return s;
@@ -1358,7 +1358,10 @@ fn field_wire_key(style: Option<&str>, f: &Field) -> String {
 /// `Sema::desugar_migrations` — the two must agree on which types get runtime
 /// machinery, since sema pre-lowers the converter/default functions the step
 /// functions call.
-fn migration_blocks<'a>(cx: &'a Cx, s: &StructDef) -> Option<&'a [crate::AST::MigrationDecl]> {
+pub(super) fn migration_blocks<'a>(
+    cx: &'a Cx,
+    s: &StructDef,
+) -> Option<&'a [crate::AST::MigrationDecl]> {
     // `#PublishedSchema struct` sets the flag; the grouped
     // `#[PublishedSchema, Codable]` spelling leaves the marker in `derives`.
     let published = s.is_published_schema
@@ -1380,7 +1383,11 @@ fn migration_blocks<'a>(cx: &'a Cx, s: &StructDef) -> Option<&'a [crate::AST::Mi
 /// current struct's `#[Rename]`/`RenameAll` treatment when the name is a
 /// current field, else the container casing style applied to the bare name
 /// (fields that only exist in historical shapes can't carry markers).
-fn migration_wire_key(style: Option<&str>, s: &StructDef, name: &str) -> String {
+pub(super) fn migration_wire_key(
+    style: Option<&str>,
+    s: &StructDef,
+    name: &str,
+) -> String {
     if let Some(f) = s.fields.iter().find(|f| f.name == name) {
         return field_wire_key(style, f);
     }
@@ -1394,7 +1401,7 @@ fn migration_wire_key(style: Option<&str>, s: &StructDef, name: &str) -> String 
 /// at compile time by inverting the migration chain from the current shape.
 /// Returns `shapes[0] = v1 (oldest) … shapes[K-1] = vK`; the current shape is
 /// `v{K+1}`. Each shape is a sorted set of wire keys.
-fn migration_shapes(
+pub(super) fn migration_shapes(
     style: Option<&str>,
     s: &StructDef,
     blocks: &[crate::AST::MigrationDecl],
@@ -2024,11 +2031,21 @@ pub(crate) fn emit_distinct(cx: &Cx, d: &DistinctDef, out: &mut String) {
             "impl crate::user_Encode for user_{n} {{\n    fn jet_encode(&self) -> crate::jet_std::DataTree {{ crate::user_Encode::jet_encode(&self.0) }}\n}}\n\n",
             n = d.name
         ));
-        out.push_str(&format!(
-            "impl crate::user_Decode for user_{n} {{\n    fn jet_decode(__t: &crate::jet_std::DataTree) -> Result<Self, crate::jet_std::DecodeError> {{ Ok(user_{n}(<{base} as crate::user_Decode>::jet_decode(__t)?)) }}\n}}\n\n",
-            n = d.name,
-            base = base_rust
-        ));
+        if let Some((lo, hi, _)) = d.range {
+            out.push_str(&format!(
+                "impl crate::user_Decode for user_{n} {{\n    fn jet_decode(__t: &crate::jet_std::DataTree) -> Result<Self, crate::jet_std::DecodeError> {{\n        let __value = <{base} as crate::user_Decode>::jet_decode(__t)?;\n        if __value < ({lo} as {base}) || __value > ({hi} as {base}) {{\n            return Err(crate::jet_std::DecodeError::new(\"expected {n} within {lo}..{hi}\"));\n        }}\n        Ok(user_{n}(__value))\n    }}\n}}\n\n",
+                n = d.name,
+                base = base_rust,
+                lo = lo,
+                hi = hi,
+            ));
+        } else {
+            out.push_str(&format!(
+                "impl crate::user_Decode for user_{n} {{\n    fn jet_decode(__t: &crate::jet_std::DataTree) -> Result<Self, crate::jet_std::DecodeError> {{ Ok(user_{n}(<{base} as crate::user_Decode>::jet_decode(__t)?)) }}\n}}\n\n",
+                n = d.name,
+                base = base_rust
+            ));
+        }
     }
 }
 

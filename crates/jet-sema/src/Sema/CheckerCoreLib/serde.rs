@@ -61,6 +61,7 @@ impl<'a> Checker<'a> {
                 Type::Map { key, value, .. } => matches!(**key, Type::String) && self.is_encodable(value),
                 Type::Named(n) => {
                     n == "Decimal"
+                        || n == "DataTree"
                         || is_json_type_name(n)
                         || self.serde_trait_impl(n, crate::Generics::ENCODE)
                         || self.type_param_scope.iter().any(|p|
@@ -96,6 +97,7 @@ impl<'a> Checker<'a> {
                 Type::FixedList { elem, .. } => self.is_decodable(elem),
                 Type::Map { key, value, .. } => matches!(**key, Type::String) && self.is_decodable(value),
                 Type::Named(n) => n == "Decimal"
+                    || n == "DataTree"
                     || self.serde_trait_impl(n, crate::Generics::DECODE)
                     || self.type_param_scope.iter().any(|p|
                         p.name == *n && p.bounds.iter().any(|b| b == crate::Generics::DECODE)),

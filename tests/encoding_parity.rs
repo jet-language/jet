@@ -491,6 +491,11 @@ enum Event {
     Count(Int)
 }
 
+#Codable
+struct Wrap<T> {
+    value: T
+}
+
 #[Codable, RenameAll(camel)]
 struct Packet {
     display_name: String
@@ -519,7 +524,10 @@ fn resident() => String {
     encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
     decoded := cbor.decode<Packet>(~encoded) ?? panic("decode")
     roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
-    return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}"
+    boxed := cbor.decode<Wrap<Int>>([U8].{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
+    boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
+    boxed_back := cbor.decode<Wrap<Int>>(~boxed_wire) ?? panic("generic roundtrip")
+    return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
 }
 
 fn forced_deopt() => String {
@@ -539,7 +547,10 @@ fn forced_deopt() => String {
     encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
     decoded := cbor.decode<Packet>(~encoded) ?? panic("decode")
     roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
-    return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}"
+    boxed := cbor.decode<Wrap<Int>>([U8].{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
+    boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
+    boxed_back := cbor.decode<Wrap<Int>>(~boxed_wire) ?? panic("generic roundtrip")
+    return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
 }
 
 fn run() {
@@ -566,7 +577,10 @@ fn run() {
     let resident = lines.next().expect("resident output");
     let deopt = lines.next().expect("deopt output");
     assert_eq!(resident, deopt, "AOT corpus functions diverged");
-    assert!(resident.ends_with("|decoded"), "hand Decode body did not run: {resident}");
+    assert!(
+        resident.ends_with("|decoded|11"),
+        "custom and generic Decode bodies did not run: {resident}"
+    );
     assert!(lines.next().is_none(), "unexpected AOT output: {}", aot.stdout);
     let (backend, dev) = run_default_dev(path.to_str().unwrap());
     assert_eq!(backend, DevBackend::DeoptInterp);
@@ -574,6 +588,222 @@ fn run() {
     assert!(jit_executed_for_test(), "resident control must execute JIT");
     assert!(deopt_invoked_for_test(), "forced-deopt control must execute TIR evaluator");
     assert!(!fallback_invoked_for_test(), "codec corpus must not fall back");
+}
+
+#[test]
+fn cbor_migration_plan_matches_aot_and_forced_deopt() {
+    on_encoding_stack(cbor_migration_plan_matches_aot_and_forced_deopt_inner);
+}
+
+fn cbor_migration_plan_matches_aot_and_forced_deopt_inner() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping CBOR migration parity (need rustc)");
+        return;
+    }
+    let source = r#"
+use core.encoding.cbor as cbor
+use core.text as text
+
+#Codable
+struct Rank { value: Int }
+
+// v1 wire shape: legacyId, name, score: Int
+// v2 removes legacyId; v3 renames name and converts score; v4 adds hostName.
+#[PublishedSchema, Codable, RenameAll(camel)]
+struct Profile {
+    display_name: String
+    score: Rank
+    host_name: String
+}
+
+migration Profile {
+    remove legacy_id
+}
+
+migration Profile {
+    rename name => display_name
+    change score: Int => Rank via { (n) => Rank.{ value: n } }
+}
+
+migration Profile {
+    add host_name: String = "localhost"
+}
+
+fn decode_old() => String {
+    bytes :: [U8].{
+        0xa3,
+        0x64, 0x6e, 0x61, 0x6d, 0x65,
+        0x63, 0x41, 0x64, 0x61,
+        0x65, 0x73, 0x63, 0x6f, 0x72, 0x65,
+        0x18, 0x5f,
+        0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
+        0x09
+    }
+    profile :: cbor.decode<Profile>(~bytes) ?? panic("decode")
+    return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
+}
+
+fn forced_deopt() => String {
+    if text.casefold("Straße") != "strasse" { panic("casefold") }
+    bytes :: [U8].{
+        0xa3,
+        0x64, 0x6e, 0x61, 0x6d, 0x65,
+        0x63, 0x41, 0x64, 0x61,
+        0x65, 0x73, 0x63, 0x6f, 0x72, 0x65,
+        0x18, 0x5f,
+        0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
+        0x09
+    }
+    profile :: cbor.decode<Profile>(~bytes) ?? panic("decode")
+    return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
+}
+
+fn run() {
+    print(forced_deopt())
+}
+"#;
+    let scratch = Scratch::new("cbor_migration_deopt");
+    let path = scratch.write_project("2026", source);
+    let bundle = checked_bundle(path.to_str().unwrap());
+    let program = jet::Codegen::TIR::lower_jit_program(&bundle)
+        .expect("migration corpus must lower to one resident/deopt program");
+    let migration = program
+        .codec_migrations
+        .get("Profile")
+        .expect("published schema must carry a compiled migration plan");
+    assert_eq!(migration.historical_shapes.len(), 3);
+    assert_eq!(migration.steps.len(), 3);
+    let mut direct_sink = jet::Comptime::DevSink::default();
+    let direct = jet::Codegen::TIR::run_named_func(
+        &program,
+        "forced_deopt",
+        Vec::new(),
+        &mut direct_sink,
+    )
+    .expect("compiled migration plan must execute in the TIR evaluator");
+    assert!(
+        matches!(direct, jet::AST::CtValue::Str(ref value) if value == "Ada|95|localhost"),
+        "direct migration result diverged: {direct:?}"
+    );
+    let plan = plan_bundle_tiers(&bundle);
+    assert!(!plan.whole_interp, "regression needs mixed tiers: {plan:?}");
+    assert!(
+        plan.deopt.iter().any(|(name, _)| name == "forced_deopt"),
+        "regression must force migration through named deopt: {plan:?}"
+    );
+    let aot = run_aot(&path, scratch.path());
+    assert_eq!(aot.exit, 0, "migration corpus AOT failed: {}", aot.stderr);
+    assert_eq!(aot.stdout, "Ada|95|localhost\n");
+    let (backend, dev) = run_default_dev(path.to_str().unwrap());
+    assert_eq!(backend, DevBackend::DeoptInterp);
+    assert_eq!(dev, aot);
+    assert!(jit_executed_for_test(), "resident control must execute JIT");
+    assert!(deopt_invoked_for_test(), "migration must execute TIR evaluator");
+    assert!(!fallback_invoked_for_test(), "migration corpus must not fall back");
+}
+
+#[test]
+fn cbor_primitive_container_boundaries_match_aot_and_forced_deopt() {
+    on_encoding_stack(cbor_primitive_container_boundaries_match_aot_and_forced_deopt_inner);
+}
+
+fn cbor_primitive_container_boundaries_match_aot_and_forced_deopt_inner() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping CBOR primitive boundary parity (need rustc)");
+        return;
+    }
+    let source = r#"
+use core.encoding.cbor as cbor
+use core.text as text
+
+#CodableAsBase
+Severity :: distinct Int(0..10)
+
+fn invalid_i8_rejected() => Bool {
+    if cbor.decode<I8>([U8].{ 0x18, 0x80 }) == {
+        .Ok(_) -> return false
+        .Err(_) -> return true
+    }
+}
+
+fn invalid_u32_rejected() => Bool {
+    if cbor.decode<U32>([U8].{ 0x20 }) == {
+        .Ok(_) -> return false
+        .Err(_) -> return true
+    }
+}
+
+fn invalid_f32_rejected() => Bool {
+    if cbor.decode<F32>([U8].{ 0xfb, 0x7f, 0xef, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }) == {
+        .Ok(_) -> return false
+        .Err(_) -> return true
+    }
+}
+
+fn invalid_fixed_rejected() => Bool {
+    if cbor.decode<[Int#2]>([U8].{ 0x81, 0x01 }) == {
+        .Ok(_) -> return false
+        .Err(_) -> return true
+    }
+}
+
+fn invalid_range_rejected() => Bool {
+    if cbor.decode<Severity>([U8].{ 0x0b }) == {
+        .Ok(_) -> return false
+        .Err(_) -> return true
+    }
+}
+
+fn forced_deopt() => String {
+    if text.casefold("Straße") != "strasse" { panic("casefold") }
+    signed := cbor.decode<I8>(~(cbor.to_bytes_canonical(I8.{ -8 }) ?? panic("i8 encode"))) ?? panic("i8 decode")
+    unsigned := cbor.decode<U32>(~(cbor.to_bytes_canonical(U32.{ 4000000000 }) ?? panic("u32 encode"))) ?? panic("u32 decode")
+    narrow := cbor.decode<F32>(~(cbor.to_bytes_canonical(F32.{ 1.5 }) ?? panic("f32 encode"))) ?? panic("f32 decode")
+    pair := cbor.decode<[Int#2]>(~(cbor.to_bytes_canonical([Int#2].{ 1, 2 }) ?? panic("fixed encode"))) ?? panic("fixed decode")
+    bytes := cbor.decode<[U8#2]>(~(cbor.to_bytes_canonical([U8#2].{ 222, 173 }) ?? panic("bytes encode"))) ?? panic("bytes decode")
+    tree := cbor.decode<DataTree>(~(cbor.to_bytes_canonical(DataTree.Object(["n": DataTree.Int(7)])) ?? panic("tree encode"))) ?? panic("tree decode")
+    severity := cbor.decode<Severity>(~(cbor.to_bytes_canonical(Severity.from_int(7)) ?? panic("range encode"))) ?? panic("range decode")
+    tree_n := (tree.field("n") ?? panic("tree field")).int() ?? panic("tree int")
+    return "{signed}|{unsigned}|{narrow}|{pair[0]},{pair[1]}|{bytes[0]},{bytes[1]}|{tree_n}|{severity.raw()}|{invalid_i8_rejected()}|{invalid_u32_rejected()}|{invalid_f32_rejected()}|{invalid_fixed_rejected()}|{invalid_range_rejected()}"
+}
+
+fn run() {
+    print(forced_deopt())
+}
+"#;
+    let scratch = Scratch::new("cbor_primitive_boundaries");
+    let path = scratch.write_project("2026", source);
+    let bundle = checked_bundle(path.to_str().unwrap());
+    let program = jet::Codegen::TIR::lower_jit_program(&bundle)
+        .expect("primitive boundary corpus must lower to one resident/deopt program");
+    let mut direct_sink = jet::Comptime::DevSink::default();
+    let direct = jet::Codegen::TIR::run_named_func(
+        &program,
+        "forced_deopt",
+        Vec::new(),
+        &mut direct_sink,
+    )
+    .expect("primitive boundaries must execute in the TIR evaluator");
+    let expected = "-8|4000000000|1.5|1,2|222,173|7|7|true|true|true|true|true";
+    assert!(
+        matches!(direct, jet::AST::CtValue::Str(ref value) if value == expected),
+        "direct primitive result diverged: {direct:?}"
+    );
+    let plan = plan_bundle_tiers(&bundle);
+    assert!(!plan.whole_interp, "regression needs mixed tiers: {plan:?}");
+    assert!(
+        plan.deopt.iter().any(|(name, _)| name == "forced_deopt"),
+        "regression must force primitive codecs through named deopt: {plan:?}"
+    );
+    let aot = run_aot(&path, scratch.path());
+    assert_eq!(aot.exit, 0, "primitive boundary AOT failed: {}", aot.stderr);
+    assert_eq!(aot.stdout, format!("{expected}\n"));
+    let (backend, dev) = run_default_dev(path.to_str().unwrap());
+    assert_eq!(backend, DevBackend::DeoptInterp);
+    assert_eq!(dev, aot);
+    assert!(jit_executed_for_test(), "resident control must execute JIT");
+    assert!(deopt_invoked_for_test(), "primitive corpus must execute TIR evaluator");
+    assert!(!fallback_invoked_for_test(), "primitive corpus must not fall back");
 }
 
 #[test]

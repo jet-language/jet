@@ -1836,6 +1836,74 @@ extern "C" fn jet_jit_datatree_decode_int(tree: i64) -> i64 {
     }
 }
 
+extern "C" fn jet_jit_decode_int_range(
+    result: i64,
+    lo: i64,
+    hi: i64,
+    type_name: i64,
+) -> i64 {
+    let state = Concurrency::with_runtime_mut(|rt| {
+        result
+            .checked_sub(1)
+            .and_then(|index| rt.results.get(index as usize))
+            .copied()
+    });
+    let Some(value) = state else { return result };
+    if !value.ok {
+        return result;
+    }
+    let value = value.bits as i64;
+    if (lo..=hi).contains(&value) {
+        return result;
+    }
+    let type_name = clone_heap_string(type_name);
+    result_err_decode(
+        "",
+        &format!("expected {type_name}, found out-of-range Int"),
+    )
+}
+
+extern "C" fn jet_jit_decode_f32_range(result: i64) -> i64 {
+    let state = Concurrency::with_runtime_mut(|rt| {
+        result
+            .checked_sub(1)
+            .and_then(|index| rt.results.get(index as usize))
+            .copied()
+    });
+    let Some(value) = state else { return result };
+    if !value.ok {
+        return result;
+    }
+    let value = f64::from_bits(value.bits);
+    if value.is_finite() && value >= -(f32::MAX as f64) && value <= f32::MAX as f64 {
+        return result;
+    }
+    result_err_decode("", "expected F32, found out-of-range Float")
+}
+
+extern "C" fn jet_jit_decode_fixed_len(result: i64, expected: i64) -> i64 {
+    let state = Concurrency::with_runtime_mut(|rt| {
+        let value = result
+            .checked_sub(1)
+            .and_then(|index| rt.results.get(index as usize))
+            .copied()?;
+        let found = value
+            .ok
+            .then(|| rt.heap.list_len(value.bits as i64).unwrap_or(0));
+        Some((value.ok, found))
+    });
+    let Some((true, Some(found))) = state else {
+        return result;
+    };
+    if found == expected {
+        return result;
+    }
+    result_err_decode(
+        "",
+        &format!("expected a fixed list of length {expected}, found {found}"),
+    )
+}
+
 extern "C" fn jet_jit_datatree_decode_list_error(tree: i64) -> i64 {
     let reason = read_datatree(tree)
         .map(|tree| format!("expected a list, found {}", typed_datatree_kind(&tree)))
@@ -2056,6 +2124,9 @@ pub(crate) struct EncodingHostFns {
     pub datatree_at: cranelift_module::FuncId,
     pub datatree_int: cranelift_module::FuncId,
     pub datatree_decode_int: cranelift_module::FuncId,
+    pub decode_int_range: cranelift_module::FuncId,
+    pub decode_f32_range: cranelift_module::FuncId,
+    pub decode_fixed_len: cranelift_module::FuncId,
     pub datatree_decode_list_error: cranelift_module::FuncId,
     pub decode_error_under: cranelift_module::FuncId,
     pub datatree_text: cranelift_module::FuncId,
@@ -2143,6 +2214,18 @@ pub(crate) fn register_encoding_symbols(builder: &mut cranelift_jit::JITBuilder)
     builder.symbol(
         "jet_jit_datatree_decode_int",
         jet_jit_datatree_decode_int as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_decode_int_range",
+        jet_jit_decode_int_range as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_decode_f32_range",
+        jet_jit_decode_f32_range as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_decode_fixed_len",
+        jet_jit_decode_fixed_len as *const u8,
     );
     builder.symbol(
         "jet_jit_datatree_decode_list_error",
@@ -2467,6 +2550,11 @@ pub(crate) fn declare_encoding_host_fns(
     sig_binary.params.push(AbiParam::new(types::I64));
     sig_binary.params.push(AbiParam::new(types::I64));
     sig_binary.returns.push(AbiParam::new(types::I64));
+    let mut sig_quaternary = Signature::new(cc);
+    for _ in 0..4 {
+        sig_quaternary.params.push(AbiParam::new(types::I64));
+    }
+    sig_quaternary.returns.push(AbiParam::new(types::I64));
     let mut import = |name: &str, sig: &Signature| -> Result<cranelift_module::FuncId, String> {
         module
             .declare_function(name, Linkage::Import, sig)
@@ -2516,6 +2604,9 @@ pub(crate) fn declare_encoding_host_fns(
         datatree_at: import("jet_jit_datatree_at", &sig_binary)?,
         datatree_int: import("jet_jit_datatree_int", &sig_unary)?,
         datatree_decode_int: import("jet_jit_datatree_decode_int", &sig_unary)?,
+        decode_int_range: import("jet_jit_decode_int_range", &sig_quaternary)?,
+        decode_f32_range: import("jet_jit_decode_f32_range", &sig_unary)?,
+        decode_fixed_len: import("jet_jit_decode_fixed_len", &sig_binary)?,
         datatree_decode_list_error: import(
             "jet_jit_datatree_decode_list_error",
             &sig_unary,

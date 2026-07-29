@@ -346,6 +346,7 @@ pub(crate) struct JitMeta<'a> {
     constants: &'a HashMap<String, jet_foundation::AST::CtValue>,
     has_generic_instances: bool,
     distinct_bases: &'a HashMap<String, Type>,
+    distinct_ranges: &'a HashMap<String, (i64, i64)>,
 }
 
 impl<'a> JitMeta<'a> {
@@ -361,6 +362,7 @@ impl<'a> JitMeta<'a> {
             constants: &program.constants,
             has_generic_instances: !program.instance_provenance.is_empty(),
             distinct_bases: &program.distinct_bases,
+            distinct_ranges: &program.distinct_ranges,
         }
     }
 
@@ -472,6 +474,9 @@ impl<'a> JitMeta<'a> {
     pub(crate) fn has_generic_instances(&self) -> bool { self.has_generic_instances }
     pub(crate) fn distinct_base(&self, name: &str) -> Option<&Type> {
         self.distinct_bases.get(name)
+    }
+    pub(crate) fn distinct_range(&self, name: &str) -> Option<(i64, i64)> {
+        self.distinct_ranges.get(name).copied()
     }
 
     pub(crate) fn struct_field_index(&self, type_name: &str, field: &str) -> Option<usize> {

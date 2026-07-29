@@ -135,6 +135,11 @@ pub(super) struct EvalCtx<'a> {
     pub(super) struct_fields: HashMap<String, Vec<(String, bool)>>,
     /// `TypeName -> [(field, Type)]` for `core.data.csv` / decode on deopt.
     pub(super) struct_field_types: HashMap<String, Vec<(String, crate::AST::Type)>>,
+    /// Sema-compiled published-schema plans. These contain wire keys and
+    /// lowered helper names, never AST expressions or a field/type tuple codec.
+    pub(super) codec_migrations: HashMap<String, TIR::TCodecMigrationPlan>,
+    pub(super) distinct_bases: HashMap<String, crate::AST::Type>,
+    pub(super) distinct_ranges: HashMap<String, (i64, i64)>,
     /// Current `MixedSwitch` subject for structured field conditions.
     switch_subject: Option<CtValue>,
     /// TIR-native callable values. Entries borrow the already-lowered program
@@ -277,10 +282,11 @@ impl<'a> EvalCtx<'a> {
         self.call_depth += 1;
         for (i, (name, _, _)) in func.params.iter().enumerate() {
             let jet = name.strip_prefix("user_").unwrap_or(name.as_str());
-            scope.insert(
-                jet.to_string(),
-                args.get(i).cloned().unwrap_or(CtValue::Unit),
-            );
+            let value = args.get(i).cloned().unwrap_or(CtValue::Unit);
+            scope.insert(jet.to_string(), value.clone());
+            if jet != name {
+                scope.insert(name.clone(), value);
+            }
         }
         let result = match self.exec_stmts(&func.body, scope)? {
             Flow::Return(v) => Ok(v),
@@ -668,6 +674,9 @@ pub fn run_program_with_structs(
         embed_inputs: None,
         struct_fields,
         struct_field_types,
+        codec_migrations: program.codec_migrations.clone(),
+        distinct_bases: program.distinct_bases.clone(),
+        distinct_ranges: program.distinct_ranges.clone(),
         switch_subject: None,
         callables: Vec::new(),
         streams: Vec::new(),
@@ -726,6 +735,9 @@ pub fn run_named_func(
         embed_inputs: None,
         struct_fields: HashMap::new(),
         struct_field_types: program_struct_field_types(program),
+        codec_migrations: program.codec_migrations.clone(),
+        distinct_bases: program.distinct_bases.clone(),
+        distinct_ranges: program.distinct_ranges.clone(),
         switch_subject: None,
         callables: Vec::new(),
         streams: Vec::new(),
@@ -876,6 +888,9 @@ fn eval_expr_hook(
         embed_inputs,
         struct_fields: HashMap::new(),
         struct_field_types: normalize_struct_field_types(req.structs),
+        codec_migrations: HashMap::new(),
+        distinct_bases: HashMap::new(),
+        distinct_ranges: HashMap::new(),
         switch_subject: None,
         callables: Vec::new(),
         streams: Vec::new(),
@@ -949,6 +964,9 @@ fn eval_block_hook(
         embed_inputs,
         struct_fields: HashMap::new(),
         struct_field_types: normalize_struct_field_types(req.structs),
+        codec_migrations: HashMap::new(),
+        distinct_bases: HashMap::new(),
+        distinct_ranges: HashMap::new(),
         switch_subject: None,
         callables: Vec::new(),
         streams: Vec::new(),

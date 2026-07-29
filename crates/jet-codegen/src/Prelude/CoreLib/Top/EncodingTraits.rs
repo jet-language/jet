@@ -52,6 +52,21 @@ impl user_Encode for char {
 impl user_Encode for u8 {
     fn jet_encode(&self) -> jet_std::DataTree { jet_std::DataTree::Int(*self as i64) }
 }
+macro_rules! jet_impl_sized_int_encode {
+    ($($ty:ty),* $(,)?) => {$(
+        impl user_Encode for $ty {
+            fn jet_encode(&self) -> jet_std::DataTree {
+                jet_std::DataTree::Int(*self as i64)
+            }
+        }
+    )*};
+}
+jet_impl_sized_int_encode!(i8, i16, i32, u16, u32);
+impl user_Encode for f32 {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        jet_std::DataTree::Float(*self as f64)
+    }
+}
 impl user_Encode for jet_std::JetDecimal {
     fn jet_encode(&self) -> jet_std::DataTree {
         // Decimal stays exact through the shared tree; text preserves scale.
@@ -72,6 +87,19 @@ impl<T: user_Encode> user_Encode for Vec<T> {
             return jet_std::DataTree::Bytes(bytes);
         }
         jet_std::DataTree::Array(self.iter().map(|x| x.jet_encode()).collect())
+    }
+}
+impl<T: user_Encode, const N: usize> user_Encode for [T; N] {
+    fn jet_encode(&self) -> jet_std::DataTree {
+        if std::any::type_name::<T>() == "u8" {
+            let mut bytes = Vec::with_capacity(N);
+            for value in self {
+                let jet_std::DataTree::Int(n) = value.jet_encode() else { unreachable!() };
+                bytes.push(n as u8);
+            }
+            return jet_std::DataTree::Bytes(bytes);
+        }
+        jet_std::DataTree::Array(self.iter().map(|value| value.jet_encode()).collect())
     }
 }
 impl<T: user_Encode> user_Encode for Option<T> {
@@ -181,6 +209,53 @@ impl user_Decode for u8 {
         }
     }
 }
+macro_rules! jet_impl_sized_int_decode {
+    ($($ty:ty => $name:literal),* $(,)?) => {$(
+        impl user_Decode for $ty {
+            fn jet_decode(t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+                match t {
+                    jet_std::DataTree::Int(n) => <$ty>::try_from(*n).map_err(|_| {
+                        jet_std::DecodeError::new(format!(
+                            "expected {}, found out-of-range Int",
+                            $name
+                        ))
+                    }),
+                    other => Err(jet_std::DecodeError::new(format!(
+                        "expected {}, found {}",
+                        $name,
+                        jet_std::datatree_kind(other)
+                    ))),
+                }
+            }
+        }
+    )*};
+}
+jet_impl_sized_int_decode!(
+    i8 => "I8",
+    i16 => "I16",
+    i32 => "I32",
+    u16 => "U16",
+    u32 => "U32",
+);
+impl user_Decode for f32 {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+        let value = match t {
+            jet_std::DataTree::Float(value) => *value,
+            jet_std::DataTree::Int(value) => *value as f64,
+            other => {
+                return Err(jet_std::DecodeError::new(format!(
+                    "expected F32, found {}",
+                    jet_std::datatree_kind(other)
+                )));
+            }
+        };
+        if value.is_finite() && value >= -(f32::MAX as f64) && value <= f32::MAX as f64 {
+            Ok(value as f32)
+        } else {
+            Err(jet_std::DecodeError::new("expected F32, found out-of-range Float"))
+        }
+    }
+}
 impl user_Decode for jet_std::JetDecimal {
     fn jet_decode(t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
         match t {
@@ -217,6 +292,18 @@ impl<T: user_Decode> user_Decode for Vec<T> {
                 jet_std::datatree_kind(other)
             ))),
         }
+    }
+}
+impl<T: user_Decode, const N: usize> user_Decode for [T; N] {
+    fn jet_decode(t: &jet_std::DataTree) -> Result<Self, jet_std::DecodeError> {
+        let values = Vec::<T>::jet_decode(t)?;
+        let found = values.len();
+        values.try_into().map_err(|_| {
+            jet_std::DecodeError::new(format!(
+                "expected a fixed list of length {}, found {}",
+                N, found
+            ))
+        })
     }
 }
 impl user_Decode for jet_std::DataTree {

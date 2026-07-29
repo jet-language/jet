@@ -104,12 +104,45 @@ pub struct JitProgram {
     pub int_constants: std::collections::HashMap<String, i64>,
     pub constants: std::collections::HashMap<String, crate::AST::CtValue>,
     pub distinct_bases: std::collections::HashMap<String, Type>,
+    pub distinct_ranges: std::collections::HashMap<String, (i64, i64)>,
+    /// Published-schema migration plans compiled from sema facts. The
+    /// evaluator applies these wire-key operations before re-entering the
+    /// ordinary lowered `Decode` body.
+    pub codec_migrations: std::collections::HashMap<String, TCodecMigrationPlan>,
     /// Sema-resolved `(trait, method) -> concrete owner` dispatch facts.
     pub trait_method_owners:
         std::collections::HashMap<(String, String), Vec<String>>,
     /// Sema-resolved `(collection, iterator) -> Iterable.Item` facts.
     pub iterable_item_types:
         std::collections::HashMap<(String, String), Type>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TCodecMigrationPlan {
+    pub historical_shapes: Vec<Vec<String>>,
+    pub steps: Vec<Vec<TCodecMigrationOp>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum TCodecMigrationOp {
+    Rename {
+        from_key: String,
+        to_key: String,
+    },
+    Remove {
+        key: String,
+    },
+    Add {
+        key: String,
+        ty: Type,
+        default_fn: String,
+    },
+    Change {
+        key: String,
+        from_ty: Type,
+        to_ty: Type,
+        converter_fn: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,6 +189,92 @@ fn register_enum_variants(
         let pattern = format!("user_{enum_name}::user_{}", variant.name);
         enum_variant_payload_types.insert(pattern, payload_types_for_variant(&variant.payload));
     }
+}
+
+fn compile_codec_migrations(
+    cx: &Cx,
+    items: &[Item],
+) -> Option<std::collections::HashMap<String, TCodecMigrationPlan>> {
+    let mut plans = std::collections::HashMap::new();
+    for item in items {
+        let Item::Struct(def) = item else { continue };
+        let Some(blocks) = super::Items::migration_blocks(cx, def) else {
+            continue;
+        };
+        let style = super::Items::container_rename_all(&def.serde_markers);
+        let historical_shapes =
+            super::Items::migration_shapes(style.as_deref(), def, blocks);
+        let mut steps = Vec::with_capacity(blocks.len());
+        for block in blocks {
+            let mut lowered = Vec::with_capacity(block.ops.len());
+            for op in &block.ops {
+                lowered.push(match op {
+                    crate::AST::MigrationOp::Rename { from, to, .. } => {
+                        TCodecMigrationOp::Rename {
+                            from_key: super::Items::migration_wire_key(
+                                style.as_deref(),
+                                def,
+                                from,
+                            ),
+                            to_key: super::Items::migration_wire_key(
+                                style.as_deref(),
+                                def,
+                                to,
+                            ),
+                        }
+                    }
+                    crate::AST::MigrationOp::Remove { field, .. } => {
+                        TCodecMigrationOp::Remove {
+                            key: super::Items::migration_wire_key(
+                                style.as_deref(),
+                                def,
+                                field,
+                            ),
+                        }
+                    }
+                    crate::AST::MigrationOp::Add {
+                        field,
+                        ty,
+                        default_fn,
+                        ..
+                    } => TCodecMigrationOp::Add {
+                        key: super::Items::migration_wire_key(
+                            style.as_deref(),
+                            def,
+                            field,
+                        ),
+                        ty: ty.clone(),
+                        default_fn: default_fn.clone()?,
+                    },
+                    crate::AST::MigrationOp::Change {
+                        field,
+                        from_ty,
+                        to_ty,
+                        conv_fn,
+                        ..
+                    } => TCodecMigrationOp::Change {
+                        key: super::Items::migration_wire_key(
+                            style.as_deref(),
+                            def,
+                            field,
+                        ),
+                        from_ty: from_ty.clone(),
+                        to_ty: to_ty.clone(),
+                        converter_fn: conv_fn.clone()?,
+                    },
+                });
+            }
+            steps.push(lowered);
+        }
+        plans.insert(
+            def.name.clone(),
+            TCodecMigrationPlan {
+                historical_shapes,
+                steps,
+            },
+        );
+    }
+    Some(plans)
 }
 
 fn register_union_type(
@@ -445,8 +564,14 @@ fn collect_serde_codec_demands(
                         | "core.encoding.toml"
                         | "core.encoding.yaml"
                         | "core.encoding.csv"
+                        | "core.encoding.cbor"
                 );
-                if encoding && matches!(method.as_str(), "to_string" | "to_string_pretty") {
+                if encoding
+                    && matches!(
+                        method.as_str(),
+                        "to_string" | "to_string_pretty" | "to_bytes" | "to_bytes_canonical"
+                    )
+                {
                     if let Some(arg) = args.first() {
                         demand_serde_codec(demands, &arg.ty, "encode");
                     }
@@ -1342,6 +1467,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             )
         })
         .collect();
+    let codec_migrations = compile_codec_migrations(&cx, &module.items)?;
     Some(JitProgram {
         instance_provenance: instance_provenance(bundle),
         source_file: module.display.clone(),
@@ -1355,6 +1481,8 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
         int_constants,
         constants,
         distinct_bases,
+        distinct_ranges: cx.distinct_ranges.clone(),
+        codec_migrations,
         trait_method_owners,
         iterable_item_types,
     })

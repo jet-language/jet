@@ -155,7 +155,9 @@ fn datatree_payload<'a>(recv: &'a CtValue, variant: &str) -> Option<&'a CtValue>
             type_name,
             variant: actual,
             args,
-        } if type_name == "JSON" && actual == variant => args.first().map(|(_, value)| value),
+        } if (type_name == "JSON" || type_name == "DataTree") && actual == variant => {
+            args.first().map(|(_, value)| value)
+        }
         _ => None,
     }
 }
@@ -174,6 +176,15 @@ fn datatree_field_result(recv: &CtValue, args: &[CtValue]) -> CtValue {
         Some(CtValue::Map(fields)) => fields
             .get(&crate::AST::CtKey::Str(name.clone()))
             .cloned()
+            .ok_or_else(|| {
+                decode_error(
+                    name.clone(),
+                    format!("field `{name}` not found"),
+                )
+            }),
+        Some(CtValue::Struct { type_name, fields }) if type_name == "JSONObject" => fields
+            .iter()
+            .find_map(|(field, value)| (field == name).then(|| value.clone()))
             .ok_or_else(|| {
                 decode_error(
                     name.clone(),
