@@ -2,10 +2,10 @@
 
 ## Project tasks
 
-Mark a top-level function with `#Task` to make it a project task. Use `#Doc` to add one help line.
+Mark a top-level function with `#Job` to make it a project task. Use `#Doc` to add one help line.
 
 ```jet
-#[Task, Doc("Seed local data"), Every(5min)]
+#[Job, Doc("Seed local data"), Every(5min)]
 fn seed() {
     // ...
 }

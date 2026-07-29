@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 /// `jetpack run [<ref>|<task>] [-- cmd…]`
 ///
-/// D-JPK-TASKRUN1: a bare first positional that names a `#Task fn` in the
+/// D-JPK-TASKRUN1: a bare first positional that names a `#Job fn` in the
 /// project entry runs that task (via `jet run --task <name> <entry>`). Package
 /// refs (`source:pkg`, workspace members) keep the existing realize path.
 pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
@@ -88,7 +88,7 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
     let entry = find_project_entry(&project_dir);
     let declared_tasks = list_project_tasks(&entry);
 
-    // Prefer a project `#Task` over package-ref classification when the first
+    // Prefer a project `#Job` over package-ref classification when the first
     // positional is a bare name (no `@source` suffix).
     if let Some(raw) = parsed.positional.first() {
         if !raw.contains(Syntax::REF_PROVIDER_AT) && declared_tasks.iter().any(|t| t == raw) {
@@ -121,8 +121,8 @@ pub(super) fn cmd_run(theme: &Theme, parsed: &Parsed) -> i32 {
                     theme.error_coded(
                         "E1294",
                         &format!("no task named `{raw}`"),
-                        "`jetpack run <name>` invokes a `#Task fn` in the project entry (D-JPK-TASKRUN1).",
-                        "mark a function `#Task` to make it runnable, or check the spelling.",
+                        "`jetpack run <name>` invokes a `#Job fn` in the project entry (D-JPK-TASKRUN1).",
+                        "mark a function `#Job` to make it runnable, or check the spelling.",
                     );
                     theme.detail(&format!("declared tasks: {list}"));
                     return 2;

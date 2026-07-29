@@ -65,6 +65,32 @@ test('cli without init fails with a helpful hint', () => {
   assert.match(r.out, /tower init/);
 });
 
+test('message CLI adds, lists, validates, and closes card-linked messages', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-message-'));
+  run(cwd, ['init', '--name', 'CLI Messages']);
+  run(cwd, ['card', 'add', '--title', 'Ship it']);
+
+  const missingBy = run(cwd, ['message', 'add', '#1', '--text', 'Read this.'], false);
+  assert.equal(missingBy.code, 1);
+  assert.match(missingBy.out, /--by/);
+
+  const message = JSON.parse(run(cwd, [
+    'message', 'add', '#1', '--text', 'Read this.', '--by', 'agent-x', '--json',
+  ]).out);
+  assert.equal(message.kind, 'message');
+  assert.equal(message.cardNum, 1);
+
+  const open = JSON.parse(run(cwd, ['message', 'list', '--open', '--json']).out);
+  assert.deepEqual(open.map(item => item.id), [message.id]);
+
+  const rejected = run(cwd, ['message', 'done', message.id, '--by', 'agent-x'], false);
+  assert.equal(rejected.code, 1);
+  assert.match(rejected.out, /owner-only/);
+
+  run(cwd, ['message', 'done', message.id, '--by', 'owner']);
+  assert.deepEqual(JSON.parse(run(cwd, ['message', 'list', '--open', '--json']).out), []);
+});
+
 test('status lists verification before building work', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-status-'));
   run(cwd, ['init', '--name', 'CLI Status']);

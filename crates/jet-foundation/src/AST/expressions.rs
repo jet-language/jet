@@ -323,11 +323,22 @@ pub enum Expr {
         /// Filled by sema so codegen picks the right runtime helper.
         kind: IndexKind,
     },
-    /// S40: inclusive copy slice `xs[a..b]`.
+    /// S40/D-SHAPE-PLACE1: range projection `xs[a..b]` or `xs[range]`.
     Slice {
         base: Box<Expr>,
         start: Box<Expr>,
         end: Box<Expr>,
+        /// D-RANGE-VALUE1=A: `Some` carries one Range expression. Legacy
+        /// literal slices keep direct bounds in `start`/`end`.
+        range: Option<Box<Expr>>,
+        span: Span,
+    },
+    /// D-RANGE-VALUE1=A: one nominal `Range` value over `Int`.
+    /// `..` is inclusive; `..<` carries a half-open end in the same value.
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
+        exclusive: bool,
         span: Span,
     },
     Ident(String, Span),
@@ -451,15 +462,13 @@ pub enum Expr {
         args: Vec<EnumLitArg>,
         span: Span,
     },
-    /// D-TAINT1 (ratified 2026-06-21): `#Tainted expr` — marks a value as
-    /// untrusted at its source. A value-fact tag (D-QUAL1): it rides the value,
-    /// taint spreads to anything derived from it, and a tainted value reaching a
-    /// sink effect (`DB`/`Exec`/`Net`) without passing through a `#Sanitizer fn`
-    /// is E0721. The tag is static and **erased in codegen** (I3) — lowering
+    /// D-TAG-SURFACE1=A: `#Tag value` attaches a declared value fact. It rides
+    /// the value, spreads to derived values, and is checked against the tag's
+    /// denied destinations. `#Scrub(Tag)` removes exactly that fact. The tag is
+    /// static and **erased in codegen** (I3) — lowering
     /// emits the inner expression unchanged, like `Expr::Present` but unwrapped.
     ///
-    /// D-TAINT2 (ratified 2026-07-13): the kind is named in parens —
-    /// `#Tainted(Credential) value`. `None` means the default `.Input` kind.
+    /// The direct tag name. `None` exists only while recovering old syntax.
     Tainted(Box<Expr>, Option<String>, Span),
     /// S32: `value(expr)` — present optional.
     Present(Box<Expr>, Span),
@@ -579,6 +588,7 @@ impl Expr {
             | Expr::MapLit(_, s)
             | Expr::Index { span: s, .. }
             | Expr::Slice { span: s, .. }
+            | Expr::Range { span: s, .. }
             | Expr::Ident(_, s)
             | Expr::Unary(_, _, s)
             | Expr::Binary(_, _, _, s)

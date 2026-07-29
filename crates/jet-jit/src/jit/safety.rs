@@ -822,24 +822,32 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                     || jit_list_record_type(&base.ty)
                     || jit_list_iter_elem_type(&base.ty).is_some()
                     || jit_closure_elem_type(&base.ty).is_some())
-                    && !matches!(
-                        &base.ty,
-                        Type::Apply { name, .. } if name == "ViewMut"
-                    )
                     && matches!(&index.ty, Type::Int)
                     && resident_safe_expr(base, callees)
                     && resident_safe_expr(index, callees)
             }
         }
         TExprKind::Slice {
-            base, start, end, ..
+            base,
+            start,
+            end,
+            range,
+            ..
         } => {
             (jit_list_native_type(&base.ty) || jit_list_record_type(&base.ty))
-                && matches!(&start.ty, Type::Int)
-                && matches!(&end.ty, Type::Int)
                 && resident_safe_expr(base, callees)
-                && resident_safe_expr(start, callees)
-                && resident_safe_expr(end, callees)
+                && range.as_deref().map_or_else(
+                    || {
+                        matches!(&start.ty, Type::Int)
+                            && matches!(&end.ty, Type::Int)
+                            && resident_safe_expr(start, callees)
+                            && resident_safe_expr(end, callees)
+                    },
+                    |range| {
+                        matches!(&range.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE)
+                            && resident_safe_expr(range, callees)
+                    },
+                )
         }
         TExprKind::BuiltinMethod { recv, op, args } => {
             resident_safe_builtin_op(op, recv, args, callees)
@@ -895,7 +903,9 @@ pub(crate) fn resident_safe_expr(expr: &TExpr, callees: &HashSet<String>) -> boo
                 && args.iter().all(|arg| resident_safe_expr(arg, callees))
         }
         TExprKind::StructLit { fields, .. } => {
-            (jit_struct_type(&expr.ty) || matches!(&expr.ty, Type::TraitObject(_)))
+            (jit_struct_type(&expr.ty)
+                || matches!(&expr.ty, Type::TraitObject(_))
+                || matches!(&expr.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE))
                 && fields
                     .iter()
                     .all(|(_, v, _)| resident_safe_expr(v, callees))
@@ -1680,11 +1690,20 @@ fn resident_safe_builtin_op(
         // JIT ABI: View/ViewMut materialize as owned list handles (inclusive slice).
         TBuiltinOp::ViewNew { .. } | TBuiltinOp::ViewMutNew { .. } => {
             (jit_list_native_type(&recv.ty) || jit_list_record_type(&recv.ty))
-                && args.len() == 2
-                && matches!(&args[0].ty, Type::Int)
-                && matches!(&args[1].ty, Type::Int)
-                && resident_safe_expr(&args[0], callees)
-                && resident_safe_expr(&args[1], callees)
+                && match args {
+                    [range]
+                        if matches!(&range.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) =>
+                    {
+                        resident_safe_expr(range, callees)
+                    }
+                    [start, end] => {
+                        matches!(&start.ty, Type::Int)
+                            && matches!(&end.ty, Type::Int)
+                            && resident_safe_expr(start, callees)
+                            && resident_safe_expr(end, callees)
+                    }
+                    _ => false,
+                }
         }
         // D-COLLBREADTH1=A: Set / Deque / list.remove — Int elems only.
         TBuiltinOp::RemoveList { .. } => {
@@ -1778,6 +1797,13 @@ fn resident_safe_builtin_op(
             matches!(&recv.ty, Type::Apply { name, args: targs }
                 if name == "Bag" && targs.len() == 1 && jit_bag_raw_key_candidate(&targs[0]))
                 && args.is_empty()
+        }
+        TBuiltinOp::Contains
+            if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) =>
+        {
+            args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::Contains
             if matches!(&recv.ty, Type::Apply { name, args: targs }
@@ -2069,10 +2095,6 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                 (jit_list_native_type(&base.ty)
                     || jit_list_iter_elem_type(&base.ty).is_some()
                     || jit_closure_elem_type(&base.ty).is_some())
-                    && !matches!(
-                        &base.ty,
-                        Type::Apply { name, .. } if name == "ViewMut"
-                    )
                     && matches!(&index.ty, Type::Int)
                     && matches!(&value.ty, Type::Int | Type::Float | Type::String | Type::Char)
                     && resident_safe_expr(base, callees)
@@ -2212,7 +2234,8 @@ pub(crate) fn resident_safe_stmt(stmt: &TStmt, callees: &HashSet<String>) -> boo
                     .all(|(_, _, body)| body.iter().all(|s| resident_safe_stmt(s, callees)))
                 && else_body.iter().all(|s| resident_safe_stmt(s, callees))
         }
-        TStmt::Region(body)
+        TStmt::TaskGroup { body, .. }
+        | TStmt::Region(body)
         | TStmt::Impure(body)
         | TStmt::Inline(body)
         | TStmt::Unsafe(body)
@@ -2407,6 +2430,7 @@ fn stmt_kind_tag(stmt: &TStmt) -> &'static str {
         TStmt::Inline(_) => "Inline",
         TStmt::Impure(_) => "Impure",
         TStmt::Region(_) => "Region",
+        TStmt::TaskGroup { .. } => "TaskGroup",
         TStmt::Unsafe(_) => "Unsafe",
         _ => "Other",
     }
@@ -2418,7 +2442,11 @@ fn first_unsafe_stmt_detail(stmts: &[TStmt], callees: &HashSet<String>) -> Optio
             continue;
         }
         match s {
-            TStmt::Inline(body) | TStmt::Impure(body) | TStmt::Region(body) | TStmt::Unsafe(body) => {
+            TStmt::Inline(body)
+            | TStmt::Impure(body)
+            | TStmt::Region(body)
+            | TStmt::TaskGroup { body, .. }
+            | TStmt::Unsafe(body) => {
                 if let Some(inner) = first_unsafe_stmt_detail(body, callees) {
                     return Some(format!("{}[{i}]>{inner}", stmt_kind_tag(s)));
                 }
@@ -2565,7 +2593,8 @@ fn count_spawn_sites_stmts(stmts: &[TStmt], n: &mut usize) {
                 }
                 count_spawn_sites_stmts(body, n);
             }
-            TStmt::Region(body)
+            TStmt::TaskGroup { body, .. }
+            | TStmt::Region(body)
             | TStmt::Impure(body)
             | TStmt::Inline(body)
             | TStmt::Unsafe(body)

@@ -140,6 +140,7 @@ impl<'a> Parser<'a> {
                 }
                 type_markers.push(crate::AST::Marker {
                     name: attr.clone(),
+                    negated: false,
                     name_span: attr_span,
                     args: Vec::new(),
                     arg_labels: Vec::new(),
@@ -693,6 +694,7 @@ impl<'a> Parser<'a> {
                 }
                 def.type_markers.push(crate::AST::Marker {
                     name: Syntax::ATTR_LAYOUT.to_string(),
+                    negated: false,
                     name_span: marker.name_span,
                     args,
                     arg_labels,
@@ -1001,6 +1003,7 @@ impl<'a> Parser<'a> {
                 methods,
                 trait_impls,
                 derives,
+                auto_derive_default: true,
                 is_published_schema: false,
                 published_schema_span: None,
                 is_single_use: false,

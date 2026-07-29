@@ -344,7 +344,7 @@ function cmdQuestion(store, { pos, flags }) {
   switch (verb) {
     case 'list': {
       const s = store.load();
-      let qs = s.questions;
+      let qs = s.questions.filter(q => q.kind !== 'message');
       if (flags.open) qs = qs.filter(q => q.status === 'open');
       if (flags.card) { const c = db.findCard(s, flags.card); qs = qs.filter(q => c && q.cardId === c.id); }
       if (flags.json) return out(flags, null, qs);
@@ -365,6 +365,36 @@ function cmdQuestion(store, { pos, flags }) {
       return out(flags, `deleted question ${id}`, result);
     }
     default: throw new TowerError('E_USAGE', `unknown question verb "${verb}" — list/ask/answer/delete`);
+  }
+}
+
+function cmdMessage(store, { pos, flags }) {
+  const [verb, id] = pos;
+  switch (verb) {
+    case 'list': {
+      const messages = db.listMessages(store.load(), {
+        cardId: flags.card,
+        status: flags.all ? null : (flags.status || 'open'),
+      });
+      if (flags.json) return out(flags, null, messages);
+      for (const message of messages)
+        console.log(`${message.id.padEnd(14)} ${(message.status || '').padEnd(9)} [${message.by}] ${message.text.slice(0, 70)}`);
+      if (!messages.length) console.log('(no messages match)');
+      return;
+    }
+    case 'add': {
+      const { result } = store.mutate((s) => db.addMessage(s, {
+        cardId: id,
+        text: flags.text,
+        by: flags.by,
+      }));
+      return out(flags, `added message ${result.id} on card #${result.cardNum}`, result);
+    }
+    case 'done': {
+      const { result } = store.mutate((s) => db.doneMessage(s, id, flags.by));
+      return out(flags, `marked message ${result.id} done`, result);
+    }
+    default: throw new TowerError('E_USAGE', `unknown message verb "${verb}" — list/add/done`);
   }
 }
 
@@ -857,6 +887,7 @@ const HELP = `tower — file-backed project board for an owner + AI agents
   tower repair apply --manifest FILE --expect-rev N --by X [--dry-run]
                                             exact, rev-guarded two-store leaf repair
   tower question list|ask|answer|delete
+  tower message  list|add|done
   tower idea     list|add|promote|delete
   tower epoch    list|add|update|current
   tower milestone list|add|update|delete
@@ -919,6 +950,7 @@ export async function run(argv) {
       case 'card':      return cmdCard(store, sub);
       case 'decision':  return cmdDecision(store, sub);
       case 'question':  return cmdQuestion(store, sub);
+      case 'message':   return cmdMessage(store, sub);
       case 'idea':      return cmdIdea(store, sub);
       case 'epoch':     return cmdEpoch(store, sub);
       case 'milestone': return cmdMilestone(store, sub);

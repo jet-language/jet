@@ -154,7 +154,7 @@ renumbered, and no new `W` code may be allocated.
 | E0056 | parse | *retired by D-S14-PAUSE* (was: `mut` capability keyword teaching) |
 | E0057 | parse | retired `take(...)` closure capture prefix; captures are implicit (D-ARROW-CONTROL1) |
 | E0058 | parse | *retired by D-MEM1/S3* (was: `view` return keyword teaching → `&` sigil; `-> &T` returns no longer exist to point at) |
-| E0059 | parse | teaching: bare `sanitizer fn` → `#Sanitizer fn` (D-TAINT-SAN) |
+| E0059 | parse | teaching: bare `sanitizer fn` → `#Scrub(Tag) fn` (D-TAG-SURFACE1) |
 | E0060 | parse | teaching: retired C FFI marker spelling → `#Extern` / `#Bindgen` (D-CFFI-SYNTAX-REOPEN, D-CFFI-CANON1) |
 | E0062 | retired | former legacy applied-rule wrong-sigil diagnostic; D-SHAPE2 cleanly rejects `#Rule` as non-grammar |
 | E0063 | parse | teaching: applied rules use `#`, not the location/address/source sigil `@` (D-VERDICT-732-1) |
@@ -408,12 +408,15 @@ renumbered, and no new `W` code may be allocated.
 | E0743 | sema  | dynamic trait dispatch has no declared effect bound under an enclosing effect ceiling (D-EFF3) |
 | E0711 | sema  | the capability handle bound by a `#Grant(…)` region escapes its scope — returned, stored, or captured (D-SCAP1) |
 | E0712 | sema  | an effect used inside a `#Grant(…)` region has no capability — it isn't in the grant's list (D-SCAP1) |
-| E0721 | sema  | an untrusted (`#Tainted`) value reaches a sink effect (`DB`/`Exec`/`Net`) without passing through a `#Sanitizer fn` (D-TAINT1) |
-| E0722 | sema  | a `#Tainted(Credential)` value reaches a credential sink (`print`/`log`/`serialize`) — credential leakage (D-TAINT2) |
+| E0721 | sema  | a tagged value reaches a destination denied by that tag declaration (D-TAG-SURFACE1) |
+| E0722 | sema  | a `#Credential` value reaches a log, display, or serialization destination (D-TAG-SURFACE1) |
 | E0725 | sema  | a `#Replayable` function reaches ambient `Time`/`Rand`/`Net`/`IO` (D-REPLAY1) |
 | E0731 | sema  | a `tag` is used where dispatch/methods are expected — `derive`d, or implemented/used as a trait (D-QUAL2) |
 | E0732 | sema  | a method is declared in a `tag` body, but tags have no methods (D-QUAL2) |
-| E0733 | sema  | a value tag in type position does not name a declared `tag`, with a suggestion from declared tags (D-QUAL2/D-QUAL4) |
+| E0733 | sema  | a value tag does not name a declared `tag`, with a suggestion from declared tags (D-TAG-SURFACE1) |
+| E0734 | parse | a tag declaration has no policy body, lacks non-empty `deny`, repeats a field, or names an unknown body field (D-TAG-SURFACE1) |
+| E0735 | sema  | a tag `deny` or `from` entry does not name a known effect, sink, or source path (D-TAG-SURFACE1) |
+| E0736 | sema  | `#Scrub(Tag)` does not consume that tagged type and return an untagged result (D-TAG-SURFACE1) |
 | E0745 | retired | *retired by D-SHAPE8=A* (was: `#Pure fn` combined with a non-empty `#(…)` effect list) |
 | E0746 | sema  | an irreversible effect (Net/FS/Exec) used directly inside a `#Transact { … }` block — can't be rolled back (D-TXN2) |
 | E0747 | sema  | a callback argument exceeds its parameter's effect bound (`fn(…) =[]=>` / `fn(…) =[E]=>`) (D-EFF2) |
@@ -524,12 +527,13 @@ renumbered, and no new `W` code may be allocated.
 | E0919 | sema  | `#Inline(Always) fn` body exceeds the checked promise's statement ceiling (D-METHODMACRO1) |
 | E0920 | retired | `#InlineAlways` condensed into `#Inline(Always)`; one marker cannot conflict with itself |
 | E0921 | sema  | a reachable call violates an effective `no_alloc`, `zero_rc`, or `arena_bounded(N)` memory fact; reports the source operation, full call path, effective declaration, and declaration provenance (D-MEM-FACTS1) |
-| E0922 | sema  | explicit `Debug` derive (`#Debug`, `#[.., Debug]`, body `derive Debug;`) — `Debug` auto-derives, the opt-in spelling is retired (D-MARK-DEBUG1=A) |
-| E0925 | parse | `#Task`/`#Every(…)` written somewhere D-SCHEDULE1 doesn't place them — a method, or `#Every(…)` without `#Task` (card #505) |
+| E0922 | sema | body-level `derive Debug;` remains retired; use the signed type marker or a hand implementation (D-AUTODERIVE-SYNTAX1=D) |
+| E0925 | parse | `#Job`/`#Every(…)` written somewhere D-SCHEDULE1 doesn't place them — a method, or `#Every(…)` without `#Job` (card #505) |
 | E0926 | sema  | `#Every(…)`'s argument isn't a valid schedule — bad duration unit, non-positive duration, or malformed/out-of-range `"HH:MM"` (D-SCHEDULE1, card #505) |
 | E0927 | sema  | a `#Name`/`#Name` marker isn't in the registered vocabulary for its plane — a typo, or a spelling no longer supported (card #518) |
 | E0930 | parse | marker arguments do not match the typed signature in the shared marker registry (D-MARKSIG1=A) |
-| E0928 | sema  | `#Task fn` reused a reserved lifecycle verb (`run`/`dev`/`build`/`test`) (D-JPK-TASKRUN1, card #476) |
+| E0931 | parse | `!` is used on a marker other than the signed auto-derive controls `Printable`, `Equatable`, or `Debug` (D-AUTODERIVE-SYNTAX1=D) |
+| E0928 | sema  | `#Job fn` reused a reserved lifecycle verb (`run`/`dev`/`build`/`test`) (D-JPK-TASKRUN1, card #476) |
 | E0951 | sema  | comptime code reaches an impure operation (shows call path) |
 | E0952 | sema  | comptime budget exhausted (fuel) |
 | E0953 | sema  | comptime panic = user-authored compile error (message verbatim) |
@@ -599,7 +603,7 @@ renumbered, and no new `W` code may be allocated.
 | E1107 | sema  | `columnar [T]` per-container layout prefix is reserved (D-SOA2C) |
 | E1108 | sema  | list method not yet supported on a `#Layout(columnar)` list (D-SOA1) |
 | E1109 | sema  | partial `#Layout(columnar: …)` is deferred — whole-struct only in v1 (D-SOA2B) |
-| E1110 | sema  | `.task => …` outside a `taskgroup` scope, or on the wrong handle (D-TASKSCOPE1) |
+| E1110 | sema  | `.task => …` has no lexical or parameter taskgroup handle, uses the wrong lexical handle, or lets `TaskGroup` escape (D-TASKSCOPE1, D-TASKGROUP-PARAM1) |
 | E1111 | sema  | a parallel collection adapter captures mutable state or crosses a worker boundary with a non-shareable value (D-PARCAPTURE1=D) |
 | L1101 | sema  | Task value dropped without `.join()` or `.detach()`  |
 | W0410 | sema  | `core.random.bytes` output used in a crypto context — `core.random` is PRNG only; use `core.crypto.random.bytes` (D-RANDSPLIT1) |
@@ -696,14 +700,14 @@ renumbered, and no new `W` code may be allocated.
 | E1287 | jetpack | `jet os vm run` needs a proved installed disk (D-JOS-VMRUN1) |
 | E1288 | jetpack | the GNOME desktop package is missing (D-JOS-DESKTOP1) |
 | E1289 | jetpack | a NixOS import failed or would overwrite output (D-JOS-NIXIMPORT1) |
-| E1294 | jet / jetpack | `jet run --task <name>` / `jetpack run <name>` names no `#Task fn` in the entry (D-JPK-TASKRUN1, card #476) |
+| E1294 | jet / jetpack | `jet run --task <name>` / `jetpack run <name>` names no `#Job fn` in the entry (D-JPK-TASKRUN1, card #476) |
 | E1290 | jetpack | real JetOS replacement proof was requested with fake/script VM tools (D-JOS-REALGUEST1) |
 | E1291 | jetpack | a jetos real-tier system option/service/package has no NixOS mapping (D-JOS-NIXBACKEND1) |
 | E1292 | jet   | signing key generation needs cryptographic randomness (D-CRYPTO-KEYGEN-DIAG1, D-CRYPTO-KEYGEN-CODE2) |
 | E1293 | jet   | a lint denied by `pkg.jet` `policy.lints.deny` fired — build failure instead of a warning (D-LINTPOLICY1, the override law) |
 | E1295 | jetpack | `--affected-since <ref>` names a git ref that does not resolve (D-JPK-SELECTOR1) |
 | E1296 | jetpack | pnpm-style `--filter` pattern DSL rejected — use `-p` / `--affected` (D-JPK-SELECTOR1) |
-| E1297 | jetpack | `jetpack tool install` bin name collides with a project `#Task fn` (JPK-TOOL-COLLIDE, D-JPK-TOOLRUN1) |
+| E1297 | jetpack | `jetpack tool install` bin name collides with a project `#Job fn` (JPK-TOOL-COLLIDE, D-JPK-TOOLRUN1) |
 | E1298 | jetpack | `jetpack tool` ref names an external provider with no hangar realization path yet (JPK-TOOL-PROVIDER, D-JPK-TOOLRUN1) |
 | E1299 | jetpack | Hangar Store v2 path law rejected a store path component (case-fold collision, reserved Windows name, trailing `.`/` `, absolute/dot components) (E4-JP1) |
 | E1315 | jetpack | Hangar Store v2 ingest aborted (source mutated during race-safe copy, unsupported special object/xattr, or digest mismatch on verify) (E4-JP1) |
@@ -934,7 +938,7 @@ CLI.
 | E1107 | The per-container layout prefix `columnar [T]` was written in a type. | A per-use columnar override isn't built yet — only the whole-struct form `#Layout(columnar) struct …` ships in v1 (D-SOA2C reserves this spelling). | Put `#Layout(columnar)` on the `struct` declaration instead. |
 | E1108 | A list method (e.g. `.map`, `.filter`, `.sort`, `.pop`, `.remove`, `.get`) was called on a `#Layout(columnar)` list. | v1 columnar lists support the core surface — indexing, field access, `len`, `is_empty`, `push`, and iteration; the rest is deferred rather than silently miscompiled. | Drop `#Layout(columnar)` from the struct to use the full list API, or rewrite the operation with indexing and a loop. |
 | E1109 | A partial columnar annotation `#Layout(columnar: f, g)` was written. | v1 supports whole-struct columnar only — every field becomes a column; per-field columnar needs new ownership/aliasing surface (D-SOA2B, deferred). | Write `#Layout(columnar)` to convert the whole struct. |
-| E1110 | `.task => …` was used outside a `taskgroup` block, or on a handle other than the active taskgroup name. | Structured spawning is scoped. Only the handle bound by `taskgroup g { … }` may spawn children, and the group joins them at scope exit. | Wrap the code in `taskgroup g { … }` and write `g.task => …` with that same name. |
+| E1110 | `.task => …` has no lexical or parameter taskgroup handle, uses the wrong lexical handle, or `TaskGroup` is stored or captured by an escaping lambda. | Structured spawning uses the active lexical handle or a direct `TaskGroup` parameter. A group may flow down the call stack, but it cannot become stored state or escape its scope. | Use the active `g.task => …`, or pass that handle directly to `fn helper(group: TaskGroup)`; do not store or capture it. |
 | E1111 | A `para_*` callback changes captured state, hides capture facts, or its items, captures, or results cannot safely cross worker boundaries. | Parallel workers run without a hidden shared-mutation or merge rule; their callbacks, inputs, and outputs must expose thread-safe owned values. | Write the callback inline or use a top-level function; return extra data, use `para_partition`/`para_fold`, copy into plain owned data, or keep the operation sequential. |
 | L1101 | A `Task` is dropped without `.join()` or `.detach()`. | The program may end before that task finishes. | Call `.join()` to wait for the result, or `.detach()` if fire-and-forget is intentional. |
 | E0040 | `async` or `await` was written. | Jet uses blocking tasks and channels rather than async syntax. | Use `core.tasks as tasks` and call `tasks.spawn(() => work())`. |
@@ -1331,8 +1335,8 @@ so these are compile-time-only diagnostics. An unknown effect name in a
 | E0745 | *Retired by D-SHAPE8=A.* | This code diagnosed the former contradiction between `#Pure fn` and a non-empty `#(…)` effect list. Both spellings are now rejected earlier by E0066. | Use one canonical effect arrow: `=[]=>` for an empty row or `=[Effects]=>` for a bounded row. |
 | E0711 | The capability `{handle}` can't escape its `#Grant` block. | `#Grant(…)` grants a capability into a lexical scope and revokes it at scope end (RAII, S63); returning, storing, or capturing the handle would let a revoked authority outlive the block (D-SCAP1). | Use the handle only inside the `#Grant` block, or perform the work that needs it there. |
 | E0712 | This `#Grant` region uses the effect `{effect}`, which it has no capability for. | `#Grant(…)` authorizes exactly the listed effects through its handle; the dual of `#Caps`, an effect reached inside — even transitively through a call — that the grant omits has no capability backing it (D-SCAP1). | Add the named effect to the `#Grant(…)` list, or move that work outside the grant. |
-| E0721 | Untrusted (`#Tainted`) data reaches `{api}` without being sanitized. | A `#Tainted` value is untrusted input; it spreads to anything derived from it. `{api}` is a sink effect (`DB`/`Exec`/`Net` — a database query, subprocess command, or network request), and an untrusted value used there unchecked is the classic injection bug (D-TAINT1). | Pass the value through a `#Sanitizer fn` first — its return value is trusted by contract, so it may reach the sink. |
-| E0722 | A `#Tainted(Credential)` value reaches `{sink}`, which would leak the credential. | Credentials (tokens, keys, passwords) tainted with `#Tainted(Credential)` must never reach display or serialization sinks (`print`, `log`, `serialize`); a credential appearing in logs, output, or a serialized payload is a security incident (D-TAINT2). | Scrub the credential before logging (e.g. `"[redacted]"`), or redesign the flow so the credential never enters a logging path. |
+| E0721 | A `{tag}` value is denied at `{api}`. | The declaration for `{tag}` lists a destination that covers `{api}`. The tag spreads with derived data until an exact-tag scrubber removes it. | Remove the destination use, change the declaration if its policy is wrong, or pass the value through `#Scrub({tag})`. |
+| E0722 | A `Credential` value is denied at `{sink}`. | The Prelude `Credential` tag denies logging, display, and serialization destinations because they would leak a secret. | Log a non-secret field, or pass the value through a matching `#Scrub(Credential)` function. |
 | E0725 | `{fn}` is `#Replayable` but reaches `{effect}`. | `#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge. | Inject a deterministic clock/RNG or mockable capability, pass recorded data in, or move the ambient effect outside the replayable function. |
 | E0746 | `{api}` has the `{effect}` effect, which can't be rolled back inside a `#Transact` block. | A `#Transact` block undoes its work on a `?`-failure; a network, file, or subprocess effect (`Net`/`FS`/`Exec`) leaves committed external state a rollback can't take back, so performing it on the block's direct path would break the all-or-nothing contract (D-TXN2). | Move the call after the block, or register it with `<handle>.on_commit(() => { … })` so it runs only after a clean commit. |
 | E0747 | This callback uses the effect `{effect}`, which the parameter doesn't allow. | A `fn(…) =[]=>` parameter demands a pure callback, and a `fn(…) =[E]=>` parameter bounds the callback to the listed effects; the actual callback's inferred effects must be a subset (D-EFF2). The bound is checked at the call site, so an impure callback is rejected before it runs. | Pass a callback within the bound (a `fn … =[]=>` for a pure parameter), or widen the parameter's effect bound. |
@@ -1371,7 +1375,10 @@ checks are compile-time-only; a tag generates no code.
 |------|------|-----|-----|
 | E0731 | `{tag}` is a tag, but {context} needs a trait. | A `tag` is a marker that erases at runtime and carries no methods; dispatch and method attachment need a `trait`. | Declare `{tag}` as a `trait` with the method(s) it should provide. |
 | E0732 | The tag `{tag}` declares a method `{method}`, but tags have no methods. | A `tag` is a marker that erases at runtime; only a `trait` carries methods and dispatches. | Make `{tag}` a `trait` if `{method}` should dispatch, or remove the method to keep `{tag}` a marker tag. |
-| E0733 | There's no tag called `{tag}`. | A value tag in type position must name a declared `tag`. | Declare it first with `tag {tag}`, check the spelling, or use the suggested declared tag. |
+| E0733 | There's no tag called `{tag}`. | A value tag must name a declared `tag`; Prelude declares `Input`, `PII`, `Secret`, and `Credential`. | Declare it with `tag {tag} { deny: [Effect] }`, check the spelling, or use the suggested tag. |
+| E0734 | Tag `{tag}` has an incomplete policy body. | Every tag declares an enforceable policy with a required non-empty `deny` list and optional `from` list. | Write `tag {tag} { deny: [Effect], from: [source.path] }`; omit `from` when it is not needed. |
+| E0735 | `{path}` is not a known tag source or destination. | `deny` entries name effects or registered sinks; `from` entries name effects or function paths. | Correct the path using the suggested effect, sink, or declared function. |
+| E0736 | `#Scrub({tag})` does not match this function signature. | A scrubber removes exactly one tag, so it must consume a value carrying that tag and return a value without it. | Accept a `#{tag} T` parameter and return the untagged result. |
 
 An undeclared value tag with a close declared tag (E0733):
 
@@ -1669,10 +1676,10 @@ front-end `.jet` diagnostics).
 | E1291 | jetos real tier could not map every system declaration to NixOS. | D-JOS-NIXBACKEND1=C generates a hidden NixOS backend from the checked `SystemPlan` and refuses to silently drop an option, service, or package it cannot translate — every unmapped declaration is listed together, before `nix` ever runs. | Rename or drop the unmapped keys/packages/services, or map them to the nearest supported real-tier option (see the option/service/package mapping table for `--real`). |
 | E1292 | Jet could not create the package-signing key. | The operating system could not provide cryptographic randomness. | Retry as a new operation on a supported host; no key files were created. |
 | E1293 | `` lint `{code}` is denied by policy: {what} `` | D-LINTPOLICY1=A (the override law): warnings never fail a build by default — but `pkg.jet`'s `policy: { lints: { deny: […] } }` is the one surface a team uses to wall a named lint into a build failure. This fires in place of the plain warning, once, when a listed lint's code matches. | Fix the underlying lint (same fix the warning already gave), or remove the code from `policy.lints.deny` if this team no longer wants the wall. |
-| E1294 | no task named `{name}`. | `jet run --task <name>` / `jetpack run <name>` only invoke `#Task fn`s (D-JPK-TASKRUN1). | Mark a function `#Task`, or check the spelling; the diagnostic lists declared tasks. |
+| E1294 | no task named `{name}`. | `jet run --task <name>` / `jetpack run <name>` only invoke `#Job fn`s (D-JPK-TASKRUN1). | Mark a function `#Job`, or check the spelling; the diagnostic lists declared tasks. |
 | E1295 | git ref `{ref}` not found. | `--affected-since` (D-JPK-SELECTOR1=C) diffs workspace member input hashes against a git baseline; that ref must resolve to a commit. | Pass a real branch, tag, or commit (a did-you-mean is offered when a close match exists). |
 | E1296 | `{flag}` is not a Jet workspace selector. | D-JPK-SELECTOR1=C rejects pnpm-style `--filter` pattern DSLs; Jet scopes workspace commands with exact `-p <member>` and computed `--affected` / `--affected-since <ref>` only. | Use `-p <member>` (repeatable) or `--affected` / `--affected-since <ref>`. |
-| E1297 | `` `{bin}` is already a task in {path} `` | JPK-TOOL-COLLIDE (D-JPK-TOOLRUN1): `jetpack tool install` would project `{bin}` onto `~/.jet/bin`, but this project already declares `#Task fn {bin}` — the project task wins here, so the global tool would be shadowed. | Install under a different bin name with `jetpack tool install <ref> --as <other>`, or run once with `jetpack tool run <ref>`. |
+| E1297 | `` `{bin}` is already a task in {path} `` | JPK-TOOL-COLLIDE (D-JPK-TOOLRUN1): `jetpack tool install` would project `{bin}` onto `~/.jet/bin`, but this project already declares `#Job fn {bin}` — the project task wins here, so the global tool would be shadowed. | Install under a different bin name with `jetpack tool install <ref> --as <other>`, or run once with `jetpack tool run <ref>`. |
 | E1298 | `` tool provider `{source}` isn't available yet `` | JPK-TOOL-PROVIDER (D-JPK-TOOLRUN1): `jetpack tool` accepts external providers (`npm`, `pypi`, `cargo`, …) so the surface is discoverable, but that provider has no hangar realization path yet — Jet never silently skips. Built-ins that work today include `nixpkgs` and `github`; local paths are bare. | Use a built-in ref (`name@nixpkgs`, `owner/repo@github`) or a bare local path, or wait for the `{source}` provider to land. |
 | E1299 | store path rejected: `{path}` | Hangar Store v2 path law (E4-JP1) records POSIX byte names and rejects Windows reserved names, trailing `.`/` ` aliases, `.`/`..`, and ASCII case-fold collisions among siblings. Unicode normalization is never applied implicitly. | Rename the entry to a portable store path with no reserved names, no trailing `.`/` `, and no case-fold collision with a sibling. |
 | E1315 | hangar ingest aborted / digest mismatch | Race-safe no-follow ingest re-stats open handles and aborts if the source mutates; unsupported special files and semantic xattrs (without an explicit platform artifact kind) are rejected; verify re-hashes and compares the envelope digest. | Re-run ingest against a stable tree, or quarantine and re-ingest from a trusted source. |
@@ -1865,31 +1872,25 @@ Implementation note: card #644 owns migration from the shipped local
 `no_alloc` denylist to this controlling transitive E0921 contract. No E0922 is
 allocated for that migration.
 
-### E0922 — explicit `Debug` derive is retired (D-MARK-DEBUG1=A)
+### E0922 — body-level `derive Debug` is retired
 
-`Debug` auto-derives whenever every field on a struct/enum is debuggable
-(S55) — there is no opt-in spelling to write. `#Debug`, `#[.., Debug]`, and
-a body `derive Debug;` line all hit this error instead of silently doing
-nothing (the pre-D-MARK-DEBUG1 behavior).
+D-AUTODERIVE-SYNTAX1=D restored `Debug` as a signed type-site control but
+did not restore the older body-level derive statement.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `Debug` derives automatically — writing it explicitly is retired ``. | Auto-derived `Debug` covers every type whose fields are all debuggable; D-MARK-DEBUG1 retired the explicit opt-in spelling so there's exactly one way to get it (I8). | Remove `Debug` here — printing already works via `{value#Debug}` interpolation; implement `Debug` by hand (`impl T.Debug { fn debug(self) => String { … } }`) only if you need custom output. |
+| `` `derive Debug` inside a type body is retired ``. | Signed type markers are the one control for compiler-generated Debug implementations. | Write `#Debug` before the type to opt in, `#!Debug` to opt out, or implement `Debug` by hand. |
 
-A hand-written `impl T.Debug { … }` override, and `{value#Debug}`
-interpolation/reflection lookups, are unaffected — only the explicit
-*derive* spelling is retired.
+### E0925 — `#Job`/`#Every(…)` wrong placement (D-SCHEDULE1, card #505)
 
-### E0925 — `#Task`/`#Every(…)` wrong placement (D-SCHEDULE1, card #505)
-
-`#Every(…)` names when a `#Task fn` runs (D-JPK-TASKRUN1); `#Task` itself
+`#Every(…)` names when a `#Job fn` runs (D-JPK-TASKRUN1); `#Job` itself
 only marks a top-level function, because a task needs a free-standing name
 `jet run --task <name> <entry>` can invoke.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `#Task`/`#Every(…)` only mark a top-level function ``. | a method has no free-standing name to invoke, so it can't be a task. | Move the function to the top level, beside `fn run()`. |
-| `` `#Every(…)` needs `#Task` on the same function ``. | a schedule only means something on a task — `#Every(…)` isn't a standalone timer. | Add `#Task` (`#Task #Every(5min) fn …`), or drop `#Every(…)` if this isn't a scheduled task. |
+| `` `#Job`/`#Every(…)` only mark a top-level function ``. | a method has no free-standing name to invoke, so it can't be a task. | Move the function to the top level, beside `fn run()`. |
+| `` `#Every(…)` needs `#Job` on the same function ``. | a schedule only means something on a task — `#Every(…)` isn't a standalone timer. | Add `#Job` (`#Job #Every(5min) fn …`), or drop `#Every(…)` if this isn't a scheduled task. |
 
 ### E0926 — bad `#Every(…)` schedule value (D-SCHEDULE1, card #505)
 
@@ -1943,12 +1944,18 @@ pointer to `docs/spec/syntax-decisions.md`.
 |------|-----|-----|
 | `` `#Rule` expects `{signature}` ``. | Every marker declares one typed signature and uses the ordinary call-argument grammar. | Match the shown positional and named parameters. |
 
-### E0928 — `#Task fn` reused a reserved lifecycle verb (D-JPK-TASKRUN1, card #476)
+### E0931 — `!` only rejects auto-derived traits
+
+| What | Why | Fix |
+|------|-----|-----|
+| `` `!{name}` is not a signed auto-derive trait ``. | `!` rejects compiler generation only for Printable, Equatable, or Debug. | Remove `!` from `#{name}`, or use it with an auto-derived trait. |
+
+### E0928 — `#Job fn` reused a reserved lifecycle verb (D-JPK-TASKRUN1, card #476)
 
 `run`, `dev`, `build`, and `test` already name Jet's built-in entry points.
-A `#Task fn` picks a *user-chosen* verb beside them — reusing a reserved name
+A `#Job fn` picks a *user-chosen* verb beside them — reusing a reserved name
 is a collision, not a task.
 
 | What | Why | Fix |
 |------|-----|-----|
-| `` `{name}` is a built-in lifecycle verb, not a task name ``. | `run`/`dev`/`build`/`test` already name Jet's built-in entry points. | Rename it, e.g. `#Task fn build_assets()`, or drop `#Task` if this is the lifecycle entry. |
+| `` `{name}` is a built-in lifecycle verb, not a task name ``. | `run`/`dev`/`build`/`test` already name Jet's built-in entry points. | Rename it, e.g. `#Job fn build_assets()`, or drop `#Job` if this is the lifecycle entry. |

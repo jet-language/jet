@@ -1721,6 +1721,7 @@ fn program_semantic_facts(
     crate::Comptime::ProgramSemanticFacts {
         effects,
         reaches_panic,
+        fact_registry: checked.fact_registry.clone(),
     }
 }
 
@@ -2546,12 +2547,12 @@ pub fn compile_bundle_path_with_entry(
 ///
 /// Sema/codegen still require a literal `fn run` (Registration/Bundle
 /// `funcs.get("run")`). D-JPK-TASKRUN1 also says a cross-task dependency is a
-/// plain call — so renaming `#Task fn greet` → `run` would break
+/// plain call — so renaming `#Job fn greet` → `run` would break
 /// `seed()`'s `greet()` with E0102. Fix: park any existing `fn run` as
 /// `__jet_unused_run`, then inject a synthetic `fn run(…) { entry_fn(…) }`
 /// that forwards params (and return) while leaving `entry_fn` callable.
 ///
-/// The wrapper is never `#Task` (avoids E0928 on reserved lifecycle name
+/// The wrapper is never `#Job` (avoids E0928 on reserved lifecycle name
 /// `run`). A no-op when `entry_fn` is already `"run"`, or when no function
 /// named `entry_fn` exists (caller surfaces E0101 / E1294 separately).
 fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
@@ -2622,6 +2623,7 @@ fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
         unsafe_span: None,
         is_pure: false,
         is_sanitizer: false,
+        scrub_tag: None,
         declared_effects: None,
         effect_via: None,
         state_requires: None,

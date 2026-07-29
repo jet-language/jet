@@ -1,5 +1,5 @@
-//! Taint tracking tests (D-TAINT1): `#Tainted` value-fact propagation, the
-//! `#Sanitizer fn` taint-strip contract, and the tainted→sink error E0721. Taint
+//! Taint tracking tests (D-TAINT1): `#Input` value-fact propagation, the
+//! `#Scrub(Input) fn` taint-strip contract, and the tainted→sink error E0721. Taint
 //! is a compile-time proof, erased in codegen (I3).
 
 fn codes(src: &str) -> Vec<String> {
@@ -9,13 +9,104 @@ fn codes(src: &str) -> Vec<String> {
     }
 }
 
+#[test]
+fn declared_tag_sources_and_destinations_drive_dataflow() {
+    let src = r#"
+use core.process as process
+tag Untrusted { from: [source], deny: [Exec] }
+fn source() => String = "untrusted"
+fn run() {
+    value := source()
+    process.run(["echo", value]) ?? return
+}
+"#;
+    assert_eq!(
+        codes(src).iter().filter(|code| *code == "E0721").count(),
+        1
+    );
+}
+
+#[test]
+fn tagged_return_types_drive_dataflow() {
+    let src = r#"
+use core.process as process
+tag PII { deny: [Exec] }
+fn account_name() => #PII String = "Ada"
+fn run() {
+    process.run(["echo", account_name()]) ?? return
+}
+"#;
+    assert_eq!(
+        codes(src).iter().filter(|code| *code == "E0721").count(),
+        1
+    );
+}
+
+#[test]
+fn tagged_struct_fields_enter_dataflow_on_access() {
+    let src = r#"
+use core.process as process
+tag PII { deny: [Exec] }
+struct Row {
+    secret: #PII String
+}
+fn run() {
+    row := Row.{ secret: "Ada" }
+    process.run(["echo", row.secret]) ?? return
+}
+"#;
+    assert_eq!(
+        codes(src).iter().filter(|code| *code == "E0721").count(),
+        1
+    );
+}
+
+#[test]
+fn resolved_instance_method_paths_introduce_declared_tags() {
+    let src = r#"
+use core.process as process
+tag Stored { from: [Store.read], deny: [Exec] }
+struct Store {
+    value: String
+    fn read(self) => String = self.value
+}
+fn run() {
+    store := Store.{ value: "Ada" }
+    process.run(["echo", store.read()]) ?? return
+}
+"#;
+    assert_eq!(
+        codes(src).iter().filter(|code| *code == "E0721").count(),
+        1
+    );
+}
+
+#[test]
+fn scrub_removes_only_its_named_tag() {
+    let src = r#"
+use core.process as process
+tag PII { deny: [Exec] }
+#Scrub(PII)
+fn redact(value: #PII String) => String = value
+fn run() {
+    value := redact(#PII #Input "secret")
+    process.run(["echo", value]) ?? return
+}
+"#;
+    assert_eq!(
+        codes(src).iter().filter(|code| *code == "E0721").count(),
+        1,
+        "the remaining Input fact must still be denied"
+    );
+}
+
 /// A tainted value reaching an `Exec` sink (`process.run`) directly is E0721.
 #[test]
 fn tainted_to_exec_sink_is_error() {
     let src = r#"
 use core.process as process
 fn run() {
-    name :: #Tainted "world; rm -rf /"
+    name :: #Input "world; rm -rf /"
     process.run(["echo", name]) ?? return
 }
 "#;
@@ -25,15 +116,15 @@ fn run() {
     );
 }
 
-/// Routing the tainted value through a `#Sanitizer fn` clears taint — the sink
+/// Routing the tainted value through a `#Scrub(Input) fn` clears taint — the sink
 /// call is then accepted.
 #[test]
 fn sanitized_value_reaches_sink_ok() {
     let src = r#"
 use core.process as process
-#Sanitizer fn clean(raw: String) => String { return raw.split(" ")[0] }
+#Scrub(Input) fn clean(raw: #Input String) => String { return raw.split(" ").to_list()[0] }
 fn run() {
-    name :: #Tainted "world; rm -rf /"
+    name :: #Input "world; rm -rf /"
     safe := clean(name)
     process.run(["echo", safe]) ?? return
 }
@@ -52,7 +143,7 @@ fn taint_propagates_through_binding() {
     let src = r#"
 use core.process as process
 fn run() {
-    raw :: #Tainted "evil"
+    raw :: #Input "evil"
     cmd := raw
     process.run(["echo", cmd]) ?? return
 }
@@ -70,7 +161,7 @@ fn taint_propagates_through_interpolation() {
     let src = r#"
 use core.process as process
 fn run() {
-    user :: #Tainted "bob"
+    user :: #Input "bob"
     arg := "hello {user}"
     process.run(["echo", arg]) ?? return
 }
@@ -87,7 +178,7 @@ fn reassign_to_clean_clears_taint() {
     let src = r#"
 use core.process as process
 fn run() {
-    x := #Tainted "evil"
+    x := #Input "evil"
     x = "safe-literal"
     process.run(["echo", x]) ?? return
 }
@@ -121,7 +212,7 @@ fn run() {
 fn tainted_at_non_sink_is_ok() {
     let src = r#"
 fn run() {
-    name :: #Tainted "world"
+    name :: #Input "world"
     print(name)
 }
 "#;
@@ -131,13 +222,13 @@ fn run() {
     );
 }
 
-/// I3: taint is erased in codegen — a `#Tainted` value and its bare twin generate
-/// byte-identical Rust. The `#Tainted` tag leaves no runtime trace.
+/// I3: taint is erased in codegen — a `#Input` value and its bare twin generate
+/// byte-identical Rust. The `#Input` tag leaves no runtime trace.
 #[test]
 fn taint_is_erased_in_codegen() {
     let tagged = r#"
 fn run() {
-    name :: #Tainted "world"
+    name :: #Input "world"
     print(name)
 }
 "#;
@@ -151,23 +242,23 @@ fn run() {
     let b = jet::compile(plain).expect("plain compiles").rust;
     assert_eq!(
         a, b,
-        "the #Tainted tag must leave no trace in generated Rust (I3)"
+        "the #Input tag must leave no trace in generated Rust (I3)"
     );
 }
 
-/// A `#Sanitizer fn` is a real, callable function; its body and signature behave
+/// A `#Scrub(Input) fn` is a real, callable function; its body and signature behave
 /// exactly like any other function (the modifier only affects the taint pass).
 #[test]
 fn sanitizer_fn_is_a_normal_function() {
     let src = r#"
-#Sanitizer fn clean(raw: String) => String { return raw.split(" ")[0] }
+#Scrub(Input) fn clean(raw: #Input String) => String { return raw.split(" ").to_list()[0] }
 fn run() {
     print(clean("a b c"))
 }
 "#;
     assert!(
         codes(src).is_empty(),
-        "a #Sanitizer fn must compile and run: {:?}",
+        "a #Scrub(Input) fn must compile and run: {:?}",
         codes(src)
     );
 }
@@ -175,11 +266,11 @@ fn run() {
 // --- D-TAINT-SAN (ratified 2026-06-25): bare `sanitizer fn` teaching error ---
 
 /// Bare lowercase `sanitizer fn` is the retired spelling → E0059, pointing at
-/// the PascalCase marker `#Sanitizer fn` (mirrors `pure` → `#Pure` / E0053).
+/// the PascalCase marker `#Scrub(Input) fn` (mirrors `pure` → `#Pure` / E0053).
 #[test]
 fn bare_sanitizer_fn_is_e0059() {
     let src = r#"
-sanitizer fn clean(raw: String) => String { return raw.split(" ")[0] }
+sanitizer fn clean(raw: #Input String) => String { return raw.split(" ")[0] }
 fn run() {
     print(clean("a b c"))
 }
@@ -196,7 +287,7 @@ fn run() {
 #[test]
 fn bare_sanitizer_pub_fn_is_e0059() {
     let src = r#"
-sanitizer pub fn clean(raw: String) => String { return raw.split(" ")[0] }
+sanitizer pub fn clean(raw: #Input String) => String { return raw.split(" ")[0] }
 fn run() {
     print(clean("a b c"))
 }
@@ -225,14 +316,14 @@ fn run() {
     );
 }
 
-// ── D-TAINT2=A tests: `#Tainted(Credential)` + E0722 ─────────────────────────
+// ── D-TAINT2=A tests: `#Credential` + E0722 ─────────────────────────
 
-/// `#Tainted(Credential)` reaching bare `print` is E0722.
+/// `#Credential` reaching bare `print` is E0722.
 #[test]
 fn tainted_credential_to_print_is_e0722() {
     let src = r#"
 fn run() {
-    token :: #Tainted(Credential) "bearer eyJhbGci..."
+    token :: #Credential "bearer eyJhbGci..."
     print(token)
 }
 "#;
@@ -243,19 +334,19 @@ fn run() {
     );
 }
 
-/// Bare `#Tainted` (no kind) at `print` is NOT E0722 — only Credential kind triggers it.
+/// Bare `#Input` (no kind) at `print` is NOT E0722 — only Credential kind triggers it.
 /// (E0721 would fire only at DB/Exec/Net sinks; bare taint at print is permitted.)
 #[test]
 fn tainted_input_to_print_is_not_e0722() {
     let src = r#"
 fn run() {
-    user_input :: #Tainted "hello world"
+    user_input :: #Input "hello world"
     print(user_input)
 }
 "#;
     assert!(
         !codes(src).iter().any(|c| c == "E0722"),
-        "bare #Tainted reaching print must NOT be E0722: {:?}",
+        "bare #Input reaching print must NOT be E0722: {:?}",
         codes(src)
     );
 }
@@ -265,7 +356,7 @@ fn run() {
 fn tainted_credential_propagates_through_binding() {
     let src = r#"
 fn run() {
-    raw_token :: #Tainted(Credential) "s3cr3t"
+    raw_token :: #Credential "s3cr3t"
     derived := raw_token
     print(derived)
 }
@@ -285,7 +376,7 @@ fn auth_token_keeps_credential_leak_protection() {
 use core.auth as auth
 
 fn run() {
-    token :: #Tainted(Credential) "a.b.c"
+    token :: #Credential "a.b.c"
     key :: [U8].{ 0, 1, 2 }
     _ := auth.verify_jwt(token, key: key, audience: "gateway")
     print(token)

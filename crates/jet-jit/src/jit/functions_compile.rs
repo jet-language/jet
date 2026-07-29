@@ -125,6 +125,7 @@ fn lower_spawn_function(
             } else {
                 None
             },
+            ret_range: false,
             shield_depth: 0,
             deadline_depth: 0,
             switch_subject: None,
@@ -134,6 +135,8 @@ fn lower_spawn_function(
             unsafe_depth: 0,
             scope_guards: Vec::new(),
             deferred_closes: Vec::new(),
+            task_groups: Vec::new(),
+            in_lexical_exit: false,
             txn_stack: Vec::new(),
         };
         for cap in &lam.captures {
@@ -156,11 +159,11 @@ fn lower_spawn_function(
             TJitSpawnBody::Expr(e) => {
                 let val = lctx.lower_expr(e)?;
                 if clif_ty(&lam.ret).is_some() {
-                    let packed = pack_spawn_return(&mut b, val, &lam.ret)?;
-                    b.ins().return_(&[packed]);
+                    let packed = pack_spawn_return(lctx.b, val, &lam.ret)?;
+                    lctx.emit_lexical_exit(Some(packed), false, lctx.shield_depth)?;
                 } else {
                     let _ = val;
-                    b.ins().return_(&[]);
+                    lctx.emit_lexical_exit(None, false, lctx.shield_depth)?;
                 }
             }
             TJitSpawnBody::Block { prefix, tail } => {
@@ -168,17 +171,14 @@ fn lower_spawn_function(
                 if let Some(t) = tail {
                     let val = lctx.lower_expr(t)?;
                     if clif_ty(&lam.ret).is_some() {
-                        let packed = pack_spawn_return(&mut b, val, &lam.ret)?;
-                        b.ins().return_(&[packed]);
+                        let packed = pack_spawn_return(lctx.b, val, &lam.ret)?;
+                        lctx.emit_lexical_exit(Some(packed), false, lctx.shield_depth)?;
                     } else {
                         let _ = val;
-                        b.ins().return_(&[]);
+                        lctx.emit_lexical_exit(None, false, lctx.shield_depth)?;
                     }
-                } else if clif_ty(&lam.ret).is_some() {
-                    let zero = b.ins().iconst(types::I64, 0);
-                    b.ins().return_(&[zero]);
                 } else {
-                    b.ins().return_(&[]);
+                    lctx.emit_lexical_exit(None, false, lctx.shield_depth)?;
                 }
             }
         }
@@ -325,6 +325,7 @@ pub(crate) fn lower_callable_lambda(
             next_var: 0,
             method_struct: None,
             ret_clif,
+            ret_range: false,
             shield_depth: 0,
             deadline_depth: 0,
             switch_subject: None,
@@ -334,6 +335,8 @@ pub(crate) fn lower_callable_lambda(
             unsafe_depth: 0,
             scope_guards: Vec::new(),
             deferred_closes: Vec::new(),
+            task_groups: Vec::new(),
+            in_lexical_exit: false,
             txn_stack: Vec::new(),
         };
         let mut arg_i = 0usize;
@@ -370,9 +373,9 @@ pub(crate) fn lower_callable_lambda(
             TLambdaBody::Expr(expr) => {
                 let value = lctx.lower_expr(expr)?;
                 if lam.ret.is_some() {
-                    lctx.b.ins().return_(&[value]);
+                    lctx.emit_lexical_exit(Some(value), false, lctx.shield_depth)?;
                 } else {
-                    lctx.b.ins().return_(&[]);
+                    lctx.emit_lexical_exit(None, false, lctx.shield_depth)?;
                 }
             }
             TLambdaBody::Block(stmts) => {
@@ -381,7 +384,7 @@ pub(crate) fn lower_callable_lambda(
                     if lam.ret.is_some() {
                         return Err("jit callable block missing return".to_string());
                     }
-                    lctx.b.ins().return_(&[]);
+                    lctx.emit_lexical_exit(None, false, lctx.shield_depth)?;
                 }
             }
         }
@@ -458,6 +461,9 @@ fn lower_function(
             next_var: 0,
             method_struct,
             ret_clif: tir.ret.as_ref().and_then(|ret| meta.clif_ty(ret)),
+            ret_range: tir.ret.as_ref().is_some_and(|ret| {
+                matches!(ret, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE)
+            }),
             shield_depth: 0,
             deadline_depth: 0,
             switch_subject: None,
@@ -467,6 +473,8 @@ fn lower_function(
             unsafe_depth: 0,
             scope_guards: Vec::new(),
             deferred_closes: Vec::new(),
+            task_groups: Vec::new(),
+            in_lexical_exit: false,
             txn_stack: Vec::new(),
         };
         if func_has_receiver(tir) {
@@ -478,7 +486,17 @@ fn lower_function(
             }
             param_idx = 1;
         }
-        for (i, (name, ty, convention)) in tir.params.iter().enumerate() {
+        for (name, ty, convention) in &tir.params {
+            if matches!(ty, Type::Named(range) if range == jet_foundation::Syntax::TYPE_RANGE) {
+                let values = [
+                    param_vals[param_idx],
+                    param_vals[param_idx + 1],
+                    param_vals[param_idx + 2],
+                ];
+                lctx.bind_range_local(name, values);
+                param_idx += 3;
+                continue;
+            }
             let scalar_write = matches!(
                 convention,
                 jet_foundation::AST::AccessConvention::Write
@@ -497,7 +515,8 @@ fn lower_function(
                 meta.clif_ty(ty).ok_or("jit param clif type")?
             };
             let var = lctx.fresh_var(clif);
-            lctx.b.def_var(var, param_vals[param_idx + i]);
+            lctx.b.def_var(var, param_vals[param_idx]);
+            param_idx += 1;
             lctx.vars.insert(name.clone(), var);
             let stored_ty = if scalar_write {
                 Type::Apply {
@@ -512,8 +531,7 @@ fn lower_function(
 
         lctx.lower_stmts(&tir.body)?;
         if !lctx.dead {
-            lctx.emit_scope_guards()?;
-            if let Some(ret) = &tir.ret {
+            let value = if let Some(ret) = &tir.ret {
                 if matches!(ret, Type::Result { ok, err }
                     if matches!(ok.as_ref(), Type::Named(n) if n == "Void" || n == "Unit")
                         && matches!(err.as_ref(), Type::Named(n) if n == "Error"))
@@ -524,16 +542,18 @@ fn lower_function(
                         .module
                         .declare_func_in_func(lctx.host.result_new_i64, lctx.b.func);
                     let call = lctx.b.ins().call(host_ref, &[tag, unit]);
-                    let result = lctx.b.inst_results(call)[0];
-                    lctx.b.ins().return_(&[result]);
-                } else if clif_ty(ret).is_some() {
+                    Some(lctx.b.inst_results(call)[0])
+                } else if clif_ty(ret).is_some()
+                    || matches!(ret, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE)
+                {
                     return Err("jit function missing return".to_string());
                 } else {
-                    lctx.b.ins().return_(&[]);
+                    None
                 }
             } else {
-                lctx.b.ins().return_(&[]);
-            }
+                None
+            };
+            lctx.emit_lexical_exit(value, false, lctx.shield_depth)?;
         }
         b.finalize();
     }
@@ -621,6 +641,7 @@ fn lower_generator_body(
             next_var: 0,
             method_struct: None,
             ret_clif: Some(types::I64),
+            ret_range: false,
             shield_depth: 0,
             deadline_depth: 0,
             switch_subject: None,
@@ -630,6 +651,8 @@ fn lower_generator_body(
             unsafe_depth: 0,
             scope_guards: Vec::new(),
             deferred_closes: Vec::new(),
+            task_groups: Vec::new(),
+            in_lexical_exit: false,
             txn_stack: Vec::new(),
         };
         for (index, (name, ty, _)) in tir.params.iter().enumerate() {
@@ -640,12 +663,8 @@ fn lower_generator_body(
         }
         lctx.lower_stmts(&tir.body)?;
         if !lctx.dead {
-            let close = lctx
-                .module
-                .declare_func_in_func(lctx.host.conc.sender_close, lctx.b.func);
-            lctx.b.ins().call(close, &[sender]);
             let zero = lctx.b.ins().iconst(types::I64, 0);
-            lctx.b.ins().return_(&[zero]);
+            lctx.emit_lexical_exit(Some(zero), false, lctx.shield_depth)?;
         }
         b.finalize();
     }

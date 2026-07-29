@@ -9,8 +9,8 @@ use crate::Generics::{
 use crate::Syntax;
 use crate::AST::FuncSig;
 use crate::AST::{
-    AccessConvention, EnumDef, Func, ImplDef, Item, StructDef, TraitDef, TraitImplBlock,
-    TraitMethodSig, Type, TypeParam,
+    AccessConvention, EnumDef, Func, ImplDef, Item, ProgramBundle, StructDef, TraitDef,
+    TraitImplBlock, TraitMethodSig, Type, TypeParam,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -64,17 +64,97 @@ pub struct TraitInfo {
 }
 
 impl TraitRegistry {
+    /// Compute automatic structural traits for one standalone item group.
+    pub fn auto_derives_for_items(items: &[Item]) -> TraitRegistry {
+        let mut registry = Self::default();
+        registry.register_synthetic_display_debug();
+        registry.register_items(items, &mut Vec::new());
+        registry
+    }
+
+    /// Compute the three automatic structural traits for each bundle module.
+    /// Module index is the nominal identity; an imported `alias.Type` resolves
+    /// through the bundle's import-target table before its leaf-name facts are
+    /// consulted. Bare names never borrow facts from another module.
+    pub fn bundle_auto_derives(bundle: &ProgramBundle) -> Vec<TraitRegistry> {
+        let mut registries: Vec<_> = bundle
+            .modules
+            .iter()
+            .map(|module| Self::auto_derives_for_items(&module.items))
+            .collect();
+        loop {
+            let snapshot = registries.clone();
+            let mut changed = false;
+            for (module_idx, module) in bundle.modules.iter().enumerate() {
+                let imports: HashMap<String, usize> = module
+                    .imports
+                    .iter()
+                    .filter_map(|import| {
+                        bundle
+                            .import_targets
+                            .get(&(module_idx, import.span))
+                            .copied()
+                            .map(|target| (import.import_alias(), target))
+                    })
+                    .collect();
+                changed |= registries[module_idx].compute_auto_derives_with(
+                    &module.items,
+                    |name, trait_name| {
+                        let (alias, leaf) = name.split_once('.')?;
+                        let target = *imports.get(alias)?;
+                        Some(snapshot[target].implements_trait(leaf, trait_name))
+                    },
+                );
+            }
+            if !changed {
+                break;
+            }
+        }
+        let snapshot = registries.clone();
+        for (module_idx, module) in bundle.modules.iter().enumerate() {
+            for import in &module.imports {
+                let Some(&target) = bundle.import_targets.get(&(module_idx, import.span)) else {
+                    continue;
+                };
+                let alias = import.import_alias();
+                registries[module_idx].auto_printable.extend(
+                    snapshot[target]
+                        .auto_printable
+                        .iter()
+                        .map(|leaf| format!("{alias}.{leaf}")),
+                );
+                registries[module_idx].auto_debug.extend(
+                    snapshot[target]
+                        .auto_debug
+                        .iter()
+                        .map(|leaf| format!("{alias}.{leaf}")),
+                );
+                registries[module_idx].auto_equatable.extend(
+                    snapshot[target]
+                        .auto_equatable
+                        .iter()
+                        .map(|leaf| format!("{alias}.{leaf}")),
+                );
+            }
+        }
+        registries
+    }
+
+    pub fn merge_auto_derives(&mut self, source: &TraitRegistry) {
+        self.auto_printable
+            .extend(source.auto_printable.iter().cloned());
+        self.auto_debug.extend(source.auto_debug.iter().cloned());
+        self.auto_equatable
+            .extend(source.auto_equatable.iter().cloned());
+    }
+
     pub fn register_items(&mut self, items: &[Item], diags: &mut Vec<Diagnostic>) {
         for item in items {
             match item {
                 Item::Trait(t) => self.register_trait(t, diags),
-                // D-QUAL2: record tag names so derives / bounds can reject them,
-                // and flag any method written in a tag body (E0732).
+                // D-TAG-SURFACE1=A: tags are compile-time facts, not traits.
                 Item::Tag(t) => {
                     self.local_tags.insert(t.name.clone());
-                    for m in &t.methods {
-                        diags.push(Generics::e0732(&t.name, &m.name, m.name_span));
-                    }
                 }
                 Item::Struct(s) => self.register_struct_meta(s),
                 Item::Enum(e) => {
@@ -167,21 +247,19 @@ impl TraitRegistry {
         // D-QUAL2: `derive X` attaches method impls, so X must be a trait. A tag
         // has no methods — deriving one is E0731.
         for item in items {
-            let derives: &[(String, Span)] = match item {
-                Item::Struct(s) => &s.derives,
-                Item::Enum(e) => &e.derives,
+            let (derives, markers): (&[(String, Span)], &[crate::AST::Marker]) = match item {
+                Item::Struct(s) => (&s.derives, &s.type_markers),
+                Item::Enum(e) => (&e.derives, &e.type_markers),
                 _ => continue,
             };
             for (name, span) in derives {
                 if self.local_tags.contains(name) {
                     diags.push(Generics::e0731(name, "`derive`", *span));
                 } else if name == DEBUG
-                    && crate::Policy::applied_rule(name).is_some_and(|row| {
-                        matches!(row.status, crate::Policy::RuleStatus::Retired { .. })
+                    && !markers.iter().any(|marker| {
+                        marker.name == DEBUG && !marker.negated && marker.name_span == *span
                     })
                 {
-                    // D-MARK-DEBUG1=A: `Debug` auto-derives; an explicit
-                    // `#Debug`/`#[.., Debug]`/`derive Debug;` is retired.
                     diags.push(Generics::e0922(*span));
                 }
             }
@@ -449,6 +527,16 @@ impl TraitRegistry {
     }
 
     fn register_trait(&mut self, t: &TraitDef, diags: &mut Vec<Diagnostic>) {
+        if crate::Policy::nonderive_marker_trait_collision(&t.name) {
+            diags.push(Diagnostic::error(
+                "E0106",
+                format!("the name `{}` is a non-derive type marker", t.name),
+                "trait names become their matching `#Trait` derive spelling, while this marker has different semantics".to_string(),
+                "choose a trait name that does not collide with a registered type marker".to_string(),
+                Some(t.name_span),
+            ));
+            return;
+        }
         if BUILTIN_TRAITS.contains(&t.name.as_str()) {
             diags.push(Diagnostic::error(
                 "E0106",
@@ -744,20 +832,175 @@ impl TraitRegistry {
     }
 
     fn compute_auto_derives(&mut self, items: &[Item]) {
-        for item in items {
-            match item {
-                Item::Struct(s) if struct_auto_derive_ok(s) => {
-                    self.auto_printable.insert(s.name.clone());
-                    self.auto_debug.insert(s.name.clone());
-                    self.auto_equatable.insert(s.name.clone());
+        self.compute_auto_derives_with(items, |_, _| None);
+    }
+
+    fn compute_auto_derives_with(
+        &mut self,
+        items: &[Item],
+        foreign_supports: impl Fn(&str, &str) -> Option<bool>,
+    ) -> bool {
+        let mut any_changed = false;
+        for trait_name in [PRINTABLE, EQUATABLE, DEBUG] {
+            loop {
+                let mut changed = false;
+                for item in items {
+                    let (name, markers, default, qualifies) = match item {
+                        Item::Struct(s) => (
+                            &s.name,
+                            &s.type_markers,
+                            s.auto_derive_default,
+                            struct_auto_derive_ok(s),
+                        ),
+                        Item::Enum(e) => (
+                            &e.name,
+                            &e.type_markers,
+                            e.auto_derive_default,
+                            enum_auto_derive_ok(e),
+                        ),
+                        _ => continue,
+                    };
+                    if !qualifies
+                        || !auto_derive_requested(markers, trait_name, default)
+                        || self
+                            .trait_impls
+                            .contains(&(name.clone(), trait_name.to_string()))
+                        || !self.auto_derive_dependencies_ready(
+                            item,
+                            trait_name,
+                            &foreign_supports,
+                        )
+                    {
+                        continue;
+                    }
+                    changed |= match trait_name {
+                        PRINTABLE => self.auto_printable.insert(name.clone()),
+                        EQUATABLE => self.auto_equatable.insert(name.clone()),
+                        DEBUG => self.auto_debug.insert(name.clone()),
+                        _ => false,
+                    };
                 }
-                Item::Enum(e) if enum_auto_derive_ok(e) => {
-                    self.auto_printable.insert(e.name.clone());
-                    self.auto_debug.insert(e.name.clone());
-                    self.auto_equatable.insert(e.name.clone());
+                any_changed |= changed;
+                if !changed {
+                    break;
                 }
-                _ => {}
             }
+        }
+        any_changed
+    }
+
+    fn auto_derive_dependencies_ready(
+        &self,
+        item: &Item,
+        trait_name: &str,
+        foreign_supports: &impl Fn(&str, &str) -> Option<bool>,
+    ) -> bool {
+        let type_params = match item {
+            Item::Struct(s) => &s.type_params,
+            Item::Enum(e) => &e.type_params,
+            _ => return false,
+        };
+        let supports = |ty: &Type| {
+            self.auto_derive_type_ready(ty, trait_name, type_params, foreign_supports)
+        };
+        match item {
+            Item::Struct(s) => s
+                .fields
+                .iter()
+                .filter(|field| field.computed.is_none())
+                .all(|field| supports(&field.ty)),
+            Item::Enum(e) => e.variants.iter().all(|variant| match &variant.payload {
+                crate::AST::VariantPayload::Unit => true,
+                crate::AST::VariantPayload::Single(ty, _) => supports(ty),
+                crate::AST::VariantPayload::Named(fields) => {
+                    fields.iter().all(|field| supports(&field.ty))
+                }
+            }),
+            _ => false,
+        }
+    }
+
+    fn auto_derive_type_ready(
+        &self,
+        ty: &Type,
+        trait_name: &str,
+        type_params: &[TypeParam],
+        foreign_supports: &impl Fn(&str, &str) -> Option<bool>,
+    ) -> bool {
+        match ty {
+            Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. } => {
+                self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
+            }
+            Type::Result { ok, err } => {
+                self.auto_derive_type_ready(ok, trait_name, type_params, foreign_supports)
+                    && self.auto_derive_type_ready(
+                        err,
+                        trait_name,
+                        type_params,
+                        foreign_supports,
+                    )
+            }
+            Type::Map { key, value, .. } => {
+                trait_name != EQUATABLE
+                    && self.auto_derive_type_ready(
+                        key,
+                        trait_name,
+                        type_params,
+                        foreign_supports,
+                    )
+                    && self.auto_derive_type_ready(
+                        value,
+                        trait_name,
+                        type_params,
+                        foreign_supports,
+                    )
+            }
+            Type::Tuple(fields) => fields
+                .iter()
+                .all(|(_, field)| {
+                    self.auto_derive_type_ready(
+                        field,
+                        trait_name,
+                        type_params,
+                        foreign_supports,
+                    )
+                }),
+            Type::Union(members) => members.iter().all(|member| {
+                self.auto_derive_type_ready(
+                    member,
+                    trait_name,
+                    type_params,
+                    foreign_supports,
+                )
+            }),
+            Type::Apply { name, args } => {
+                foreign_supports(name, trait_name)
+                    .unwrap_or_else(|| self.implements_trait(name, trait_name))
+                    && args
+                        .iter()
+                        .all(|arg| {
+                            self.auto_derive_type_ready(
+                                arg,
+                                trait_name,
+                                type_params,
+                                foreign_supports,
+                            )
+                        })
+            }
+            Type::Tagged { inner, .. } => {
+                self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
+            }
+            Type::Named(name) if type_params.iter().any(|param| param.name == *name) => true,
+            Type::Named(name) => foreign_supports(name, trait_name)
+                .unwrap_or_else(|| self.implements_trait(name, trait_name)),
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Char
+            | Type::IntN { .. }
+            | Type::Float32 => true,
+            Type::Shared(_) | Type::TraitObject(_) | Type::Fn { .. } => false,
         }
     }
 
@@ -814,7 +1057,15 @@ impl TraitRegistry {
             DISPLAY => self
                 .trait_impls
                 .contains(&(type_name.to_string(), DISPLAY.to_string())),
-            EQUATABLE if self.auto_equatable.contains(type_name) => true,
+            EQUATABLE
+                if self.auto_equatable.contains(type_name)
+                    || self
+                        .derives
+                        .get(type_name)
+                        .is_some_and(|derives| derives.contains(COMPARABLE)) =>
+            {
+                true
+            }
             COMPARABLE | SERIALIZE | ENCODE | DECODE => self
                 .derives
                 .get(type_name)
@@ -1146,6 +1397,147 @@ impl TraitRegistry {
             Some(Type::String),
             AccessConvention::Move,
         );
+        // Keep sema's named-type admission tied to real prelude protocol
+        // implementations.
+        for ty in [
+            "ArgsSpec",
+            "AriaRole",
+            "BigInt",
+            "BitSet",
+            "BrowserError",
+            "ByteBuffer",
+            "Clock",
+            "Closed",
+            "CountMinSketch",
+            "DBError",
+            "DBValue",
+            "DataError",
+            "DataErrorKind",
+            "DataTree",
+            "Date",
+            "DateTime",
+            "Decimal",
+            "DecodeError",
+            "DirEntry",
+            "DNSSrv",
+            "Duration",
+            "EncodingError",
+            "EnvError",
+            "EventResult",
+            "F32x4",
+            "F64x2",
+            "Field",
+            "FileLock",
+            "GameAssets",
+            "GameBackend",
+            "GameFrame",
+            "GameImage",
+            "GameInputMap",
+            "GameInputSnapshot",
+            "GameReplay",
+            "GameScene",
+            "GameSound",
+            "HTTPError",
+            "HTTPHeaderName",
+            "HTTPHeaderValue",
+            "HTTPMethod",
+            "HTTPRequest",
+            "HTTPResponse",
+            "HTTPRouter",
+            "HTTPStatus",
+            "HTTPVersion",
+            "HyperLogLog",
+            "Id",
+            "Instant",
+            "IOError",
+            "IPAddr",
+            "JSON",
+            "JSONError",
+            "Key",
+            "LocalDate",
+            "LocalTime",
+            "Lru",
+            "Mat3",
+            "Mat4",
+            "Measurement",
+            "MIME",
+            "NetError",
+            "ParsedArgs",
+            "Path",
+            "Period",
+            "Point",
+            "Pool",
+            "ProcessChild",
+            "ProcessResult",
+            "ProcessSpec",
+            "Quat",
+            "Range",
+            "RangeError",
+            "Rect",
+            "ReflectField",
+            "ReflectValue",
+            "Regex",
+            "RegexFlags",
+            "RegexMatch",
+            "ReservoirSampler",
+            "Rng",
+            "Size",
+            "SocketAddr",
+            "Solver",
+            "Stat",
+            "Stopwatch",
+            "TcpListener",
+            "TcpStream",
+            "TDigest",
+            "TempDir",
+            "TempFile",
+            "TextError",
+            "TLSStream",
+            "UDPPacket",
+            "UdpSocket",
+            "UnixListener",
+            "UnixStream",
+            "URL",
+            "UTF8Error",
+            "Value",
+            "Vec2",
+            "Vec3",
+            "Vec4",
+            "WalkEntry",
+            "WatchEvent",
+            "WsError",
+            "Zone",
+            "ZonedDateTime",
+        ] {
+            self.auto_printable.insert(ty.to_string());
+        }
+        for ty in [
+            "BitSet",
+            "ByteBuffer",
+            "Clock",
+            "Decimal",
+            "GameImage",
+            "GameSound",
+            "Id",
+            "IOError",
+            "Lru",
+            "Mat3",
+            "Mat4",
+            "Quat",
+            "Range",
+            "Vec2",
+            "Vec3",
+            "Vec4",
+        ] {
+            self.auto_debug.insert(ty.to_string());
+        }
+        // D-RANGE-VALUE1=A: Range uses the same structural value contracts as
+        // an ordinary record. Values.rs owns the matching runtime protocols.
+        self.auto_equatable.insert(Syntax::TYPE_RANGE.to_string());
+        self.trait_impls.insert((
+            Syntax::TYPE_RANGE.to_string(),
+            DISPLAY.to_string(),
+        ));
         // D-ENCSTREAM-SURFACE1=A: EncodingError Display is the exact stream error
         // projection law; Format/Kind/Cause/Error compare by value.
         self.trait_impls
@@ -1566,11 +1958,23 @@ impl TraitRegistry {
     }
 }
 
-fn struct_auto_derive_ok(s: &StructDef) -> bool {
+pub fn auto_derive_requested(
+    markers: &[crate::AST::Marker],
+    trait_name: &str,
+    package_default: bool,
+) -> bool {
+    markers
+        .iter()
+        .rev()
+        .find(|marker| marker.name == trait_name)
+        .map_or(package_default, |marker| !marker.negated)
+}
+
+pub fn struct_auto_derive_ok(s: &StructDef) -> bool {
     !s.fields.is_empty() && s.fields.iter().all(|f| field_auto_ok(&f.ty, &s.name))
 }
 
-fn enum_auto_derive_ok(e: &EnumDef) -> bool {
+pub fn enum_auto_derive_ok(e: &EnumDef) -> bool {
     use crate::AST::VariantPayload;
     e.variants.iter().all(|v| match &v.payload {
         VariantPayload::Unit => true,
@@ -1581,11 +1985,27 @@ fn enum_auto_derive_ok(e: &EnumDef) -> bool {
 
 fn field_auto_ok(ty: &Type, owner: &str) -> bool {
     match ty {
-        Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
-        Type::List(inner) | Type::Option(inner) => field_auto_ok(inner, owner),
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::IntN { .. }
+        | Type::Float32 => true,
+        Type::List(inner)
+        | Type::Option(inner)
+        | Type::Tagged { inner, .. }
+        | Type::FixedList { elem: inner, .. } => field_auto_ok(inner, owner),
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            field_auto_ok(key, owner) && field_auto_ok(value, owner)
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, field)| field_auto_ok(field, owner)),
+        Type::Union(members) => members.iter().all(|member| field_auto_ok(member, owner)),
         Type::Named(n) => n != owner,
         Type::Apply { .. } => true,
-        _ => false,
+        Type::Shared(_) | Type::TraitObject(_) | Type::Fn { .. } => false,
     }
 }
 

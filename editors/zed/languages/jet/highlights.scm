@@ -67,7 +67,7 @@
   "return"
 ] @keyword.control
 
-; keyword.declaration: Bench Context Impure Reactive Sanitizer State Tainted Test Todo Transact Transition Unsafe add alias as change client comptime derive distinct enum extern fn impl migration module priv protocol pub remove rename rust server state struct tag taskgroup trait use validate via
+; keyword.declaration: Bench Context Impure Reactive Scrub State Test Todo Transact Transition Unsafe add alias as change client comptime derive distinct enum extern fn impl migration module priv protocol pub remove rename rust server state struct tag taskgroup trait use validate via
 [
   "Bench"
   "Test"
@@ -128,7 +128,7 @@
 ] @type.builtin
 
 ; builtin: check input print
-; marker.rule: ABI Authority Bench Bindgen CLI Caps Codable CodableAsBase Comparable Context DebugOnly Decode Default DenyUnknownFields Doc Encode Env Every Extern FFI Flag Flatten Grant HTML Impure Inline Invariant Layout Live Local Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable SQL Sanitizer Shared Shield Short SingleUse Skip State Static Summarize Tag Tainted Target Task Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport allow wire
+; marker.rule: ABI Authority Bench Bindgen CLI Caps Codable CodableAsBase Comparable Context Debug DebugOnly Decode Default DenyUnknownFields Discriminant Doc Encode Env Equatable Every Extern FFI Flag Flatten Grant HTML Impure Inline Invariant Job Layout Live Local Meta MustUse NoPrelude Nondeterministic Numeric Off Patchable Persist Policy Post Pre Printable PubFile PublishedSchema Reactive Redact Region Rename RenameAll Replayable SQL Scrub Shared Shield Short SingleUse Skip State Static Summarize Target Test Todo Track Transact Transition UnitFamily Unsafe Untagged WasmExport allow wire
 ; sigil: # & ... :: := ^ ~
 ; operator: ! != % %= && &= * *= + ++ += - -- -= -> .. ..< .[ .{ / /= < << <<= <= == => > >= >> >>= ? ?. ?? ^= | |= ||
 ; END GENERATED JET SYNTAX HIGHLIGHTS

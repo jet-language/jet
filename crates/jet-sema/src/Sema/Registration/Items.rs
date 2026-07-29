@@ -466,6 +466,16 @@ pub(crate) fn register_struct(
         } else {
             fields.push((f.name.clone(), f.name_span, f.ty.clone(), f.is_pub));
         }
+        if matches!(&f.ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP) {
+            diags.push(Diagnostic::error(
+                "E1110",
+                "`TaskGroup` cannot be stored in a struct field".to_string(),
+                "a taskgroup is a scoped spawn authority, not a value that can escape its call stack"
+                    .to_string(),
+                "pass `group: TaskGroup` directly to a named helper function instead".to_string(),
+                Some(f.name_span),
+            ));
+        }
         if f.ty.is_float()
             && is_money_like_name(&f.name)
             && !allows_float_money(&f.serde_markers)

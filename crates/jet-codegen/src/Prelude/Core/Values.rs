@@ -18,6 +18,56 @@ trait JetQuantity: Sized {
     fn from_float(value: f64) -> Self;
 }
 
+// D-RANGE-VALUE1=A: one allocation-free integer range value. Both source
+// spellings use this type; `exclusive` selects the half-open end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct JetRange {
+    start: i64,
+    end: i64,
+    exclusive: bool,
+}
+impl JetRange {
+    fn contains(&self, value: &i64) -> bool {
+        jet_range_contains(self.start, self.end, self.exclusive, *value)
+    }
+
+    fn structural_text(&self) -> String {
+        jet_range_structural_text(self.start, self.end, self.exclusive)
+    }
+}
+impl JetShow for JetRange {
+    fn jet_show(&self) -> String {
+        self.structural_text()
+    }
+}
+impl user_Display for JetRange {
+    fn display(&self) -> String {
+        self.structural_text()
+    }
+}
+impl JetDisplay for JetRange {
+    fn jet_display(&self) -> String {
+        <Self as user_Display>::display(self)
+    }
+}
+impl JetDebug for JetRange {
+    fn jet_debug(&self) -> String {
+        self.structural_text()
+    }
+}
+impl user_Equatable for JetRange {
+    fn equal(&self, rhs: &Self) -> bool {
+        jet_range_equal(
+            self.start,
+            self.end,
+            self.exclusive,
+            rhs.start,
+            rhs.end,
+            rhs.exclusive,
+        )
+    }
+}
+
 // D-SHAPE-RESOURCE2=A: scope-owned deferred close. `FnOnce` lives in Option so
 // Drop consumes it exactly once; declaration order gives reverse cleanup order.
 struct JetDeferredClose<F: FnOnce()> {
@@ -261,29 +311,26 @@ impl<T: JetDebug> JetDebug for std::collections::VecDeque<T> {
 }
 impl<K: Ord + JetShow, V: JetShow> JetShow for std::collections::BTreeMap<K, V> {
     fn jet_show(&self) -> String {
-        let parts: Vec<String> = self
-            .iter()
-            .map(|(k, v)| format!("{}: {}", k.jet_show(), v.jet_show()))
-            .collect();
-        format!("[:{}]", parts.join(", "))
+        jet_debug_map(
+            self.iter()
+                .map(|(key, value)| (key.jet_show(), value.jet_show())),
+        )
     }
 }
 impl<K: Ord + JetDisplay, V: JetDisplay> JetDisplay for std::collections::BTreeMap<K, V> {
     fn jet_display(&self) -> String {
-        let parts: Vec<String> = self
-            .iter()
-            .map(|(k, v)| format!("{}: {}", k.jet_display(), v.jet_display()))
-            .collect();
-        format!("[:{}]", parts.join(", "))
+        jet_debug_map(
+            self.iter()
+                .map(|(key, value)| (key.jet_display(), value.jet_display())),
+        )
     }
 }
 impl<K: Ord + JetDebug, V: JetDebug> JetDebug for std::collections::BTreeMap<K, V> {
     fn jet_debug(&self) -> String {
-        let parts: Vec<String> = self
-            .iter()
-            .map(|(k, v)| format!("{}: {}", k.jet_debug(), v.jet_debug()))
-            .collect();
-        format!("[:{}]", parts.join(", "))
+        jet_debug_map(
+            self.iter()
+                .map(|(key, value)| (key.jet_debug(), value.jet_debug())),
+        )
     }
 }
 impl<T: JetShow> JetShow for Option<T> {

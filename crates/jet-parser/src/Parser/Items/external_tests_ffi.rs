@@ -232,11 +232,11 @@ impl<'a> Parser<'a> {
                 && matches!(self.peek3().kind, TokKind::KwFn | TokKind::KwPub)
         }
 
-        /// D-SCHEDULE1 (card #505): true when the cursor is at `#Task` (a bare
+        /// D-SCHEDULE1 (card #505): true when the cursor is at `#Job` (a bare
         /// schedule fn marker). Unlike `#Sanitizer`/`#Replayable`, this does
         /// NOT require `fn`/`pub` immediately next — the ratified spelling
-        /// stacks `#Task` before `#Every(…)` (`#Task #Every(5min) fn …`), so
-        /// the marker after `#Task` is usually another marker, not `fn`
+        /// stacks `#Job` before `#Every(…)` (`#Job #Every(5min) fn …`), so
+        /// the marker after `#Job` is usually another marker, not `fn`
         /// itself. Same looseness as `#State(`/`#Transition(`/`#Every(`,
         /// which only look as far as their own shape.
         pub(in crate::Parser) fn at_task_fn(&self) -> bool {
@@ -330,8 +330,7 @@ impl<'a> Parser<'a> {
         /// D-TAINT-SAN: bare lowercase `sanitizer` is the retired spelling of the
         /// taint-strip modifier, recognized only when `fn`/`pub` follows (so an
         /// ordinary identifier named `sanitizer` elsewhere is unaffected). The
-        /// modifier is now the marker `#Sanitizer` — point the user at it (E0059),
-        /// mirroring `pure` → `#Pure` (E0053).
+        /// modifier is now the typed marker `#Scrub(Tag)` (E0059).
         pub(super) fn foreign_sanitizer_follows(&self) -> bool {
             matches!(self.peek2().kind, TokKind::KwFn | TokKind::KwPub)
         }
@@ -340,15 +339,11 @@ impl<'a> Parser<'a> {
             Diagnostic::error(
                 "E0059",
                 format!(
-                    "the taint-strip modifier is written `#{}`, not bare `{}`",
-                    Syntax::KW_SANITIZER,
+                    "the taint-strip modifier is written `#Scrub(Tag)`, not bare `{}`",
                     Syntax::FOREIGN_SANITIZER
                 ),
-                format!(
-                    "`#{}` is a marker, like every other `#`-tag, so the taint-strip contract draws the eye",
-                    Syntax::KW_SANITIZER
-                ),
-                format!("write: #{} fn name() {{ ... }}", Syntax::KW_SANITIZER),
+                "`#Scrub(Tag)` names the exact fact removed by the function".to_string(),
+                format!("write: #{}(Tag) fn name() {{ ... }}", Syntax::KW_SCRUB),
                 Some(span),
             )
         }

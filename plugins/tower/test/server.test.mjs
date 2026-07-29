@@ -54,6 +54,35 @@ test('server round-trip: add, state, validation, conflict, next', async () => {
   assert.equal(unknown.status, 404);
 });
 
+test('message API adds, lists, and closes independently of done-card clearing', async () => {
+  const add = await post('message/add', {
+    cardId: '#1',
+    text: 'Read the migration note.',
+    by: 'agent-x',
+  });
+  assert.equal(add.status, 200);
+  assert.equal(add.json.result.kind, 'message');
+
+  const listed = await (await fetch(url('/api/messages'))).json();
+  assert.deepEqual(listed.map(message => message.id), [add.json.result.id]);
+
+  const cleared = await post('done/clear', {});
+  assert.equal(cleared.status, 200);
+  const afterClear = await (await fetch(url('/api/messages'))).json();
+  assert.equal(afterClear.length, 1, 'clearing completed cards must not clear messages');
+
+  const rejected = await post('message/done', { id: add.json.result.id, by: 'agent-x' });
+  assert.equal(rejected.status, 403);
+  assert.equal(rejected.json.error, 'E_OWNER_ONLY');
+
+  const done = await post('message/done', { id: add.json.result.id, by: 'owner' });
+  assert.equal(done.status, 200);
+  assert.equal(done.json.result.status, 'done');
+  assert.deepEqual(await (await fetch(url('/api/messages'))).json(), []);
+  const all = await (await fetch(url('/api/messages?status='))).json();
+  assert.equal(all[0].doneBy, 'owner');
+});
+
 // #522 — stale-process trap: /api/version reports what this process loaded
 // at boot vs. a fresh read of the source on disk right now.
 test('GET /api/version reports start/current/stale', async () => {

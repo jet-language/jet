@@ -653,7 +653,7 @@ pub(crate) fn run_dev_entry(file: &str, mode: OutputMode) {
 }
 
 /// D-JPK-TASKRUN1 (card #476): `jet run --task <name> <file>` — compile with
-/// the named `#Task fn` as the entry via a synthetic `fn run { task(…) }`
+/// the named `#Job fn` as the entry via a synthetic `fn run { task(…) }`
 /// wrapper (same `compile_with_entry` path `fn dev()` uses; the task keeps
 /// its source name so plain-call deps stay resolvable), then run the binary
 /// with `program_args` (typed CLI args via D-CLIFLAG1 ride for free).
@@ -695,8 +695,8 @@ pub(crate) fn run_task_entry(
         let diag = jet::Diagnostics::Diagnostic::error(
             "E1294",
             format!("no task named `{task}`"),
-            format!("`jet run --task` / `jetpack run` only invoke functions marked `#Task` (D-JPK-TASKRUN1)."),
-            "mark a function `#Task` to make it runnable, or check the spelling.".to_string(),
+            format!("`jet run --task` / `jetpack run` only invoke functions marked `#Job` (D-JPK-TASKRUN1)."),
+            "mark a function `#Job` to make it runnable, or check the spelling.".to_string(),
             None,
         )
         .with_detail(format!("declared tasks: {list}\n"));

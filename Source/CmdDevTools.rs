@@ -51,7 +51,7 @@ pub(crate) fn run_dev(
     let mut prev_bundle = render_dev_iteration(file, try_anyway, mode, use_interpreter);
     // #439 / E3-UL6: dependency-aware watch session shared with `jet run --watch`.
     let mut watch = jet_devserver::WatchSession::open(path);
-    // D-SCHEDULE1 (card #505): due `#Task #Every(…)` fns fire on their own
+    // D-SCHEDULE1 (card #505): due `#Job #Every(…)` fns fire on their own
     // schedule, independent of file-change ticks.
     let mut clock = TaskClock::new();
     let mut persist = jet_devserver::PersistStore::new();
@@ -131,7 +131,7 @@ fn sync_persist_bindings(
 }
 
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): the `jet dev` consumer of
-/// schedule-as-code — check every `#Task #Every(…)` fn in `bundle` against
+/// schedule-as-code — check every `#Job #Every(…)` fn in `bundle` against
 /// `clock`, and run whichever are due through the same interpreter tier the
 /// rest of the dev loop uses (`jet::Interpreter::run_named_task`). This is
 /// the dev-loop tier only (D-DEV3); the service runtime (D-SERVICE1) and a

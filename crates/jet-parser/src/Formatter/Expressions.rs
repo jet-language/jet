@@ -653,14 +653,39 @@ impl<'a> Fmt<'a> {
                 self.write("]");
             }
             Expr::Slice {
-                base, start, end, ..
+                base,
+                start,
+                end,
+                range,
+                ..
             } => {
                 self.fmt_expr(base, Prec::Postfix);
                 self.write("[");
-                self.fmt_expr(start, Prec::OrFallback);
-                self.write("..");
-                self.fmt_expr(end, Prec::OrFallback);
+                if let Some(range) = range {
+                    self.fmt_expr(range, Prec::OrFallback);
+                } else {
+                    self.fmt_expr(start, Prec::OrFallback);
+                    self.write("..");
+                    self.fmt_expr(end, Prec::OrFallback);
+                }
                 self.write("]");
+            }
+            Expr::Range {
+                start,
+                end,
+                exclusive,
+                ..
+            } => {
+                let wrap = prec > Prec::Range;
+                if wrap {
+                    self.write("(");
+                }
+                self.fmt_expr(start, Prec::Or);
+                self.write(if *exclusive { "..<" } else { ".." });
+                self.fmt_expr(end, Prec::Or);
+                if wrap {
+                    self.write(")");
+                }
             }
             Expr::Ident(name, _) => self.write(name),
             Expr::Call(c) => self.fmt_call(c),
@@ -1049,13 +1074,11 @@ impl<'a> Fmt<'a> {
                     self.write(if named { "}" } else { ")" });
                 }
             }
-            // D-TAINT1/TAINT2: `#Tainted expr` or `#Tainted(Kind) expr`.
+            // D-TAG-SURFACE1=A: a direct value-fact application.
             Expr::Tainted(inner, kind, _) => {
-                if let Some(k) = kind {
-                    self.write(&format!("#{}({}) ", Syntax::KW_TAINTED, k));
-                } else {
-                    self.write(&format!("#{} ", Syntax::KW_TAINTED));
-                }
+                self.write("#");
+                self.write(kind.as_deref().unwrap_or("Input"));
+                self.write(" ");
                 self.fmt_expr(inner, Prec::Unary);
             }
             Expr::Present(inner, _) => {

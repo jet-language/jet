@@ -327,7 +327,13 @@ pub(crate) fn stmt_in_subset(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) ->
         // Plain Rust lexical blocks.
         Stmt::Region { body, .. } => scoped_stmts_in_subset(body, cx, locals),
         Stmt::Policy { body, .. } => scoped_stmts_in_subset(body, cx, locals),
-        Stmt::TaskGroup { body, .. } => scoped_stmts_in_subset(body, cx, locals),
+        Stmt::TaskGroup { name, body, .. } => {
+            let mut scoped = locals.clone();
+            scoped.insert(name.clone());
+            body
+                .iter()
+                .all(|statement| stmt_in_subset(statement, cx, &mut scoped))
+        }
         // D-LAYOUT1 / D-LAYOUT-GATES1: `layout name { … }`. UNLIKE `Region`/
         // `TaskGroup`, `name` is a REAL runtime binding that must stay valid
         // for statements AFTER this one (`lower_stmt`/`TStmt::Layout` binds

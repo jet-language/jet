@@ -195,11 +195,23 @@ fn gc_expr_references_ident(expr: &Expr, name: &str) -> bool {
             gc_expr_references_ident(base, name) || gc_expr_references_ident(index, name)
         }
         Expr::Slice {
-            base, start, end, ..
+            base,
+            start,
+            end,
+            range,
+            ..
         } => {
             gc_expr_references_ident(base, name)
-                || gc_expr_references_ident(start, name)
-                || gc_expr_references_ident(end, name)
+                || range.as_deref().map_or_else(
+                    || {
+                        gc_expr_references_ident(start, name)
+                            || gc_expr_references_ident(end, name)
+                    },
+                    |range| gc_expr_references_ident(range, name),
+                )
+        }
+        Expr::Range { start, end, .. } => {
+            gc_expr_references_ident(start, name) || gc_expr_references_ident(end, name)
         }
         Expr::ListLit(items, _) => items
             .iter()

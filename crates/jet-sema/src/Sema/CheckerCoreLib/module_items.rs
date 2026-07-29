@@ -5,6 +5,12 @@ pub fn core_module_items(module: &str) -> Vec<String> {
     let normalized_module =
         Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
     let module = normalized_module.as_str();
+    if module == "core.lang" {
+        return crate::Policy::RULE_ARG_DECLARATIONS
+            .iter()
+            .map(|declaration| declaration.name.to_string())
+            .collect();
+    }
     let items: &[&str] = match module {
         "core.io" => &[
             "Reader",
@@ -763,6 +769,9 @@ pub fn core_module_items(module: &str) -> Vec<String> {
 /// items so `alias.Type.method()` is a static type call, not a nested module.
 pub(crate) fn core_module_type_item(module: &str, item: &str) -> bool {
     let module = Syntax::normalize_core_module(module).unwrap_or_else(|| module.to_string());
+    if module == "core.lang" {
+        return crate::Policy::rule_arg_declaration(item).is_some();
+    }
     matches!(
         (module.as_str(), item),
         ("jet.crypto", "Secret" | "SigningKey" | "VerifyKey" | "X25519SecretKey"

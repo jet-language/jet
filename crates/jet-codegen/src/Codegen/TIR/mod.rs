@@ -1126,6 +1126,7 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             &extern_funcs,
         );
         populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+        imported_cx.jit_spawn_site_base = spawn_lambdas.len();
         for item in &imported.items {
             match item {
                 Item::Func(function)
@@ -1156,6 +1157,35 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
                         let mut lowered = lower_func(function, &imported_cx);
                         lowered.name =
                             format!("user_{}::{}", code_module.name, mangle(&function.name));
+                        funcs.push(lowered);
+                    }
+                }
+                Item::Impl(implementation)
+                    if implementation.trait_name.as_deref()
+                        == Some(crate::Syntax::TRAIT_DISPLAY)
+                        && imported_cx
+                            .unit_labels
+                            .contains_key(&implementation.type_name) =>
+                {
+                    for method in &implementation.methods {
+                        if !tir_covers_trait_method(
+                            method,
+                            &implementation.type_name,
+                            &imported_cx,
+                            crate::Syntax::TRAIT_DISPLAY,
+                        ) {
+                            continue;
+                        }
+                        let mut lowered = lower_trait_method(
+                            method,
+                            &implementation.type_name,
+                            &imported_cx,
+                            crate::Syntax::TRAIT_DISPLAY,
+                        );
+                        lowered.name = format!(
+                            "{}.{}::{}",
+                            imported.alias, implementation.type_name, method.name
+                        );
                         funcs.push(lowered);
                     }
                 }
@@ -1407,20 +1437,11 @@ pub fn lower_jit_program(bundle: &ProgramBundle) -> Option<JitProgram> {
             fields.iter().map(|(_, ty)| ty.clone()).collect(),
         );
     }
-    let mut distinct_bases = std::collections::HashMap::new();
-    for item in &module.items {
-        match item {
-            Item::Distinct(def) => {
-                distinct_bases.insert(def.name.clone(), def.base.clone());
-            }
-            Item::UnitFamily(family) => {
-                for def in family.distinct_defs() {
-                    distinct_bases.insert(def.name, def.base);
-                }
-            }
-            _ => {}
-        }
-    }
+    let distinct_bases = cx
+        .distinct_types
+        .iter()
+        .map(|(name, (base, _))| (name.clone(), base.clone()))
+        .collect();
     let mut trait_method_owners =
         std::collections::HashMap::<(String, String), Vec<String>>::new();
     for item in &module.items {
@@ -2185,6 +2206,12 @@ pub enum TStmt {
     Return(Option<TExpr>),
     /// A call used for effect: `print(x);`, `helper(a);`.
     ExprStmt(TExpr),
+    /// D-TASKSCOPE1=A: a lexical structured-concurrency scope. Engines create
+    /// one group, run `body`, and close it on every exit path.
+    TaskGroup {
+        group: TLocal,
+        body: Vec<TStmt>,
+    },
     /// D-SHAPE-RESOURCE2=A: one sema-checked `defer close(^resource)` action.
     /// AOT emits a Drop guard; non-resident dev tiers use their named fallback.
     DeferClose {
@@ -2236,6 +2263,9 @@ pub enum TStmt {
     Range {
         label: Option<String>,
         var: String,
+        /// D-RANGE-VALUE1=A: `Some` evaluates one Range value once. Literal
+        /// ranges keep `None` and the direct start/end jump lowering.
+        source: Option<TExpr>,
         start: TExpr,
         end: TExpr,
         step: Option<TExpr>,
@@ -2918,13 +2948,15 @@ pub enum TExprKind {
         recv: Box<TExpr>,
         lanes: Vec<u8>,
     },
-    /// c109 Phase 5: an inclusive copy slice `coll[a..b]` (`Expr::Slice`). Lowers
-    /// to the `jet_slice_vec` helper. `line` is the source line for the bounds
-    /// panic, resolved at lowering.
+    /// An owned slice expression. Place contexts lower the same source shape to
+    /// `ViewNew` or `ViewMutNew`; explicit copy stays here. `line` identifies
+    /// bounds failures.
     Slice {
         base: Box<TExpr>,
         start: Box<TExpr>,
         end: Box<TExpr>,
+        /// D-RANGE-VALUE1=A: a stored Range source, evaluated once.
+        range: Option<Box<TExpr>>,
         line: usize,
     },
     /// c109 Phase 6: the sema-inserted `.clone()` on an owning non-Copy field read
@@ -3274,8 +3306,13 @@ pub struct TExternArg {
 /// (`spawn_closure` is the distinct `emit_spawn_lambda` form; `serve`/`guard` use the
 /// plain `emit_lambda` form) plus, for `serve`, the lowered address arg.
 pub enum TCoreClosureKind {
-    /// `tasks.spawn(<lambda>)` → `{root}jet_std::JetTask::spawn(<spawn_closure>)`.
-    Spawn { spawn_closure: String },
+    /// `tasks.spawn(<lambda>)` uses no group. `g.task => …` carries the same
+    /// internal group collector through every named helper call.
+    Spawn {
+        group: Option<Box<TExpr>>,
+        site: usize,
+        spawn_closure: String,
+    },
     /// `http.serve(addr, <lambda>)` → `{root}jet_http_serve(&(<addr>), <closure>)`.
     Serve { addr: Box<TExpr>, closure: String },
     /// `scope.guard(<lambda>)` → `{root}jet_scope_guard(<closure>)`.

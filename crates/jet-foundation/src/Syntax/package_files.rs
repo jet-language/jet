@@ -304,11 +304,11 @@ pub const ATTR_CODABLE: &str = "Codable"; // D-SERDE4
 pub const ATTR_ENCODE: &str = "Encode"; // D-SERDE4
 pub const ATTR_DECODE: &str = "Decode"; // D-SERDE4
                                         // D-MARKERMOVE3 (B, ratified 2026-07-02): the other built-in derive markers
-                                        // that join Codable/Encode/Decode on the contract plane (`@`). `Debug` is
-                                        // NOT one of these — D-MARK-DEBUG1=A retired the explicit derive spelling
-                                        // outright (E0922, Traits.rs); it auto-derives instead (S55). User derives
-                                        // (`derive T.Wire { … }`, applied as `#[Wire]`) stay `#` — the built-in/user
-                                        // line is the `@`/`#` plane line.
+                                        // that join Codable/Encode/Decode on the contract plane (`@`).
+                                        // D-AUTODERIVE-SYNTAX1=D restores Debug as a signed type-site auto-derive
+                                        // control beside Printable and Equatable. User derives (`derive T.Wire {
+                                        // … }`, applied as `#[Wire]`) stay `#` — the built-in/user line is the
+                                        // `@`/`#` plane line.
 pub const ATTR_SUMMARIZE: &str = "Summarize"; // D-MARKERMOVE3
 pub const ATTR_COMPARABLE: &str = "Comparable"; // D-MARKERMOVE3
                                                 // Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.
@@ -319,7 +319,9 @@ pub const ATTR_FLATTEN: &str = "Flatten"; // D-SERDE5  #[Flatten]
                                           // Container attributes (D-SERDE3/7/8), written `#[…]` before a struct/enum.
 pub const ATTR_RENAME_ALL: &str = "RenameAll"; // D-SERDE3  #[RenameAll(camel)]
 pub const ATTR_DENY_UNKNOWN_FIELDS: &str = "DenyUnknownFields"; // D-SERDE8
-pub const ATTR_TAG: &str = "Tag"; // D-SERDE7  #[Tag("type")] internal tagging
+/// D-MARKER-NAME-HYGIENE1=A: serde's internal discriminant field is not a
+/// compile-time fact tag.
+pub const ATTR_TAG: &str = "Discriminant"; // D-SERDE7, D-MARKER-NAME-HYGIENE1
 pub const ATTR_UNTAGGED: &str = "Untagged"; // D-SERDE7  #[Untagged]
                                             // D-SERDE3 (= C) RenameAll casing keywords — closed typed menu, own-case args.
 pub const RENAME_ALL_CAMEL: &str = "camel"; // D-SERDE3
@@ -414,7 +416,7 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     CTX_BLOCK,
     // Transactions (D-TXN1–D-TXN4): `#Transact(name) { … }`
     KW_TRANSACT,
-    // Schedule-as-code (D-SCHEDULE1, card #505): `#Task fn` — `#Every(…)`
+    // Schedule-as-code (D-SCHEDULE1, card #505): `#Job fn` — `#Every(…)`
     // stays out of this list, matching ATTR_TARGET/ATTR_META (paren-arg
     // config markers aren't bare completion words).
     KW_TASK,
@@ -422,9 +424,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_TEST,
     KW_BENCH,
     KW_TODO,
-    // Taint tracking (D-TAINT1): value-fact tag + sanitizer modifier
-    KW_TAINTED,
-    KW_SANITIZER,
+    // D-TAG-SURFACE1=A retired `Tainted`/`Sanitizer`; direct declared tags and
+    // `#Scrub(Tag)` come from the applied-rule registry.
     // Typestate (D-STATE1 / D-STATE-DECL / D-STATE-REQ / D-STATE-TRANS)
     KW_STATE,
     KW_TRANSITION,
@@ -560,8 +561,8 @@ use super::{
     BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS, KW_BENCH,
     KW_BREAK, KW_COMPTIME, KW_DEFER, KW_DERIVE, KW_ELSE, KW_ENUM,
     KW_EXTERN, KW_FN, KW_IF, KW_IMPL, KW_IMPURE, KW_IT, KW_LOOP, KW_MODULE,
-    KW_PRIV, KW_PROTOCOL, KW_PUB, KW_RETURN, KW_SANITIZER,
-    KW_SELF, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TAINTED, KW_TASK, KW_TASKGROUP, KW_TEST,
+    KW_PRIV, KW_PROTOCOL, KW_PUB, KW_RETURN,
+    KW_SELF, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG, KW_TASK, KW_TASKGROUP, KW_TEST,
     KW_TODO, KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNSAFE, KW_USE, LIT_FALSE,
     LIT_NULL, LIT_TRUE, PROTO_CLIENT, PROTO_SERVER, TYPE_BIT_SET, TYPE_BOOL,
     TYPE_BTREE_MAP, TYPE_BYTE_BUFFER, TYPE_CHAR, TYPE_DEQUE, TYPE_F32, TYPE_F64, TYPE_FLOAT,

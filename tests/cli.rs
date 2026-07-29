@@ -60,11 +60,11 @@ fn spawn_with_retry(cmd: &mut Command) -> Child {
 #[test]
 fn inspect_unsafe_reports_policy_provenance_and_operations() {
     let dir = isolated_cwd("inspect_unsafe");
-    fs::write(dir.join("main.jet"), "use core.mem\nfn run() {\n value :: 7\n #Unsafe(\"local\", obligations: .Track) {\n  pointer :: *Int.{ *value }\n  assert no_alias\n  print(pointer.*)\n  assert valid_ptr, aligned\n }\n}\n").unwrap();
+    fs::write(dir.join("main.jet"), "use core.mem\nfn run() {\n value :: 7\n #Unsafe(\"local\", obligations: .Track) {\n  pointer :: *Int.{ *value }\n  assert no_alias\n  band :: pointer.*..8\n  assert valid_ptr, aligned\n  print(band.start)\n }\n}\n").unwrap();
     let output = Command::new(jet()).args(["inspect", "unsafe", "main.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap();
     assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("\"schema_version\":1") && stdout.contains("\"mode\":\"Obligations\"") && stdout.contains("\"kind\":\"raw_pointer\"") && stdout.contains("\"discharged\":true"), "{stdout}");
+    assert!(stdout.contains("\"schema_version\":1") && stdout.contains("\"mode\":\"Obligations\"") && stdout.contains("\"kind\":\"raw_pointer\"") && stdout.contains("\"kind\":\"dereference\"") && stdout.contains("\"discharged\":true"), "{stdout}");
 }
 
 #[test]
@@ -244,7 +244,7 @@ fn tasks_lists_documented_scheduled_project_tasks_and_matches_run_outside_projec
     let hello = workspace.join("packages/hello/hello.jet");
     let mut hello_source = fs::read_to_string(&hello).unwrap();
     hello_source.push_str(
-        "\n#[Task, Doc(\"Say hello from this workspace member\")] fn greet() {}\n",
+        "\n#[Job, Doc(\"Say hello from this workspace member\")] fn greet() {}\n",
     );
     fs::write(&hello, hello_source).unwrap();
 

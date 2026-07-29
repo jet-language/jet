@@ -76,12 +76,17 @@ pub(crate) fn lower_core_closure_call(
             // The spawned body's type (the lambda's return) is the Task's element type.
             let body_ty = lambda_body_ty(lam, cx, env);
             let jit_lambda = lower_spawn_lambda_for_jit(lam, cx, env);
+            let site = cx.jit_spawn_site_base + cx.jit_spawn_lambdas.borrow().len();
             cx.jit_spawn_lambdas.borrow_mut().push(jit_lambda);
             let spawn_closure = render_spawn_lambda(lam, cx, env);
             return Some(TExpr {
                 ty: core_closure_call_return_ty(module, method, body_ty),
                 kind: TExprKind::CoreClosureCall {
-                    kind: TCoreClosureKind::Spawn { spawn_closure },
+                    kind: TCoreClosureKind::Spawn {
+                        group: None,
+                        site,
+                        spawn_closure,
+                    },
                 },
             });
         }

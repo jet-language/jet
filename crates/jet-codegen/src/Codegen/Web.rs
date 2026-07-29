@@ -1480,13 +1480,48 @@ fn items_have_explicit_unit_display(items: &[Item], type_name: &str) -> bool {
     unit && display
 }
 
+fn bundle_module_index_for_alias(bundle: &ProgramBundle, alias: &str) -> Option<usize> {
+    let entry = &bundle.modules[bundle.entry];
+    entry
+        .imports
+        .iter()
+        .find_map(|import| {
+            (import.import_alias() == alias)
+                .then(|| {
+                    bundle
+                        .import_targets
+                        .get(&(bundle.entry, import.span))
+                        .copied()
+                })
+                .flatten()
+        })
+        .or_else(|| {
+            bundle
+                .modules
+                .iter()
+                .position(|module| module.alias == alias)
+        })
+}
+
 fn bundle_has_explicit_unit_display(bundle: &ProgramBundle, type_name: &str) -> bool {
     if let Some((alias, leaf)) = type_name.split_once('.') {
-        return bundle.modules.iter().any(|module| {
-            module.alias == alias && items_have_explicit_unit_display(&module.items, leaf)
-        });
+        return bundle_module_index_for_alias(bundle, alias)
+            .and_then(|index| bundle.modules.get(index))
+            .is_some_and(|module| items_have_explicit_unit_display(&module.items, leaf));
     }
     items_have_explicit_unit_display(&bundle.modules[bundle.entry].items, type_name)
+}
+
+fn bundle_has_named_web_type(bundle: &ProgramBundle, name: &str) -> bool {
+    if let Some((alias, leaf)) = name.split_once('.') {
+        return bundle_module_index_for_alias(bundle, alias)
+            .and_then(|index| bundle.modules.get(index))
+            .is_some_and(|module| find_named_web_type(&module.items, leaf));
+    }
+    bundle
+        .modules
+        .iter()
+        .any(|module| find_named_web_type(&module.items, name))
 }
 
 fn collect_wasm_unions(
@@ -2163,9 +2198,9 @@ fn wasm_internal_ty(ty: &Type, bundle: &ProgramBundle) -> Option<String> {
             wasm_internal_ty(err, bundle)?
         ),
         Type::Union(members) => user_type_rust(&crate::AST::union_enum_name(members)),
-        Type::Named(name) if bundle.modules.iter().any(|module| {
-            find_named_web_type(&module.items, name)
-        }) => user_type_rust(name),
+        Type::Named(name) if bundle_has_named_web_type(bundle, name) => {
+            user_type_rust(name.rsplit('.').next().unwrap_or(name))
+        }
         _ => wasm_ty(ty)?.to_string(),
     })
 }

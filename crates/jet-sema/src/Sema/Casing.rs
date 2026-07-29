@@ -99,7 +99,7 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
         Item::Enum(e) => {
             pascal(&e.name, e.name_span, "enum", out);
             for p in &e.type_params { pascal(&p.name, p.name_span, "type parameter", out); }
-            for g in &e.groups { pascal(&g.path, g.name_span, "enum variant group", out); }
+            for g in &e.groups { pascal(&g.path, g.name_span, "variant group", out); }
             for v in &e.variants {
                 pascal(&v.name, v.name_span, "enum variant", out);
                 if let VariantPayload::Named(fields) = &v.payload {
@@ -125,7 +125,6 @@ fn item_names(item: &Item, traits: &HashSet<String>, out: &mut Vec<Diagnostic>) 
         }
         Item::Tag(t) => {
             pascal(&t.name, t.name_span, "tag", out);
-            for m in &t.methods { trait_method_names(m, out); }
         }
         Item::Impl(i) => for m in &i.methods { func_names(m, "method", out); },
         Item::Const(c) => {
@@ -383,8 +382,16 @@ fn expr_names(expr: &Expr, out: &mut Vec<Diagnostic>) {
             expr_names(key, out); expr_names(value, out);
         },
         Expr::Index { base, index, .. } => { expr_names(base, out); expr_names(index, out); }
-        Expr::Slice { base, start, end, .. } => {
-            expr_names(base, out); expr_names(start, out); expr_names(end, out);
+        Expr::Slice { base, start, end, range, .. } => {
+            expr_names(base, out);
+            if let Some(range) = range {
+                expr_names(range, out);
+            } else {
+                expr_names(start, out); expr_names(end, out);
+            }
+        }
+        Expr::Range { start, end, .. } => {
+            expr_names(start, out); expr_names(end, out);
         }
         Expr::CallValue { callee, args, .. } => {
             expr_names(callee, out);

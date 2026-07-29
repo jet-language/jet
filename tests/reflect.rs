@@ -2,7 +2,9 @@
 
 use jet::Comptime::{build_struct_type_info, CtValue};
 use jet::Diagnostics::Span;
-use jet::AST::{AccessConvention, Field, Func, Param, StructDef, Type, TypeParam};
+use jet::AST::{
+    AccessConvention, Expr, Field, Func, Marker, Param, StructDef, Type, TypeParam,
+};
 
 fn span() -> Span {
     Span::new(0, 1)
@@ -51,6 +53,7 @@ fn method(name: &str, is_pub: bool) -> Func {
         unsafe_span: None,
         is_pure: false,
         is_sanitizer: false,
+        scrub_tag: None,
         is_reactive: false,
                 reactive_upgrades: Vec::new(),
         is_replayable: false,
@@ -109,6 +112,7 @@ fn type_info_exposes_methods_type_params_and_markers() {
         methods: vec![method("show", true)],
         trait_impls: Vec::new(),
         derives: vec![("Debug".to_string(), span())],
+        auto_derive_default: true,
         is_published_schema: false,
         published_schema_span: None,
         is_single_use: false,
@@ -130,7 +134,17 @@ fn type_info_exposes_methods_type_params_and_markers() {
     assert_eq!(list_len(markers), 1);
     assert!(matches!(
         markers,
-        CtValue::List(xs) if matches!(&xs[0], CtValue::Str(s) if s == "Debug")
+        CtValue::List(xs)
+            if matches!(
+                &xs[0],
+                CtValue::Struct { fields, .. }
+                    if fields.iter().any(|(name, value)|
+                        name == "name" && matches!(value, CtValue::Str(value) if value == "Debug"))
+            )
+    ));
+    assert!(matches!(
+        struct_field(&info, "marker_names"),
+        CtValue::List(xs) if matches!(&xs[0], CtValue::Str(name) if name == "Debug")
     ));
 }
 
@@ -147,6 +161,7 @@ fn field_info_carries_visibility() {
         methods: Vec::new(),
         trait_impls: Vec::new(),
         derives: Vec::new(),
+        auto_derive_default: true,
         is_published_schema: false,
         published_schema_span: None,
         is_single_use: false,
@@ -173,4 +188,73 @@ fn field_info_carries_visibility() {
     };
     let is_pub = &hidden_fields.iter().find(|(n, _)| n == "is_pub").unwrap().1;
     assert!(matches!(is_pub, CtValue::Bool(false)));
+}
+
+#[test]
+fn marker_arguments_are_typed_and_keep_the_compatibility_name() {
+    let marker = Marker {
+        name: "Inline".to_string(),
+        negated: false,
+        name_span: span(),
+        args: vec![Expr::Ident("Always".to_string(), span())],
+        arg_labels: vec![None],
+        span: span(),
+        ct: None,
+    };
+    let s = StructDef {
+        span: span(),
+        is_pub: true,
+        is_package_pub: false,
+        name: "Hot".to_string(),
+        name_span: span(),
+        type_params: Vec::new(),
+        fields: Vec::new(),
+        methods: Vec::new(),
+        trait_impls: Vec::new(),
+        derives: Vec::new(),
+        auto_derive_default: true,
+        is_published_schema: false,
+        published_schema_span: None,
+        is_single_use: false,
+        single_use_span: None,
+        layout: None,
+        layout_span: None,
+        serde_markers: Vec::new(),
+        type_markers: vec![marker],
+        is_must_use: false,
+        must_use_span: None,
+        validate_block: Vec::new(),
+        validate_span: None,
+    };
+
+    let info = build_struct_type_info(&s);
+    assert!(matches!(
+        struct_field(&info, "marker_names"),
+        CtValue::List(names)
+            if matches!(&names[0], CtValue::Str(name) if name == "Inline")
+    ));
+    let CtValue::List(markers) = struct_field(&info, "markers") else {
+        panic!("markers");
+    };
+    let CtValue::Struct { fields, .. } = &markers[0] else {
+        panic!("marker");
+    };
+    let CtValue::List(args) = &fields.iter().find(|(name, _)| name == "args").unwrap().1 else {
+        panic!("args");
+    };
+    assert!(matches!(
+        &args[0],
+        CtValue::Struct { fields, .. }
+            if fields.iter().any(|(name, value)|
+                name == "ty" && matches!(value, CtValue::Str(value) if value == "InlineMode"))
+            && fields.iter().any(|(name, value)|
+                name == "value"
+                    && matches!(
+                        value,
+                        CtValue::Enum { type_name, variant, args }
+                            if type_name == "InlineMode"
+                                && variant == "Always"
+                                && args.is_empty()
+                    ))
+    ));
 }

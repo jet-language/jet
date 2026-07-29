@@ -2,6 +2,12 @@
 //! coercions shared by the interpreter spine.
 
 use crate::Diagnostics::{Diagnostic, Span};
+
+#[allow(dead_code)]
+mod range_semantics {
+    use jet_foundation::StructuralDebug::jet_debug_range;
+    include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
+}
 use crate::AST::{BinOp, CtFloat, Type};
 
 use super::Diagnostics::{comptime_panic, divide_by_zero, index_oob, overflow, unsupported};
@@ -769,6 +775,26 @@ pub fn apply_method(
         (CtValue::Float(f), "is_nan") => Ok(CtValue::Bool(f.is_nan())),
         (CtValue::Float(f), "is_infinite") => Ok(CtValue::Bool(f.is_infinite())),
         (CtValue::Float(f), "is_finite") => Ok(CtValue::Bool(f.is_finite())),
+        (CtValue::Struct { type_name, fields }, "contains")
+            if type_name == crate::Syntax::TYPE_RANGE =>
+        {
+            let field = |name: &str| {
+                fields
+                    .iter()
+                    .find(|(field, _)| field == name)
+                    .map(|(_, value)| value)
+            };
+            let (Some(CtValue::Int(start)), Some(CtValue::Int(end))) =
+                (field("start"), field("end"))
+            else {
+                return Err(unsupported("Range.contains", span));
+            };
+            let exclusive = matches!(field("exclusive"), Some(CtValue::Bool(true)));
+            let value = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
+            Ok(CtValue::Bool(range_semantics::jet_range_contains(
+                *start, *end, exclusive, value,
+            )))
+        }
         // List
         (CtValue::List(xs), "len") => Ok(CtValue::Int(xs.len() as i64)),
         (CtValue::List(xs), "is_empty") => Ok(CtValue::Bool(xs.is_empty())),
@@ -1139,10 +1165,23 @@ pub fn apply_method(
                 Some(CtValue::Str(s)) => s,
                 _ => return Err(unsupported("`has_marker` requires a string argument", span)),
             };
-            if let Some((_, CtValue::List(markers))) = fields.iter().find(|(n, _)| n == "markers") {
+            if let Some((_, CtValue::List(markers))) = fields
+                .iter()
+                .find(|(n, _)| n == "marker_names")
+                .or_else(|| fields.iter().find(|(n, _)| n == "markers"))
+            {
                 let found = markers
                     .iter()
-                    .any(|m| matches!(m, CtValue::Str(s) if *s == needle));
+                    .any(|m| match m {
+                        CtValue::Str(name) => *name == needle,
+                        CtValue::Struct { fields, .. } => fields.iter().any(
+                            |(field, value)| {
+                                field == "name"
+                                    && matches!(value, CtValue::Str(name) if *name == needle)
+                            },
+                        ),
+                        _ => false,
+                    });
                 return Ok(CtValue::Bool(found));
             }
             Ok(CtValue::Bool(false))

@@ -317,6 +317,7 @@ fn collect_stmt_ops(stmts: &[TStmt], out: &mut Vec<String>) {
                 }
             }
             TStmt::Loop { body, .. }
+            | TStmt::TaskGroup { body, .. }
             | TStmt::Region(body)
             | TStmt::Impure(body)
             | TStmt::Unsafe(body)
@@ -544,7 +545,7 @@ pub fn jit_select_arm_counts(bundle: &ProgramBundle) -> Option<(usize, usize)> {
     let names: HashSet<String> = program.funcs.iter().map(|f| f.name.clone()).collect();
     let m = program.funcs.iter().find(|f| f.name == program.entry)?;
     for s in &m.body {
-        if let TStmt::Region(body) = s {
+        if let TStmt::TaskGroup { body, .. } | TStmt::Region(body) = s {
             for inner in body {
                 if let TStmt::Let { init, .. } = inner {
                     if let TExprKind::SelectWait { builder } = &init.kind {
@@ -567,7 +568,7 @@ pub fn jit_main_uncovered_detail(bundle: &ProgramBundle) -> Option<String> {
         if resident_safe_stmt(s, &names) {
             continue;
         }
-        if let TStmt::Region(body) = s {
+        if let TStmt::TaskGroup { body, .. } | TStmt::Region(body) = s {
             for (j, inner) in body.iter().enumerate() {
                 if !resident_safe_stmt(inner, &names) {
                     let extra = if let TStmt::Let { init, .. } = inner {

@@ -50,6 +50,8 @@ pub const UNIT_SUFFIX_EXPONENT_RESERVED: &str = "e"; // D-UNITLIT1
 /// key set equals this slice.
 pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core",
+    // D-LANGNS-NAME1=A: generated declarations for compiler vocabulary.
+    "core.lang",
     "core.io",
     "core.env",
     // D-OSFACTS1=A: system facts and safe interrupt hook.
@@ -360,6 +362,9 @@ pub const MANIFEST_BLOCK_GRANTS: &str = "grants"; // D-EFFBUDGET1
 /// `policy: { trust: { … } }` in `pkg.jet`. Manifest keys only, no language
 /// grammar.
 pub const MANIFEST_BLOCK_POLICY: &str = "policy"; // D-JPK-GRANTSCHEMA1
+/// D-AUTODERIVE1=E / D-AUTODERIVE-SYNTAX1=D: package default for compiler
+/// generation of Printable, Equatable, and Debug implementations.
+pub const MANIFEST_POLICY_AUTO_DERIVE: &str = "auto_derive";
 pub const POLICY_FIELD_TRUST: &str = "trust"; // D-JPK-GRANTSCHEMA1
 /// D-JPK-PROVIDERAUTH1=A: reviewed registry and fetch authority.
 pub const POLICY_FIELD_PROVIDERS: &str = "providers";

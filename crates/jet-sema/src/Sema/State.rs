@@ -34,6 +34,7 @@ use std::collections::{HashMap, HashSet};
 /// Program-wide typestate metadata, collected once before any body is walked.
 #[derive(Default)]
 pub struct StateTable {
+    facts: jet_foundation::Facts::FactRegistry,
     /// `Type::method` → required state (`#State(S)`). The receiver must be in this
     /// state at the call.
     requires: HashMap<String, String>,
@@ -55,6 +56,16 @@ pub struct StateTable {
 }
 
 impl StateTable {
+    fn state_leaf<'a>(type_name: &str, state: &'a str) -> Option<&'a str> {
+        if !state.contains('.') {
+            return Some(state);
+        }
+        let mut parts = state.rsplitn(3, '.');
+        let leaf = parts.next()?;
+        let plane = parts.next()?;
+        let owner = parts.next()?;
+        (plane == "State" && owner == type_name).then_some(leaf)
+    }
     /// Register every typestate marker in `items` into this table. Methods key as
     /// `Type::method`; entry transitions (`_ -> To`) also register under
     /// `entry_ctors` so a constructor call can seed a local's initial state.
@@ -87,11 +98,23 @@ impl StateTable {
                 }
                 // D-STATE-DECL: register the bounded state-set for this type.
                 Item::StateDecl(sd) => {
+                    self.facts.declare(
+                        jet_foundation::Facts::FactKind::State,
+                        format!("{}.State", sd.type_name),
+                        sd.states.iter().map(|(state, _)| state.clone()),
+                    );
                     self.declared
                         .insert(sd.type_name.clone(), sd.states.clone());
                 }
                 _ => {}
             }
+        }
+    }
+
+    pub fn with_facts(facts: jet_foundation::Facts::FactRegistry) -> Self {
+        Self {
+            facts,
+            ..Self::default()
         }
     }
 
@@ -101,17 +124,25 @@ impl StateTable {
     /// declared states with no outgoing `#Transition(S, …)` (dead-end states).
     pub fn validate_declarations(&self, items: &[Item], diags: &mut Vec<Diagnostic>) {
         for (type_name, decl_states) in &self.declared {
-            let state_names: HashSet<&str> = decl_states.iter().map(|(n, _)| n.as_str()).collect();
+            let plane = format!("{type_name}.State");
+            let state_names: HashSet<&str> = self
+                .facts
+                .get(jet_foundation::Facts::FactKind::State, &plane)
+                .into_iter()
+                .flat_map(|fact| fact.members.iter().map(String::as_str))
+                .collect();
 
             // Collect all method markers for this type.
             let mut outgoing: HashSet<String> = HashSet::new();
 
             // Helper to check a single state name against the declared set.
             let check_state = |state: &str, span: Span, diags: &mut Vec<Diagnostic>| {
-                if !state_names.contains(state) {
+                let leaf = Self::state_leaf(type_name, state);
+                if leaf.is_none_or(|leaf| !state_names.contains(leaf)) {
+                    let candidate_name = leaf.unwrap_or(state);
                     let candidates: Vec<&str> = state_names
                         .iter()
-                        .filter(|&&s| edit_distance(state, s) <= 2)
+                        .filter(|&&s| edit_distance(candidate_name, s) <= 2)
                         .copied()
                         .collect();
                     diags.push(e0151(state, type_name, &candidates, span));
@@ -139,7 +170,9 @@ impl StateTable {
                     if let Some(tr) = &m.state_transition {
                         if let Some(from) = &tr.from {
                             check_state(from, tr.span, diags);
-                            outgoing.insert(from.clone());
+                            if let Some(leaf) = Self::state_leaf(type_name, from) {
+                                outgoing.insert(leaf.to_string());
+                            }
                         }
                         check_state(&tr.to, tr.span, diags);
                     }
@@ -164,14 +197,23 @@ impl StateTable {
     fn add_method(&mut self, type_name: &str, m: &Func) {
         let key = format!("{type_name}::{}", m.name);
         if let Some((state, _)) = &m.state_requires {
-            self.requires.insert(key.clone(), state.clone());
+            if let Some(state) = Self::state_leaf(type_name, state) {
+                self.requires.insert(key.clone(), state.to_string());
+            }
         }
         if let Some(tr) = &m.state_transition {
-            self.transitions
-                .insert(key, (tr.from.clone(), tr.to.clone()));
-            if tr.from.is_none() {
+            let from = tr
+                .from
+                .as_deref()
+                .and_then(|state| Self::state_leaf(type_name, state))
+                .map(str::to_string);
+            let Some(to) = Self::state_leaf(type_name, &tr.to).map(str::to_string) else {
+                return;
+            };
+            self.transitions.insert(key, (from.clone(), to.clone()));
+            if from.is_none() {
                 self.entry_ctors
-                    .insert(format!("{type_name}::{}", m.name), tr.to.clone());
+                    .insert(format!("{type_name}::{}", m.name), to);
             }
         }
     }
@@ -194,6 +236,10 @@ impl StateTable {
             && self.fn_requires.is_empty()
             && self.fn_transitions.is_empty()
             && self.declared.is_empty()
+    }
+
+    pub fn into_facts(self) -> jet_foundation::Facts::FactRegistry {
+        self.facts
     }
 }
 
@@ -554,9 +600,17 @@ impl<'a> StateCtx<'a> {
                 self.check_expr(index);
             }
             Expr::Slice {
-                base, start, end, ..
+                base, start, end, range, ..
             } => {
                 self.check_expr(base);
+                if let Some(range) = range {
+                    self.check_expr(range);
+                } else {
+                    self.check_expr(start);
+                    self.check_expr(end);
+                }
+            }
+            Expr::Range { start, end, .. } => {
                 self.check_expr(start);
                 self.check_expr(end);
             }

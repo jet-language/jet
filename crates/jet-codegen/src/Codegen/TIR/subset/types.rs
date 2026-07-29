@@ -37,6 +37,9 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_KEY) {
         return true;
     }
+    if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_TASKGROUP) {
+        return true;
+    }
     if matches!(&ty, Type::Named(n) if n == "DataEvent") {
         return true;
     }
@@ -279,7 +282,7 @@ pub(crate) fn is_covered_generic_struct_ty(ty: &Type, cx: &Cx) -> bool {
 /// operator (`ast_operand_is_integer` returns `None` for a distinct-typed operand, so the
 /// overflow trap is never claimed — matching the AST path's plain `+`).
 pub(crate) fn is_covered_distinct_ty(ty: &Type, cx: &Cx) -> bool {
-    matches!(ty, Type::Named(name) if cx.distinct_types.contains_key(name))
+    matches!(ty, Type::Named(name) if cx.is_distinct_type_name(name))
 }
 
 /// c109 Phase 23: a named-tuple type `(x: Int, y: Int)` (S73/D-SG7, `Type::Tuple`)
@@ -395,7 +398,7 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
     // on `type_name == "TextWidth"` in `lower_expr`'s StructLit arm.
     matches!(
         name,
-        "HTTPRequest" | "HTTPResponse" | "TextWidth" | "TerminalSize" | "TerminalPolicy"
+        "HTTPRequest" | "HTTPResponse" | "Range" | "TextWidth" | "TerminalSize" | "TerminalPolicy"
             | "AsyncPolicy" | "DecodeError" | "FieldError"
             | "EncodingLimits" | "EncodingCause" | "EncodingError"
             | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions"

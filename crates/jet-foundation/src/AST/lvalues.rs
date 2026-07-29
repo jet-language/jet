@@ -43,6 +43,8 @@ pub enum IndexKind {
     #[default]
     Unknown,
     List,
+    /// D-RANGE-VALUE1=A: `xs[range]` is a copy slice using one Range value.
+    Range,
     /// D-OOBPROOF1 / D-REFINE1: fixed-size list index proven in-bounds by a
     /// range-refined distinct `Int`. Codegen may emit direct indexing because
     /// sema carried the proof here.

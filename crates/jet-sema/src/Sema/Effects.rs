@@ -175,39 +175,10 @@ impl Effect {
     /// entry is a bare root, which (D-EFFTREE1 ancestor subsumption) covers
     /// its whole subtree — so this is still the true maximal set.
     pub fn all() -> EffectSet {
-        [
-            Effect::Net,
-            Effect::FS,
-            Effect::IO,
-            Effect::DB,
-            Effect::Time,
-            Effect::Rand,
-            Effect::Env,
-            Effect::Exec,
-            Effect::Log,
-            Effect::GPU,
-            Effect::Go,
-            Effect::Java,
-            Effect::DotNet,
-            Effect::Fortran,
-            Effect::Cobol,
-            Effect::Tcl,
-            Effect::Lua,
-            Effect::Ada,
-            Effect::Pascal,
-            Effect::Dart,
-            Effect::PowerShell,
-            Effect::Perl,
-            Effect::Ruby,
-            Effect::Php,
-            Effect::R,
-            Effect::Com,
-            Effect::Browser,
-            Effect::Secret,
-        ]
-        .into_iter()
-        .map(|e| e.name().to_string())
-        .collect()
+        jet_foundation::Facts::EFFECT_ROOTS
+            .iter()
+            .map(|effect| (*effect).to_string())
+            .collect()
     }
 }
 
@@ -247,7 +218,7 @@ pub fn parse_effect_name(name: &str) -> Option<String> {
 /// (`FS.Read`) covers only itself and any deeper path under it — a sibling
 /// (`FS.Write`) is never covered.
 pub fn effect_covers(bound: &str, e: &str) -> bool {
-    e == bound || e.starts_with(&format!("{bound}."))
+    jet_foundation::Facts::fact_covers(bound, e)
 }
 
 /// The subset of `inferred` NOT covered by any entry of `bound_set` — the
@@ -641,6 +612,9 @@ pub struct SemIndexEffectFacts {
     pub reference_anchors: HashMap<(String, usize, usize), DefinitionAnchorFact>,
     /// D-WEBAPP1=D: statically known `fn app()` application graph (Tower #438).
     pub web_app: Option<jet_foundation::WebApp::WebAppGraph>,
+    /// D-FACTMODEL1=A: the one checked registry used by tag, effect, state,
+    /// diagnostics, semantic tooling, and reflection consumers.
+    pub fact_registry: jet_foundation::Facts::FactRegistry,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1506,9 +1480,19 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         Expr::Index { base, index, .. } => {
             expr_handle_escape(base, handle).or_else(|| expr_handle_escape(index, handle))
         }
-        Expr::Slice { base, start, end, .. } => expr_handle_escape(base, handle)
-            .or_else(|| expr_handle_escape(start, handle))
-            .or_else(|| expr_handle_escape(end, handle)),
+        Expr::Slice { base, start, end, range, .. } => expr_handle_escape(base, handle)
+            .or_else(|| {
+                range.as_deref().map_or_else(
+                    || {
+                        expr_handle_escape(start, handle)
+                            .or_else(|| expr_handle_escape(end, handle))
+                    },
+                    |range| expr_handle_escape(range, handle),
+                )
+            }),
+        Expr::Range { start, end, .. } => {
+            expr_handle_escape(start, handle).or_else(|| expr_handle_escape(end, handle))
+        }
         Expr::ListLit(elems, _) => elems.iter().find_map(|el| expr_handle_escape(el, handle)),
         Expr::TupleLit(fields, _, _) => {
             fields.iter().find_map(|(_, e)| expr_handle_escape(e, handle))

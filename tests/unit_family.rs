@@ -1076,6 +1076,188 @@ fn run() {}
 }
 
 #[test]
+fn dimensional_quantities_example_stays_in_native_jit() {
+    if !jet_jit::cranelift_host_supported() {
+        return;
+    }
+    use jet::JitBackend::JitBackend;
+    use jet::JitBackend::RunOutcome;
+
+    let path = "examples/features/types/dimensional_quantities.jet";
+    let mut bundle = jet::Loader::load_entry(path).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(
+        jet_jit::resident_jit_safe_bundle(&bundle),
+        "dimensional quantities must stay resident-safe: {}",
+        jet_jit::resident_jit_safe_bundle_detail(&bundle)
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|reason| panic!("dimensional quantities must JIT-compile: {reason}"));
+
+    jet_jit::reset_jit_trace_for_test();
+    let mut backend = jet_jit::CraneliftBackend::new();
+    match backend.run(&bundle, false) {
+        RunOutcome::Ran {
+            stdout,
+            stderr,
+            exit_code,
+        } => {
+            assert_eq!(
+                stdout,
+                "12 meter\n4 meter/second\n12 meter\n766 px\n12 Meter\n12\n12.0\n"
+            );
+            assert!(stderr.is_empty());
+            assert_eq!(exit_code, 0);
+        }
+        RunOutcome::Problems(diagnostics) => {
+            panic!("JIT rejected dimensional quantities: {diagnostics:?}")
+        }
+    }
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "dimensional quantities did not execute native JIT code"
+    );
+    assert!(
+        !jet_jit::deopt_invoked_for_test(),
+        "dimensional quantities deoptimized to the interpreter"
+    );
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "dimensional quantities invoked a forbidden fallback"
+    );
+}
+
+#[test]
+fn imported_public_units_keep_display_metadata_across_tiers() {
+    let units = r#"
+pub #UnitFamily(Length, base: meter) { meter }
+
+impl Meter.Display {
+    fn display(self) => String = "defined in units"
+}
+
+pub fn distance() => Meter { return 12meter }
+"#;
+    let main = r#"
+use "measurements" as units
+
+struct Nested {
+    values: [[units.Meter]]
+}
+
+fn run() {
+    distance :: units.distance()
+    print(distance)
+    print("{distance}")
+    print("{distance#Unit(name)}")
+    print("{distance#Unit(bare)}")
+}
+"#;
+    let expected = "defined in units\ndefined in units\n12 Meter\n12\n";
+
+    if tir_support::have_rustc() {
+        let (code, stdout) = tir_support::build_and_run_multi(
+            "imported_unit_display",
+            "main.jet",
+            &[("measurements.jet", units), ("main.jet", main)],
+        );
+        assert_eq!(code, 0);
+        assert_eq!(stdout, expected);
+    }
+
+    let dir = common::unique_tmp("imported_unit_display_tiers");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("measurements.jet"), units).unwrap();
+    let entry = dir.join("main.jet");
+    std::fs::write(&entry, main).unwrap();
+    let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+    let program = jet::Codegen::TIR::lower_jit_program(&bundle)
+        .expect("imported unit display must lower through shared TIR");
+    let mut sink = jet::Comptime::DevSink::default();
+    jet::Codegen::TIR::run_program(
+        &program,
+        &bundle.project_root,
+        &mut sink,
+        std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
+        true,
+    )
+    .expect("imported unit display must run in the evaluator");
+    assert_eq!(sink.stdout, expected);
+
+    if jet_jit::cranelift_host_supported() {
+        use jet::JitBackend::JitBackend;
+        use jet::JitBackend::RunOutcome;
+
+        let mut backend = jet_jit::CraneliftBackend::new();
+        match backend.run(&bundle, false) {
+            RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, expected),
+            RunOutcome::Problems(diagnostics) => {
+                panic!("JIT rejected imported unit display: {diagnostics:?}")
+            }
+        }
+    }
+
+    let web_units = r#"
+pub #UnitFamily(Length, base: meter) { meter }
+
+impl Meter.Display {
+    fn display(self) => String = "defined in units"
+}
+"#;
+    let web_main = r#"
+#Target(Web)
+use "web_units" as units
+
+fn show(distance: units.Meter) {
+    print(distance)
+    print("{distance}")
+}
+
+fn run() {}
+"#;
+    std::fs::write(dir.join("web_units.jet"), web_units).unwrap();
+    let web_entry = dir.join("web.jet");
+    std::fs::write(&web_entry, web_main).unwrap();
+    let web = jet::compile_web(web_entry.to_str().unwrap())
+        .expect("imported unit display must compile for web")
+        .web
+        .expect("web compilation must produce artifacts");
+    assert!(
+        web.wasm_rust.contains("defined in units"),
+        "web output must retain the defining module's Display implementation"
+    );
+    let wasm_rust = dir.join("imported_unit_app_wasm.rs");
+    let wasm_bin = dir.join("imported_unit_app.wasm");
+    std::fs::write(&wasm_rust, &web.wasm_rust).unwrap();
+    let rustc = std::process::Command::new("rustc")
+        .args([
+            "--edition",
+            "2021",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--crate-type",
+            "cdylib",
+            "-O",
+        ])
+        .arg(&wasm_rust)
+        .arg("-o")
+        .arg(&wasm_bin)
+        .output()
+        .expect("run rustc for imported unit Display web output");
+    assert!(
+        rustc.status.success(),
+        "rustc rejected imported unit Display web output:\n{}",
+        String::from_utf8_lossy(&rustc.stderr)
+    );
+    assert!(wasm_bin.is_file(), "web build did not produce a Wasm artifact");
+}
+
+#[test]
 fn physical_dimension_mismatch_is_rejected_in_sema() {
     let src = r#"
 #UnitFamily(Length) { meter }

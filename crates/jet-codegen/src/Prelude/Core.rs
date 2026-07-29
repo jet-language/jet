@@ -1540,11 +1540,44 @@ fn jet_slice_vec<T: Clone>(xs: &[T], a: i64, b: i64, file: &str, line: u32) -> V
     }
     xs[a as usize..=b as usize].to_vec()
 }
-// D-DYNARRAY1: `View<T>` — `list.view(a..b)` is the zero-copy sibling of
-// `list[a..b]` (`jet_slice_vec` above): same inclusive bounds, same panic
-// wording, but a borrowed Rust slice instead of a fresh `Vec` — no element
-// data is copied. The returned `&[T]`'s lifetime is elided from `xs`'s; sema
-// (E2305) proves the window never outlives the list before this ever runs.
+fn jet_checked_range_bounds(
+    len: i64,
+    range: &JetRange,
+    action: &str,
+    file: &str,
+    line: u32,
+) -> std::ops::Range<usize> {
+    let Some((start, end)) =
+        jet_range_bounds(range.start, range.end, range.exclusive, len)
+    else {
+        jet_panic(
+            file,
+            line,
+            &format!(
+                "can't {} {} items from {} to {} ({})",
+                action,
+                len,
+                range.start,
+                range.end,
+                if range.exclusive { "exclusive" } else { "inclusive" }
+            ),
+        );
+    };
+    start as usize..end as usize
+}
+
+fn jet_slice_range<T: Clone>(
+    xs: &[T],
+    range: &JetRange,
+    file: &str,
+    line: u32,
+) -> Vec<T> {
+    xs[jet_checked_range_bounds(xs.len() as i64, range, "slice", file, line)].to_vec()
+}
+// D-DYNARRAY1 / D-SHAPE-PLACE1: range places produce zero-copy windows.
+// Their bounds share `jet_range_bounds` with owned slicing and every engine.
+// The returned lifetime is tied to `xs`; sema proves the window cannot outlive
+// the owner or survive a storage-changing mutation.
 fn jet_view_new<'a, T>(xs: &'a [T], a: i64, b: i64, file: &str, line: u32) -> &'a [T] {
     let len = xs.len() as i64;
     if a < 0 || b < 0 || a > b || b >= len {
@@ -1573,6 +1606,25 @@ fn jet_view_mut_new<'a, T>(
         );
     }
     &mut xs[a as usize..=b as usize]
+}
+
+fn jet_view_range_new<'a, T>(
+    xs: &'a [T],
+    range: &JetRange,
+    file: &str,
+    line: u32,
+) -> &'a [T] {
+    &xs[jet_checked_range_bounds(xs.len() as i64, range, "view", file, line)]
+}
+
+fn jet_view_mut_range_new<'a, T>(
+    xs: &'a mut [T],
+    range: &JetRange,
+    file: &str,
+    line: u32,
+) -> &'a mut [T] {
+    let bounds = jet_checked_range_bounds(xs.len() as i64, range, "view", file, line);
+    &mut xs[bounds]
 }
 
 fn jet_check_view_bounds(len: i64, a: i64, b: i64, file: &str, line: u32) {

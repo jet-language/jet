@@ -9849,7 +9849,7 @@ fn generated_internal_tagged_enum_round_trips_every_variant_shape() {
     let src = r#"
 use core.encoding.json as json
 
-#[Codable, Tag("type")]
+#[Codable, Discriminant("type")]
 enum Event {
     Idle
     Count(Int)

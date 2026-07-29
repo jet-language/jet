@@ -9,7 +9,7 @@ use crate::Sema::CheckerCoreLib::{
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::{
     edit_distance, option_used_where_plain_expected, result_used_where_plain_expected,
-    soft_public_use, type_fix_hint,
+    soft_public_use, type_fix_hint, undeclared_value_tag,
 };
 use crate::Syntax;
 use super::helpers::no_any_type;
@@ -190,6 +190,17 @@ impl<'a> Checker<'a> {
                     }
                     if self.registry.contains(n) {
                         return;
+                    }
+                    if let Some((module, leaf)) = n.split_once('.') {
+                        if let (Some(modules), Some(&index)) =
+                            (self.modules, self.imports.get(module))
+                        {
+                            if modules[index].registry.contains(leaf)
+                                && self.type_is_pub_in(index, leaf)
+                            {
+                                return;
+                            }
+                        }
                     }
                     // Check imported file-module registries for pub types.
                     if let Some(mods) = self.modules {
@@ -493,8 +504,9 @@ impl<'a> Checker<'a> {
             }
         }
 
-        fn tag_is_declared(&self, name: &str) -> bool {
-            self.trait_reg.local_tags.contains(name)
+        pub(crate) fn tag_is_declared(&self, name: &str) -> bool {
+            crate::Syntax::BUILTIN_TAGS.contains(&name)
+                || self.trait_reg.local_tags.contains(name)
                 || self.modules.is_some_and(|modules| {
                     self.imports.values().copied().any(|idx| {
                         modules[idx].trait_reg.local_tags.contains(name)
@@ -503,13 +515,14 @@ impl<'a> Checker<'a> {
                 })
         }
 
-        fn closest_declared_tag(&self, name: &str) -> Option<String> {
+        pub(crate) fn closest_declared_tag(&self, name: &str) -> Option<String> {
             let mut candidates = self
                 .trait_reg
                 .local_tags
                 .iter()
                 .cloned()
                 .collect::<Vec<_>>();
+            candidates.extend(crate::Syntax::BUILTIN_TAGS.iter().map(|tag| (*tag).to_string()));
             if let Some(modules) = self.modules {
                 for idx in self.imports.values().copied() {
                     candidates.extend(
@@ -646,20 +659,6 @@ impl<'a> Checker<'a> {
             ));
         }
     
-}
-
-fn undeclared_value_tag(marker: &str, suggestion: Option<&str>, span: Span) -> Diagnostic {
-    let fix = suggestion.map_or_else(
-        || format!("declare it first with `tag {marker}`, or check the spelling"),
-        |candidate| format!("did you mean `{candidate}`?"),
-    );
-    Diagnostic::error(
-        "E0733",
-        format!("there's no tag called `{marker}`"),
-        "a value tag in type position must name a declared `tag`".to_string(),
-        fix,
-        Some(span),
-    )
 }
 
 #[cfg(test)]

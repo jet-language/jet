@@ -82,7 +82,7 @@ pub struct FuncSig {
     /// D-CABI-CALLBACK1: body contains only allocation-free, panic-free scalar
     /// computation and has no generic parameters or runtime/global access.
     pub is_foreign_thread_safe: bool,
-    /// D-TAINT1: `#Sanitizer fn` — its return value is untainted by contract.
+    /// Compatibility bit for the retired sanitizer spelling.
     pub is_sanitizer: bool,
     /// D-MUSTUSE1 (c18iwxqx): `#MustUse fn` / method — return value cannot be
     /// silently ignored as a bare expression statement (E0419).

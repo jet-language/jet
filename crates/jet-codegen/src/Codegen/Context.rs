@@ -129,6 +129,9 @@ pub(crate) struct Cx {
     /// `rust_type` maps the list type and the list ops route to its inherent API.
     pub(crate) columnar: HashSet<String>,
     pub(crate) comparable: HashSet<String>,
+    pub(crate) auto_printable: HashSet<String>,
+    pub(crate) auto_debug: HashSet<String>,
+    pub(crate) auto_equatable: HashSet<String>,
     /// D-TAG1: types whose fields are all Eq+Hash-capable (comparable minus
     /// float fields) — gates `derive(Eq, Hash)` for `Bag<T>` keys.
     pub(crate) hashable: HashSet<String>,
@@ -216,6 +219,8 @@ pub(crate) struct Cx {
     pub(crate) current_type_params: std::cell::RefCell<HashSet<String>>,
     /// c139 M4: spawn lambda bodies collected during TIR lowering (JIT order).
     pub(crate) jit_spawn_lambdas: std::cell::RefCell<Vec<crate::Codegen::TIR::TJitSpawnLambda>>,
+    /// Global offset for spawn sites lowered from an imported module.
+    pub(crate) jit_spawn_site_base: usize,
     /// Concrete generic owner methods reached while lowering executable TIR.
     /// The key is `Owner<Args>::method`, keeping discovery deterministic.
     pub(crate) jit_method_calls:
@@ -619,6 +624,12 @@ pub(crate) use crate::Syntax::binary_text_handle_rust_type;
 pub(crate) use crate::Syntax::reflect_handle_rust_type;
 
 impl Cx {
+    fn imported_type_metadata_name(&self, name: &str) -> Option<String> {
+        let (qualifier, leaf) = name.split_once('.')?;
+        let module = self.import_mods.get(qualifier)?.strip_prefix("user_")?;
+        Some(format!("{module}.{leaf}"))
+    }
+
     pub(crate) fn quantity_dimension(&self, ty: &Type) -> Option<crate::AST::Dimension> {
         ty.quantity_parts()
             .map(|(_, dimension)| dimension)
@@ -626,7 +637,13 @@ impl Cx {
                 let Type::Named(name) = ty else {
                     return None;
                 };
-                self.unit_facts.get(name).map(|fact| fact.dimension)
+                self.unit_facts
+                    .get(name)
+                    .or_else(|| {
+                        self.imported_type_metadata_name(name)
+                            .and_then(|canonical| self.unit_facts.get(&canonical))
+                    })
+                    .map(|fact| fact.dimension)
             })
     }
 
@@ -634,7 +651,24 @@ impl Cx {
         let Type::Named(name) = ty else {
             return None;
         };
-        self.unit_labels.get(name)
+        self.unit_labels.get(name).or_else(|| {
+            self.imported_type_metadata_name(name)
+                .and_then(|canonical| self.unit_labels.get(&canonical))
+        })
+    }
+
+    pub(crate) fn has_display_type(&self, name: &str) -> bool {
+        self.display_types.contains(name)
+            || self
+                .imported_type_metadata_name(name)
+                .is_some_and(|canonical| self.display_types.contains(&canonical))
+    }
+
+    pub(crate) fn is_distinct_type_name(&self, name: &str) -> bool {
+        self.distinct_types.contains_key(name)
+            || self
+                .imported_type_metadata_name(name)
+                .is_some_and(|canonical| self.distinct_types.contains_key(&canonical))
     }
 
     pub(crate) fn quantity_unit_label(
@@ -1073,6 +1107,13 @@ impl Cx {
             {
                 "()".to_string()
             }
+            // D-TASKGROUP-PARAM1=A: helpers receive the lexical group's real
+            // internal collector. The surface remains second-class.
+            Type::Named(name)
+                if name == Syntax::TYPE_TASKGROUP && !self.type_names.contains(name) =>
+            {
+                format!("{}jet_std::JetTaskGroup", self.root_prefix)
+            }
             Type::Named(name) if name == "Error" => "String".to_string(),
             Type::Named(name) if name == "Claims" && !self.type_names.contains(name) => {
                 format!("{}JetAuthClaims", self.root_prefix)
@@ -1255,6 +1296,11 @@ impl Cx {
             }
             Type::Named(name) if name == "WebPage" && !self.type_names.contains(name) => {
                 format!("{}JetWebPage", self.root_prefix)
+            }
+            Type::Named(name)
+                if name == Syntax::TYPE_RANGE && !self.type_names.contains(name) =>
+            {
+                format!("{}JetRange", self.root_prefix)
             }
             Type::Named(name)
                 if name == Syntax::TYPE_EFFECT && !self.type_names.contains(name) =>
@@ -1931,6 +1977,74 @@ pub(crate) fn foreign_binding_method_key(owner: &str, method: &str) -> String {
     format!("__jet_foreign_method__{owner}__{method}")
 }
 
+/// Add local and imported unit-family facts under the names used by this module.
+pub(crate) fn register_bundle_unit_metadata(
+    cx: &mut Cx,
+    bundle: &ProgramBundle,
+    module_idx: usize,
+) {
+    let imported = bundle.modules[module_idx]
+        .imports
+        .iter()
+        .filter_map(|import| {
+            bundle
+                .import_targets
+                .get(&(module_idx, import.span))
+                .copied()
+                .map(|target| {
+                    let qualifier = bundle.modules[target].alias.clone();
+                    (target, Some(qualifier))
+                })
+        });
+    for (target, qualifier) in std::iter::once((module_idx, None)).chain(imported) {
+        let module = &bundle.modules[target];
+        for item in &module.items {
+            if let Item::UnitFamily(family) = item {
+                if qualifier.is_some() && !family.is_pub {
+                    continue;
+                }
+                let dimension = crate::AST::Dimension::for_family(&family.family);
+                for member in family.distinct_defs() {
+                    let name = qualifier.as_ref().map_or_else(
+                        || member.name.clone(),
+                        |qualifier| format!("{qualifier}.{}", member.name),
+                    );
+                    cx.type_names.insert(name.clone());
+                    cx.distinct_types
+                        .insert(name.clone(), (member.base.clone(), member.is_numeric));
+                    let kind = member
+                        .quantity
+                        .map(|(_, kind)| kind)
+                        .unwrap_or(crate::AST::QuantityKind::Linear);
+                    let Some(source) =
+                        unit_family_member_for_type(family, &member.name, kind)
+                    else {
+                        continue;
+                    };
+                    cx.unit_labels
+                        .insert(name.clone(), unit_label(family, source));
+                    if let Some(dimension) = dimension {
+                        cx.unit_facts.insert(name, unit_fact(family, source, dimension, kind));
+                    }
+                }
+            }
+        }
+        if let Some(qualifier) = &qualifier {
+            for item in &module.items {
+                let Item::Impl(implementation) = item else {
+                    continue;
+                };
+                let qualified = format!("{qualifier}.{}", implementation.type_name);
+                if implementation.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY)
+                    && cx.unit_labels.contains_key(&qualified)
+                {
+                    cx.display_types.insert(qualified);
+                }
+            }
+        }
+    }
+}
+
 /// Mirror the bundle-level import maps `emit_bundle` fills before lowering.
 /// `build_cx_items` alone leaves `core_imports` empty; without this, JIT
 /// lowering mis-gates `use core.tasks as tasks` spawn/channel calls.
@@ -1949,46 +2063,7 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     register_core_import_surfaces(cx);
     cx.used_core = bundle.used_core.clone();
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
-    // Keep imported nominal identities qualified: two modules may deliberately
-    // mint the same member leaf for different dimensions.
-    let imported = bundle.modules[module_idx]
-        .imports
-        .iter()
-        .filter_map(|import| {
-            bundle
-                .import_targets
-                .get(&(module_idx, import.span))
-                .copied()
-        });
-    for target in std::iter::once(module_idx).chain(imported) {
-        let module = &bundle.modules[target];
-        for item in &module.items {
-            if let Item::UnitFamily(family) = item {
-                let dimension = crate::AST::Dimension::for_family(&family.family);
-                for member in family.distinct_defs() {
-                    let name = if target == module_idx {
-                        member.name.clone()
-                    } else {
-                        format!("{}.{}", module.alias, member.name)
-                    };
-                    let kind = member
-                        .quantity
-                        .map(|(_, kind)| kind)
-                        .unwrap_or(crate::AST::QuantityKind::Linear);
-                    let Some(source) =
-                        unit_family_member_for_type(family, &member.name, kind)
-                    else {
-                        continue;
-                    };
-                    cx.unit_labels
-                        .insert(name.clone(), unit_label(family, source));
-                    if let Some(dimension) = dimension {
-                        cx.unit_facts.insert(name, unit_fact(family, source, dimension, kind));
-                    }
-                }
-            }
-        }
-    }
+    register_bundle_unit_metadata(cx, bundle, module_idx);
     register_imported_methods(cx, bundle, module_idx);
     let (uinline, ufile) = unqualified_import_maps(bundle, module_idx);
     cx.unqualified_inline = uinline;
@@ -2229,6 +2304,9 @@ pub(crate) fn build_cx_items(
         migrations: HashMap::new(),
         columnar: HashSet::new(),
         comparable: HashSet::new(),
+        auto_printable: HashSet::new(),
+        auto_debug: HashSet::new(),
+        auto_equatable: HashSet::new(),
         hashable: HashSet::new(),
         partial_ord: HashSet::new(),
         patchable: HashSet::new(),
@@ -2263,6 +2341,7 @@ pub(crate) fn build_cx_items(
         struct_type_param_order: HashMap::new(),
         current_type_params: std::cell::RefCell::new(HashSet::new()),
         jit_spawn_lambdas: std::cell::RefCell::new(Vec::new()),
+        jit_spawn_site_base: 0,
         jit_method_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_canonical_deopt: std::cell::RefCell::new(HashSet::new()),
@@ -2799,6 +2878,31 @@ pub(crate) fn build_cx_items(
                 if type_is_comparable_struct(s, &cx.type_names) {
                     cx.comparable.insert(s.name.clone());
                 }
+                if crate::Traits::struct_auto_derive_ok(s) {
+                    for (trait_name, selected) in [
+                        (Generics::PRINTABLE, &mut cx.auto_printable),
+                        (Generics::DEBUG, &mut cx.auto_debug),
+                        (Generics::EQUATABLE, &mut cx.auto_equatable),
+                    ] {
+                        if crate::Traits::auto_derive_requested(
+                            &s.type_markers,
+                            trait_name,
+                            s.auto_derive_default,
+                        ) && !items.iter().any(|item| match item {
+                            Item::Impl(i) => {
+                                i.type_name == s.name
+                                    && i.trait_name.as_deref() == Some(trait_name)
+                            }
+                            _ => false,
+                        }) && !s
+                            .trait_impls
+                            .iter()
+                            .any(|block| block.trait_name == trait_name)
+                        {
+                            selected.insert(s.name.clone());
+                        }
+                    }
+                }
                 for (t, _) in &s.derives {
                     if t == Generics::COMPARABLE {
                         cx.partial_ord.insert(s.name.clone());
@@ -2853,6 +2957,31 @@ pub(crate) fn build_cx_items(
                 }
                 if type_is_comparable_enum(e, &cx.type_names) {
                     cx.comparable.insert(e.name.clone());
+                }
+                if crate::Traits::enum_auto_derive_ok(e) {
+                    for (trait_name, selected) in [
+                        (Generics::PRINTABLE, &mut cx.auto_printable),
+                        (Generics::DEBUG, &mut cx.auto_debug),
+                        (Generics::EQUATABLE, &mut cx.auto_equatable),
+                    ] {
+                        if crate::Traits::auto_derive_requested(
+                            &e.type_markers,
+                            trait_name,
+                            e.auto_derive_default,
+                        ) && !items.iter().any(|item| match item {
+                            Item::Impl(i) => {
+                                i.type_name == e.name
+                                    && i.trait_name.as_deref() == Some(trait_name)
+                            }
+                            _ => false,
+                        }) && !e
+                            .trait_impls
+                            .iter()
+                            .any(|block| block.trait_name == trait_name)
+                        {
+                            selected.insert(e.name.clone());
+                        }
+                    }
                 }
                 if e.derives
                     .iter()
@@ -2966,8 +3095,19 @@ pub(crate) fn build_cx_items(
 
     collect_iter_index_hooks(&mut cx, items);
     register_core_event_enums(&mut cx);
+    let auto_derives = crate::Traits::TraitRegistry::auto_derives_for_items(items);
+    apply_auto_derives(&mut cx, &auto_derives);
 
     cx
+}
+
+pub(crate) fn apply_auto_derives(
+    cx: &mut Cx,
+    auto_derives: &crate::Traits::TraitRegistry,
+) {
+    cx.auto_printable = auto_derives.auto_printable.clone();
+    cx.auto_debug = auto_derives.auto_debug.clone();
+    cx.auto_equatable = auto_derives.auto_equatable.clone();
 }
 
 fn register_core_event_enums(cx: &mut Cx) {

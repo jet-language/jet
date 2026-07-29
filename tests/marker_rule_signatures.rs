@@ -35,9 +35,69 @@ fn parse_codes(source: &str) -> Vec<String> {
 }
 
 #[test]
+fn core_lang_marker_enums_accept_dot_literals_without_imports() {
+    let diagnostics = codes("#Inline(.Always)\nfn helper() => Int = 1\nfn run() {}");
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn qualified_core_lang_hierarchical_marker_enums_use_the_variant_root() {
+    let diagnostics = codes(
+        r#"
+use core.lang as lang
+
+#Target(lang.Target.Web)
+fn helper() {}
+
+fn run() {
+    #Caps(lang.Capability.Net) {}
+    #Grant(caps: lang.Capability.Net) {}
+}
+"#,
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn qualified_state_namespace_is_valid_and_not_a_value() {
+    let valid = codes(
+        "state Door { Closed Open }\nstruct Door {\n#State(Door.State.Closed) fn close(self) {}\n#Transition(Door.State.Closed, Door.State.Open) fn open(self) {}\n}\nfn run() {}",
+    );
+    assert!(!valid.iter().any(|code| code == "E0151"), "{valid:?}");
+
+    let value = codes(
+        "state Door { Closed Open }\nstruct Door {}\nfn run() { print(Door.State.Open) }",
+    );
+    assert!(value.iter().any(|code| code == "E0302"), "{value:?}");
+}
+
+#[test]
+fn signed_auto_derive_markers_parse_on_types() {
+    for source in [
+        "#!Printable\nstruct Quiet { value: Int }\nfn run() {}",
+        "#[!Debug, !Equatable, Printable]\nstruct Mixed { value: Int }\nfn run() {}",
+    ] {
+        let diagnostics = parse_codes(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}\n{source}");
+    }
+}
+
+#[test]
+fn negative_sign_is_reserved_for_auto_derive_traits() {
+    for source in [
+        "#!Pure\nfn run() {}",
+        "#[!Inline]\nfn run() {}",
+        "#!Comparable\nstruct Bad { value: Int }\nfn run() {}",
+    ] {
+        let diagnostics = parse_codes(source);
+        assert_eq!(diagnostics, vec!["E0931"], "{diagnostics:?}\n{source}");
+    }
+}
+
+#[test]
 fn field_and_variant_sites_reject_every_non_applicable_example() {
     for source in [
-        "#[Task, Static] struct Bad { value: Int }\nfn run() {}",
+        "#[Job, Static] struct Bad { value: Int }\nfn run() {}",
         "enum Bad { #Comparable Value }\nfn run() {}",
         "enum Bad { #Skip Value }\nfn run() {}",
     ] {
@@ -72,7 +132,7 @@ fn run() {}
         Some("Ready")
     );
 
-    let wrong = parse_codes("struct Bad { #Task fn work(self) {} }\nfn run() {}");
+    let wrong = parse_codes("struct Bad { #Job fn work(self) {} }\nfn run() {}");
     assert_eq!(wrong.iter().filter(|code| *code == "E0925").count(), 1);
 }
 
@@ -110,8 +170,8 @@ fn parser_binds_the_authoritative_declaration_site_matrix() {
             jet::Policy::RuleSite::Bench,
         ),
         (
-            "#Task on function",
-            "#Task fn work() {}\nfn run() {}",
+            "#Job on function",
+            "#Job fn work() {}\nfn run() {}",
             jet::Policy::RuleSite::Function,
         ),
     ];
@@ -230,7 +290,7 @@ fn run() {
 fn duration_rule_arguments_use_function_parameter_types() {
     let valid = codes(
         r#"
-#[Task, Every(schedule)]
+#[Job, Every(schedule)]
 fn tick(schedule: Duration) {}
 fn run() {}
 "#,
@@ -245,7 +305,7 @@ fn run() {}
 
     let wrong = codes(
         r#"
-#[Task, Every(schedule)]
+#[Job, Every(schedule)]
 fn tick(schedule: Int) {}
 fn run() {}
 "#,
@@ -392,7 +452,7 @@ fn static_type_and_field_strings_use_the_same_signature_gate() {
 comptime tag_name = "kind"
 comptime field_name = "identifier"
 comptime variant_name = "ready"
-#[Codable, Tag(tag_name)]
+#[Codable, Discriminant(tag_name)]
 enum Event { #Rename(variant_name) Ready }
 #Codable
 struct Row { #Rename(field_name) id: Int }
@@ -402,7 +462,7 @@ fn run() {}
     assert!(!valid.iter().any(|code| code == "E0930"), "{valid:?}");
 
     for source in [
-        "comptime value = 42\n#[Codable, Tag(value)] enum Event { Ready }\nfn run() {}",
+        "comptime value = 42\n#[Codable, Discriminant(value)] enum Event { Ready }\nfn run() {}",
         "comptime value = 42\n#Codable struct Row { #Rename(value) id: Int }\nfn run() {}",
         "comptime value = 42\n#Codable enum Event { #Rename(value) Ready }\nfn run() {}",
     ] {

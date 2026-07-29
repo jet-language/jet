@@ -213,6 +213,10 @@ fn walk_expr_nodes(e: &Expr, include_suppressed: bool, f: &mut impl FnMut(&Expr)
             walk_expr_nodes(inner, include_suppressed, f);
         }
         Expr::OptField { base, .. } => walk_expr_nodes(base, include_suppressed, f),
+        Expr::Range { start, end, .. } => {
+            walk_expr_nodes(start, include_suppressed, f);
+            walk_expr_nodes(end, include_suppressed, f);
+        }
         Expr::MapLit(entries, _) => {
             for (key, value) in entries {
                 walk_expr_nodes(key, include_suppressed, f);
@@ -224,11 +228,19 @@ fn walk_expr_nodes(e: &Expr, include_suppressed: bool, f: &mut impl FnMut(&Expr)
             walk_expr_nodes(index, include_suppressed, f);
         }
         Expr::Slice {
-            base, start, end, ..
+            base,
+            start,
+            end,
+            range,
+            ..
         } => {
             walk_expr_nodes(base, include_suppressed, f);
-            walk_expr_nodes(start, include_suppressed, f);
-            walk_expr_nodes(end, include_suppressed, f);
+            if let Some(range) = range {
+                walk_expr_nodes(range, include_suppressed, f);
+            } else {
+                walk_expr_nodes(start, include_suppressed, f);
+                walk_expr_nodes(end, include_suppressed, f);
+            }
         }
         Expr::Call(call) => {
             for arg in &call.args {

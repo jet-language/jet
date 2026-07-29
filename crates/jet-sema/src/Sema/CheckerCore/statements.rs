@@ -1778,6 +1778,18 @@ impl<'a> Checker<'a> {
                                 Some(Type::Named(n)) if n == "ProcessLines" => {
                                     self.declare_loop_var(var.clone(), *var_span, &Type::String);
                                 }
+                                Some(Type::Named(n)) if n == Syntax::TYPE_RANGE => {
+                                    if var2.is_some() {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0109",
+                                            "a Range loop has one value per step".to_string(),
+                                            "Range values yield whole numbers, not key-value pairs".to_string(),
+                                            "use one loop name".to_string(),
+                                            Some(collection.span()),
+                                        ));
+                                    }
+                                    self.declare_loop_var(var.clone(), *var_span, &Type::Int);
+                                }
                                 Some(Type::Named(n)) if n == "HTTPBodyChunks" => {
                                     self.declare_loop_var(
                                         var.clone(),
@@ -2779,10 +2791,15 @@ fn expr_indexes_root_with(expr: &Expr, root: &str, index_var: &str) -> bool {
         Expr::TupleLit(items, _, _) => items
             .iter()
             .any(|(_, e)| expr_indexes_root_with(e, root, index_var)),
-        Expr::Slice { base, start, end, .. } => {
+        Expr::Slice { base, start, end, range, .. } => {
             expr_indexes_root_with(base, root, index_var)
-                || expr_indexes_root_with(start, root, index_var)
-                || expr_indexes_root_with(end, root, index_var)
+                || range.as_deref().map_or_else(
+                    || {
+                        expr_indexes_root_with(start, root, index_var)
+                            || expr_indexes_root_with(end, root, index_var)
+                    },
+                    |range| expr_indexes_root_with(range, root, index_var),
+                )
         }
         Expr::OrFallback { value, .. } => expr_indexes_root_with(value, root, index_var),
         Expr::If {

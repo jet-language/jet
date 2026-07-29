@@ -152,6 +152,9 @@ pub(crate) fn is_text_error_type_name(name: &str) -> bool {
 }
 
 pub(crate) fn core_type_known(name: &str) -> bool {
+    if crate::Policy::rule_arg_declaration(name).is_some() {
+        return true;
+    }
     matches!(
         name,
         "Unit" | "Void" | "U8" | "Error" | "ProcessResult" | "ProcessSpec" | "ProcessChild" | "Stopwatch" | "Closed"
@@ -166,6 +169,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // controls. TerminalFact is a namespace of checked String keys, not a
         // fifth value type.
         | "TerminalPolicy" | "TerminalSize" | "TerminalMode" | "TerminalSession"
+        | "Range"
         | "IOContext" | "IOOperation"
         // D-TEXTWIDTH1=B: `TextWidth` (dot-ctor struct, `core_constructable_fields`)
         // + its two dot-literal enum fields + the `.Reject` policy error.
@@ -302,6 +306,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-BUILD*: selected-root build-program handles. No runtime values.
         | "BuildContext" | "BuildPlan" | "BuildAction" | "BuildTarget"
         | "BuildToolchain" | "BuildProbe" | "ProgramInfo" | "TypeInfo" | "SourceSpan"
+        | "MarkerInfo" | "MarkerArgInfo" | "StateInfo" | "TransitionInfo" | "FactInfo"
         | "PackageInfo" | "FunctionInfo" | "EffectInfo" | "MethodInfo" | "FieldInfo"
     ) || is_json_type_name(name)
         || is_json_error_type_name(name)
@@ -309,7 +314,33 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         || is_utf8_error_type_name(name)
 }
 
+/// D-RULEARG-TYPES1=A: enum variants generated from the marker registry.
+pub(crate) fn core_lang_variants(
+    enum_name: &str,
+) -> Option<std::collections::HashMap<String, (Span, VariantPayload)>> {
+    let declaration = crate::Policy::rule_arg_declaration(enum_name)?;
+    let zero = Span::new(0, 0);
+    Some(
+        declaration
+            .variants
+            .iter()
+            .map(|variant| {
+                (
+                    (*variant).to_string(),
+                    (zero, VariantPayload::Unit),
+                )
+            })
+            .collect(),
+    )
+}
+
 pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
+    if type_name == Syntax::TYPE_RANGE {
+        return match field {
+            "start" | "end" => Some(Type::Int),
+            _ => None,
+        };
+    }
     if type_name == "TLSPeerIdentity" {
         return match field {
             "verified_server_name" => Some(Type::String),
@@ -370,8 +401,53 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "name" | "module" | "identity" | "kind" => Some(Type::String),
             "fields" => Some(Type::List(Box::new(Type::Named("FieldInfo".to_string())))),
             "methods" => Some(Type::List(Box::new(Type::Named("MethodInfo".to_string())))),
-            "markers" | "implements" => Some(Type::List(Box::new(Type::String))),
+            "markers" => Some(Type::List(Box::new(Type::Named("MarkerInfo".to_string())))),
+            "marker_names" | "implements" => Some(Type::List(Box::new(Type::String))),
+            "states" => Some(Type::List(Box::new(Type::Named("StateInfo".to_string())))),
+            "transitions" => Some(Type::List(Box::new(Type::Named("TransitionInfo".to_string())))),
+            "facts" => Some(Type::List(Box::new(Type::Named("FactInfo".to_string())))),
             "span" => Some(Type::Named(Syntax::TYPE_SOURCE_SPAN.to_string())),
+            _ => None,
+        };
+    }
+    if type_name == "MarkerInfo" {
+        return match field {
+            "name" => Some(Type::String),
+            "args" => Some(Type::List(Box::new(Type::Named("MarkerArgInfo".to_string())))),
+            _ => None,
+        };
+    }
+    if type_name == "MarkerArgInfo" {
+        return match field {
+            "name" | "ty" => Some(Type::String),
+            "value" => Some(Type::Union(
+                std::iter::once(Type::String)
+                    .chain([Type::Int, Type::Bool])
+                    .chain(
+                        crate::Policy::RULE_ARG_DECLARATIONS
+                            .iter()
+                            .map(|declaration| Type::Named(declaration.name.to_string())),
+                    )
+                    .collect(),
+            )),
+            _ => None,
+        };
+    }
+    if type_name == "StateInfo" {
+        return match field {
+            "name" | "path" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == "TransitionInfo" {
+        return match field {
+            "operation" | "from" | "to" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == "FactInfo" {
+        return match field {
+            "kind" | "name" | "path" => Some(Type::String),
             _ => None,
         };
     }

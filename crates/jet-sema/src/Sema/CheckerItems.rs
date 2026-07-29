@@ -1045,6 +1045,9 @@ impl<'a> Checker<'a> {
         if let Some(v) = core_encoding_variants(enum_name) {
             return Some(v);
         }
+        if let Some(v) = core_lang_variants(enum_name) {
+            return Some(v);
+        }
         if let Some(v) = core_email_variants(enum_name) {
             return Some(v);
         }
@@ -1427,9 +1430,12 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
         }
+        let nominal_name = import_ns
+            .map(|alias| format!("{alias}.{type_name}"))
+            .unwrap_or_else(|| type_name.to_string());
         if !type_args.is_empty() {
             Type::Apply {
-                name: type_name.to_string(),
+                name: nominal_name,
                 args: type_args.to_vec(),
             }
         } else if self
@@ -1439,7 +1445,7 @@ impl<'a> Checker<'a> {
             .is_some_and(|p| !p.is_empty())
         {
             Type::Apply {
-                name: type_name.to_string(),
+                name: nominal_name,
                 args: self
                     .trait_reg
                     .struct_params
@@ -1450,7 +1456,7 @@ impl<'a> Checker<'a> {
                     .collect(),
             }
         } else {
-            Type::Named(type_name.to_string())
+            Type::Named(nominal_name)
         }
     }
 
@@ -2788,7 +2794,11 @@ impl<'a> Checker<'a> {
                         "convert one side, or compare fields that have the same type".to_string(),
                         Some(call.name_span),
                     ));
-                } else if !types_comparable(&lt, self.registry) {
+                } else if !crate::Sema::Diagnostics::is_equatable(
+                    &lt,
+                    self.registry,
+                    self.trait_reg,
+                ) {
                     if let Some(field) = incomparable_field(&lt, self.registry) {
                         self.diags.push(Diagnostic::error(
                             "E0312",

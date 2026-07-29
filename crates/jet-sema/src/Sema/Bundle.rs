@@ -92,6 +92,93 @@ fn dedupe_unknown_names(diagnostics: &mut Vec<Diagnostic>) {
     });
 }
 
+fn check_fact_tags_and_states(
+    bundle: &ProgramBundle,
+    states: &[ModuleState],
+    diags: &mut Vec<Diagnostic>,
+) -> jet_foundation::Facts::FactRegistry {
+    let mut facts = jet_foundation::Facts::FactRegistry::default();
+    for effect in jet_foundation::Facts::EFFECT_ROOTS {
+        facts.declare(
+            jet_foundation::Facts::FactKind::Effect,
+            (*effect).to_string(),
+            std::iter::empty(),
+        );
+    }
+    super::Taint::register_builtin_tag_facts(&mut facts);
+
+    let mut scrubbers = HashMap::new();
+    let mut returns = HashMap::new();
+    let mut return_types = HashMap::new();
+    let mut field_tags = HashMap::new();
+    let mut field_types = HashMap::new();
+    let mut known_sources = std::collections::BTreeSet::new();
+    for module in &bundle.modules {
+        super::Taint::collect_function_paths(
+            &module.alias,
+            &module.items,
+            &mut known_sources,
+        );
+    }
+    for module in &bundle.modules {
+        super::Taint::collect_return_tag_facts(
+            &module.items,
+            &mut returns,
+            &mut return_types,
+        );
+        super::Taint::collect_field_facts(
+            &module.items,
+            &mut field_tags,
+            &mut field_types,
+        );
+        super::Taint::collect_tag_facts(
+            &module.items,
+            &mut facts,
+            &mut scrubbers,
+            &known_sources,
+            diags,
+            true,
+        );
+    }
+    for module in &bundle.modules {
+        super::Taint::collect_tag_facts(
+            &module.items,
+            &mut facts,
+            &mut scrubbers,
+            &known_sources,
+            diags,
+            false,
+        );
+    }
+    for (index, module) in bundle.modules.iter().enumerate() {
+        for item in &module.items {
+            taint_check_item(
+                item,
+                &scrubbers,
+                &facts,
+                &returns,
+                &return_types,
+                &field_tags,
+                &field_types,
+                &states[index].core_imports,
+                diags,
+            );
+        }
+    }
+
+    let mut state_table = crate::Sema::StateTable::with_facts(facts);
+    for module in &bundle.modules {
+        state_table.add_items(&module.items);
+    }
+    if !state_table.is_empty() {
+        for module in &bundle.modules {
+            state_table.validate_declarations(&module.items, diags);
+            crate::Sema::check_items_state(&module.items, &state_table, diags);
+        }
+    }
+    state_table.into_facts()
+}
+
 #[derive(Default)]
 pub struct IncrementalSemaCache {
     environment: Vec<u8>,
@@ -401,11 +488,19 @@ fn expr_has_comptime_evaluation(expr: &Expr) -> bool {
             expr_has_comptime_evaluation(base) || expr_has_comptime_evaluation(index)
         }
         Expr::Slice {
-            base, start, end, ..
+            base, start, end, range, ..
         } => {
             expr_has_comptime_evaluation(base)
-                || expr_has_comptime_evaluation(start)
-                || expr_has_comptime_evaluation(end)
+                || range.as_deref().map_or_else(
+                    || {
+                        expr_has_comptime_evaluation(start)
+                            || expr_has_comptime_evaluation(end)
+                    },
+                    expr_has_comptime_evaluation,
+                )
+        }
+        Expr::Range { start, end, .. } => {
+            expr_has_comptime_evaluation(start) || expr_has_comptime_evaluation(end)
         }
         Expr::Call(call) => call.args.iter().any(argument),
         Expr::Binary(_, left, right, _) => {
@@ -1213,7 +1308,22 @@ fn check_bundle_opts_for_output_inner(
                             .iter()
                             .map(|(name, func)| (name.clone(), func))
                             .collect();
-                        let type_info = crate::Comptime::build_struct_type_info(s);
+                        let states = module
+                            .items
+                            .iter()
+                            .find_map(|item| match item {
+                                Item::StateDecl(state) if state.type_name == s.name => Some(
+                                    state
+                                        .states
+                                        .iter()
+                                        .map(|(name, _)| name.clone())
+                                        .collect::<Vec<_>>(),
+                                ),
+                                _ => None,
+                            })
+                            .unwrap_or_default();
+                        let type_info =
+                            crate::Comptime::build_struct_type_info_with_states(s, &states);
 
                         match crate::Comptime::evaluate_derive_body(
                             body,
@@ -1397,6 +1507,10 @@ fn check_bundle_opts_for_output_inner(
             &bundle.project_root,
             &st.trait_reg,
         ));
+    }
+    let bundle_auto_derives = TraitRegistry::bundle_auto_derives(bundle);
+    for (state, auto_derives) in states.iter_mut().zip(&bundle_auto_derives) {
+        state.trait_reg.merge_auto_derives(auto_derives);
     }
     bundle.comptime_inputs.extend(top_level_embed_inputs);
     diags.extend(super::BudgetSpecs::validate_bundle(bundle));
@@ -2150,34 +2264,10 @@ fn check_bundle_opts_for_output_inner(
     // mixed-axis conflicts and unmatched cross-gate calls.
     diags.extend(check_os_target(bundle));
 
-    // D-TAINT1: taint tracking across every module. `#Sanitizer fn`s are
-    // collected program-wide (a sanitizer in one module clears taint at a call in
-    // another); each module's bodies are checked against its own Core aliases so
-    // a sink call (DB/Exec/Net effect) resolves correctly. Erased in codegen (I3).
-    let mut sanitizers: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for module in &bundle.modules {
-        collect_sanitizers(&module.items, &mut sanitizers);
-    }
-    for (idx, module) in bundle.modules.iter().enumerate() {
-        let core_imports = &states[idx].core_imports;
-        for item in &module.items {
-            taint_check_item(item, &sanitizers, core_imports, &mut diags);
-        }
-    }
-
-    // D-STATE1 / D-STATE-DECL: typestate across the whole bundle. State-set
-    // declarations are collected program-wide, then declarations validated (E0151,
-    // L0151) and per-body forward dataflow checked (E0150). Erased in codegen (I3).
-    let mut state_tbl = crate::Sema::StateTable::default();
-    for module in &bundle.modules {
-        state_tbl.add_items(&module.items);
-    }
-    if !state_tbl.is_empty() {
-        for module in &bundle.modules {
-            state_tbl.validate_declarations(&module.items, &mut diags);
-            crate::Sema::check_items_state(&module.items, &state_tbl, &mut diags);
-        }
-    }
+    // D-FACTMODEL1=A: one erased fact model for tags, effects, and states.
+    // Keep the pass in its own frame; this bundle checker already carries the
+    // compiler's largest solved graphs.
+    let fact_registry = check_fact_tags_and_states(bundle, &states, &mut diags);
 
     let (mut used_core, usage_spans, ffi_callback_fns) = collect_used_core(bundle, &states);
     // D-CLIFLAG1: a `#[CLI]`-derived struct's generated `__jet_cli_spec_*`/
@@ -2243,6 +2333,7 @@ fn check_bundle_opts_for_output_inner(
             memory_projections,
             reference_anchors,
             web_app: web_app_graph,
+            fact_registry,
         },
     )
 }

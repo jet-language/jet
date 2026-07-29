@@ -24,7 +24,7 @@ that already exist; almost none need a new mechanism.
 | --- | --- | --- | --- | --- |
 | CLI tools | flags + `--help` + env config tool | friction | dead-end-magic | `#CLI` ships; `core.args` help does not exit (`Args.rs:3-12`); no shorts/env on `#CLI` (`CheckerCli.rs:60-87`) |
 | Scripting / automation | glob, subprocess, fail on error | friction | missing-default | `process.run` returns Ok on nonzero exit (`Process.rs:260-268`); scores repro shipped in 15 lines after 3 retries |
-| Packaging / build / devloop | new → deps → test → fmt → tasks | ships | keep | inline deps, toolchain pin, `#Task`/`#Every`, `jet fmt --check`, `jet dev` |
+| Packaging / build / devloop | new → deps → test → fmt → tasks | ships | keep | inline deps, toolchain pin, `#Job`/`#Every`, `jet fmt --check`, `jet dev` |
 | Web / HTTP services | two-route JSON API + static | friction | missing-default | routing ships (`http_routes.jet`); no `server.json` / `req.json<T>` / `static_files(root)`; `web.app()` only prints graph OK |
 | UI (browser / desktop) | button + reactive count | friction | missing-default | GTK counter real; every path hand-writes measure/layout/paint; flagship web click state lives in host HTML/JS |
 | Games | pong-like loop | blocked | dead-end-magic | `core.game` runs 3 headless frames (`Game.rs:246-247`); ECS query returns strings; raylib draws once, no loop example |

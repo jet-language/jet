@@ -2004,13 +2004,15 @@ fn bare_range_window_lowers_without_copy() {
     let src = r#"
 fn run() {
     xs :: [1, 2, 3]
-    window :: xs[0..1]
+    band :: 0..1
+    window :: xs[band]
     print(window[1])
 }
 "#;
     let out = jet::compile(src).expect("bare range window must compile");
     assert!(
-        out.rust.contains("let user_window = jet_view_new"),
+        out.rust
+            .contains("let user_window = jet_view_range_new"),
         "range acquisition must lower to a view: {}",
         out.rust
     );
@@ -2047,13 +2049,18 @@ fn write_range_window_edits_owner() {
     let src = r#"
 fn run() {
     xs := [1, 2, 3]
-    edit :: &xs[0..1]
+    band :: 0..1
+    edit :: &xs[band]
     edit[1] = 9
     print(xs[1])
 }
 "#;
     let out = jet::compile(src).expect("write range window must compile");
-    assert!(out.rust.contains("jet_view_mut_new"), "{}", out.rust);
+    assert!(
+        out.rust.contains("jet_view_mut_range_new"),
+        "{}",
+        out.rust
+    );
 }
 
 #[test]
@@ -2734,6 +2741,28 @@ fn run() {
 "#;
     let diags = jet::compile(src).expect_err("resizing a viewed owner must fail");
     assert!(diags.iter().any(|d| d.code == "E0212"));
+}
+
+#[test]
+fn named_range_view_blocks_owner_resize_and_replacement() {
+    for action in ["xs.push(4)", "xs = [4, 5, 6]"] {
+        let src = format!(
+            r#"
+fn run() {{
+    xs := [1, 2, 3]
+    band :: 0..<2
+    window :: xs[band]
+    {action}
+    print(window.len())
+}}
+"#
+        );
+        let diags = jet::compile(&src).expect_err("changing a viewed owner must fail");
+        assert!(
+            diags.iter().any(|d| d.code == "E0212"),
+            "expected E0212 for `{action}`, got {diags:?}"
+        );
+    }
 }
 
 /// D-MEM1 S9 / #649: replacing an owner invalidates every view, so assignment

@@ -697,6 +697,7 @@ mod tests {
             every: None,
             inline_foreign: None,
             is_sanitizer: false,
+            scrub_tag: None,
             declared_effects: None,
             effect_via: None,
             state_requires: None,

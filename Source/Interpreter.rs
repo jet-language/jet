@@ -152,7 +152,7 @@ pub fn run_checked(bundle: &ProgramBundle, try_anyway: bool) -> RunOutcome {
     }
 }
 
-/// D-SCHEDULE1 (ratified 2026-07-11, card #505): run one `#Task fn` by name,
+/// D-SCHEDULE1 (ratified 2026-07-11, card #505): run one `#Job fn` by name,
 /// the same way `run_checked` runs `fn run()` — the `jet dev` consumer
 /// (`Source/CmdDevTools.rs`'s due-task tick) calls this to invoke a scheduled
 /// task automatically. The caller has already filtered to `Func::is_task`
@@ -269,8 +269,8 @@ pub fn run_named_task(bundle: &ProgramBundle, name: &str, try_anyway: bool) -> R
     }
 }
 
-/// D-SCHEDULE1: the `#Task`/`#Every(…)` facts the dev loop's due-task tick
-/// needs — a task's name and its resolved schedule (`None` for a `#Task fn`
+/// D-SCHEDULE1: the `#Job`/`#Every(…)` facts the dev loop's due-task tick
+/// needs — a task's name and its resolved schedule (`None` for a `#Job fn`
 /// with no `#Every(…)`, i.e. manual-invocation-only). Scoped to the entry
 /// module's top-level items only (D-JPK-TASKRUN1: a task lives "beside `fn
 /// run()`" — the same file, not an imported one). Sema has already rejected

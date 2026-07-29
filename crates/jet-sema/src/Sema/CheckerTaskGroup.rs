@@ -13,14 +13,31 @@ pub(crate) struct PendingTaskSpawn {
 
 pub(crate) struct TaskGroupCtx {
     pub name: String,
+    pub origin: TaskGroupOrigin,
     pub pending: Vec<PendingTaskSpawn>,
     synth_counter: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TaskGroupOrigin {
+    Lexical,
+    Parameter,
 }
 
 impl TaskGroupCtx {
     pub(crate) fn new(name: String) -> Self {
         Self {
             name,
+            origin: TaskGroupOrigin::Lexical,
+            pending: Vec::new(),
+            synth_counter: 0,
+        }
+    }
+
+    pub(crate) fn parameter(name: String) -> Self {
+        Self {
+            name,
+            origin: TaskGroupOrigin::Parameter,
             pending: Vec::new(),
             synth_counter: 0,
         }
@@ -39,52 +56,71 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn active_taskgroup_name(&self) -> Option<&str> {
-        self.taskgroup_stack.last().map(|g| g.name.as_str())
+        self.taskgroup_stack
+            .iter()
+            .rev()
+            .find(|g| g.origin == TaskGroupOrigin::Lexical)
+            .map(|g| g.name.as_str())
     }
 
     pub(crate) fn taskgroup_receiver_ok(&mut self, receiver: &Expr, span: Span) -> bool {
-        let Some(active) = self.active_taskgroup_name() else {
+        let Expr::Ident(name, rspan) = receiver else {
             self.diags.push(Diagnostic::error(
                 "E1110",
-                "`.task => …` only works inside a `taskgroup` block".to_string(),
-                "structured task spawning is scoped — a taskgroup owns child tasks and joins them at scope exit"
+                "`.task => …` must be called on a taskgroup handle".to_string(),
+                "structured spawning goes through a lexical taskgroup or a `TaskGroup` parameter"
                     .to_string(),
-                "wrap the spawn in `taskgroup g { … }` and call `g.task => …`".to_string(),
+                "write `g.task => …` where `g` is a taskgroup name or parameter".to_string(),
                 Some(span),
             ));
             return false;
         };
-        match receiver {
-            Expr::Ident(name, rspan) if name == active => true,
-            Expr::Ident(name, rspan) => {
-                self.diags.push(Diagnostic::error(
-                    "E1110",
-                    format!(
-                        "`.task` must be called on the active taskgroup handle `{}`, not `{}`",
-                        active, name
-                    ),
-                    "each `taskgroup` block owns spawns on its bound handle only".to_string(),
-                    format!("write `{active}.task => …` inside `taskgroup {active} {{ … }}`"),
-                    Some(*rspan),
-                ));
-                false
-            }
-            _ => {
-                self.diags.push(Diagnostic::error(
-                    "E1110",
-                    "`.task => …` must be called on the taskgroup handle".to_string(),
-                    "structured spawning goes through the handle bound by `taskgroup g { … }`"
-                        .to_string(),
-                    "write `g.task => …` where `g` is the taskgroup name".to_string(),
-                    Some(span),
-                ));
-                false
-            }
+        if self.taskgroup_stack.iter().rev().any(|group| {
+            group.name == *name
+                && (group.origin == TaskGroupOrigin::Parameter
+                    || self.active_taskgroup_name() == Some(name.as_str()))
+        }) {
+            return true;
         }
+        if let Some(active) = self.active_taskgroup_name() {
+            self.diags.push(Diagnostic::error(
+                "E1110",
+                format!(
+                    "`.task` must be called on the active taskgroup handle `{}`, not `{}`",
+                    active, name
+                ),
+                "each lexical `taskgroup` block owns spawns on its bound handle; a helper can instead receive `TaskGroup` as a parameter".to_string(),
+                format!(
+                    "write `{active}.task => …`, or pass `{active}` to `fn helper(group: TaskGroup)`"
+                ),
+                Some(*rspan),
+            ));
+        } else {
+            self.diags.push(Diagnostic::error(
+                "E1110",
+                "`.task => …` needs a taskgroup handle".to_string(),
+                "structured spawning is scoped to a lexical taskgroup or a `TaskGroup` parameter"
+                    .to_string(),
+                "wrap the call in `taskgroup g { … }`, or add `group: TaskGroup` to this helper"
+                    .to_string(),
+                Some(*rspan),
+            ));
+        }
+        false
     }
 
-    pub(crate) fn register_taskgroup_spawn(&mut self, binding: Option<String>, span: Span) {
-        if let Some(ctx) = self.taskgroup_stack.last_mut() {
+    pub(crate) fn register_taskgroup_spawn(
+        &mut self,
+        receiver: &str,
+        binding: Option<String>,
+        span: Span,
+    ) {
+        if let Some(ctx) = self
+            .taskgroup_stack
+            .iter_mut()
+            .rev()
+            .find(|group| group.name == receiver)
+        {
             ctx.pending.push(PendingTaskSpawn {
                 binding,
                 span,
@@ -94,7 +130,7 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn mark_taskgroup_spawn_consumed(&mut self, name: &str) {
-        if let Some(ctx) = self.taskgroup_stack.last_mut() {
+        for ctx in self.taskgroup_stack.iter_mut().rev() {
             for p in ctx.pending.iter_mut().rev() {
                 if p.binding.as_deref() == Some(name) {
                     p.consumed = true;
@@ -202,8 +238,14 @@ impl<'a> Checker<'a> {
             return None;
         }
         *recv_type_out = Some(Syntax::TYPE_TASKGROUP.to_string());
+        let receiver_name = match receiver.as_ref() {
+            Expr::Ident(name, _) => name.clone(),
+            _ => unreachable!("taskgroup_receiver_ok accepted a non-identifier"),
+        };
         match method {
-            Syntax::TASKGROUP_SPAWN_METHOD => self.infer_taskgroup_spawn(args, span),
+            Syntax::TASKGROUP_SPAWN_METHOD => {
+                self.infer_taskgroup_spawn(&receiver_name, args, span)
+            }
             Syntax::TASKGROUP_ALL_METHOD => self.infer_taskgroup_all(args, span),
             Syntax::TASKGROUP_RACE_METHOD => self.infer_taskgroup_race(args, span),
             Syntax::TASKGROUP_ANY_METHOD => self.infer_taskgroup_any(args, span),
@@ -225,7 +267,12 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn infer_taskgroup_spawn(&mut self, args: &mut Vec<CallArg>, span: Span) -> Option<Type> {
+    fn infer_taskgroup_spawn(
+        &mut self,
+        receiver: &str,
+        args: &mut Vec<CallArg>,
+        span: Span,
+    ) -> Option<Type> {
         if args.len() != 1 {
             self.diags.push(Diagnostic::error(
                 "E0104",
@@ -295,7 +342,7 @@ impl<'a> Checker<'a> {
             );
         }
         let binding = self.current_binding_name.clone();
-        self.register_taskgroup_spawn(binding, span);
+        self.register_taskgroup_spawn(receiver, binding, span);
         Some(Type::Apply {
             name: "Task".to_string(),
             args: vec![t],

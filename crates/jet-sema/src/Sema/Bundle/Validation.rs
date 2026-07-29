@@ -108,34 +108,74 @@ mod effect_qualification_tests {
 /// bundle path, using `core_imports` to classify sink calls.
 pub(super) fn taint_check_item(
     item: &Item,
-    sanitizers: &std::collections::HashSet<String>,
+    scrubbers: &HashMap<String, String>,
+    facts: &jet_foundation::Facts::FactRegistry,
+    returns: &HashMap<String, crate::Sema::Taint::TagSet>,
+    return_types: &crate::Sema::Taint::ReturnTypes,
+    field_tags: &crate::Sema::Taint::FieldTags,
+    field_types: &crate::Sema::Taint::FieldTypes,
     core_imports: &HashMap<String, String>,
     diags: &mut Vec<Diagnostic>,
 ) {
     match item {
-        Item::Func(f) => diags.extend(check_func_taint(&f.body, sanitizers, core_imports)),
+        Item::Func(f) => {
+            diags.extend(check_func_taint(
+                f, None, scrubbers, facts, returns, return_types, field_tags, field_types,
+                core_imports,
+            ))
+        }
         Item::Impl(i) => {
             for m in &i.methods {
-                diags.extend(check_func_taint(&m.body, sanitizers, core_imports));
+                diags.extend(check_func_taint(
+                    m, Some(&i.type_name), scrubbers, facts, returns, return_types, field_tags,
+                    field_types, core_imports,
+                ));
             }
         }
         Item::Struct(s) => {
             for m in &s.methods {
-                diags.extend(check_func_taint(&m.body, sanitizers, core_imports));
+                diags.extend(check_func_taint(
+                    m, Some(&s.name), scrubbers, facts, returns, return_types, field_tags,
+                    field_types, core_imports,
+                ));
             }
             for block in &s.trait_impls {
                 for m in &block.methods {
-                    diags.extend(check_func_taint(&m.body, sanitizers, core_imports));
+                    diags.extend(check_func_taint(
+                        m, Some(&s.name), scrubbers, facts, returns, return_types, field_tags,
+                        field_types, core_imports,
+                    ));
                 }
             }
         }
         Item::Enum(e) => {
             for m in &e.methods {
-                diags.extend(check_func_taint(&m.body, sanitizers, core_imports));
+                diags.extend(check_func_taint(
+                    m, Some(&e.name), scrubbers, facts, returns, return_types, field_tags,
+                    field_types, core_imports,
+                ));
             }
         }
-        Item::Test(t) => diags.extend(check_func_taint(&t.body, sanitizers, core_imports)),
-        Item::ErrorConv(ec) => diags.extend(check_func_taint(&ec.body, sanitizers, core_imports)),
+        Item::Test(t) => diags.extend(crate::Sema::Taint::check_body_tags(
+            &t.body,
+            scrubbers,
+            facts,
+            returns,
+            return_types,
+            field_tags,
+            field_types,
+            core_imports,
+        )),
+        Item::ErrorConv(ec) => diags.extend(crate::Sema::Taint::check_body_tags(
+            &ec.body,
+            scrubbers,
+            facts,
+            returns,
+            return_types,
+            field_tags,
+            field_types,
+            core_imports,
+        )),
         _ => {}
     }
 }
@@ -860,9 +900,17 @@ pub(crate) fn collect_core_expr(
             }
         }
         Expr::Slice {
-            base, start, end, ..
+            base, start, end, range, ..
         } => {
             collect_core_expr(base, imports, used, spans, ffi_cb);
+            if let Some(range) = range {
+                collect_core_expr(range, imports, used, spans, ffi_cb);
+            } else {
+                collect_core_expr(start, imports, used, spans, ffi_cb);
+                collect_core_expr(end, imports, used, spans, ffi_cb);
+            }
+        }
+        Expr::Range { start, end, .. } => {
             collect_core_expr(start, imports, used, spans, ffi_cb);
             collect_core_expr(end, imports, used, spans, ffi_cb);
         }
@@ -1592,6 +1640,7 @@ pub(crate) fn check_module_bodies(
                     is_inline_always: false,
                     inline_span: None,
                     is_sanitizer: false,
+                    scrub_tag: None,
                     declared_effects: None,
                     effect_via: None,
                     state_requires: None,
@@ -1664,6 +1713,7 @@ pub(crate) fn check_module_bodies(
                     is_inline_always: false,
                     inline_span: None,
                     is_sanitizer: false,
+                    scrub_tag: None,
                     declared_effects: None,
                     effect_via: None,
                     state_requires: None,
@@ -1791,6 +1841,7 @@ pub(crate) fn check_module_bodies(
                     is_inline_always: false,
                     inline_span: None,
                     is_sanitizer: false,
+                    scrub_tag: None,
                     declared_effects: None,
                     effect_via: None,
                     state_requires: None,

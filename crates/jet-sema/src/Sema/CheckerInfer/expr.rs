@@ -706,7 +706,9 @@ impl<'a> Checker<'a> {
                             }
                             match fmt {
                                 crate::AST::StrFormat::Display => {
-                                    if !is_displayable(&t, self.registry, self.trait_reg) {
+                                    if !is_displayable(&t, self.registry, self.trait_reg)
+                                        && !self.is_unit_type(&t)
+                                    {
                                         if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
                                             self.diags.push(Diagnostic::error(
                                                 "E0915",
@@ -826,12 +828,7 @@ impl<'a> Checker<'a> {
                                     }
                                 }
                                 crate::AST::StrFormat::Unit(_) => {
-                                    let is_unit = matches!(
-                                        &t,
-                                        Type::Named(name)
-                                            if self.registry.is_unit_type(name)
-                                    ) || t.quantity_parts().is_some();
-                                    if !is_unit {
+                                    if !self.is_unit_type(&t) {
                                         self.diags.push(Diagnostic::error(
                                             "E0112",
                                             format!(
@@ -1046,13 +1043,70 @@ impl<'a> Checker<'a> {
                 index,
                 span,
                 kind,
-            } => self.infer_index(base, index, span, kind),
+            } => {
+                let result = self.infer_index(base, index, span, kind);
+                if matches!(kind, IndexKind::Range) {
+                    let span = *span;
+                    let base = std::mem::replace(base, Box::new(Expr::Absent(span)));
+                    let range = std::mem::replace(index, Box::new(Expr::Absent(span)));
+                    let zero = || Box::new(Expr::Int(0, span, None, None));
+                    *e = Expr::Slice {
+                        base,
+                        start: zero(),
+                        end: zero(),
+                        range: Some(range),
+                        span,
+                    };
+                }
+                result
+            }
             Expr::Slice {
                 base,
                 start,
                 end,
+                range,
                 span,
-            } => self.infer_slice(base, start, end, *span),
+            } => {
+                if let Some(range) = range {
+                    let base_ty = {
+                        self.borrow_ctx = true;
+                        self.infer(base)?
+                    };
+                    let range_ty = self.infer(range)?;
+                    if range_ty != Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
+                        self.diags.push(Diagnostic::error(
+                            "E0505",
+                            format!("slice bound must be Range, not {}", range_ty.show()),
+                            "a stored slice bound carries its start, end, and end behavior in one Range value".to_string(),
+                            "use `a..b`, `a..<b`, or a Range value".to_string(),
+                            Some(range.span()),
+                        ));
+                        return None;
+                    }
+                    match base_ty {
+                        Type::List(inner) => Some(Type::List(inner)),
+                        Type::String => Some(Type::String),
+                        other => {
+                            self.diags.push(Diagnostic::error(
+                                "E0505",
+                                format!("only lists and strings can be sliced, not {}", other.show()),
+                                "a Range projects a window from indexed storage".to_string(),
+                                "use `xs[range]` on a list or `s.slice(range)` on text".to_string(),
+                                Some(*span),
+                            ));
+                            None
+                        }
+                    }
+                } else {
+                    self.infer_slice(base, start, end, *span)
+                }
+            }
+            Expr::Range {
+                start,
+                end,
+                span,
+                ..
+            } => self.infer_range(start, end, *span),
             Expr::Call(call) => {
                 let span = call.name_span;
                 // D-UNINIT1: a `mut` arg is the fill site, not a read.
@@ -1665,7 +1719,17 @@ impl<'a> Checker<'a> {
             // Its type is exactly the inner's type; taint propagation + the E0721
             // sink check run in the dedicated taint pass (Sema/Taint.rs), erased
             // in codegen (I3).
-            Expr::Tainted(inner, _, _span) => self.infer(inner),
+            Expr::Tainted(inner, tag, span) => {
+                let tag = tag.as_deref().unwrap_or("Input");
+                if !self.tag_is_declared(tag) {
+                    self.diags.push(crate::Sema::Diagnostics::undeclared_value_tag(
+                        tag,
+                        self.closest_declared_tag(tag).as_deref(),
+                        *span,
+                    ));
+                }
+                self.infer(inner)
+            }
             Expr::Present(inner, _span) => {
                 let t = self.infer(inner)?;
                 Some(Type::Option(Box::new(t)))
@@ -2224,7 +2288,9 @@ impl<'a> Checker<'a> {
                 self.borrow_ctx = true;
                 for item in items.iter_mut() {
                     if let Some(t) = self.infer(item) {
-                        if !is_printable(&t, self.registry) {
+                        if !is_printable(&t, self.registry, self.trait_reg)
+                            && !self.is_unit_type(&t)
+                        {
                             if crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&t) {
                                 self.diags.push(Diagnostic::error(
                                     "E0112",
@@ -2453,6 +2519,10 @@ impl<'a> Checker<'a> {
         match &base_ty {
             Type::List(inner) => {
                 *kind = IndexKind::List;
+                if idx_ty == Type::Named(crate::Syntax::TYPE_RANGE.to_string()) {
+                    *kind = IndexKind::Range;
+                    return Some(Type::List(inner.clone()));
+                }
                 if idx_ty != Type::Int {
                     self.diags.push(Diagnostic::error(
                         "E0505",
@@ -2730,13 +2800,35 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0505",
                     format!("only lists and strings can be sliced, not {}", other.show()),
-                    "slicing copies a range (S40)".to_string(),
-                    "use `xs[a..b]` on a list or `s.slice(a..b)` on text".to_string(),
+                    "a Range can project a window only from indexed storage".to_string(),
+                    "use `xs[a..b]` on a list or a text range operation on String".to_string(),
                     Some(span),
                 ));
                 None
             }
         }
+    }
+
+    fn infer_range(
+        &mut self,
+        start: &mut Box<Expr>,
+        end: &mut Box<Expr>,
+        _span: Span,
+    ) -> Option<Type> {
+        let mut valid = true;
+        for bound in [start.as_mut(), end.as_mut()] {
+            if self.infer(bound)? != Type::Int {
+                valid = false;
+                self.diags.push(Diagnostic::error(
+                    "E0505",
+                    "range bounds must be Int".to_string(),
+                    "a Range stores whole-number start and end bounds".to_string(),
+                    "use Int values on both sides of the range operator".to_string(),
+                    Some(bound.span()),
+                ));
+            }
+        }
+        valid.then(|| Type::Named(crate::Syntax::TYPE_RANGE.to_string()))
     }
 
     pub(crate) fn infer_field(
@@ -2751,6 +2843,14 @@ impl<'a> Checker<'a> {
         }
         if let Expr::Field(base, leaf, _) = &**inner {
             if let Expr::Ident(alias, _) = &**base {
+                if self.core_imports.get(alias).map(String::as_str) == Some("core.lang")
+                    && crate::Policy::rule_arg_declaration(leaf).is_some()
+                {
+                    let enum_name = leaf.clone();
+                    **inner = Expr::Ident(enum_name.clone(), span);
+                    let mut empty = Vec::new();
+                    return Some(self.check_enum_lit(&enum_name, member, &mut empty, span));
+                }
                 if self.core_imports.get(alias).map(String::as_str) == Some("core.encoding") {
                     let enum_name = match leaf.as_str() {
                         "DataEvent" => Some("DataEvent"),
@@ -2762,6 +2862,26 @@ impl<'a> Checker<'a> {
                         **inner = Expr::Ident(enum_name.to_string(), span);
                         let mut empty = Vec::new();
                         return Some(self.check_enum_lit(enum_name, member, &mut empty, span));
+                    }
+                }
+                if leaf == "State" {
+                    let is_declared_state = self
+                        .struct_owner_module(alias, None)
+                        .and_then(|owner| self.modules.and_then(|modules| modules.get(owner)))
+                        .and_then(|module| module.declared_states.get(alias))
+                        .is_some_and(|states| states.iter().any(|state| state == member));
+                    if is_declared_state {
+                        self.diags.push(Diagnostic::error(
+                            "E0302",
+                            format!("`{alias}.State.{member}` is not a runtime value"),
+                            "the reserved `.State` plane contains compile-time facts"
+                                .to_string(),
+                            format!(
+                                "use it in `#State({alias}.State.{member})`, `#Transition`, or type reflection"
+                            ),
+                            Some(span),
+                        ));
+                        return None;
                     }
                 }
             }
@@ -2825,12 +2945,8 @@ impl<'a> Checker<'a> {
                 let mut empty = Vec::new();
                 return Some(self.check_enum_lit(type_name, member, &mut empty, span));
             }
-            if let Some(owner_mod) = self.struct_owner_module(type_name, None) {
-                let is_declared_state = self
-                    .modules
-                    .and_then(|modules| modules.get(owner_mod))
-                    .and_then(|module| module.declared_states.get(type_name))
-                    .is_some_and(|states| states.iter().any(|state| state == member));
+            if let Some(_owner_mod) = self.struct_owner_module(type_name, None) {
+                let is_declared_state = false;
                 let (what, why, fix) = if is_declared_state {
                     (
                         format!("`{type_name}.{member}` is not a value"),

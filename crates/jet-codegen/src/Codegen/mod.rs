@@ -50,12 +50,14 @@ pub use Web::{
 const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/UnicodeString.rs"),
     include_str!("../Prelude/Core/Values.rs"),
+    include_str!("../Prelude/Core/RangeBounds.rs"),
     include_str!("../Prelude/Core/ExpiringSecret.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/Core/Collections.rs"),
     include_str!("../Prelude/Core/RuntimeControl.rs"),
     include_str!("../Prelude/Observe.rs"),
     include_str!("../../../jet-foundation/src/ExactUnitConversion.rs"),
+    include_str!("../../../jet-foundation/src/StructuralDebug.rs"),
 ];
 
 fn push_prelude(out: &mut String) {
@@ -333,6 +335,7 @@ const CORELIB_PRELUDE_PARTS: &[&str] = &[
     include_str!("../../../jet-foundation/src/RegexSyntax.rs"),
     "\n}\n",
     include_str!("../Prelude/CoreLib/JetStd/Open.rs"),
+    include_str!("../Prelude/TaskGroup.rs"),
     include_str!("../Prelude/CoreLib/JetStd/UrlMime.rs"),
     include_str!("../Prelude/CoreLib/JetStd/JSONCodec.rs"),
     include_str!("../Prelude/CoreLib/JetStd/CommonTypes.rs"),
@@ -758,6 +761,9 @@ pub(crate) fn user_type_rust(name: &str) -> String {
 pub(crate) fn emit_synthetic_display_trait(out: &mut String) {
     out.push_str("pub trait user_Display {\n");
     out.push_str("    fn display(&self) -> String;\n");
+    out.push_str("}\n\n");
+    out.push_str("pub trait user_Debug {\n");
+    out.push_str("    fn debug(&self) -> String;\n");
     out.push_str("}\n\n");
 }
 
@@ -1343,6 +1349,8 @@ mod tests {
         let unicode =
             std::fs::read_to_string(root.join("src/Prelude/Core/UnicodeString.rs")).unwrap();
         let values = std::fs::read_to_string(root.join("src/Prelude/Core/Values.rs")).unwrap();
+        let range_bounds =
+            std::fs::read_to_string(root.join("src/Prelude/Core/RangeBounds.rs")).unwrap();
         let expiring_secret =
             std::fs::read_to_string(root.join("src/Prelude/Core/ExpiringSecret.rs")).unwrap();
         let core = std::fs::read_to_string(root.join("src/Prelude/Core.rs")).unwrap();
@@ -1354,9 +1362,12 @@ mod tests {
         let exact_units =
             std::fs::read_to_string(root.join("../jet-foundation/src/ExactUnitConversion.rs"))
                 .unwrap();
+        let structural_debug =
+            std::fs::read_to_string(root.join("../jet-foundation/src/StructuralDebug.rs")).unwrap();
         for (relative, source) in [
             ("src/Prelude/Core/UnicodeString.rs", unicode.as_str()),
             ("src/Prelude/Core/Values.rs", values.as_str()),
+            ("src/Prelude/Core/RangeBounds.rs", range_bounds.as_str()),
             (
                 "src/Prelude/Core/ExpiringSecret.rs",
                 expiring_secret.as_str(),
@@ -1371,6 +1382,10 @@ mod tests {
             (
                 "../jet-foundation/src/ExactUnitConversion.rs",
                 exact_units.as_str(),
+            ),
+            (
+                "../jet-foundation/src/StructuralDebug.rs",
+                structural_debug.as_str(),
             ),
         ] {
             assert!(
@@ -1391,6 +1406,9 @@ mod tests {
         let values_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Values.rs\")")
             .unwrap();
+        let range_bounds_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/RangeBounds.rs\")")
+            .unwrap();
         let expiring_secret_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/ExpiringSecret.rs\")")
             .unwrap();
@@ -1409,14 +1427,19 @@ mod tests {
         let exact_units_pos = production_codegen
             .find("include_str!(\"../../../jet-foundation/src/ExactUnitConversion.rs\")")
             .unwrap();
+        let structural_debug_pos = production_codegen
+            .find("include_str!(\"../../../jet-foundation/src/StructuralDebug.rs\")")
+            .unwrap();
         assert!(
             unicode_pos < values_pos
-                && values_pos < expiring_secret_pos
+                && values_pos < range_bounds_pos
+                && range_bounds_pos < expiring_secret_pos
                 && expiring_secret_pos < core_pos
                 && core_pos < collections_pos
                 && collections_pos < control_pos
                 && control_pos < observe_pos
-                && observe_pos < exact_units_pos,
+                && observe_pos < exact_units_pos
+                && exact_units_pos < structural_debug_pos,
             "prelude ownership order is generated-byte order"
         );
         assert!(production_codegen.contains("for part in PRELUDE_PARTS"));
@@ -1426,12 +1449,14 @@ mod tests {
             [
                 unicode.as_str(),
                 values.as_str(),
+                range_bounds.as_str(),
                 expiring_secret.as_str(),
                 core.as_str(),
                 collections.as_str(),
                 runtime_control.as_str(),
                 observe.as_str(),
                 exact_units.as_str(),
+                structural_debug.as_str(),
             ],
             "PRELUDE_PARTS must list every owned module exactly once in generated-byte order"
         );
@@ -1441,22 +1466,24 @@ mod tests {
         let expected = [
             unicode.as_str(),
             values.as_str(),
+            range_bounds.as_str(),
             expiring_secret.as_str(),
             core.as_str(),
             collections.as_str(),
             runtime_control.as_str(),
             observe.as_str(),
             exact_units.as_str(),
+            structural_debug.as_str(),
         ]
         .concat();
         assert_eq!(
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 213_351, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 227_757, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "8372b9ec3b7b16433127995a019da916ade4e24cda94ec2fdcbc1efbea358a8e",
+            "69343721d4715c9dca3a4d27b93dee8bd4ef73640c7500bbe3d3fabfc71150b2",
             "split changed historical prelude bytes, order, or boundary newline"
         );
     }
@@ -2054,6 +2081,7 @@ pub fn emit_bundle_dbg(
     // package edition. Keep codegen on the same edition sema checked.
     jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
     let entry = &bundle.modules[bundle.entry];
+    let bundle_auto_derives = crate::Traits::TraitRegistry::bundle_auto_derives(bundle);
     let mut out = String::new();
     out.push_str(&format!(
         "// Generated by {} — do not edit. Edit the .{} source instead.\n",
@@ -2106,6 +2134,7 @@ pub fn emit_bundle_dbg(
             link,
             &extern_funcs,
         );
+        apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         // D-DBG3 step 2: line markers stay scoped to the entry file only (v1, same
         // restriction as the step-1 interpreter debugger) — a bare `// jet:line N`
         // can't disambiguate which file N belongs to across modules.
@@ -2120,6 +2149,7 @@ pub fn emit_bundle_dbg(
         register_core_import_surfaces(&mut cx);
         cx.used_core = bundle.used_core.clone();
         cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
+        register_bundle_unit_metadata(&mut cx, bundle, i);
         cx.root_prefix = "super::".to_string();
         cx.active_os = active_os;
         let (uinline, ufile) = unqualified_import_maps(bundle, i);
@@ -2136,6 +2166,7 @@ pub fn emit_bundle_dbg(
         link,
         &extern_funcs,
     );
+    apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
     cx.debug_linemap = debug_linemap;
     cx.active_os = active_os;
     cx.import_mods = import_mods;
@@ -2149,6 +2180,38 @@ pub fn emit_bundle_dbg(
     register_core_import_surfaces(&mut cx);
     cx.used_core = bundle.used_core.clone();
     cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
+    register_bundle_unit_metadata(&mut cx, bundle, bundle.entry);
+    for import in &entry.imports {
+        let Some(&target) = bundle
+            .import_targets
+            .get(&(bundle.entry, import.span))
+        else {
+            continue;
+        };
+        let imported = &bundle.modules[target];
+        let has_unit_display = imported.items.iter().any(|item| {
+            let Item::Impl(implementation) = item else {
+                return false;
+            };
+            implementation.trait_name.as_deref() == Some(Syntax::TRAIT_DISPLAY)
+                && imported.items.iter().any(|item| {
+                    matches!(
+                        item,
+                        Item::UnitFamily(family)
+                            if family.distinct_defs().iter().any(|definition| {
+                                definition.name == implementation.type_name
+                            })
+                    )
+                })
+        });
+        if !has_unit_display {
+            continue;
+        }
+        out.push_str(&format!(
+            "use user_{}::user_Display as _;\n",
+            imported.alias
+        ));
+    }
     let (uinline, ufile) = unqualified_import_maps(bundle, bundle.entry);
     cx.unqualified_inline = uinline;
     cx.unqualified_file = ufile;
@@ -2180,6 +2243,7 @@ pub fn emit_bundle_tests_cov(
     coverage: bool,
 ) -> String {
     let entry = &bundle.modules[bundle.entry];
+    let bundle_auto_derives = crate::Traits::TraitRegistry::bundle_auto_derives(bundle);
     let tests: Vec<&TestDef> = entry
         .items
         .iter()
@@ -2250,6 +2314,7 @@ pub fn emit_bundle_tests_cov(
             link,
             &extern_funcs,
         );
+        apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         cx.test_mode = true;
         cx.coverage = coverage;
         cx.import_mods = import_mod_map(bundle, i);
@@ -2278,6 +2343,7 @@ pub fn emit_bundle_tests_cov(
         link,
         &extern_funcs,
     );
+    apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
     cx.test_mode = true;
     cx.coverage = coverage;
     cx.import_mods = import_mods;
@@ -2385,6 +2451,7 @@ pub fn emit_bundle_fuzz(
     test_name: Option<&str>,
 ) -> Result<String, String> {
     let entry = &bundle.modules[bundle.entry];
+    let bundle_auto_derives = crate::Traits::TraitRegistry::bundle_auto_derives(bundle);
     let tests: Vec<&TestDef> = entry
         .items
         .iter()
@@ -2449,6 +2516,7 @@ pub fn emit_bundle_fuzz(
             link,
             &extern_funcs,
         );
+        apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         cx.test_mode = true;
         cx.import_mods = import_mod_map(bundle, i);
         cx.foreign_types = foreign_type_map(bundle, i);
@@ -2476,6 +2544,7 @@ pub fn emit_bundle_fuzz(
         link,
         &extern_funcs,
     );
+    apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
     cx.test_mode = true;
     cx.import_mods = import_mods;
     cx.foreign_types = foreign_type_map(bundle, bundle.entry);
@@ -2634,6 +2703,7 @@ fn emit_fuzz_main(cx: &Cx, test: &TestDef, idx: usize, file_label: &str, out: &m
 /// valid; the timing wrapper ignores that result.
 pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> String {
     let entry = &bundle.modules[bundle.entry];
+    let bundle_auto_derives = crate::Traits::TraitRegistry::bundle_auto_derives(bundle);
     let benches: Vec<&BenchDef> = entry
         .items
         .iter()
@@ -2701,6 +2771,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
             link,
             &extern_funcs,
         );
+        apply_auto_derives(&mut cx, &bundle_auto_derives[i]);
         cx.test_mode = true;
         cx.coverage = coverage;
         cx.import_mods = import_mod_map(bundle, i);
@@ -2729,6 +2800,7 @@ pub fn emit_bundle_benches(bundle: &ProgramBundle, link: Option<&FfiLink>) -> St
         link,
         &extern_funcs,
     );
+    apply_auto_derives(&mut cx, &bundle_auto_derives[bundle.entry]);
     cx.test_mode = true;
     cx.coverage = coverage;
     cx.import_mods = import_mods;

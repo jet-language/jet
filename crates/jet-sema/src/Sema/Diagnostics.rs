@@ -6,6 +6,28 @@ pub(crate) use crate::Syntax::edit_distance;
 use crate::AST::{BinOp, ElseBranch, Expr, IfStmt, Pattern, Stmt, Type, VariantPayload};
 use std::collections::{HashMap, HashSet};
 
+pub(crate) fn undeclared_value_tag(
+    marker: &str,
+    suggestion: Option<&str>,
+    span: Span,
+) -> Diagnostic {
+    let fix = suggestion.map_or_else(
+        || {
+            format!(
+                "declare it first with `tag {marker} {{ deny: [Effect] }}`, or check the spelling"
+            )
+        },
+        |candidate| format!("did you mean `{candidate}`?"),
+    );
+    Diagnostic::error(
+        "E0733",
+        format!("there's no tag called `{marker}`"),
+        "a value tag must name a declared `tag`".to_string(),
+        fix,
+        Some(span),
+    )
+}
+
 pub(crate) fn compound_why(op: BinOp) -> String {
     match op {
         BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {
@@ -787,30 +809,46 @@ pub(crate) fn one_pass_materializer(ty: &Type) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn is_printable(ty: &Type, registry: &TypeRegistry) -> bool {
+pub(crate) fn is_printable(
+    ty: &Type,
+    registry: &TypeRegistry,
+    trait_reg: &crate::Traits::TraitRegistry,
+) -> bool {
     if is_secret_bearing_crypto_type(ty) || is_one_pass_source(ty) {
         return false;
     }
     match ty {
         Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
-        Type::Option(inner) => is_printable(inner, registry),
-        Type::Result { ok, err } => is_printable(ok, registry) && is_printable(err, registry),
-        Type::List(inner) => is_printable(inner, registry),
-        Type::Map { value, .. } => is_printable(value, registry),
-        Type::Named(n) => registry.contains(n) || core_type_known(n),
+        Type::Option(inner) => is_printable(inner, registry, trait_reg),
+        Type::Result { ok, err } => {
+            is_printable(ok, registry, trait_reg) && is_printable(err, registry, trait_reg)
+        }
+        Type::List(inner) => is_printable(inner, registry, trait_reg),
+        Type::Map { value, .. } => is_printable(value, registry, trait_reg),
+        Type::Named(n) => {
+            registry.is_unit_type(n)
+                || trait_reg.implements_trait(n, Generics::PRINTABLE)
+        }
         Type::Apply { .. } if ty.quantity_parts().is_some() => true,
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
             (name == "View"
                 && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))
-                || args.iter().all(|a| is_printable(a, registry))
+                || (trait_reg.implements_trait(name, Generics::PRINTABLE)
+                    && args
+                        .iter()
+                        .all(|a| is_printable(a, registry, trait_reg)))
         }
-        Type::Tuple(fields) => fields.iter().all(|(_, t)| is_printable(t, registry)),
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, t)| is_printable(t, registry, trait_reg)),
         Type::TraitObject(_) | Type::Shared(_) | Type::Fn { .. } => false,
-        Type::FixedList { elem, .. } => is_printable(elem, registry),
-        Type::Tagged { inner, .. } => is_printable(inner, registry),
-        Type::Union(members) => members.iter().all(|m| is_printable(m, registry)),
+        Type::FixedList { elem, .. } => is_printable(elem, registry, trait_reg),
+        Type::Tagged { inner, .. } => is_printable(inner, registry, trait_reg),
+        Type::Union(members) => members
+            .iter()
+            .all(|m| is_printable(m, registry, trait_reg)),
     }
 }
 
@@ -937,12 +975,17 @@ pub(crate) fn is_debuggable(
         Type::List(inner) => is_debuggable(inner, type_reg, trait_reg),
         Type::Map { value, .. } => is_debuggable(value, type_reg, trait_reg),
         Type::Named(n) => {
-            type_reg.contains(n)
-                || core_type_known(n)
+            type_reg.is_unit_type(n)
                 || trait_reg.implements_trait(n, Generics::DEBUG)
         }
         Type::Apply { name, .. } if name == "KeyRef" => true,
-        Type::Apply { args, .. } => args.iter().all(|a| is_debuggable(a, type_reg, trait_reg)),
+        Type::Apply { .. } if ty.quantity_parts().is_some() => true,
+        Type::Apply { name, args } => {
+            trait_reg.implements_trait(name, Generics::DEBUG)
+                && args
+                    .iter()
+                    .all(|a| is_debuggable(a, type_reg, trait_reg))
+        }
         Type::Tuple(fields) => fields
             .iter()
             .all(|(_, t)| is_debuggable(t, type_reg, trait_reg)),
@@ -952,6 +995,62 @@ pub(crate) fn is_debuggable(
         Type::Union(members) => members
             .iter()
             .all(|m| is_debuggable(m, type_reg, trait_reg)),
+    }
+}
+
+pub(crate) fn is_equatable(
+    ty: &Type,
+    registry: &TypeRegistry,
+    trait_reg: &crate::Traits::TraitRegistry,
+) -> bool {
+    if is_secret_bearing_crypto_type(ty) {
+        return false;
+    }
+    match ty {
+        Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
+        Type::IntN { .. } | Type::Float32 => true,
+        Type::Option(inner) | Type::List(inner) => is_equatable(inner, registry, trait_reg),
+        Type::Result { ok, err } => {
+            is_equatable(ok, registry, trait_reg) && is_equatable(err, registry, trait_reg)
+        }
+        Type::Named(name) if name == "U8" => true,
+        Type::Named(name)
+            if matches!(
+                name.as_str(),
+                "EncodingFormat"
+                    | "EncodingErrorKind"
+                    | "EncodingCause"
+                    | "EncodingError"
+                    | "EncodingLimits"
+                    | "DataError"
+                    | "DataErrorKind"
+                    | "DataLimits"
+            ) =>
+        {
+            true
+        }
+        Type::Named(name) => trait_reg.implements_trait(name, Generics::EQUATABLE),
+        Type::Apply { name, .. } if name == "KeyRef" => true,
+        Type::Apply { name, .. }
+            if matches!(name.as_str(), "MutationPlan" | "VaultWrite" | "Rotation") =>
+        {
+            false
+        }
+        Type::Apply { name, args } => {
+            trait_reg.implements_trait(name, Generics::EQUATABLE)
+                && args
+                    .iter()
+                    .all(|arg| is_equatable(arg, registry, trait_reg))
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, field)| is_equatable(field, registry, trait_reg)),
+        Type::TraitObject(_) | Type::Map { .. } | Type::Shared(_) | Type::Fn { .. } => false,
+        Type::FixedList { elem, .. } => is_equatable(elem, registry, trait_reg),
+        Type::Tagged { inner, .. } => is_equatable(inner, registry, trait_reg),
+        Type::Union(members) => members
+            .iter()
+            .all(|member| is_equatable(member, registry, trait_reg)),
     }
 }
 
@@ -1071,9 +1170,12 @@ pub(crate) fn expr_root_ident(expr: &Expr) -> Option<&str> {
     }
 }
 
-/// Types the generated Rust copies implicitly (no move on read).
+/// Types every execution tier copies implicitly (no move on read).
 pub(crate) fn type_is_copy(ty: &Type) -> bool {
-    ty.is_scalar() || matches!(ty, Type::Char) || is_u8_ty(ty)
+    ty.is_scalar()
+        || matches!(ty, Type::Char)
+        || is_u8_ty(ty)
+        || matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_RANGE)
 }
 
 pub(crate) fn is_task_type(ty: &Type) -> bool {

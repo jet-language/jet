@@ -64,6 +64,7 @@ impl<'a> Parser<'a> {
                 methods,
                 trait_impls,
                 derives,
+                auto_derive_default: true,
                 is_single_use: false,
                 single_use_span: None,
                 is_must_use: false,
@@ -498,13 +499,21 @@ impl<'a> Parser<'a> {
             if !matches!(self.peek().kind, TokKind::Hash) {
                 return false;
             }
-            let TokKind::Ident(name) = &self.peek2().kind else {
-                return false;
+            let (name, after_name) = if matches!(self.peek2().kind, TokKind::Bang) {
+                let TokKind::Ident(name) = &self.toks[self.pos + 2].kind else {
+                    return false;
+                };
+                (name, self.pos + 3)
+            } else {
+                let TokKind::Ident(name) = &self.peek2().kind else {
+                    return false;
+                };
+                (name, self.pos + 2)
             };
             if !Self::is_pascal_type_marker_name(name) || Self::is_reserved_item_rule_prefix(name) {
                 return false;
             }
-            self.type_marker_prefix_leads_to_type_def(self.pos + 2)
+            self.type_marker_prefix_leads_to_type_def(after_name)
         }
     
         fn is_pascal_type_marker_name(name: &str) -> bool {

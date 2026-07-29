@@ -94,6 +94,10 @@ pub(super) fn substitute_expr(
         | Expr::Paren(inner, _)
         | Expr::Spread(inner, _) => substitute_expr(inner, types, values),
         Expr::OptField { base, .. } => substitute_expr(base, types, values),
+        Expr::Range { start, end, .. } => {
+            substitute_expr(start, types, values);
+            substitute_expr(end, types, values);
+        }
         Expr::MethodCall {
             receiver,
             method,
@@ -223,11 +227,15 @@ pub(super) fn substitute_expr(
             substitute_expr(index, types, values);
         }
         Expr::Slice {
-            base, start, end, ..
+            base, start, end, range, ..
         } => {
             substitute_expr(base, types, values);
-            substitute_expr(start, types, values);
-            substitute_expr(end, types, values);
+            if let Some(range) = range {
+                substitute_expr(range, types, values);
+            } else {
+                substitute_expr(start, types, values);
+                substitute_expr(end, types, values);
+            }
         }
         Expr::CallValue { callee, args, .. } => {
             substitute_expr(callee, types, values);

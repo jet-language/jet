@@ -159,8 +159,28 @@ fn split_view_candidate(stmt: &Stmt, stmt_index: usize, cx: &Cx) -> Option<Split
     };
     let (base, start, end, single) = match inner.as_ref() {
         Expr::Slice {
-            base, start, end, ..
-        } => (base.as_ref(), const_place_bound(start)?, const_place_bound(end)?, false),
+            base,
+            start,
+            end,
+            range,
+            ..
+        } => {
+            let (start, end) = match range.as_deref() {
+                Some(Expr::Range {
+                    start,
+                    end,
+                    exclusive,
+                    ..
+                }) => {
+                    let start = const_place_bound(start)?;
+                    let end = const_place_bound(end)?;
+                    (start, if *exclusive { end.checked_sub(1)? } else { end })
+                }
+                Some(_) => return None,
+                None => (const_place_bound(start)?, const_place_bound(end)?),
+            };
+            (base.as_ref(), start, end, false)
+        }
         Expr::Index { base, index, .. } => {
             let index = const_place_bound(index)?;
             (base.as_ref(), index, index, true)
@@ -1167,6 +1187,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 TStmt::Range {
                     label: label_name(label),
                     var: var.clone(),
+                    source: None,
                     start,
                     end,
                     step,
@@ -1188,6 +1209,25 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 // variable binds with its concrete type. This lets `core_struct_field_rust_name`
                 // emit plain field names (not `user_<field>`) for core types like DirEntry.
                 let lowered_coll = lower_expr(collection, cx, env);
+                if matches!(&lowered_coll.ty, Type::Named(name) if name == Syntax::TYPE_RANGE) {
+                    let step = step.as_ref().map(|s| lower_expr(s, cx, env));
+                    let zero = || TExpr {
+                        ty: Type::Int,
+                        kind: TExprKind::IntLit(0, None),
+                    };
+                    let mut branch = clone_env(env);
+                    branch.bind(var, TLocal::user(var), Some(Type::Int));
+                    return TStmt::Range {
+                        label: label_name(label),
+                        var: var.clone(),
+                        source: Some(lowered_coll),
+                        start: zero(),
+                        end: zero(),
+                        step,
+                        exclusive: false,
+                        body: lower_stmts(body, cx, &mut branch),
+                    };
+                }
                 let mut method_kind = method_kind;
                 let mut coll_elem_ty: Option<Type> = match &lowered_coll.ty {
                     Type::List(inner) => Some((**inner).clone()),
@@ -1397,13 +1437,20 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
             let mut scoped = clone_env(env);
             TStmt::Region(lower_stmts(body, cx, &mut scoped))
         }
-        // D-TASKSCOPE1=A: taskgroup erases to a plain block at codegen (I3).
-        Stmt::TaskGroup { body, .. } => {
+        // D-TASKSCOPE1=A / D-TASKGROUP-PARAM1=A: the lexical block owns one
+        // internal collector. Helpers borrow this same value.
+        Stmt::TaskGroup { name, body, .. } => {
             let mut scoped = clone_env(env);
-            TStmt::Region(lower_stmts(body, cx, &mut scoped))
+            let group_ty = Type::Named(Syntax::TYPE_TASKGROUP.to_string());
+            let group = TLocal::user(name);
+            scoped.bind(name, group.clone(), Some(group_ty));
+            TStmt::TaskGroup {
+                group,
+                body: lower_stmts(body, cx, &mut scoped),
+            }
         }
-        // D-LAYOUT1 / D-LAYOUT-GATES1: `layout name { … }` needs a REAL
-        // runtime object (unlike Region/TaskGroup, which erase) — bind `name`
+        // D-LAYOUT1 / D-LAYOUT-GATES1: `layout name { … }` needs a public
+        // runtime object (unlike the compiler-private TaskGroup handle) — bind `name`
         // to a fresh `jet_layout::Handle` BEFORE lowering the body, so the
         // desugared `name.h(box, anchor)` calls inside resolve to it, exactly
         // like an ordinary `name :: jet_layout::Handle::new(…)` binding would.

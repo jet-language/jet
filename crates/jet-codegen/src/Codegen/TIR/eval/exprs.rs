@@ -1,6 +1,6 @@
 //! Exhaustive TExprKind evaluation (#777).
 use std::collections::HashMap;
-use crate::AST::{CtFloat, Type, UnOp};
+use crate::AST::{BinOp, CtFloat, Type, UnOp};
 use crate::Codegen::TIR::{
     ListSpreadPart, TCallArg, TCoreClosureKind, TExpr, TExprKind, TFnValueKind, TModuleCallForm,
     TPlace, TStrPart,
@@ -11,6 +11,31 @@ use crate::Diagnostics::Diagnostic;
 use super::builtins::eval_builtin;
 use super::handles::eval_handle;
 use super::{materialize_view_mut_window, unsupported, EvalCallable, EvalCtx, Flow};
+
+fn range_parts(value: &CtValue) -> Option<(i64, i64, bool)> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != crate::Syntax::TYPE_RANGE {
+        return None;
+    }
+    let field = |wanted: &str| {
+        fields
+            .iter()
+            .find(|(name, _)| name == wanted)
+            .map(|(_, value)| value)
+    };
+    let (Some(CtValue::Int(start)), Some(CtValue::Int(end))) =
+        (field("start"), field("end"))
+    else {
+        return None;
+    };
+    Some((
+        *start,
+        *end,
+        matches!(field("exclusive"), Some(CtValue::Bool(true))),
+    ))
+}
 
 fn datatree(variant: &str, payload: Option<CtValue>) -> CtValue {
     CtValue::Enum {
@@ -631,7 +656,11 @@ impl<'a> EvalCtx<'a> {
                 let migration_trace_start = self
                     .codec_migrations
                     .contains_key(&ty.name())
-                    .then(|| self.sink.as_ref().map_or(0, |sink| sink.stderr.len()));
+                    .then(|| {
+                        self.sink.as_ref().map_or(0, |sink| {
+                            sink.lock().expect("evaluator sink poisoned").stderr.len()
+                        })
+                    });
                 let result = self.run_func(func, vec![tree.clone()], &mut child)?;
                 if matches!(result, CtValue::ResErr(_)) {
                     // The emitted migration walker probes the current shape
@@ -639,9 +668,8 @@ impl<'a> EvalCtx<'a> {
                     // failed field contributes a propagation frame. Generated
                     // Decode TIR can visit later fields while constructing the
                     // failed value; keep the same observable trace as AOT.
-                    if let (Some(start), Some(sink)) =
-                        (migration_trace_start, self.sink.as_mut())
-                    {
+                    if let (Some(start), Some(sink)) = (migration_trace_start, self.sink.as_ref()) {
+                        let mut sink = sink.lock().expect("evaluator sink poisoned");
                         if let Some(line_end) = sink.stderr[start..].find('\n') {
                             sink.stderr.truncate(start + line_end + 1);
                         }
@@ -720,8 +748,23 @@ impl<'a> EvalCtx<'a> {
                             let v = self.eval_expr(e, scope)?;
                             let text = match fmt {
                                 crate::AST::StrFormat::Debug => {
-                                    show_typed_value(&v, &e.ty, true)
-                                        .unwrap_or_else(|| self.debug_value(&v))
+                                    let manual = match &e.ty {
+                                        Type::Named(type_name) => {
+                                            self.funcs.get(&format!("{type_name}::debug")).copied()
+                                        }
+                                        _ => None,
+                                    };
+                                    if let Some(func) = manual {
+                                        let mut child = HashMap::new();
+                                        child.insert("self".to_string(), v.clone());
+                                        match self.run_func(func, Vec::new(), &mut child)? {
+                                            CtValue::Str(text) => text,
+                                            _ => self.debug_value(&v),
+                                        }
+                                    } else {
+                                        show_typed_value(&v, &e.ty, true)
+                                            .unwrap_or_else(|| self.debug_value(&v))
+                                    }
                                 }
                                 crate::AST::StrFormat::Display => {
                                     show_typed_value(&v, &e.ty, false)
@@ -857,6 +900,32 @@ impl<'a> EvalCtx<'a> {
             TExprKind::Binary { op, lhs, rhs, .. } => {
                 let l = self.eval_expr(lhs, scope)?;
                 let r = self.eval_expr(rhs, scope)?;
+                if matches!(op, BinOp::Eq | BinOp::Ne)
+                    && matches!(
+                        &lhs.ty,
+                        Type::Named(name) if name == crate::Syntax::TYPE_RANGE
+                    )
+                {
+                    let Some((left_start, left_end, left_exclusive)) = range_parts(&l) else {
+                        return Err(unsupported("Range equality", self.span()));
+                    };
+                    let Some((right_start, right_end, right_exclusive)) = range_parts(&r) else {
+                        return Err(unsupported("Range equality", self.span()));
+                    };
+                    let equal = super::range_semantics::jet_range_equal(
+                        left_start,
+                        left_end,
+                        left_exclusive,
+                        right_start,
+                        right_end,
+                        right_exclusive,
+                    );
+                    return Ok(CtValue::Bool(if matches!(op, BinOp::Eq) {
+                        equal
+                    } else {
+                        !equal
+                    }));
+                }
                 if let Type::IntN { signed, bits } = &lhs.ty {
                     let a = as_int(&l, self.span())?;
                     let b = as_int(&r, self.span())?;
@@ -968,8 +1037,6 @@ impl<'a> EvalCtx<'a> {
                         },
                         _ => return Err(unsupported("view-mut base", self.span())),
                     };
-                    let start = as_int(&self.eval_expr(&args[0], scope)?, self.span())?;
-                    let end = as_int(&self.eval_expr(&args[1], scope)?, self.span())?;
                     let CtValue::List(xs) = scope
                         .get(&base_name)
                         .cloned()
@@ -977,9 +1044,18 @@ impl<'a> EvalCtx<'a> {
                     else {
                         return Err(unsupported("view-mut list base", self.span()));
                     };
-                    if start < 0 || end < start || end as usize >= xs.len() {
-                        return Err(unsupported("view-mut bounds", self.span()));
-                    }
+                    let (start, end_exclusive) = if args.len() == 1 {
+                        let range = self.eval_expr(&args[0], scope)?;
+                        super::range_window(&range, xs.len(), self.span())?
+                    } else {
+                        let start = as_int(&self.eval_expr(&args[0], scope)?, self.span())?;
+                        let end = as_int(&self.eval_expr(&args[1], scope)?, self.span())?;
+                        if start < 0 || end < start || end as usize >= xs.len() {
+                            return Err(unsupported("view-mut bounds", self.span()));
+                        }
+                        (start, end + 1)
+                    };
+                    let end = end_exclusive - 1;
                     return Ok(CtValue::Struct {
                         type_name: "__JetViewMut".into(),
                         fields: vec![
@@ -1047,7 +1123,8 @@ impl<'a> EvalCtx<'a> {
                         _ => None,
                     });
                     let span = self.span();
-                    let Some(clock) = self.clocks.get_mut(index) else {
+                    let mut runtime = self.runtime.lock().expect("evaluator runtime poisoned");
+                    let Some(clock) = runtime.clocks.get_mut(index) else {
                         return Err(unsupported("clock handle", span));
                     };
                     let result = match op {
@@ -1077,6 +1154,13 @@ impl<'a> EvalCtx<'a> {
                     return self.eval_event_method(method, &mut r, &argv);
                 }
                 match op {
+                    crate::Codegen::TIR::THandleOp::TaskJoin => {
+                        return self.take_task(&r);
+                    }
+                    crate::Codegen::TIR::THandleOp::TaskDetach => {
+                        let _ = self.take_task(&r)?;
+                        return Ok(CtValue::Unit);
+                    }
                     crate::Codegen::TIR::THandleOp::SerdeEncode => {
                         return self.eval_serde_encode_value(r, &recv.ty);
                     }
@@ -1101,6 +1185,9 @@ impl<'a> EvalCtx<'a> {
                         .and_then(|clock| handle_index(clock, "__JetTirClock"))
                         .ok_or_else(|| unsupported("expiring clock", self.span()))?;
                     let now = *self
+                        .runtime
+                        .lock()
+                        .expect("evaluator runtime poisoned")
                         .clocks
                         .get(clock_index)
                         .ok_or_else(|| unsupported("expiring clock handle", self.span()))?;
@@ -1383,13 +1470,17 @@ impl<'a> EvalCtx<'a> {
                 // ambient I/O matches AOT (env/fs/process). Pure comptime
                 // keeps depth 0 and stays on apply_core_call (E3410).
                 if self.impure_depth > 0 && self.allow_impure {
+                    let mut sink = self
+                        .sink
+                        .as_ref()
+                        .map(|sink| sink.lock().expect("evaluator sink poisoned"));
                     apply_impure_core_call(
                         module,
                         method,
                         argv,
                         *source_span,
                         &self.base_dir,
-                        self.sink.as_deref_mut(),
+                        sink.as_deref_mut(),
                         self.repl_mode,
                         None,
                         None,
@@ -1564,23 +1655,62 @@ impl<'a> EvalCtx<'a> {
                 }
             }
             TExprKind::Slice {
-                base, start, end, ..
+                base, start, end, range, ..
             } => {
                 let b = self.eval_expr(base, scope)?;
-                let a = as_int(&self.eval_expr(start, scope)?, self.span())?;
-                let z = as_int(&self.eval_expr(end, scope)?, self.span())?;
+                let (a, z, exclusive) = if let Some(range) = range {
+                    let value = self.eval_expr(range, scope)?;
+                    let CtValue::Struct { type_name, fields } = value else {
+                        return Err(unsupported("Range slice", self.span()));
+                    };
+                    if type_name != crate::Syntax::TYPE_RANGE {
+                        return Err(unsupported("Range slice type", self.span()));
+                    }
+                    let field = |name: &str| {
+                        fields.iter().find(|(field, _)| field == name).map(|(_, value)| value)
+                    };
+                    (
+                        field("start")
+                            .ok_or_else(|| unsupported("Range.start", self.span()))
+                            .and_then(|value| as_int(value, self.span()))?,
+                        field("end")
+                            .ok_or_else(|| unsupported("Range.end", self.span()))
+                            .and_then(|value| as_int(value, self.span()))?,
+                        matches!(field("exclusive"), Some(CtValue::Bool(true))),
+                    )
+                } else {
+                    (
+                        as_int(&self.eval_expr(start, scope)?, self.span())?,
+                        as_int(&self.eval_expr(end, scope)?, self.span())?,
+                        false,
+                    )
+                };
                 match b {
                     CtValue::List(xs) => {
-                        if a < 0 || z < a || z as usize >= xs.len() {
+                        let end_valid = if exclusive {
+                            z as usize <= xs.len()
+                        } else {
+                            (z as usize) < xs.len()
+                        };
+                        if a < 0 || z < a || !end_valid {
                             Err(unsupported("slice bounds", self.span()))
+                        } else if exclusive {
+                            Ok(CtValue::List(xs[a as usize..z as usize].to_vec()))
                         } else {
                             Ok(CtValue::List(xs[a as usize..=z as usize].to_vec()))
                         }
                     }
                     CtValue::Str(s) => {
                         let chars: Vec<char> = s.chars().collect();
-                        if a < 0 || z < a || z as usize >= chars.len() {
+                        let end_valid = if exclusive {
+                            z as usize <= chars.len()
+                        } else {
+                            (z as usize) < chars.len()
+                        };
+                        if a < 0 || z < a || !end_valid {
                             Err(unsupported("slice bounds", self.span()))
+                        } else if exclusive {
+                            Ok(CtValue::Str(chars[a as usize..z as usize].iter().collect()))
                         } else {
                             Ok(CtValue::Str(
                                 chars[a as usize..=z as usize].iter().collect(),
@@ -1855,7 +1985,8 @@ impl<'a> EvalCtx<'a> {
                         let frame = format!(
                             "error propagated from: {fn_name} ({file}:{line}) via ?\n"
                         );
-                        if let Some(sink) = self.sink.as_mut() {
+                        if let Some(sink) = self.sink.as_ref() {
+                            let mut sink = sink.lock().expect("evaluator sink poisoned");
                             let skip = sink
                                 .stderr
                                 .ends_with(&frame);
@@ -2075,6 +2206,9 @@ impl<'a> EvalCtx<'a> {
                         let deadline = struct_int(&r, "deadline")
                             .ok_or_else(|| unsupported("expiring secret deadline", self.span()))?;
                         let valid = self
+                            .runtime
+                            .lock()
+                            .expect("evaluator runtime poisoned")
                             .clocks
                             .get(clock_index)
                             .is_some_and(|now| *now <= deadline);
@@ -2112,14 +2246,21 @@ impl<'a> EvalCtx<'a> {
                             })
                             .ok_or_else(|| unsupported("shared handle", self.span()))?;
                         let transactional = method == "edit_txn";
+                        let shared = self
+                            .runtime
+                            .lock()
+                            .expect("evaluator runtime poisoned")
+                            .shared_values
+                            .get(index)
+                            .cloned();
                         let current = if transactional {
                             self.shared_transactions
                                 .last()
                                 .and_then(|transaction| transaction.get(&index))
                                 .cloned()
-                                .or_else(|| self.shared_values.get(index).cloned())
+                                .or(shared)
                         } else {
-                            self.shared_values.get(index).cloned()
+                            shared
                         }
                         .ok_or_else(|| unsupported("shared value", self.span()))?;
                         let Some(TExpr {
@@ -2140,7 +2281,10 @@ impl<'a> EvalCtx<'a> {
                             };
                             transaction.insert(index, updated);
                         } else if method == "edit" {
-                            self.shared_values[index] = updated;
+                            self.runtime
+                                .lock()
+                                .expect("evaluator runtime poisoned")
+                                .shared_values[index] = updated;
                         }
                         return Ok(result);
                     }
@@ -2224,8 +2368,10 @@ impl<'a> EvalCtx<'a> {
                                 ));
                             }
                         };
-                        let index = self.clocks.len();
-                        self.clocks.push(seed);
+                        let mut runtime =
+                            self.runtime.lock().expect("evaluator runtime poisoned");
+                        let index = runtime.clocks.len();
+                        runtime.clocks.push(seed);
                         return Ok(CtValue::Struct {
                             type_name: "__JetTirClock".to_string(),
                             fields: vec![("index".to_string(), CtValue::Int(index as i64))],
@@ -2281,6 +2427,9 @@ impl<'a> EvalCtx<'a> {
                     let clock_index = handle_index(&clock, "__JetTirClock")
                         .ok_or_else(|| unsupported("expiring clock", self.span()))?;
                     let now = *self
+                        .runtime
+                        .lock()
+                        .expect("evaluator runtime poisoned")
                         .clocks
                         .get(clock_index)
                         .ok_or_else(|| unsupported("expiring clock handle", self.span()))?;
@@ -2478,7 +2627,8 @@ impl<'a> EvalCtx<'a> {
                     loc.line,
                     " ".repeat(col_offset)
                 );
-                if let Some(sink) = self.sink.as_mut() {
+                if let Some(sink) = self.sink.as_ref() {
+                    let mut sink = sink.lock().expect("evaluator sink poisoned");
                     sink.stderr.push_str(&rendered);
                     sink.exit_code = Some(70);
                     return Err(Diagnostic::error(
@@ -2816,8 +2966,10 @@ impl<'a> EvalCtx<'a> {
                             return Ok(value);
                         }
                         if path == "jet_std::JetShared" && method.name == "new" && argv.len() == 1 {
-                            let index = self.shared_values.len();
-                            self.shared_values.push(argv.remove(0));
+                            let mut runtime =
+                                self.runtime.lock().expect("evaluator runtime poisoned");
+                            let index = runtime.shared_values.len();
+                            runtime.shared_values.push(argv.remove(0));
                             return Ok(CtValue::Struct {
                                 type_name: "__JetTirShared".to_string(),
                                 fields: vec![("index".to_string(), CtValue::Int(index as i64))],
@@ -2968,8 +3120,8 @@ impl<'a> EvalCtx<'a> {
                 )
             }
             TExprKind::CoreClosureCall {
-                kind: TCoreClosureKind::Spawn { .. },
-            } => self.eval_spawn(scope),
+                kind: TCoreClosureKind::Spawn { group, site, .. },
+            } => self.eval_spawn(*site, group.as_deref(), scope),
             TExprKind::CoreClosureCall {
                 kind: TCoreClosureKind::Guard { executable, .. },
             } => {
@@ -2997,9 +3149,24 @@ impl<'a> EvalCtx<'a> {
             TExprKind::CoreClosureCall { .. } => {
                 Err(unsupported("expr `CoreClosureCall`", self.span()))
             }
-            TExprKind::TaskGroupAll { .. } => Err(unsupported("expr `TaskGroupAll`", self.span())),
-            TExprKind::TaskGroupRace { .. } => Err(unsupported("expr `TaskGroupRace`", self.span())),
-            TExprKind::TaskGroupAny { .. } => Err(unsupported("expr `TaskGroupAny`", self.span())),
+            TExprKind::TaskGroupAll { tasks } => {
+                let CtValue::List(tasks) = self.eval_expr(tasks, scope)? else {
+                    return Err(unsupported("taskgroup all list", self.span()));
+                };
+                self.task_select(&tasks, crate::task_group::JetTaskSelectMode::All)
+            }
+            TExprKind::TaskGroupRace { tasks } => {
+                let CtValue::List(tasks) = self.eval_expr(tasks, scope)? else {
+                    return Err(unsupported("taskgroup race list", self.span()));
+                };
+                self.task_select(&tasks, crate::task_group::JetTaskSelectMode::Race)
+            }
+            TExprKind::TaskGroupAny { tasks } => {
+                let CtValue::List(tasks) = self.eval_expr(tasks, scope)? else {
+                    return Err(unsupported("taskgroup any list", self.span()));
+                };
+                self.task_select(&tasks, crate::task_group::JetTaskSelectMode::Any)
+            }
             TExprKind::SelectStart => Err(unsupported("expr `SelectStart`", self.span())),
             TExprKind::SelectRecv { .. } => Err(unsupported("expr `SelectRecv`", self.span())),
             TExprKind::SelectAfter { .. } => Err(unsupported("expr `SelectAfter`", self.span())),
@@ -3248,9 +3415,10 @@ impl<'a> EvalCtx<'a> {
     }
 
     fn write_print(&mut self, text: &str, to_stderr: bool) -> Result<(), Diagnostic> {
-        let Some(sink) = self.sink.as_mut() else {
+        let Some(sink) = self.sink.as_ref() else {
             return Err(unsupported("print at comptime", self.span()));
         };
+        let mut sink = sink.lock().expect("evaluator sink poisoned");
         if to_stderr {
             sink.stderr.push_str(text);
             sink.stderr.push('\n');
@@ -3415,40 +3583,46 @@ impl<'a> EvalCtx<'a> {
         match v {
             CtValue::Struct { type_name, fields } => {
                 let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
+                if ty == crate::Syntax::TYPE_RANGE {
+                    if let Some((start, end, exclusive)) = range_parts(v) {
+                        return super::range_semantics::jet_range_structural_text(
+                            start,
+                            end,
+                            exclusive,
+                        );
+                    }
+                }
                 let Some(defs) = self.struct_fields.get(ty) else {
                     // Builtin struct with no declared fields on hand (Vec3, …).
-                    // Still render Jet-source names — `debug_rust` re-mangles (I2).
-                    if fields.is_empty() {
-                        return format!("{ty} {{}}");
-                    }
-                    let parts: Vec<String> = fields
+                    // Adapt its fields to the same record assembler AOT uses.
+                    let fields = fields
                         .iter()
                         .map(|(name, value)| {
                             let name = name.strip_prefix("user_").unwrap_or(name);
-                            format!("{name}: {}", self.debug_value(value))
+                            (name.to_string(), self.debug_value(value))
                         })
-                        .collect();
-                    return format!("{ty} {{ {} }}", parts.join(", "));
+                        .collect::<Vec<_>>();
+                    return jet_foundation::StructuralDebug::jet_debug_record(ty, fields);
                 };
-                if defs.is_empty() {
-                    return format!("{ty} {{}}");
-                }
-                let parts: Vec<String> = defs
+                let fields = defs
                     .iter()
                     .map(|(name, redact)| {
                         if *redact {
-                            format!("{name}: [redacted]")
+                            (name.clone(), "[redacted]".to_string())
                         } else {
                             let rendered = fields
                                 .iter()
-                                .find(|(n, _)| n == name || n.strip_prefix("user_") == Some(name.as_str()))
-                                .map(|(_, value)| value.debug_rust())
-                                .unwrap_or_else(|| CtValue::Unit.debug_rust());
-                            format!("{name}: {rendered}")
+                                .find(|(n, _)| {
+                                    n == name
+                                        || n.strip_prefix("user_") == Some(name.as_str())
+                                })
+                                .map(|(_, value)| self.debug_value(value))
+                                .unwrap_or_else(|| self.debug_value(&CtValue::Unit));
+                            (name.clone(), rendered)
                         }
                     })
-                    .collect();
-                format!("{ty} {{ {} }}", parts.join(", "))
+                    .collect::<Vec<_>>();
+                jet_foundation::StructuralDebug::jet_debug_record(ty, fields)
             }
             CtValue::Enum {
                 type_name,
@@ -3457,6 +3631,13 @@ impl<'a> EvalCtx<'a> {
             } => {
                 let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
                 let var = variant.strip_prefix("user_").unwrap_or(variant);
+                if ty.starts_with("__JetUnion_") {
+                    let payload = args
+                        .first()
+                        .map(|(_, value)| self.debug_value(value))
+                        .unwrap_or_default();
+                    return jet_foundation::StructuralDebug::jet_debug_union(payload);
+                }
                 if ty == "IOError" {
                     let parts: Vec<String> = args
                         .iter()
@@ -3526,6 +3707,14 @@ impl<'a> EvalCtx<'a> {
                     format!("{var}({})", parts.join(", "))
                 }
             }
+            CtValue::Map(entries) => jet_foundation::StructuralDebug::jet_debug_map(
+                entries.iter().map(|(key, value)| {
+                    (
+                        self.debug_value(&key.to_value()),
+                        self.debug_value(value),
+                    )
+                }),
+            ),
             _ => v.debug_rust(),
         }
     }

@@ -449,6 +449,9 @@ impl<'a> Fmt<'a> {
 
     /// D-SHAPE2 / D-SERDE2–8: render one applied rule.
     pub(super) fn fmt_marker(&mut self, m: &Marker) {
+        if m.negated {
+            self.write("!");
+        }
         self.write(&m.name);
         if !m.args.is_empty() {
             self.write("(");
@@ -608,7 +611,7 @@ impl<'a> Fmt<'a> {
             + usize::from(f.inline_foreign.is_some())
             + usize::from(f.web_marker.is_some())
             + usize::from(f.is_reactive)
-            + usize::from(f.is_sanitizer)
+            + usize::from(f.scrub_tag.is_some())
             + usize::from(f.is_replayable)
             + usize::from(f.is_task)
             + usize::from(f.every.is_some())
@@ -660,9 +663,12 @@ impl<'a> Fmt<'a> {
             start_rule!();
             self.write(marker.name());
         }
+        if let Some(tag) = &f.scrub_tag {
+            start_rule!();
+            self.write(&format!("{}({tag})", Syntax::KW_SCRUB));
+        }
         for (enabled, name) in [
             (f.is_reactive, Syntax::KW_REACTIVE),
-            (f.is_sanitizer, Syntax::KW_SANITIZER),
             (f.is_replayable, Syntax::ATTR_REPLAYABLE),
             (f.is_task, Syntax::KW_TASK),
         ] {

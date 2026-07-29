@@ -160,6 +160,13 @@ function isOlderThanDays(dateStr, days) {
   return (Date.now() - t) > days * 86_400_000;
 }
 
+function isPendingCompletion(card, cursor) {
+  if (card.phase !== 'done') return false;
+  if (!cursor) return true;
+  const completedAt = card.completedAt || (String(card.updated || '').length > 10 ? card.updated : null);
+  return !!completedAt && completedAt > cursor;
+}
+
 const LIVE_EVENTS = 500;
 
 // The one retirement chokepoint (called only from `mutate`, right after the
@@ -175,8 +182,17 @@ function retire(s, config, dataDir) {
   let dirty = false;
 
   // (b) done cards aged out: card + ALL its live decisions + questions
-  // retire together, regardless of the decisions' own ratifiedAt.
-  const retireCardIds = new Set(s.cards.filter(c => c.phase === 'done' && isOlderThanDays(c.updated, days)).map(c => c.id));
+  // retire together, regardless of the decisions' own ratifiedAt. An open
+  // agent message keeps its card live until the owner marks that message done.
+  const messageCardIds = new Set(s.questions
+    .filter(q => q.kind === 'message' && q.status === 'open')
+    .map(q => q.cardId));
+  const retireCardIds = new Set(s.cards
+    .filter(c => c.phase === 'done'
+      && !isPendingCompletion(c, s.meta.completionCursor)
+      && !messageCardIds.has(c.id)
+      && isOlderThanDays(c.updated, days))
+    .map(c => c.id));
   if (retireCardIds.size) {
     for (const c of s.cards) {
       if (!retireCardIds.has(c.id)) continue;
@@ -191,14 +207,14 @@ function retire(s, config, dataDir) {
     s.questions = s.questions.filter(q => !retireCardIds.has(q.cardId));
   }
 
-  // (a) standalone ratified decisions aged out on their own — only once
-  // their card is done (or gone); a still-active card keeps its decisions
-  // live no matter how old, so the card's own view stays whole.
+  // (a) standalone ratified decisions age out only when their card is gone.
+  // A live card keeps its decisions until the card retires, so its view can
+  // never become half-archived while a completion or message holds it live.
   const liveCardById = new Map(s.cards.map(c => [c.id, c]));
   const standaloneIds = new Set(s.decisions.filter(d => {
     if (d.status !== 'ratified' || !isOlderThanDays(d.ratifiedAt, days)) return false;
     const c = liveCardById.get(d.cardId);
-    return !c || c.phase === 'done';
+    return !c;
   }).map(d => d.id));
   if (standaloneIds.size) {
     for (const d of s.decisions) {
@@ -277,6 +293,9 @@ export function normalize(s) {
   s.meta = { version: VERSION, project: 'Project', nextNum: 1, rev: 0, ...(s.meta || {}) };
   s.meta.version = VERSION;
   s.meta.ui = { toggled: [], ...(s.meta.ui || {}) };
+  if (s.meta.completionCursor == null && s.meta.digestCursor != null)
+    s.meta.completionCursor = s.meta.digestCursor;
+  delete s.meta.digestCursor;
   for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'events']) s[k] ||= [];
   delete s.messages;   // messaging was removed; drop the legacy key on next write
   // D-TWR-OPS1=A: active epoch is derived solely from epoch.status === 'active'.
@@ -480,7 +499,7 @@ export function project(s, config = null, history = null) {
     const clearance = clearanceOf(c, s.decisions);
     const decisions = s.decisions.filter(d => d.cardId === c.id);
     const questions = s.questions.filter(q => q.cardId === c.id);
-    const openQ = questions.filter(q => q.status === 'open').length;
+    const openQ = questions.filter(q => q.kind !== 'message' && q.status === 'open').length;
     return { ...c, clearance, decisions, questions, openQ, lane: laneOf(c, s.decisions, s.cards) };
   });
   const historyCards = history?.cards || [];
@@ -506,7 +525,7 @@ export function project(s, config = null, history = null) {
     sidequests: cards.filter(c => c.track === 'sidequest' && ACTIVE.includes(c.phase)).length,
     frozen: cards.filter(c => c.phase === 'frozen').length,
     ideas: s.ideas.filter(b => b.status !== 'tagged').length,
-    openQuestions: s.questions.filter(q => q.status === 'open').length,
+    openQuestions: s.questions.filter(q => q.kind !== 'message' && q.status === 'open').length,
   };
   return { meta: s.meta, config: publicConfig(config) || undefined, epochs: s.epochs, milestones, phases: PHASES, lanes: LANES,
     cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas,
@@ -733,6 +752,7 @@ function assertOwnerLane(c, patch, by) {
 
 export function updateCard(s, ref, patch, config) {
   const c = mustCard(s, ref);
+  const oldPhase = c.phase;
   const oldMilestoneId = c.milestoneId;
   // Basic shape validation runs before the owner-lane authorization check, so
   // a malformed request always reports E_INVALID/E_NOT_FOUND regardless of
@@ -787,6 +807,8 @@ export function updateCard(s, ref, patch, config) {
     c.assignee = null;
     delete c.claimedAt;
   }
+  if (oldPhase !== 'done' && c.phase === 'done') c.completedAt = now();
+  if (oldPhase === 'done' && c.phase !== 'done') delete c.completedAt;
   if (patch.logEntry) c.log.unshift({ at: today(), by: patch.by || 'agent', text: patch.logEntry });
   touchCard(c, patch.by);
   syncMilestones(s, [oldMilestoneId, c.milestoneId]);
@@ -851,6 +873,9 @@ export function verifyCriterion(s, ref, n, { evidence, by } = {}) {
 export function deleteCard(s, ref, p = {}) {
   const c = mustCard(s, ref);
   const oldMilestoneId = c.milestoneId;
+  const openMessages = s.questions.filter(q => q.cardId === c.id && q.kind === 'message' && q.status === 'open');
+  if (openMessages.length)
+    fail('E_INVALID', `card #${c.num} has ${openMessages.length} open message${openMessages.length === 1 ? '' : 's'} — mark each message done before deleting the card`);
   const ratified = s.decisions.filter(d => d.cardId === c.id && d.status === 'ratified');
   if (ratified.length)
     fail('E_HAS_RATIFIED', `card #${c.num} has ${ratified.length} ratified decision${ratified.length > 1 ? 's' : ''} (${ratified.map(d => d.id).join(', ')}) — they retire to \`tower archive\` on their own once the buffer window passes; delete once none are live on the card`);
@@ -1064,9 +1089,11 @@ export function createAcceptanceResolver() {
     d.provenanceHistory = [...(d.provenanceHistory || []), Object.freeze({ ...provenance })];
     if (outcome === 'accept') {
       c.phase = 'done';
+      c.completedAt = now();
       c.log.unshift({ at: today(), by: 'owner', text: `Accepted — ${d.id} resolved through owner verification UI.` });
     } else {
       c.phase = 'building';
+      delete c.completedAt;
       c.log.unshift({ at: today(), by: 'owner', text: `Bounced back to building: ${comment || '(no comment)'}` });
     }
     touchCard(c, 'owner');
@@ -1153,6 +1180,7 @@ function advanceClearedCard(s, cardId) {
 export function addQuestion(s, p) {
   const card = mustCard(s, p.cardId);
   if (!p.text || !String(p.text).trim()) fail('E_INVALID', 'question needs text');
+  if (p.kind === 'message') fail('E_INVALID', 'use message add for agent messages');
   const q = { id: newId('q'), cardId: card.id, decisionId: p.decisionId || null,
     by: p.by || 'owner', kind: p.kind || 'question',
     text: String(p.text).trim(), status: 'open', answer: '', created: now() };
@@ -1163,6 +1191,7 @@ export function addQuestion(s, p) {
 }
 export function answerQuestion(s, id, answer, by) {
   const q = s.questions.find(x => x.id === id) || fail('E_NOT_FOUND', `no question ${id}`);
+  if (q.kind === 'message') fail('E_INVALID', `use message done for ${id}`);
   if (!answer || !String(answer).trim()) fail('E_INVALID', 'answer needs text');
   q.answer = answer; q.status = 'answered'; q.answeredAt = today(); q.answeredBy = by || 'agent';
   const card = s.cards.find(c => c.id === q.cardId);
@@ -1172,11 +1201,52 @@ export function answerQuestion(s, id, answer, by) {
 }
 export function deleteQuestion(s, id, by) {
   const q = s.questions.find(x => x.id === id);
+  if (q?.kind === 'message') fail('E_INVALID', `use message done for ${id}`);
   s.questions = s.questions.filter(q => q.id !== id);
   const card = q && s.cards.find(c => c.id === q.cardId);
   if (card) touchCard(card, by);
   logEvent(s, { by, action: 'question.delete', ref: id });
   return { ok: true, id };
+}
+
+// ---- mutations: durable agent messages ------------------------------------
+
+export function listMessages(s, { cardId, status = 'open' } = {}) {
+  const card = cardId == null ? null : mustCard(s, cardId);
+  return s.questions.filter(q => q.kind === 'message'
+    && (!card || q.cardId === card.id)
+    && (!status || q.status === status));
+}
+
+export function addMessage(s, p) {
+  const card = mustCard(s, p.cardId);
+  if (!p.text || !String(p.text).trim()) fail('E_INVALID', 'message needs text');
+  if (!p.by || p.by === 'owner') fail('E_INVALID', 'message add needs --by <agent>');
+  const message = {
+    id: newId('q'),
+    cardId: card.id,
+    decisionId: null,
+    by: p.by,
+    kind: 'message',
+    text: String(p.text).trim(),
+    status: 'open',
+    answer: '',
+    created: now(),
+  };
+  s.questions.push(message);
+  logEvent(s, { by: p.by, action: 'message.add', ref: message.id, note: `#${card.num}` });
+  return { ...message, cardNum: card.num };
+}
+
+export function doneMessage(s, id, by) {
+  if (by !== 'owner') fail('E_OWNER_ONLY', 'message done is owner-only');
+  const message = s.questions.find(q => q.id === id && q.kind === 'message')
+    || fail('E_NOT_FOUND', `no message ${id}`);
+  message.status = 'done';
+  message.completedAt = now();
+  message.doneBy = by;
+  logEvent(s, { by, action: 'message.done', ref: id });
+  return message;
 }
 
 // ---- mutations: ideas ------------------------------------------------------
@@ -1386,19 +1456,22 @@ export function buildBrief(s, ref) {
     blockers: (card.blockedBy || []).map(id => blockerState(s, id)),
     criteria: { items: card.criteria || [], needsAcceptance: !!card.needsAcceptance },
     decisions: s.decisions.filter(d => d.cardId === card.id).map(decisionForBrief),
-    questions: s.questions.filter(q => q.cardId === card.id && q.status === 'open').map(q => ({ id: q.id, by: q.by, text: q.text })),
+    questions: s.questions.filter(q => q.cardId === card.id && q.kind !== 'message' && q.status === 'open').map(q => ({ id: q.id, by: q.by, text: q.text })),
     refs: [...new Set([...explicitRefs, ...harvested])],
     log: (card.log || []).slice(0, 5),
     rules: BRIEF_RULES,
   };
 }
 
-// Digest cursor: everything in events[] after this instant is "since you
-// were away". The owner's "Caught up" button advances it.
-export function setDigestCursor(s, at) {
-  s.meta.digestCursor = at || now();
-  return { digestCursor: s.meta.digestCursor };
+// Completion cursor: done cards after this instant appear in the owner's
+// queue. Agent messages ignore this cursor and stay until marked done.
+export function setCompletionCursor(s, at) {
+  s.meta.completionCursor = at || now();
+  return { completionCursor: s.meta.completionCursor };
 }
+
+export const setDigestCursor = setCompletionCursor;
+export const clearDoneQueue = setCompletionCursor;
 
 // ---- ui state ---------------------------------------------------------------
 

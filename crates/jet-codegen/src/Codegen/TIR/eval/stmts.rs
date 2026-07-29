@@ -1,5 +1,6 @@
 //! Exhaustive TStmt evaluation (#777).
 use std::collections::HashMap;
+use std::sync::{mpsc, Arc};
 use crate::Codegen::TIR::{TForInMethod, TIfCond, TPatternPosition, TPlace, TStmt};
 use crate::Comptime::Builtins::{as_bool, as_int, eval_binop};
 use crate::Comptime::CtValue;
@@ -218,6 +219,43 @@ impl<'a> EvalCtx<'a> {
                 }
                 Ok(Flow::Normal)
             }
+            TStmt::TaskGroup { group, body } => {
+                let mut run_body = |this: &mut Self| {
+                    let value = this.new_taskgroup();
+                    let index = Self::taskgroup_index(&value)
+                        .expect("new taskgroup always carries an evaluator index");
+                    scope.insert(group.name.clone(), value);
+                    let body_result = this.exec_stmts(body, scope);
+                    let close_result = this.close_taskgroup(index);
+                    scope.remove(&group.name);
+                    match (body_result, close_result) {
+                        (Err(error), _) | (Ok(_), Err(error)) => Err(error),
+                        (Ok(flow), Ok(())) => Ok(flow),
+                    }
+                };
+                if self.task_sender.is_some() {
+                    run_body(self)
+                } else {
+                    let config = Arc::new(self.task_config());
+                    std::thread::scope(|threads| {
+                        let (sender, receiver) = mpsc::channel();
+                        let worker_config = config.clone();
+                        let dispatcher = threads.spawn(move || {
+                            while let Ok(job) = receiver.recv() {
+                                let job_config = (*worker_config).clone();
+                                threads.spawn(move || Self::run_task_job(job_config, job));
+                            }
+                        });
+                        self.task_sender = Some(sender);
+                        let result = run_body(self);
+                        drop(self.task_sender.take());
+                        dispatcher
+                            .join()
+                            .expect("evaluator task dispatcher panicked");
+                        result
+                    })
+                }
+            }
             TStmt::If {
                 cond,
                 then_body,
@@ -283,6 +321,7 @@ impl<'a> EvalCtx<'a> {
             }
             TStmt::Range {
                 var,
+                source,
                 start,
                 end,
                 step,
@@ -290,8 +329,32 @@ impl<'a> EvalCtx<'a> {
                 body,
                 label,
             } => {
-                let mut i = as_int(&self.eval_expr(start, scope)?, self.span())?;
-                let end_v = as_int(&self.eval_expr(end, scope)?, self.span())?;
+                let (mut i, end_v, exclusive_v) = if let Some(source) = source {
+                    let value = self.eval_expr(source, scope)?;
+                    let CtValue::Struct { type_name, fields } = value else {
+                        return Err(unsupported("Range loop source", self.span()));
+                    };
+                    if type_name != crate::Syntax::TYPE_RANGE {
+                        return Err(unsupported("Range loop source type", self.span()));
+                    }
+                    let field = |name: &str| {
+                        fields.iter().find(|(field, _)| field == name).map(|(_, value)| value)
+                    };
+                    let start = field("start")
+                        .ok_or_else(|| unsupported("Range.start", self.span()))
+                        .and_then(|value| as_int(value, self.span()))?;
+                    let end = field("end")
+                        .ok_or_else(|| unsupported("Range.end", self.span()))
+                        .and_then(|value| as_int(value, self.span()))?;
+                    let exclusive = matches!(field("exclusive"), Some(CtValue::Bool(true)));
+                    (start, end, exclusive)
+                } else {
+                    (
+                        as_int(&self.eval_expr(start, scope)?, self.span())?,
+                        as_int(&self.eval_expr(end, scope)?, self.span())?,
+                        *exclusive,
+                    )
+                };
                 let step_v = match step {
                     Some(s) => as_int(&self.eval_expr(s, scope)?, self.span())?,
                     None => 1,
@@ -301,7 +364,7 @@ impl<'a> EvalCtx<'a> {
                 }
                 // D-RANGE-EXCL1=C: exclusive `..<` stops before end; inclusive `..` includes it.
                 let in_range = |cur: i64| {
-                    if *exclusive {
+                    if exclusive_v {
                         if step_v > 0 { cur < end_v } else { cur > end_v }
                     } else if step_v > 0 {
                         cur <= end_v
@@ -462,11 +525,15 @@ impl<'a> EvalCtx<'a> {
                     return Err(unsupported("for-in method collection", self.span()));
                 }
                 if let Some(stream_index) = super::EvalCtx::stream_index(&coll) {
-                    let (func, args) = self
-                        .streams
-                        .get(stream_index)
-                        .map(|stream| (stream.func, stream.args.clone()))
-                        .ok_or_else(|| unsupported("stream handle", self.span()))?;
+                    let (func, args) = {
+                        let runtime =
+                            self.runtime.lock().expect("evaluator runtime poisoned");
+                        runtime
+                            .streams
+                            .get(stream_index)
+                            .map(|stream| (stream.func, stream.args.clone()))
+                            .ok_or_else(|| unsupported("stream handle", self.span()))?
+                    };
                     let previous_consumer = self.yield_consumer.replace(super::YieldConsumer {
                         var: var.clone(),
                         body,
@@ -909,7 +976,13 @@ impl<'a> EvalCtx<'a> {
                             let _ = self.eval_tlambda(lam, Vec::new(), scope)?;
                         }
                         for (index, value) in staged {
-                            if let Some(slot) = self.shared_values.get_mut(index) {
+                            if let Some(slot) = self
+                                .runtime
+                                .lock()
+                                .expect("evaluator runtime poisoned")
+                                .shared_values
+                                .get_mut(index)
+                            {
                                 *slot = value;
                             }
                         }

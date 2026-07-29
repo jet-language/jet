@@ -6,6 +6,14 @@
 
 fn checked(raw: Int) => Severity ? String = Severity.from_int(raw)
 
+fn sum(band: Range) => Int {
+    total := 0
+    loop n; band {
+        total += n
+    }
+    return total
+}
+
 fn run() {
     // Checked at compile time — always in range.
     sev :: Severity.from_int(7)
@@ -14,4 +22,11 @@ fn run() {
     print("{from_runtime.raw()}")
     widened :: sev + from_runtime
     print("{widened}")
+
+    // D-RANGE-VALUE1=A: inclusive and exclusive spellings make the same
+    // storable type. The value keeps its end behavior when passed to `sum`.
+    bands :: [1..3, 4..<7]
+    print(bands[0].contains(3))
+    print(bands[1].end)
+    print(sum(bands[1]))
 }

@@ -76,6 +76,12 @@
 // not part of the language surface.
 // D-OPDEF1=A adds no punctuation: `impl Type.Add`/`.Sub`/`.Mul`/`.Div`,
 // `.Equatable`, and `.Comparable` reuse ordinary trait-impl dot syntax.
+// D-AUTODERIVE1=E / D-AUTODERIVE-SYNTAX1=D (ratified 2026-07-29,
+// card #1267) amend S55 and D-MARK-DEBUG1. Printable, Equatable, and Debug
+// auto-derive when fields qualify. MANIFEST_POLICY_AUTO_DERIVE controls the
+// package default. At a type site, the ordinary marker names opt in and a
+// leading Bang opts out (`#!Printable`, `#[!Debug, Equatable]`). Missing
+// traits follow the package default; a hand-written impl always wins.
 // D-HTTP-ROUTE-SYNTAX2=A owns the two route-pattern markers carried inside
 // ordinary String values. They are not lexer tokens; the HTTP router consumes
 // them after String evaluation.
@@ -88,10 +94,24 @@
 // position as TYPE_UNION_SEP. `T ? E1 | E2` parses as `T ? (E1 | E2)`.
 // D-REGEX-LIT1=D adds no punctuation. Regex patterns use the universal
 // `Type.{ body }` / inferred `.{ body }` form from D-DOTCTOR3.
+// D-RANGE-VALUE1=A makes `a..b` and `a..<b` construct one nominal Range
+// value. Range carries end inclusivity; arm heads and distinct constraints
+// keep their literal-only grammar.
 // D-FMT-INTERP1=A adds `Fixed` to the closed interpolation-selector set:
 // `{value#Fixed(n)}` reuses `#` and ordinary integer-call parentheses.
 // D-QUANTITY-PRINT1 adds `Unit(name)` and `Unit(bare)` to that same selector
 // rail. Bare interpolation keeps the declared symbol as the default.
+// D-FACTMODEL1=A: tag, state, taint-kind, and effect leaves are one erased
+// compile-time fact model with one segment-aware subsumption rule.
+// D-TAG-SURFACE1=A: `tag Name { deny: [...], from: [...] }`, direct `#Name`
+// value/type facts, and `#Scrub(Name)` are the sole dataflow-tag surface.
+// D-STATE-NS1=A: state facts have the reserved `T.State.Name` qualified plane;
+// bare names are sugar only inside `#State` and `#Transition`.
+// D-RULEARG-TYPES1=A + D-LANGNS-NAME1=A: compiler marker vocabularies are
+// generated enums in `core.lang`, derived from Policy::APPLIED_RULES.
+// D-MARKER-NAME-HYGIENE1=A: `#Discriminant("field")` owns serde internal
+// discriminants and `#Job fn` owns scheduled entry functions. `#Tag` and
+// `#Task` are retired spellings.
 pub const HTTP_ROUTE_PARAM_PREFIX: &str = ":";
 pub const HTTP_ROUTE_CATCH_ALL_PREFIX: &str = "*";
 
@@ -292,7 +312,7 @@ pub const NAME_CASE_CATEGORIES: &[(&str, NameCase)] = &[
     ("distinct type", NameCase::Pascal),
     ("enum", NameCase::Pascal),
     ("enum variant", NameCase::Pascal),
-    ("enum variant group", NameCase::Pascal),
+    ("variant group", NameCase::Pascal),
     ("marker", NameCase::Pascal),
     ("protocol", NameCase::Pascal),
     ("protocol message", NameCase::Pascal),

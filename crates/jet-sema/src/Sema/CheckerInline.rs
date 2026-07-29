@@ -336,9 +336,17 @@ impl<'a> InlineAlwaysScan<'a> {
                 self.scan_expr(index);
             }
             Expr::Slice {
-                base, start, end, ..
+                base, start, end, range, ..
             } => {
                 self.scan_expr(base);
+                if let Some(range) = range {
+                    self.scan_expr(range);
+                } else {
+                    self.scan_expr(start);
+                    self.scan_expr(end);
+                }
+            }
+            Expr::Range { start, end, .. } => {
                 self.scan_expr(start);
                 self.scan_expr(end);
             }

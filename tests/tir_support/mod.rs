@@ -29,6 +29,22 @@ pub fn build_and_run(name: &str, src: &str) -> (i32, String) {
     (code, stdout)
 }
 
+pub fn compile(name: &str, src: &str) -> String {
+    let dir = unique_tmp("jet_tir_compile");
+    fs::create_dir_all(&dir).unwrap();
+    let jet_path = dir.join(format!("{name}.jet"));
+    fs::write(&jet_path, src).unwrap();
+    let shown = jet_path.to_string_lossy().into_owned();
+    jet::compile_with_path(src, &shown)
+        .unwrap_or_else(|diags| {
+            panic!(
+                "front end rejected:\n{}",
+                jet::render_diagnostics(&shown, src, &diags)
+            )
+        })
+        .rust
+}
+
 pub fn build_and_run_full(prefix: &str, name: &str, src: &str) -> (i32, String, String) {
     build_and_run_full_inner(prefix, name, src, None)
 }

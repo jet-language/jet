@@ -1020,22 +1020,46 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 // D-DYNARRAY1: `list.view(a..b)` — zero-copy window constructor.
                 // `&(recv)` (not `.clone()`): the window borrows the list's OWN
                 // backing storage, it never makes a second copy of it.
-                TBuiltinOp::ViewNew { line } => format!(
-                    "jet_view_new(&({}), {}, {}, {:?}, {})",
-                    recv,
-                    a(0),
-                    a(1),
-                    cx.file,
-                    line
-                ),
-                TBuiltinOp::ViewMutNew { line } => format!(
-                    "jet_view_mut_new(&mut ({}), {}, {}, {:?}, {})",
-                    recv,
-                    a(0),
-                    a(1),
-                    cx.file,
-                    line
-                ),
+                TBuiltinOp::ViewNew { line } => {
+                    if args.len() == 1 {
+                        format!(
+                            "jet_view_range_new(&({}), &({}), {:?}, {})",
+                            recv,
+                            a(0),
+                            cx.file,
+                            line
+                        )
+                    } else {
+                        format!(
+                            "jet_view_new(&({}), {}, {}, {:?}, {})",
+                            recv,
+                            a(0),
+                            a(1),
+                            cx.file,
+                            line
+                        )
+                    }
+                }
+                TBuiltinOp::ViewMutNew { line } => {
+                    if args.len() == 1 {
+                        format!(
+                            "jet_view_mut_range_new(&mut ({}), &({}), {:?}, {})",
+                            recv,
+                            a(0),
+                            cx.file,
+                            line
+                        )
+                    } else {
+                        format!(
+                            "jet_view_mut_new(&mut ({}), {}, {}, {:?}, {})",
+                            recv,
+                            a(0),
+                            a(1),
+                            cx.file,
+                            line
+                        )
+                    }
+                }
                 // D-ITERTOOLS1=A: non-closure lazy adapters return JetIter (no eager Vec).
                 TBuiltinOp::Take => format!("jet_iter_take({as_iter}, {})", a(0)),
                 TBuiltinOp::Skip => format!("jet_iter_skip({as_iter}, {})", a(0)),
@@ -1664,9 +1688,19 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             base,
             start,
             end,
+            range,
             line,
         } => {
             let b = emit_tir_expr(base, cx);
+            if let Some(range) = range {
+                return format!(
+                    "jet_slice_range(&({}), &({}), {:?}, {})",
+                    b,
+                    emit_tir_expr(range, cx),
+                    cx.file,
+                    line
+                );
+            }
             let a = emit_tir_expr(start, cx);
             let e = emit_tir_expr(end, cx);
             format!(
@@ -2573,7 +2607,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ReflectFieldName => format!("({}).name()", recv),
                 THandleOp::ReflectFieldValue => format!("({}).value()", recv),
                 THandleOp::TaskJoin => format!("({}).join()", recv),
-                THandleOp::TaskDetach => format!("{{ let _detach = ({}); }}", recv),
+                THandleOp::TaskDetach => format!("({}).detach()", recv),
                 THandleOp::TaskPause => format!("({}).pause()", recv),
                 THandleOp::TaskResume => format!("({}).resume()", recv),
                 THandleOp::TaskCancel => format!("({}).cancel()", recv),
@@ -3789,12 +3823,21 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // lowering; emit assembles the bespoke shape, byte-for-byte `emit_core_call`
         // (Source/Codegen/Expression.rs).
         TExprKind::CoreClosureCall { kind } => match kind {
-            TCoreClosureKind::Spawn { spawn_closure } => {
-                format!(
+            TCoreClosureKind::Spawn {
+                group,
+                spawn_closure,
+                ..
+            } => match group {
+                Some(group) => format!(
+                    "({}).spawn({})",
+                    emit_tir_expr(group, cx),
+                    spawn_closure
+                ),
+                None => format!(
                     "{}jet_std::JetTask::spawn({})",
                     cx.root_prefix, spawn_closure
-                )
-            }
+                ),
+            },
             TCoreClosureKind::Serve { addr, closure } => format!(
                 "{}jet_http_serve(&({}), {})",
                 cx.root_prefix,

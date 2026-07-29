@@ -215,6 +215,10 @@ pub(crate) fn rewrite_inline_calls_expr(
         | Expr::Err(inner, _)
         | Expr::Try(inner, _, _) => rewrite_inline_calls_expr(inner, siblings, modname),
         Expr::OptField { base, .. } => rewrite_inline_calls_expr(base, siblings, modname),
+        Expr::Range { start, end, .. } => {
+            rewrite_inline_calls_expr(start, siblings, modname);
+            rewrite_inline_calls_expr(end, siblings, modname);
+        }
         Expr::MethodCall { receiver, args, .. } => {
             rewrite_inline_calls_expr(receiver, siblings, modname);
             for a in args.iter_mut() {
@@ -283,10 +287,14 @@ pub(crate) fn rewrite_inline_calls_expr(
             rewrite_inline_calls_expr(base, siblings, modname);
             rewrite_inline_calls_expr(index, siblings, modname);
         }
-        Expr::Slice { base, start, end, .. } => {
+        Expr::Slice { base, start, end, range, .. } => {
             rewrite_inline_calls_expr(base, siblings, modname);
-            rewrite_inline_calls_expr(start, siblings, modname);
-            rewrite_inline_calls_expr(end, siblings, modname);
+            if let Some(range) = range {
+                rewrite_inline_calls_expr(range, siblings, modname);
+            } else {
+                rewrite_inline_calls_expr(start, siblings, modname);
+                rewrite_inline_calls_expr(end, siblings, modname);
+            }
         }
         Expr::CallValue { callee, args, .. } => {
             rewrite_inline_calls_expr(callee, siblings, modname);

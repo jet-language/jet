@@ -4,6 +4,7 @@ use cranelift_module::{FuncId, Linkage, Module};
 use jet_codegen::scheduler::{
     JetSchedulerChannel, JetSchedulerJoin, JetSchedulerSender, JetTaskControl,
 };
+use std::cell::Cell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::resident::resident_teardown;
@@ -11,6 +12,20 @@ use super::{
     Archive, Collections, Compress, Concurrency, CoreHost, Crypto, Encoding, Fmt, JitResultValue,
     Memory, Net, Numeric, Parse, Process, Random, Sketch, Solver, Text, Time, TRY_COMPILE_PANIC_HOOK_LOCK,
 };
+
+thread_local! {
+    static STRUCT_NEW_COUNT: Cell<usize> = const { Cell::new(0) };
+}
+
+#[doc(hidden)]
+pub fn reset_struct_new_count_for_test() {
+    STRUCT_NEW_COUNT.with(|count| count.set(0));
+}
+
+#[doc(hidden)]
+pub fn struct_new_count_for_test() -> usize {
+    STRUCT_NEW_COUNT.with(Cell::get)
+}
 
 pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
     let result = {
@@ -65,6 +80,8 @@ pub(crate) struct JitRuntime {
     pub(crate) senders: Vec<Option<JetSchedulerSender<i64>>>,
     pub(crate) tasks: Vec<Option<JetSchedulerJoin<i64>>>,
     pub(crate) task_controls: Vec<std::sync::Arc<JetTaskControl>>,
+    pub(crate) task_groups:
+        Vec<Option<jet_codegen::task_group::JetTaskGroupRuntime<i64>>>,
     /// General `Result<T, E>` ABI arena. Handles are one-based indices; payload
     /// bits are interpreted from checked TIR types, never dynamically guessed.
     pub(crate) results: Vec<JitResultValue>,
@@ -468,6 +485,14 @@ extern "C" fn jet_jit_str_push_f64(buf_id: i64, v: f64) {
     with_runtime_trap(|rt| {
         if let Some(buf) = rt.heap.get_string_mut(buf_id) {
             buf.push_str(&jet_rt::display_f64(v));
+        }
+    });
+}
+
+extern "C" fn jet_jit_str_push_compact_f64(buf_id: i64, v: f64) {
+    with_runtime_trap(|rt| {
+        if let Some(buf) = rt.heap.get_string_mut(buf_id) {
+            buf.push_str(&v.to_string());
         }
     });
 }
@@ -1007,6 +1032,7 @@ extern "C" fn jet_jit_numeric_bit_count(value: i64, op: i64, width: i64) -> i64 
 }
 
 extern "C" fn jet_jit_struct_new(n: i64) -> i64 {
+    STRUCT_NEW_COUNT.with(|count| count.set(count.get() + 1));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record(n as usize))
 }
 
@@ -1441,6 +1467,7 @@ pub(crate) struct HostFns {
     pub(crate) str_push_lit: FuncId,
     pub(crate) str_push_i64: FuncId,
     pub(crate) str_push_f64: FuncId,
+    pub(crate) str_push_compact_f64: FuncId,
     pub(crate) str_push_bool: FuncId,
     pub(crate) str_push_char: FuncId,
     pub(crate) str_push_str: FuncId,
@@ -1589,6 +1616,10 @@ pub(crate) fn new_jit_module() -> Result<(JITModule, HostFns), String> {
     builder.symbol("jet_jit_str_push_lit", jet_jit_str_push_lit as *const u8);
     builder.symbol("jet_jit_str_push_i64", jet_jit_str_push_i64 as *const u8);
     builder.symbol("jet_jit_str_push_f64", jet_jit_str_push_f64 as *const u8);
+    builder.symbol(
+        "jet_jit_str_push_compact_f64",
+        jet_jit_str_push_compact_f64 as *const u8,
+    );
     builder.symbol("jet_jit_str_push_bool", jet_jit_str_push_bool as *const u8);
     builder.symbol("jet_jit_str_push_char", jet_jit_str_push_char as *const u8);
     builder.symbol("jet_jit_str_push_str", jet_jit_str_push_str as *const u8);
@@ -2250,6 +2281,10 @@ fn declare_host_fns(
         str_push_lit: import("jet_jit_str_push_lit", &sig_str_push_lit)?,
         str_push_i64: import("jet_jit_str_push_i64", &sig_str_push_i64)?,
         str_push_f64: import("jet_jit_str_push_f64", &sig_str_push_f64)?,
+        str_push_compact_f64: import(
+            "jet_jit_str_push_compact_f64",
+            &sig_str_push_f64,
+        )?,
         str_push_bool: import("jet_jit_str_push_bool", &sig_str_push_bool)?,
         str_push_char: import("jet_jit_str_push_char", &sig_str_push_char)?,
         str_push_str: import("jet_jit_str_push_str", &sig_str_push_lit)?,

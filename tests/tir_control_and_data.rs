@@ -3,7 +3,7 @@
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{build_and_run, build_and_run_full, have_rustc};
+use tir_support::{build_and_run, build_and_run_full, compile, have_rustc};
 
 /// Arithmetic + a helper call + interpolation. The helper `double` and `main`
 /// are both fully covered, so both route through the TIR.
@@ -25,6 +25,36 @@ fn run() {
     let (code, stdout) = build_and_run("tir_arith", src);
     assert_eq!(code, 0, "should exit cleanly");
     assert_eq!(stdout, "sum 19\n38\n");
+}
+
+#[test]
+fn range_value_windows_are_no_copy_and_write_through() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+fn run() {
+    values := [10, 20, 30, 40, 50]
+    band :: 1..<4
+    window :: values[band]
+    print(window)
+    edit :: &values[band]
+    edit[1] = 99
+    print(values)
+}
+"#;
+    let rust = compile("tir_range_value_windows", src);
+    assert!(
+        rust.contains("let user_window = jet_view_range_new"),
+        "bare Range projection must borrow without copying: {rust}"
+    );
+    assert!(
+        rust.contains("let user_edit = jet_view_mut_range_new"),
+        "write Range projection must borrow the owner: {rust}"
+    );
+    let (code, stdout) = build_and_run("tir_range_value_windows", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "[20, 30, 40]\n[10, 20, 99, 40, 50]\n");
 }
 
 /// An if-expression (S68) bound to a local, plus a String param helper.
@@ -399,6 +429,15 @@ fn run() {
     }
 }
 ";
+    let generated = compile("tir_ranges_codegen", src);
+    assert!(
+        generated.contains("for user_n in (1i64)..=(5i64) {"),
+        "literal range loop must remain a direct Rust range jump:\n{generated}"
+    );
+    assert!(
+        !generated.contains("let _jet_range = JetRange"),
+        "literal range loop must not allocate or construct a Range value:\n{generated}"
+    );
     let (code, stdout) = build_and_run("tir_ranges", src);
     assert_eq!(code, 0);
     // 1+2+3+4+5 = 15, then 0,2,4,6,8,10 (inclusive end).
@@ -429,6 +468,61 @@ fn run() {
     assert_eq!(code, 0);
     // 0+1+2+3+4 = 10; empty exclusive range runs 0 times.
     assert_eq!(stdout, "10\n0\n");
+}
+
+/// D-RANGE-VALUE1=A: both range spellings construct one storable `Range`.
+/// A Range keeps its bounds and inclusivity when passed, returned, looped,
+/// queried, and used as a slice bound.
+#[test]
+fn range_values_store_pass_return_loop_and_slice() {
+    if !have_rustc() {
+        return;
+    }
+    let src = "\
+fn identity(band: ^Range) => Range {
+    return band
+}
+fn run() {
+    bands :: [1..3, 8..<10]
+    print(bands[0])
+    print(\"{bands[1]#Debug}\")
+    print(bands[0] == (1..3))
+    print(bands[0] == (1..<3))
+    print(bands[0].contains(3))
+    band :: identity(4..<7)
+    print(band.start)
+    print(band.end)
+    print(band.contains(6))
+    print(band.contains(7))
+    print((7..4).contains(5))
+    total := 0
+    loop n; band {
+        total = (total + n)
+    }
+    print(total)
+    xs :: [10, 20, 30, 40, 50, 60, 70, 80]
+    print(xs[band])
+}
+";
+    let (code, stdout) = build_and_run("tir_range_values", src);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        "\
+Range { start: 1, end: 3, exclusive: false }
+Range { start: 8, end: 10, exclusive: true }
+true
+false
+true
+4
+7
+true
+false
+false
+15
+[50, 60, 70]
+"
+    );
 }
 
 /// Named loops: `next(outer)` and `break(outer)` driving a nested

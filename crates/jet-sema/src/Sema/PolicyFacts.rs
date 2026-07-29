@@ -93,17 +93,7 @@ pub fn collect_policy_facts(src: &str) -> Result<PolicyFactGraph, Vec<Diagnostic
         return Err(lex_diags);
     }
     let program = Parser::parse(&toks)?;
-    let mut graph = collect_policy_facts_from_program(&program);
-    // Value-fact tags are type-transparent; surface them from source so the
-    // shared graph records introduction sites alongside `#Sanitizer` sinks.
-    if src.contains("#Tainted") {
-        graph.record(
-            PolicyDomain::Taint,
-            "source",
-            "#Tainted value-fact enters the shared IFC/taint lattice",
-        );
-    }
-    Ok(graph)
+    Ok(collect_policy_facts_from_program(&program))
 }
 
 pub fn collect_policy_facts_from_program(program: &Program) -> PolicyFactGraph {
@@ -188,11 +178,11 @@ fn collect_func(graph: &mut PolicyFactGraph, func: &Func) {
             format!("#Pre×{} #Post×{}", func.pre.len(), func.post.len()),
         );
     }
-    if func.is_sanitizer {
+    if let Some(tag) = &func.scrub_tag {
         graph.record(
             PolicyDomain::Taint,
             func.name.clone(),
-            "#Sanitizer clears taint before sinks (D-TAINT1)",
+            format!("#Scrub({tag}) removes exactly one fact tag (D-TAG-SURFACE1)"),
         );
     }
     if func.is_replayable {

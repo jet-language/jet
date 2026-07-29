@@ -249,7 +249,7 @@ fn instance_definition_identity_tracks_manifest_semver_not_formatting_or_workspa
 fn trait_impl_and_error_conversion_are_specialized_as_one_local_identity_graph() {
     let src = r#"
 module laws<T> {
-    tag Audited;
+    tag Audited { deny: [Net] }
     fn audited(value: #Audited T) => #Audited T { return ~value }
     trait Reveal { type Output; fn reveal(self) => T }
     struct Wrapped { value: T }
@@ -287,7 +287,7 @@ fn run() {}
 fn deriving_instance_tag_keeps_e0731() {
     let (_, diagnostics) = check(r#"
 module bad<T> {
-    tag Marker;
+    tag Marker { deny: [Net] }
     struct Value { item: T; derive Marker }
 }
 module instance = bad<Int>

@@ -108,6 +108,7 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         "ProcessChild" => matches!(member, "stdin" | "stdout" | "stderr" | "terminal"),
         "TerminalSize" => matches!(member, "cols" | "rows"),
         "TerminalPolicy" => matches!(member, "size" | "mode"),
+        "Range" => matches!(member, "start" | "end" | "exclusive"),
         n if n == Syntax::TYPE_JSON_ERROR || n == "JSONError" => {
             matches!(member, "line" | "message")
         }

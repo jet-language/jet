@@ -796,7 +796,7 @@ mod s61_tests {
     fn adjacent_marker_stacks_share_one_ordered_e0999_rewrite() {
         for (src, expected) in [
             (
-                "#Task\n#Every(1s)\nfn tick() {}\n",
+                "#Job\n#Every(1s)\nfn tick() {}\n",
                 "#[Task, Every(1s)]",
             ),
             (
@@ -937,7 +937,7 @@ mod s61_tests {
             task_lex_diagnostics.is_empty(),
             "{task_lex_diagnostics:?}"
         );
-        parse(&task_tokens).expect("#Doc may attach to a #Task function");
+        parse(&task_tokens).expect("#Doc may attach to a #Job function");
 
         let src = "#Doc(\"helper text\") fn helper() {}\n";
         let (tokens, lex_diagnostics) = lex(src);

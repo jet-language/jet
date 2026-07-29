@@ -101,7 +101,7 @@ loop-body= "loop" effect-body
 source-clauses = source-clause { "," source-clause } ;
 source-clause = ident [ "," ident ] ";" source [ ";" expr ] ;
 loop-result-body = effect-body | "->" value-arm-body ;
-source   = expr [ ".." expr ] ;
+source   = expr ;                              // a range literal is one Range expression (D-RANGE-VALUE1)
 break    = "break" [ expr | "(" ident [ "," expr ] ")" ] NL ;
 next     = "next" [ "(" ident ")" ] NL ;
 cond     = expr | "(" expr ")" ;                     // S68/D-SG2: optional parens, fmt strips them
@@ -167,7 +167,11 @@ keep code readable from top to bottom. See
   subject is exhaustive; result types unify. Braces group multiline bodies.
 - `loop` has infinite,
   conditional, source (`loop x; source [; stride]`), map-pair, and explicit-state
-  (`loop i := init; cond [; afterthought]`) headers. Range sources are inclusive.
+  (`loop i := init; cond [; afterthought]`) headers. `a..b` and `a..<b`
+  construct one `Range` value over `Int`; the first includes `b` and the second
+  excludes it. A Range may be stored, passed, returned, and used as a loop
+  source or slice bound. It exposes `.start`, `.end`, and `.contains(value)`.
+  Literal range loops still compile directly to jumps without allocation.
   Source/bounds/stride evaluate once left-to-right; stride must be positive `Int`
   and is checked before the first pull. `break`/`next`
   inside loops only (E0115, S23). A loop may carry an ordinary-name label
@@ -205,7 +209,9 @@ keep code readable from top to bottom. See
   the porting-hazard teaching errors: `..=` in an arm head is **E0318** (Jet's
   `..` is already inclusive — write `lo..hi`), `step` in an arm head is
   **E0319** (`step` is a loop modifier, not a band), and an inverted/empty band
-  `hi..lo` is **E0316**.
+  `hi..lo` is **E0316**. Arm heads accept range literals only. A
+  `distinct Int(0..10)` constraint also stays literal-only because a runtime
+  Range cannot determine a type declaration (D-RANGE-VALUE1=A).
 - **Ambient surface (D-PRELUDE-LAW1=A):** this registry is closed. Always
   ambient: `print`, `input`, `panic`, `require`. Comptime-gated ambient:
   `embed_file`, `embed_bytes`, `find`, `fetch`. A user declaration shadows an
@@ -654,10 +660,12 @@ impl Circle {
   `impl Type.Trait { … }` (qualify foreign types: `impl other.Point.Shape`).
   A trait name in type position (`[Shape]`, `fn f(s: Shape)`) means
   dynamic dispatch with invisible boxing. Generic params: `fn f<T: Bound>(…)`
-  and `struct Pair<T> { … }`. Built-in traits follow S55: auto
-  `Printable`/`Equatable`/`Debug` (D-MARK-DEBUG1=A: `Debug` auto-derives
-  whenever every field qualifies — no `#Debug` needed; a hand-written impl
-  overrides); explicit `#Comparable`, `#Codable`,
+  and `struct Pair<T> { … }`. Built-in traits follow S55:
+  `Printable`/`Equatable`/`Debug` auto-derive whenever every field qualifies.
+  The package default is on; `policy: .{ auto_derive: false }` disables silent
+  generation. A signed type marker opts one trait in or out (`#Debug`,
+  `#!Debug`), and a hand-written implementation wins (D-AUTODERIVE1=E,
+  D-AUTODERIVE-SYNTAX1=D). Other explicit derives are `#Comparable`, `#Codable`,
   `#Encode`, `#Decode`.
 - **Encoding traits (D-SERDE2/D-SERDE16):** `Encode.encode(self) => DataTree`
   and `Decode.decode(tree: DataTree) => Self ? DecodeError` are ordinary Jet
@@ -681,14 +689,14 @@ impl Circle {
   needing outside context — both need a design call on how `[FieldError]`
   composes with the existing single-`DecodeError` `Decode` trait contract
   before they can land without a breaking change.
-- **Tags (D-QUAL2):** `tag Name;` or `tag Name { }` — a marker qualifier with
-  no methods that erases at runtime (codegen emits nothing). Tags are the second
-  and only other qualifier kind beside traits; the beginner rule is one
-  sentence: *methods → trait, no methods → tag.* A tag carries no methods, so
+- **Tags (D-QUAL2, D-TAG-SURFACE1):** `tag Name { deny: [Net] }` declares an
+  erased dataflow fact and its policy. `deny` is required and nonempty; `from`
+  is optional. Direct `#Name` tags attach to values, fields, parameters, and
+  returns. `#Scrub(Name)` removes exactly that tag. A tag carries no methods, so
   declaring one in a tag body is **E0732**, and using a tag where dispatch or
   method attachment is expected — `derive`d, or implemented/used as a trait —
   is **E0731** (fix-it: declare it as a `trait`). All tags are PascalCase
-  (D-CASING1).
+  (D-CASING1). Prelude declares `Input`, `PII`, `Secret`, and `Credential`.
 - **Applied rules (D-SHAPE2/D-ATTR2):** `#Rule` or `#[A, B]` on the
   line before a declaration. Block markers use PascalCase and parenthesized
   arguments when arguments exist. An explicit empty effect row is `=[]=>`; `comptime`
@@ -2037,13 +2045,30 @@ serialization or implicit capture merge; callers
 return data, use `para_partition` or `para_fold`, or choose explicit synchronized
 state.
 
-### Taskgroups and structured combinators (D-TASKSCOPE1, D-CONCCOMB1, D-RACEWIN1, D-CONCSELECT1; verified 2026-06-30)
+### Taskgroups and structured combinators (D-TASKSCOPE1, D-TASKGROUP-PARAM1, D-CONCCOMB1, D-RACEWIN1, D-CONCSELECT1; verified 2026-07-29)
 
 Structured concurrency uses a scoped `taskgroup` (D-TASKSCOPE1=A). Inside
 `taskgroup g { … }`, `g.task => expression` or `g.task => { … }` spawns a
 child owned by the
 group. Unjoined handles at scope exit are cancelled and joined before the block
 returns.
+
+`TaskGroup` may also be written as a direct parameter of a named function
+(D-TASKGROUP-PARAM1=A). This lets a lexical group flow down the call stack:
+
+```jet
+fn add_work(group: TaskGroup, value: Int) {
+    task :: group.task => value + 1
+    print(task.join())
+}
+```
+
+A spawn through a `TaskGroup` parameter may capture only copied or moved owned
+values. It may not capture a `view`. `TaskGroup` remains a scoped authority, not
+a general value: it is illegal in fields, returns, local declarations, lambda
+parameters, and escaping closures. The parameter carries the lexical group's
+internal collector. A task spawned by a helper therefore remains owned by the
+caller's group and is cancelled and joined at that outer scope's exit.
 
 Combinators are methods on the group handle only (no detached work):
 

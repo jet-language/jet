@@ -1215,7 +1215,7 @@ fn interpreter_matches_expected_golden() {
     for stem in interpreter_example_stems() {
         let file = example_path(&stem);
         // D-JPK-TASKRUN1 / R12 (card #476): task_runner's meaningful entries are
-        // its `#Task` fns, not the `fn run()` usage hint. Mirror golden.rs's
+        // its `#Job` fns, not the `fn run()` usage hint. Mirror golden.rs's
         // AOT `--task` battery on the interpreter tier via `run_named_task`,
         // proving the same TIR dispatches each task identically. The bare
         // `fn run()` output is not a golden.
@@ -3051,6 +3051,126 @@ fn unified_loop_jit_tiers_are_explicit_and_match_aot() {
         assert_eq!(diags.len(), 1, "{diags:?}");
         assert_eq!(diags[0].code, "E0123");
     }
+}
+
+#[test]
+fn range_values_run_in_resident_jit_without_fallback() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let unboxed = r#"
+fn identity(band: ^Range) => Range {
+    return band
+}
+fn run() {
+    band := 2..<5
+    copied :: identity(band)
+    print(copied)
+    print(band.start)
+    print(copied.contains(4))
+    print(copied == band)
+    bands :: [1..3, 8..<10]
+    print("{bands[1]#Debug}")
+    print(bands[0].start)
+    print(bands[0].contains(3))
+    total := 0
+    loop n; copied {
+        total += n
+    }
+    print(total)
+    values :: [10, 20, 30, 40, 50, 60]
+    print(~values[copied])
+    band = 7..9
+    print(band)
+}
+"#;
+    jet_jit::reset_struct_new_count_for_test();
+    let unboxed_run = run_cranelift_without_fallback(unboxed, "range_unboxed");
+    assert_eq!(
+        unboxed_run.stdout,
+        "Range { start: 2, end: 5, exclusive: true }\n2\ntrue\ntrue\nRange { start: 8, end: 10, exclusive: true }\n1\ntrue\n9\n[30, 40, 50]\nRange { start: 7, end: 9, exclusive: false }\n"
+    );
+    assert_eq!(
+        jet_jit::struct_new_count_for_test(),
+        0,
+        "Range construct/copy/pass/return/list/field/contains/show/equality/loop/slice must not call struct_new"
+    );
+
+    let src = r#"
+fn identity(band: ^Range) => Range {
+    return band
+}
+fn run() {
+    band :: 2..<5
+    copied :: identity(band)
+    print(copied == band)
+    bands :: [1..3, 8..<10]
+    print(bands[0])
+    print("{bands[1]#Debug}")
+    print(bands[0].contains(3))
+    print(band)
+    print("{band}")
+    print("{band#Debug}")
+    print(band == (2..<5))
+    print(band == (2..5))
+    print(band.start)
+    print(band.end)
+    print(band.contains(4))
+    print((5..2).contains(3))
+    total := 0
+    loop n; band {
+        total += n
+    }
+    print(total)
+    values := [10, 20, 30, 40, 50, 60]
+    print(~values[band])
+    edit :: &values[band]
+    edit[0] = 99
+    print(values)
+}
+"#;
+    let proof = std::env::temp_dir().join("jet_jit_range_value_safety.jet");
+    fs::write(&proof, src).unwrap();
+    let bundle = checked_bundle_from_path(&proof.to_string_lossy());
+    assert_eq!(
+        jet_jit::resident_jit_func_safety_detail(&bundle, "run"),
+        None,
+        "Range values and windows must stay in resident JIT"
+    );
+    jet_jit::try_compile_bundle(&bundle)
+        .unwrap_or_else(|error| panic!("Range resident compilation failed: {error}"));
+    let native = run_cranelift_without_fallback(src, "range_values");
+    let expected = "\
+true
+Range { start: 1, end: 3, exclusive: false }
+Range { start: 8, end: 10, exclusive: true }
+true
+Range { start: 2, end: 5, exclusive: true }
+Range { start: 2, end: 5, exclusive: true }
+Range { start: 2, end: 5, exclusive: true }
+true
+false
+2
+5
+true
+false
+9
+[30, 40, 50]
+[10, 20, 99, 40, 50, 60]
+";
+    assert_eq!(native.stdout, expected);
+
+    let dir = common::unique_tmp("jet_range_value_interpreter");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.jet");
+    fs::write(&path, src).unwrap();
+    match dev_iteration(&path.to_string_lossy(), false, true) {
+        RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, expected),
+        RunOutcome::Problems(diags) => {
+            panic!("Range views must run in the canonical evaluator: {diags:?}")
+        }
+    }
+    let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -8231,8 +8351,8 @@ fn run() {
 }
 
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `jet dev`'s due-task tick
-/// consumer. `scheduled_tasks` must enumerate every `#Task #Every(…)` fn
-/// with its resolved schedule (and skip a plain `#Task fn` with no
+/// consumer. `scheduled_tasks` must enumerate every `#Job #Every(…)` fn
+/// with its resolved schedule (and skip a plain `#Job fn` with no
 /// `#Every(…)`), and `run_named_task` must actually execute one by name
 /// through the same interpreter tier `dev_iteration` uses — golden-testing
 /// the loop's per-tick logic without the long-running file watcher, same
@@ -8261,7 +8381,7 @@ fn schedule_every_dev_loop_consumer() {
     assert_eq!(
         names,
         vec!["nightly_backup", "prune_sessions"],
-        "scheduled_tasks must list every #Task fn carrying #Every(…), and skip the \
+        "scheduled_tasks must list every #Job fn carrying #Every(…), and skip the \
          #Every(…)-less `manual_only` task"
     );
     let schedules: std::collections::HashMap<&str, &jet::AST::EverySchedule> =

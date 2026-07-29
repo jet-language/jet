@@ -21,6 +21,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         senders: Vec::new(),
         tasks: Vec::new(),
         task_controls: Vec::new(),
+        task_groups: Vec::new(),
         results: Vec::new(),
         solvers: Vec::new(),
         rngs: Vec::new(),
@@ -118,6 +119,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.senders.clear();
     rt.tasks.clear();
     rt.task_controls.clear();
+    rt.task_groups.clear();
     rt.results.clear();
     rt.solvers.clear();
     rt.rngs.clear();
@@ -246,6 +248,10 @@ pub(crate) fn resident_invoke() -> Result<RunOutcome, String> {
             entry();
             None
         };
+        // A trap, deadline, cancellation, propagated error, or explicit early
+        // return may bypass a generated lexical epilogue. Drain any surviving
+        // groups before interpreting the run outcome.
+        Concurrency::close_active_task_groups();
         Concurrency::settle_pending_after_native();
         jet_codegen::scheduler::jet_scheduler_drain();
         Concurrency::set_active_runtime(None);

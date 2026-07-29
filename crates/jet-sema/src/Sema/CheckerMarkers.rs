@@ -10,9 +10,9 @@
 //! visible in this build (D-METADERIVE1=A user derives are a legal, dynamic
 //! addition to the contract vocabulary, not typos).
 //!
-//! A retired `Debug` registry row is deliberately not flagged here: E0922
-//! (`crates/jet-foundation/src/Traits.rs`) already owns that retired name
-//! end to end, with its own text. Duplicating it here would double-report.
+//! D-AUTODERIVE-SYNTAX1=D restored `Debug` as an active signed type-site
+//! auto-derive control. It follows the same closed-vocabulary checks as
+//! `Printable` and `Equatable`.
 
 use crate::AST::{Item, Marker};
 use crate::Diagnostics::{Diagnostic, Span};
@@ -76,11 +76,60 @@ fn validate_rule_arguments(
     let bindings = rule_signature_bindings(marker)?;
     let marker_name = marker.name.clone();
     let marker_span = marker.span;
+    let rule = crate::Policy::applied_rule(&marker_name);
     let mut types = Vec::with_capacity(bindings.len());
     let mut constants = Vec::with_capacity(bindings.len());
     let mut mismatch = false;
     for binding in &bindings {
         let argument = &mut marker.args[binding.source_index];
+        let source_type = binding
+            .parameter_index
+            .and_then(|index| rule.and_then(|rule| rule.signature.params.get(index)))
+            .map(|parameter| parameter.source_type)
+            .or_else(|| rule.and_then(|rule| rule.signature.variadic_source_type));
+        if let Some(declaration) =
+            source_type.and_then(crate::Policy::rule_arg_declaration)
+        {
+            let path = match argument {
+                crate::AST::Expr::Ident(name, _) => Some(name.clone()),
+                crate::AST::Expr::Field(base, member, _) => {
+                    fn path(expression: &crate::AST::Expr) -> Option<String> {
+                        match expression {
+                            crate::AST::Expr::Ident(name, _) => Some(name.clone()),
+                            crate::AST::Expr::Field(base, member, _) => {
+                                Some(format!("{}.{}", path(base)?, member))
+                            }
+                            _ => None,
+                        }
+                    }
+                    path(base).map(|base| format!("{base}.{member}"))
+                }
+                crate::AST::Expr::EnumLit { variant, .. } => Some(variant.clone()),
+                _ => None,
+            };
+            let candidate = path.as_deref().map(|path| {
+                let segments: Vec<&str> = path.split('.').collect();
+                let variant_segments = segments
+                    .iter()
+                    .position(|segment| *segment == declaration.name)
+                    .and_then(|index| segments.get(index + 1..))
+                    .filter(|segments| !segments.is_empty())
+                    .unwrap_or(&segments);
+                if matches!(declaration.name, "Capability" | "Target") {
+                    variant_segments.first().copied().unwrap_or(path)
+                } else {
+                    variant_segments.last().copied().unwrap_or(path)
+                }
+            });
+            if !declaration.variants.is_empty()
+                && candidate.is_some_and(|candidate| !declaration.variants.contains(&candidate))
+            {
+                return Err(crate::Policy::marker_argument_shape_error(
+                    &marker_name,
+                    marker_span,
+                ));
+            }
+        }
         let observation = if binding.ty == crate::Policy::RuleArgType::Ident
             || binding.ty == crate::Policy::RuleArgType::Any
                 && marker_name != Syntax::ATTR_DEFAULT
@@ -242,6 +291,7 @@ pub(crate) fn resolve_static_rule_products(
         facts.push(crate::AST::AppliedRuleApplication {
             marker: Marker {
                 name: name.to_string(),
+                negated: false,
                 name_span: span,
                 args: vec![expression],
                 arg_labels: vec![None],
@@ -550,7 +600,6 @@ fn is_legal_rule_name(name: &str, known_derive_names: &HashSet<String>) -> bool 
 /// legal, or already reported elsewhere:
 /// - a name known on the OTHER plane already got E0062/E0063 from the
 ///   parser's shared marker reader — never double-report.
-/// - `#Debug` is E0922's job (see module docs).
 fn check_one(m: &Marker, known_derive_names: &HashSet<String>) -> Option<Diagnostic> {
     let e0922_owns_debug = crate::Policy::applied_rule(&m.name).is_some_and(|row| {
         row.name == "Debug"

@@ -204,7 +204,9 @@ impl<'a> Checker<'a> {
             // `variadic_bound_list`) — nothing to declared-type-check there.
             let skip_type_check = (p.name == Syntax::KW_SELF || p.variadic_bound_list.is_some())
                 && matches!(&p.ty, Type::Named(n) if n.is_empty());
-            if !skip_type_check {
+            let taskgroup_parameter = owner_type.is_none()
+                && matches!(&p.ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP);
+            if !skip_type_check && !taskgroup_parameter {
                 let pty = self.resolve_type(p.ty.clone());
                 self.check_declared_type(&pty, p.ty_span);
             }
@@ -400,6 +402,13 @@ impl<'a> Checker<'a> {
             }
             self.pop_scope();
         }
+        let taskgroup_floor = self.taskgroup_stack.len();
+        if owner_type.is_none() {
+            self.taskgroup_stack.extend(f.params.iter().filter_map(|param| {
+                matches!(&param.ty, Type::Named(name) if name == Syntax::TYPE_TASKGROUP)
+                    .then(|| TaskGroupCtx::parameter(param.name.clone()))
+            }));
+        }
         let prev_unsafe = self.in_unsafe;
         self.in_unsafe = self.in_unsafe || f.is_unsafe;
         self.check_block(&mut f.body, false);
@@ -411,6 +420,7 @@ impl<'a> Checker<'a> {
         // never has to guess.
         self.check_variadic_bound_body_shape(f);
         self.lint_unjoined_tasks_in_current_scope();
+        self.taskgroup_stack.truncate(taskgroup_floor);
         // D-LIN1: the function body's own scope (parameters + top-level locals) is
         // never `pop_scope`d, so check its `#SingleUse` locals here (E0140).
         self.check_single_use_consumed_in_current_scope();
@@ -709,11 +719,15 @@ fn expr_uses(e: &Expr, name: &str, other: &mut Vec<Span>) {
             expr_uses(index, name, other);
         }
         Expr::Slice {
-            base, start, end, ..
+            base, start, end, range, ..
         } => {
             expr_uses(base, name, other);
-            expr_uses(start, name, other);
-            expr_uses(end, name, other);
+            if let Some(range) = range {
+                expr_uses(range, name, other);
+            } else {
+                expr_uses(start, name, other);
+                expr_uses(end, name, other);
+            }
         }
         Expr::ListLit(items, _) => {
             for i in items {
@@ -1339,6 +1353,7 @@ pub(crate) fn synthesize_delegation_method(
         is_inline_always: false,
         inline_span: None,
         is_sanitizer: false,
+        scrub_tag: None,
         declared_effects: None,
         effect_via: None,
         state_requires: None,
@@ -1412,6 +1427,7 @@ pub(crate) fn synthesize_default_method(
         is_inline_always: false,
         inline_span: None,
         is_sanitizer: false,
+        scrub_tag: None,
         declared_effects: None,
         effect_via: None,
         state_requires: None,

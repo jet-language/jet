@@ -17,6 +17,7 @@ pub const RESERVED_TYPES: &[&str] = &[
     Syntax::TYPE_PRIORITY_QUEUE,
     Syntax::TYPE_LRU,
     Syntax::TYPE_ITER,
+    Syntax::TYPE_RANGE,
     "Bag",
     Syntax::TYPE_DEQUE,
     Syntax::TYPE_BIGINT,
@@ -181,6 +182,10 @@ pub fn builtin_method_return(
         Type::Map { key, value, .. } => map_method_return(key, value, method, arg_count),
         Type::String => string_method_return(method, arg_count),
         Type::Named(n) if n == "Stopwatch" => stopwatch_method_return(method, arg_count),
+        Type::Named(n) if n == Syntax::TYPE_RANGE => match (method, arg_count) {
+            ("contains", 1) => Some(Some(Type::Bool)),
+            _ => None,
+        },
         // D-DET1: deterministic injected Clock/Rng capability methods. Reading
         // time/randomness THROUGH the handle is reproducible (caller seeded it).
         Type::Named(n) if n == crate::Syntax::CLOCK_TYPE => clock_method_return(method, arg_count),
@@ -1288,6 +1293,9 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
         }
     }
     match recv_ty {
+        Type::Named(n) if n == Syntax::TYPE_RANGE && method == "contains" => {
+            Some(vec![Type::Int])
+        }
         Type::Named(n) if n == "Secret" && method == "from_text" => Some(vec![Type::String]),
         Type::Named(n) if matches!(n.as_str(), "Secret" | "VerifyKey" | "X25519PublicKey" | "Signature" | "Sealed" | "WrappedKey" | "WrappedVaultKey") && method == "from_bytes" => Some(vec![Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))]),
         Type::Named(n) if n == "KeyUnlock" && method == "Recipient" => Some(vec![Type::Named("X25519SecretKey".into())]),

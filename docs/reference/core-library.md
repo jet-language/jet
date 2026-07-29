@@ -74,6 +74,27 @@ use core.encoding.json as json       // a nested submodule
 `use core.files` and `use core.encoding.json` each resolve to a
 compiler-known module under the `core` root.
 
+### `core.lang` — language declarations
+
+`core.lang` publishes the compiler vocabulary used by typed marker arguments.
+These are ordinary generated enums. The marker registry is their source, so
+diagnostics, `jet explain`, hover, completion, documentation, and reflection
+show the same declaration.
+
+The generated enum types are `ABI`, `Capability`, `FfiLanguage`, `InlineMode`,
+`IntType`, `Layout`, `Maturity`, `NamingCase`, `ObligationMode`,
+`PolicySetting`, `State`, `TaintKind`, `Target`, and `Track`.
+
+```jet
+use core.lang as lang
+
+#Inline(lang.InlineMode.Always)
+fn parse_fast(text: String) => Int = text.parse() ?? 0
+```
+
+An expected marker argument also accepts a dot literal without an import:
+`#Inline(.Always)`.
+
 **Not allowed:**
 
 ```jet
@@ -2063,10 +2084,10 @@ are follow-on work — see docs/spec/syntax-decisions.md's D-VALIDATE1 entry.
 |-----------|--------|
 | `#RenameAll(camel)` | map every field's wire key — `camel`/`snake`/`pascal`/`kebab`/`screaming` (D-SERDE3) |
 | `#DenyUnknownFields` | a wire key the struct doesn't declare is an error, not ignored (D-SERDE8) |
-| `#Tag("type")` / `#Untagged` | enum wire representation (D-SERDE7); default is externally tagged |
+| `#Discriminant("type")` / `#Untagged` | enum wire representation (D-SERDE7); default is externally tagged |
 
 **Enums** serialize externally tagged by default: a unit variant is its bare name
-(`"Closed"`), a payload variant is `{"Variant": payload}`. `#Tag("type")` switches
+(`"Closed"`), a payload variant is `{"Variant": payload}`. `#Discriminant("type")` switches
 to internal tagging (`{"type":"Click", …}`); a single unnamed payload uses the
 canonical `value` key (`{"type":"Count","value":7}`). `#Untagged` emits the
 payload alone.

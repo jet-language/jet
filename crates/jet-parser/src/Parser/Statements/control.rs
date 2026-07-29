@@ -95,7 +95,26 @@ impl<'a> Parser<'a> {
                 }
                 self.expect(TokKind::Semi, "after the loop source binding")?;
                 let first = self.expr_no_struct_lit()?;
-                let kind = if matches!(self.peek().kind, TokKind::DotDot | TokKind::DotDotLt) {
+                let kind = if let Expr::Range {
+                    start,
+                    end,
+                    exclusive,
+                    ..
+                } = &first
+                {
+                    let step = if matches!(self.peek().kind, TokKind::Semi) {
+                        self.bump();
+                        Some(self.expr_no_struct_lit()?)
+                    } else {
+                        None
+                    };
+                    ForKind::Range {
+                        start: (**start).clone(),
+                        end: (**end).clone(),
+                        step,
+                        exclusive: *exclusive,
+                    }
+                } else if matches!(self.peek().kind, TokKind::DotDot | TokKind::DotDotLt) {
                     let exclusive = matches!(self.peek().kind, TokKind::DotDotLt);
                     self.bump();
                     let end = self.expr_no_struct_lit()?;
@@ -924,7 +943,7 @@ impl<'a> Parser<'a> {
         let arguments = self.bound_registered_rule_arguments(&marker)?;
         let mut caps = Vec::with_capacity(marker.args.len());
         for argument in arguments.variadic() {
-            let Some(name) = Self::marker_effect_path(argument) else {
+            let Some(name) = Self::marker_enum_path(argument, "Capability") else {
                 return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_CAPS, argument.span()));
             };
             caps.push((name, argument.span()));
@@ -959,7 +978,8 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::Colon, "after the scoped capability handle")?;
             let mut caps = Vec::new();
             loop {
-                caps.push(self.expect_effect_path_name("as a granted effect")?);
+                let (name, span) = self.expect_effect_path_name("as a granted effect")?;
+                caps.push((Self::strip_marker_enum_prefix(name, "Capability"), span));
                 if matches!(self.peek().kind, TokKind::RParen) {
                     break;
                 }
@@ -992,7 +1012,7 @@ impl<'a> Parser<'a> {
         let arguments = self.bound_registered_rule_arguments(&marker)?;
         let mut caps = Vec::with_capacity(marker.args.len());
         for argument in arguments.variadic() {
-            let Some(name) = Self::marker_effect_path(argument) else {
+            let Some(name) = Self::marker_enum_path(argument, "Capability") else {
                 return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_GRANT, argument.span()));
             };
             caps.push((name, argument.span()));
@@ -1022,16 +1042,6 @@ impl<'a> Parser<'a> {
             body,
             span: Span::new(marker.span.start, end),
         })
-    }
-
-    fn marker_effect_path(expr: &Expr) -> Option<String> {
-        match expr {
-            Expr::Ident(name, _) => Some(name.clone()),
-            Expr::Field(base, member, _) => {
-                Some(format!("{}.{}", Self::marker_effect_path(base)?, member))
-            }
-            _ => None,
-        }
     }
 
     /// D-TXN4: parse a `#Transact(name) { … }` transaction block in statement
@@ -1149,7 +1159,26 @@ impl<'a> Parser<'a> {
             }
             self.expect(TokKind::Semi, "after the loop source binding")?;
             let first = self.expr_no_struct_lit()?;
-            let kind = if matches!(self.peek().kind, TokKind::DotDot | TokKind::DotDotLt) {
+            let kind = if let Expr::Range {
+                start,
+                end,
+                exclusive,
+                ..
+            } = &first
+            {
+                let step = if matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                    Some(self.expr_no_struct_lit()?)
+                } else {
+                    None
+                };
+                ForKind::Range {
+                    start: (**start).clone(),
+                    end: (**end).clone(),
+                    step,
+                    exclusive: *exclusive,
+                }
+            } else if matches!(self.peek().kind, TokKind::DotDot | TokKind::DotDotLt) {
                 // D-RANGE-EXCL1=C: `..` inclusive (S22); `..<` half-open.
                 let exclusive = matches!(self.peek().kind, TokKind::DotDotLt);
                 self.bump();
@@ -1520,7 +1549,20 @@ impl<'a> Parser<'a> {
                 }
                 self.expect(TokKind::Semi, "after the loop binding")?;
                 let first = self.expr_no_struct_lit()?;
-                let kind = if matches!(self.peek().kind, TokKind::DotDot | TokKind::DotDotLt) {
+                let kind = if let Expr::Range {
+                    start,
+                    end,
+                    exclusive,
+                    ..
+                } = &first
+                {
+                    ForKind::Range {
+                        start: (**start).clone(),
+                        end: (**end).clone(),
+                        step: None,
+                        exclusive: *exclusive,
+                    }
+                } else if matches!(self.peek().kind, TokKind::DotDot | TokKind::DotDotLt) {
                     let exclusive = matches!(self.peek().kind, TokKind::DotDotLt);
                     self.bump();
                     let end = self.expr_no_struct_lit()?;

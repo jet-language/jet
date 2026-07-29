@@ -1,6 +1,6 @@
 import { boardEpochs, cardMatches, sortCards, ownerVerifyQueue, openAcceptanceBallot } from './board-state.js';
 import { renderMarkdown, splitBlocks } from './markdown.js';
-import { buildDigestTimeline } from './digest.js';
+import { buildDoneMessageQueue } from './done-messages.js';
 
 // Tower client. Vanilla JS, no framework, no build.
 // Two views: Now (everything blocked on the owner) and Board (epochs →
@@ -209,18 +209,33 @@ function ageChip(iso) {
   const label = h < 48 ? Math.round(h) + 'h' : Math.round(h / 24) + 'd';
   return `<span class="agechip ${h > 72 ? 'agechip--hot' : ''}" title="waiting ${label}">${label}</span>`;
 }
-const ageOf = (it) => it.type === 'decision' ? it.decision.created : it.type === 'verify' ? (it.ballot ? it.ballot.created : it.card.updated) : it.card.created;
+const ageOf = (it) => ['done', 'message'].includes(it.type)
+  ? it.at
+  : it.type === 'decision'
+    ? it.decision.created
+    : it.ballot ? it.ballot.created : it.card.updated;
 
 // Owner verification queue: ONLY needsAcceptance cards (visual/UI/UX/DX taste).
 // Bare phase=verify is agent technical closeout — never surfaces on Now/beacon.
 const verifyQueue = () => ownerVerifyQueue(S.cards);
+const queueNotices = () => {
+  const { done, messages } = buildDoneMessageQueue({
+    cursor: S.meta.completionCursor,
+    cards: S.cards || [],
+    questions: S.questions || [],
+  });
+  return [
+    ...messages.map(message => ({ ...message, type: 'message' })),
+    ...done.map(item => ({ ...item, type: 'done' })),
+  ];
+};
 
 // Every owner-blocking item, in the order the beacon + Now view show them.
 // Acceptance ballots are excluded from the plain 'decision' bucket — they
 // get the richer dedicated verification treatment below instead of the
 // generic ballot deck.
 function duties() {
-  const out = [];
+  const out = queueNotices();
   for (const v of verifyQueue()) out.push({ type: 'verify', id: v.card.id, card: v.card, ballot: v.ballot });
   for (const d of openGenericDecisions()) out.push({ type: 'decision', id: d.id, decision: d });
   return out;
@@ -234,7 +249,11 @@ function renderBeacon() {
   b.classList.toggle('beacon--clear', !items.length);
   for (const it of items.slice(0, 40)) {
     const h = (Date.now() - new Date(ageOf(it) || Date.now()).getTime()) / 3.6e6;
-    const title = it.type === 'decision' ? it.decision.title : 'verify: ' + it.card.title;
+    const title = it.type === 'message'
+      ? `message: ${it.ref} ${it.title}`
+      : it.type === 'done'
+        ? `done: ${it.text}`
+        : it.type === 'decision' ? it.decision.title : 'verify: ' + it.card.title;
     const seg = el(`<button class="beacon__seg" style="opacity:${Math.min(1, .55 + h / 96).toFixed(2)}" title="${esc(title)}"></button>`);
     seg.addEventListener('click', () => jumpTo(it));
     b.appendChild(seg);
@@ -242,7 +261,7 @@ function renderBeacon() {
 }
 function jumpTo(it) {
   if (it.type === 'decision') focusAll(it.decision.id);
-  else { go('now'); }
+  else go('now');
 }
 
 // ---- chrome ------------------------------------------------------------------
@@ -298,8 +317,8 @@ function viewNow() {
     ${openGenericDecisions().length ? `<div class="viewhead__actions"><button class="btn btn--red" id="focus-all">Decide all →</button></div>` : ''}</div>`;
   $('#focus-all')?.addEventListener('click', () => focusAll(openGenericDecisions()[0].id));
 
-  const dig = digestBlock();
-  if (dig) v.appendChild(dig);
+  const queue = doneMessageBlock();
+  if (queue) v.appendChild(queue);
 
   const rec = recentlyDecidedBlock();
   if (rec) v.appendChild(rec);
@@ -327,47 +346,48 @@ function viewNow() {
   updateNowSel();
 }
 
-// ---- while-you-were-away digest -------------------------------------------
-let digestInit = false;
-let digestShowAll = false;
-function digestBlock() {
-  const cursor = S.meta.digestCursor;
-  if (!cursor) {
-    if (!digestInit) { digestInit = true; api('digest/seen', {}).catch(() => {}); }
-    return null;
+// ---- completed cards and durable agent messages ----------------------------
+let doneQueueInit = false;
+function doneMessageBlock() {
+  const cursor = S.meta.completionCursor;
+  if (!cursor && !doneQueueInit) {
+    doneQueueInit = true;
+    api('done/clear', {}).catch(() => {});
   }
-  const { items } = buildDigestTimeline({
+  const { done, messages } = buildDoneMessageQueue({
     cursor,
-    events: S.events || [],
     cards: S.cards || [],
-    decisions: S.decisions || [],
     questions: S.questions || [],
   });
-  if (!items.length) return null;
-  const since = new Date(cursor).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  const shown = digestShowAll ? items : items.slice(0, 20);
-  const rows = shown.map(it => {
-    const t = new Date(it.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    const time = it.kind === 'done' ? '' : `<time>${esc(t)}</time>`;
-    return `<div class="digest__row digest__row--${esc(it.kind)}">${time}<span>${esc(it.text)}</span></div>`;
-  }).join('');
-  const more = !digestShowAll && items.length > 20
-    ? `<button class="btn btn--ghost btn--sm" data-more>Show all ${items.length}</button>` : '';
-  const node = el(`<div class="digest digest--timeline">
-      <div class="digest__head">
-        <div class="digest__h">Catch up</div>
-        <span class="digest__count">${items.length} card${items.length === 1 ? '' : 's'} changed since ${esc(since)}</span>
-        <button class="btn btn--sm" data-seen>Dismiss</button>
+  if (!done.length && !messages.length) return null;
+  const doneRows = done.map(item => `<button class="queue__row" data-card="${esc(item.cardId)}">
+      <span class="queue__marker queue__marker--done">${item.marker}</span>
+      <span>${esc(item.text)}</span>
+    </button>`).join('');
+  const messageRows = messages.map(item => `<div class="queue__row queue__row--message">
+      <span class="queue__marker queue__marker--message">${item.marker}</span>
+      <button class="queue__message" data-card="${esc(item.cardId)}">
+        <b>${esc(item.ref)} ${esc(item.title)}</b><span>${esc(item.text)}</span>
+      </button>
+      <button class="btn btn--sm" data-message-done="${esc(item.id)}">Done</button>
+    </div>`).join('');
+  const since = cursor
+    ? ` since ${new Date(cursor).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+    : '';
+  const node = el(`<div class="queue">
+      <div class="queue__head">
+        <div class="queue__h"><span class="queue__signal" aria-hidden="true">✦</span>Done and messages</div>
+        <span class="queue__count">${done.length} done${since} · ${messages.length} message${messages.length === 1 ? '' : 's'}</span>
+        ${done.length ? '<button class="btn btn--sm" data-clear-done>Clear done cards</button>' : ''}
       </div>
-      <div class="digest__list">${rows}</div>
-      ${more}
+      ${done.length ? `<div class="queue__section"><div class="queue__label">Completed</div>${doneRows}</div>` : ''}
+      ${messages.length ? `<div class="queue__section"><div class="queue__label">Messages</div>${messageRows}</div>` : ''}
     </div>`);
-  $('[data-seen]', node).addEventListener('click', async () => {
-    digestShowAll = false;
-    try { await api('digest/seen', {}); }
-    catch { /* toast already shown */ }
-  });
-  $('[data-more]', node)?.addEventListener('click', () => { digestShowAll = true; render(); });
+  $('[data-clear-done]', node)?.addEventListener('click', () => api('done/clear', {}));
+  node.querySelectorAll('[data-message-done]').forEach(button => button.addEventListener('click', () =>
+    api('message/done', { id: button.dataset.messageDone, by: 'owner' })));
+  node.querySelectorAll('[data-card]').forEach(button => button.addEventListener('click', () =>
+    showDetail(button.dataset.card)));
   return node;
 }
 
