@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 1310,
-    "rev": 19619,
+    "nextNum": 1311,
+    "rev": 19748,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -15691,10 +15691,16 @@
       "priority": "P0",
       "plan": "Close only from existing child-card evidence. Do not absorb child implementation scope.\nAmended 2026-07-24 after D-ONECORE1=A and D-LENS-RUN2=A: parity is delivered structurally by the sidequest chain #776 (semantic-core TIR) -> #777 (canonical interpreter) -> #778 (tiered jet run) -> #779 (core shrink), not by hand-writing every Cranelift gap.\n1. Keep the #727 differential corpus gate green (criterion 1, verified) — it is the safety net for the whole rework.\n2. The E2211 burn-down steps of the old plan are superseded; tier-1 widening continues later as perf work on the new structured TIR.\n3. This card closes when #778 lands: every AOT-runnable corpus program runs under default jet run with byte-identical output via tiered execution, and the CI gate (#730) enforces it.\n4. Shared SoT rule stands: host shims call jet-foundation / existing runtime; never a third algorithm copy.",
       "blockedBy": [
-        "c07z598z"
+        "c07z598z",
+        "c0u592bs"
       ],
       "assignee": "e3-688-parity",
       "log": [
+        {
+          "at": "2026-07-29",
+          "by": "burndown-orch",
+          "text": "Fresh #1307 review found a latent parity gap outside its original red set: typed Codable succeeds resident but a surrounding function deopt can bypass generated codec bodies. Tracked as #1310 and required before this closeout."
+        },
         {
           "at": "2026-07-28",
           "by": "cursor-fable",
@@ -15872,9 +15878,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-21T13:54:01.789Z",
-      "updated": "2026-07-28T21:39:45.709Z",
+      "updated": "2026-07-29T11:58:10.120Z",
       "workOrder": 50,
-      "updatedBy": "tower-prep-rank",
+      "updatedBy": "burndown-orch",
       "claimedAt": "2026-07-28T04:27:41.091Z"
     },
     {
@@ -18564,13 +18570,13 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-automation-apis",
-      "phase": "building",
+      "phase": "verify",
       "priority": "P0",
       "plan": "Complete only this slice; do not absorb sibling scope. Preserve these parent constraints where they apply:\nD-PROCESS-SESSION1 must choose the public extension to ProcessSpec and ProcessChild. Keep non-interactive argv execution as the safe default. Use native Unix PTYs and Windows ConPTY, with one byte-stream and lifecycle model. Make interrupt, terminate, kill, wait, timeout, and drop control the full process tree. Reuse core.io, core.watcher, core.event, task cancellation, and native job or process-group controls. Add no terminal emulator or sibling process module.",
       "blockedBy": [
         "D-PROCESS-SESSION2"
       ],
-      "assignee": null,
+      "assignee": "e3-bd-771-b2",
       "log": [
         {
           "at": "2026-07-28",
@@ -18635,11 +18641,11 @@
         {
           "n": 3,
           "text": "Documentation and audit evidence match Process sessions: public session model, and an independent reviewer verifies the result.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bd-771-b2",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-26T10:49:41.408Z"
+          "evidence": "Commits f8f5b39a8, 18238c517, and 9fb3652fe complete D-PROCESS-SESSION1=A and D-PROCESS-SESSION2=D. Reviewer fixes make ProcessChild.terminal a TerminalSession? with None on ordinary AOT/JIT children, and preserve terminal capability-report provenance in sema so close string-literal typos such as reszie diagnose with TerminalFact.resize while arbitrary preview keys and ordinary Set[String] values remain open. Runtime/static regressions and reference/decision docs match. Initial focused AOT, resident-JIT, beginner refusal, and process_builder golden proof passed before review. Per batch instruction, tests for reviewer corrections are deferred to the grouped boundary; git diff --check and added-debug checks passed. Fresh-context re-review requested.",
+          "at": "2026-07-29T15:14:58.864Z"
         }
       ],
       "refs": [
@@ -18652,9 +18658,10 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:07.441Z",
-      "updated": "2026-07-28T21:37:37.574Z",
+      "updated": "2026-07-29T15:14:59.097Z",
       "workOrder": 70,
-      "updatedBy": "tower-prep-rank"
+      "updatedBy": "e3-bd-771-b2",
+      "claimedAt": "2026-07-29T15:14:59.096Z"
     },
     {
       "id": "c0dixxk4",
@@ -50777,7 +50784,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "The concrete two-table patch is not valid yet. The generated Fortran binding produces Qualified target user___fortran_matrix::user_probe, while JitProgram contains only entry-module resident key run. Safety admission would therefore false-admit a call that lower_ctx cannot resolve. #1254 must first supply the cross-module/full-runtime tier-0 law; then add both safety and lowering arms and prove all polyglot goldens. tests/jit_gaps.txt remains shrink-only. blockedBy: #1254.",
       "blockedBy": [
@@ -50785,6 +50792,11 @@
       ],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1258",
+          "text": "Closed at ef49c6ee5. Fortran, Go, Java, and .NET default-lens goldens pass; qualified imported functions stay resident, direct C binders use the existing bridge, and the exact regression rejects interpreter deopt. Fresh review clean."
+        },
         {
           "at": "2026-07-28",
           "by": "e3-1258-modulecall",
@@ -50805,38 +50817,38 @@
         {
           "n": 1,
           "text": "Qualified module calls are resident-safe only when the resolved target and every argument are already JIT-safe.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T12:35:02.699Z"
+          "status": "verified",
+          "metBy": "e3-bd-1258",
+          "verifiedBy": "e3-1258-review",
+          "evidence": "Independent review confirmed safety requires the resolved resident key and safe arguments; exact trace-tier regression passes.",
+          "at": "2026-07-29T11:37:38.028Z"
         },
         {
           "n": 2,
           "text": "The affected polyglot binder goldens succeed under default jet run and match their checked AOT/expected output byte-for-byte.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T12:35:02.935Z"
+          "status": "verified",
+          "metBy": "e3-bd-1258",
+          "verifiedBy": "e3-1258-review",
+          "evidence": "Independent review checked all affected binder paths and focused parity evidence; no signature or lifecycle finding remains.",
+          "at": "2026-07-29T11:37:38.289Z"
         },
         {
           "n": 3,
           "text": "The fix adds no fallback gap; tests/jit_gaps.txt does not grow, and focused regression coverage proves the qualified-call path.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T12:35:03.162Z"
+          "status": "verified",
+          "metBy": "e3-bd-1258",
+          "verifiedBy": "e3-1258-review",
+          "evidence": "Independent exact regression requires tier1 native and rejects tier0 interp/E0956; jit_gaps unchanged and diff clean.",
+          "at": "2026-07-29T11:37:38.537Z"
         },
         {
           "n": 4,
           "text": "A fresh reviewer checks both JIT tables, target-name resolution, parity evidence, and unrelated scope.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T12:35:03.406Z"
+          "status": "verified",
+          "metBy": "e3-bd-1258",
+          "verifiedBy": "e3-1258-review",
+          "evidence": "Fresh full-diff review of ef49c6ee5 completed clean after material-fix re-review.",
+          "at": "2026-07-29T11:37:38.783Z"
         }
       ],
       "refs": [
@@ -50846,8 +50858,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T10:09:11.328Z",
-      "updated": "2026-07-28T21:39:45.920Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-29T11:37:39.323Z",
+      "updatedBy": "e3-bd-1258",
       "workOrder": 40
     },
     {
@@ -51702,21 +51714,47 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "A raw Rust panic must never print beside user diagnostics. Internal failure is an ICE with exit 101 (I2).\n\n1. Rebuild first, then reproduce. The report came from a dirty tree on 2026-07-28, so confirm the panic on a clean build before changing anything.\n2. Find the path that still lowers a body sema already rejected. Commit b022c23f2 closed one such path; the assertion at crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs:580 proves another remains.\n3. Fix it at the shared entry that decides whether to lower, not at the one call site this repro happens to reach. Every sibling caller must be covered.\n4. Make any internal failure that survives exit as an ICE with exit 101 and no chatter mixed into the diagnostic stream.\n5. Add the repro from the card body as a regression test.\n\nOwned paths: crates/jet-codegen/src/Codegen/TIR/lower/builtins.rs, the lowering entry in crates/jet-codegen, the compile driver, tests/.\n\nProof: the repro prints diagnostics only; the regression test fails without the fix; independent review closes.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-29",
+          "by": "e3-review-1271-final",
+          "text": "Fresh review CLEAN at 1641ef622. Prior false-green fixed by exact stdout/stderr assertions. Re-ran exact regression: 1 passed. Confirmed clean worktree, clean committed diff, unchanged gap ledger, and 5df94bab0 ancestry."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-1271",
+          "text": "Reviewer blocker fixed in 1641ef622: the regression now requires empty stdout and the exact full stable stderr for E0102, E0107, the two-problem summary, and the explain hint. Both focused tests pass. Ready for independent re-review."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-1271",
+          "text": "Implementation ready for fresh review at 4e1ac673e. The audit used a stale dirty binary; clean history shows 5df94bab0 already fixed the shared reachable-function lowering entry. This patch pins the missing end-to-end jet run repro. No new syntax, diagnostic, or production mechanism was added."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-1271",
+          "text": "Implementation ready for fresh review at 4e1ac673e. The audit used a stale dirty binary; clean history shows 5df94bab0 already fixed the shared reachable-function lowering entry. This patch pins the missing end-to-end  repro. No new syntax, diagnostic, or production mechanism was added."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-1271",
+          "text": "Started clean rebuild and panic reproduction. No owner gate or new syntax is required."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "repro no longer prints a raw panic; internal failure surfaces as ICE exit 101; regression test added",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T14:13:45.378Z"
+          "status": "verified",
+          "metBy": "e3-1271",
+          "verifiedBy": "e3-review-1271-final",
+          "evidence": "Fresh independent re-review of 1641ef622: exact CLI regression passed; stdout is required empty; full stderr is byte-pinned to E0102 and E0107 with summary/hint; commit diff-check clean; tests/jit_gaps.txt unchanged; worktree clean. Production guard 5df94bab0 remains an ancestor.",
+          "at": "2026-07-29T13:02:35.403Z"
         }
       ],
       "refs": [
@@ -51725,8 +51763,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:07:36.873Z",
-      "updated": "2026-07-28T21:37:45.672Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-29T13:02:35.822Z",
+      "updatedBy": "e3-review-1271-final",
       "workOrder": 390
     },
     {
@@ -52042,48 +52080,64 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Ratified: D-CLI-FIELD-MARKERS1=A — per-field `#Short(\"n\")` and `#Env(\"PORT\")` markers inside the existing bracket list.\n\n1. Add the two markers to the registry and parse them in the existing field marker list. No new marker plane.\n2. Lower `#Short` to the builder's .flag_short/.option_short and `#Env` to .option_env. The builder methods already exist, so this is one mechanism with two spellings.\n3. Precedence is flag, then environment variable, then `#Default`. Print it in the derived help text so it is never a surprise.\n4. Duplicate short letters are a compile error that names both fields. Register the code, the what/why/fix text, and its UI snapshot (I4).\n5. Syntax chores: Syntax.rs rows for both markers, syntax-decisions.md log line, regenerate devtools grammars, rebless snapshots.\n6. Extend examples/features/cli/typed_entry_args.jet to use a short flag and an environment fallback, and update its golden.\n\nOwned paths: crates/jet-sema/src/Sema/CheckerCli.rs, crates/jet-foundation/src/Syntax.rs, the CLI lowering in crates/jet-codegen, examples/features/cli/, docs/spec/syntax-decisions.md.\n\nProof: targeted CLI tests for short flag, environment fallback, precedence order, and the duplicate-short error; help golden; independent review closes.",
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
+      "assignee": "e3-bd-1277",
+      "log": [
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1277",
+          "text": "Grouped review fix 05581bb99: text dossiers now use one renderer for root and nested inputs, including short, required, default, and environment metadata. Added a nested text regression. Static diff check passed; grouped tests remain pending."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1277",
+          "text": "Implemented D-CLI-FIELD-MARKERS1=A in 3346147cd: typed #Short/#Env lower through core.args across AOT/JIT, schema metadata/dossier/completions/help carry the values, explicit input > env > #Default is pinned, diagnostics E1318/E1319 and UI snapshots cover collisions/misuse, syntax/docs/grammars/examples/snapshots updated. Passed focused JIT+AOT precedence/help test, typed CLI golden, both UI snapshots, CLISchema v3 cross-format tests, marker/grammar/syntax reconciliation tests, package checks, git diff --check; tests/jit_gaps.txt unchanged. Independent fresh-context review required."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1277",
+          "text": "Started the ratified CLI field marker slice in the isolated worktree."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bd-1277",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T16:01:46.298Z"
+          "evidence": "Added CONTRACT_SHORT and CONTRACT_ENV to Syntax.rs/markers.rs and the applied-rule registry.",
+          "at": "2026-07-29T13:52:40.172Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bd-1277",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T16:01:46.298Z"
+          "evidence": "Recorded ratified D-CLI-FIELD-MARKERS1=A in docs/spec/syntax-decisions.md.",
+          "at": "2026-07-29T13:52:40.376Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bd-1277",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T16:01:46.298Z"
+          "evidence": "Ran target/debug/jet self devtools grammars; grammar contract tests pass.",
+          "at": "2026-07-29T13:52:40.568Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bd-1277",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T16:01:46.298Z"
+          "evidence": "Reblessed JetCommandSchema v3 shell completion snapshots and generated/read focused E1318/E1319 UI snapshots.",
+          "at": "2026-07-29T13:52:40.762Z"
         }
       ],
       "refs": [
@@ -52093,9 +52147,10 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:08:13.338Z",
-      "updated": "2026-07-28T21:37:41.097Z",
-      "updatedBy": "tower-prep-rank",
-      "workOrder": 210
+      "updated": "2026-07-29T15:20:08.643Z",
+      "updatedBy": "e3-bd-1277",
+      "workOrder": 210,
+      "claimedAt": "2026-07-29T15:20:08.643Z"
     },
     {
       "id": "c0s24t6f",
@@ -52106,48 +52161,64 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Ratified: D-FMT-INTERP1=A — format selectors ride the existing `#` selector rail from D-ATTR4.\n\n1. Extend the interpolation hole to `value ('#' selector)?`, which is already the D-ATTR4 shape. The brace grammar itself does not change, and S8 still holds: one value per brace.\n2. Add `#Fixed(n)`, lowering to the existing core.fmt decimal path. One formatting mechanism underneath.\n3. An unknown selector is a registered compile error that lists the valid set. Register the code, the what/why/fix text, and the UI snapshot (I4).\n4. Syntax chores: Syntax.rs row for the selector, syntax-decisions.md log line under S8 and D-ATTR4, regenerate devtools grammars, rebless snapshots.\n5. Update examples/features/text/human_format.jet to use `{price#Fixed(2)}` and refresh its golden.\n\nSiblings such as `#Percent(n)` are a later addition on the same rail, not this card.\n\nOwned paths: crates/jet-parser (interpolation), crates/jet-sema (selector resolution), crates/jet-foundation/src/Syntax.rs, examples/features/text/, docs/spec/syntax-decisions.md.\n\nProof: targeted format tests including rounding at the boundary; the unknown-selector snapshot; example golden; both lenses agree; independent review closes.",
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
+      "assignee": "e3-bd-1278",
+      "log": [
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1278",
+          "text": "Grouped review fix 05581bb99: added UI fixtures and expected snapshots for non-Float Fixed interpolation and missing or malformed precision. Static diff check passed; grouped snapshot verification remains pending."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1278",
+          "text": "Implemented in commit 81f30c522. Added #Fixed(n) on the existing interpolation selector rail and TIR-lowered it to core.fmt.decimal. Focused proof passed: interpreter/resident-JIT rounding parity, formatter stability, filtered human_format golden, focused E0914 snapshot re-bless/check, and grammar regeneration. git diff --check clean; tests/jit_gaps.txt unchanged; no debug markers. Awaiting the batch's single fresh-context reviewer and grouped verification."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "agent",
+          "text": "Implementation started in codex/e3-1278. Adding #Fixed(n) on the existing interpolation selector rail, lowering through core.fmt decimal, with focused lens parity, rounding, diagnostic, formatter, syntax, grammar, snapshot, and example proof."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Syntax.rs entry updated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bd-1278",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T16:01:59.438Z"
+          "evidence": "Syntax.rs records D-FMT-INTERP1=A; INTERP_SELECTOR_FIXED is defined beside the existing Debug selector.",
+          "at": "2026-07-29T14:53:12.105Z"
         },
         {
           "n": 2,
           "text": "syntax-decisions.md log entry",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bd-1278",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T16:01:59.438Z"
+          "evidence": "docs/spec/syntax-decisions.md logs ratified D-FMT-INTERP1=A under D-ATTR4.",
+          "at": "2026-07-29T14:53:12.369Z"
         },
         {
           "n": 3,
           "text": "jet devtools grammars regenerated",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bd-1278",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T16:01:59.438Z"
+          "evidence": "Jet self devtools grammars regenerated every editor grammar section successfully; generated content remained canonical.",
+          "at": "2026-07-29T14:53:18.988Z"
         },
         {
           "n": 4,
           "text": "snapshots re-blessed",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bd-1278",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T16:01:59.438Z"
+          "evidence": "Focused E0914 fixture re-blessed and checked with JET_UI_FILTER/UPDATE_EXPECT for tests/ui/debug_unknown_selector.jet.",
+          "at": "2026-07-29T14:53:12.952Z"
         }
       ],
       "refs": [
@@ -52157,9 +52228,10 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:08:13.524Z",
-      "updated": "2026-07-28T21:37:41.636Z",
-      "updatedBy": "tower-prep-rank",
-      "workOrder": 230
+      "updated": "2026-07-29T15:20:09.085Z",
+      "updatedBy": "e3-bd-1278",
+      "workOrder": 230,
+      "claimedAt": "2026-07-29T15:20:09.084Z"
     },
     {
       "id": "c0rsejxo",
@@ -52414,39 +52486,60 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Ratified: D-TASKS-LIST1=A — a top-level `jet tasks` verb.\n\n1. Add the verb. It prints each declared task with its `#Doc` line and marks the scheduled ones with their `#Every` schedule.\n2. Reuse list_task_names from the compile path, the same list E1294 already computes at Source/CmdCompile.rs:677-698. One source of truth.\n3. In a non-project directory it gives the same error `jet run` gives there.\n4. List it in `jet help` beside the other verbs.\n5. Update examples/features/devloop/task_runner.jet and the CLI reference so discovery is taught, not guessed.\n\nOwned paths: the command layer in Source/, examples/features/devloop/task_runner.jet, docs/reference/.\n\nProof: a test runs `jet tasks` on the example project and matches the expected listing including a scheduled task; a non-project run matches the jet run error; independent review closes.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-29",
+          "by": "e3-1282-rereview",
+          "text": "Fresh-context review of commits 7c18ffa74 and 91d24d453 found no concrete defect. Prior #Doc and workspace-guidance blockers are fixed. Five scoped tests and git diff --check pass."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1282",
+          "text": "Reviewer blockers fixed in 91d24d453: #Doc is field-only except within the same function marker group as #Task, with positive reversed-order and negative ordinary-function coverage; jet tasks now has tasks-specific workspace ambiguity, invalid-member guidance, and -p member selection coverage. Scoped PASS: jet-foundation authoritative_attachment_matrix_covers_declaration_sites; jet-parser doc_on_a_function_requires_task; cli tasks_lists_documented_scheduled_project_tasks_and_matches_run_outside_projects; fmt fmt_preserves_schedule_markers; filtered task_runner golden examples_compile_and_run. No full suite rerun."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1282",
+          "text": "Implementation ready at 7c18ffa74. PASS: exact tasks CLI regression; foundation Doc site; parser applicator; formatter task metadata; filtered task_runner golden. Completion golden remains red only for pre-existing unrelated registry drift (notebook and older flags), so this patch retains only tasks snapshot lines. Independent review required."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1282",
+          "text": "Started D-TASKS-LIST1=A. I will reuse the shared project task discovery source, add top-level `jet tasks`, and update all command listings and focused tests."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "jet tasks lists every declared task with its doc line and marks scheduled ones with their #Every schedule",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:30:26.547Z"
+          "status": "verified",
+          "metBy": "e3-bd-1282",
+          "verifiedBy": "e3-1282-rereview",
+          "evidence": "Fresh-context review of 7c18ffa74 and 91d24d453 found no concrete defect. Exact CLI and filtered golden tests pass; listing includes every task, #Doc text, and #Every schedule.",
+          "at": "2026-07-29T10:59:22.940Z"
         },
         {
           "n": 2,
           "text": "the listing comes from the same list E1294 computes, not a second source",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:30:26.806Z"
+          "status": "verified",
+          "metBy": "e3-bd-1282",
+          "verifiedBy": "e3-1282-rereview",
+          "evidence": "Fresh review confirms list_task_names is the one parsed source for jet tasks and E1294. Exact CLI regression proves matching task names and order.",
+          "at": "2026-07-29T10:59:27.715Z"
         },
         {
           "n": 3,
           "text": "jet help shows the verb and a non-project directory gives the same error jet run gives",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:30:27.066Z"
+          "status": "verified",
+          "metBy": "e3-bd-1282",
+          "verifiedBy": "e3-1282-rereview",
+          "evidence": "Fresh review confirms help, completions, and man output include jet tasks. Exact CLI test proves the non-project error matches jet run and workspace guidance stays tasks-specific.",
+          "at": "2026-07-29T10:59:36.325Z"
         }
       ],
       "refs": [
@@ -52455,8 +52548,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:38:20.850Z",
-      "updated": "2026-07-28T21:37:40.555Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-29T10:59:40.220Z",
+      "updatedBy": "e3-1282-rereview",
       "workOrder": 190
     },
     {
@@ -52468,12 +52561,32 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Ratified: D-REGEX-LIT1=D — a regex is always a typed literal, and the head is inferable at a pattern-typed argument.\n\n1. Make the one-shot `re.*` pattern parameters take the pattern type. A leading-dot literal `.{\"...\"}` then resolves against them the way an enum variant shorthand resolves against an expected enum.\n2. Sema compile-validates the literal with the linear-engine parser. The diagnostic carries the offset inside the pattern. A validated literal call returns the match directly, with no `??`.\n3. `Regex.{\"...\"}` with the explicit head is the same construct. It works everywhere, and it is how a named reusable pattern value is written.\n4. A bare string literal where a pattern is expected is a compile error whose fix text shows the `.{\"...\"}` form. Register the code and its UI snapshot (I4).\n5. Runtime-built patterns keep today's fallible Result signature through the compiled-pattern path. Nothing there changes.\n6. Rewrite examples/features/text/regex.jet to teach the literal form first, and refresh the golden.\n\nOwned paths: crates/jet-sema (literal head inference and pattern validation), the core.regex module, crates/jet-foundation/src/Syntax.rs, examples/features/text/regex.jet, docs/spec/syntax-decisions.md.\n\nProof: targeted tests for an inferred head, an explicit head, a bad pattern with the offset in the message, a bare string rejection, and a runtime-built pattern still returning Result; example golden; independent review closes.",
       "blockedBy": [],
-      "assignee": null,
+      "assignee": "e3-bd-1283",
       "log": [
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1283",
+          "text": "Grouped review fix 05581bb99: the comptime regex executor now consumes the canonical validated grammar and supports noncapturing and named groups, range quantifiers, and Unicode classes. Reusable Regex methods now dispatch through the existing regex core operations, with a comptime/TIR/runtime regression. Static diff check passed; grouped tests remain pending."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1283",
+          "text": "Committed as 418e4e5cd feat(regex): add checked typed literals. Worktree is clean. Fresh batch reviewer should inspect this commit; do not close until that review and grouped boundary verification complete."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1283",
+          "text": "Implementation complete. Scoped proof: regex integration 5/5; RegexSyntax units 2/2; exact TIR Match, resident REPL, Unicode comptime/AOT parity, and focused text/regex golden pass. Both E0152 UI snapshots were generated and inspected. git diff --check is clean and tests/jit_gaps.txt did not grow. Ready for the batch's single fresh reviewer; grouped verification remains at the parent batch boundary."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1283",
+          "text": "Started the ratified typed Regex literal slice. I am reusing the existing typed-literal elaboration and the canonical linear regex engine; scoped tests cover inferred positional and named heads, explicit heads, compile offsets, bare strings, and runtime compile."
+        },
         {
           "at": "2026-07-28",
           "by": "cursor-main",
@@ -52484,20 +52597,20 @@
         {
           "n": 1,
           "text": "Regex is always a typed literal — a bare string is never implicitly a pattern. Bare string literal at a pattern-typed parameter is a compile error; fix text shows the .{\"...\"} form.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bd-1283",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T17:18:55.809Z"
+          "evidence": "E0152 UI snapshots reject a bare String with a .{\"...\"}/re.compile fix and report invalid literal character offset 8.",
+          "at": "2026-07-29T14:34:28.973Z"
         },
         {
           "n": 2,
           "text": "Head inference: .{\"...\"} in a pattern-typed positional or named argument compile-validates and returns the match directly (no ??). Explicit Regex.{\"...\"} works everywhere; runtime-built patterns keep the fallible Result path.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "e3-bd-1283",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T17:18:56.000Z"
+          "evidence": "Scoped tests pass for inferred positional and named .{\"...\"}, reusable Regex.{\"...\"}, direct one-shot results across AOT/REPL/comptime, and fallible re.compile runtime patterns; focused regex golden passes.",
+          "at": "2026-07-29T14:34:33.138Z"
         }
       ],
       "refs": [
@@ -52506,9 +52619,10 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:38:21.036Z",
-      "updated": "2026-07-28T21:37:41.387Z",
-      "updatedBy": "tower-prep-rank",
-      "workOrder": 220
+      "updated": "2026-07-29T15:20:08.869Z",
+      "updatedBy": "e3-bd-1283",
+      "workOrder": 220,
+      "claimedAt": "2026-07-29T15:20:08.869Z"
     },
     {
       "id": "c083yh6b",
@@ -52519,39 +52633,55 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "Ratified: D-BINREAD-LEN1=A — `take` and its siblings accept unsigned sized lengths.\n\n1. Let `take` and the related length-taking calls such as `skip` accept U8, U16, and U32 directly, widening internally.\n2. Accept only unsigned widths at or below the platform Int. U64 stays explicit, because that widen can exceed Int on a 32-bit target. No implicit narrowing anywhere.\n3. Nothing else about S42 sized-int separation changes. This is a narrow carve for lengths, stated as such in the spec entry.\n4. Delete the wrapper calls this replaces, and rewrite examples/features/parsing/binary-reader.jet to read the count and take it with no manual widen. Refresh the golden.\n\nOwned paths: the binary Reader in the core encoding modules, examples/features/parsing/binary-reader.jet, docs/spec/syntax-decisions.md, docs/reference/core-library.md.\n\nProof: targeted tests for U8, U16, and U32 lengths, and a test proving U64 still needs an explicit conversion; example golden; independent review closes.",
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-07-29",
+          "by": "e3-review-1284",
+          "text": "Fresh-context review of 125de7123 found no concrete defects. Reviewer: e3-review-1284, GPT-5 Codex. PASS: cargo build; filtered binary-reader golden; one-shot default-dev example with U8/U16/U32; filtered U64 diagnostic snapshot. Diff follows D-BINREAD-LEN1=A, adds no Reader sibling because none exists, preserves AOT/JIT parity, and has no unrelated scope. No full suite ran."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1284",
+          "text": "Implementation committed as 125de7123. Scoped proof passed: jet-sema/jet-codegen cargo check; filtered U64 UI snapshot; one-case U64 invalid corpus; one-case binary-reader AOT/default-dev differential replay with RUST_MIN_STACK=33554432 after the harness overflowed its default test-thread stack; filtered binary-reader golden. Ready for independent review; not verified or closed by implementer."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1284",
+          "text": "Claimed for implementation of ratified D-BINREAD-LEN1=A. Working only in the assigned e3-1284 worktree and owned paths."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Reader.take and its length-taking siblings accept U8, U16, and U32 directly and widen internally",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:31:21.215Z"
+          "status": "verified",
+          "metBy": "e3-bd-1284",
+          "verifiedBy": "e3-review-1284",
+          "evidence": "Fresh review of 125de7123 found one contained sema carve for Reader.take. U8/U16/U32 pass the filtered AOT golden and fresh one-shot default-dev run.",
+          "at": "2026-07-29T10:38:41.156Z"
         },
         {
           "n": 2,
           "text": "U64 still requires an explicit conversion, and no implicit narrowing is introduced anywhere",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:31:21.480Z"
+          "status": "verified",
+          "metBy": "e3-bd-1284",
+          "verifiedBy": "e3-review-1284",
+          "evidence": "Fresh review confirms only unsigned IntN widths 8, 16, and 32 bypass E0112. The filtered U64 UI snapshot passes; all other conversion paths remain unchanged.",
+          "at": "2026-07-29T10:38:41.362Z"
         },
         {
           "n": 3,
           "text": "binary-reader.jet reads a count and takes it with no manual widen, and the wrappers this replaces are gone",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:31:21.741Z"
+          "status": "verified",
+          "metBy": "e3-bd-1284",
+          "verifiedBy": "e3-review-1284",
+          "evidence": "Fresh review confirms direct count use in the example, canon, and differential fixture. No take(Int.from_u8/u16/u32) wrapper remains in examples, tests, docs, Source, or crates.",
+          "at": "2026-07-29T10:38:41.571Z"
         }
       ],
       "refs": [
@@ -52560,8 +52690,8 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:38:21.224Z",
-      "updated": "2026-07-28T21:37:40.849Z",
-      "updatedBy": "tower-prep-rank",
+      "updated": "2026-07-29T10:38:41.828Z",
+      "updatedBy": "e3-review-1284",
       "workOrder": 200
     },
     {
@@ -52574,7 +52704,7 @@
       "epoch": "e3",
       "milestoneId": null,
       "phase": "ready",
-      "priority": "P2",
+      "priority": "P3",
       "plan": "Ratified: D-EXAMPLES-SHORTPATH1=A — every flagship teaches the magic default first, with the manual mechanics kept beside it as a clearly labelled expert variant. Examples are executable specs (I5), so this is a product change, not a tidy-up.\n\n1. Write the policy into the examples README and the contributor docs, so new examples land the right way round.\n2. first_hour.jet points at `#CLI` instead of hand-walking raw `io.args()`. The raw walk moves to a labelled expert file.\n3. parallel_scan.jet opens with `taskgroup.all` or `para_map`. The channel and spawn and join pipeline becomes the labelled expert file beside it.\n4. Text parsing examples open with the streaming reader rather than materializing `String.lines()` for file-scale work.\n5. Add the three missing composed flagships: a log job that goes file to pattern to aggregate, an MMIO board write (today it lives only in tests), and one math flagship so examples/features/math/ stops hiding the numeric floor.\n6. Update every touched golden.\n\nOwned paths: examples/features/** and the examples README.\n\nProof: every touched example compiles and runs on both lenses; goldens updated and green; the new composed examples are covered by the golden suite; independent review closes.",
       "blockedBy": [],
       "assignee": null,
@@ -52624,9 +52754,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:38:21.421Z",
-      "updated": "2026-07-28T21:37:47.470Z",
-      "updatedBy": "tower-prep-rank",
-      "workOrder": 460
+      "updated": "2026-07-29T13:57:49.948Z",
+      "updatedBy": "owner",
+      "workOrder": 3000
     },
     {
       "id": "c02n9rz3",
@@ -54286,12 +54416,52 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P2",
       "plan": "Eleven pre-existing reds across two test targets, all confirmed on a reverted baseline. Baselines were encoding_parity 5 passed and 4 failed, and comptime_diff 14 passed and 10 failed; the #1269 fix moved those to 7 and 2, and 15 and 9.\n\n1. encoding_parity: collect_stream_and_unfold_whole_share_canonical_law and jsonl_csv_xml_cbor_streams_match_aot_and_default_dev. Both say a streaming path and a whole-value path disagree. Find the one shared encoder seam rather than patching each format.\n2. comptime_diff, encoding group: cbor whole decode, cbor canonical typed corpus, cbor options and hostile errors, gzip golden and hostile inputs, and xml parse options. Same question as above, asked at comptime.\n3. comptime_diff, width and parity group: comptime f32 width, comptime_matches_runtime, and comptime_module_calls_match_runtime. These are comptime-versus-runtime evaluation differences, which is a lens-parity failure and must be fixed, not blessed.\n4. if_expr_comptime_matches_runtime may belong to the in-flight branch-surface work on #1259 and #1260. Check that first. If it does, move it to that card instead of fixing it here, and say so in the log.\n5. Report the split so the remaining work is on the right card.\n\nOne compiler, two lenses. A parity red is never closed by changing the expectation.\n\nOwned paths: the encoding modules under crates/jet-codegen/src/Prelude/CoreLib, the comptime evaluator under crates/jet-sema/src/Comptime, tests/encoding_parity, tests/comptime_diff.\n\nProof: cargo test --test encoding_parity and --test comptime_diff are green, or each remaining red is on its own card with the reason recorded; independent review closes.",
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-07-29",
+          "by": "e3-review-1307-final",
+          "text": "Post-close fresh review of c9d698bd7 CLEAN. decode_reason now returns Option, but test fidelity is unchanged because malformed result, non-DecodeError payload, missing reason, and wrong reason all fail the required Some(exact_reason) assertions. PASS: cargo test --test ban_bare_panic (2/2) and targeted jet-codegen datatree_int_rejects_float_and_text_with_canonical_reasons (1/1). Commit show --check is clean."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-review-1307-final",
+          "text": "Independent fresh-context review CLEAN through 06291e4b2. Final exact CBOR AOT/resident proof passed and asserts resident JIT executed with no deopt or fallback; exact list-index and Bytes errors match AOT; [U8] keeps CBOR byte identity. Earlier focused rolling and DataTree resident/deopt proofs passed. Worktree clean, git show --check clean, tests/jit_gaps.txt unchanged, and no debug instrumentation remains. All four criteria independently verified."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1307-b2",
+          "text": "Final parity delta committed as 06291e4b2 atop fee3e005c. The resident DataTree representation now preserves CBOR byte-string identity; typed decoding reports exact Bytes kind while [U8] accepts byte strings through the canonical list path. Exact PASS: cbor_whole_codable_bytes_and_original_wire_canonical_validation, including scalar 0|$|expected Int, found Bytes and explicit ResidentJit/no-deopt/no-fallback trace assertions; cbor_whole_hostile_byte_corpus_matches_aot_and_default_dev after representation change. git diff --check passes, tests/jit_gaps.txt unchanged, debug-marker search empty, worktree clean. Fresh re-review pending."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1307-b2",
+          "text": "Reviewer blocker fixed in fee3e005c: resident CBOR parse now preserves structured CBORError kind/byte_offset/path/reason; typed DecodeError is projected to CBORError; typed Int decoding is distinct from strict DataTree.int(); list decode errors retain [index] framing. Exact PASS: cbor_whole_hostile_byte_corpus_matches_aot_and_default_dev; cbor_whole_codable_bytes_and_original_wire_canonical_validation, including exact AOT/default-dev TypeMismatch 0|$[0]|expected Int, found text \"x\". Hostile fixture enum arms were migrated to current dotted syntax without changing outcomes. Worktree clean; diff check passes; jit_gaps unchanged. Awaiting material re-review of fee3e005c."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1307-b2",
+          "text": "Final scoped patch is clean at 06b4b8757 (stack: 404254af9, d5fb44b2e, 06b4b8757). Exact PASS: resident canonical Packet/[U8] CBOR and strict original-wire validation; resident and named-deopt DataTree Int exact errors; focused codegen accessor unit; compensated rolling_mean; cargo check for jet-codegen, jet-comptime, and jet-jit. git diff --check passes and tests/jit_gaps.txt is unchanged. Correction to older logs/evidence: Packet is proved through the resident canonical codec only. The partial TIR Named structural decoder was removed. Full forced-deopt Codable, custom markers, and migrations are tracked on #1310 and are not claimed by #1307. Fresh independent re-review is pending."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1307-b2",
+          "text": "Post-review fixes are in d5fb44b2e. The exact CBOR whole-value test now passes for typed Packet and [U8] decode in default dev, including the canonical-validation tail. A new exact rolling_mean test proves AOT and default dev both return NonFinite at index 1. The worktree is clean, git show --check passes, and tests/jit_gaps.txt is unchanged. Fresh re-review is pending."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1307-b2",
+          "text": "Post-handoff proof at 404254af9: encoding_parity passed 11 of 11 tests. comptime_diff passed 22 of 24 tests before the final rolling_mean commit; the only other failure is the #1259 value-if fixture. After the commit, exact comptime_module_calls_match_runtime passed in 148.30 seconds. git show --check passed, tests/jit_gaps.txt did not change, and the worktree is clean. An inherited remote #1307 worker made and committed the final edits while this agent stayed read-only."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1307-b2",
+          "text": "Implementation complete in 404254a; all four criteria are met and await independent verification. Shared fixes: demand-driven generic-module constant evaluation; typed CBOR target propagation and shared scalar/list decoder; resident canonical CBOR plus files.read_bytes; TIR rolling_mean parity; bounded 64 MiB compile workers for libtest-only stack limits. Exact green evidence is attached to criteria. One full encoding target run exposed the backend test stack abort before the worker fix; it was not repeated per batch test policy, and every affected/heavy case passed exactly afterward. One full comptime_diff run produced 20 passes plus four reds: three were fixed and rechecked exactly; if_expr remains moved to #1259. rustfmt/cargo-fmt is unavailable in jet-env; git diff --check passed. Ready for fresh-context review; do not close without reviewer verification."
+        },
         {
           "at": "2026-07-29",
           "by": "e3-review-1307-codex",
@@ -54347,45 +54517,45 @@
         {
           "n": 1,
           "text": "encoding_parity is green: the streaming path and the whole-value path agree under both lenses",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:33:38.994Z"
+          "status": "verified",
+          "metBy": "e3-bd-1307-b2",
+          "verifiedBy": "e3-review-1307-final",
+          "evidence": "Independent fresh-context review through 06291e4b2 found the scoped stream/whole parity clean. Exact cbor_whole_codable_bytes_and_original_wire_canonical_validation passed with resident JIT asserted, no deopt or fallback, exact CBORError paths and wording, and preserved [U8] byte identity. Hostile direct-parse corpus also passed.",
+          "at": "2026-07-29T12:56:45.286Z"
         },
         {
           "n": 2,
           "text": "the comptime_diff encoding reds are green through the shared encoder seam, not per-format patches",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:33:39.252Z"
+          "status": "verified",
+          "metBy": "e3-bd-1307-b2",
+          "verifiedBy": "e3-review-1307-final",
+          "evidence": "Independent review confirmed one canonical CBOR parser and structured resident CBORError projection. Direct parse preserves kind, byte_offset, path, and reason; typed decode maps DecodeError to TypeMismatch. No partial named field-tuple decoder remains; full deopt Codable scope is tracked on #1310.",
+          "at": "2026-07-29T12:56:50.305Z"
         },
         {
           "n": 3,
           "text": "the comptime versus runtime parity reds are fixed rather than reblessed",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-28T20:33:39.508Z"
+          "status": "verified",
+          "metBy": "e3-bd-1307-b2",
+          "verifiedBy": "e3-review-1307-final",
+          "evidence": "Independent review confirmed behavior fixes, not expectation reblessing: compensated checked rolling_mean, strict DataTree.int(), separate canonical typed Int decode, list-index DecodeError framing, structured CBORError ABI, and resident CBOR byte identity. Exact rolling, DataTree resident/deopt, Codable, and hostile corpus proofs passed; tests/jit_gaps.txt is unchanged.",
+          "at": "2026-07-29T12:56:54.819Z"
         },
         {
           "n": 4,
           "text": "if_expr_comptime_matches_runtime is either fixed here or moved to the branch-surface card with the reason recorded",
-          "status": "met",
+          "status": "verified",
           "metBy": "e3-bd-1307",
-          "verifiedBy": null,
-          "evidence": "Moved if_expr_comptime_matches_runtime to #1259. Its four failures are parser errors because the fixture uses retired braced value-if syntax; #1259 owns the ratified value-if surface and examples.",
-          "at": "2026-07-28T22:08:23.621Z"
+          "verifiedBy": "e3-review-1307-final",
+          "evidence": "Independent review confirmed if_expr_comptime_matches_runtime is excluded for a recorded reason: it uses the retired braced value-if surface, and the ratified branch-surface repair is owned by #1259. No #1307 expectation was changed to hide that failure.",
+          "at": "2026-07-29T12:56:59.709Z"
         }
       ],
       "refs": [],
       "needsAcceptance": false,
       "created": "2026-07-28T19:44:00.668Z",
-      "updated": "2026-07-29T01:08:22.112Z",
-      "updatedBy": "e3-review-1307-codex",
+      "updated": "2026-07-29T13:17:19.441Z",
+      "updatedBy": "e3-review-1307-final",
       "workOrder": 90
     },
     {
@@ -54548,6 +54718,96 @@
       "created": "2026-07-28T23:02:51.161Z",
       "updated": "2026-07-29T01:49:31.211Z",
       "updatedBy": "e3-review-1309-codex"
+    },
+    {
+      "id": "c0u592bs",
+      "num": 1310,
+      "title": "Canonical Codable semantics survive TIR deopt",
+      "body": "Typed CBOR can run resident through generated Decode bodies, but a surrounding tier gap sends the function to the canonical TIR evaluator. That evaluator must preserve the same Encode, Decode, migration, coercion, range, and error laws. Field-name/type tuple walking is forbidden because it ignores user and marker behavior.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "verify",
+      "priority": "P1",
+      "plan": "Parse CBOR once into DataTree. Dispatch named and custom values through the ordinary lowered Type.encode and Type.decode functions already present in JitProgram. Share primitive and container decoding for Option, List, fixed lists, maps, bytes, F32, sized integers, chars, DataTree, distinct ranges, and exact errors. Carry a compiled migration plan with wire keys and default or converter function names; apply it through the same codec dispatch. Delete typed field-tuple encode and decode shortcuts. Prove forced per-function deopt matches AOT for rename, default, flatten, deny unknown, custom Decode, migrations, enums, maps, F32, bytes, sized bounds, and distinct values.",
+      "blockedBy": [
+        "c08z8u2c"
+      ],
+      "workOrder": 95,
+      "assignee": "e3-bd-1310",
+      "log": [
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1310",
+          "text": "Second reviewer follow-up committed as 796293293: Codable now rejects U64 consistently at direct encode/decode and derive-time sema admission because the canonical shared DataTree/CtValue Int is i64 and cannot preserve the full U64 domain. E2411 gives exact conversion guidance. Forced-TIR U8 overflow now matches the existing AOT law (`expected U8, found Int`). Exact regressions pin direct and derived U64 rejection plus U8 error wording. Static git diff --check passed and debug-marker search was empty. Per batch instruction, no project tests were run; grouped verification remains pending."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1310",
+          "text": "Reviewer fixes committed as ecc065bc0: forced-TIR fixed byte arrays now enforce exact length; sized integer range failures match AOT/resident wording; failed migration change decoding preserves DecodeError under the wire key instead of falling back to the current-shape error. Exact regressions cover fixed-byte length, I8 range wording, and failed change path/reason. Static git diff --check passed and debug-marker search was empty. Per batch instruction, no cargo or project tests were run; grouped batch verification remains pending."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1310",
+          "text": "[handoff] WIP checkpoint 952c6960807a115b095aa7f885010d5fdf08f9b7. Resume only after #771 integrates because it owns overlapping handle, method-call, lower_ctx, and JIT seams. The new exact test proves AOT and resident custom/derived CBOR bodies, then forces the same body through named TIR deopt. Current exact result is red: forced deopt exits 101 at the fallback because Token.Decode receives a tree that its text accessor reports as `expected Text, found value`. Partial code adds evaluator dispatch for lowered Encode and Decode bodies, primitive/container recursion, DataTree accessors, parse-once CBOR decode, and DecodeError-to-CBORError projection. Remaining work: fix DataTree representation identity at nested custom Decode; add compiled migration plans and execute rename/remove/add/change through lowered defaults and converters; complete exact fixed-list, F32, sized-int, distinct-range, marker, enum, map, and error corpus; delete the old field/type tuple bridge; run targeted checks and fresh review. `git diff --check` passed, `tests/jit_gaps.txt` did not change, debug search is empty, and the worktree is clean."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1310",
+          "text": "Started forced-deopt codec work. First proof will force a named function into the TIR evaluator and compare AOT, resident, and deopt behavior. The implementation will call lowered Encode and Decode bodies. It will not add a field-name/type tuple codec."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Forced per-function TIR deopt dispatches named, generic, enum, and custom Codable values through the same lowered Encode and Decode bodies as resident execution.",
+          "status": "met",
+          "metBy": "e3-bd-1310",
+          "verifiedBy": null,
+          "evidence": "Commit 8f6b11fc1; exact cbor_codable_bodies_match_aot_resident_and_forced_deopt passes and proves custom Token, derived Packet/Event, generic Wrap<Int>, resident control, and named TIR deopt use lowered codec bodies with no fallback.",
+          "at": "2026-07-29T14:45:23.882Z"
+        },
+        {
+          "n": 2,
+          "text": "Primitive and container decoding preserves exact AOT laws for options, fixed and dynamic lists, maps, DataTree, chars, F32, bytes, sized integers, and distinct ranges, including errors.",
+          "status": "met",
+          "metBy": "e3-bd-1310",
+          "verifiedBy": null,
+          "evidence": "Commit 8f6b11fc1; exact cbor_primitive_container_boundaries_match_aot_and_forced_deopt passes across AOT, direct TIR, and mixed resident/deopt. Corpus covers I8/U32/F32, fixed Int list, fixed bytes, DataTree, distinct range, and invalid signed/unsigned/F32/fixed/range decodes; existing exact Codable corpus covers option, dynamic list, map, char, and bytes.",
+          "at": "2026-07-29T14:45:29.890Z"
+        },
+        {
+          "n": 3,
+          "text": "Migration plans preserve serde wire keys and execute rename, remove, add, and change through the same defaults and converter functions before re-decoding.",
+          "status": "met",
+          "metBy": "e3-bd-1310",
+          "verifiedBy": null,
+          "evidence": "Commit 8f6b11fc1; exact cbor_migration_plan_matches_aot_and_forced_deopt passes with full exit/stdout/stderr equality. Compiled plan carries RenameAll wire keys plus rename/remove/add/change operations and invokes sema-lowered default/converter functions before ordinary Decode re-entry.",
+          "at": "2026-07-29T14:45:37.628Z"
+        },
+        {
+          "n": 4,
+          "text": "An adversarial AOT, resident, and forced-deopt corpus covers markers, custom codecs, migrations, enums, maps, numeric bounds, and bytes; no field-tuple codec or JIT-gap growth remains.",
+          "status": "met",
+          "metBy": "e3-bd-1310",
+          "verifiedBy": null,
+          "evidence": "Commits 8ebae0bf4 and 8f6b11fc1; exact custom/derived/generic/enum/map/marker, migration, numeric-bound, fixed-list, DataTree, and byte corpora pass. cargo check -p jet-sema -p jet-codegen -p jet-jit passes; git diff --check clean; no DEBUG E3-1310 markers; tests/jit_gaps.txt unchanged; evaluator parses CBOR once then dispatches lowered codecs, with no field/type tuple codec.",
+          "at": "2026-07-29T14:45:45.760Z"
+        }
+      ],
+      "refs": [
+        "crates/jet-codegen/src/Codegen/TIR/eval",
+        "crates/jet-codegen/src/Codegen/TIR/mod.rs",
+        "crates/jet-comptime/src/Comptime/TypedDecode.rs",
+        "crates/jet-jit/src/jit/lower_ctx.rs",
+        "tests/encoding_parity.rs"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-29T11:57:43.059Z",
+      "updated": "2026-07-29T15:14:16.712Z",
+      "updatedBy": "e3-bd-1310",
+      "claimedAt": "2026-07-29T15:14:16.712Z"
     }
   ],
   "decisions": [
@@ -72679,6 +72939,909 @@
   ],
   "events": [
     {
+      "at": "2026-07-29T15:20:09.085Z",
+      "by": "e3-bd-1278",
+      "action": "card.update",
+      "ref": "c0s24t6f",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T15:20:08.869Z",
+      "by": "e3-bd-1283",
+      "action": "card.update",
+      "ref": "c05051f9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T15:20:08.643Z",
+      "by": "e3-bd-1277",
+      "action": "card.update",
+      "ref": "c0ozksvh",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T15:14:59.097Z",
+      "by": "e3-bd-771-b2",
+      "action": "card.update",
+      "ref": "c0ft6gme",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-29T15:14:58.864Z",
+      "by": "e3-bd-771-b2",
+      "action": "card.criteria-meet",
+      "ref": "c0ft6gme",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T15:14:16.712Z",
+      "by": "e3-bd-1310",
+      "action": "card.update",
+      "ref": "c0u592bs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T15:05:04.638Z",
+      "by": "e3-bd-1310",
+      "action": "card.update",
+      "ref": "c0u592bs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T15:04:23.591Z",
+      "by": "e3-bd-771-b2",
+      "action": "card.update",
+      "ref": "c0ft6gme",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-29T15:04:23.356Z",
+      "by": "e3-bd-771-b2",
+      "action": "card.criteria-meet",
+      "ref": "c0ft6gme",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T14:53:59.037Z",
+      "by": "e3-bd-1278",
+      "action": "card.update",
+      "ref": "c0s24t6f",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T14:53:18.989Z",
+      "by": "e3-bd-1278",
+      "action": "card.criteria-meet",
+      "ref": "c0s24t6f",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T14:53:12.952Z",
+      "by": "e3-bd-1278",
+      "action": "card.criteria-meet",
+      "ref": "c0s24t6f",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-29T14:53:12.705Z",
+      "by": "e3-bd-1278",
+      "action": "card.criteria-meet",
+      "ref": "c0s24t6f",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T14:53:12.369Z",
+      "by": "e3-bd-1278",
+      "action": "card.criteria-meet",
+      "ref": "c0s24t6f",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T14:53:12.106Z",
+      "by": "e3-bd-1278",
+      "action": "card.criteria-meet",
+      "ref": "c0s24t6f",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T14:45:50.593Z",
+      "by": "e3-bd-1310",
+      "action": "card.update",
+      "ref": "c0u592bs",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-29T14:45:45.760Z",
+      "by": "e3-bd-1310",
+      "action": "card.criteria-meet",
+      "ref": "c0u592bs",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-29T14:45:37.628Z",
+      "by": "e3-bd-1310",
+      "action": "card.criteria-meet",
+      "ref": "c0u592bs",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T14:45:29.890Z",
+      "by": "e3-bd-1310",
+      "action": "card.criteria-meet",
+      "ref": "c0u592bs",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T14:45:23.883Z",
+      "by": "e3-bd-1310",
+      "action": "card.criteria-meet",
+      "ref": "c0u592bs",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T14:40:31.114Z",
+      "by": "agent",
+      "action": "card.update",
+      "ref": "c0s24t6f",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T14:36:56.643Z",
+      "by": "e3-bd-1278",
+      "action": "card.claim",
+      "ref": "c0s24t6f",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T14:35:56.676Z",
+      "by": "e3-bd-1278",
+      "action": "card.claim",
+      "ref": "c0s24t6f",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T14:35:34.015Z",
+      "by": "e3-bd-1283",
+      "action": "card.update",
+      "ref": "c05051f9",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-29T14:34:38.797Z",
+      "by": "e3-bd-1283",
+      "action": "card.update",
+      "ref": "c05051f9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T14:34:33.138Z",
+      "by": "e3-bd-1283",
+      "action": "card.criteria-meet",
+      "ref": "c05051f9",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T14:34:28.974Z",
+      "by": "e3-bd-1283",
+      "action": "card.criteria-meet",
+      "ref": "c05051f9",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T14:02:44.643Z",
+      "by": "e3-bd-1283",
+      "action": "card.update",
+      "ref": "c05051f9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T13:57:49.948Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0bda91w",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-29T13:57:43.722Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0bda91w",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-29T13:57:36.895Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0bda91w",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-29T13:57:36.305Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0bda91w",
+      "note": "workOrder"
+    },
+    {
+      "at": "2026-07-29T13:57:27.020Z",
+      "by": "owner",
+      "action": "card.update",
+      "ref": "c0bda91w",
+      "note": "priority"
+    },
+    {
+      "at": "2026-07-29T13:56:42.635Z",
+      "by": "e3-bd-1283",
+      "action": "card.claim",
+      "ref": "c05051f9",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T13:53:47.218Z",
+      "by": "e3-bd-1277",
+      "action": "card.update",
+      "ref": "c0ozksvh",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T13:52:40.762Z",
+      "by": "e3-bd-1277",
+      "action": "card.criteria-meet",
+      "ref": "c0ozksvh",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-29T13:52:40.568Z",
+      "by": "e3-bd-1277",
+      "action": "card.criteria-meet",
+      "ref": "c0ozksvh",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T13:52:40.376Z",
+      "by": "e3-bd-1277",
+      "action": "card.criteria-meet",
+      "ref": "c0ozksvh",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T13:52:40.172Z",
+      "by": "e3-bd-1277",
+      "action": "card.criteria-meet",
+      "ref": "c0ozksvh",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T13:48:42.080Z",
+      "by": "e3-bd-771-b2",
+      "action": "card.update",
+      "ref": "c0ft6gme",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-29T13:48:41.830Z",
+      "by": "e3-bd-771-b2",
+      "action": "card.criteria-meet",
+      "ref": "c0ft6gme",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T13:38:07.096Z",
+      "by": "e3-bd-1310",
+      "action": "card.update",
+      "ref": "c0u592bs",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-29T13:21:19.949Z",
+      "by": "e3-bd-1277",
+      "action": "card.update",
+      "ref": "c0ozksvh",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T13:21:11.805Z",
+      "by": "e3-bd-1310",
+      "action": "card.update",
+      "ref": "c0u592bs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T13:19:31.488Z",
+      "by": "e3-bd-1277",
+      "action": "card.claim",
+      "ref": "c0ozksvh",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T13:19:25.148Z",
+      "by": "e3-bd-771-b2",
+      "action": "card.claim",
+      "ref": "c0ft6gme",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T13:17:56.882Z",
+      "by": "e3-bd-1277",
+      "action": "card.claim",
+      "ref": "c0ozksvh",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T13:17:53.162Z",
+      "by": "e3-bd-1310",
+      "action": "card.claim",
+      "ref": "c0u592bs",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T13:17:48.556Z",
+      "by": "e3-bd-771-b2",
+      "action": "card.claim",
+      "ref": "c0ft6gme",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T13:17:19.441Z",
+      "by": "e3-review-1307-final",
+      "action": "card.update",
+      "ref": "c08z8u2c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-29T13:02:35.822Z",
+      "by": "e3-review-1271-final",
+      "action": "card.update",
+      "ref": "c0xx15b1",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-29T13:02:35.619Z",
+      "by": "e3-review-1271-final",
+      "action": "card.update",
+      "ref": "c0xx15b1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-29T13:02:35.403Z",
+      "by": "e3-review-1271-final",
+      "action": "card.criteria-verify",
+      "ref": "c0xx15b1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T13:01:12.505Z",
+      "by": "e3-1271",
+      "action": "card.update",
+      "ref": "c0xx15b1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-29T13:01:08.365Z",
+      "by": "e3-1271",
+      "action": "card.criteria-meet",
+      "ref": "c0xx15b1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T12:57:06.067Z",
+      "by": "e3-review-1307-final",
+      "action": "card.update",
+      "ref": "c08z8u2c",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T12:56:59.709Z",
+      "by": "e3-review-1307-final",
+      "action": "card.criteria-verify",
+      "ref": "c08z8u2c",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-29T12:56:54.820Z",
+      "by": "e3-review-1307-final",
+      "action": "card.criteria-verify",
+      "ref": "c08z8u2c",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T12:56:50.305Z",
+      "by": "e3-review-1307-final",
+      "action": "card.criteria-verify",
+      "ref": "c08z8u2c",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T12:56:45.286Z",
+      "by": "e3-review-1307-final",
+      "action": "card.criteria-verify",
+      "ref": "c08z8u2c",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T12:56:31.632Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.criteria-meet",
+      "ref": "c08z8u2c",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T12:56:26.075Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.criteria-meet",
+      "ref": "c08z8u2c",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T12:56:21.274Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.criteria-meet",
+      "ref": "c08z8u2c",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T12:56:15.073Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.update",
+      "ref": "c08z8u2c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-29T12:51:48.694Z",
+      "by": "e3-1271",
+      "action": "card.update",
+      "ref": "c0xx15b1",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-29T12:51:48.459Z",
+      "by": "e3-1271",
+      "action": "card.criteria-meet",
+      "ref": "c0xx15b1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T12:51:37.422Z",
+      "by": "e3-1271",
+      "action": "card.claim",
+      "ref": "c0xx15b1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T12:51:29.091Z",
+      "by": "e3-1271",
+      "action": "card.update",
+      "ref": "c0xx15b1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T12:51:28.832Z",
+      "by": "e3-1271",
+      "action": "card.criteria-meet",
+      "ref": "c0xx15b1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T12:50:27.785Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.criteria-meet",
+      "ref": "c08z8u2c",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T12:50:27.592Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.criteria-meet",
+      "ref": "c08z8u2c",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T12:50:27.396Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.criteria-meet",
+      "ref": "c08z8u2c",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T12:50:02.133Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.update",
+      "ref": "c08z8u2c",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T12:42:53.155Z",
+      "by": "e3-1271",
+      "action": "card.update",
+      "ref": "c0xx15b1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T12:42:48.565Z",
+      "by": "e3-1271",
+      "action": "card.claim",
+      "ref": "c0xx15b1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T12:40:42.229Z",
+      "by": "e3-1271",
+      "action": "card.claim",
+      "ref": "c0xx15b1",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T12:32:51.349Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.update",
+      "ref": "c08z8u2c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-29T12:32:21.314Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.criteria-meet",
+      "ref": "c08z8u2c",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T12:32:21.115Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.criteria-meet",
+      "ref": "c08z8u2c",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T12:32:20.913Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.criteria-meet",
+      "ref": "c08z8u2c",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T11:58:10.120Z",
+      "by": "burndown-orch",
+      "action": "card.update",
+      "ref": "c02hbqjf",
+      "note": "logEntry,blockedBy"
+    },
+    {
+      "at": "2026-07-29T11:58:00.541Z",
+      "by": "burndown-orch",
+      "action": "card.criteria-add",
+      "ref": "c0u592bs",
+      "note": "#4 An adversarial AOT, resident, and forced-deopt corpus covers"
+    },
+    {
+      "at": "2026-07-29T11:58:00.294Z",
+      "by": "burndown-orch",
+      "action": "card.criteria-add",
+      "ref": "c0u592bs",
+      "note": "#3 Migration plans preserve serde wire keys and execute rename,"
+    },
+    {
+      "at": "2026-07-29T11:58:00.045Z",
+      "by": "burndown-orch",
+      "action": "card.criteria-add",
+      "ref": "c0u592bs",
+      "note": "#2 Primitive and container decoding preserves exact AOT laws fo"
+    },
+    {
+      "at": "2026-07-29T11:57:59.793Z",
+      "by": "burndown-orch",
+      "action": "card.criteria-add",
+      "ref": "c0u592bs",
+      "note": "#1 Forced per-function TIR deopt dispatches named, generic, enu"
+    },
+    {
+      "at": "2026-07-29T11:57:52.503Z",
+      "by": "burndown-orch",
+      "action": "card.update",
+      "ref": "c0u592bs",
+      "note": "blockedBy"
+    },
+    {
+      "at": "2026-07-29T11:57:43.059Z",
+      "by": "burndown-orch",
+      "action": "card.add",
+      "ref": "c0u592bs",
+      "note": "Canonical Codable semantics survive TIR deopt"
+    },
+    {
+      "at": "2026-07-29T11:37:39.323Z",
+      "by": "e3-bd-1258",
+      "action": "card.update",
+      "ref": "c02cun0p",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-29T11:37:39.060Z",
+      "by": "e3-bd-1258",
+      "action": "card.update",
+      "ref": "c02cun0p",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-29T11:37:38.783Z",
+      "by": "e3-1258-review",
+      "action": "card.criteria-verify",
+      "ref": "c02cun0p",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-29T11:37:38.537Z",
+      "by": "e3-1258-review",
+      "action": "card.criteria-verify",
+      "ref": "c02cun0p",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T11:37:38.289Z",
+      "by": "e3-1258-review",
+      "action": "card.criteria-verify",
+      "ref": "c02cun0p",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T11:37:38.029Z",
+      "by": "e3-1258-review",
+      "action": "card.criteria-verify",
+      "ref": "c02cun0p",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T11:37:37.782Z",
+      "by": "e3-bd-1258",
+      "action": "card.criteria-meet",
+      "ref": "c02cun0p",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-29T11:37:15.720Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.update",
+      "ref": "c08z8u2c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-29T11:27:01.114Z",
+      "by": "e3-bd-1258",
+      "action": "card.update",
+      "ref": "c02cun0p",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-29T11:27:00.879Z",
+      "by": "e3-bd-1258",
+      "action": "card.criteria-meet",
+      "ref": "c02cun0p",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T11:26:54.251Z",
+      "by": "e3-bd-1258",
+      "action": "card.criteria-meet",
+      "ref": "c02cun0p",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T11:26:54.077Z",
+      "by": "e3-bd-1258",
+      "action": "card.criteria-meet",
+      "ref": "c02cun0p",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T11:11:55.238Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.update",
+      "ref": "c08z8u2c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-29T11:11:38.633Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.claim",
+      "ref": "c08z8u2c",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T11:06:04.800Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.update",
+      "ref": "c08z8u2c",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-29T11:05:38.439Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.criteria-meet",
+      "ref": "c08z8u2c",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T11:05:38.224Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.criteria-meet",
+      "ref": "c08z8u2c",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T11:05:37.969Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.criteria-meet",
+      "ref": "c08z8u2c",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T10:59:40.220Z",
+      "by": "e3-1282-rereview",
+      "action": "card.update",
+      "ref": "c01xexf7",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T10:59:36.326Z",
+      "by": "e3-1282-rereview",
+      "action": "card.criteria-verify",
+      "ref": "c01xexf7",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T10:59:27.715Z",
+      "by": "e3-1282-rereview",
+      "action": "card.criteria-verify",
+      "ref": "c01xexf7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T10:59:22.941Z",
+      "by": "e3-1282-rereview",
+      "action": "card.criteria-verify",
+      "ref": "c01xexf7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T10:47:18.892Z",
+      "by": "e3-bd-1282",
+      "action": "card.update",
+      "ref": "c01xexf7",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-29T10:38:41.828Z",
+      "by": "e3-review-1284",
+      "action": "card.update",
+      "ref": "c083yh6b",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T10:38:41.572Z",
+      "by": "e3-review-1284",
+      "action": "card.criteria-verify",
+      "ref": "c083yh6b",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T10:38:41.363Z",
+      "by": "e3-review-1284",
+      "action": "card.criteria-verify",
+      "ref": "c083yh6b",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T10:38:41.156Z",
+      "by": "e3-review-1284",
+      "action": "card.criteria-verify",
+      "ref": "c083yh6b",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T10:34:11.977Z",
+      "by": "e3-bd-1282",
+      "action": "card.update",
+      "ref": "c01xexf7",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T10:34:11.752Z",
+      "by": "e3-bd-1282",
+      "action": "card.criteria-meet",
+      "ref": "c01xexf7",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T10:34:11.557Z",
+      "by": "e3-bd-1282",
+      "action": "card.criteria-meet",
+      "ref": "c01xexf7",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T10:34:11.358Z",
+      "by": "e3-bd-1282",
+      "action": "card.criteria-meet",
+      "ref": "c01xexf7",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T10:34:02.012Z",
+      "by": "e3-bd-1282",
+      "action": "card.claim",
+      "ref": "c01xexf7",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T10:31:37.789Z",
+      "by": "e3-bd-1284",
+      "action": "card.update",
+      "ref": "c083yh6b",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T10:31:37.429Z",
+      "by": "e3-bd-1284",
+      "action": "card.criteria-meet",
+      "ref": "c083yh6b",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T10:31:37.063Z",
+      "by": "e3-bd-1284",
+      "action": "card.criteria-meet",
+      "ref": "c083yh6b",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T10:31:36.756Z",
+      "by": "e3-bd-1284",
+      "action": "card.criteria-meet",
+      "ref": "c083yh6b",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T10:18:33.893Z",
+      "by": "e3-bd-1284",
+      "action": "card.update",
+      "ref": "c083yh6b",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T10:18:28.091Z",
+      "by": "e3-bd-1284",
+      "action": "card.claim",
+      "ref": "c083yh6b",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T10:18:19.168Z",
+      "by": "e3-bd-1258",
+      "action": "card.claim",
+      "ref": "c02cun0p",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T10:18:00.760Z",
+      "by": "e3-bd-1282",
+      "action": "card.update",
+      "ref": "c01xexf7",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T10:18:00.539Z",
+      "by": "e3-bd-1282",
+      "action": "card.claim",
+      "ref": "c01xexf7",
+      "note": ""
+    },
+    {
+      "at": "2026-07-29T10:17:46.337Z",
+      "by": "e3-bd-1307-b2",
+      "action": "card.claim",
+      "ref": "c08z8u2c",
+      "note": ""
+    },
+    {
       "at": "2026-07-29T02:14:02.369Z",
       "by": "e3-review-1280-codex",
       "action": "card.update",
@@ -75273,909 +76436,6 @@
       "by": "tower-prep",
       "action": "card.update",
       "ref": "c0pllqqs",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:07.404Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c039kz2t",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:07.083Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0fwzyiv",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:06.744Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c07p2e72",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:06.426Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c05glk9b",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:06.108Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c002nhca",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:05.746Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c06lehoq",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:05.401Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0av1t1i",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:05.064Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0a11ldt",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:04.680Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0j57gh4",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:04.290Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0ycfgad",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:03.954Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0suwxl9",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:03.548Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0yry94n",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:03.163Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c00fgfxk",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:02.797Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0ur9thr",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:02.372Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0quv706",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:01.972Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0ayrs07",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:01.540Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0pq9ng2",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:01.118Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0ka9gqo",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:00.656Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0d9coim",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:00.290Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0977ofk",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:59.834Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c04nrfae",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:59.428Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0y8cvmm",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:59.033Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0sgm7rk",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:58.635Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0mhmf9m",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:58.210Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0gdtu17",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:57.806Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0w3wx2y",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:57.403Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c05txypo",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:57.038Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0nkru0v",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:56.643Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0vp4k3n",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:56.307Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0q11gnc",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:55.982Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0f19qqt",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:55.626Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0ey5tpw",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:55.261Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0965aml",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:54.911Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c06f42yp",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:54.591Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0y99xga",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:54.283Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0xui422",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:53.972Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0a1jejw",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:53.664Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c04awhtt",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:53.341Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0cqh9xs",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:53.018Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c00de14z",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:52.682Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0tqgl1r",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:52.368Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0lz10ao",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:52.054Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c00lqj9d",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:51.745Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c002osb3",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:51.410Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0yem9kl",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:51.097Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0snpbxn",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:50.777Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0n2wb0d",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:50.451Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0wbxcvq",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:50.105Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0ynt6sy",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:49.753Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0t10gwl",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:49.404Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0ngee9s",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:49.049Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0hylqrr",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:48.707Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c02ptuvv",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:48.320Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0ceddsp",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:47.861Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c06svqzk",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:47.512Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c00sdqmw",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:47.109Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0u5x7kf",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:46.732Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c06fcnkn",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:46.281Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c00u5ldg",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:45.924Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0uwiswc",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:45.619Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0pigzyp",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:45.292Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c00jpncd",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:44.946Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0qpaec0",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:44.592Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0l0xsll",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:44.245Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0fcsxlk",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:43.875Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0s1t30c",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:43.451Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c04x4oua",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:43.020Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0z655d9",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:42.574Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0thpu5d",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:42.091Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0o1h1be",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:41.599Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0pqeiev",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:41.175Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0eatnv2",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:40.023Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c08j7uxj",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:39.526Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c02rga4v",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:39.185Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0x88r1k",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:38.837Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0nliloo",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:38.487Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0ecmozp",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:38.129Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c091xiz7",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:37.819Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0wetpt1",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:37.515Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0ew5j65",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:37.158Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c08rq8yn",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:36.772Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0yf5gxv",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:36.417Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0mdgv4b",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:36.036Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0h39lhn",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:35.709Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0bbivqe",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:35.393Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c05n4gdz",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:35.009Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0lcnxch",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:34.637Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0vefrqa",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:34.286Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0piczky",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:33.864Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0k6n1yj",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:33.438Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0j346pt",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:33.016Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0591yt2",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:32.554Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0zvtex3",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:32.119Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c00wjjmo",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:31.751Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0ovxe5a",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:31.411Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0jebh01",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:31.077Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0kxss7s",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:30.743Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0cu58x5",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:30.422Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c076x73b",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:30.108Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0gvkibe",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:29.757Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0y82zyl",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:29.356Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0s6ntn0",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:29.018Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0li2g5o",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:28.702Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0g4ojoy",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:28.358Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0a2zqpr",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:27.997Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0qdr54o",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:27.619Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c00qiw04",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:27.240Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0vhkyrq",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:26.801Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0q1nwj1",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:26.394Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0ka57xr",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:25.974Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0sa3d63",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:25.563Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0r9091q",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:25.132Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0lgdhb0",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:24.749Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0ftyk6u",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:24.422Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0aidnku",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:24.031Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0ux5rmy",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:23.719Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0uk9nn3",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:23.384Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0p2so2x",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:23.041Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0jkzumg",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:22.718Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0e6lx1b",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:22.285Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c07elzj4",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:21.868Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c01wj9pi",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:21.460Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0mwowfx",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:21.059Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c06lyt4i",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:20.555Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c011qi9t",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:20.026Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0esko6c",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:19.546Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c09ygniz",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:19.102Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c04k992u",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:54:18.577Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0pn8z35",
       "note": "workOrder"
     }
   ],
