@@ -9,8 +9,8 @@ use crate::Generics::{
 use crate::Syntax;
 use crate::AST::FuncSig;
 use crate::AST::{
-    AccessConvention, EnumDef, Func, ImplDef, Item, StructDef, TraitDef, TraitImplBlock,
-    TraitMethodSig, Type, TypeParam,
+    AccessConvention, EnumDef, Func, ImplDef, Item, ProgramBundle, StructDef, TraitDef,
+    TraitImplBlock, TraitMethodSig, Type, TypeParam,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -64,33 +64,80 @@ pub struct TraitInfo {
 }
 
 impl TraitRegistry {
-    /// Compute the three automatic structural traits once for a whole bundle.
-    /// Registration may visit files in any order; the final fixed point sees
-    /// every named type and explicit opt-out before admitting an outer type.
-    pub fn bundle_auto_derives<'a>(
-        item_groups: impl IntoIterator<Item = &'a [Item]>,
-    ) -> TraitRegistry {
-        let item_groups: Vec<&[Item]> = item_groups.into_iter().collect();
-        let mut registry = TraitRegistry::default();
+    /// Compute automatic structural traits for one standalone item group.
+    pub fn auto_derives_for_items(items: &[Item]) -> TraitRegistry {
+        let mut registry = Self::default();
         registry.register_synthetic_display_debug();
-        for items in &item_groups {
-            registry.register_items(items, &mut Vec::new());
-        }
+        registry.register_items(items, &mut Vec::new());
+        registry
+    }
+
+    /// Compute the three automatic structural traits for each bundle module.
+    /// Module index is the nominal identity; an imported `alias.Type` resolves
+    /// through the bundle's import-target table before its leaf-name facts are
+    /// consulted. Bare names never borrow facts from another module.
+    pub fn bundle_auto_derives(bundle: &ProgramBundle) -> Vec<TraitRegistry> {
+        let mut registries: Vec<_> = bundle
+            .modules
+            .iter()
+            .map(|module| Self::auto_derives_for_items(&module.items))
+            .collect();
         loop {
-            let before = registry.auto_printable.len()
-                + registry.auto_debug.len()
-                + registry.auto_equatable.len();
-            for items in &item_groups {
-                registry.compute_auto_derives(items);
+            let snapshot = registries.clone();
+            let mut changed = false;
+            for (module_idx, module) in bundle.modules.iter().enumerate() {
+                let imports: HashMap<String, usize> = module
+                    .imports
+                    .iter()
+                    .filter_map(|import| {
+                        bundle
+                            .import_targets
+                            .get(&(module_idx, import.span))
+                            .copied()
+                            .map(|target| (import.import_alias(), target))
+                    })
+                    .collect();
+                changed |= registries[module_idx].compute_auto_derives_with(
+                    &module.items,
+                    |name, trait_name| {
+                        let (alias, leaf) = name.split_once('.')?;
+                        let target = *imports.get(alias)?;
+                        Some(snapshot[target].implements_trait(leaf, trait_name))
+                    },
+                );
             }
-            let after = registry.auto_printable.len()
-                + registry.auto_debug.len()
-                + registry.auto_equatable.len();
-            if after == before {
+            if !changed {
                 break;
             }
         }
-        registry
+        let snapshot = registries.clone();
+        for (module_idx, module) in bundle.modules.iter().enumerate() {
+            for import in &module.imports {
+                let Some(&target) = bundle.import_targets.get(&(module_idx, import.span)) else {
+                    continue;
+                };
+                let alias = import.import_alias();
+                registries[module_idx].auto_printable.extend(
+                    snapshot[target]
+                        .auto_printable
+                        .iter()
+                        .map(|leaf| format!("{alias}.{leaf}")),
+                );
+                registries[module_idx].auto_debug.extend(
+                    snapshot[target]
+                        .auto_debug
+                        .iter()
+                        .map(|leaf| format!("{alias}.{leaf}")),
+                );
+                registries[module_idx].auto_equatable.extend(
+                    snapshot[target]
+                        .auto_equatable
+                        .iter()
+                        .map(|leaf| format!("{alias}.{leaf}")),
+                );
+            }
+        }
+        registries
     }
 
     pub fn merge_auto_derives(&mut self, source: &TraitRegistry) {
@@ -779,6 +826,15 @@ impl TraitRegistry {
     }
 
     fn compute_auto_derives(&mut self, items: &[Item]) {
+        self.compute_auto_derives_with(items, |_, _| None);
+    }
+
+    fn compute_auto_derives_with(
+        &mut self,
+        items: &[Item],
+        foreign_supports: impl Fn(&str, &str) -> Option<bool>,
+    ) -> bool {
+        let mut any_changed = false;
         for trait_name in [PRINTABLE, EQUATABLE, DEBUG] {
             loop {
                 let mut changed = false;
@@ -803,7 +859,11 @@ impl TraitRegistry {
                         || self
                             .trait_impls
                             .contains(&(name.clone(), trait_name.to_string()))
-                        || !self.auto_derive_dependencies_ready(item, trait_name)
+                        || !self.auto_derive_dependencies_ready(
+                            item,
+                            trait_name,
+                            &foreign_supports,
+                        )
                     {
                         continue;
                     }
@@ -814,21 +874,29 @@ impl TraitRegistry {
                         _ => false,
                     };
                 }
+                any_changed |= changed;
                 if !changed {
                     break;
                 }
             }
         }
+        any_changed
     }
 
-    fn auto_derive_dependencies_ready(&self, item: &Item, trait_name: &str) -> bool {
+    fn auto_derive_dependencies_ready(
+        &self,
+        item: &Item,
+        trait_name: &str,
+        foreign_supports: &impl Fn(&str, &str) -> Option<bool>,
+    ) -> bool {
         let type_params = match item {
             Item::Struct(s) => &s.type_params,
             Item::Enum(e) => &e.type_params,
             _ => return false,
         };
-        let supports =
-            |ty: &Type| self.auto_derive_type_ready(ty, trait_name, type_params);
+        let supports = |ty: &Type| {
+            self.auto_derive_type_ready(ty, trait_name, type_params, foreign_supports)
+        };
         match item {
             Item::Struct(s) => s
                 .fields
@@ -851,29 +919,74 @@ impl TraitRegistry {
         ty: &Type,
         trait_name: &str,
         type_params: &[TypeParam],
+        foreign_supports: &impl Fn(&str, &str) -> Option<bool>,
     ) -> bool {
         match ty {
             Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. } => {
-                self.auto_derive_type_ready(inner, trait_name, type_params)
+                self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
             }
             Type::Result { ok, err } => {
-                self.auto_derive_type_ready(ok, trait_name, type_params)
-                    && self.auto_derive_type_ready(err, trait_name, type_params)
+                self.auto_derive_type_ready(ok, trait_name, type_params, foreign_supports)
+                    && self.auto_derive_type_ready(
+                        err,
+                        trait_name,
+                        type_params,
+                        foreign_supports,
+                    )
+            }
+            Type::Map { key, value, .. } => {
+                trait_name != EQUATABLE
+                    && self.auto_derive_type_ready(
+                        key,
+                        trait_name,
+                        type_params,
+                        foreign_supports,
+                    )
+                    && self.auto_derive_type_ready(
+                        value,
+                        trait_name,
+                        type_params,
+                        foreign_supports,
+                    )
             }
             Type::Tuple(fields) => fields
                 .iter()
-                .all(|(_, field)| self.auto_derive_type_ready(field, trait_name, type_params)),
+                .all(|(_, field)| {
+                    self.auto_derive_type_ready(
+                        field,
+                        trait_name,
+                        type_params,
+                        foreign_supports,
+                    )
+                }),
+            Type::Union(members) => members.iter().all(|member| {
+                self.auto_derive_type_ready(
+                    member,
+                    trait_name,
+                    type_params,
+                    foreign_supports,
+                )
+            }),
             Type::Apply { name, args } => {
-                self.implements_trait(name, trait_name)
+                foreign_supports(name, trait_name)
+                    .unwrap_or_else(|| self.implements_trait(name, trait_name))
                     && args
                         .iter()
-                        .all(|arg| self.auto_derive_type_ready(arg, trait_name, type_params))
+                        .all(|arg| {
+                            self.auto_derive_type_ready(
+                                arg,
+                                trait_name,
+                                type_params,
+                                foreign_supports,
+                            )
+                        })
             }
             Type::Tagged { inner, .. } => {
-                self.auto_derive_type_ready(inner, trait_name, type_params)
+                self.auto_derive_type_ready(inner, trait_name, type_params, foreign_supports)
             }
             Type::Named(name) if type_params.iter().any(|param| param.name == *name) => true,
-            Type::Named(name) => self.implements_trait(name, trait_name),
+            Type::Named(name) => foreign_supports(name, trait_name)
+                .unwrap_or_else(|| self.implements_trait(name, trait_name)),
             Type::Int
             | Type::Float
             | Type::Bool
@@ -881,7 +994,7 @@ impl TraitRegistry {
             | Type::Char
             | Type::IntN { .. }
             | Type::Float32 => true,
-            _ => false,
+            Type::Shared(_) | Type::TraitObject(_) | Type::Fn { .. } => false,
         }
     }
 
@@ -1858,11 +1971,27 @@ pub fn enum_auto_derive_ok(e: &EnumDef) -> bool {
 
 fn field_auto_ok(ty: &Type, owner: &str) -> bool {
     match ty {
-        Type::Int | Type::Float | Type::Bool | Type::String | Type::Char => true,
-        Type::List(inner) | Type::Option(inner) => field_auto_ok(inner, owner),
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::String
+        | Type::Char
+        | Type::IntN { .. }
+        | Type::Float32 => true,
+        Type::List(inner)
+        | Type::Option(inner)
+        | Type::Tagged { inner, .. }
+        | Type::FixedList { elem: inner, .. } => field_auto_ok(inner, owner),
+        Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+            field_auto_ok(key, owner) && field_auto_ok(value, owner)
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .all(|(_, field)| field_auto_ok(field, owner)),
+        Type::Union(members) => members.iter().all(|member| field_auto_ok(member, owner)),
         Type::Named(n) => n != owner,
         Type::Apply { .. } => true,
-        _ => false,
+        Type::Shared(_) | Type::TraitObject(_) | Type::Fn { .. } => false,
     }
 }
 
