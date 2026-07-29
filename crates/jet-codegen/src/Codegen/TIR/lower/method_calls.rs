@@ -198,6 +198,68 @@ fn core_widen_to_vec(module: &str, method: &str, args: &[TExpr]) -> Vec<bool> {
         .collect()
 }
 
+fn lower_serde_encode_node(recv: TExpr, cx: &Cx) -> TExpr {
+    if matches!(&recv.ty, Type::Apply { .. }) {
+        cx.jit_method_calls.borrow_mut().insert(
+            format!("{}::encode", recv.ty.name()),
+            (recv.ty.clone(), "encode".to_string()),
+        );
+    }
+    TExpr {
+        ty: Type::Named(Syntax::TYPE_DATA.to_string()),
+        kind: TExprKind::HandleMethod {
+            recv: Box::new(recv),
+            op: THandleOp::SerdeEncode,
+            args: Vec::new(),
+        },
+    }
+}
+
+fn lower_datatree_decode_node(
+    recv: TExpr,
+    target: Type,
+    resolved_ret: Option<&Type>,
+    cx: &Cx,
+) -> TExpr {
+    if matches!(&target, Type::Apply { .. }) {
+        cx.jit_method_calls.borrow_mut().insert(
+            format!("{}::decode", target.name()),
+            (target.clone(), "decode".to_string()),
+        );
+    }
+    TExpr {
+        ty: resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+            ok: Box::new(target.clone()),
+            err: Box::new(Type::Named("DecodeError".to_string())),
+        }),
+        kind: TExprKind::HandleMethod {
+            recv: Box::new(recv),
+            op: THandleOp::DataTreeDecode(target),
+            args: Vec::new(),
+        },
+    }
+}
+
+fn fragment_serde_encode_type(ty: &Type, cx: &Cx) -> bool {
+    matches!(
+        ty,
+        Type::Int
+            | Type::IntN { .. }
+            | Type::Float
+            | Type::Float32
+            | Type::Bool
+            | Type::String
+            | Type::Char
+            | Type::List(_)
+            | Type::FixedList { .. }
+            | Type::Option(_)
+            | Type::Map { .. }
+    ) || matches!(ty, Type::Named(name) if is_json_type_name(name))
+        || cx.sigs.contains_key(&format!("{}::encode", ty.name()))
+        || matches!(ty, Type::Apply { name, .. }
+            if cx.sigs.contains_key(&format!("{name}::encode")))
+}
+
 /// c109 Phase 6: lower a method call. The gate proved it is the synthetic `.clone()`
 /// or a user instance method on a covered type; resolve every dispatch fact here.
 pub(crate) fn lower_method_call(
@@ -2913,43 +2975,36 @@ pub(crate) fn lower_method_call(
             }
         }
     }
+    if super::is_eval_fragment() && recv_type.is_none() && args.is_empty() {
+        let recv = lower_expr(receiver, cx, env);
+        if method == "encode" && fragment_serde_encode_type(&recv.ty, cx) {
+            return lower_serde_encode_node(recv, cx);
+        }
+        if method == Syntax::METHOD_DATATREE_DECODE
+            && matches!(&recv.ty, Type::Named(name) if is_json_type_name(name))
+        {
+            if let Some(target) = type_args.first() {
+                return lower_datatree_decode_node(recv, target.clone(), resolved_ret, cx);
+            }
+        }
+        *lowered_receiver.borrow_mut() = Some(recv);
+    }
     if let Some(handle) = recv_type {
         if handle == "__SerdeEncode__" && method == "encode" && args.is_empty() {
             let recv = lower_expr(receiver, cx, env);
-            if matches!(&recv.ty, Type::Apply { .. }) {
-                cx.jit_method_calls.borrow_mut().insert(
-                    format!("{}::encode", recv.ty.name()),
-                    (recv.ty.clone(), "encode".to_string()),
-                );
-            }
-            return TExpr {
-                ty: Type::Named(Syntax::TYPE_DATA.to_string()),
-                kind: TExprKind::HandleMethod {
-                    recv: Box::new(recv),
-                    op: THandleOp::SerdeEncode,
-                    args: Vec::new(),
-                },
-            };
+            return lower_serde_encode_node(recv, cx);
         }
         if handle == Syntax::TYPE_DATA
             && method == Syntax::METHOD_DATATREE_DECODE
             && args.is_empty()
         {
             if let Some(Type::Result { ok, .. }) = resolved_ret {
-                if matches!(ok.as_ref(), Type::Apply { .. }) {
-                    cx.jit_method_calls.borrow_mut().insert(
-                        format!("{}::decode", ok.name()),
-                        ((**ok).clone(), "decode".to_string()),
-                    );
-                }
-                return TExpr {
-                    ty: resolved_ret.cloned().unwrap_or_else(unit_type),
-                    kind: TExprKind::HandleMethod {
-                        recv: Box::new(lower_expr(receiver, cx, env)),
-                        op: THandleOp::DataTreeDecode((**ok).clone()),
-                        args: Vec::new(),
-                    },
-                };
+                return lower_datatree_decode_node(
+                    lower_expr(receiver, cx, env),
+                    (**ok).clone(),
+                    resolved_ret,
+                    cx,
+                );
             }
         }
         if let Some(mut op) = handle_method_op(handle, method, args.len()) {
