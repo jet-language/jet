@@ -658,8 +658,25 @@ fn forced_deopt() => String {
     return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
 }
 
+fn failed_change() => String {
+    bytes :: [U8].{
+        0xa3,
+        0x64, 0x6e, 0x61, 0x6d, 0x65,
+        0x63, 0x41, 0x64, 0x61,
+        0x65, 0x73, 0x63, 0x6f, 0x72, 0x65,
+        0x63, 0x62, 0x61, 0x64,
+        0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
+        0x09
+    }
+    if cbor.decode<Profile>(~bytes) == {
+        .Ok(_) -> return "accepted"
+        .Err(error) -> return "{error.path}:{error.reason}"
+    }
+}
+
 fn run() {
     print(forced_deopt())
+    print(failed_change())
 }
 "#;
     let scratch = Scratch::new("cbor_migration_deopt");
@@ -685,6 +702,21 @@ fn run() {
         matches!(direct, jet::AST::CtValue::Str(ref value) if value == "Ada|95|localhost"),
         "direct migration result diverged: {direct:?}"
     );
+    let failed_change = jet::Codegen::TIR::run_named_func(
+        &program,
+        "failed_change",
+        Vec::new(),
+        &mut direct_sink,
+    )
+    .expect("failed migration change must return its keyed decode error");
+    assert!(
+        matches!(
+            failed_change,
+            jet::AST::CtValue::Str(ref value)
+                if value == "score:expected Int, found text \"bad\""
+        ),
+        "failed migration change lost its keyed decode error: {failed_change:?}"
+    );
     let plan = plan_bundle_tiers(&bundle);
     assert!(!plan.whole_interp, "regression needs mixed tiers: {plan:?}");
     assert!(
@@ -693,7 +725,10 @@ fn run() {
     );
     let aot = run_aot(&path, scratch.path());
     assert_eq!(aot.exit, 0, "migration corpus AOT failed: {}", aot.stderr);
-    assert_eq!(aot.stdout, "Ada|95|localhost\n");
+    assert_eq!(
+        aot.stdout,
+        "Ada|95|localhost\nscore:expected Int, found text \"bad\"\n"
+    );
     let (backend, dev) = run_default_dev(path.to_str().unwrap());
     assert_eq!(backend, DevBackend::DeoptInterp);
     assert_eq!(dev, aot);
@@ -754,6 +789,20 @@ fn invalid_range_rejected() => Bool {
     }
 }
 
+fn invalid_i8_error() => String {
+    if cbor.decode<I8>([U8].{ 0x18, 0x80 }) == {
+        .Ok(_) -> return "accepted"
+        .Err(error) -> return error.reason
+    }
+}
+
+fn invalid_fixed_bytes_error() => String {
+    if cbor.decode<[U8#2]>([U8].{ 0x41, 0xde }) == {
+        .Ok(_) -> return "accepted"
+        .Err(error) -> return error.reason
+    }
+}
+
 fn forced_deopt() => String {
     if text.casefold("Straße") != "strasse" { panic("casefold") }
     signed := cbor.decode<I8>(~(cbor.to_bytes_canonical(I8.{ -8 }) ?? panic("i8 encode"))) ?? panic("i8 decode")
@@ -764,7 +813,7 @@ fn forced_deopt() => String {
     tree := cbor.decode<DataTree>(~(cbor.to_bytes_canonical(DataTree.Object(["n": DataTree.Int(7)])) ?? panic("tree encode"))) ?? panic("tree decode")
     severity := cbor.decode<Severity>(~(cbor.to_bytes_canonical(Severity.from_int(7)) ?? panic("range encode"))) ?? panic("range decode")
     tree_n := (tree.field("n") ?? panic("tree field")).int() ?? panic("tree int")
-    return "{signed}|{unsigned}|{narrow}|{pair[0]},{pair[1]}|{bytes[0]},{bytes[1]}|{tree_n}|{severity.raw()}|{invalid_i8_rejected()}|{invalid_u32_rejected()}|{invalid_f32_rejected()}|{invalid_fixed_rejected()}|{invalid_range_rejected()}"
+    return "{signed}|{unsigned}|{narrow}|{pair[0]},{pair[1]}|{bytes[0]},{bytes[1]}|{tree_n}|{severity.raw()}|{invalid_i8_rejected()}|{invalid_u32_rejected()}|{invalid_f32_rejected()}|{invalid_fixed_rejected()}|{invalid_range_rejected()}|{invalid_i8_error()}|{invalid_fixed_bytes_error()}"
 }
 
 fn run() {
@@ -784,7 +833,7 @@ fn run() {
         &mut direct_sink,
     )
     .expect("primitive boundaries must execute in the TIR evaluator");
-    let expected = "-8|4000000000|1.5|1,2|222,173|7|7|true|true|true|true|true";
+    let expected = "-8|4000000000|1.5|1,2|222,173|7|7|true|true|true|true|true|expected I8, found out-of-range Int|expected a fixed list of length 2, found 1";
     assert!(
         matches!(direct, jet::AST::CtValue::Str(ref value) if value == expected),
         "direct primitive result diverged: {direct:?}"

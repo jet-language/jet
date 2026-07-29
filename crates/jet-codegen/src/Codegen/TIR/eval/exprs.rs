@@ -273,7 +273,7 @@ impl<'a> EvalCtx<'a> {
         &mut self,
         type_name: &str,
         tree: &CtValue,
-    ) -> Result<Option<CtValue>, Diagnostic> {
+    ) -> Result<Option<Result<CtValue, CtValue>>, Diagnostic> {
         let Some(plan) = self.codec_migrations.get(type_name).cloned() else {
             return Ok(None);
         };
@@ -333,7 +333,9 @@ impl<'a> EvalCtx<'a> {
                         };
                         let old = match self.eval_datatree_decode(encoded.clone(), from_ty)? {
                             CtValue::ResOk(value) => *value,
-                            CtValue::ResErr(_) => return Ok(None),
+                            CtValue::ResErr(error) => {
+                                return Ok(Some(Err(decode_error_under(key, *error))));
+                            }
                             _ => unreachable!(),
                         };
                         let func = self.funcs.get(converter_fn).copied().ok_or_else(|| {
@@ -349,7 +351,7 @@ impl<'a> EvalCtx<'a> {
                 }
             }
         }
-        Ok(Some(datatree_object(pairs)))
+        Ok(Some(Ok(datatree_object(pairs))))
     }
 
     fn eval_datatree_decode(
@@ -371,7 +373,7 @@ impl<'a> EvalCtx<'a> {
                         if !in_range {
                             Err(decode_error(
                                 "",
-                                format!("expected {}, found Int", ty.name()),
+                                format!("expected {}, found out-of-range Int", ty.name()),
                             ))
                         } else {
                             Ok(CtValue::Int(*value))
@@ -479,6 +481,17 @@ impl<'a> EvalCtx<'a> {
                 let CtValue::Bytes(bytes) = tree else {
                     unreachable!();
                 };
+                if let Type::FixedList { len, .. } = ty {
+                    if bytes.len() != *len as usize {
+                        return Ok(CtValue::ResErr(Box::new(decode_error(
+                            "",
+                            format!(
+                                "expected a fixed list of length {len}, found {}",
+                                bytes.len()
+                            ),
+                        ))));
+                    }
+                }
                 Ok(CtValue::List(
                     bytes.into_iter().map(|byte| CtValue::Int(i64::from(byte))).collect(),
                 ))
@@ -616,11 +629,15 @@ impl<'a> EvalCtx<'a> {
                             sink.stderr.truncate(start + line_end + 1);
                         }
                     }
-                    if let Some(migrated) =
-                        self.apply_codec_migration(&ty.name(), &tree)?
-                    {
-                        let mut child = HashMap::new();
-                        return self.run_func(func, vec![migrated], &mut child);
+                    match self.apply_codec_migration(&ty.name(), &tree)? {
+                        Some(Ok(migrated)) => {
+                            let mut child = HashMap::new();
+                            return self.run_func(func, vec![migrated], &mut child);
+                        }
+                        Some(Err(error)) => {
+                            return Ok(CtValue::ResErr(Box::new(error)));
+                        }
+                        None => {}
                     }
                 }
                 return Ok(result);
