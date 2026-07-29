@@ -316,6 +316,8 @@ pub enum ManifestError {
     BadLintsPolicy { detail: String },
     /// D-PACKAGE-POLICY-SCOPE1: malformed or widening package policy.
     BadMemoryPolicy { detail: String },
+    /// D-AUTODERIVE-SYNTAX1=D: malformed `policy.auto_derive`.
+    BadAutoDerivePolicy { detail: String },
 }
 
 /// Top-level keys reserved for a future Jet feature; using them non-empty
@@ -514,6 +516,21 @@ deps: {
 
         let defaulted = parse("payload: { name: \"app\", version: \"1\" }").unwrap();
         assert_eq!(defaulted.auto_derive, None);
+
+        for policy in [
+            "policy: .{ auto_derive: sometimes }",
+            "policy: .{ auto_derive: true, auto_derive: false }",
+        ] {
+            assert!(
+                matches!(
+                    parse(&format!(
+                        "payload: {{ name: \"app\", version: \"1\" }}\n{policy}"
+                    )),
+                    Err(ManifestError::BadAutoDerivePolicy { .. })
+                ),
+                "{policy}"
+            );
+        }
     }
 
     #[test]

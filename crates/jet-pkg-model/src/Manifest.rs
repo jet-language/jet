@@ -476,6 +476,9 @@ fn to_diagnostic(path: &Path, err: &ManifestError) -> Diagnostic {
         ManifestError::BadMemoryPolicy { detail } => {
             e1206(&file, &format!("memory policy is malformed: {detail}"))
         }
+        ManifestError::BadAutoDerivePolicy { detail } => {
+            e1206(&file, &format!("`policy.auto_derive` is malformed: {detail}"))
+        }
     }
 }
 
