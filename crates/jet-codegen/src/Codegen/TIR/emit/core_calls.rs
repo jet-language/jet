@@ -2850,6 +2850,49 @@ pub(crate) fn emit_tir_core_call(
             arg(1),
             arg(2)
         ),
+        // D-HTTP-JSON1=A: one JSON response with its content type set.
+        ("core.http.server", "json") => {
+            format!("jet_http_srv_json({}, &({}))", arg(0), arg(1))
+        }
+        // D-HTTP-STATIC-FILES1=A: mount a directory. The trailing options keep
+        // the safe defaults when the program leaves them off.
+        ("core.http.server", "static_files") => {
+            let option = |index: usize, default: &str| {
+                args.get(index).map_or_else(|| default.to_string(), |_| arg(index))
+            };
+            format!(
+                "jet_http_srv_static_files_mount(&({}), &({}), &({}), JetHTTPStaticOptions {{ index: {}, dotfiles: {}, follow_links: {} }})",
+                arg(0),
+                arg(1),
+                arg(2),
+                option(3, "true"),
+                option(4, "false"),
+                option(5, "false"),
+            )
+        }
+        // D-HTTP-CORS1=A: `origins` takes a plain list or the `.Any` case.
+        ("core.http.server", "cors_policy") => {
+            let origins = if matches!(args.first().map(|a| &a.ty), Some(Type::List(_))) {
+                format!("JetHTTPCorsOrigins::List({})", arg(0))
+            } else {
+                arg(0)
+            };
+            let list = |index: usize| {
+                args.get(index)
+                    .map_or_else(|| "Vec::new()".to_string(), |_| arg(index))
+            };
+            format!(
+                "jet_http_cors_policy(&({}), &({}), &({}), {}, {})",
+                origins,
+                list(1),
+                list(2),
+                args.get(3).map_or_else(|| "false".to_string(), |_| arg(3)),
+                args.get(4).map_or_else(|| "86400".to_string(), |_| arg(4)),
+            )
+        }
+        ("core.http.server", "cors") => {
+            format!("jet_http_srv_install_cors(&({}), &({}))", arg(0), arg(1))
+        }
         ("core.http.server", "access_log") => {
             format!("jet_http_srv_access_log(&({}), {})", arg(0), arg(1))
         }

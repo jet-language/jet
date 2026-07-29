@@ -578,6 +578,7 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "HTTPRetryPolicy" => Some("JetHTTPRetryPolicy"),
         "HTTPCookieJar" => Some("JetHTTPCookieJar"),
         "HTTPCorsPolicy" => Some("JetHTTPCorsPolicy"),
+        "HTTPCorsOrigins" => Some("JetHTTPCorsOrigins"),
         "HTTPCompressEncoding" => Some("JetHTTPCompressEncoding"),
         "HTTPRouter" => Some("JetHTTPRouter"),
         _ => None,
@@ -1069,6 +1070,7 @@ impl Cx {
             Type::Named(name) if name == "HTTPRetryPolicy" => "JetHTTPRetryPolicy".to_string(),
             Type::Named(name) if name == "HTTPCookieJar" => "JetHTTPCookieJar".to_string(),
             Type::Named(name) if name == "HTTPCorsPolicy" => "JetHTTPCorsPolicy".to_string(),
+            Type::Named(name) if name == "HTTPCorsOrigins" => "JetHTTPCorsOrigins".to_string(),
             Type::Named(name) if name == "HTTPCompressEncoding" => "JetHTTPCompressEncoding".to_string(),
             Type::Named(name) if name == "HTTPMethod" => "JetHTTPMethod".to_string(),
             Type::Named(name) if name == "HTTPStatus" => "JetHTTPStatus".to_string(),
@@ -2272,6 +2274,21 @@ pub(crate) fn build_cx_items(
         .insert("HTTPCompressEncoding".to_string(), http_compress_encoding);
     cx.cloneable.insert("HTTPCompressEncoding".to_string());
     cx.cloneable.insert("HTTPCorsPolicy".to_string());
+    // D-HTTP-CORS1=A: `.Any` or `.List([...])` origins.
+    let http_cors_origins = vec![
+        ("Any".to_string(), VariantPayload::Unit),
+        (
+            "List".to_string(),
+            VariantPayload::Single(Type::List(Box::new(Type::String)), zero),
+        ),
+    ];
+    for (variant, _) in &http_cors_origins {
+        cx.variant_owner
+            .insert(variant.clone(), "HTTPCorsOrigins".to_string());
+    }
+    cx.enum_variants
+        .insert("HTTPCorsOrigins".to_string(), http_cors_origins);
+    cx.cloneable.insert("HTTPCorsOrigins".to_string());
     let mut http_errors = [
         "InvalidMethod",
         "InvalidUrl",
@@ -2295,6 +2312,7 @@ pub(crate) fn build_cx_items(
         ("Redirect", "reason", Type::String),
         ("Protocol", "version", Type::String),
         ("IO", "operation", Type::String),
+        ("Policy", "reason", Type::String),
         ("ResourceUnavailable", "resource", Type::String),
         ("Internal", "incident_id", Type::String),
         (

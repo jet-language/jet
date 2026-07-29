@@ -722,6 +722,12 @@ pub fn core_module_items(module: &str) -> Vec<String> {
             "static_file_range",
             "access_log",
             "request_id",
+            // D-HTTP-JSON1=A / D-HTTP-STATIC-FILES1=A / D-HTTP-CORS1=A: the
+            // everyday web-service defaults.
+            "json",
+            "static_files",
+            "cors",
+            "cors_policy",
         ],
         // D-BROWSER-AUTO1=A: native BiDi profile/session entry points.
         "core.browser" => &[

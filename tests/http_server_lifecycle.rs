@@ -3519,7 +3519,7 @@ fn server_safe_defaults_static_files_ranges_and_access_events_are_bounded() {
         if let Some(range) = range { headers.append("range", range).unwrap(); }
         JetHTTPRequest::server("GET", path.to_string(), Vec::new(), headers)
     };
-    let full = jet_http_srv_static_files(&request("/nested/data.bin", None), &root).unwrap();
+    let full = jet_http_srv_static_files(&request("/nested/data.bin", None), "", &root, JetHTTPStaticOptions::safe()).unwrap();
     assert_eq!(full.status, 200);
     let etag = full.headers.get("etag").unwrap().clone();
     let last_modified = full.headers.get("last-modified").unwrap().clone();
@@ -3527,25 +3527,25 @@ fn server_safe_defaults_static_files_ranges_and_access_events_are_bounded() {
     assert_eq!(full.headers.get("accept-ranges"), Some(&"bytes".to_string()));
     assert!(full.headers.get("etag").is_some());
 
-    let partial = jet_http_srv_static_files(&request("/nested/data.bin", Some("bytes=2-4")), &root).unwrap();
+    let partial = jet_http_srv_static_files(&request("/nested/data.bin", Some("bytes=2-4")), "", &root, JetHTTPStaticOptions::safe()).unwrap();
     assert_eq!(partial.status, 206);
     assert_eq!(partial.body.bytes(64).unwrap(), vec![2, 0xff, 4]);
     assert_eq!(partial.headers.get("content-range"), Some(&"bytes 2-4/6".to_string()));
-    assert_eq!(jet_http_srv_static_files(&request("/nested/data.bin", Some("bytes=0-1,4-5")), &root).unwrap().status, 416);
-    assert_eq!(jet_http_srv_static_files(&request("/../secret", None), &root).unwrap().status, 404);
-    assert_eq!(jet_http_srv_static_files(&request("/nested", None), &root).unwrap().status, 404);
-    assert_eq!(jet_http_srv_static_files(&request("/", None), &root).unwrap().body.bytes(64).unwrap(), b"index");
+    assert_eq!(jet_http_srv_static_files(&request("/nested/data.bin", Some("bytes=0-1,4-5")), "", &root, JetHTTPStaticOptions::safe()).unwrap().status, 416);
+    assert_eq!(jet_http_srv_static_files(&request("/../secret", None), "", &root, JetHTTPStaticOptions::safe()).unwrap().status, 404);
+    assert_eq!(jet_http_srv_static_files(&request("/nested", None), "", &root, JetHTTPStaticOptions::safe()).unwrap().status, 404);
+    assert_eq!(jet_http_srv_static_files(&request("/", None), "", &root, JetHTTPStaticOptions::safe()).unwrap().body.bytes(64).unwrap(), b"index");
     for (name, value) in [("if-none-match", etag.as_str()), ("if-modified-since", last_modified.as_str())] {
         let mut headers = JetHTTPHeaders::new();
         headers.append(name, value).unwrap();
         let conditional = JetHTTPRequest::server("GET", "/nested/data.bin".to_string(), Vec::new(), headers);
-        assert_eq!(jet_http_srv_static_files(&conditional, &root).unwrap().status, 304);
+        assert_eq!(jet_http_srv_static_files(&conditional, "", &root, JetHTTPStaticOptions::safe()).unwrap().status, 304);
     }
     let mut headers = JetHTTPHeaders::new();
     headers.append("range", "bytes=1-2").unwrap();
     headers.append("if-range", "\"stale\"").unwrap();
     let stale_range = JetHTTPRequest::server("GET", "/nested/data.bin".to_string(), Vec::new(), headers);
-    let stale_range = jet_http_srv_static_files(&stale_range, &root).unwrap();
+    let stale_range = jet_http_srv_static_files(&stale_range, "", &root, JetHTTPStaticOptions::safe()).unwrap();
     assert_eq!(stale_range.status, 200);
     assert_eq!(stale_range.body.bytes(64).unwrap().len(), 6);
 
@@ -3583,7 +3583,7 @@ fn static_file_response_holds_the_open_identity_and_streams_the_selected_range()
     let mut headers = JetHTTPHeaders::new();
     headers.append("range", "bytes=2-6").unwrap();
     let request = JetHTTPRequest::server("GET", "/asset.bin".to_string(), Vec::new(), headers);
-    let response = jet_http_srv_static_files(&request, &root).unwrap();
+    let response = jet_http_srv_static_files(&request, "", &root, JetHTTPStaticOptions::safe()).unwrap();
     let direct = jet_http_srv_static_file_range(
         &request,
         &path.to_string_lossy().into_owned(),
@@ -3612,7 +3612,7 @@ fn windows_static_serving_fails_closed_without_held_no_reparse_identity() {
         Vec::new(),
         JetHTTPHeaders::new(),
     );
-    assert_eq!(jet_http_srv_static_files(&request, &root).unwrap().status, 404);
+    assert_eq!(jet_http_srv_static_files(&request, "", &root, JetHTTPStaticOptions::safe()).unwrap().status, 404);
     assert!(jet_http_srv_static_file(
         &root.join("asset.txt").to_string_lossy().into_owned(),
         &"text/plain".to_string(),
@@ -5218,13 +5218,21 @@ fn builtin_middleware_timeout_body_limit_cors_compress_and_access_log() {
         Err(JetHTTPError::BodyTooLarge { limit: 4 })
     ));
 
-    let policy = jet_http_cors_policy(&"https://app.example".to_string());
+    let policy = jet_http_cors_policy(
+        &JetHTTPCorsOrigins::List(vec!["https://app.example".to_string()]),
+        &Vec::new(),
+        &Vec::new(),
+        false,
+        86_400,
+    )
+    .unwrap();
     let cors = jet_http_mw_cors(
         &policy,
         std::sync::Arc::new(|_| Ok(jet_http_srv_response(200, &"ok".to_string()))),
     );
     let mut preflight_headers = JetHTTPHeaders::new();
     preflight_headers.append("origin", "https://app.example").unwrap();
+    preflight_headers.append("access-control-request-method", "POST").unwrap();
     let preflight = JetHTTPRequest::server("OPTIONS", "/api".to_string(), Vec::new(), preflight_headers);
     let preflight = cors(preflight).unwrap();
     assert_eq!(preflight.status, 204);
@@ -5264,7 +5272,11 @@ fn static_files_handler_serves_root_index_and_rejects_traversal() {
     std::fs::create_dir_all(root.join("nested")).unwrap();
     std::fs::write(root.join("index.html"), b"index").unwrap();
     std::fs::write(root.join("nested/data.bin"), [1, 2, 3]).unwrap();
-    let handler = jet_http_srv_static_files_handler(root.to_string_lossy().into_owned());
+    let handler = jet_http_srv_static_files_handler(
+        String::new(),
+        root.to_string_lossy().into_owned(),
+        JetHTTPStaticOptions::safe(),
+    );
     let ok = handler(JetHTTPRequest::server("GET", "/nested/data.bin".to_string(), Vec::new(), Default::default())).unwrap();
     assert_eq!(ok.status, 200);
     assert_eq!(ok.body.bytes(16).unwrap(), vec![1, 2, 3]);
@@ -5273,4 +5285,202 @@ fn static_files_handler_serves_root_index_and_rejects_traversal() {
     let blocked = handler(JetHTTPRequest::server("GET", "/../secret".to_string(), Vec::new(), Default::default())).unwrap();
     assert_eq!(blocked.status, 404);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+/// D-HTTP-STATIC-FILES1=A: the mount defaults refuse every hostile path shape,
+/// and each expert option opens exactly one of them.
+#[test]
+fn static_files_mount_refuses_escapes_dotfiles_and_link_escapes() {
+    let base = std::env::temp_dir().join(format!(
+        "jet-http-static-hostile-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+    ));
+    let root = base.join("public");
+    std::fs::create_dir_all(root.join("nested")).unwrap();
+    std::fs::write(base.join("secret.txt"), b"outside").unwrap();
+    std::fs::write(root.join("index.html"), b"index").unwrap();
+    std::fs::write(root.join(".env"), b"TOKEN=private").unwrap();
+    std::fs::write(root.join("nested/app.css"), b"body{}").unwrap();
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(base.join("secret.txt"), root.join("escape.txt")).unwrap();
+        std::os::unix::fs::symlink(root.join("nested/app.css"), root.join("inside.css")).unwrap();
+    }
+
+    let get = |path: &str| {
+        JetHTTPRequest::server("GET", path.to_string(), Vec::new(), JetHTTPHeaders::new())
+    };
+    let serve = |path: &str, options: JetHTTPStaticOptions| {
+        jet_http_srv_static_files(&get(path), "/assets", &root, options).unwrap()
+    };
+    let safe = JetHTTPStaticOptions::safe();
+
+    // The mount only answers under its own prefix.
+    assert_eq!(serve("/assets/nested/app.css", safe).status, 200);
+    assert_eq!(serve("/assets/", safe).body.bytes(64).unwrap(), b"index");
+    assert_eq!(serve("/nested/app.css", safe).status, 404);
+    assert_eq!(serve("/assetsother/app.css", safe).status, 404);
+
+    // Path escapes never leave the root.
+    assert_eq!(serve("/assets/../secret.txt", safe).status, 404);
+    assert_eq!(serve("/assets/nested/../../secret.txt", safe).status, 404);
+    assert_eq!(serve("/assets/%2e%2e/secret.txt", safe).status, 404);
+    assert_eq!(serve("/assets/%2fsecret.txt", safe).status, 404);
+
+    // Dot-files are hidden until the expert asks for them.
+    assert_eq!(serve("/assets/.env", safe).status, 404);
+    let dotfiles = JetHTTPStaticOptions { dotfiles: true, ..safe };
+    assert_eq!(serve("/assets/.env", dotfiles).status, 200);
+
+    // Symbolic links are refused by default, and one that leaves the root stays
+    // refused even when the expert turns links on.
+    #[cfg(unix)]
+    {
+        assert_eq!(serve("/assets/escape.txt", safe).status, 404);
+        assert_eq!(serve("/assets/inside.css", safe).status, 404);
+        let links = JetHTTPStaticOptions { follow_links: true, ..safe };
+        assert_eq!(serve("/assets/escape.txt", links).status, 404);
+        assert_eq!(serve("/assets/inside.css", links).status, 200);
+    }
+
+    // The index option turns a directory request into a 404.
+    let no_index = JetHTTPStaticOptions { index: false, ..safe };
+    assert_eq!(serve("/assets/", no_index).status, 404);
+
+    // A mount on a live mux answers GET and HEAD through the catch-all route.
+    let mux = jet_http_mux_new();
+    jet_http_srv_static_files_mount(
+        &mux,
+        &"/assets".to_string(),
+        &root.to_string_lossy().into_owned(),
+        safe,
+    );
+    let served = jet_http_mux_dispatch(&mux, get("/assets/nested/app.css")).unwrap();
+    assert_eq!(served.status, 200);
+    assert_eq!(served.headers.get("content-type"), Some(&"text/css; charset=utf-8".to_string()));
+    let head = jet_http_mux_dispatch(
+        &mux,
+        JetHTTPRequest::server("HEAD", "/assets/nested/app.css".to_string(), Vec::new(), JetHTTPHeaders::new()),
+    )
+    .unwrap();
+    assert_eq!(head.status, 200);
+    assert_eq!(jet_http_mux_dispatch(&mux, get("/assets/.env")).unwrap().status, 404);
+
+    std::fs::remove_dir_all(base).unwrap();
+}
+
+/// D-HTTP-CORS1=A: no policy means no headers, a named origin is stamped, and
+/// `.Any` with credentials is refused when the policy is built.
+#[test]
+fn cors_policy_rejects_any_origin_with_credentials_and_stamps_named_origins() {
+    let refused = jet_http_cors_policy(
+        &JetHTTPCorsOrigins::Any,
+        &Vec::new(),
+        &Vec::new(),
+        true,
+        86_400,
+    );
+    let Err(JetHTTPError::Policy { reason }) = refused else {
+        panic!("`.Any` origins with credentials must be refused");
+    };
+    assert!(reason.contains("CORS credentials need named origins"));
+    assert!(reason.contains("set credentials to false"));
+
+    // No policy installed means the mux sends no CORS header at all.
+    let bare = jet_http_mux_new();
+    jet_http_mux_add(&bare, "GET", "/api", |_| jet_http_srv_response(200, &"ok".to_string()));
+    let mut origin_headers = JetHTTPHeaders::new();
+    origin_headers.append("origin", "https://app.example").unwrap();
+    let plain = jet_http_mux_dispatch(
+        &bare,
+        JetHTTPRequest::server("GET", "/api".to_string(), Vec::new(), origin_headers.clone()),
+    )
+    .unwrap();
+    assert_eq!(plain.headers.get("access-control-allow-origin"), None);
+
+    let policy = jet_http_cors_policy(
+        &JetHTTPCorsOrigins::List(vec!["https://app.example".to_string()]),
+        &vec!["GET".to_string(), "POST".to_string()],
+        &vec!["content-type".to_string()],
+        true,
+        600,
+    )
+    .unwrap();
+    let mux = jet_http_mux_new();
+    jet_http_srv_install_cors(&mux, &policy);
+    jet_http_mux_add(&mux, "GET", "/api", |_| jet_http_srv_response(200, &"ok".to_string()));
+
+    let mut preflight_headers = origin_headers.clone();
+    preflight_headers.append("access-control-request-method", "POST").unwrap();
+    let preflight = jet_http_mux_dispatch(
+        &mux,
+        JetHTTPRequest::server("OPTIONS", "/api".to_string(), Vec::new(), preflight_headers),
+    )
+    .unwrap();
+    assert_eq!(preflight.status, 204);
+    assert_eq!(
+        preflight.headers.get("access-control-allow-origin"),
+        Some(&"https://app.example".to_string())
+    );
+    assert_eq!(preflight.headers.get("access-control-allow-methods"), Some(&"GET, POST".to_string()));
+    assert_eq!(preflight.headers.get("access-control-allow-headers"), Some(&"content-type".to_string()));
+    assert_eq!(preflight.headers.get("access-control-allow-credentials"), Some(&"true".to_string()));
+    assert_eq!(preflight.headers.get("access-control-max-age"), Some(&"600".to_string()));
+
+    let allowed = jet_http_mux_dispatch(
+        &mux,
+        JetHTTPRequest::server("GET", "/api".to_string(), Vec::new(), origin_headers),
+    )
+    .unwrap();
+    assert_eq!(
+        allowed.headers.get("access-control-allow-origin"),
+        Some(&"https://app.example".to_string())
+    );
+    assert_eq!(allowed.headers.get("vary"), Some(&"origin".to_string()));
+
+    // An origin outside the list gets the answer with no CORS header.
+    let mut other = JetHTTPHeaders::new();
+    other.append("origin", "https://evil.example").unwrap();
+    let denied = jet_http_mux_dispatch(
+        &mux,
+        JetHTTPRequest::server("GET", "/api".to_string(), Vec::new(), other),
+    )
+    .unwrap();
+    assert_eq!(denied.status, 200);
+    assert_eq!(denied.headers.get("access-control-allow-origin"), None);
+
+    // `.Any` without credentials is a valid policy and answers every origin.
+    let any = jet_http_cors_policy(&JetHTTPCorsOrigins::Any, &Vec::new(), &Vec::new(), false, 0).unwrap();
+    let any_mux = jet_http_mux_new();
+    jet_http_srv_install_cors(&any_mux, &any);
+    jet_http_mux_add(&any_mux, "GET", "/api", |_| jet_http_srv_response(200, &"ok".to_string()));
+    let mut anywhere = JetHTTPHeaders::new();
+    anywhere.append("origin", "https://anywhere.example").unwrap();
+    let wide = jet_http_mux_dispatch(
+        &any_mux,
+        JetHTTPRequest::server("GET", "/api".to_string(), Vec::new(), anywhere),
+    )
+    .unwrap();
+    assert_eq!(wide.headers.get("access-control-allow-origin"), Some(&"*".to_string()));
+}
+
+/// D-HTTP-JSON1=A: `server.json` labels the body, and the typed decode used by
+/// `req.json<T>()` and `resp.json<T>(limit)` honours the body cap.
+#[test]
+fn server_json_sets_the_content_type_and_the_body_cap_still_holds() {
+    let response = jet_http_srv_json(201, &"unused-by-the-test-encoder".to_string());
+    assert_eq!(response.status, 201);
+    assert_eq!(
+        response.headers.get("content-type"),
+        Some(&"application/json; charset=utf-8".to_string())
+    );
+
+    // The typed decode reads through the shared body reader, so the framing cap
+    // rejects an oversized body before any decode runs.
+    let body = JetHTTPBody::from_text("{\"a\":1}".to_string());
+    assert!(matches!(
+        jet_http_body_text(&body, 2),
+        Err(JetHTTPError::BodyTooLarge { limit: 2 })
+    ));
 }

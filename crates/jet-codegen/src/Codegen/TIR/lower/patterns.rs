@@ -673,7 +673,7 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
     if matches!(type_name, "IOError" | "IOOperation") {
         return format!("{}jet_std::{}::{}", cx.root_prefix, if type_name == "IOError" { "IOError" } else { "IOOperation" }, variant);
     }
-    if matches!(type_name, "HTTPError" | "HTTPOperation" | "HTTPProxy" | "HTTPRedirectPolicy" | "HTTPRetryPolicy" | "HTTPCookieJar" | "HTTPCompressEncoding") {
+    if matches!(type_name, "HTTPError" | "HTTPOperation" | "HTTPProxy" | "HTTPCorsOrigins" | "HTTPRedirectPolicy" | "HTTPRetryPolicy" | "HTTPCookieJar" | "HTTPCompressEncoding") {
         return format!("{}Jet{}::{}", cx.root_prefix, type_name, variant);
     }
     if matches!(type_name, "SMTPSecurity" | "RecipientPolicy" | "EmailError" | "SMTPAuth" | "TLSTrust") {

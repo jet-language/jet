@@ -848,6 +848,15 @@ pub(crate) fn core_call_return_ty(module: &str, method: &str) -> Type {
         }
         ("core.http.server", "response") => return Type::Named("HTTPResponse".to_string()),
         ("core.http.server", "sse") => return Type::Named("HTTPResponse".to_string()),
+        // D-HTTP-JSON1=A / D-HTTP-STATIC-FILES1=A / D-HTTP-CORS1=A.
+        ("core.http.server", "json") => return Type::Named("HTTPResponse".to_string()),
+        ("core.http.server", "static_files" | "cors") => return unit_type(),
+        ("core.http.server", "cors_policy") => {
+            return Type::Result {
+                ok: Box::new(Type::Named("HTTPCorsPolicy".to_string())),
+                err: Box::new(Type::Named("HTTPError".to_string())),
+            }
+        }
         ("core.http.server", "access_log") => return Type::String,
         ("core.http.server", "request_id") => return unit_type(),
         _ => {}

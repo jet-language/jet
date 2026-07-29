@@ -3368,17 +3368,30 @@ impl<'a> Checker<'a> {
                     );
                     return Some(Type::Named("HTTPHandler".to_string()));
                 }
+                // D-HTTP-STATIC-FILES1=A: mount a directory under a prefix. The
+                // trailing `index`, `dotfiles`, and `follow_links` options are
+                // the expert opt-in; leaving them off keeps the safe defaults.
                 ("core.http.server", "static_files") => {
-                    if args.len() != 1 {
+                    if args.len() < 3 || args.len() > 6 {
                         self.diags
-                            .push(wrong_core_arity("static_files", 1, args.len(), span));
+                            .push(wrong_core_arity("static_files", 3, args.len(), span));
                         for a in args.iter_mut() {
                             self.infer(&mut a.expr);
                         }
                         return None;
                     }
-                    self.expect_core_arg("static_files", 0, &Type::String, &mut args[0]);
-                    return Some(Type::Named("HTTPHandler".to_string()));
+                    self.expect_core_arg(
+                        "static_files",
+                        0,
+                        &Type::Named("HTTPMux".to_string()),
+                        &mut args[0],
+                    );
+                    self.expect_core_arg("static_files", 1, &Type::String, &mut args[1]);
+                    self.expect_core_arg("static_files", 2, &Type::String, &mut args[2]);
+                    for index in 3..args.len() {
+                        self.expect_core_arg("static_files", index, &Type::Bool, &mut args[index]);
+                    }
+                    return Some(Type::Named("Unit".to_string()));
                 }
                 ("core.http.middleware", "timeout") => {
                     if args.len() != 2 {
@@ -3421,8 +3434,10 @@ impl<'a> Checker<'a> {
                     );
                     return Some(Type::Named("HTTPHandler".to_string()));
                 }
-                ("core.http.middleware", "cors_policy") => {
-                    if args.len() != 1 {
+                // D-HTTP-CORS1=A: one policy value, then one install on the mux.
+                // `origins` takes a plain `[String]` list or the `.Any` case.
+                ("core.http.server", "cors_policy") => {
+                    if args.is_empty() || args.len() > 5 {
                         self.diags
                             .push(wrong_core_arity("cors_policy", 1, args.len(), span));
                         for a in args.iter_mut() {
@@ -3430,10 +3445,32 @@ impl<'a> Checker<'a> {
                         }
                         return None;
                     }
-                    self.expect_core_arg("cors_policy", 0, &Type::String, &mut args[0]);
-                    return Some(Type::Named("HTTPCorsPolicy".to_string()));
+                    let origins = self.infer(&mut args[0].expr);
+                    let list_form = matches!(&origins, Some(Type::List(_)));
+                    let case_form =
+                        matches!(&origins, Some(Type::Named(name)) if name == "HTTPCorsOrigins");
+                    if !list_form && !case_form {
+                        self.expect_core_arg(
+                            "cors_policy",
+                            0,
+                            &Type::Named("HTTPCorsOrigins".to_string()),
+                            &mut args[0],
+                        );
+                    }
+                    let string_list = Type::List(Box::new(Type::String));
+                    for (index, want) in
+                        [(1, &string_list), (2, &string_list), (3, &Type::Bool), (4, &Type::Int)]
+                    {
+                        if let Some(arg) = args.get_mut(index) {
+                            self.expect_core_arg("cors_policy", index, want, arg);
+                        }
+                    }
+                    return Some(Type::Result {
+                        ok: Box::new(Type::Named("HTTPCorsPolicy".to_string())),
+                        err: Box::new(Type::Named("HTTPError".to_string())),
+                    });
                 }
-                ("core.http.middleware", "cors") => {
+                ("core.http.server", "cors") => {
                     if args.len() != 2 {
                         self.diags
                             .push(wrong_core_arity("cors", 2, args.len(), span));
@@ -3445,16 +3482,32 @@ impl<'a> Checker<'a> {
                     self.expect_core_arg(
                         "cors",
                         0,
-                        &Type::Named("HTTPCorsPolicy".to_string()),
+                        &Type::Named("HTTPMux".to_string()),
                         &mut args[0],
                     );
                     self.expect_core_arg(
                         "cors",
                         1,
-                        &Type::Named("HTTPHandler".to_string()),
+                        &Type::Named("HTTPCorsPolicy".to_string()),
                         &mut args[1],
                     );
-                    return Some(Type::Named("HTTPHandler".to_string()));
+                    return Some(Type::Named("Unit".to_string()));
+                }
+                // D-HTTP-JSON1=A: one typed JSON response.
+                ("core.http.server", "json") => {
+                    if args.len() != 2 {
+                        self.diags
+                            .push(wrong_core_arity("json", 2, args.len(), span));
+                        for a in args.iter_mut() {
+                            self.infer(&mut a.expr);
+                        }
+                        return None;
+                    }
+                    self.expect_core_arg("json", 0, &Type::Int, &mut args[0]);
+                    if let Some(value) = self.infer(&mut args[1].expr) {
+                        self.check_encodable(&value, args[1].expr.span());
+                    }
+                    return Some(Type::Named("HTTPResponse".to_string()));
                 }
                 ("core.http.middleware", "compress") => {
                     if args.len() != 2 {

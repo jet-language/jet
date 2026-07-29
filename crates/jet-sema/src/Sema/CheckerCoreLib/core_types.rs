@@ -281,7 +281,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Regex" | "RegexFlags" | "Match"
         // D-NETDEP1=A / D-HTTPLIB1=A: HTTP types.
         | "HTTPMethod" | "HTTPStatus" | "HTTPVersion" | "HTTPHeaderName" | "HTTPHeaderValue"
-        | "HTTPHeaders" | "HTTPBody" | "HTTPBodyChunks" | "HTTPError" | "HTTPOperation" | "HTTPProxy" | "HTTPRedirectPolicy" | "HTTPRetryPolicy" | "HTTPCookieJar" | "HTTPMux" | "HTTPHandler" | "HTTPServerTls" | "HTTPServer" | "HTTPShutdownReport" | "HTTPCorsPolicy" | "HTTPCompressEncoding"
+        | "HTTPHeaders" | "HTTPBody" | "HTTPBodyChunks" | "HTTPError" | "HTTPOperation" | "HTTPProxy" | "HTTPRedirectPolicy" | "HTTPRetryPolicy" | "HTTPCookieJar" | "HTTPMux" | "HTTPHandler" | "HTTPServerTls" | "HTTPServer" | "HTTPShutdownReport" | "HTTPCorsPolicy" | "HTTPCorsOrigins" | "HTTPCompressEncoding"
         | "WsConn" | "WsError" | "WsMessage"
         | "Browser" | "BrowserContext" | "BrowserPage" | "BrowserFrame" | "BrowserLocator"
         | "BrowserIntercept"
@@ -789,6 +789,18 @@ pub(crate) fn core_http_variants(
         }
         return Some(variants);
     }
+    // D-HTTP-CORS1=A: a CORS policy names either every origin or a list.
+    if enum_name == "HTTPCorsOrigins" {
+        variants.insert("Any".to_string(), (zero, VariantPayload::Unit));
+        variants.insert(
+            "List".to_string(),
+            (
+                zero,
+                VariantPayload::Single(Type::List(Box::new(Type::String)), zero),
+            ),
+        );
+        return Some(variants);
+    }
     if enum_name == "HTTPProxy" {
         variants.insert("FromEnvironment".to_string(), (zero, VariantPayload::Unit));
         variants.insert("None".to_string(), (zero, VariantPayload::Unit));
@@ -894,6 +906,8 @@ pub(crate) fn core_http_variants(
         ("Redirect", "reason", Type::String),
         ("Protocol", "version", Type::String),
         ("IO", "operation", Type::String),
+        // D-HTTP-CORS1=A: a policy value was refused when it was built.
+        ("Policy", "reason", Type::String),
         ("ResourceUnavailable", "resource", Type::String),
         ("Internal", "incident_id", Type::String),
         ("UnsupportedTarget", "operation", Type::Named("HTTPOperation".to_string())),

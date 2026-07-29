@@ -26,6 +26,9 @@ enum JetHTTPError {
     Redirect { reason: String },
     Protocol { version: String },
     IO { operation: String },
+    /// D-HTTP-CORS1=A: a policy value was refused when it was built. `reason`
+    /// carries the user-facing copy that says what to change.
+    Policy { reason: String },
     Cancelled,
     ResourceUnavailable { resource: String },
     UnsupportedTarget { operation: JetHTTPOperation },
@@ -129,6 +132,7 @@ impl std::fmt::Display for JetHTTPError {
             Self::Redirect { reason } => write!(formatter, "HTTP redirect failed: {reason}"),
             Self::Protocol { version } => write!(formatter, "unsupported HTTP protocol {version}"),
             Self::IO { operation } => write!(formatter, "HTTP I/O failed during {operation}"),
+            Self::Policy { reason } => write!(formatter, "{reason}"),
             Self::Cancelled => formatter.write_str("HTTP operation cancelled"),
             Self::ResourceUnavailable { resource } => write!(formatter, "HTTP resource unavailable: {resource}"),
             Self::UnsupportedTarget { operation } => {

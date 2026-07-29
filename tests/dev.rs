@@ -6846,6 +6846,10 @@ fn corpus_gate_exclusion(stem: &str) -> Option<&'static str> {
         | "net/http_server_tasks" | "net/http_server_trailers" | "net/socket_echo" => {
             Some("network service")
         }
+        // D-HTTP-JSON1=A / D-HTTP-STATIC-FILES1=A / D-HTTP-CORS1=A (card #1273):
+        // the new server calls have no quick-run lowering yet, so this example
+        // is AOT-proved only. Drop the exclusion when the JIT covers them.
+        "net/http_web_defaults" => Some("network service; quick-run JIT gap for json/static_files/cors"),
         "ui/ui_native_linux" => Some("native GTK shell"),
         _ => None,
     }

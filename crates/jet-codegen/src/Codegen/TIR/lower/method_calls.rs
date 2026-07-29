@@ -2152,6 +2152,17 @@ pub(crate) fn lower_method_call(
                     err: Box::new(Type::Named("HTTPError".to_string())),
                 },
             ),
+            // D-HTTP-JSON1=A: `req.json<T>()` / `resp.json<T>(limit)`.
+            ("HTTPRequest", "json") | ("HTTPResponse", "json") => type_args.first().map_or_else(
+                || resolved_ret.cloned().unwrap_or_else(|| Type::Result {
+                    ok: Box::new(Type::Named("Unknown".to_string())),
+                    err: Box::new(Type::Named("HTTPError".to_string())),
+                }),
+                |target| Type::Result {
+                    ok: Box::new(target.clone()),
+                    err: Box::new(Type::Named("HTTPError".to_string())),
+                },
+            ),
             ("HTTPBody", "chunks") => Type::Named("HTTPBodyChunks".to_string()),
             ("HTTPBody", "copy_to") => Type::Result {
                 ok: Box::new(Type::Int),
@@ -2306,6 +2317,7 @@ pub(crate) fn lower_method_call(
             ("HTTPRequest", "method" | "path" | "param" | "body_len" | "under_limit", _)
                 | ("HTTPRequest", "header", 1)
                 | ("HTTPRequest", "body", 0)
+                | ("HTTPRequest", "json", 0)
                 | ("HTTPRequest", "trailers", 0)
                 | ("HTTPResponse", "header", 2)
                 | ("HTTPResponse", "trailers", 1)

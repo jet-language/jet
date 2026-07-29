@@ -589,6 +589,12 @@ pub fn http_type_method_return(
     match ty {
         Type::Named(n) if n == "HTTPRequest" => match method {
             "method" | "path" => mk_str(),
+            // D-HTTP-JSON1=A: typed JSON decode. The real return type comes
+            // from the type argument in `CheckerInfer`.
+            "json" if _args.is_empty() => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("Unknown".to_string())),
+                err: Box::new(Type::Named("HTTPError".to_string())),
+            })),
             "body" if _args.is_empty() => mk("HTTPBody"),
             "trailers" if _args.is_empty() => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("HTTPHeaders".to_string())),
@@ -618,6 +624,11 @@ pub fn http_type_method_return(
         },
         Type::Named(n) if n == "HTTPResponse" => match method {
             "status" => mk_int(),
+            // D-HTTP-JSON1=A: typed JSON decode with an optional byte cap.
+            "json" if _args.len() <= 1 => Some(Some(Type::Result {
+                ok: Box::new(Type::Named("Unknown".to_string())),
+                err: Box::new(Type::Named("HTTPError".to_string())),
+            })),
             "body" => mk("HTTPBody"),
             "header" if _args.len() == 1 => mk_opt_str(),
             "header" => mk("HTTPResponse"),

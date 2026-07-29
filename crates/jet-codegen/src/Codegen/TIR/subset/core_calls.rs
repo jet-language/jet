@@ -145,6 +145,7 @@ pub(crate) fn core_call_covered(module: &str, method: &str) -> bool {
                 | "static_file"
                 | "static_file_range"
                 | "static_files"
+                | "json"
                 | "access_log"
                 | "request_id"
                 | "timeout"

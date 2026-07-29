@@ -554,6 +554,13 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
                     EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
                 });
             }
+            // D-HTTP-CORS1=A: `.Any` / `.List([...])` CORS origins.
+            if resolved_type == "HTTPCorsOrigins" && matches!(variant.as_str(), "Any" | "List") {
+                return args.iter().all(|arg| match arg {
+                    EnumLitArg::Positional(expr) => expr_in_subset(expr, cx, locals),
+                    EnumLitArg::Named { expr, .. } => expr_in_subset(expr, cx, locals),
+                });
+            }
             if resolved_type == "HTTPRedirectPolicy" && variant == "Follow" {
                 return args.iter().all(|arg| match arg {
                     EnumLitArg::Positional(expr) => expr_in_subset(expr, cx, locals),

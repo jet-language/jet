@@ -2250,6 +2250,52 @@ impl<'a> Checker<'a> {
                     return Some(ret);
                 }
             }
+            // D-HTTP-JSON1=A: `req.json<T>()` and `resp.json<T>(limit)` decode
+            // the body through the same `#Codable` path the raw body uses.
+            if method == "json"
+                && matches!(&recv_ty, Type::Named(name)
+                    if name == "HTTPRequest" || name == "HTTPResponse")
+            {
+                let is_request = matches!(&recv_ty, Type::Named(name) if name == "HTTPRequest");
+                let want = if is_request { 0 } else { 1 };
+                if args.len() > want {
+                    self.diags.push(wrong_core_arity("json", want, args.len(), span));
+                }
+                if let Some(arg) = args.first_mut() {
+                    self.expect_core_arg("json", 0, &Type::Int, arg);
+                }
+                let error = Type::Named("HTTPError".to_string());
+                let target = type_args.first().cloned().or_else(|| {
+                    match &self.expected_type {
+                        Some(Type::Result { ok, .. }) => Some((**ok).clone()),
+                        _ => None,
+                    }
+                });
+                let target = match target {
+                    Some(target) => {
+                        self.check_decodable(&target, span);
+                        target
+                    }
+                    None => {
+                        self.diags.push(Diagnostic::error(
+                            "E0901",
+                            format!("`{}.json` needs a decode type", if is_request { "req" } else { "resp" }),
+                            "JSON bytes can decode to many types, so the target must be explicit".to_string(),
+                            if is_request {
+                                "write `req.json<Type>()`".to_string()
+                            } else {
+                                "write `resp.json<Type>(limit)`".to_string()
+                            },
+                            Some(span),
+                        ));
+                        Type::Named("Unknown".to_string())
+                    }
+                };
+                *recv_type_out = Some(if is_request { "HTTPRequest" } else { "HTTPResponse" }.to_string());
+                let ret = Type::Result { ok: Box::new(target), err: Box::new(error) };
+                *resolved_ret_out = Some(ret.clone());
+                return Some(ret);
+            }
             if let Some(ret) = http_type_method_return(&recv_ty, method, args) {
                 if let Type::Named(name) = &recv_ty {
                     self.check_http_route_constant(name, method, args);

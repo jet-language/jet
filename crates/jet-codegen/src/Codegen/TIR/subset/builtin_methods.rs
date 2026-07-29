@@ -277,9 +277,9 @@ pub(crate) fn is_http_method_name(recv_type: Option<&str>, method: &str) -> bool
                 | "timeout" | "connect_timeout" | "read_timeout" | "total_timeout"
                 | "dns_timeout" | "tls_timeout" | "write_timeout" | "first_byte_timeout"
                 | "redirects" | "proxy" | "cookie" | "form" | "multipart_text" | "send"
-                | "trailers"
+                | "trailers" | "json"
         ),
-        Some("HTTPResponse") => matches!(method, "status" | "body" | "header" | "cookies" | "trailers" | "protocol" | "remote_address" | "redirect_history" | "timings" | "reused_connection" | "raw_content_encoding"),
+        Some("HTTPResponse") => matches!(method, "status" | "json" | "body" | "header" | "cookies" | "trailers" | "protocol" | "remote_address" | "redirect_history" | "timings" | "reused_connection" | "raw_content_encoding"),
         Some("HTTPClient") => matches!(method, "cookies" | "redirects" | "protocols" | "timeouts" | "raw_encoding" | "proxy" | "tls" | "allow_http_downgrade" | "retries" | "send"),
         Some("HTTPHeaders") => matches!(method, "first" | "all" | "append" | "set" | "remove"),
         Some("HTTPBody") => matches!(method, "bytes" | "text" | "json" | "chunks" | "copy_to"),

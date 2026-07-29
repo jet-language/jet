@@ -4278,26 +4278,59 @@ fn jet_http_static_open(
     }
 }
 
+/// D-HTTP-STATIC-FILES1=A: the policy one static mount serves under.
+/// `safe()` is what `static_files(mux, prefix, root)` installs: serve
+/// `index.html` for a directory request, hide dot-files, and refuse symbolic
+/// links. A resolved path always has to stay under the root.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct JetHTTPStaticOptions {
+    index: bool,
+    dotfiles: bool,
+    follow_links: bool,
+}
+
+impl JetHTTPStaticOptions {
+    fn safe() -> Self {
+        Self { index: true, dotfiles: false, follow_links: false }
+    }
+}
+
+/// Remove a mount prefix from a request path. `None` means the path is not
+/// under the prefix, and the caller answers 404.
+fn jet_http_static_relative<'a>(prefix: &str, path: &'a str) -> Option<&'a str> {
+    let prefix = prefix.trim_end_matches('/');
+    if prefix.is_empty() {
+        return Some(path);
+    }
+    let rest = path.strip_prefix(prefix)?;
+    if rest.is_empty() || rest.starts_with('/') { Some(rest) } else { None }
+}
+
 fn jet_http_srv_static_files(
     req: &JetHTTPRequest,
+    prefix: &str,
     root: &std::path::Path,
+    options: JetHTTPStaticOptions,
 ) -> Result<JetHTTPResponse, String> {
     let not_found = || Ok(jet_http_srv_empty_response(404));
     if !matches!(req.method.as_str(), "GET" | "HEAD") { return Ok(jet_http_srv_empty_response(405)); }
     let root = match std::fs::canonicalize(root) { Ok(root) => root, Err(_) => return not_found() };
     let path = req.path.split('?').next().unwrap_or(&req.path);
+    let Some(path) = jet_http_static_relative(prefix, path) else { return not_found() };
     let mut candidate = root.clone();
     for segment in path.split('/').filter(|segment| !segment.is_empty()) {
         let Ok(segment) = jet_http_route_decode_segment(segment) else { return not_found() };
         if segment == "." || segment == ".." || segment.contains(std::path::MAIN_SEPARATOR) { return not_found(); }
+        if !options.dotfiles && segment.starts_with('.') { return not_found(); }
         candidate.push(segment);
         let Ok(metadata) = std::fs::symlink_metadata(&candidate) else { return not_found() };
-        if metadata.file_type().is_symlink() { return not_found(); }
+        if !options.follow_links && metadata.file_type().is_symlink() { return not_found(); }
     }
     if candidate.is_dir() {
+        if !options.index { return not_found(); }
         candidate.push("index.html");
         let Ok(metadata) = std::fs::symlink_metadata(&candidate) else { return not_found() };
-        if metadata.file_type().is_symlink() { return not_found(); }
+        if !options.follow_links && metadata.file_type().is_symlink() { return not_found(); }
     }
     let Some((mut file, metadata, canonical)) = jet_http_static_open(&root, &candidate) else { return not_found() };
     let file_len = usize::try_from(metadata.len()).map_err(|_| "static file is too large".to_string())?;
@@ -4439,11 +4472,19 @@ fn jet_http_srv_install_request_id(mux: &JetHTTPMux) {
 
 // ── D-HTTP-HANDLER-MW1=A: nested core.http.middleware Handler wrappers ───────
 
+/// D-HTTP-CORS1=A: which origins a CORS policy answers for.
+#[derive(Clone, Debug)]
+enum JetHTTPCorsOrigins {
+    Any,
+    List(Vec<String>),
+}
+
 #[derive(Clone, Debug)]
 struct JetHTTPCorsPolicy {
-    allow_origin: String,
+    origins: JetHTTPCorsOrigins,
     allow_methods: String,
     allow_headers: String,
+    credentials: bool,
     max_age_secs: i64,
 }
 
@@ -4452,12 +4493,47 @@ enum JetHTTPCompressEncoding {
     Gzip,
 }
 
-fn jet_http_cors_policy(origin: &String) -> JetHTTPCorsPolicy {
-    JetHTTPCorsPolicy {
-        allow_origin: origin.clone(),
-        allow_methods: "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS".to_string(),
-        allow_headers: "content-type, authorization, x-request-id".to_string(),
-        max_age_secs: 86_400,
+const JET_HTTP_CORS_DEFAULT_METHODS: &str = "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS";
+const JET_HTTP_CORS_DEFAULT_HEADERS: &str = "content-type, authorization, x-request-id";
+
+/// D-HTTP-CORS1=A: build a CORS policy. An `.Any` origin with credentials is
+/// refused here, because that combination would open the API to every website.
+fn jet_http_cors_policy(
+    origins: &JetHTTPCorsOrigins,
+    methods: &Vec<String>,
+    headers: &Vec<String>,
+    credentials: bool,
+    max_age: i64,
+) -> Result<JetHTTPCorsPolicy, JetHTTPError> {
+    if credentials && matches!(origins, JetHTTPCorsOrigins::Any) {
+        return Err(JetHTTPError::Policy {
+            reason: "CORS credentials need named origins. An `.Any` origin with credentials \
+                     would let every website read this API, and browsers refuse the pair. \
+                     List the origins you trust, or set credentials to false."
+                .to_string(),
+        });
+    }
+    let join = |values: &Vec<String>, fallback: &str| {
+        if values.is_empty() { fallback.to_string() } else { values.join(", ") }
+    };
+    Ok(JetHTTPCorsPolicy {
+        origins: origins.clone(),
+        allow_methods: join(methods, JET_HTTP_CORS_DEFAULT_METHODS),
+        allow_headers: join(headers, JET_HTTP_CORS_DEFAULT_HEADERS),
+        credentials,
+        max_age_secs: max_age,
+    })
+}
+
+/// The value for `access-control-allow-origin`, or `None` when this request
+/// origin is not in the policy and no CORS header may be sent.
+fn jet_http_cors_allow_origin(policy: &JetHTTPCorsPolicy, origin: &str) -> Option<String> {
+    match &policy.origins {
+        JetHTTPCorsOrigins::Any => Some("*".to_string()),
+        JetHTTPCorsOrigins::List(list) => list
+            .iter()
+            .any(|allowed| allowed == origin)
+            .then(|| origin.to_string()),
     }
 }
 
@@ -4507,23 +4583,46 @@ fn jet_http_mw_body_limit(max_bytes: i64, next: JetHTTPHandler) -> JetHTTPHandle
 fn jet_http_mw_cors(policy: &JetHTTPCorsPolicy, next: JetHTTPHandler) -> JetHTTPHandler {
     let policy = policy.clone();
     std::sync::Arc::new(move |req| {
-        if req.method == "OPTIONS" {
+        let origin = req.headers.get("origin").cloned();
+        let allow = origin
+            .as_deref()
+            .and_then(|origin| jet_http_cors_allow_origin(&policy, origin));
+        // A preflight is an OPTIONS request that names the method it is asking
+        // about. Every other OPTIONS request keeps its normal route answer.
+        let preflight = req.method == "OPTIONS"
+            && req.headers.get("access-control-request-method").is_some();
+        if preflight {
             let mut response = jet_http_srv_empty_response(204);
-            let _ = response.headers.set("access-control-allow-origin", &policy.allow_origin);
-            let _ = response.headers.set("access-control-allow-methods", &policy.allow_methods);
-            let _ = response.headers.set("access-control-allow-headers", &policy.allow_headers);
-            if policy.max_age_secs > 0 {
-                let _ = response.headers.set("access-control-max-age", &policy.max_age_secs.to_string());
+            let _ = response.headers.set("vary", "origin");
+            if let Some(allow) = allow {
+                let _ = response.headers.set("access-control-allow-origin", &allow);
+                let _ = response.headers.set("access-control-allow-methods", &policy.allow_methods);
+                let _ = response.headers.set("access-control-allow-headers", &policy.allow_headers);
+                if policy.credentials {
+                    let _ = response.headers.set("access-control-allow-credentials", "true");
+                }
+                if policy.max_age_secs > 0 {
+                    let _ = response.headers.set("access-control-max-age", &policy.max_age_secs.to_string());
+                }
             }
             return Ok(response);
         }
-        let origin = req.headers.get("origin").cloned();
         let mut response = next.clone()(req)?;
-        if origin.as_deref() == Some(policy.allow_origin.as_str()) || policy.allow_origin == "*" {
-            let _ = response.headers.set("access-control-allow-origin", &policy.allow_origin);
+        if let Some(allow) = allow {
+            let _ = response.headers.set("access-control-allow-origin", &allow);
+            let _ = response.headers.set("vary", "origin");
+            if policy.credentials {
+                let _ = response.headers.set("access-control-allow-credentials", "true");
+            }
         }
         Ok(response)
     })
+}
+
+/// D-HTTP-CORS1=A: install the policy on a mux. No call means no CORS headers.
+fn jet_http_srv_install_cors(mux: &JetHTTPMux, policy: &JetHTTPCorsPolicy) {
+    let policy = policy.clone();
+    jet_http_mux_middleware(mux, move |next| jet_http_mw_cors(&policy, next));
 }
 
 fn jet_http_gzip_stored(input: &[u8]) -> Vec<u8> {
@@ -4597,10 +4696,39 @@ fn jet_http_mux_as_handler(mux: JetHTTPMux) -> JetHTTPHandler {
     })
 }
 
-fn jet_http_srv_static_files_handler(root: String) -> JetHTTPHandler {
+fn jet_http_srv_static_files_handler(
+    prefix: String,
+    root: String,
+    options: JetHTTPStaticOptions,
+) -> JetHTTPHandler {
     std::sync::Arc::new(move |req| {
-        jet_http_srv_static_files(&req, std::path::Path::new(&root)).map_err(|_| JetHTTPError::IO {
-            operation: "read static file".to_string(),
+        jet_http_srv_static_files(&req, &prefix, std::path::Path::new(&root), options).map_err(|_| {
+            JetHTTPError::IO { operation: "read static file".to_string() }
         })
     })
+}
+
+/// D-HTTP-STATIC-FILES1=A: mount `root` under `prefix` on a mux. The catch-all
+/// route serves GET; the mux answers HEAD from the same handler.
+fn jet_http_srv_static_files_mount(
+    mux: &JetHTTPMux,
+    prefix: &String,
+    root: &String,
+    options: JetHTTPStaticOptions,
+) {
+    let trimmed = prefix.trim_end_matches('/');
+    let pattern = format!("{trimmed}/*jet_static_path");
+    jet_http_mux_add_handler(
+        mux,
+        "GET",
+        &pattern,
+        jet_http_srv_static_files_handler(trimmed.to_string(), root.clone(), options),
+    );
+}
+
+/// D-HTTP-JSON1=A: one JSON response. The content type is set for the caller.
+fn jet_http_srv_json<T: user_Encode>(status: i64, value: &T) -> JetHTTPResponse {
+    let mut response = jet_http_srv_response(status, &jet_enc_json_to_string(value));
+    let _ = response.headers.set("content-type", "application/json; charset=utf-8");
+    response
 }

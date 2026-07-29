@@ -2978,6 +2978,22 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                 format!("{}jet_http_client_response_status(&({}))", root, recv)
                             }
                             "body" => format!("{}jet_http_client_response_body(&({}))", root, recv),
+                            // D-HTTP-JSON1=A: read the body, then decode it.
+                            // Without a limit the shared body cap applies.
+                            "json" => {
+                                let target = match &e.ty {
+                                    Type::Result { ok, .. } => cx.rust_type(ok),
+                                    _ => unreachable!("resp.json must return Result<T, HTTPError>"),
+                                };
+                                let limit = if args.is_empty() {
+                                    format!("{root}JET_HTTP_MAX_BODY_BYTES as i64")
+                                } else {
+                                    a(0)
+                                };
+                                format!(
+                                    "{root}jet_http_body_json::<{target}>(&({root}jet_http_client_response_body(&({recv}))), {limit})"
+                                )
+                            }
                             "header" => format!(
                                 "{}jet_http_client_response_header(&({}), &({}))",
                                 root,
@@ -3034,6 +3050,16 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                         }
                         ("HTTPRequest", "body") => {
                             format!("{}jet_http_srv_req_body(&({}))", root, recv)
+                        }
+                        // D-HTTP-JSON1=A: the ratified body cap frames the read.
+                        ("HTTPRequest", "json") => {
+                            let target = match &e.ty {
+                                Type::Result { ok, .. } => cx.rust_type(ok),
+                                _ => unreachable!("req.json must return Result<T, HTTPError>"),
+                            };
+                            format!(
+                                "{root}jet_http_body_json::<{target}>(&({root}jet_http_srv_req_body(&({recv}))), {root}JET_HTTP_MAX_BODY_BYTES as i64)"
+                            )
                         }
                         ("HTTPRequest", "trailers") => {
                             format!("{}jet_http_srv_req_trailers(&({}))", root, recv)
