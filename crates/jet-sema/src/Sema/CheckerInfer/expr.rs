@@ -2686,6 +2686,19 @@ impl<'a> Checker<'a> {
                 let mut empty = Vec::new();
                 return Some(self.check_enum_lit(type_name, member, &mut empty, span));
             }
+            if self.struct_owner_module(type_name, None).is_some() {
+                self.diags.push(Diagnostic::error(
+                    "E0302",
+                    format!("`{type_name}.{member}` is not a value"),
+                    "struct fields need a value before the dot; typestate names are compile-time facts, not runtime values"
+                        .to_string(),
+                    format!(
+                        "use a `{type_name}` value before a field, or call a static method on `{type_name}`"
+                    ),
+                    Some(span),
+                ));
+                return None;
+            }
         }
         self.borrow_ctx = true;
         let suppress = self.suppress_partial_move_root_read;
