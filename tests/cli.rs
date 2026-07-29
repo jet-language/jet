@@ -3778,6 +3778,55 @@ fn ext_optional_check_resolves_dot_jet() {
 }
 
 #[test]
+fn run_rejected_collection_body_reports_only_frontend_diagnostics() {
+    let dir = isolated_cwd("run_rejected_collection_body");
+    fs::write(
+        dir.join("main.jet"),
+        r#"use core.files as fs
+
+struct Row {
+    name: String
+    count: Int
+}
+
+fn run() {
+    fs.write("/tmp/jet_1271.csv", "alpha,1\n") ?? panic("write failed")
+    text :: fs.read("/tmp/jet_1271.csv") ?? ""
+    rows := [Row].{}
+    loop line; text.split("\n") {
+        parts :: line.split(",")
+        rows.push(Row.{ name: parts.get(0), count: missing })
+    }
+    rows.sort_by((row: Row) => row.name)
+}
+"#,
+    )
+    .unwrap();
+
+    let rejected = Command::new(jet())
+        .args(["run", "main.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+
+    assert_eq!(rejected.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&rejected.stderr);
+    assert_eq!(stderr.matches("Error [E0102]").count(), 1, "{stderr}");
+    assert_eq!(stderr.matches("Error [E0107]").count(), 1, "{stderr}");
+    for leaked in [
+        "thread 'main' panicked",
+        "panicked at",
+        "assertion `left == right` failed",
+        "builtins.rs",
+        "internal compiler error",
+        "generated Rust",
+    ] {
+        assert!(!stderr.contains(leaked), "`{leaked}` leaked:\n{stderr}");
+    }
+}
+
+#[test]
 fn check_fixed_dynamic_size_reports_e0103_without_internal_failure() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let invalid = root.join("tests/fuzz/sema/invalid/ui_fixed_dynamic_size.E0103.jet");
