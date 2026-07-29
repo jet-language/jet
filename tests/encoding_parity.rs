@@ -376,6 +376,62 @@ fn whole_value_codecs_match_aot_comptime_and_default_dev() {
     assert_default_dev_matches_aot_or_honest_gap("whole-value", &path, scratch.path(), &aot, true);
 }
 
+#[test]
+fn cbor_typed_schema_matches_comptime_default_dev_and_deopt() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping typed CBOR schema parity (need rustc)");
+        return;
+    }
+    let source = r#"
+use core.encoding.cbor as cbor
+use core.encoding.hex as hex
+use core.text as text
+
+#Codable
+struct Packet {
+    id: Int
+    payload: [U8]
+}
+
+comptime root = hex.encode(cbor.to_bytes_canonical([U8].{222, 173}) ?? panic("root"))
+comptime packet = hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("packet"))
+
+fn gap() => String {
+    folded :: text.casefold("Straße")
+    if folded != "strasse" { panic("casefold") }
+    actual_root := hex.encode(cbor.to_bytes_canonical([U8].{222, 173}) ?? panic("root"))
+    actual_packet := hex.encode(cbor.to_bytes_canonical(Packet.{ id: 7, payload: [222, 173] }) ?? panic("packet"))
+    return "{actual_root}|{actual_packet}"
+}
+
+fn run() {
+    print("{root}|{packet}")
+    print(gap())
+}
+"#;
+    let scratch = Scratch::new("cbor_typed_schema");
+    let path = scratch.write_project("2026", source);
+    let bundle = checked_bundle(path.to_str().unwrap());
+    let plan = plan_bundle_tiers(&bundle);
+    assert!(!plan.whole_interp, "regression needs mixed named-function deopt: {plan:?}");
+    assert!(
+        plan.deopt.iter().any(|(name, _)| name == "gap"),
+        "regression needs `gap` on the named deopt tier: {plan:?}"
+    );
+    let expected = "42dead|a262696407677061796c6f616442dead\n42dead|a262696407677061796c6f616442dead\n";
+    let aot = run_aot(&path, scratch.path());
+    assert_eq!(aot.exit, 0, "typed CBOR AOT failed: {}", aot.stderr);
+    assert_eq!(aot.stdout, expected);
+    let (backend, dev) = run_default_dev(path.to_str().unwrap());
+    assert_eq!(dev.exit, 0, "typed CBOR default-dev failed: {}", dev.stderr);
+    assert_eq!(dev.stdout, expected, "default-dev backend: {backend:?}");
+    assert_eq!(backend, DevBackend::DeoptInterp);
+    assert!(
+        deopt_invoked_for_test(),
+        "typed CBOR regression must execute named-function deopt"
+    );
+}
+
 /// `csv.to_string` takes either the dynamic `[[String]]` rows form or a typed
 /// `[T]` list of `#Codable` values. The resident JIT used to send both to the
 /// rows host, so a typed list rendered "" and still reported success — silent
@@ -763,14 +819,14 @@ fn terminal_limit_probe() => String {
     writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
     limit_err :: writer.write(encoding.DataEvent.Text("abcd"))
     if limit_err == {
-        Err(first) -> {
+        .Err(first) -> {
             again :: writer.finish()
             if again == {
-                Err(second) -> return "{first.reason == second.reason}"
-                Ok(_) -> return "terminal-missed"
+                .Err(second) -> return "{first.reason == second.reason}"
+                .Ok(_) -> return "terminal-missed"
             }
         }
-        Ok(_) -> return "limit-missed"
+        .Ok(_) -> return "limit-missed"
     }
     return "unreachable"
 }
@@ -780,14 +836,14 @@ fn malformed_reader_probe() => String {
     input :: files.open("@DIR@/malformed.json") ?? panic("open")
     reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
     if reader.next() == {
-        Err(error) -> {
+        .Err(error) -> {
             repeat :: reader.next()
             if repeat == {
-                Err(second) -> return "{error.kind == encoding.EncodingErrorKind.Syntax}|{error.path}|{error.reason == second.reason}"
-                Ok(_) -> return "repeat-missed"
+                .Err(second) -> return "{error.kind == encoding.EncodingErrorKind.Syntax}|{error.path}|{error.reason == second.reason}"
+                .Ok(_) -> return "repeat-missed"
             }
         }
-        Ok(_) -> return "malformed-missed"
+        .Ok(_) -> return "malformed-missed"
     }
     return "unreachable"
 }

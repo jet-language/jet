@@ -401,9 +401,36 @@ impl<'a> Interp<'a> {
                             span,
                         ));
                     };
+                    let struct_fields =
+                        super::super::super::EncodingLite::cbor_struct_fields(self.structs);
+                    let root_ty = args.first().and_then(|arg| match &arg.expr {
+                        Expr::Ident(name, _) => self.binding_types.get(name).cloned(),
+                        Expr::StructLit {
+                            type_name,
+                            type_args,
+                            ..
+                        } if type_args.is_empty() => Some(Type::Named(type_name.clone())),
+                        Expr::StructLit {
+                            type_name,
+                            type_args,
+                            ..
+                        } => Some(Type::Apply {
+                            name: type_name.clone(),
+                            args: type_args.clone(),
+                        }),
+                        Expr::TypedLit {
+                            head: Some(ty), ..
+                        } => Some(ty.clone()),
+                        Expr::MethodCall {
+                            resolved_ret: Some(ty),
+                            ..
+                        } => Some(ty.clone()),
+                        _ => None,
+                    });
                     return Ok(match super::super::super::EncodingLite::cbor_encode_typed(
                         value,
-                        self.structs,
+                        root_ty.as_ref(),
+                        &struct_fields,
                         method == "to_bytes_canonical",
                     ) {
                         Ok(bytes) => CtValue::ResOk(Box::new(CtValue::Bytes(bytes))),
