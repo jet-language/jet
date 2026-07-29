@@ -30,6 +30,8 @@ struct JetFileWriter {
 }
 
 mod jet_std {
+    include!("../crates/jet-codegen/src/Prelude/TaskGroup.rs");
+
     #[derive(Clone, Copy)]
     pub struct Duration {
         pub ms: i64,
@@ -410,6 +412,7 @@ include!("kept/Ws.rs");
     assert_eq!(
         consumers,
         [
+            std::path::PathBuf::from("crates/jet-jit/src/net_http_rt.rs"),
             std::path::PathBuf::from("tests/http_server_lifecycle.rs"),
             std::path::PathBuf::from("tests/ws_law.rs"),
         ]

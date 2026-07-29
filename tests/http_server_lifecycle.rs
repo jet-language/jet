@@ -43,6 +43,8 @@ struct JetFileWriter {
 }
 
 mod jet_std {
+    include!("../crates/jet-codegen/src/Prelude/TaskGroup.rs");
+
     #[derive(Clone, Copy)]
     pub struct Duration {
         pub ms: i64,
