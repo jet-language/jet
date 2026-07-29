@@ -341,12 +341,12 @@ mod tests {
             if let Ok(text)=std::fs::read_to_string(&path){if let Ok(pid)=text.parse::<i32>(){break pid;}}
             if Instant::now()>=publish_deadline{
                 let _=supervisor.wait();let _=std::fs::remove_file(&path);
-                panic!("isolated worker did not publish its PID before the deadline");
+                return assert!(false,"isolated worker did not publish its PID before the deadline");
             }
             assert!(supervisor.try_wait().unwrap().is_none(),"isolated worker supervisor exited before publishing its PID");
             std::thread::sleep(Duration::from_millis(2));
         };
-        let worker=match PidFd::open(worker){Ok(worker)=>worker,Err(error)=>{let _=supervisor.wait();let _=std::fs::remove_file(&path);panic!("cannot open isolated worker pidfd: {error}")}};
+        let worker=match PidFd::open(worker){Ok(worker)=>worker,Err(error)=>{let _=supervisor.wait();let _=std::fs::remove_file(&path);return assert!(false,"cannot open isolated worker pidfd: {error}")}};
         supervisor.kill().unwrap();supervisor.wait().unwrap();
         let exit_deadline=Instant::now()+Duration::from_secs(2);
         while worker.alive().unwrap()&&Instant::now()<exit_deadline{std::thread::sleep(Duration::from_millis(2));}
