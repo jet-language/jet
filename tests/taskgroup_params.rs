@@ -48,6 +48,26 @@ fn interpreter_outcome(name: &str, source: &str) -> RunOutcome {
     dev_iteration(path.to_str().unwrap(), false, true)
 }
 
+fn assert_jit_compiles(name: &str, source: &str) {
+    let path = std::env::temp_dir().join(format!(
+        "jet_taskgroup_jit_{name}_{}.jet",
+        std::process::id()
+    ));
+    fs::write(&path, source).unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diagnostic| {
+            matches!(
+                diagnostic.severity,
+                jet::Diagnostics::Severity::Error
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(errors.is_empty(), "{errors:?}");
+    jet_jit::try_compile_bundle(&bundle).expect("TaskGroup source must compile for resident JIT");
+}
+
 #[test]
 fn named_function_parameters_spawn_copy_and_owned_captures() {
     if !have_rustc() {
@@ -98,6 +118,7 @@ fn lexical_group_joins_anonymous_helper_spawn() {
 
 #[test]
 fn default_run_joins_helper_spawn_before_outer_exit() {
+    assert_jit_compiles("parameter_join", OUTER_GROUP_HELPER);
     let (code, stdout, stderr) = run_default_multi(
         "taskgroup_parameter_join",
         "main.jet",
@@ -239,6 +260,120 @@ fn run() {
         assert_eq!(code, 0);
         assert_eq!(stdout, interpreted);
     }
+}
+
+fn assert_native_wait_exit(
+    name: &str,
+    source: &str,
+    stderr_text: &str,
+) {
+    assert_jit_compiles(name, source);
+    let (code, stdout, stderr) = run_default_multi(name, "main.jet", &[("main.jet", source)]);
+    assert_ne!(code, 0, "{stderr}");
+    assert_eq!(stdout, "", "{stderr}");
+    assert!(!stdout.contains("caller"), "{stdout:?}\n{stderr}");
+    assert!(stderr.contains(stderr_text), "{stderr}");
+    assert!(
+        stderr.lines().any(|line| {
+            line.split_whitespace()
+                .take(3)
+                .eq(["run", "tier1", "native"])
+        }),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn native_cancellation_closes_group_before_caller_continues() {
+    let source = r#"
+use core.tasks as tasks
+use core.time as time
+
+fn wait_in_group(gate: Shared<[Int]>) {
+    taskgroup group {
+        child :: group.task => {
+            gate.edit((state: [Int]) => state[0] = 1)
+            total := 0
+            loop n; 0..<2000000 { total += n }
+            print("settled")
+        }
+        time.sleep(10000)
+        child.join()
+    }
+}
+
+fn run() {
+    gate :: Shared.new([0])
+    outer :: tasks.spawn(() => wait_in_group(gate))
+    loop gate.read((state: [Int]) => state[0]) == 0 {}
+    outer.cancel()
+    outer.join()
+    print("caller")
+}
+"#;
+    assert_native_wait_exit("taskgroup_cancel_exit", source, "cancel");
+}
+
+#[test]
+fn native_deadline_closes_group_before_caller_continues() {
+    let source = r#"
+use core.time as time
+
+fn leave_on_deadline() {
+    taskgroup group {
+        child :: group.task => {
+            total := 0
+            loop n; 0..<2000000 { total += n }
+            print("settled")
+        }
+        #Context(deadline: time.now() - 1) {
+            time.sleep(10000)
+        }
+        child.join()
+    }
+}
+
+fn run() {
+    leave_on_deadline()
+    print("caller")
+}
+"#;
+    assert_native_wait_exit("taskgroup_deadline_exit", source, "E3003");
+}
+
+#[test]
+fn native_panicked_wait_closes_group_before_caller_continues() {
+    let source = r#"
+fn slow_value(gate: Shared<[Int]>) => Int {
+    gate.edit((state: [Int]) => state[0] = 1)
+    total := 0
+    loop n; 0..<2000000 { total += n }
+    print("settled")
+    return 1
+}
+
+fn fail_after_start(gate: Shared<[Int]>) => Int {
+    loop gate.read((state: [Int]) => state[0]) == 0 {}
+    panic("wait failed")
+    return 0
+}
+
+fn leave_on_wait_panic() {
+    gate :: Shared.new([0])
+    taskgroup group {
+        slow :: group.task => slow_value(gate)
+        failed :: group.task => fail_after_start(gate)
+        ignored :: group.any([failed])
+        slow.join()
+    }
+}
+
+fn run() {
+    leave_on_wait_panic()
+    print("caller")
+}
+"#;
+    assert_native_wait_exit("taskgroup_wait_panic_exit", source, "wait failed");
 }
 
 #[test]

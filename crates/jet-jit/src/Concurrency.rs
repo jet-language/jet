@@ -103,6 +103,11 @@ fn take_pending_shield_exit() -> JetShieldExit {
     })
 }
 
+extern "C" fn jet_jit_pending_exit_status() -> i64 {
+    let pending = PENDING_SHIELD_EXIT.with(|slot| slot.get() != 0);
+    i64::from(pending || with_runtime_mut(|rt| rt.deadline_exceeded.is_some()))
+}
+
 /// Complete a control transfer after the top-level Cranelift frame returned.
 /// Spawned frames use their Rust task wrapper; resident `run` uses this hook.
 pub(crate) fn settle_pending_after_native() {
@@ -746,6 +751,7 @@ pub(crate) struct ConcurrencyHostFns {
     pub interval: cranelift_module::FuncId,
     pub shield_enter: cranelift_module::FuncId,
     pub shield_leave: cranelift_module::FuncId,
+    pub pending_exit_status: cranelift_module::FuncId,
     pub wait_value: cranelift_module::FuncId,
     pub sleep: cranelift_module::FuncId,
     pub time_now: cranelift_module::FuncId,
@@ -814,6 +820,10 @@ pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_interval", jet_jit_interval as *const u8);
     builder.symbol("jet_jit_shield_enter", jet_jit_shield_enter as *const u8);
     builder.symbol("jet_jit_shield_leave", jet_jit_shield_leave as *const u8);
+    builder.symbol(
+        "jet_jit_pending_exit_status",
+        jet_jit_pending_exit_status as *const u8,
+    );
     builder.symbol("jet_jit_wait_value", jet_jit_wait_value as *const u8);
     builder.symbol("jet_jit_sleep", jet_jit_sleep as *const u8);
     builder.symbol("jet_jit_time_now", jet_jit_time_now as *const u8);
@@ -907,6 +917,7 @@ pub(crate) fn declare_concurrency_host_fns(
         interval: import("jet_jit_interval", &sig_i64)?,
         shield_enter: import("jet_jit_shield_enter", &sig_void)?,
         shield_leave: import("jet_jit_shield_leave", &sig_noarg_i64)?,
+        pending_exit_status: import("jet_jit_pending_exit_status", &sig_noarg_i64)?,
         wait_value: import("jet_jit_wait_value", &sig_noarg_i64)?,
         sleep: import("jet_jit_sleep", &sig_i64)?,
         time_now: import("jet_jit_time_now", &sig_noarg_i64)?,

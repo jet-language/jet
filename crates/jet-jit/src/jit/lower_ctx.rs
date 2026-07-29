@@ -96,6 +96,9 @@ pub(crate) struct LowerCtx<'a, 'b> {
     /// Native task-group handles active at this source point. Every non-local
     /// edge closes them in LIFO order before leaving the function.
     pub(crate) task_groups: Vec<Value>,
+    /// Suppress nested trap epilogues while the one lexical exit path is
+    /// already running its guards. The final trapped-status read propagates it.
+    pub(crate) in_lexical_exit: bool,
     /// Open `#Transact` frames: snapshot restores + commit/rollback hook funcs.
     pub(crate) txn_stack: Vec<TxnFrame>,
 }
@@ -256,13 +259,6 @@ impl LowerCtx<'_, '_> {
     }
 
     fn emit_dummy_return(&mut self) {
-        if let Some(sender) = self.yield_sender {
-            let close = self
-                .module
-                .declare_func_in_func(self.host.conc.sender_close, self.b.func);
-            self.b.ins().call(close, &[sender]);
-        }
-        self.emit_deadline_pops_to(0);
         match self.ret_clif {
             Some(ty) => {
                 let value = if ty == types::F64 {
@@ -271,6 +267,33 @@ impl LowerCtx<'_, '_> {
                     self.b.ins().iconst(ty, 0)
                 };
                 self.b.ins().return_(&[value]);
+            }
+            None => {
+                self.b.ins().return_(&[]);
+            }
+        }
+    }
+
+    fn merge_exit_status(&mut self, current: Option<Value>, next: Value) -> Option<Value> {
+        Some(match current {
+            Some(current) => self.b.ins().bor(current, next),
+            None => next,
+        })
+    }
+
+    fn emit_requested_return(&mut self, value: Option<Value>) {
+        match value {
+            Some(value) => {
+                self.b.ins().return_(&[value]);
+            }
+            None if self.ret_clif.is_some() => {
+                let ty = self.ret_clif.expect("checked native return type");
+                let zero = if ty == types::F64 {
+                    self.b.ins().f64const(0.0)
+                } else {
+                    self.b.ins().iconst(ty, 0)
+                };
+                self.b.ins().return_(&[zero]);
             }
             None => {
                 self.b.ins().return_(&[]);
@@ -294,7 +317,7 @@ impl LowerCtx<'_, '_> {
         let mut status = None;
         for _ in target_depth..self.shield_depth {
             let call = self.b.ins().call(leave_ref, &[]);
-            status = Some(self.b.inst_results(call)[0]);
+            status = self.merge_exit_status(status, self.b.inst_results(call)[0]);
         }
         status
     }
@@ -316,7 +339,8 @@ impl LowerCtx<'_, '_> {
         self.b.ins().brif(pending, interrupted, &[], cont, &[]);
         self.b.switch_to_block(interrupted);
         self.b.seal_block(interrupted);
-        self.emit_dummy_return();
+        self.emit_lexical_exit(None, true, self.shield_depth - 1)
+            .expect("jit interrupt cleanup");
         self.b.switch_to_block(cont);
         self.b.seal_block(cont);
     }
@@ -332,9 +356,8 @@ impl LowerCtx<'_, '_> {
         self.b.ins().brif(interrupted, unwind, &[], ready, &[]);
         self.b.switch_to_block(unwind);
         self.b.seal_block(unwind);
-        self.emit_shared_transaction_aborts_to(0);
-        self.emit_shield_leaves_to(0);
-        self.emit_dummy_return();
+        self.emit_lexical_exit(None, true, self.shield_depth)
+            .expect("jit wait cleanup");
         self.b.switch_to_block(ready);
         self.b.seal_block(ready);
         let value_ref = self
@@ -1966,10 +1989,7 @@ impl LowerCtx<'_, '_> {
             self.emit_txn_rollbacks_keep()?;
             break;
         }
-        self.emit_shared_transaction_aborts_to(0);
-        self.emit_shield_leaves_to(0);
-        self.emit_scope_guards()?;
-        self.b.ins().return_(&[return_handle]);
+        self.emit_lexical_exit(Some(return_handle), false, self.shield_depth)?;
         self.b.switch_to_block(ok_block);
         self.b.seal_block(ok_block);
         let ok_ty = inner
@@ -2006,18 +2026,83 @@ impl LowerCtx<'_, '_> {
         for id in guards {
             let func_ref = self.module.declare_func_in_func(id, self.b.func);
             self.b.ins().call(func_ref, &[]);
-            self.emit_trap_check()?;
         }
         Ok(())
     }
 
-    fn emit_taskgroup_closes(&mut self) {
+    fn emit_taskgroup_closes(&mut self) -> Option<Value> {
         let close = self
             .module
             .declare_func_in_func(self.host.conc.task_group_close, self.b.func);
+        let mut status = None;
         for group in self.task_groups.iter().rev().copied().collect::<Vec<_>>() {
-            self.b.ins().call(close, &[group]);
+            let call = self.b.ins().call(close, &[group]);
+            status = self.merge_exit_status(status, self.b.inst_results(call)[0]);
         }
+        status
+    }
+
+    /// One function-exit path for every native control transfer. Close every
+    /// lexical group before returning to the caller, and replace the requested
+    /// return value with the ABI dummy when a close or wait recorded an exit.
+    pub(crate) fn emit_lexical_exit(
+        &mut self,
+        value: Option<Value>,
+        force_dummy: bool,
+        active_shield_depth: u32,
+    ) -> Result<(), String> {
+        self.emit_shared_transaction_aborts_to(0);
+
+        let saved_shield_depth = self.shield_depth;
+        self.shield_depth = active_shield_depth;
+        let mut status = self.emit_shield_leaves_to(0);
+        self.shield_depth = saved_shield_depth;
+        if force_dummy {
+            let forced = self.b.ins().iconst(types::I64, 1);
+            status = self.merge_exit_status(status, forced);
+        }
+        if let Some(close_status) = self.emit_taskgroup_closes() {
+            status = self.merge_exit_status(status, close_status);
+        }
+        self.in_lexical_exit = true;
+        let guards = self.emit_scope_guards();
+        self.in_lexical_exit = false;
+        guards?;
+
+        let trapped = self
+            .module
+            .declare_func_in_func(self.host.is_trapped, self.b.func);
+        let call = self.b.ins().call(trapped, &[]);
+        status = self.merge_exit_status(status, self.b.inst_results(call)[0]);
+        let pending = self
+            .module
+            .declare_func_in_func(self.host.conc.pending_exit_status, self.b.func);
+        let call = self.b.ins().call(pending, &[]);
+        status = self.merge_exit_status(status, self.b.inst_results(call)[0]);
+
+        if let Some(sender) = self.yield_sender {
+            let close = self
+                .module
+                .declare_func_in_func(self.host.conc.sender_close, self.b.func);
+            self.b.ins().call(close, &[sender]);
+        }
+        self.emit_deadline_pops_to(0);
+
+        let status = status.expect("trap status always contributes");
+        let zero = self.b.ins().iconst(types::I64, 0);
+        let pending = self.b.ins().icmp(IntCC::NotEqual, status, zero);
+        let interrupted = self.b.create_block();
+        let ready = self.b.create_block();
+        self.b.ins().brif(pending, interrupted, &[], ready, &[]);
+
+        self.b.switch_to_block(interrupted);
+        self.b.seal_block(interrupted);
+        self.emit_dummy_return();
+
+        self.b.switch_to_block(ready);
+        self.b.seal_block(ready);
+        self.emit_requested_return(value);
+        Ok(())
     }
 
     fn emit_txn_commit_hooks(&mut self) -> Result<(), String> {
@@ -2131,8 +2216,7 @@ impl LowerCtx<'_, '_> {
                 .brif(pending, interrupted, &[], destination, &[]);
             self.b.switch_to_block(interrupted);
             self.b.seal_block(interrupted);
-            self.emit_shared_transaction_aborts_to(0);
-            self.emit_dummy_return();
+            self.emit_lexical_exit(None, true, targets.shield_depth)?;
         } else {
             self.emit_shared_transaction_aborts_to(targets.shared_transaction_depth);
             self.b.ins().jump(destination, &[]);
@@ -2168,11 +2252,23 @@ impl LowerCtx<'_, '_> {
     /// doing so would be UB, forbidden by I1). `resident_invoke` observes the
     /// flag after `main` returns and reports the trap as `E0953`.
     fn emit_trap_check(&mut self) -> Result<(), String> {
+        if self.in_lexical_exit {
+            return Ok(());
+        }
         let is_ref = self
             .module
             .declare_func_in_func(self.host.is_trapped, self.b.func);
         let call = self.b.ins().call(is_ref, &[]);
-        let flag = self.b.inst_results(call)[0];
+        let mut flag = self.b.inst_results(call)[0];
+        if self.shield_depth == 0 {
+            let pending = self
+                .module
+                .declare_func_in_func(self.host.conc.pending_exit_status, self.b.func);
+            let call = self.b.ins().call(pending, &[]);
+            flag = self
+                .merge_exit_status(Some(flag), self.b.inst_results(call)[0])
+                .expect("existing exit status");
+        }
         let zero = self.b.ins().iconst(types::I64, 0);
         let trapped = self.b.ins().icmp(IntCC::NotEqual, flag, zero);
         let epilogue = self.b.create_block();
@@ -2181,10 +2277,7 @@ impl LowerCtx<'_, '_> {
 
         self.b.switch_to_block(epilogue);
         self.b.seal_block(epilogue);
-        self.emit_shared_transaction_aborts_to(0);
-        self.emit_shield_leaves_to(0);
-        self.emit_taskgroup_closes();
-        self.emit_dummy_return();
+        self.emit_lexical_exit(None, true, self.shield_depth)?;
 
         self.b.switch_to_block(cont);
         self.b.seal_block(cont);
@@ -2994,16 +3087,6 @@ impl LowerCtx<'_, '_> {
                 // Keep compile-time txn_stack: a `return` in one `if` branch must
                 // not pop frames needed by the fallthrough / sibling path.
                 self.emit_txn_rollbacks_keep()?;
-                self.emit_shared_transaction_aborts_to(0);
-                self.emit_shield_leaves_to(0);
-                self.emit_taskgroup_closes();
-                self.emit_scope_guards()?;
-                if let Some(sender) = self.yield_sender {
-                    let close = self
-                        .module
-                        .declare_func_in_func(self.host.conc.sender_close, self.b.func);
-                    self.b.ins().call(close, &[sender]);
-                }
                 let ret_val = match (self.ret_clif, self.b.func.dfg.value_type(val)) {
                     (Some(ty), got) if ty == types::I64 && got == types::F64 => self
                         .b
@@ -3016,25 +3099,12 @@ impl LowerCtx<'_, '_> {
                     }
                     _ => val,
                 };
-                self.b.ins().return_(&[ret_val]);
+                self.emit_lexical_exit(Some(ret_val), false, self.shield_depth)?;
                 self.dead = true;
             }
             TStmt::Return(None) => {
                 self.emit_txn_rollbacks_keep()?;
-                self.emit_shared_transaction_aborts_to(0);
-                self.emit_shield_leaves_to(0);
-                self.emit_taskgroup_closes();
-                self.emit_scope_guards()?;
-                if let Some(sender) = self.yield_sender {
-                    let close = self
-                        .module
-                        .declare_func_in_func(self.host.conc.sender_close, self.b.func);
-                    self.b.ins().call(close, &[sender]);
-                    let zero = self.b.ins().iconst(types::I64, 0);
-                    self.b.ins().return_(&[zero]);
-                } else {
-                    self.b.ins().return_(&[]);
-                }
+                self.emit_lexical_exit(None, false, self.shield_depth)?;
                 self.dead = true;
             }
             TStmt::ExprStmt(expr) => {
@@ -3389,7 +3459,7 @@ impl LowerCtx<'_, '_> {
                     );
                     self.b.switch_to_block(interrupted);
                     self.b.seal_block(interrupted);
-                    self.emit_dummy_return();
+                    self.emit_lexical_exit(None, true, targets.shield_depth)?;
                 } else {
                     self.b.ins().jump(targets.break_block, &[]);
                 }
@@ -3421,7 +3491,7 @@ impl LowerCtx<'_, '_> {
                     );
                     self.b.switch_to_block(interrupted);
                     self.b.seal_block(interrupted);
-                    self.emit_dummy_return();
+                    self.emit_lexical_exit(None, true, targets.shield_depth)?;
                 } else {
                     self.b.ins().jump(targets.break_block, &[value]);
                 }
@@ -3442,7 +3512,7 @@ impl LowerCtx<'_, '_> {
                     );
                     self.b.switch_to_block(interrupted);
                     self.b.seal_block(interrupted);
-                    self.emit_dummy_return();
+                    self.emit_lexical_exit(None, true, targets.shield_depth)?;
                 } else {
                     self.b.ins().jump(targets.continue_block, &[]);
                 }
@@ -5808,12 +5878,7 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().brif(closed, stop, &[], resume, &[]);
                 self.b.switch_to_block(stop);
                 self.b.seal_block(stop);
-                let close = self
-                    .module
-                    .declare_func_in_func(self.host.conc.sender_close, self.b.func);
-                self.b.ins().call(close, &[sender]);
-                let zero = self.b.ins().iconst(types::I64, 0);
-                self.b.ins().return_(&[zero]);
+                self.emit_lexical_exit(None, false, self.shield_depth)?;
                 self.b.switch_to_block(resume);
                 self.b.seal_block(resume);
                 Ok(self.b.ins().iconst(types::I8, 0))
@@ -10808,13 +10873,11 @@ impl LowerCtx<'_, '_> {
                             self.emit_loop_fallback(Some(name), "continue", true)?;
                         }
                         TOrFallback::Return(None) => {
-                            self.emit_shield_leaves_to(0);
-                            self.b.ins().return_(&[]);
+                            self.emit_lexical_exit(None, false, self.shield_depth)?;
                         }
                         TOrFallback::Return(Some(e)) => {
                             let val = self.lower_expr(e)?;
-                            self.emit_shield_leaves_to(0);
-                            self.b.ins().return_(&[val]);
+                            self.emit_lexical_exit(Some(val), false, self.shield_depth)?;
                         }
                         TOrFallback::Panic { .. } => {
                             let zero = self.b.ins().iconst(types::I64, 0);
@@ -10923,13 +10986,11 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().jump(merge, &[fb]);
                     }
                     TOrFallback::Return(None) => {
-                        self.emit_shield_leaves_to(0);
-                        self.b.ins().return_(&[]);
+                        self.emit_lexical_exit(None, false, self.shield_depth)?;
                     }
                     TOrFallback::Return(Some(e)) => {
                         let val = self.lower_expr(e)?;
-                        self.emit_shield_leaves_to(0);
-                        self.b.ins().return_(&[val]);
+                        self.emit_lexical_exit(Some(val), false, self.shield_depth)?;
                     }
                     TOrFallback::Panic { .. } => {
                         let zero = self.b.ins().iconst(types::I64, 0);
