@@ -4580,6 +4580,25 @@ fn jet_http_mw_body_limit(max_bytes: i64, next: JetHTTPHandler) -> JetHTTPHandle
     })
 }
 
+/// Keep any existing `Vary` tokens and add `origin` once. CORS must not erase a
+/// handler's own vary list.
+fn jet_http_cors_stamp_vary(headers: &mut JetHTTPHeaders) {
+    match headers.get("vary") {
+        Some(existing) => {
+            let already = existing
+                .split(',')
+                .any(|part| part.trim().eq_ignore_ascii_case("origin"));
+            if !already {
+                let merged = format!("{existing}, origin");
+                let _ = headers.set("vary", &merged);
+            }
+        }
+        None => {
+            let _ = headers.set("vary", "origin");
+        }
+    }
+}
+
 fn jet_http_mw_cors(policy: &JetHTTPCorsPolicy, next: JetHTTPHandler) -> JetHTTPHandler {
     let policy = policy.clone();
     std::sync::Arc::new(move |req| {
@@ -4593,7 +4612,7 @@ fn jet_http_mw_cors(policy: &JetHTTPCorsPolicy, next: JetHTTPHandler) -> JetHTTP
             && req.headers.get("access-control-request-method").is_some();
         if preflight {
             let mut response = jet_http_srv_empty_response(204);
-            let _ = response.headers.set("vary", "origin");
+            jet_http_cors_stamp_vary(&mut response.headers);
             if let Some(allow) = allow {
                 let _ = response.headers.set("access-control-allow-origin", &allow);
                 let _ = response.headers.set("access-control-allow-methods", &policy.allow_methods);
@@ -4610,7 +4629,7 @@ fn jet_http_mw_cors(policy: &JetHTTPCorsPolicy, next: JetHTTPHandler) -> JetHTTP
         let mut response = next.clone()(req)?;
         if let Some(allow) = allow {
             let _ = response.headers.set("access-control-allow-origin", &allow);
-            let _ = response.headers.set("vary", "origin");
+            jet_http_cors_stamp_vary(&mut response.headers);
             if policy.credentials {
                 let _ = response.headers.set("access-control-allow-credentials", "true");
             }

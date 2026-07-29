@@ -11,14 +11,27 @@ trait JetShow {
 trait user_Encode {}
 impl<T> user_Encode for T {}
 
-trait user_Decode: Sized {}
-
-fn jet_enc_json_to_string<T: user_Encode>(_value: &T) -> String {
-    String::new()
+trait user_Decode: Sized {
+    fn from_json_fixture(text: &str) -> Result<Self, String>;
 }
 
-fn jet_enc_json_decode<T: user_Decode>(_text: &str) -> Result<T, String> {
-    Err("unused test decoder".to_string())
+impl user_Decode for String {
+    fn from_json_fixture(text: &str) -> Result<Self, String> {
+        let trimmed = text.trim_start();
+        if trimmed.starts_with('{') || trimmed.starts_with('[') || trimmed.starts_with('"') {
+            Ok(text.to_string())
+        } else {
+            Err("fixture JSON decode failed".to_string())
+        }
+    }
+}
+
+fn jet_enc_json_to_string<T: user_Encode>(_value: &T) -> String {
+    r#"{"ok":true}"#.to_string()
+}
+
+fn jet_enc_json_decode<T: user_Decode>(text: &str) -> Result<T, String> {
+    T::from_json_fixture(text)
 }
 
 struct JetFileReader {
@@ -5409,7 +5422,11 @@ fn cors_policy_rejects_any_origin_with_credentials_and_stamps_named_origins() {
     .unwrap();
     let mux = jet_http_mux_new();
     jet_http_srv_install_cors(&mux, &policy);
-    jet_http_mux_add(&mux, "GET", "/api", |_| jet_http_srv_response(200, &"ok".to_string()));
+    jet_http_mux_add(&mux, "GET", "/api", |_| {
+        let mut response = jet_http_srv_response(200, &"ok".to_string());
+        let _ = response.headers.set("vary", "accept-encoding");
+        response
+    });
 
     let mut preflight_headers = origin_headers.clone();
     preflight_headers.append("access-control-request-method", "POST").unwrap();
@@ -5437,7 +5454,10 @@ fn cors_policy_rejects_any_origin_with_credentials_and_stamps_named_origins() {
         allowed.headers.get("access-control-allow-origin"),
         Some(&"https://app.example".to_string())
     );
-    assert_eq!(allowed.headers.get("vary"), Some(&"origin".to_string()));
+    assert_eq!(
+        allowed.headers.get("vary"),
+        Some(&"accept-encoding, origin".to_string())
+    );
 
     // An origin outside the list gets the answer with no CORS header.
     let mut other = JetHTTPHeaders::new();
@@ -5465,22 +5485,30 @@ fn cors_policy_rejects_any_origin_with_credentials_and_stamps_named_origins() {
     assert_eq!(wide.headers.get("access-control-allow-origin"), Some(&"*".to_string()));
 }
 
-/// D-HTTP-JSON1=A: `server.json` labels the body, and the typed decode used by
-/// `req.json<T>()` and `resp.json<T>(limit)` honours the body cap.
+/// D-HTTP-JSON1=A: `server.json` labels the encoded body, and the typed decode
+/// used by `req.json<T>()` / `resp.json<T>(limit)` honours the body cap.
 #[test]
 fn server_json_sets_the_content_type_and_the_body_cap_still_holds() {
-    let response = jet_http_srv_json(201, &"unused-by-the-test-encoder".to_string());
+    let response = jet_http_srv_json(201, &"payload".to_string());
     assert_eq!(response.status, 201);
     assert_eq!(
         response.headers.get("content-type"),
         Some(&"application/json; charset=utf-8".to_string())
     );
+    assert_eq!(
+        response.body.bytes(64).unwrap(),
+        br#"{"ok":true}"#.as_slice()
+    );
+
+    let body = JetHTTPBody::from_text(r#"{"a":1}"#.to_string());
+    let decoded: String = jet_http_body_json(&body, 64).unwrap();
+    assert_eq!(decoded, r#"{"a":1}"#);
 
     // The typed decode reads through the shared body reader, so the framing cap
     // rejects an oversized body before any decode runs.
-    let body = JetHTTPBody::from_text("{\"a\":1}".to_string());
+    let oversized = JetHTTPBody::from_text(r#"{"a":1}"#.to_string());
     assert!(matches!(
-        jet_http_body_text(&body, 2),
+        jet_http_body_json::<String>(&oversized, 2),
         Err(JetHTTPError::BodyTooLarge { limit: 2 })
     ));
 }
