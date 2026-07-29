@@ -3811,19 +3811,31 @@ fn run() {
         .unwrap();
 
     assert_eq!(rejected.status.code(), Some(1));
-    let stderr = String::from_utf8_lossy(&rejected.stderr);
-    assert_eq!(stderr.matches("Error [E0102]").count(), 1, "{stderr}");
-    assert_eq!(stderr.matches("Error [E0107]").count(), 1, "{stderr}");
-    for leaked in [
-        "thread 'main' panicked",
-        "panicked at",
-        "assertion `left == right` failed",
-        "builtins.rs",
-        "internal compiler error",
-        "generated Rust",
-    ] {
-        assert!(!stderr.contains(leaked), "`{leaked}` leaked:\n{stderr}");
-    }
+    assert!(rejected.stdout.is_empty(), "{:?}", rejected.stdout);
+    let stderr = String::from_utf8(rejected.stderr).unwrap();
+    assert_eq!(
+        stderr,
+        concat!(
+            "Error [E0102]: `Iter` has no method `get`\n",
+            "  --> main.jet:14:37\n",
+            "    |\n",
+            " 14 |         rows.push(Row.{ name: parts.get(0), count: missing })\n",
+            "    |                                     ^^^\n",
+            " Why: check the method name on this type\n",
+            " Fix: call `.to_list()` first\n",
+            "\n",
+            "Error [E0107]: nothing named `missing` exists here\n",
+            "  --> main.jet:14:52\n",
+            "    |\n",
+            " 14 |         rows.push(Row.{ name: parts.get(0), count: missing })\n",
+            "    |                                                    ^^^^^^^\n",
+            " Why: a name must be declared before it's used\n",
+            " Fix: declare it first: `missing :: ...`\n",
+            "\n",
+            "2 problems found\n",
+            "run `jet explain E0102` to learn more\n",
+        )
+    );
 }
 
 #[test]
