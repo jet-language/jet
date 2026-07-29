@@ -67,20 +67,28 @@ struct JetParsedArgs {
     subcommand: Option<String>,
 }
 
+fn jet_args_program_name(prog: &str) -> String {
+    if prog.is_empty() {
+        return "program".to_string();
+    }
+    std::path::Path::new(prog)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(prog)
+        .to_string()
+}
+
+fn jet_args_program(mut spec: JetArgsSpec, prog: &str) -> JetArgsSpec {
+    spec.prog = prog.to_string();
+    spec
+}
+
 impl JetArgsSpec {
     /// Render the generated --help text.
     fn help(&self) -> String {
         let mut s = String::new();
         // usage line
-        let prog = if self.prog.is_empty() {
-            "program".to_string()
-        } else {
-            std::path::Path::new(&self.prog)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or(&self.prog)
-                .to_string()
-        };
+        let prog = jet_args_program_name(&self.prog);
         let has_opts = self.entries.iter().any(|e| {
             matches!(
                 e,

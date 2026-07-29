@@ -836,7 +836,7 @@ fn emit_cli_subcommand_entry(
             "                        ",
         );
         arms.push_str(&format!(
-            "        {sub:?} => {{\n            let __spec = {helper_prefix}__jet_cli_spec_{payload}();\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match {helper_prefix}__jet_cli_decode_{payload}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{\n{invoke}                        }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
+            "        {sub:?} => {{\n            let __spec = jet_args_program({helper_prefix}__jet_cli_spec_{payload}(), &__rest[0]);\n            match jet_args_parse(&__spec, &__rest) {{\n                Ok(__parsed) => {{\n                    if jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ println!(\"{{}}\", __spec.help()); return; }}\n                    match {helper_prefix}__jet_cli_decode_{payload}(&__spec, &__parsed) {{\n                        Ok(__payload) => {{\n{invoke}                        }}\n                        Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n                    }}\n                }}\n                Err(__e) => {{ eprintln!(\"{{}}\", __e); std::process::exit(2); }}\n            }}\n        }}\n",
             sub = v.name.to_lowercase(),
             payload = payload_name,
         ));
@@ -844,7 +844,7 @@ fn emit_cli_subcommand_entry(
     let _ = cx;
 
     out.push_str(&format!(
-        "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n    if __argv.len() < 2 || __argv[1] == \"--help\" {{\n        println!(\"Usage: <program> <command> [options]\\n\\nCommands:\\n{usage}\");\n        return;\n    }}\n    let __sub = __argv[1].to_lowercase();\n    let mut __rest: Vec<String> = vec![format!(\"{{}} {{}}\", __argv[0], __sub)];\n    __rest.extend_from_slice(&__argv[2..]);\n    match __sub.as_str() {{\n{arms}        __other => {{\n            eprintln!(\"unknown command `{{}}`\\n\\nknown commands: {cmds}\", __other);\n            std::process::exit(2);\n        }}\n    }}\n}}\n\n",
+        "fn main() {{\n    jet_std_env_init();\n    jet_gc::runtime_or_exit(jet_gc::initialize_trace());\n    let __argv = jet_std_io_args();\n    if __argv.len() < 2 || __argv[1] == \"--help\" {{\n        let __prog = jet_args_program_name(__argv.first().map(String::as_str).unwrap_or(\"\"));\n        println!(\"Usage: {{}} <command> [options]\\n\\nCommands:\\n{usage}\", __prog);\n        return;\n    }}\n    let __sub = __argv[1].to_lowercase();\n    let mut __rest: Vec<String> = vec![format!(\"{{}} {{}}\", __argv[0], __sub)];\n    __rest.extend_from_slice(&__argv[2..]);\n    match __sub.as_str() {{\n{arms}        __other => {{\n            eprintln!(\"unknown command `{{}}`\\n\\nknown commands: {cmds}\", __other);\n            std::process::exit(2);\n        }}\n    }}\n}}\n\n",
         usage = usage_lines,
         arms = arms,
         cmds = cmd_names.join(", "),

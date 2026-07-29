@@ -27,9 +27,11 @@ mod runtime {
     pub(super) struct Parsed(JetParsedArgs);
 
     pub(super) fn empty_spec(prog: &str) -> Spec {
-        let mut spec = jet_args_spec();
-        spec.prog = prog.to_string();
-        Spec(spec)
+        Spec(jet_args_program(jet_args_spec(), prog))
+    }
+
+    pub(super) fn program_name(prog: &str) -> String {
+        jet_args_program_name(prog)
     }
 
     pub(super) fn flag(spec: Spec, name: &str, help: &str) -> Spec {
@@ -71,7 +73,10 @@ mod runtime {
     }
 }
 
-use runtime::{empty_spec, flag, flag_set, help_text, option, option_val, parse, positional, Parsed, Spec};
+use runtime::{
+    empty_spec, flag, flag_set, help_text, option, option_val, parse, positional, program_name,
+    Parsed, Spec,
+};
 
 #[derive(Clone)]
 pub(crate) struct CLIPlan {
@@ -292,8 +297,11 @@ fn decode_struct(
     Ok(rec)
 }
 
-fn print_usage(schema: &CLICommandSchema) {
-    let mut out = String::from("Usage: <program> <command> [options]\n\nCommands:\n");
+fn print_usage(schema: &CLICommandSchema, prog: &str) {
+    let mut out = format!(
+        "Usage: {} <command> [options]\n\nCommands:\n",
+        program_name(prog)
+    );
     for cmd in &schema.commands {
         out.push_str("  ");
         out.push_str(&cmd.name);
@@ -326,7 +334,10 @@ pub(crate) extern "C" fn jet_jit_cli_main() {
     if !plan.variants.is_empty() {
         // Enum subcommands — bare / --help prints usage and exits 0.
         if argv.len() < 2 || argv[1] == "--help" {
-            print_usage(&plan.schema);
+            print_usage(
+                &plan.schema,
+                argv.first().map(String::as_str).unwrap_or(""),
+            );
             return;
         }
         let sub = argv[1].to_lowercase();
