@@ -15,6 +15,10 @@ use jet_foundation::PackageEdition;
 use super::{unsupported, EvalCtx};
 
 fn data_error(kind: &str, operation: &str, reason: &str) -> CtValue {
+    data_error_at(kind, operation, None, reason)
+}
+
+fn data_error_at(kind: &str, operation: &str, index: Option<i64>, reason: &str) -> CtValue {
     CtValue::Struct {
         type_name: "DataError".to_string(),
         fields: vec![
@@ -29,7 +33,12 @@ fn data_error(kind: &str, operation: &str, reason: &str) -> CtValue {
             ("operation".to_string(), CtValue::Str(operation.to_string())),
             ("row".to_string(), CtValue::None(Type::Int)),
             ("column".to_string(), CtValue::None(Type::Int)),
-            ("index".to_string(), CtValue::None(Type::Int)),
+            (
+                "index".to_string(),
+                index
+                    .map(|value| CtValue::Some(Box::new(CtValue::Int(value))))
+                    .unwrap_or(CtValue::None(Type::Int)),
+            ),
             ("reason".to_string(), CtValue::Str(reason.to_string())),
             (
                 "cause".to_string(),
@@ -211,6 +220,18 @@ impl<'a> EvalCtx<'a> {
                         "rolling_mean",
                         "rolling width must be positive",
                     )));
+                }
+                if checked {
+                    if let Some((index, _)) =
+                        values.iter().enumerate().find(|(_, value)| !value.is_finite())
+                    {
+                        return Ok(err(data_error_at(
+                            "NonFinite",
+                            "rolling_mean",
+                            Some(index as i64),
+                            "numeric input must be finite",
+                        )));
+                    }
                 }
                 let value = apply_core_call(
                     "core.data",

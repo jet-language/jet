@@ -130,3 +130,42 @@ fn run() {{
     );
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn rolling_mean_nonfinite_matches_aot_and_default_dev() {
+    if !Command::new("rustc").arg("--version").output().is_ok() {
+        eprintln!("note: skipping rolling_mean parity test (need rustc)");
+        return;
+    }
+    let dir =
+        std::env::temp_dir().join(format!("jet_dataflow_rolling_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.data as data
+
+fn run() {
+    result := data.rolling_mean([1.0, Float.NAN, 3.0], 2)
+    if result == {
+        .Ok(_) -> print("unexpected ok")
+        .Err(error) -> print("{error}")
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "rolling_nonfinite", source);
+    assert_eq!(code, 0, "rolling_mean AOT failed: {stderr}");
+    assert_eq!(
+        stdout,
+        "NonFinite rolling_mean, index 1: numeric input must be finite\n"
+    );
+    let path = dir.join("rolling_nonfinite.jet");
+    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran {
+            stdout: dev_stdout,
+            stderr: dev_stderr,
+            exit_code,
+        } => assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new())),
+        other => panic!("rolling_mean default-dev failed: {other:?}"),
+    }
+    let _ = fs::remove_dir_all(&dir);
+}

@@ -109,6 +109,30 @@ fn db_value_result(
     }
 }
 
+fn datatree_int_result(recv: &CtValue) -> CtValue {
+    let result = match recv {
+        CtValue::Enum {
+            variant,
+            args,
+            ..
+        } if variant == "Int" => match args.as_slice() {
+            [(_, CtValue::Int(value))] => Ok(CtValue::Int(*value)),
+            _ => Err("invalid int payload".to_string()),
+        },
+        _ => Err("expected int".to_string()),
+    };
+    match result {
+        Ok(value) => CtValue::ResOk(Box::new(value)),
+        Err(reason) => CtValue::ResErr(Box::new(CtValue::Struct {
+            type_name: "DecodeError".to_string(),
+            fields: vec![
+                ("path".to_string(), CtValue::Str(String::new())),
+                ("reason".to_string(), CtValue::Str(reason)),
+            ],
+        })),
+    }
+}
+
 pub(super) fn eval_handle(
     op: &THandleOp,
     recv: &mut CtValue,
@@ -484,7 +508,7 @@ pub(super) fn eval_handle(
         THandleOp::HTTPServerMethod { .. } => Err(unsupported("handle `HTTPServerMethod`", span)),
         THandleOp::DataTreeField => Err(unsupported("handle `DataTreeField`", span)),
         THandleOp::DataTreeAt => Err(unsupported("handle `DataTreeAt`", span)),
-        THandleOp::DataTreeInt => Err(unsupported("handle `DataTreeInt`", span)),
+        THandleOp::DataTreeInt | THandleOp::JSONInt => Ok(datatree_int_result(recv)),
         THandleOp::DataTreeText => Err(unsupported("handle `DataTreeText`", span)),
         THandleOp::DataTreeBool => Err(unsupported("handle `DataTreeBool`", span)),
         THandleOp::DataTreeFloat => Err(unsupported("handle `DataTreeFloat`", span)),
@@ -492,7 +516,6 @@ pub(super) fn eval_handle(
         THandleOp::SerdeEncode => Err(unsupported("handle `SerdeEncode`", span)),
         THandleOp::JSONField => Err(unsupported("handle `JSONField`", span)),
         THandleOp::JSONAt => Err(unsupported("handle `JSONAt`", span)),
-        THandleOp::JSONInt => Err(unsupported("handle `JSONInt`", span)),
         THandleOp::JSONText => Err(unsupported("handle `JSONText`", span)),
         THandleOp::JSONBool => Err(unsupported("handle `JSONBool`", span)),
         THandleOp::JSONFloat => Err(unsupported("handle `JSONFloat`", span)),

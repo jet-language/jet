@@ -629,6 +629,7 @@ impl<'a> EvalCtx<'a> {
                         &bytes,
                         argv.get(1),
                         ok,
+                        &self.struct_field_types,
                     ));
                 }
                 if module == "jet.crypto"

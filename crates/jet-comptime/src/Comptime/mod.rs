@@ -300,6 +300,7 @@ pub fn cbor_decode_typed_for_tir(
     bytes: &[u8],
     options: Option<&CtValue>,
     root_ty: &Type,
+    struct_fields: &HashMap<String, Vec<(String, Type)>>,
 ) -> CtValue {
     let options = match EncodingLite::cbor_options(options) {
         Ok(options) => options,
@@ -313,7 +314,7 @@ pub fn cbor_decode_typed_for_tir(
             return CtValue::ResErr(Box::new(EncodingLite::cbor_error_value(error)));
         }
     };
-    match TypedDecode::typed_decode_builtin_value(root_ty, &tree) {
+    match TypedDecode::typed_decode_schema_value(root_ty, &tree, struct_fields) {
         Some(Ok(value)) => CtValue::ResOk(Box::new(value)),
         Some(Err(CtValue::Struct { fields, .. })) => {
             let path = fields
