@@ -21,6 +21,7 @@ pub(crate) fn fresh_runtime() -> JitRuntime {
         senders: Vec::new(),
         tasks: Vec::new(),
         task_controls: Vec::new(),
+        task_groups: Vec::new(),
         results: Vec::new(),
         solvers: Vec::new(),
         rngs: Vec::new(),
@@ -118,6 +119,7 @@ fn reset_run_heap(rt: &mut JitRuntime) {
     rt.senders.clear();
     rt.tasks.clear();
     rt.task_controls.clear();
+    rt.task_groups.clear();
     rt.results.clear();
     rt.solvers.clear();
     rt.rngs.clear();

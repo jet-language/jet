@@ -820,7 +820,14 @@ impl<'a> EvalCtx<'a> {
                     },
                 }
             }
-            TExprKind::Unit | TExprKind::DefaultLit | TExprKind::Uninit => Ok(CtValue::Unit),
+            TExprKind::Unit
+            | TExprKind::TaskGroupNew
+            | TExprKind::DefaultLit
+            | TExprKind::Uninit => Ok(CtValue::Unit),
+            TExprKind::TaskGroupClose(group) => {
+                self.eval_expr(group, scope)?;
+                Ok(CtValue::Unit)
+            }
             TExprKind::CtLit(v) => Ok(v.clone()),
             TExprKind::ConstRef(name) => self
                 .globals

@@ -455,6 +455,49 @@ extern "C" fn jet_jit_spawn4(f: SpawnFn4, c0: i64, c1: i64, c2: i64, c3: i64) ->
     spawn_with_runtime(move || f(c0, c1, c2, c3))
 }
 
+extern "C" fn jet_jit_task_group_new() -> i64 {
+    with_runtime_mut(|rt| {
+        let id = rt.task_groups.len() as i64;
+        rt.task_groups
+            .push(Some(jet_codegen::task_group::JetTaskGroupRuntime::new()));
+        id
+    })
+}
+
+extern "C" fn jet_jit_task_group_register(group: i64, task: i64) {
+    with_runtime_mut(|rt| {
+        rt.task_groups[group as usize]
+            .as_ref()
+            .expect("jit taskgroup already closed")
+            .register(task);
+    });
+}
+
+extern "C" fn jet_jit_task_group_close(group: i64) -> i64 {
+    let group = with_runtime_mut(|rt| rt.task_groups[group as usize].take());
+    let Some(group) = group else {
+        return JitWaitStatus::Ready as i64;
+    };
+    let mut status = JitWaitStatus::Ready as i64;
+    group.close_with(
+        |task| {
+            with_runtime_mut(|rt| {
+                let idx = *task as usize;
+                if rt.tasks.get(idx).is_some_and(Option::is_some) {
+                    rt.task_controls[idx].cancel();
+                }
+            });
+        },
+        |task| {
+            let join = with_runtime_mut(|rt| rt.tasks[task as usize].take());
+            if let Some(join) = join {
+                status = status.max(wait_status(|| join.join()));
+            }
+        },
+    );
+    status
+}
+
 extern "C" fn jet_jit_task_cancel(task: i64) {
     with_runtime_mut(|rt| {
         rt.task_controls[task as usize].cancel();
@@ -672,6 +715,9 @@ pub(crate) struct ConcurrencyHostFns {
     pub spawn2: cranelift_module::FuncId,
     pub spawn3: cranelift_module::FuncId,
     pub spawn4: cranelift_module::FuncId,
+    pub task_group_new: cranelift_module::FuncId,
+    pub task_group_register: cranelift_module::FuncId,
+    pub task_group_close: cranelift_module::FuncId,
     pub task_join: cranelift_module::FuncId,
     pub task_cancel: cranelift_module::FuncId,
     pub task_detach: cranelift_module::FuncId,
@@ -728,6 +774,18 @@ pub(crate) fn register_concurrency_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_spawn2", jet_jit_spawn2 as *const u8);
     builder.symbol("jet_jit_spawn3", jet_jit_spawn3 as *const u8);
     builder.symbol("jet_jit_spawn4", jet_jit_spawn4 as *const u8);
+    builder.symbol(
+        "jet_jit_task_group_new",
+        jet_jit_task_group_new as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_task_group_register",
+        jet_jit_task_group_register as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_task_group_close",
+        jet_jit_task_group_close as *const u8,
+    );
     builder.symbol("jet_jit_task_join", jet_jit_task_join as *const u8);
     builder.symbol("jet_jit_task_cancel", jet_jit_task_cancel as *const u8);
     builder.symbol("jet_jit_task_detach", jet_jit_task_detach as *const u8);
@@ -780,6 +838,8 @@ pub(crate) fn declare_concurrency_host_fns(
 
     let mut sig_void_i64 = Signature::new(cc);
     sig_void_i64.params.push(AbiParam::new(types::I64));
+    let mut sig_void_i64_i64 = sig_void_i64.clone();
+    sig_void_i64_i64.params.push(AbiParam::new(types::I64));
     let sig_void = Signature::new(cc);
     let mut sig_noarg_i64 = Signature::new(cc);
     sig_noarg_i64.returns.push(AbiParam::new(types::I64));
@@ -816,6 +876,9 @@ pub(crate) fn declare_concurrency_host_fns(
         spawn2: import("jet_jit_spawn2", &sig_spawn2)?,
         spawn3: import("jet_jit_spawn3", &sig_spawn3)?,
         spawn4: import("jet_jit_spawn4", &sig_spawn4)?,
+        task_group_new: import("jet_jit_task_group_new", &sig_noarg_i64)?,
+        task_group_register: import("jet_jit_task_group_register", &sig_void_i64_i64)?,
+        task_group_close: import("jet_jit_task_group_close", &sig_i64)?,
         task_join: import("jet_jit_task_join", &sig_i64)?,
         task_cancel: import("jet_jit_task_cancel", &sig_void_i64)?,
         task_detach: import("jet_jit_task_detach", &sig_void_i64)?,

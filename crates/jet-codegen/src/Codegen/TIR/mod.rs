@@ -2589,6 +2589,11 @@ pub enum TExprKind {
     /// Unit / default / uninit / comptime / host forms — structured facts only.
     /// Scalar comptime values use IntLit/BoolLit/CharLit via `lower_comptime_scalar`.
     Unit,
+    /// D-TASKGROUP-PARAM1=A: create the internal collector shared with helpers.
+    TaskGroupNew,
+    /// Close the lexical collector after its body. The AOT value also closes in
+    /// Drop so early exits preserve structured concurrency.
+    TaskGroupClose(Box<TExpr>),
     /// Compiler-private result block used by finite yielding loops. Unlike a
     /// lambda, it executes in the current function, so `return` and cleanup
     /// retain ordinary loop semantics.
@@ -3280,8 +3285,12 @@ pub struct TExternArg {
 /// (`spawn_closure` is the distinct `emit_spawn_lambda` form; `serve`/`guard` use the
 /// plain `emit_lambda` form) plus, for `serve`, the lowered address arg.
 pub enum TCoreClosureKind {
-    /// `tasks.spawn(<lambda>)` → `{root}jet_std::JetTask::spawn(<spawn_closure>)`.
-    Spawn { spawn_closure: String },
+    /// `tasks.spawn(<lambda>)` uses no group. `g.task => …` carries the same
+    /// internal group collector through every named helper call.
+    Spawn {
+        group: Option<Box<TExpr>>,
+        spawn_closure: String,
+    },
     /// `http.serve(addr, <lambda>)` → `{root}jet_http_serve(&(<addr>), <closure>)`.
     Serve { addr: Box<TExpr>, closure: String },
     /// `scope.guard(<lambda>)` → `{root}jet_scope_guard(<closure>)`.

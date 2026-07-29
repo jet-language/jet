@@ -37,6 +37,9 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_KEY) {
         return true;
     }
+    if matches!(&ty, Type::Named(n) if n == crate::Syntax::TYPE_TASKGROUP) {
+        return true;
+    }
     if matches!(&ty, Type::Named(n) if n == "DataEvent") {
         return true;
     }

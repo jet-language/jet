@@ -1,0 +1,7 @@
+Error [E1110]: `group` is a `TaskGroup` and cannot escape in a lambda
+  --> tests/ui/taskgroup_parameter_escape.jet:4:12
+    |
+  4 |     return () => use_group(group)
+    |            ^^^^^^^^^^^^^^^
+ Why: a taskgroup is a scoped spawn authority that may flow only through direct named-function calls
+ Fix: move this work to `fn helper(group: TaskGroup)` and call the helper directly

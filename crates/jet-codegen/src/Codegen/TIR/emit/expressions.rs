@@ -450,6 +450,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
             )
         }
         TExprKind::Unit => "()".to_string(),
+        TExprKind::TaskGroupNew => {
+            format!("{}jet_std::JetTaskGroup::new()", cx.root_prefix)
+        }
+        TExprKind::TaskGroupClose(group) => {
+            format!("({}).close()", emit_tir_expr(group, cx))
+        }
         TExprKind::DefaultLit => "Default::default()".to_string(),
         TExprKind::Uninit => format!(
             "unsafe {{ std::mem::MaybeUninit::<{}>::uninit().assume_init() }}",
@@ -2583,7 +2589,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                 THandleOp::ReflectFieldName => format!("({}).name()", recv),
                 THandleOp::ReflectFieldValue => format!("({}).value()", recv),
                 THandleOp::TaskJoin => format!("({}).join()", recv),
-                THandleOp::TaskDetach => format!("{{ let _detach = ({}); }}", recv),
+                THandleOp::TaskDetach => format!("({}).detach()", recv),
                 THandleOp::TaskPause => format!("({}).pause()", recv),
                 THandleOp::TaskResume => format!("({}).resume()", recv),
                 THandleOp::TaskCancel => format!("({}).cancel()", recv),
@@ -3799,12 +3805,20 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
         // lowering; emit assembles the bespoke shape, byte-for-byte `emit_core_call`
         // (Source/Codegen/Expression.rs).
         TExprKind::CoreClosureCall { kind } => match kind {
-            TCoreClosureKind::Spawn { spawn_closure } => {
-                format!(
+            TCoreClosureKind::Spawn {
+                group,
+                spawn_closure,
+            } => match group {
+                Some(group) => format!(
+                    "({}).spawn({})",
+                    emit_tir_expr(group, cx),
+                    spawn_closure
+                ),
+                None => format!(
                     "{}jet_std::JetTask::spawn({})",
                     cx.root_prefix, spawn_closure
-                )
-            }
+                ),
+            },
             TCoreClosureKind::Serve { addr, closure } => format!(
                 "{}jet_http_serve(&({}), {})",
                 cx.root_prefix,

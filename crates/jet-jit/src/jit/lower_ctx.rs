@@ -10553,7 +10553,21 @@ impl LowerCtx<'_, '_> {
                 Err(format!("jit core call unsupported: {module}.{method}"))
             }
             TExprKind::CoreClosureCall { kind } => match kind {
-                TCoreClosureKind::Spawn { .. } => self.lower_spawn(),
+                TCoreClosureKind::Spawn { group, .. } => {
+                    let group = match group {
+                        Some(group) => Some(self.lower_expr(group)?),
+                        None => None,
+                    };
+                    let task = self.lower_spawn()?;
+                    if let Some(group) = group {
+                        let host = self.module.declare_func_in_func(
+                            self.host.conc.task_group_register,
+                            self.b.func,
+                        );
+                        self.b.ins().call(host, &[group, task]);
+                    }
+                    Ok(task)
+                }
                 TCoreClosureKind::Serve { .. } => {
                     Err("jit http serve closure unsupported".to_string())
                 }
@@ -11583,6 +11597,21 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::Absent => Ok(self.b.ins().iconst(types::I64, 0)),
             TExprKind::Unit => Ok(self.b.ins().iconst(types::I64, 0)),
+            TExprKind::TaskGroupNew => {
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.conc.task_group_new, self.b.func);
+                let call = self.b.ins().call(host, &[]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            TExprKind::TaskGroupClose(group) => {
+                let group = self.lower_expr(group)?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.conc.task_group_close, self.b.func);
+                let call = self.b.ins().call(host, &[group]);
+                Ok(self.finish_wait_call(self.b.inst_results(call)[0]))
+            }
             TExprKind::CtLit(value) => self.lower_ct_value(value),
             TExprKind::Uninit => {
                 // D-UNINIT1 / GC promote: placeholder overwritten before read.

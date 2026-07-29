@@ -1076,6 +1076,13 @@ impl Cx {
             {
                 "()".to_string()
             }
+            // D-TASKGROUP-PARAM1=A: helpers receive the lexical group's real
+            // internal collector. The surface remains second-class.
+            Type::Named(name)
+                if name == Syntax::TYPE_TASKGROUP && !self.type_names.contains(name) =>
+            {
+                format!("{}jet_std::JetTaskGroup", self.root_prefix)
+            }
             Type::Named(name) if name == "Error" => "String".to_string(),
             Type::Named(name) if name == "Claims" && !self.type_names.contains(name) => {
                 format!("{}JetAuthClaims", self.root_prefix)
