@@ -59,6 +59,9 @@ impl<'a> Checker<'a> {
                 name,
                 Syntax::SIGIL_BIND_IMMUT
             );
+            if let Some(module) = unique_core_module_for_alias(name) {
+                fix = format!("add `use {module} as {name}`");
+            }
             let mut best: Option<(String, usize)> = None;
             let candidates: Vec<String> = self
                 .scopes
@@ -293,4 +296,24 @@ impl<'a> Checker<'a> {
             };
             Some(ty)
         }
+}
+
+fn unique_core_module_for_alias(alias: &str) -> Option<&'static str> {
+    let mut chars = alias.chars();
+    let shorthand = match (chars.next(), chars.next(), chars.next()) {
+        (Some(first), Some(last), None) => Some((first, last)),
+        _ => None,
+    };
+    let mut matches = Syntax::KNOWN_CORE_MODULES.iter().copied().filter(|module| {
+        let leaf = module.rsplit('.').next().unwrap_or(module);
+        leaf == alias
+            || shorthand.is_some_and(|(first, last)| {
+                let mut leaf_chars = leaf.chars();
+                leaf_chars.next() == Some(first)
+                    && leaf_chars.next_back() == Some(last)
+                    && leaf_chars.next().is_some()
+            })
+    });
+    let module = matches.next()?;
+    matches.next().is_none().then_some(module)
 }

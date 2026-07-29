@@ -3474,11 +3474,21 @@ impl<'a> Checker<'a> {
                 }
             }
             let Some((owner_mod, mut msig)) = self.resolve_method_sig(&type_name, method) else {
+                let materializer = matches!(
+                    &recv_ty,
+                    Type::Apply { name, .. } if name == Syntax::TYPE_ITER
+                )
+                .then(|| crate::Sema::Diagnostics::one_pass_materializer(&recv_ty))
+                .flatten();
+                let fix = materializer.map_or_else(
+                    || format!("define it inside `struct {type_name}` or `impl {type_name}`"),
+                    |method| format!("call `{method}` first"),
+                );
                 self.diags.push(Diagnostic::error(
                     "E0102",
                     format!("`{}` has no method `{}`", type_name, method),
                     "check the method name on this type".to_string(),
-                    format!("define it inside `struct {type_name}` or `impl {type_name}`"),
+                    fix,
                     Some(span),
                 ));
                 for a in args.iter_mut() {
