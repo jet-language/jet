@@ -1733,7 +1733,7 @@ fn run(cmd: Cmd) {}
         .unwrap();
     assert!(help.status.success(), "subcommand root help failed: {}", String::from_utf8_lossy(&help.stderr));
     let help = String::from_utf8(help.stdout).unwrap();
-    assert_eq!(help, "Usage: <program> <command> [options]\n\nCommands:\n  serve\n  import\n");
+    assert_eq!(help, "Usage: commands <command> [options]\n\nCommands:\n  serve\n  import\n");
     assert!(!help.contains("Serve") && !help.contains("Import"));
 
     for shell in ["bash", "zsh", "fish", "powershell"] {
@@ -1818,6 +1818,77 @@ fn derived_help_uses_program_basename_for_compiled_and_jet_run_paths() {
             .unwrap()
     );
     check_snapshot("shape_cli_help_program_names.txt", &program_names);
+}
+
+#[test]
+fn derived_enum_help_uses_program_basename_for_compiled_and_jet_run_paths() {
+    let dir = isolated_cwd("shape_cli_enum_help_program_name");
+    fs::write(
+        dir.join("commands.jet"),
+        "#CLI\nstruct ServeArgs { verbose: Bool }\nenum Cmd { Serve(ServeArgs) }\nfn run(cmd: Cmd) {}\n",
+    )
+    .unwrap();
+
+    let build = Command::new(jet())
+        .args(["build", "commands.jet"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "enum build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let built = dir.join("build/commands").canonicalize().unwrap();
+    let compiled_root = Command::new(&built)
+        .arg("--help")
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let compiled_sub = Command::new(&built)
+        .args(["serve", "--help"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let run_root = Command::new(jet())
+        .args(["run", "commands.jet", "--", "--help"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let run_sub = Command::new(jet())
+        .args(["run", "commands.jet", "--", "serve", "--help"])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    for (label, output) in [
+        ("compiled root", &compiled_root),
+        ("compiled subcommand", &compiled_sub),
+        ("jet run root", &run_root),
+        ("jet run subcommand", &run_sub),
+    ] {
+        assert!(
+            output.status.success(),
+            "{label} help failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let first_line = |output: Output| {
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .to_string()
+    };
+    let program_names = format!(
+        "compiled root: {}\ncompiled subcommand: {}\njet run root: {}\njet run subcommand: {}\n",
+        first_line(compiled_root),
+        first_line(compiled_sub),
+        first_line(run_root),
+        first_line(run_sub)
+    );
+    check_snapshot("shape_cli_enum_help_program_names.txt", &program_names);
 }
 
 #[test]
