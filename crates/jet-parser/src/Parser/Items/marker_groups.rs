@@ -266,11 +266,6 @@ impl<'a> Parser<'a> {
             loop {
                 let m = self.parse_one_marker()?;
                 self.bind_rule_fact(m.name_span, None, site);
-                if crate::Policy::applied_rule(&m.name).is_some()
-                    && !crate::Policy::rule_allows(&m.name, site)
-                {
-                    return Err(Self::wrong_rule_site(&m, site, noun));
-                }
                 group.push(m);
                 if matches!(self.peek().kind, TokKind::Comma) {
                     self.bump();
@@ -280,6 +275,19 @@ impl<'a> Parser<'a> {
             }
             let close = self.peek().span;
             self.expect(TokKind::RBracket, "to close an `#[…]` rule list")?;
+            let task_group = site == crate::Policy::RuleSite::Function
+                && group
+                    .iter()
+                    .any(|marker| marker.name == Syntax::KW_TASK);
+            for marker in &group {
+                let task_doc = task_group && marker.name == Syntax::CONTRACT_DOC;
+                if crate::Policy::applied_rule(&marker.name).is_some()
+                    && !crate::Policy::rule_allows(&marker.name, site)
+                    && !task_doc
+                {
+                    return Err(Self::wrong_rule_site(marker, site, noun));
+                }
+            }
             if group.len() == 1 {
                 let mut diagnostic = Diagnostic::error(
                     "E0999",
@@ -673,10 +681,16 @@ impl<'a> Parser<'a> {
             site: crate::Policy::RuleSite,
         ) -> Result<crate::AST::Func, Diagnostic> {
             let ordered_markers = markers.clone();
+            let task_group = site == crate::Policy::RuleSite::Function
+                && ordered_markers
+                    .iter()
+                    .any(|marker| marker.name == Syntax::KW_TASK);
             let mut policy = Vec::new();
             for marker in markers {
+                let task_doc = task_group && marker.name == Syntax::CONTRACT_DOC;
                 if crate::Policy::applied_rule(&marker.name).is_some()
                     && !crate::Policy::rule_allows(&marker.name, site)
+                    && !task_doc
                 {
                     if site == crate::Policy::RuleSite::Method
                         && matches!(marker.name.as_str(), Syntax::KW_TASK | Syntax::ATTR_EVERY)
@@ -788,8 +802,8 @@ impl<'a> Parser<'a> {
                         function.is_task = true;
                         function.task_span = Some(marker.span);
                     }
-                    // D-TASKS-LIST1=A: `#Doc` stays in `applied_rules`; task
-                    // discovery reads that shared marker metadata by target.
+                    // D-TASKS-LIST1=A: only a group that also has `#Task`
+                    // reaches this arm. Discovery reads the retained marker.
                     Syntax::CONTRACT_DOC => {}
                     Syntax::ATTR_EVERY => {
                         let Some(schedule) = arguments.parameter(0) else {

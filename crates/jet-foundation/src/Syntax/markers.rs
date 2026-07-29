@@ -40,8 +40,8 @@ pub const CONTRACT_CLI: &str = "CLI"; // D-CLIFLAG1, D-SHAPE-CLI1
 /// D-PATCH1 (card #181): struct-level derive — generates nested `T.Patch` with
 /// `apply`/`diff`/`merge`, Codable by construction (Encode+Decode on Patch).
 pub const CONTRACT_PATCHABLE: &str = "Patchable"; // D-PATCH1
-/// D-CLIFLAG1 / D-TASKS-LIST1=A: one-line help for CLI fields and `#Task`
-/// functions. The rule registry owns both legal sites.
+/// D-CLIFLAG1: field help for CLI-derived arguments. D-TASKS-LIST1=A reuses
+/// it only when the function marker group also contains `#Task`.
 pub const CONTRACT_DOC: &str = "Doc"; // D-CLIFLAG1
 /// D-CLI-POS1=A: field-level opt-out from positional filling on a `#[CLI]`
 /// required value field — `#[Flag]`. Without it, required scalars fill from

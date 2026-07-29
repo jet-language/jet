@@ -19,3 +19,6 @@ seed  Seed local data (every 5min)
 ```
 
 Run a task with `jet run --task seed`. Cross-task dependencies are ordinary function calls.
+
+In a workspace, use `jet tasks -p member` to list tasks for one member.
+A bare `jet tasks` names the members when the choice is ambiguous.

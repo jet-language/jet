@@ -929,6 +929,28 @@ mod s61_tests {
         }
     }
 
+    #[test]
+    fn doc_on_a_function_requires_task() {
+        let task_src = "#[Doc(\"task text\"), Task] fn work() {}\n";
+        let (task_tokens, task_lex_diagnostics) = lex(task_src);
+        assert!(
+            task_lex_diagnostics.is_empty(),
+            "{task_lex_diagnostics:?}"
+        );
+        parse(&task_tokens).expect("#Doc may attach to a #Task function");
+
+        let src = "#Doc(\"helper text\") fn helper() {}\n";
+        let (tokens, lex_diagnostics) = lex(src);
+        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
+        let diagnostics = parse(&tokens).expect_err("#Doc alone must not attach to a function");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "E0355"),
+            "{diagnostics:?}"
+        );
+    }
+
     /// D-FFI-INLINE1=A (card #501): `jet fmt` round-trips `#FFI` fns idempotently
     /// (formatter-roundtrip-required-for-new-syntax).
     #[test]

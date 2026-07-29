@@ -235,6 +235,57 @@ fn tasks_lists_documented_scheduled_project_tasks_and_matches_run_outside_projec
         .unwrap();
     assert_eq!(tasks_error.status.code(), run_error.status.code());
     assert_eq!(tasks_error.stderr, run_error.stderr);
+
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/features/packages/monorepo");
+    let workspace = isolated_cwd("tasks_workspace");
+    fs::remove_dir_all(&workspace).unwrap();
+    copy_dir_all(&fixture, &workspace);
+    let hello = workspace.join("packages/hello/hello.jet");
+    let mut hello_source = fs::read_to_string(&hello).unwrap();
+    hello_source.push_str(
+        "\n#[Task, Doc(\"Say hello from this workspace member\")] fn greet() {}\n",
+    );
+    fs::write(&hello, hello_source).unwrap();
+
+    let ambiguous = Command::new(jet())
+        .arg("tasks")
+        .current_dir(&workspace)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let ambiguous_stderr = String::from_utf8_lossy(&ambiguous.stderr);
+    assert_eq!(ambiguous.status.code(), Some(2), "{ambiguous_stderr}");
+    assert!(
+        ambiguous_stderr.contains("`jet tasks` is ambiguous"),
+        "{ambiguous_stderr}"
+    );
+    assert!(
+        ambiguous_stderr.contains("hello") && ambiguous_stderr.contains("ranker"),
+        "{ambiguous_stderr}"
+    );
+    assert!(
+        ambiguous_stderr.contains("jet tasks -p <member>")
+            && !ambiguous_stderr.contains("jet run"),
+        "{ambiguous_stderr}"
+    );
+
+    let selected = Command::new(jet())
+        .args(["tasks", "-p", "hello"])
+        .current_dir(&workspace)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert_eq!(
+        selected.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&selected.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(selected.stdout).unwrap(),
+        "greet  Say hello from this workspace member\n"
+    );
 }
 
 #[test]

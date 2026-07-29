@@ -545,8 +545,8 @@ pub const FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--locked", help: "with fetch: verify only, refuse network" },
     // D-CLI-STORE2=A: script locking folds into `fetch`, not a separate verb.
     FlagSpec { long: "--lock", help: "with fetch: lock a manifest-less script's inline deps instead of fetching a project" },
-    // D-CLI-BARE1=A: workspace member selection for bare run/dev/debug/bench/check/build.
-    FlagSpec { long: "-p", help: "with run/dev/debug/bench/check/build: pick a workspace member by name" },
+    // D-CLI-BARE1=A / D-TASKS-LIST1=A: select one workspace member.
+    FlagSpec { long: "-p", help: "with run/dev/debug/bench/check/build/tasks: pick a workspace member by name" },
     FlagSpec { long: "--annotated", help: "with new: include commented example deps" },
     FlagSpec { long: "--force", help: "with publish: bypass pre-publish gate (with warning)" },
     FlagSpec { long: "--message", help: "with yank: human-readable reason for yanking the version" },

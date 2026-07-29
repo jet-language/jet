@@ -385,7 +385,7 @@ usage:
   {bin} run   <file.{ext}> -- ...   everything after `--` is forwarded to the program (D-CLI1)
   {bin} run   <file.{ext}> --gc-trace   record bounded automatic-GC promotion evidence
   {bin} run   <file.{ext}> --trace-tiers  expert: per-function tier, reason, timing
-  {bin} tasks                       list project `#Task` functions
+  {bin} tasks [-p member]           list project `#Task` functions
   {bin} test  <file|dir>            compile and run top-level test blocks (recurses into subdirs)
   {bin} test  <file|dir>  -- ...    `--` forwards to the test runner
   {bin} test  <file> --filter=foo   only run tests whose name contains `foo`
@@ -1246,7 +1246,8 @@ fn main() {
         }
         "tasks" => {
             let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            let entry = resolve_bare_entry("run", &cwd, None)
+            let member_flag = flag_value(&raw, "-p");
+            let entry = resolve_bare_entry("tasks", &cwd, member_flag)
                 .unwrap_or_else(|| missing_bare_entry("run", &cwd));
             run_tasks(&entry.to_string_lossy(), mode);
             return;
@@ -2435,7 +2436,11 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
                 None => {
                     let names: Vec<&str> = plan.members.iter().map(|m| m.name.as_str()).collect();
                     eprintln!("error: no workspace member named `{want}`");
-                    eprintln!(" fix: pick one of: {}", names.join(", "));
+                    if cmd == "tasks" {
+                        eprintln!(" fix: list tasks for one of: {}", names.join(", "));
+                    } else {
+                        eprintln!(" fix: pick one of: {}", names.join(", "));
+                    }
                     exit(ExitCodes::USAGE);
                 }
             };
@@ -2444,6 +2449,18 @@ fn resolve_bare_entry(cmd: &str, cwd: &Path, member_flag: Option<&str>) -> Optio
             1 => return Some(runnable.into_iter().next().unwrap().1),
             n if n >= 2 => {
                 let names: Vec<&str> = runnable.iter().map(|(n, _)| n.as_str()).collect();
+                if cmd == "tasks" {
+                    eprintln!(
+                        "error: `jet tasks` is ambiguous — this workspace has {} members with entry files",
+                        names.len()
+                    );
+                    eprintln!(
+                        " why: tasks are listed for one member at a time: {}",
+                        names.join(", ")
+                    );
+                    eprintln!(" fix: pick one with `jet tasks -p <member>`");
+                    exit(ExitCodes::USAGE);
+                }
                 eprintln!(
                     "error: `jet {cmd}` is ambiguous — {} workspace members can run",
                     names.len()

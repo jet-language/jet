@@ -572,9 +572,7 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Skip", sig!(), FIELD_SITE, Bare),
     rule!("Default", sig!(param!("value", Any, "T.default")), FIELD_SITE, BareOrCall),
     rule!("Flatten", sig!(), FIELD_SITE, Bare),
-    // D-TASKS-LIST1=A: tasks reuse the existing `#Doc` rule for their
-    // one-line listing text. The function site is metadata only.
-    rule!("Doc", sig!(param!("text", String)), &[RuleSite::Field, RuleSite::Function], Call),
+    rule!("Doc", sig!(param!("text", String)), FIELD_SITE, Call),
     rule!("Flag", sig!(), FIELD_SITE, Bare),
     rule!("Persist", sig!(), DECLARATION_SITE, Bare),
     rule!("Track", sig!(), DECLARATION_SITE, Bare),
@@ -668,7 +666,6 @@ mod tests {
             ("Test", RuleSite::Test),
             ("Bench", RuleSite::Bench),
             ("Task", RuleSite::Function),
-            ("Doc", RuleSite::Function),
         ];
         for (name, site) in legal {
             assert!(super::rule_allows(name, site), "#{name} at {site:?}");
@@ -683,6 +680,7 @@ mod tests {
             ("Bench", RuleSite::Test),
             ("Test", RuleSite::Bench),
             ("Codable", RuleSite::Function),
+            ("Doc", RuleSite::Function),
         ];
         for (name, site) in illegal {
             assert!(!super::rule_allows(name, site), "#{name} at {site:?}");
