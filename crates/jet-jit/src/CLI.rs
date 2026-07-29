@@ -26,8 +26,10 @@ mod runtime {
     #[derive(Clone)]
     pub(super) struct Parsed(JetParsedArgs);
 
-    pub(super) fn empty_spec() -> Spec {
-        Spec(jet_args_spec())
+    pub(super) fn empty_spec(prog: &str) -> Spec {
+        let mut spec = jet_args_spec();
+        spec.prog = prog.to_string();
+        Spec(spec)
     }
 
     pub(super) fn flag(spec: Spec, name: &str, help: &str) -> Spec {
@@ -160,8 +162,8 @@ fn alloc_str(s: String) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
 }
 
-fn build_spec(inputs: &[CLIInputSchema]) -> Spec {
-    let mut spec = empty_spec();
+fn build_spec(inputs: &[CLIInputSchema], prog: &str) -> Spec {
+    let mut spec = empty_spec(prog);
     for input in inputs {
         let flag_name = input.flag.clone();
         let help = input.help.clone();
@@ -346,9 +348,10 @@ pub(crate) extern "C" fn jet_jit_cli_main() {
             .iter()
             .find(|c| c.name == sub)
             .expect("schema command");
-        let mut rest = vec![format!("{} {}", argv[0], sub)];
+        let nested_prog = format!("{} {}", argv[0], sub);
+        let mut rest = vec![nested_prog.clone()];
         rest.extend_from_slice(&argv[2..]);
-        let spec = build_spec(&cmd_schema.inputs);
+        let spec = build_spec(&cmd_schema.inputs, &nested_prog);
         let parsed = match parse(&spec, &rest) {
             Ok(p) => p,
             Err(e) => {
@@ -382,7 +385,8 @@ pub(crate) extern "C" fn jet_jit_cli_main() {
     }
 
     // Struct typed entry.
-    let spec = build_spec(&plan.schema.inputs);
+    let prog = argv.first().map(String::as_str).unwrap_or("program");
+    let spec = build_spec(&plan.schema.inputs, prog);
     let parsed = match parse(&spec, &argv) {
         Ok(p) => p,
         Err(e) => {

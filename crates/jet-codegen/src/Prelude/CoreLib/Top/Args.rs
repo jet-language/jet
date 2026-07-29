@@ -75,7 +75,11 @@ impl JetArgsSpec {
         let prog = if self.prog.is_empty() {
             "program".to_string()
         } else {
-            self.prog.clone()
+            std::path::Path::new(&self.prog)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(&self.prog)
+                .to_string()
         };
         let has_opts = self.entries.iter().any(|e| {
             matches!(
@@ -810,4 +814,3 @@ impl JetShow for JetParsedArgs {
         )
     }
 }
-
