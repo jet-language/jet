@@ -600,7 +600,14 @@ pub(crate) fn method_call_in_subset(
     // every admitted method through fixed prelude helpers, with sema-proved arity.
     if matches!(
         recv_type.as_deref(),
-        Some("ProcessSpec" | "ProcessChild" | "ProcessStdin" | "ProcessStdoutStream" | "ProcessStderrStream")
+        Some(
+            "ProcessSpec"
+                | "ProcessChild"
+                | "ProcessStdin"
+                | "ProcessStdoutStream"
+                | "ProcessStderrStream"
+                | "TerminalSession"
+        )
     ) && is_process_handle_method_name(recv_type.as_deref(), method, args.len())
     {
         return expr_in_subset(receiver, cx, locals)

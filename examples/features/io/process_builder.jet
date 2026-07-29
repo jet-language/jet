@@ -16,4 +16,9 @@ fn run() {
     loop line; child.stdout.lines() { print(line.trim()) }
     waited :: child.wait() ?? panic("wait failed")
     print(waited.success)
+    terminal_spec :: process.cmd(["echo", "terminal-api"]).terminal(TerminalPolicy.{
+        size: TerminalSize.{ cols: 100, rows: 30 },
+        mode: .Cooked
+    })
+    print(terminal_spec.capabilities().has("preview_example"))
 }

@@ -456,6 +456,9 @@ pub(super) fn eval_handle(
         THandleOp::ProcessChildMethod { .. } => {
             Err(unsupported("handle `ProcessChildMethod`", span))
         }
+        THandleOp::TerminalSessionResize => {
+            Err(unsupported("handle `TerminalSessionResize`", span))
+        }
         THandleOp::ProcessStdinWrite => Err(unsupported("handle `ProcessStdinWrite`", span)),
         THandleOp::ReflectValueTypeName => Err(unsupported("handle `ReflectValueTypeName`", span)),
         THandleOp::ReflectValueDisplay => Err(unsupported("handle `ReflectValueDisplay`", span)),

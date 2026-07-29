@@ -5982,25 +5982,69 @@ fn run() {
     );
 }
 
-/// D-PROCESS-SESSION1=A (#771): the beginner form takes no arguments. The
-/// expert `TerminalPolicy` form is a later slice, so an argument is an arity
-/// error today, not a silently ignored value.
+/// D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D (#771): the beginner and expert
+/// forms share one ProcessSpec. The public model is useful before a native
+/// backend lands: host facts are empty and every terminal launch still refuses
+/// instead of falling back to pipes.
+#[cfg(unix)]
 #[test]
-fn core_process_terminal_takes_no_arguments_yet() {
+fn core_process_terminal_policy_and_capabilities_are_typed_and_fail_closed() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_core_process_terminal_policy_{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
     let src = r#"
 use core.process as process
 
 fn run() {
-    result :: process.cmd(["echo", "hi"]).terminal(1).run() ?? panic("run failed")
-    print(result.success)
+    policy :: TerminalPolicy.{
+        size: TerminalSize.{ cols: 120, rows: 40 },
+        mode: .Raw
+    }
+    plan :: process.cmd(["echo", "hi"]).terminal(policy)
+    facts :: plan.capabilities()
+    print(facts.has(TerminalFact.terminal))
+    print(facts.has(TerminalFact.resize))
+    print(facts.has(TerminalFact.raw))
+    print(facts.has("preview_x"))
+    if plan.run() == {
+        .Ok(_) -> { print("terminal launch unexpectedly succeeded") }
+        .Err(_) -> { print("terminal unavailable") }
+    }
+    child :: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
+    if child.terminal.resize(TerminalSize.{ cols: 80, rows: 24 }) == {
+        .Ok(_) -> { print("plain child unexpectedly resized") }
+        .Err(_) -> { print("plain child has no terminal") }
+    }
+    waited :: child.wait() ?? panic("wait failed")
+    print(waited.output.trim())
 }
 "#;
-    let diags = jet::compile(src).expect_err("terminal() takes no arguments");
+    let (code, stdout, stderr) = build_and_run(&dir, "process_terminal_policy", src, &[], None);
+    assert_eq!(code, 0, "stderr:\n{stderr}");
+    assert_eq!(
+        stdout,
+        "false\nfalse\nfalse\nfalse\nterminal unavailable\nplain child has no terminal\nplain\n"
+    );
+
+    let typo = jet::compile(
+        r#"use core.process as process
+fn run() {
+    facts :: process.cmd(["echo", "x"]).capabilities()
+    print(facts.has(TerminalFact.reszie))
+}
+"#,
+    )
+    .expect_err("stable fact typos must fail in sema");
     assert!(
-        diags
-            .iter()
-            .any(|d| d.code == "E0104" && d.what.contains("`terminal` expects 0 arguments")),
-        "{diags:?}"
+        typo.iter().any(|diag| {
+            diag.code == "E0302"
+                && diag.what.contains("`TerminalFact` has no key `reszie`")
+                && diag.fix.contains("`TerminalFact.resize`")
+        }),
+        "{typo:?}"
     );
 }
 

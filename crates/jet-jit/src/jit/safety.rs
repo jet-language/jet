@@ -1781,10 +1781,20 @@ fn resident_safe_builtin_op(
         }
         TBuiltinOp::Contains
             if matches!(&recv.ty, Type::Apply { name, args: targs }
-                if name == "Set" && targs.len() == 1 && matches!(&targs[0], Type::Int)) =>
+                if name == "Set"
+                    && targs.len() == 1
+                    && matches!(&targs[0], Type::Int | Type::String)) =>
         {
             args.len() == 1
-                && matches!(&args[0].ty, Type::Int)
+                && match (&recv.ty, &args[0].ty) {
+                    (Type::Apply { args: targs, .. }, Type::Int) => {
+                        matches!(targs.as_slice(), [Type::Int])
+                    }
+                    (Type::Apply { args: targs, .. }, Type::String) => {
+                        matches!(targs.as_slice(), [Type::String])
+                    }
+                    _ => false,
+                }
                 && resident_safe_expr(&args[0], callees)
         }
         TBuiltinOp::Contains
@@ -3151,8 +3161,10 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                         | "env_remove",
                     1,
                 ) | ("env", 2)
+                    | ("terminal", 0 | 1)
                     | (
-                        "env_clear" | "detached" | "terminal" | "run" | "run_checked" | "spawn",
+                        "env_clear" | "detached" | "capabilities" | "run" | "run_checked"
+                            | "spawn",
                         0,
                     )
             )
@@ -3163,6 +3175,7 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
                 ("wait" | "id" | "kill" | "terminate" | "interrupt", 0)
             )
         }
+        THandleOp::TerminalSessionResize => args.len() == 1,
         THandleOp::EventMethod { method } => {
             matches!(
                 (method.as_str(), args.len()),

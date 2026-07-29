@@ -1697,7 +1697,7 @@ pub(crate) fn lower_method_call(
     // helpers; sema already proved arity and argument types.
     if matches!(
         recv_type.as_deref(),
-        Some("ProcessSpec") | Some("ProcessChild")
+        Some("ProcessSpec") | Some("ProcessChild") | Some("TerminalSession")
     ) {
         let recv_t = lower_expr(receiver, cx, env);
         let targs: Vec<TExpr> = args.iter().map(|a| lower_expr(&a.expr, cx, env)).collect();
@@ -1710,6 +1710,10 @@ pub(crate) fn lower_method_call(
                 ok: Box::new(Type::Named("ProcessChild".to_string())),
                 err: Box::new(Type::Named("IOError".to_string())),
             },
+            (Some("ProcessSpec"), "capabilities") => Type::Apply {
+                name: "Set".to_string(),
+                args: vec![Type::String],
+            },
             (Some("ProcessSpec"), _) => Type::Named("ProcessSpec".to_string()),
             (Some("ProcessChild"), "id") => Type::Int,
             (Some("ProcessChild"), "wait") => Type::Result {
@@ -1720,16 +1724,22 @@ pub(crate) fn lower_method_call(
                 ok: Box::new(unit_type()),
                 err: Box::new(Type::Named("IOError".to_string())),
             },
+            (Some("TerminalSession"), "resize") => Type::Result {
+                ok: Box::new(unit_type()),
+                err: Box::new(Type::Named("IOError".to_string())),
+            },
             _ => unit_type(),
         };
         let op = if recv_type.as_deref() == Some("ProcessSpec") {
             THandleOp::ProcessSpecMethod {
                 method: method.to_string(),
             }
-        } else {
+        } else if recv_type.as_deref() == Some("ProcessChild") {
             THandleOp::ProcessChildMethod {
                 method: method.to_string(),
             }
+        } else {
+            THandleOp::TerminalSessionResize
         };
         return TExpr {
             ty: result_ty,

@@ -20,8 +20,23 @@ fn jet_process_spec_detached(mut spec: jet_std::ProcessSpec) -> jet_std::Process
 // the same `ProcessSpec`, so cwd, environment, streams, timeout, and the child
 // lifecycle keep one model.
 fn jet_process_spec_terminal(mut spec: jet_std::ProcessSpec) -> jet_std::ProcessSpec {
-    spec.terminal = true;
+    spec.terminal = Some(jet_std::TerminalPolicy::default());
     spec
+}
+fn jet_process_spec_terminal_with_policy(
+    mut spec: jet_std::ProcessSpec,
+    policy: &jet_std::TerminalPolicy,
+) -> jet_std::ProcessSpec {
+    spec.terminal = Some(policy.clone());
+    spec
+}
+// D-PROCESS-SESSION2=D: an open keyed report lets new preview facts use String
+// keys without changing a public report type. Known facts come from the
+// checked TerminalFact namespace. No backend means no supported facts.
+fn jet_process_spec_capabilities(
+    _spec: &jet_std::ProcessSpec,
+) -> std::collections::HashSet<String> {
+    std::collections::HashSet::new()
 }
 // D-PROCESS-SESSION1=A: a terminal session needs a Unix PTY or a Windows
 // ConPTY. Report the missing backend at launch. Running the child on plain
@@ -30,7 +45,7 @@ fn jet_process_spec_terminal(mut spec: jet_std::ProcessSpec) -> jet_std::Process
 fn jet_process_terminal_backend_check(
     spec: &jet_std::ProcessSpec,
 ) -> Result<(), jet_std::IOError> {
-    if !spec.terminal {
+    if spec.terminal.is_none() {
         return Ok(());
     }
     Err(jet_std::IOError::other(
@@ -126,6 +141,7 @@ fn jet_process_spec_spawn(
         stderr: std::rc::Rc::new(std::cell::RefCell::new(
             child.stderr.take().map(std::io::BufReader::new),
         )),
+        terminal: jet_std::TerminalSession,
         inner: std::rc::Rc::new(std::cell::RefCell::new(Some(child))),
         timeout_ms: spec.timeout_ms,
         started: std::time::Instant::now(),
@@ -314,6 +330,16 @@ fn jet_process_child_terminate(child: &jet_std::ProcessChild) -> Result<(), jet_
 }
 fn jet_process_child_interrupt(child: &jet_std::ProcessChild) -> Result<(), jet_std::IOError> {
     jet_process_child_kill(child)
+}
+fn jet_terminal_session_resize(
+    _session: &jet_std::TerminalSession,
+    _size: &jet_std::TerminalSize,
+) -> Result<(), jet_std::IOError> {
+    Err(jet_std::IOError::other(
+        jet_std::IOOperation::Resolve,
+        Some("process terminal".to_string()),
+        "this child has no terminal session",
+    ))
 }
 // D-PROCESS1=A: `child.stdin` is a writer handle (`.write(text)`); `child.stdout`/
 // `child.stderr` are streaming reader handles consumed only via

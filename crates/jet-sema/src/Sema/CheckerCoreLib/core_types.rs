@@ -162,6 +162,10 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // handles off a `ProcessChild`; `ProcessLines` is the loop-source-only
         // result of `.lines()` on the latter two (mirrors `FileLines`/`StdinLines`).
         | "ProcessStreamMode" | "ProcessStdin" | "ProcessStdoutStream" | "ProcessStderrStream" | "ProcessLines"
+        // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: public expert
+        // controls. TerminalFact is a namespace of checked String keys, not a
+        // fifth value type.
+        | "TerminalPolicy" | "TerminalSize" | "TerminalMode" | "TerminalSession"
         | "IOContext" | "IOOperation"
         // D-TEXTWIDTH1=B: `TextWidth` (dot-ctor struct, `core_constructable_fields`)
         // + its two dot-literal enum fields + the `.Reject` policy error.
@@ -332,6 +336,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
+    if type_name == "ProcessChild" && field == "terminal" {
+        return Some(Type::Named(Syntax::TYPE_TERMINAL_SESSION.to_string()));
+    }
     if type_name == Syntax::TYPE_IO_CONTEXT {
         return match field {
             "operation" => Some(Type::Named(Syntax::TYPE_IO_OPERATION.to_string())),
@@ -343,7 +350,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
     if type_name == "HTTPShutdownReport" && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled") {
         return Some(Type::Int);
     }
-    if matches!(type_name, "EncodingLimits" | "EncodingCause" | "EncodingError" | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions" | "XMLError" | "AsyncPolicy" | "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig") {
+    if matches!(type_name, "TerminalSize" | "TerminalPolicy" | "EncodingLimits" | "EncodingCause" | "EncodingError" | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions" | "XMLError" | "AsyncPolicy" | "RecipientReport" | "SendReport" | "Limits" | "DkimConfig" | "SMTPConfig") {
         return core_constructable_fields(type_name)?.into_iter().find(|(name, _)| name == field).map(|(_, ty)| ty);
     }
     if type_name == "Envelope" {
@@ -691,6 +698,19 @@ pub(crate) fn core_process_stream_mode_variants(
         m.insert((*name).to_string(), (zero, VariantPayload::Unit));
     }
     m
+}
+
+/// D-PROCESS-SESSION2=D: expert terminal mode has the two owner-ratified
+/// variants. The portable default is Cooked; Raw is explicit.
+pub(crate) fn core_terminal_mode_variants(
+) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
+    use crate::AST::VariantPayload;
+    use crate::Diagnostics::Span;
+    let zero = Span::new(0, 0);
+    ["Raw", "Cooked"]
+        .into_iter()
+        .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
+        .collect()
 }
 
 pub(crate) fn core_env_error_variants(
@@ -1156,6 +1176,22 @@ pub fn encoding_handle_method_return(
 pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, Type)>> {
     let str_ty = Type::String;
     match type_name {
+        // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: explicit terminal
+        // controls use named fields so misspellings fail in sema.
+        "TerminalSize" => Some(vec![
+            ("cols".to_string(), Type::Int),
+            ("rows".to_string(), Type::Int),
+        ]),
+        "TerminalPolicy" => Some(vec![
+            (
+                "size".to_string(),
+                Type::Named(Syntax::TYPE_TERMINAL_SIZE.to_string()),
+            ),
+            (
+                "mode".to_string(),
+                Type::Named(Syntax::TYPE_TERMINAL_MODE.to_string()),
+            ),
+        ]),
         // D-TEXTWIDTH1=B: `TextWidth.{ ambiguous: .Wide, controls: .Reject }`
         // — the two dot-literal enum fields resolve via `resolve_enum_variants_cloned`
         // (below), the same "core enum, not in the user registry" mechanism as

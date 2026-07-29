@@ -1009,6 +1009,9 @@ impl<'a> Checker<'a> {
         if enum_name == "ProcessStreamMode" {
             return Some(core_process_stream_mode_variants());
         }
+        if enum_name == Syntax::TYPE_TERMINAL_MODE {
+            return Some(core_terminal_mode_variants());
+        }
         if enum_name == "EnvError" {
             return Some(core_env_error_variants());
         }

@@ -1208,6 +1208,37 @@ impl<'a> Checker<'a> {
             } => self.infer_ptr_from_addr(alias, *alias_span, elem, addr, *span),
             Expr::Field(_, _, span) => {
                 let span = *span;
+                // D-PROCESS-SESSION2=D: known terminal facts are checked
+                // namespace members but lower to ordinary String keys. This
+                // keeps `Set<String>` open to preview keys without an extra
+                // public report type.
+                if let Expr::Field(inner, member, _) = e {
+                    if matches!(&**inner, Expr::Ident(name, _) if name == Syntax::TERMINAL_FACT_NAMESPACE)
+                    {
+                        if let Some(fact) = Syntax::terminal_fact(member) {
+                            *e = Expr::Str(vec![StrPart::Lit(fact.to_string())], span);
+                            return Some(Type::String);
+                        }
+                        let candidates = Syntax::TERMINAL_FACTS
+                            .iter()
+                            .map(|fact| (*fact).to_string())
+                            .collect::<Vec<_>>();
+                        let fix = suggest_field(member, &candidates)
+                            .map(|fact| format!("did you mean `TerminalFact.{fact}`?"))
+                            .unwrap_or_else(|| {
+                                "use a documented TerminalFact key or a preview string".to_string()
+                            });
+                        self.diags.push(Diagnostic::error(
+                            "E0302",
+                            format!("`TerminalFact` has no key `{member}`"),
+                            "stable terminal capability keys use the checked TerminalFact namespace"
+                                .to_string(),
+                            fix,
+                            Some(span),
+                        ));
+                        return None;
+                    }
+                }
                 // D-TAG1: fold a dotted variant path (`Damage.Fire.Burn`) into an
                 // enum literal so codegen sees one EnumLit node. Single-segment
                 // `Enum.Variant` keeps its existing Field route (unchanged Rust).

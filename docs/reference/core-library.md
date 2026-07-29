@@ -1093,7 +1093,7 @@ fn run() {
 `ProcessSpec` builder methods are value-returning: `cwd(path)`, `env(key,
 value)`, `env_remove(key)`, `env_clear()`, `stdin(mode)`, `stdout(mode)`,
 `stderr(mode)`, `timeout(duration)`, `output_limit(bytes)`, `detached()`, and
-`terminal()`.
+`terminal()` or `terminal(policy)`.
 `mode` is one of the three stream-mode dot-literals: `.Stream` (pipe it —
 drain live via `child.stdout.lines()`), `.Inherit` (pass through to the
 parent's stream), or `.Capture` (pipe it — collect into `ProcessResult` at
@@ -1109,28 +1109,46 @@ Use `run_checked()` when a nonzero exit must take the error path. Its `IOError`
 includes the exit code, the signal when present, and at most 4096 bytes of
 captured stderr.
 
-**Terminal sessions (D-PROCESS-SESSION1=A).** Argv execution with no terminal
-is the default and stays the safe path. Interactive programs — a debugger, a
-REPL, a shell — often need a real terminal, and they print different output
-without one. `terminal()` is the one opt-in that asks for a terminal session,
-and it stays on the same `ProcessSpec`, so cwd, environment, streams, timeout,
-and the child lifecycle keep one model:
+**Terminal sessions (D-PROCESS-SESSION1=A, D-PROCESS-SESSION2=D).** Argv
+execution with no terminal is the default and stays the safe path. Interactive
+programs — a debugger, a REPL, a shell — often need a real terminal, and they
+print different output without one. `terminal()` is the beginner opt-in.
+`terminal(policy)` adds explicit initial size and mode. Both forms stay on the
+same `ProcessSpec`, so cwd, environment, streams, timeout, and the child
+lifecycle keep one model:
 
 ```jet
 child :: process.cmd(["lldb", app]).terminal().spawn()?
+
+policy :: TerminalPolicy.{
+    size: TerminalSize.{ cols: 120, rows: 40 },
+    mode: .Raw
+}
+plan :: process.cmd(["python", "-i"]).terminal(policy)
+if plan.capabilities().has(TerminalFact.resize) {
+    child :: plan.spawn()?
+    child.terminal.resize(TerminalSize.{ cols: 160, rows: 50 })?
+}
 ```
+
+`TerminalMode` is `.Raw` or `.Cooked`. The no-argument form uses an `80x24`
+`.Cooked` policy. `capabilities()` returns a `Set[String]`. Use the checked
+keys `TerminalFact.terminal`, `TerminalFact.resize`, and `TerminalFact.raw`
+for stable facts. String keys remain open for preview facts without adding a
+second report type. `ProcessChild.terminal` is a `TerminalSession`;
+`resize(size)` returns `Unit ? IOError`.
 
 A terminal session needs a Unix PTY or a Windows ConPTY. While no such backend
 is present, every launch path that asks for a terminal — `run()`, `spawn()`,
 and `pipeline()` — fails with an `IOError` that names the missing backend. The
 child never runs on plain pipes with the requested terminal silently dropped.
-The expert `TerminalPolicy` form (size, raw mode, transcript), the terminal
-handle on `ProcessChild`, and the PTY and ConPTY backends are later slices of
-the same decision.
+The capability set is empty, and resize fails. PTY/ConPTY transport,
+transcripts, binary streams, process-tree control, and resource limits are
+separate backend slices of the same process mechanism.
 
 `ProcessChild` exposes `id()`, `wait()`, `kill()`, `terminate()`,
-`interrupt()`, a `.stdin` writer (`child.stdin.write(text)`), and `.stdout`/
-`.stderr` streaming readers consumed only via
+`interrupt()`, `.terminal`, a `.stdin` writer (`child.stdin.write(text)`), and
+`.stdout`/`.stderr` streaming readers consumed only via
 `loop line; child.stdout.lines() { ... }` (same loop-source-only shape as
 `FileReader.lines()`/`io.stdin().lines()` — storing the reader or the line
 stream in a name is E2502).

@@ -528,6 +528,13 @@ impl<'a> JitMeta<'a> {
                 _ => None,
             };
         }
+        if enum_name == jet_foundation::Syntax::TYPE_TERMINAL_MODE {
+            return match variant {
+                "Raw" => Some(0),
+                "Cooked" => Some(1),
+                _ => None,
+            };
+        }
         // D-TERM1: prelude `Key` / `JetKey` variant order.
         if enum_name == "Key" {
             return match variant {
@@ -699,6 +706,7 @@ impl<'a> JitMeta<'a> {
                 | "YAML"
                 | "CSV"
                 | "ProcessStreamMode"
+                | "TerminalMode"
                 | "EncodingFormat"
                 | "EncodingErrorKind"
                 | "DataEvent"
@@ -771,6 +779,8 @@ fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
         "Rng" => &["state"],
         // Mirrors jet_std::ProcessResult field order (Open.rs).
         "ProcessResult" => &["code", "output", "errors", "success", "signal", "timed_out"],
+        "TerminalSize" => &["cols", "rows"],
+        "TerminalPolicy" => &["size", "mode"],
         // D-ENCSTREAM-SURFACE1 / jet_std::EncodingLimits.
         "EncodingLimits" => &[
             "buffer_bytes",
@@ -888,6 +898,15 @@ pub(crate) fn core_struct_field_type(type_name: &str, field: &str) -> Option<Typ
             "output" | "errors" => Some(Type::String),
             "success" | "timed_out" => Some(Type::Bool),
             "signal" => Some(Type::Option(Box::new(Type::Int))),
+            _ => None,
+        },
+        "TerminalSize" => match field {
+            "cols" | "rows" => Some(Type::Int),
+            _ => None,
+        },
+        "TerminalPolicy" => match field {
+            "size" => Some(Type::Named("TerminalSize".into())),
+            "mode" => Some(Type::Named("TerminalMode".into())),
             _ => None,
         },
         // D-LSDIR1 / D-FSOPS1 — CORE FS records omitted from TIR ProgramBundle.

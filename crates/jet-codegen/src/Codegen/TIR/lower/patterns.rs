@@ -630,6 +630,9 @@ pub(crate) fn tir_enum_lit_prefix(cx: &Cx, type_name: &str, variant: &str) -> St
     if type_name == "ProcessStreamMode" {
         return format!("{}jet_std::ProcessStreamMode::{}", cx.root_prefix, variant);
     }
+    if type_name == crate::Syntax::TYPE_TERMINAL_MODE {
+        return format!("{}jet_std::TerminalMode::{}", cx.root_prefix, variant);
+    }
     // D-TEXTWIDTH1=B: `TextWidth`'s two field enums — same shape.
     if matches!(type_name, "TextWidthAmbiguous" | "TextWidthControls") {
         return format!("{}jet_std::{}::{}", cx.root_prefix, type_name, variant);

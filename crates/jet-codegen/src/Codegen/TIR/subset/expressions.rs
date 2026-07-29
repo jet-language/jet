@@ -582,6 +582,9 @@ pub(crate) fn expr_in_subset(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> boo
             if type_name == "ProcessStreamMode" {
                 return matches!(variant.as_str(), "Stream" | "Inherit" | "Capture");
             }
+            if type_name == crate::Syntax::TYPE_TERMINAL_MODE {
+                return matches!(variant.as_str(), "Raw" | "Cooked");
+            }
             // D-TEXTWIDTH1=B: `TextWidth`'s two field enums, always
             // covered — every variant is unit (no payload args to check).
             if type_name == "TextWidthAmbiguous" {

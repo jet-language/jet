@@ -9,6 +9,39 @@
         Capture,
     }
 
+    // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: expert controls stay on
+    // ProcessSpec and ProcessChild. Native PTY/ConPTY backends fill the session
+    // handle in their successor slices.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct TerminalSize {
+        pub cols: i64,
+        pub rows: i64,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum TerminalMode {
+        Raw,
+        Cooked,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct TerminalPolicy {
+        pub size: TerminalSize,
+        pub mode: TerminalMode,
+    }
+
+    impl Default for TerminalPolicy {
+        fn default() -> Self {
+            Self {
+                size: TerminalSize { cols: 80, rows: 24 },
+                mode: TerminalMode::Cooked,
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct TerminalSession;
+
     // D-ENCSTREAM-SURFACE1=A: shared, handle-free encoding ABI.  These are
     // ordinary owned values; codec state itself remains behind non-Clone
     // format-native handles below.
@@ -288,7 +321,7 @@
         // session. Argv execution with no terminal stays the default, so this
         // flag is the one opt-in. A launch that asks for a terminal never runs
         // without one: it fails when no PTY/ConPTY backend is available.
-        pub terminal: bool,
+        pub terminal: Option<TerminalPolicy>,
     }
 
     #[derive(Clone, Debug)]
@@ -299,6 +332,7 @@
             std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<std::process::ChildStdout>>>>,
         pub stderr:
             std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<std::process::ChildStderr>>>>,
+        pub terminal: TerminalSession,
         pub timeout_ms: Option<i64>,
         pub started: std::time::Instant,
     }

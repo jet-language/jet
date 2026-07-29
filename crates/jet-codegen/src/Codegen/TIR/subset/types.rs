@@ -395,7 +395,8 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
     // on `type_name == "TextWidth"` in `lower_expr`'s StructLit arm.
     matches!(
         name,
-        "HTTPRequest" | "HTTPResponse" | "TextWidth" | "AsyncPolicy" | "DecodeError" | "FieldError"
+        "HTTPRequest" | "HTTPResponse" | "TextWidth" | "TerminalSize" | "TerminalPolicy"
+            | "AsyncPolicy" | "DecodeError" | "FieldError"
             | "EncodingLimits" | "EncodingCause" | "EncodingError"
             | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions"
             | "XMLRenderOptions" | "XMLCanonical" | "XMLError"

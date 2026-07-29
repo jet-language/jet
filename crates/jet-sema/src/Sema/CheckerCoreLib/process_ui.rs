@@ -250,10 +250,15 @@ pub(crate) fn process_spec_method_return(
     match (method, n_args) {
         ("cwd" | "env_remove" | "stdin" | "stdout" | "stderr", 1) => Some(Some(spec_ty)),
         ("env", 2) => Some(Some(spec_ty)),
-        // D-PROCESS-SESSION1=A: `.terminal()` asks for a terminal-backed
-        // session on the same spec. Argv execution with no terminal remains the
-        // default; the expert `TerminalPolicy` form is a later slice.
-        ("env_clear" | "detached" | "terminal", 0) => Some(Some(spec_ty)),
+        // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: `.terminal()` keeps
+        // portable defaults; `.terminal(TerminalPolicy)` selects explicit
+        // size and mode on the same ProcessSpec.
+        ("terminal", 0 | 1) => Some(Some(spec_ty.clone())),
+        ("env_clear" | "detached", 0) => Some(Some(spec_ty)),
+        ("capabilities", 0) => Some(Some(Type::Apply {
+            name: "Set".to_string(),
+            args: vec![Type::String],
+        })),
         ("timeout" | "output_limit", 1) => Some(Some(spec_ty)),
         ("run" | "run_checked", 0) => Some(Some(result_ty(
             Type::Named("ProcessResult".to_string()),
@@ -271,11 +276,39 @@ pub(crate) fn process_spec_method_return(
             diags.push(wrong_core_arity(method, 2, n_args, span));
             Some(None)
         }
-        ("env_clear" | "detached" | "terminal" | "run" | "run_checked" | "spawn", _) => {
+        ("env_clear" | "detached" | "run" | "run_checked" | "spawn" | "capabilities", _) => {
             diags.push(wrong_core_arity(method, 0, n_args, span));
             Some(None)
         }
+        ("terminal", _) => {
+            diags.push(Diagnostic::error(
+                "E0104",
+                format!("`terminal` expects 0 or 1 arguments, got {n_args}"),
+                "`terminal()` uses portable defaults; `terminal(policy)` uses one TerminalPolicy"
+                    .to_string(),
+                "pass no argument or one TerminalPolicy".to_string(),
+                Some(span),
+            ));
+            Some(None)
+        }
         ("timeout" | "output_limit", _) => {
+            diags.push(wrong_core_arity(method, 1, n_args, span));
+            Some(None)
+        }
+        _ => None,
+    }
+}
+
+/// D-PROCESS-SESSION2=D: type-check the terminal handle on ProcessChild.
+pub(crate) fn terminal_session_method_return(
+    method: &str,
+    n_args: usize,
+    span: Span,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Type>> {
+    match (method, n_args) {
+        ("resize", 1) => Some(Some(result_ty(unit_ty(), io_error_ty()))),
+        ("resize", _) => {
             diags.push(wrong_core_arity(method, 1, n_args, span));
             Some(None)
         }

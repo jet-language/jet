@@ -285,6 +285,12 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "ProcessChild" => Some("ProcessChild"),
         // D-PROCESS1=A: the core dot-literal stream-mode enum.
         "ProcessStreamMode" => Some("ProcessStreamMode"),
+        // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: expert terminal
+        // controls on the existing process model.
+        "TerminalPolicy" => Some("TerminalPolicy"),
+        "TerminalSize" => Some("TerminalSize"),
+        "TerminalMode" => Some("TerminalMode"),
+        "TerminalSession" => Some("TerminalSession"),
         // D-TEXTWIDTH1=B: the `text.display_width` policy value + its two
         // dot-literal enum fields, plus the reject-path error struct.
         "TextWidth" => Some("TextWidth"),

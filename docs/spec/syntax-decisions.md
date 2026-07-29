@@ -2499,6 +2499,18 @@ index, not a substitute for that law.
   any non-Unicode entry. Existing editions keep `set => Void` and report
   invalid input through E3001; its fallible `Void ? EnvError` signature waits
   for a major release plus edition opt-in.
+- **D-PROCESS-SESSION1=A**: terminal-backed children use the existing
+  `core.process` mechanism. `ProcessSpec.terminal()` is an explicit opt-in;
+  ordinary argv execution stays pipe-backed and never inherits a terminal by
+  accident. The same spec owns cwd, environment, stream, timeout, and child
+  lifecycle policy. A requested terminal that the host cannot provide fails
+  closed instead of silently running on pipes.
+- **D-PROCESS-SESSION2=D**: the expert surface is
+  `terminal(TerminalPolicy)`, with `TerminalSize` and `.Raw`/`.Cooked`
+  `TerminalMode`; `ProcessChild.terminal` returns the `TerminalSession` handle.
+  `ProcessSpec.capabilities()` returns an open keyed report. Stable keys use
+  `TerminalFact` constants; string keys allow preview facts without a parallel
+  report type.
 - **D-MATHLIB2=A**: `core.math` is the canonical callable surface for libm and
   explicit checked/saturating/wrapping integer families. Value-context docs,
   LSP completion, and snippets may discover helpers, but emitted code uses the

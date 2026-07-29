@@ -10894,6 +10894,15 @@ impl LowerCtx<'_, '_> {
                     }
                     other => other.clone(),
                 };
+                // ProcessChild is an opaque resident handle, not a heap record.
+                // Its terminal projection keeps that same child identity; the
+                // TerminalSession host method validates whether a backend
+                // attached a real session.
+                if matches!(&record_ty, Type::Named(name) if name == "ProcessChild")
+                    && field == "terminal"
+                {
+                    return Ok(handle);
+                }
                 let type_name = record_type_key(&record_ty)
                     .or_else(|| self.method_struct.clone());
                 // GameFrame.input / .index — TIR may erase the frame param to Int
@@ -15280,7 +15289,9 @@ impl LowerCtx<'_, '_> {
                     "env_remove" => (self.host.process.spec_env_remove, 1),
                     "env_clear" => (self.host.process.spec_env_clear, 0),
                     "detached" => (self.host.process.spec_detached, 0),
-                    "terminal" => (self.host.process.spec_terminal, 0),
+                    "terminal" if args.is_empty() => (self.host.process.spec_terminal, 0),
+                    "terminal" => (self.host.process.spec_terminal_with_policy, 1),
+                    "capabilities" => (self.host.process.spec_capabilities, 0),
                     "run" => (self.host.process.spec_run, 0),
                     "run_checked" => (self.host.process.spec_run_checked, 0),
                     "spawn" => (self.host.process.spec_spawn, 0),
@@ -15318,6 +15329,17 @@ impl LowerCtx<'_, '_> {
                 }
                 _ => Err("jit handle method unsupported".to_string()),
             },
+            THandleOp::TerminalSessionResize if args.len() == 1 => {
+                let size = self.lower_expr(&args[0])?;
+                let host = self
+                    .module
+                    .declare_func_in_func(self.host.process.terminal_resize, self.b.func);
+                let call = self.b.ins().call(host, &[recv_val, size]);
+                Ok(self.b.inst_results(call)[0])
+            }
+            THandleOp::TerminalSessionResize => {
+                Err("jit terminal resize arity unsupported".to_string())
+            }
             THandleOp::ProcessStdinWrite => Err("jit handle method unsupported".to_string()),
             THandleOp::TaskDetach => {
                 let host_ref = self

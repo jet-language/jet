@@ -1294,6 +1294,8 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     || matches!(
                         n.as_str(),
                         "TextWidth"
+                            | "TerminalSize"
+                            | "TerminalPolicy"
                             | "AsyncPolicy"
                             | "DecodeError"
                             | "FieldError"
@@ -2526,7 +2528,18 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     }
                     "detached" => format!("{}jet_process_spec_detached({})", root, recv),
                     // D-PROCESS-SESSION1=A: terminal-backed session opt-in.
-                    "terminal" => format!("{}jet_process_spec_terminal({})", root, recv),
+                    "terminal" if args.is_empty() => {
+                        format!("{}jet_process_spec_terminal({})", root, recv)
+                    }
+                    "terminal" => format!(
+                        "{}jet_process_spec_terminal_with_policy({}, &({}))",
+                        root,
+                        recv,
+                        a(0)
+                    ),
+                    "capabilities" => {
+                        format!("{}jet_process_spec_capabilities(&({}))", root, recv)
+                    }
                     "run" => format!("{}jet_process_spec_run(&({}))", root, recv),
                     "run_checked" => {
                         format!("{}jet_process_spec_run_checked(&({}))", root, recv)
@@ -2544,6 +2557,9 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "interrupt" => format!("{}jet_process_child_interrupt(&({}))", root, recv),
                     _ => format!("/* unsupported ProcessChild.{method} */ {{ unreachable!() }}"),
                 },
+                THandleOp::TerminalSessionResize => {
+                    format!("{}jet_terminal_session_resize(&({}), &({}))", root, recv, a(0))
+                }
                 // D-PROCESS1=A: `child.stdin.write(text)` — recv is already the
                 // lowered `(child).stdin` field access (a writer handle).
                 THandleOp::ProcessStdinWrite => {

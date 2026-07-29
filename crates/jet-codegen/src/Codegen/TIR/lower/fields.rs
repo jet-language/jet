@@ -105,7 +105,9 @@ pub(crate) fn core_struct_field_rust_name(cx: &Cx, recv_ty: &Type, member: &str)
         // D-PROCESS1=A: `child.stdin`/`.stdout`/`.stderr` read the real
         // `ProcessChild` Rust struct field directly (a writer/reader handle),
         // not a `user_<field>` name.
-        "ProcessChild" => matches!(member, "stdin" | "stdout" | "stderr"),
+        "ProcessChild" => matches!(member, "stdin" | "stdout" | "stderr" | "terminal"),
+        "TerminalSize" => matches!(member, "cols" | "rows"),
+        "TerminalPolicy" => matches!(member, "size" | "mode"),
         n if n == Syntax::TYPE_JSON_ERROR || n == "JSONError" => {
             matches!(member, "line" | "message")
         }

@@ -556,6 +556,21 @@ extern "C" fn jet_jit_process_spec_terminal(spec: i64) -> i64 {
     }
 }
 
+extern "C" fn jet_jit_process_spec_terminal_with_policy(spec: i64, _policy: i64) -> i64 {
+    jet_jit_process_spec_terminal(spec)
+}
+
+extern "C" fn jet_jit_process_spec_capabilities(_spec: i64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.sets.push(std::collections::HashSet::new());
+        rt.sets.len() as i64
+    })
+}
+
+extern "C" fn jet_jit_terminal_session_resize(_session: i64, _size: i64) -> i64 {
+    result_err_msg("I/O error during resolve `process terminal`: this child has no terminal session")
+}
+
 extern "C" fn jet_jit_process_spec_stdin(spec: i64, _mode: i64) -> i64 {
     spec
 }
@@ -817,12 +832,15 @@ pub(crate) struct ProcessHostFns {
     pub spec_env_clear: cranelift_module::FuncId,
     pub spec_detached: cranelift_module::FuncId,
     pub spec_terminal: cranelift_module::FuncId,
+    pub spec_terminal_with_policy: cranelift_module::FuncId,
+    pub spec_capabilities: cranelift_module::FuncId,
     pub spec_run: cranelift_module::FuncId,
     pub spec_run_checked: cranelift_module::FuncId,
     pub spec_spawn: cranelift_module::FuncId,
     pub child_id: cranelift_module::FuncId,
     pub child_kill: cranelift_module::FuncId,
     pub child_wait: cranelift_module::FuncId,
+    pub terminal_resize: cranelift_module::FuncId,
     pub stream_lines: cranelift_module::FuncId,
 }
 
@@ -855,6 +873,18 @@ pub(crate) fn register_process_symbols(builder: &mut cranelift_jit::JITBuilder) 
     builder.symbol(
         "jet_jit_process_spec_terminal",
         jet_jit_process_spec_terminal as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_process_spec_terminal_with_policy",
+        jet_jit_process_spec_terminal_with_policy as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_process_spec_capabilities",
+        jet_jit_process_spec_capabilities as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_terminal_session_resize",
+        jet_jit_terminal_session_resize as *const u8,
     );
     builder.symbol("jet_jit_process_spec_run", jet_jit_process_spec_run as *const u8);
     builder.symbol(
@@ -909,12 +939,18 @@ pub(crate) fn declare_process_host_fns(
         spec_env_clear: import("jet_jit_process_spec_env_clear", &sig_unary)?,
         spec_detached: import("jet_jit_process_spec_detached", &sig_unary)?,
         spec_terminal: import("jet_jit_process_spec_terminal", &sig_unary)?,
+        spec_terminal_with_policy: import(
+            "jet_jit_process_spec_terminal_with_policy",
+            &sig_binary,
+        )?,
+        spec_capabilities: import("jet_jit_process_spec_capabilities", &sig_unary)?,
         spec_run: import("jet_jit_process_spec_run", &sig_unary)?,
         spec_run_checked: import("jet_jit_process_spec_run_checked", &sig_unary)?,
         spec_spawn: import("jet_jit_process_spec_spawn", &sig_unary)?,
         child_id: import("jet_jit_process_child_id", &sig_unary)?,
         child_kill: import("jet_jit_process_child_kill", &sig_unary)?,
         child_wait: import("jet_jit_process_child_wait", &sig_unary)?,
+        terminal_resize: import("jet_jit_terminal_session_resize", &sig_binary)?,
         stream_lines: import("jet_jit_process_stream_lines", &sig_binary)?,
     })
 }

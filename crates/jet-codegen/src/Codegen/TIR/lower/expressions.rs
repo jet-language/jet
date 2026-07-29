@@ -1391,7 +1391,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             // D-TEXTWIDTH1=B: `TextWidth.{ ambiguous: .Wide, controls: .Reject }` —
             // a plain dot-ctor core struct, `jet_std::TextWidth` head, no injected
             // extra field (unlike HTTPRequest's `params`).
-            if type_name == "TextWidth" {
+            if matches!(
+                type_name.as_str(),
+                "TextWidth" | "TerminalSize" | "TerminalPolicy"
+            ) {
                 let tfields: Vec<(String, TExpr, bool)> = fields
                     .iter()
                     .map(|(n, _, fe)| (n.clone(), lower_expr(fe, cx, env), false))

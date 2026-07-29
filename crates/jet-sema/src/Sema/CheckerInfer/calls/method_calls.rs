@@ -14,6 +14,7 @@ use crate::Sema::CheckerCoreLib::{
     math_method_return, math_scalar_ty, math_static_arg_ty, math_static_return,
     net_method_return, parsed_args_method_return, path_method_return, require_net_method_labels,
     process_child_method_return, process_spec_method_return, process_stdin_method_return,
+    terminal_session_method_return,
     process_stream_method_return, reflect_method_return, regex_method_return, result_ty,
     simd_reduce_markers, sketch_method_return, sketch_type_name,
     text_cursor_method_return, u8_ty, ui_backend_method_return, unit_ty, url_mime_method_return,
@@ -2630,6 +2631,14 @@ impl<'a> Checker<'a> {
                             "output_limit" if args.len() == 1 => {
                                 self.expect_core_arg(method, 0, &Type::Int, &mut args[0]);
                             }
+                            "terminal" if args.len() == 1 => {
+                                self.expect_core_arg(
+                                    method,
+                                    0,
+                                    &Type::Named(Syntax::TYPE_TERMINAL_POLICY.to_string()),
+                                    &mut args[0],
+                                );
+                            }
                             _ => {
                                 for a in args.iter_mut() {
                                     self.infer(&mut a.expr);
@@ -2637,6 +2646,9 @@ impl<'a> Checker<'a> {
                             }
                         }
                         *recv_type_out = Some("ProcessSpec".to_string());
+                        if method == "capabilities" {
+                            *resolved_ret_out = ret.clone();
+                        }
                         return ret;
                     }
                 }
@@ -2651,6 +2663,30 @@ impl<'a> Checker<'a> {
                             self.infer(&mut a.expr);
                         }
                         *recv_type_out = Some("ProcessChild".to_string());
+                        return ret;
+                    }
+                }
+                if handle_ty == Syntax::TYPE_TERMINAL_SESSION {
+                    if let Some(ret) = terminal_session_method_return(
+                        method,
+                        args.len(),
+                        span,
+                        &mut self.diags,
+                    ) {
+                        self.record_effect(Effect::Exec.name(), span);
+                        if method == "resize" && args.len() == 1 {
+                            self.expect_core_arg(
+                                method,
+                                0,
+                                &Type::Named(Syntax::TYPE_TERMINAL_SIZE.to_string()),
+                                &mut args[0],
+                            );
+                        } else {
+                            for arg in args.iter_mut() {
+                                self.infer(&mut arg.expr);
+                            }
+                        }
+                        *recv_type_out = Some(Syntax::TYPE_TERMINAL_SESSION.to_string());
                         return ret;
                     }
                 }

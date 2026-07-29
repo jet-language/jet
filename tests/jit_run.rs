@@ -100,6 +100,75 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D (#771): the expert policy,
+/// checked capability keys, and child terminal handle stay resident too.
+/// Until a PTY/ConPTY backend lands, capabilities are empty and both launch
+/// and resize fail closed.
+#[cfg(unix)]
+#[test]
+fn expert_terminal_model_runs_resident_and_fails_closed() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_process_terminal_policy");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("terminal_policy.jet");
+    fs::write(
+        &file,
+        r#"use core.process as process
+
+fn run() {
+    policy :: TerminalPolicy.{
+        size: TerminalSize.{ cols: 120, rows: 40 },
+        mode: .Raw
+    }
+    plan :: process.cmd(["echo", "terminal"]).terminal(policy)
+    print(plan.capabilities().has(TerminalFact.terminal))
+    facts :: plan.capabilities()
+    print(facts.has(TerminalFact.resize))
+    print(facts.has(TerminalFact.raw))
+    print(facts.has("preview_x"))
+    if plan.run() == {
+        .Ok(_) -> { print("terminal ok") }
+        .Err(_) -> { print("terminal err") }
+    }
+    child :: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
+    if child.terminal.resize(TerminalSize.{ cols: 80, rows: 24 }) == {
+        .Ok(_) -> { print("resize ok") }
+        .Err(_) -> { print("resize err") }
+    }
+    waited :: child.wait() ?? panic("wait failed")
+    print(waited.output.trim())
+}
+"#,
+    )
+    .unwrap();
+
+    jet_jit::reset_jit_trace_for_test();
+    let outcome = dev_iteration(file.to_str().unwrap(), false, false);
+    let stdout = match outcome {
+        RunOutcome::Ran { stdout, .. } => stdout,
+        RunOutcome::Problems(diags) => panic!(
+            "expert terminal model must run under default `jet run`: {:?}",
+            diags.iter().map(|d| d.code.clone()).collect::<Vec<_>>()
+        ),
+    };
+    assert_eq!(
+        stdout,
+        "false\nfalse\nfalse\nfalse\nterminal err\nresize err\nplain\n"
+    );
+    assert!(
+        jet_jit::jit_executed_for_test(),
+        "terminal policy and capabilities must lower to resident host calls"
+    );
+    assert!(
+        !jet_jit::fallback_invoked_for_test(),
+        "the expert terminal model must not deopt to tier 0"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[cfg(unix)]
 #[test]
 fn process_run_checked_matches_default_and_aot_lenses() {

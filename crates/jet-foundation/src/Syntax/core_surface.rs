@@ -165,6 +165,26 @@ pub const TYPE_STRING: &str = "String";
 pub const TYPE_ERROR: &str = "Error";
 pub const TYPE_VOID: &str = "Void";
 
+/// D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: expert terminal-session
+/// controls stay on the one `ProcessSpec` / `ProcessChild` model.
+pub const TYPE_TERMINAL_POLICY: &str = "TerminalPolicy";
+pub const TYPE_TERMINAL_SIZE: &str = "TerminalSize";
+pub const TYPE_TERMINAL_MODE: &str = "TerminalMode";
+pub const TYPE_TERMINAL_SESSION: &str = "TerminalSession";
+pub const TERMINAL_FACT_NAMESPACE: &str = "TerminalFact";
+pub const TERMINAL_FACT_TERMINAL: &str = "terminal";
+pub const TERMINAL_FACT_RESIZE: &str = "resize";
+pub const TERMINAL_FACT_RAW: &str = "raw";
+pub const TERMINAL_FACTS: &[&str] = &[
+    TERMINAL_FACT_TERMINAL,
+    TERMINAL_FACT_RESIZE,
+    TERMINAL_FACT_RAW,
+];
+
+pub fn terminal_fact(name: &str) -> Option<&'static str> {
+    TERMINAL_FACTS.iter().copied().find(|fact| *fact == name)
+}
+
 /// D-SG9/S42 (ratified): explicit fixed-width numeric spellings for expert and
 /// FFI/binary code. `Int`/`Float` stay the beginner defaults (64-bit); `I64`
 /// and `F64` are the explicit-width aliases for the same two types and

@@ -3855,6 +3855,8 @@ pub enum THandleOp {
     ProcessChildMethod {
         method: String,
     },
+    /// D-PROCESS-SESSION2=D: resize the typed terminal handle.
+    TerminalSessionResize,
     /// D-PROCESS1=A: `child.stdin.write(text)` →
     /// `{root}jet_process_stdin_write(&(recv), &(a0))` → `Result<(), IOError>`.
     ProcessStdinWrite,

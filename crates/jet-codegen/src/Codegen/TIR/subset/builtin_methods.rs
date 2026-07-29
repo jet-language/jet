@@ -152,14 +152,17 @@ pub(crate) fn is_process_handle_method_name(
             (method, nargs),
             ("cwd" | "env_remove" | "stdin" | "stdout" | "stderr", 1)
                 | ("env", 2)
-                // D-PROCESS-SESSION1=A: `.terminal()` session opt-in.
-                | ("env_clear" | "detached" | "terminal" | "run" | "run_checked" | "spawn", 0)
+                // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: beginner and
+                // expert terminal opt-in plus the keyed host report.
+                | ("terminal", 0 | 1)
+                | ("env_clear" | "detached" | "capabilities" | "run" | "run_checked" | "spawn", 0)
                 | ("timeout" | "output_limit", 1)
         ),
         Some("ProcessChild") => matches!(
             (method, nargs),
             ("id" | "wait" | "kill" | "terminate" | "interrupt", 0)
         ),
+        Some("TerminalSession") => matches!((method, nargs), ("resize", 1)),
         // D-PROCESS1=A: `.write(text)` on `child.stdin`.
         Some("ProcessStdin") => matches!((method, nargs), ("write", 1)),
         // D-PROCESS1=A: `.lines()` on `child.stdout`/`child.stderr`.
