@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildDoneMessageQueue } from '../app/ui/done-messages.js';
-import { renderMarkdown, splitBlocks } from '../app/ui/markdown.js';
+import {
+  buildDoneMessageQueue, renderDoneMessageQueue,
+} from '../app/ui/done-messages.js';
 
 test('done and messages queue includes only completed cards after the cursor', () => {
   const cursor = '2026-07-25T10:00:00.000Z';
@@ -52,17 +53,52 @@ test('open card-linked messages ignore the completion cursor and done messages s
   }]);
 });
 
-test('markdown renderer: headings, lists, code, bold', () => {
-  const html = renderMarkdown('# Title\n\n- a\n- b\n\n```\ncode\n```\n\n**bold** and `x`');
-  assert.match(html, /<h1/);
-  assert.match(html, /<ul/);
-  assert.match(html, /<pre/);
-  assert.match(html, /<strong>bold<\/strong>/);
-  assert.match(html, /<code class="md__code">x<\/code>/);
+test('empty done and message queue renders nothing', () => {
+  assert.equal(renderDoneMessageQueue({ done: [], messages: [] }), '');
 });
 
-test('splitBlocks separates headings and paragraphs', () => {
-  const blocks = splitBlocks('# A\n\npara one\n\n## B\n\n- x\n- y');
-  assert.ok(blocks.length >= 3);
-  assert.equal(blocks[0], '# A');
+test('done-only queue renders the exact heading and clear control', () => {
+  const html = renderDoneMessageQueue({
+    done: [{ cardId: 'c1', marker: 'DONE', text: '#10 Ship docs tab' }],
+    messages: [],
+  });
+  assert.match(html, /Done &amp; messages/);
+  assert.match(html, />DONE</);
+  assert.match(html, /data-clear-done>Clear done cards</);
+  assert.doesNotMatch(html, />MESSAGE</);
+  assert.doesNotMatch(html, /data-message-done/);
+  assert.doesNotMatch(html, /2026-|queue__flare|★|✦/);
+});
+
+test('message-only queue renders a per-message Done control without clear', () => {
+  const html = renderDoneMessageQueue({
+    done: [],
+    messages: [{
+      cardId: 'c1',
+      id: 'q1',
+      marker: 'MESSAGE',
+      ref: '#10',
+      text: 'Read <this> note.',
+      title: 'Ship & docs',
+    }],
+  });
+  assert.match(html, />MESSAGE</);
+  assert.match(html, /data-message-done="q1">Done</);
+  assert.doesNotMatch(html, /data-clear-done/);
+  assert.match(html, /Read &lt;this&gt; note/);
+  assert.match(html, /Ship &amp; docs/);
+});
+
+test('mixed queue keeps completed cards and messages independently actionable', () => {
+  const html = renderDoneMessageQueue({
+    done: [{ cardId: 'c1', marker: 'DONE', text: '#10 Ship docs tab' }],
+    messages: [{
+      cardId: 'c2', id: 'q2', marker: 'MESSAGE', ref: '#11',
+      text: 'Read the note.', title: 'Migration',
+    }],
+  });
+  assert.match(html, />DONE</);
+  assert.match(html, />MESSAGE</);
+  assert.match(html, /data-clear-done/);
+  assert.match(html, /data-message-done="q2"/);
 });

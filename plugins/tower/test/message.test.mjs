@@ -4,8 +4,8 @@ import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
-  addCard, addMessage, buildBrief, deleteCard, doneMessage, empty, normalize,
-  openStore, project, setCompletionCursor, TowerError,
+  addCard, addMessage, buildBrief, clearDoneQueue, deleteCard, doneMessage,
+  empty, normalize, openStore, project, setCompletionCursor, TowerError,
 } from '../app/store.mjs';
 import { configFile, writeJSON } from '../app/paths.mjs';
 
@@ -88,10 +88,88 @@ test('an open message keeps an aged done card live until the owner marks it done
   assert.equal(store.load().cards.length, 1);
   assert.equal(store.load().questions.length, 1);
 
+  store.mutate((s) => clearDoneQueue(s, {
+    at: '2021-01-01T00:00:00.000Z',
+    by: 'owner',
+  }));
+  assert.equal(store.load().cards.length, 1, 'the open message still retains the card');
+
   store.mutate((s) => doneMessage(s, message.id, 'owner'));
   assert.equal(store.load().cards.length, 0);
   assert.equal(store.load().questions.length, 0);
   assert.equal(store.loadHistory().cards[0].questions[0].status, 'done');
+});
+
+test('an uncleared completion stays live past the retirement buffer', () => {
+  const { store } = fresh({ retireAfterDays: 0 });
+  store.mutate((s, cfg) => addCard(s, { title: 'Ship it', by: 'agent' }, cfg));
+  store.mutate((s) => setCompletionCursor(s, '2019-01-01T00:00:00.000Z'));
+  store.mutate((s) => {
+    s.cards[0].phase = 'done';
+    s.cards[0].updated = '2020-01-01';
+    s.cards[0].completedAt = '2020-01-01T12:00:00.000Z';
+  });
+
+  assert.equal(store.load().cards.length, 1, 'owner has not cleared this completion');
+  assert.equal(store.loadHistory().cards.length, 0);
+
+  store.mutate((s) => clearDoneQueue(s, {
+    at: '2021-01-01T00:00:00.000Z',
+    by: 'owner',
+  }));
+  assert.equal(store.load().cards.length, 0, 'normal retirement resumes after clear');
+  assert.equal(store.loadHistory().cards.length, 1);
+});
+
+test('messages cannot be added to owner-only card lanes', () => {
+  const { store } = fresh();
+  store.mutate((s, cfg) => addCard(s, {
+    title: 'Frozen', phase: 'frozen', by: 'owner',
+  }, cfg));
+  assert.throws(
+    () => store.mutate((s) => addMessage(s, {
+      cardId: '#1', text: 'Should not land.', by: 'agent',
+    })),
+    (error) => error instanceof TowerError && error.code === 'E_OWNER_LANE',
+  );
+
+  store.mutate((s, cfg) => addCard(s, { title: 'Decide', by: 'agent' }, cfg));
+  store.mutate((s) => {
+    s.decisions.push({
+      id: 'D-MESSAGE-LANE',
+      cardId: s.cards.find(card => card.num === 2).id,
+      status: 'open',
+      draft: false,
+      group: 'syntax',
+    });
+  });
+  assert.throws(
+    () => store.mutate((s) => addMessage(s, {
+      cardId: '#2', text: 'Should not land.', by: 'agent',
+    })),
+    (error) => error instanceof TowerError && error.code === 'E_OWNER_LANE',
+  );
+});
+
+test('clearing completed cards is owner-only and attributed', () => {
+  const state = empty('Messages');
+  assert.throws(
+    () => clearDoneQueue(state, { by: 'agent' }),
+    (error) => error instanceof TowerError && error.code === 'E_OWNER_ONLY',
+  );
+
+  const result = clearDoneQueue(state, {
+    at: '2026-07-25T12:00:00.000Z',
+    by: 'owner',
+  });
+  assert.equal(result.completionCursor, '2026-07-25T12:00:00.000Z');
+  assert.deepEqual(state.events[0], {
+    at: state.events[0].at,
+    by: 'owner',
+    action: 'done.clear',
+    ref: null,
+    note: '2026-07-25T12:00:00.000Z',
+  });
 });
 
 test('an open message prevents card deletion', () => {

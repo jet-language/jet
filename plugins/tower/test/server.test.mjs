@@ -66,8 +66,14 @@ test('message API adds, lists, and closes independently of done-card clearing', 
   const listed = await (await fetch(url('/api/messages'))).json();
   assert.deepEqual(listed.map(message => message.id), [add.json.result.id]);
 
-  const cleared = await post('done/clear', {});
+  const rejectedClear = await post('done/clear', { by: 'agent-x' });
+  assert.equal(rejectedClear.status, 403);
+  assert.equal(rejectedClear.json.error, 'E_OWNER_ONLY');
+
+  const cleared = await post('done/clear', { by: 'owner' });
   assert.equal(cleared.status, 200);
+  assert.equal(cleared.json.state.events[0].action, 'done.clear');
+  assert.equal(cleared.json.state.events[0].by, 'owner');
   const afterClear = await (await fetch(url('/api/messages'))).json();
   assert.equal(afterClear.length, 1, 'clearing completed cards must not clear messages');
 

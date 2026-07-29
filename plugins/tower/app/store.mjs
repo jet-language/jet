@@ -160,6 +160,16 @@ function isOlderThanDays(dateStr, days) {
   return (Date.now() - t) > days * 86_400_000;
 }
 
+function completionTime(card) {
+  if (card.completedAt) return card.completedAt;
+  return String(card.updated || '').length > 10 ? card.updated : null;
+}
+
+function hasUnclearedCompletion(card, cursor) {
+  const completedAt = completionTime(card);
+  return !!completedAt && (!cursor || completedAt > cursor);
+}
+
 const LIVE_EVENTS = 500;
 
 // The one retirement chokepoint (called only from `mutate`, right after the
@@ -181,7 +191,10 @@ function retire(s, config, dataDir) {
     .filter(q => q.kind === 'message' && q.status === 'open')
     .map(q => q.cardId));
   const retireCardIds = new Set(s.cards
-    .filter(c => c.phase === 'done' && !messageCardIds.has(c.id) && isOlderThanDays(c.updated, days))
+    .filter(c => c.phase === 'done'
+      && !messageCardIds.has(c.id)
+      && !hasUnclearedCompletion(c, s.meta.completionCursor)
+      && isOlderThanDays(c.updated, days))
     .map(c => c.id));
   if (retireCardIds.size) {
     for (const c of s.cards) {
@@ -1161,6 +1174,9 @@ export function addMessage(s, p) {
   const card = mustCard(s, p.cardId);
   if (!p.text || !String(p.text).trim()) fail('E_INVALID', 'message needs text');
   if (!p.by || p.by === 'owner') fail('E_INVALID', 'message add needs --by <agent>');
+  const lane = laneOf(card, s.decisions, s.cards).lane;
+  if (lane === 'frozen' || lane === 'decide')
+    fail('E_OWNER_LANE', `card #${card.num} is in the ${lane} owner lane — agents cannot add messages`);
   const message = {
     id: newId('q'),
     cardId: card.id,
@@ -1409,7 +1425,17 @@ export function setCompletionCursor(s, at) {
 }
 
 export const setDigestCursor = setCompletionCursor;
-export const clearDoneQueue = setCompletionCursor;
+
+export function clearDoneQueue(s, { at, by } = {}) {
+  if (by !== 'owner') fail('E_OWNER_ONLY', 'clearing completed cards is owner-only');
+  const result = setCompletionCursor(s, at);
+  logEvent(s, {
+    by,
+    action: 'done.clear',
+    note: result.completionCursor,
+  });
+  return result;
+}
 
 // ---- ui state ---------------------------------------------------------------
 

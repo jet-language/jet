@@ -94,7 +94,7 @@ const routes = {
   'milestone/update': (s, p) => db.updateMilestone(s, p.id, p, p.by),
   'milestone/delete': (s, p) => db.deleteMilestone(s, p.id, p.by),
   'ui/toggle':       (s, p) => db.toggleOpen(s, p.key),
-  'done/clear':      (s) => db.clearDoneQueue(s),
+  'done/clear':      (s, p) => db.clearDoneQueue(s, p),
 };
 
 const STATUS = { E_NOT_FOUND: 404, E_INVALID: 400, E_USAGE: 400, E_CONFLICT: 409, E_CLAIMED: 409, E_NO_DATA: 500, E_CRITERIA: 409, E_CRITERIA_SELF: 400,
