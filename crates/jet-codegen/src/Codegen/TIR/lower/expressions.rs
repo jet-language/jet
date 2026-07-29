@@ -2510,6 +2510,20 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
             };
+            if head == Type::Named(Syntax::TYPE_REGEX.to_string()) {
+                if let TypedLitBody::Value(pattern) = body {
+                    return TExpr {
+                        ty: head,
+                        kind: TExprKind::CoreCall {
+                            module: "jet.regex".to_string(),
+                            method: "literal".to_string(),
+                            args: vec![lower_expr(pattern, cx, env)],
+                            source_span: *span,
+                            widen_to_vec: vec![false],
+                        },
+                    };
+                }
+            }
             let rewritten = match (head.clone(), body.clone()) {
                 (Type::List(_) | Type::FixedList { .. }, TypedLitBody::Empty) => {
                     Expr::ListLit(Vec::new(), *span)

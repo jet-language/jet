@@ -3487,7 +3487,10 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                     "is_match" | "find" | "find_all" | "matches" | "split" | "name" => {
                         format!("({}).{}(&({}))", recv, method, a(0))
                     }
-                    "replace" | "replace_all" | "split_limit" => {
+                    "replace" | "replace_all" => {
+                        format!("({}).{}(&({}), &({}))", recv, method, a(0), a(1))
+                    }
+                    "split_limit" => {
                         format!("({}).{}(&({}), {})", recv, method, a(0), a(1))
                     }
                     "replace_all_with" => {
