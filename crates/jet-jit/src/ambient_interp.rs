@@ -10,6 +10,7 @@ use jet_codegen::Diagnostics::{Diagnostic, Span};
 
 use crate::Crypto;
 use crate::DB;
+use crate::IO;
 
 trait JetShow {
     fn jet_show(&self) -> String;
@@ -40,6 +41,38 @@ fn db_err(msg: impl Into<String>) -> CtValue {
     CtValue::Struct {
         type_name: "DBError".to_string(),
         fields: vec![("message".to_string(), CtValue::Str(msg.into()))],
+    }
+}
+
+fn io_error(kind: &str, cause: impl Into<String>) -> CtValue {
+    CtValue::Enum {
+        type_name: "IOError".to_string(),
+        variant: kind.to_string(),
+        args: vec![(
+            None,
+            CtValue::Struct {
+                type_name: "IOContext".to_string(),
+                fields: vec![
+                    (
+                        "operation".to_string(),
+                        CtValue::Enum {
+                            type_name: "IOOperation".to_string(),
+                            variant: "Read".to_string(),
+                            args: vec![],
+                        },
+                    ),
+                    (
+                        "resource".to_string(),
+                        CtValue::Some(Box::new(CtValue::Str("stdin".to_string()))),
+                    ),
+                    ("os_code".to_string(), CtValue::None(Type::Int)),
+                    (
+                        "cause".to_string(),
+                        CtValue::Some(Box::new(CtValue::Str(cause.into()))),
+                    ),
+                ],
+            },
+        )],
     }
 }
 
@@ -234,6 +267,47 @@ pub fn ambient_core_call(
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
     match (module, method) {
+        ("core.io", "confirm") => {
+            let Some(CtValue::Str(prompt)) = args.first() else {
+                return Some(Err(unsupported("core.io.confirm prompt", span)));
+            };
+            Some(Ok(CtValue::Bool(IO::prompt_confirm(prompt))))
+        }
+        ("core.io", "choose") => {
+            let Some(CtValue::Str(prompt)) = args.first() else {
+                return Some(Err(unsupported("core.io.choose prompt", span)));
+            };
+            let Some(CtValue::List(items)) = args.get(1) else {
+                return Some(Err(unsupported("core.io.choose items", span)));
+            };
+            let mut values = Vec::with_capacity(items.len());
+            for item in items {
+                let CtValue::Str(item) = item else {
+                    return Some(Err(unsupported("core.io.choose item", span)));
+                };
+                values.push(item.clone());
+            }
+            Some(Ok(match IO::prompt_choose(prompt, &values) {
+                Ok(item) => CtValue::ResOk(Box::new(CtValue::Str(item))),
+                Err(error) => CtValue::ResErr(Box::new(io_error("InvalidInput", error))),
+            }))
+        }
+        ("core.io", "input_secret") => {
+            let Some(CtValue::Str(prompt)) = args.first() else {
+                return Some(Err(unsupported("core.io.input_secret prompt", span)));
+            };
+            Some(Ok(match IO::prompt_input_secret(prompt) {
+                Ok(secret) => CtValue::ResOk(Box::new(CtValue::Str(secret))),
+                Err(error) => {
+                    let kind = if error == "secret input needs a terminal" {
+                        "InvalidInput"
+                    } else {
+                        "Other"
+                    };
+                    CtValue::ResErr(Box::new(io_error(kind, error)))
+                }
+            }))
+        }
         ("jet.db" | "core.db", "open_memory") => Some(Ok(db_conn_value(DB::runtime_open_memory()))),
         ("jet.db" | "core.db", "open") => {
             let path = match args.first() {

@@ -108,6 +108,52 @@ fn read_line() -> Result<String, String> {
     Ok(line)
 }
 
+pub(crate) fn prompt_confirm(prompt: &str) -> bool {
+    let prompt = format!("{prompt} [y/N] ");
+    let answer = write_prompt(&prompt)
+        .and_then(|_| read_line())
+        .unwrap_or_default();
+    matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    )
+}
+
+pub(crate) fn prompt_choose(prompt: &str, values: &[String]) -> Result<String, String> {
+    if values.is_empty() {
+        return Err("choose needs at least one item".to_string());
+    }
+    println!("{prompt}");
+    for (index, item) in values.iter().enumerate() {
+        println!("  {}) {item}", index + 1);
+    }
+    loop {
+        let answer = write_prompt("> ").and_then(|_| read_line())?;
+        if let Ok(index) = answer.trim().parse::<usize>() {
+            if let Some(item) = index.checked_sub(1).and_then(|index| values.get(index)) {
+                return Ok(item.clone());
+            }
+        }
+        println!("Enter a number from 1 to {}.", values.len());
+    }
+}
+
+pub(crate) fn prompt_input_secret(prompt: &str) -> Result<String, String> {
+    if !std::io::stdin().is_terminal() {
+        return Err("secret input needs a terminal".to_string());
+    }
+    write_prompt(prompt)?;
+    if !terminal_mode::enter(false) {
+        println!();
+        return Err("could not disable terminal echo".to_string());
+    }
+    let guard = TerminalModeGuard;
+    let secret = read_line();
+    drop(guard);
+    println!();
+    secret
+}
+
 #[cfg(unix)]
 mod terminal_mode {
     const TCSANOW: i32 = 0;
@@ -366,14 +412,7 @@ extern "C" fn jet_jit_io_progress(text: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_io_confirm(prompt: i64) -> i8 {
-    let prompt = format!("{} [y/N] ", clone_str(prompt));
-    let answer = write_prompt(&prompt)
-        .and_then(|_| read_line())
-        .unwrap_or_default();
-    i8::from(matches!(
-        answer.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes"
-    ))
+    i8::from(prompt_confirm(&clone_str(prompt)))
 }
 
 extern "C" fn jet_jit_io_choose(prompt: i64, items: i64) -> i64 {
@@ -389,44 +428,17 @@ extern "C" fn jet_jit_io_choose(prompt: i64, items: i64) -> i64 {
             })
             .collect::<Vec<_>>()
     });
-    if values.is_empty() {
-        return result_err("choose needs at least one item");
-    }
-    println!("{prompt}");
-    for (index, item) in values.iter().enumerate() {
-        println!("  {}) {item}", index + 1);
-    }
-    loop {
-        let answer = match write_prompt("> ").and_then(|_| read_line()) {
-            Ok(answer) => answer,
-            Err(error) => return result_err(&error),
-        };
-        if let Ok(index) = answer.trim().parse::<usize>() {
-            if let Some(item) = index.checked_sub(1).and_then(|index| values.get(index)) {
-                let id = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(item.clone()));
-                return result_ok_bits(id as u64);
-            }
+    match prompt_choose(&prompt, &values) {
+        Ok(item) => {
+            let id = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(item));
+            result_ok_bits(id as u64)
         }
-        println!("Enter a number from 1 to {}.", values.len());
+        Err(error) => result_err(&error),
     }
 }
 
 extern "C" fn jet_jit_io_input_secret(prompt: i64) -> i64 {
-    if !std::io::stdin().is_terminal() {
-        return result_err("secret input needs a terminal");
-    }
-    if let Err(error) = write_prompt(&clone_str(prompt)) {
-        return result_err(&error);
-    }
-    if !terminal_mode::enter(false) {
-        println!();
-        return result_err("could not disable terminal echo");
-    }
-    let guard = TerminalModeGuard;
-    let secret = read_line();
-    drop(guard);
-    println!();
-    match secret {
+    match prompt_input_secret(&clone_str(prompt)) {
         Ok(secret) => {
             let id = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(secret));
             result_ok_bits(id as u64)
