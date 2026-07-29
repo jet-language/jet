@@ -1406,6 +1406,12 @@ fn check_bundle_opts_for_output_inner(
             &st.trait_reg,
         ));
     }
+    let bundle_auto_derives = TraitRegistry::bundle_auto_derives(
+        bundle.modules.iter().map(|module| module.items.as_slice()),
+    );
+    for state in &mut states {
+        state.trait_reg.merge_auto_derives(&bundle_auto_derives);
+    }
     bundle.comptime_inputs.extend(top_level_embed_inputs);
     diags.extend(super::BudgetSpecs::validate_bundle(bundle));
 
