@@ -1940,8 +1940,16 @@ fn run(cmd: Cmd) {}
             .unwrap();
         assert!(completion.status.success(), "{shell} subcommand completion failed: {}", String::from_utf8_lossy(&completion.stderr));
         let script = String::from_utf8(completion.stdout).unwrap();
-        for word in ["serve", "import", "--port", "--file"] {
+        for word in ["serve", "import"] {
             assert!(script.contains(word), "{shell} external completion omitted {word}: {script}");
+        }
+        let field_flags = if shell == "fish" {
+            ["-l port", "-l file", "-s p"]
+        } else {
+            ["--port", "--file", "-p"]
+        };
+        for flag in field_flags {
+            assert!(script.contains(flag), "{shell} external completion omitted {flag}: {script}");
         }
         check_snapshot(&format!("shape_cli_enum_{shell}.txt"), &script);
     }
