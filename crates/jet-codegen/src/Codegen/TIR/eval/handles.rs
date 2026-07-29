@@ -6,8 +6,14 @@ use crate::Codegen::TIR::THandleOp;
 use super::unsupported;
 use super::browser;
 
-fn handle_op_name(op: &THandleOp) -> &'static str {
-    match op {
+fn handle_op_name(op: &THandleOp) -> String {
+    let name = match op {
+        THandleOp::HTTPClientMethod { kind, method } => {
+            return format!("HTTPClient:{kind}:{method}")
+        }
+        THandleOp::HTTPServerMethod { kind, method } => {
+            return format!("HTTPServer:{kind}:{method}")
+        }
         THandleOp::ArgsSpecFlag => "ArgsSpecFlag",
         THandleOp::ArgsSpecFlagShort => "ArgsSpecFlagShort",
         THandleOp::ArgsSpecOption => "ArgsSpecOption",
@@ -50,7 +56,8 @@ fn handle_op_name(op: &THandleOp) -> &'static str {
         THandleOp::DBValueBool => "DBValueBool",
         THandleOp::DBValueIsNull => "DBValueIsNull",
         _ => "",
-    }
+    };
+    name.to_string()
 }
 
 fn path_string(recv: &CtValue) -> Option<String> {
@@ -271,10 +278,10 @@ pub(super) fn eval_handle(
     }
     let op_name = handle_op_name(op);
     if !op_name.is_empty() {
-        if let Some(result) = crate::Comptime::eval_args_handle(op_name, recv, args, span) {
+        if let Some(result) = crate::Comptime::eval_args_handle(&op_name, recv, args, span) {
             return result;
         }
-        if let Some(result) = crate::Comptime::try_ambient_handle(op_name, recv, args, span) {
+        if let Some(result) = crate::Comptime::try_ambient_handle(&op_name, recv, args, span) {
             return result;
         }
     }

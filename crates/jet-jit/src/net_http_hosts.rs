@@ -3,6 +3,7 @@
 use cranelift_codegen::ir::{types, AbiParam, Signature};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
+use jet_codegen::AST::CtValue;
 use std::sync::{Mutex, MutexGuard};
 
 use crate::Concurrency;
@@ -26,6 +27,7 @@ enum NetHttpHandle {
     HTTPHandler(JetHTTPHandler),
     HTTPServer(Arc<JetHTTPServer>),
     HTTPShutdownReport(JetHTTPShutdownReport),
+    HTTPCorsPolicy(JetHTTPCorsPolicy),
     WsConn(Arc<Mutex<JetWsConn>>),
     WsMessage(JetWsMessage),
 }
@@ -124,6 +126,21 @@ fn clone_string(handle: i64) -> String {
     Concurrency::with_runtime_mut(|rt| rt.heap.clone_string(handle).unwrap_or_default())
 }
 
+fn clone_string_list(handle: i64) -> Vec<String> {
+    if handle <= 0 {
+        return Vec::new();
+    }
+    Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(handle).unwrap_or(0);
+        let mut out = Vec::with_capacity(len as usize);
+        for i in 0..len {
+            let sid = rt.heap.list_get_int(handle, i).unwrap_or(0);
+            out.push(rt.heap.clone_string(sid).unwrap_or_default());
+        }
+        out
+    })
+}
+
 fn alloc_string(s: String) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(s))
 }
@@ -158,10 +175,14 @@ fn result_ok(bits: u64) -> i64 {
 
 fn result_err(message: String) -> i64 {
     let handle = alloc_string(message);
+    result_err_bits(handle)
+}
+
+fn result_err_bits(bits: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         rt.results.push(JitResultValue {
             ok: false,
-            bits: handle as u64,
+            bits: bits as u64,
         });
         rt.results.len() as i64
     })
@@ -180,7 +201,7 @@ fn net_err(e: JetNetError) -> i64 {
 }
 
 fn http_err(e: JetHTTPError) -> i64 {
-    result_err(format!("{e:?}"))
+    result_err_bits(marshal_http_error(e).0)
 }
 
 fn option_string(s: Option<String>) -> i64 {
@@ -702,6 +723,96 @@ extern "C" fn jet_jit_http_body_text(body: i64, limit: i64) -> i64 {
     }
 }
 
+extern "C" fn jet_jit_http_body_json_text(body: i64, has_limit: i64, limit: i64) -> i64 {
+    match with_handle(body, |h| match h {
+        NetHttpHandle::HTTPBody(b) => Some(jet_http_body_json_text_defaulted(
+            b,
+            (has_limit != 0).then_some(limit),
+        )),
+        _ => None,
+    }) {
+        Some(Ok(s)) => result_ok_handle(alloc_string(s)),
+        Some(Err(e)) => http_err(e),
+        None => result_err("invalid HTTPBody".into()),
+    }
+}
+
+/// D-HTTP-JSON1=A: `server.json(status, body)` — body is already JSON text.
+extern "C" fn jet_jit_http_json_response(status: i64, body: i64) -> i64 {
+    runtime_json_response(status, clone_string(body))
+}
+
+/// D-HTTP-STATIC-FILES1=A: mount a directory under a prefix.
+extern "C" fn jet_jit_http_static_files(
+    mux: i64,
+    prefix: i64,
+    root: i64,
+    index: i64,
+    dotfiles: i64,
+    follow_links: i64,
+) -> i64 {
+    let _ = runtime_static_files(
+        mux,
+        clone_string(prefix),
+        clone_string(root),
+        (index >= 0).then_some(index != 0),
+        (dotfiles >= 0).then_some(dotfiles != 0),
+        (follow_links >= 0).then_some(follow_links != 0),
+    );
+    0
+}
+
+/// D-HTTP-CORS1=A: build a CORS policy from a named-origin list or `.Any`.
+/// `origins_mode`: 0 = `.Any`, 1 = string-list handle.
+extern "C" fn jet_jit_http_cors_policy(
+    origins_mode: i64,
+    origins: i64,
+    methods: i64,
+    headers: i64,
+    credentials: i64,
+    has_max_age: i64,
+    max_age: i64,
+) -> i64 {
+    let origins_any = origins_mode == 0;
+    let origin_list = if origins_any {
+        Vec::new()
+    } else {
+        clone_string_list(origins)
+    };
+    match runtime_cors_policy(
+        origins_any,
+        origin_list,
+        (methods > 0).then(|| clone_string_list(methods)),
+        (headers > 0).then(|| clone_string_list(headers)),
+        (credentials >= 0).then_some(credentials != 0),
+        (has_max_age != 0).then_some(max_age),
+    ) {
+        Ok(h) => result_ok_handle(h),
+        Err(error) => result_err_bits(error.packed),
+    }
+}
+
+/// Map JSON typed-decode `Result` errs to `HTTPError::InvalidFraming` (AOT parity).
+extern "C" fn jet_jit_http_project_json_decode_error(result: i64) -> i64 {
+    let is_error = Concurrency::with_runtime_mut(|rt| {
+        result
+            .checked_sub(1)
+            .and_then(|index| rt.results.get(index as usize))
+            .is_some_and(|value| !value.ok)
+    });
+    if is_error {
+        http_err(jet_http_json_decode_error())
+    } else {
+        result
+    }
+}
+
+/// D-HTTP-CORS1=A: install a policy on a mux.
+extern "C" fn jet_jit_http_cors(mux: i64, policy: i64) -> i64 {
+    let _ = runtime_cors(mux, policy);
+    0
+}
+
 extern "C" fn jet_jit_http_resp_status(resp: i64) -> i64 {
     with_handle(resp, |h| match h {
         NetHttpHandle::HTTPResponse(r) => Some(jet_http_srv_response_status(r)),
@@ -713,6 +824,16 @@ extern "C" fn jet_jit_http_resp_status(resp: i64) -> i64 {
 extern "C" fn jet_jit_http_resp_body(resp: i64) -> i64 {
     match with_handle(resp, |h| match h {
         NetHttpHandle::HTTPResponse(r) => Some(jet_http_srv_response_body(r)),
+        _ => None,
+    }) {
+        Some(b) => push_handle(NetHttpHandle::HTTPBody(b)),
+        None => 0,
+    }
+}
+
+extern "C" fn jet_jit_http_client_resp_body(resp: i64) -> i64 {
+    match with_handle(resp, |h| match h {
+        NetHttpHandle::HTTPResponse(r) => Some(jet_http_client_response_body(r)),
         _ => None,
     }) {
         Some(b) => push_handle(NetHttpHandle::HTTPBody(b)),
@@ -1197,32 +1318,9 @@ extern "C" fn jet_jit_http_static_file_range(req: i64, path: i64, mime: i64) -> 
 extern "C" fn jet_jit_http_client_request_new(method: i64, url: i64) -> i64 {
     let method = clone_string(method);
     let url = clone_string(url);
-    push_handle(NetHttpHandle::HTTPRequest(JetHTTPRequest {
-        method,
-        url,
-        path: String::new(),
-        version: "HTTP/1.1".to_string(),
-        headers: JetHTTPHeaders::new(),
-        trailers: std::sync::Arc::new(std::sync::Mutex::new(JetHTTPHeaders::new())),
-        header_error: None,
-        body: JetHTTPBody::empty(),
-        body_set: false,
-        params: std::collections::BTreeMap::new(),
-        route_template: None,
-        timeout_ms: None,
-        connect_timeout_ms: None,
-        read_timeout_ms: None,
-        total_timeout_ms: None,
-        dns_timeout_ms: None,
-        tls_timeout_ms: None,
-        write_timeout_ms: None,
-        first_byte_timeout_ms: None,
-        redirects: None,
-        proxy: None,
-        cookies: Vec::new(),
-        form: Vec::new(),
-        multipart: Vec::new(),
-    }))
+    push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_new(
+        &method, &url,
+    )))
 }
 
 fn take_http_request(handle: i64) -> Option<JetHTTPRequest> {
@@ -1235,62 +1333,74 @@ fn take_http_request(handle: i64) -> Option<JetHTTPRequest> {
     })
 }
 
+extern "C" fn jet_jit_http_client_request_body(req: i64, body: i64) -> i64 {
+    let body = clone_string(body);
+    let Some(req) = take_http_request(req) else {
+        return 0;
+    };
+    push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_body(
+        req, &body,
+    )))
+}
+
 extern "C" fn jet_jit_http_client_request_form(req: i64, name: i64, value: i64) -> i64 {
     let name = clone_string(name);
     let value = clone_string(value);
-    let Some(mut req) = take_http_request(req) else {
+    let Some(req) = take_http_request(req) else {
         return 0;
     };
-    req.form.push(name);
-    req.form.push(value);
-    push_handle(NetHttpHandle::HTTPRequest(req))
+    push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_form(
+        req, &name, &value,
+    )))
 }
 
 extern "C" fn jet_jit_http_client_request_cookie(req: i64, name: i64, value: i64) -> i64 {
     let name = clone_string(name);
     let value = clone_string(value);
-    let Some(mut req) = take_http_request(req) else {
+    let Some(req) = take_http_request(req) else {
         return 0;
     };
-    req.cookies.push(name);
-    req.cookies.push(value);
-    push_handle(NetHttpHandle::HTTPRequest(req))
+    push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_cookie(
+        req, &name, &value,
+    )))
 }
 
 extern "C" fn jet_jit_http_client_request_header(req: i64, name: i64, value: i64) -> i64 {
     let name = clone_string(name);
     let value = clone_string(value);
-    let Some(mut req) = take_http_request(req) else {
+    let Some(req) = take_http_request(req) else {
         return 0;
     };
-    if req.headers.append(&name, &value).is_err() {
-        req.header_error = Some(JetHTTPError::InvalidHeader);
-    }
-    push_handle(NetHttpHandle::HTTPRequest(req))
+    push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_header(
+        req, &name, &value,
+    )))
 }
 
 extern "C" fn jet_jit_http_client_request_redirects(req: i64, limit: i64) -> i64 {
-    let Some(mut req) = take_http_request(req) else {
+    let Some(req) = take_http_request(req) else {
         return 0;
     };
-    req.redirects = Some(limit);
-    push_handle(NetHttpHandle::HTTPRequest(req))
+    push_handle(NetHttpHandle::HTTPRequest(
+        jet_http_client_request_redirects(req, limit),
+    ))
 }
 
 extern "C" fn jet_jit_http_client_request_connect_timeout(req: i64, ms: i64) -> i64 {
-    let Some(mut req) = take_http_request(req) else {
+    let Some(req) = take_http_request(req) else {
         return 0;
     };
-    req.connect_timeout_ms = Some(ms);
-    push_handle(NetHttpHandle::HTTPRequest(req))
+    push_handle(NetHttpHandle::HTTPRequest(
+        jet_http_client_request_connect_timeout(req, ms),
+    ))
 }
 
 extern "C" fn jet_jit_http_client_request_read_timeout(req: i64, ms: i64) -> i64 {
-    let Some(mut req) = take_http_request(req) else {
+    let Some(req) = take_http_request(req) else {
         return 0;
     };
-    req.read_timeout_ms = Some(ms);
-    push_handle(NetHttpHandle::HTTPRequest(req))
+    push_handle(NetHttpHandle::HTTPRequest(
+        jet_http_client_request_read_timeout(req, ms),
+    ))
 }
 
 fn http_cleartext_request(req: &JetHTTPRequest) -> Result<JetHTTPResponse, String> {
@@ -1457,7 +1567,7 @@ extern "C" fn jet_jit_http_client_request_send(req: i64) -> i64 {
 extern "C" fn jet_jit_http_resp_header(resp: i64, name: i64) -> i64 {
     let name = clone_string(name);
     option_string(with_handle(resp, |h| match h {
-        NetHttpHandle::HTTPResponse(r) => Some(r.headers.get(&name).cloned()),
+        NetHttpHandle::HTTPResponse(r) => Some(jet_http_client_response_header(r, &name)),
         _ => None,
     })
     .flatten())
@@ -1465,13 +1575,7 @@ extern "C" fn jet_jit_http_resp_header(resp: i64, name: i64) -> i64 {
 
 extern "C" fn jet_jit_http_resp_cookies(resp: i64) -> i64 {
     match with_handle(resp, |h| match h {
-        NetHttpHandle::HTTPResponse(r) => Some(
-            r.headers
-                .all("set-cookie")
-                .into_iter()
-                .map(str::to_string)
-                .collect::<Vec<_>>(),
-        ),
+        NetHttpHandle::HTTPResponse(r) => Some(jet_http_response_cookies(r)),
         _ => None,
     }) {
         Some(rows) => list_of_strings(rows),
@@ -1519,8 +1623,15 @@ pub(crate) struct NetHttpHostFns {
     pub http_req_param: FuncId,
     pub http_req_header: FuncId,
     pub http_body_text: FuncId,
+    pub http_body_json_text: FuncId,
+    pub http_json_response: FuncId,
+    pub http_static_files: FuncId,
+    pub http_cors_policy: FuncId,
+    pub http_cors: FuncId,
+    pub http_project_json_decode_error: FuncId,
     pub http_resp_status: FuncId,
     pub http_resp_body: FuncId,
+    pub http_client_resp_body: FuncId,
     pub http_server_bind: FuncId,
     pub http_server_local_addr: FuncId,
     pub http_server_serve: FuncId,
@@ -1541,6 +1652,7 @@ pub(crate) struct NetHttpHostFns {
     pub http_sse: FuncId,
     pub http_static_file_range: FuncId,
     pub http_client_request_new: FuncId,
+    pub http_client_request_body: FuncId,
     pub http_client_request_form: FuncId,
     pub http_client_request_cookie: FuncId,
     pub http_client_request_header: FuncId,
@@ -1650,8 +1762,33 @@ pub(crate) fn register_net_http_symbols(builder: &mut JITBuilder) {
     builder.symbol("jet_jit_http_req_param", jet_jit_http_req_param as *const u8);
     builder.symbol("jet_jit_http_req_header", jet_jit_http_req_header as *const u8);
     builder.symbol("jet_jit_http_body_text", jet_jit_http_body_text as *const u8);
+    builder.symbol(
+        "jet_jit_http_body_json_text",
+        jet_jit_http_body_json_text as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_http_json_response",
+        jet_jit_http_json_response as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_http_static_files",
+        jet_jit_http_static_files as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_http_cors_policy",
+        jet_jit_http_cors_policy as *const u8,
+    );
+    builder.symbol("jet_jit_http_cors", jet_jit_http_cors as *const u8);
+    builder.symbol(
+        "jet_jit_http_project_json_decode_error",
+        jet_jit_http_project_json_decode_error as *const u8,
+    );
     builder.symbol("jet_jit_http_resp_status", jet_jit_http_resp_status as *const u8);
     builder.symbol("jet_jit_http_resp_body", jet_jit_http_resp_body as *const u8);
+    builder.symbol(
+        "jet_jit_http_client_resp_body",
+        jet_jit_http_client_resp_body as *const u8,
+    );
     builder.symbol(
         "jet_jit_http_server_bind",
         jet_jit_http_server_bind as *const u8,
@@ -1730,6 +1867,10 @@ pub(crate) fn register_net_http_symbols(builder: &mut JITBuilder) {
         jet_jit_http_client_request_new as *const u8,
     );
     builder.symbol(
+        "jet_jit_http_client_request_body",
+        jet_jit_http_client_request_body as *const u8,
+    );
+    builder.symbol(
         "jet_jit_http_client_request_form",
         jet_jit_http_client_request_form as *const u8,
     );
@@ -1805,6 +1946,21 @@ pub(crate) fn declare_net_http_host_fns(
             .declare_function(name, Linkage::Import, sig)
             .map_err(|e| e.to_string())
     };
+    let mut sig5 = Signature::new(cc);
+    for _ in 0..5 {
+        sig5.params.push(AbiParam::new(types::I64));
+    }
+    sig5.returns.push(AbiParam::new(types::I64));
+    let mut sig6 = Signature::new(cc);
+    for _ in 0..6 {
+        sig6.params.push(AbiParam::new(types::I64));
+    }
+    sig6.returns.push(AbiParam::new(types::I64));
+    let mut sig7 = Signature::new(cc);
+    for _ in 0..7 {
+        sig7.params.push(AbiParam::new(types::I64));
+    }
+    sig7.returns.push(AbiParam::new(types::I64));
     Ok(NetHttpHostFns {
         socket_addr: import(module, "jet_jit_net_socket_addr", &sig2)?,
         socket_to_string: import(module, "jet_jit_net_socket_to_string", &sig1)?,
@@ -1849,8 +2005,19 @@ pub(crate) fn declare_net_http_host_fns(
         http_req_param: import(module, "jet_jit_http_req_param", &sig2)?,
         http_req_header: import(module, "jet_jit_http_req_header", &sig2)?,
         http_body_text: import(module, "jet_jit_http_body_text", &sig2)?,
+        http_body_json_text: import(module, "jet_jit_http_body_json_text", &sig3)?,
+        http_json_response: import(module, "jet_jit_http_json_response", &sig2)?,
+        http_static_files: import(module, "jet_jit_http_static_files", &sig6)?,
+        http_cors_policy: import(module, "jet_jit_http_cors_policy", &sig7)?,
+        http_cors: import(module, "jet_jit_http_cors", &sig2)?,
+        http_project_json_decode_error: import(
+            module,
+            "jet_jit_http_project_json_decode_error",
+            &sig1,
+        )?,
         http_resp_status: import(module, "jet_jit_http_resp_status", &sig1)?,
         http_resp_body: import(module, "jet_jit_http_resp_body", &sig1)?,
+        http_client_resp_body: import(module, "jet_jit_http_client_resp_body", &sig1)?,
         http_server_bind: import(module, "jet_jit_http_server_bind", &sig2)?,
         http_server_local_addr: import(module, "jet_jit_http_server_local_addr", &sig1)?,
         http_server_serve: import(module, "jet_jit_http_server_serve", &sig1)?,
@@ -1871,6 +2038,7 @@ pub(crate) fn declare_net_http_host_fns(
         http_sse: import(module, "jet_jit_http_sse", &sig1)?,
         http_static_file_range: import(module, "jet_jit_http_static_file_range", &sig3)?,
         http_client_request_new: import(module, "jet_jit_http_client_request_new", &sig2)?,
+        http_client_request_body: import(module, "jet_jit_http_client_request_body", &sig2)?,
         http_client_request_form: import(module, "jet_jit_http_client_request_form", &sig3)?,
         http_client_request_cookie: import(module, "jet_jit_http_client_request_cookie", &sig3)?,
         http_client_request_header: import(module, "jet_jit_http_client_request_header", &sig3)?,
@@ -1900,4 +2068,222 @@ pub(crate) fn declare_net_http_host_fns(
         ws_message_is_text: import(module, "jet_jit_ws_message_is_text", &sig1)?,
         ws_message_text: import(module, "jet_jit_ws_message_text", &sig1)?,
     })
+}
+
+// ── I9 shared Prelude adapters (C hosts + ambient call these; no forked logic) ─
+
+/// Build a CORS policy via `jet_http_cors_policy` only. Returns an opaque handle.
+/// `origins_any`: true → `.Any`; false → `List(origins)`.
+pub(crate) struct RuntimeHttpError {
+    pub(crate) value: CtValue,
+    packed: i64,
+}
+
+pub(crate) fn runtime_cors_policy(
+    origins_any: bool,
+    origins: Vec<String>,
+    methods: Option<Vec<String>>,
+    headers: Option<Vec<String>>,
+    credentials: Option<bool>,
+    max_age: Option<i64>,
+) -> Result<i64, RuntimeHttpError> {
+    let origins = if origins_any {
+        JetHTTPCorsOrigins::Any
+    } else {
+        JetHTTPCorsOrigins::List(origins)
+    };
+    match jet_http_cors_policy_defaulted(
+        &origins,
+        methods.as_ref(),
+        headers.as_ref(),
+        credentials,
+        max_age,
+    ) {
+        Ok(policy) => Ok(push_handle(NetHttpHandle::HTTPCorsPolicy(policy))),
+        Err(error) => {
+            let (packed, value) = marshal_http_error(error);
+            Err(RuntimeHttpError { value, packed })
+        }
+    }
+}
+
+/// Install CORS via `jet_http_srv_install_cors` only.
+pub(crate) fn runtime_cors(mux: i64, policy: i64) -> Result<(), String> {
+    let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
+    let policy = with_handle(policy, |h| match h {
+        NetHttpHandle::HTTPCorsPolicy(p) => Some(p.clone()),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPCorsPolicy".to_string())?;
+    jet_http_srv_install_cors(&mux, &policy);
+    Ok(())
+}
+
+/// Mount static files via `jet_http_srv_static_files_mount` only.
+pub(crate) fn runtime_static_files(
+    mux: i64,
+    prefix: String,
+    root: String,
+    index: Option<bool>,
+    dotfiles: Option<bool>,
+    follow_links: Option<bool>,
+) -> Result<(), String> {
+    let mux = http_mux(mux).ok_or_else(|| "invalid HTTPMux".to_string())?;
+    jet_http_srv_static_files_mount_defaulted(
+        &mux,
+        &prefix,
+        &root,
+        index,
+        dotfiles,
+        follow_links,
+    );
+    Ok(())
+}
+
+/// JSON response with AOT content-type — body is already JSON text (same as AOT
+/// after `jet_enc_json_to_string`).
+pub(crate) fn runtime_json_response(status: i64, body: String) -> i64 {
+    push_handle(NetHttpHandle::HTTPResponse(jet_http_srv_json_text(
+        status, &body,
+    )))
+}
+
+pub(crate) fn runtime_http_mux() -> i64 {
+    push_handle(NetHttpHandle::HTTPMux(Arc::new(jet_http_mux_new())))
+}
+
+fn marshal_http_error(error: JetHTTPError) -> (i64, CtValue) {
+    let parts = jet_http_error_surface_parts(error);
+    let (payload_bits, args) = match parts.payload {
+        JetHTTPErrorSurfacePayload::Unit => (0, vec![]),
+        JetHTTPErrorSurfacePayload::Int { field, value } => (
+            value,
+            vec![(Some(field.to_string()), CtValue::Int(value))],
+        ),
+        JetHTTPErrorSurfacePayload::Text { field, value } => (
+            alloc_string(value.clone()),
+            vec![(Some(field.to_string()), CtValue::Str(value))],
+        ),
+        JetHTTPErrorSurfacePayload::Operation {
+            field,
+            variant,
+            ordinal,
+        } => (
+            ordinal,
+            vec![(
+                Some(field.to_string()),
+                CtValue::Enum {
+                    type_name: "HTTPOperation".into(),
+                    variant: variant.to_string(),
+                    args: vec![],
+                },
+            )],
+        ),
+    };
+    let packed = payload_bits.wrapping_shl(8) | parts.ordinal;
+    let value = CtValue::Enum {
+        type_name: "HTTPError".into(),
+        variant: parts.variant.to_string(),
+        args,
+    };
+    (packed, value)
+}
+
+fn http_error_value(error: JetHTTPError) -> CtValue {
+    marshal_http_error(error).1
+}
+
+pub(crate) fn runtime_http_req_body(request: i64) -> Result<i64, String> {
+    let body = with_handle(request, |handle| match handle {
+        NetHttpHandle::HTTPRequest(request) => Some(jet_http_srv_req_body(request)),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPRequest".to_string())?;
+    Ok(push_handle(NetHttpHandle::HTTPBody(body)))
+}
+
+pub(crate) fn runtime_http_resp_body(response: i64) -> Result<i64, String> {
+    let body = with_handle(response, |handle| match handle {
+        NetHttpHandle::HTTPResponse(response) => Some(jet_http_client_response_body(response)),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPResponse".to_string())?;
+    Ok(push_handle(NetHttpHandle::HTTPBody(body)))
+}
+
+pub(crate) fn runtime_http_body_json_text(
+    body: i64,
+    limit: Option<i64>,
+) -> Result<Result<String, CtValue>, String> {
+    with_handle(body, |handle| match handle {
+        NetHttpHandle::HTTPBody(body) => Some(
+            jet_http_body_json_text_defaulted(body, limit).map_err(http_error_value),
+        ),
+        _ => None,
+    })
+    .ok_or_else(|| "invalid HTTPBody".to_string())
+}
+
+pub(crate) fn runtime_http_json_decode_error() -> CtValue {
+    http_error_value(jet_http_json_decode_error())
+}
+
+pub(crate) fn runtime_http_request_body(
+    request: i64,
+    body: String,
+) -> Result<i64, String> {
+    let request =
+        take_http_request(request).ok_or_else(|| "invalid HTTPRequest".to_string())?;
+    Ok(push_handle(NetHttpHandle::HTTPRequest(
+        jet_http_client_request_body(request, &body),
+    )))
+}
+
+pub(crate) fn runtime_http_request_new(method: String, url: String) -> i64 {
+    push_handle(NetHttpHandle::HTTPRequest(jet_http_client_request_new(
+        &method, &url,
+    )))
+}
+
+#[cfg(test)]
+mod http_i9_adapter_tests {
+    use super::*;
+
+    #[test]
+    fn http_error_marshalling_uses_canonical_surface_shape() {
+        let (invalid, invalid_value) = marshal_http_error(JetHTTPError::InvalidFraming);
+        assert_eq!(invalid, 5);
+        assert!(matches!(
+            invalid_value,
+            CtValue::Enum { type_name, variant, args }
+                if type_name == "HTTPError" && variant == "InvalidFraming" && args.is_empty()
+        ));
+
+        let reason = "named origins required".to_string();
+        let (policy, policy_value) =
+            marshal_http_error(JetHTTPError::Policy { reason: reason.clone() });
+        assert_eq!(policy & 0xff, 17);
+        assert!(matches!(
+            policy_value,
+            CtValue::Enum { type_name, variant, args }
+                if type_name == "HTTPError"
+                    && variant == "Policy"
+                    && matches!(
+                        args.as_slice(),
+                        [(Some(field), CtValue::Str(value))]
+                            if field == "reason" && value == "named origins required"
+                    )
+        ));
+    }
+
+    #[test]
+    fn cors_defaulting_preserves_explicit_max_age() {
+        let origins = JetHTTPCorsOrigins::List(vec!["https://app.example".to_string()]);
+        let defaulted =
+            jet_http_cors_policy_defaulted(&origins, None, None, None, None).unwrap();
+        let explicit =
+            jet_http_cors_policy_defaulted(&origins, None, None, None, Some(i64::MIN)).unwrap();
+        assert_eq!(defaulted.max_age_secs, 86_400);
+        assert_eq!(explicit.max_age_secs, i64::MIN);
+    }
 }

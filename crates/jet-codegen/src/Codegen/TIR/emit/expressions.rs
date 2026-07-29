@@ -2986,12 +2986,12 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                     _ => unreachable!("resp.json must return Result<T, HTTPError>"),
                                 };
                                 let limit = if args.is_empty() {
-                                    format!("{root}JET_HTTP_MAX_BODY_BYTES as i64")
+                                    "None".to_string()
                                 } else {
-                                    a(0)
+                                    format!("Some({})", a(0))
                                 };
                                 format!(
-                                    "{root}jet_http_body_json::<{target}>(&({root}jet_http_client_response_body(&({recv}))), {limit})"
+                                    "{root}jet_http_body_json_defaulted::<{target}>(&({root}jet_http_client_response_body(&({recv}))), {limit})"
                                 )
                             }
                             "header" => format!(
@@ -3058,7 +3058,7 @@ pub(crate) fn emit_tir_expr(e: &TExpr, cx: &Cx) -> String {
                                 _ => unreachable!("req.json must return Result<T, HTTPError>"),
                             };
                             format!(
-                                "{root}jet_http_body_json::<{target}>(&({root}jet_http_srv_req_body(&({recv}))), {root}JET_HTTP_MAX_BODY_BYTES as i64)"
+                                "{root}jet_http_body_json_defaulted::<{target}>(&({root}jet_http_srv_req_body(&({recv}))), None)"
                             )
                         }
                         ("HTTPRequest", "trailers") => {

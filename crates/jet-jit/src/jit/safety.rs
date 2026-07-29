@@ -2894,6 +2894,7 @@ pub(crate) fn opaque_host_handle_ty(ty: &Type) -> bool {
                 | "HTTPResponse"
                 | "HTTPBody"
                 | "HTTPHeaders"
+                | "HTTPCorsPolicy"
                 | "WsConn"
                 | "WsMessage"
         ),
@@ -3343,7 +3344,9 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
         THandleOp::HTTPClientMethod { kind, method } => match (kind.as_str(), method.as_str()) {
             ("HTTPResponse", "status" | "body" | "cookies") if args.is_empty() => true,
             ("HTTPResponse", "header") if args.len() == 1 => true,
-            ("HTTPBody", "text") if args.len() == 1 => true,
+            ("HTTPResponse", "json") if args.len() <= 1 => true,
+            ("HTTPBody", "text" | "json") if args.len() == 1 => true,
+            ("HTTPRequest", "body") if args.len() == 1 => true,
             ("HTTPRequest", "form" | "cookie" | "header") if args.len() == 2 => true,
             ("HTTPRequest", "redirects" | "connect_timeout" | "read_timeout")
                 if args.len() == 1 =>
@@ -3364,13 +3367,13 @@ fn resident_safe_handle_op(op: &THandleOp, recv: &TExpr, args: &[TExpr]) -> bool
             }
             ("HTTPMux", "middleware") if args.len() == 1 => true,
             ("HTTPHandler", "handle") if args.len() == 1 => true,
-            ("HTTPRequest", "body" | "method" | "path" | "trailers" | "body_len")
+            ("HTTPRequest", "body" | "method" | "path" | "trailers" | "body_len" | "json")
                 if args.is_empty() =>
             {
                 true
             }
             ("HTTPRequest", "param" | "header" | "under_limit") if args.len() == 1 => true,
-            ("HTTPBody", "text") if args.len() == 1 => true,
+            ("HTTPBody", "text" | "json") if args.len() == 1 => true,
             ("HTTPResponse", "status" | "body") if args.is_empty() => true,
             ("HTTPResponse", "trailers") if args.len() == 1 => true,
             ("HTTPServer", "local_addr" | "serve") if args.is_empty() => true,

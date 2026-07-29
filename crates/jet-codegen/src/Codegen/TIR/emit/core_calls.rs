@@ -2858,17 +2858,18 @@ pub(crate) fn emit_tir_core_call(
         // D-HTTP-STATIC-FILES1=A: mount a directory. The trailing options keep
         // the safe defaults when the program leaves them off.
         ("core.http.server", "static_files") => {
-            let option = |index: usize, default: &str| {
-                args.get(index).map_or_else(|| default.to_string(), |_| arg(index))
+            let option = |index: usize| {
+                args.get(index)
+                    .map_or_else(|| "None".to_string(), |_| format!("Some({})", arg(index)))
             };
             format!(
-                "jet_http_srv_static_files_mount(&({}), &({}), &({}), JetHTTPStaticOptions {{ index: {}, dotfiles: {}, follow_links: {} }})",
+                "jet_http_srv_static_files_mount_defaulted(&({}), &({}), &({}), {}, {}, {})",
                 arg(0),
                 arg(1),
                 arg(2),
-                option(3, "true"),
-                option(4, "false"),
-                option(5, "false"),
+                option(3),
+                option(4),
+                option(5),
             )
         }
         // D-HTTP-CORS1=A: `origins` takes a plain list or the `.Any` case.
@@ -2880,15 +2881,19 @@ pub(crate) fn emit_tir_core_call(
             };
             let list = |index: usize| {
                 args.get(index)
-                    .map_or_else(|| "Vec::new()".to_string(), |_| arg(index))
+                    .map_or_else(|| "None".to_string(), |_| format!("Some(&({}))", arg(index)))
+            };
+            let value = |index: usize| {
+                args.get(index)
+                    .map_or_else(|| "None".to_string(), |_| format!("Some({})", arg(index)))
             };
             format!(
-                "jet_http_cors_policy(&({}), &({}), &({}), {}, {})",
+                "jet_http_cors_policy_defaulted(&({}), {}, {}, {}, {})",
                 origins,
                 list(1),
                 list(2),
-                args.get(3).map_or_else(|| "false".to_string(), |_| arg(3)),
-                args.get(4).map_or_else(|| "86400".to_string(), |_| arg(4)),
+                value(3),
+                value(4),
             )
         }
         ("core.http.server", "cors") => {

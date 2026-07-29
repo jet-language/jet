@@ -4525,6 +4525,24 @@ fn jet_http_cors_policy(
     })
 }
 
+fn jet_http_cors_policy_defaulted(
+    origins: &JetHTTPCorsOrigins,
+    methods: Option<&Vec<String>>,
+    headers: Option<&Vec<String>>,
+    credentials: Option<bool>,
+    max_age: Option<i64>,
+) -> Result<JetHTTPCorsPolicy, JetHTTPError> {
+    let empty_methods = Vec::new();
+    let empty_headers = Vec::new();
+    jet_http_cors_policy(
+        origins,
+        methods.unwrap_or(&empty_methods),
+        headers.unwrap_or(&empty_headers),
+        credentials.unwrap_or(false),
+        max_age.unwrap_or(86_400),
+    )
+}
+
 /// The value for `access-control-allow-origin`, or `None` when this request
 /// origin is not in the policy and no CORS header may be sent.
 fn jet_http_cors_allow_origin(policy: &JetHTTPCorsPolicy, origin: &str) -> Option<String> {
@@ -4745,9 +4763,35 @@ fn jet_http_srv_static_files_mount(
     );
 }
 
+fn jet_http_srv_static_files_mount_defaulted(
+    mux: &JetHTTPMux,
+    prefix: &String,
+    root: &String,
+    index: Option<bool>,
+    dotfiles: Option<bool>,
+    follow_links: Option<bool>,
+) {
+    jet_http_srv_static_files_mount(
+        mux,
+        prefix,
+        root,
+        JetHTTPStaticOptions {
+            index: index.unwrap_or(true),
+            dotfiles: dotfiles.unwrap_or(false),
+            follow_links: follow_links.unwrap_or(false),
+        },
+    );
+}
+
+fn jet_http_srv_json_text(status: i64, body: &String) -> JetHTTPResponse {
+    let mut response = jet_http_srv_response(status, body);
+    let _ = response
+        .headers
+        .set("content-type", "application/json; charset=utf-8");
+    response
+}
+
 /// D-HTTP-JSON1=A: one JSON response. The content type is set for the caller.
 fn jet_http_srv_json<T: user_Encode>(status: i64, value: &T) -> JetHTTPResponse {
-    let mut response = jet_http_srv_response(status, &jet_enc_json_to_string(value));
-    let _ = response.headers.set("content-type", "application/json; charset=utf-8");
-    response
+    jet_http_srv_json_text(status, &jet_enc_json_to_string(value))
 }

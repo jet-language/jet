@@ -71,6 +71,18 @@ fn decode_error_under(segment: &str, error: CtValue) -> CtValue {
     )
 }
 
+fn ambient_http_json_decode_error(span: crate::Diagnostics::Span) -> Result<CtValue, Diagnostic> {
+    let mut recv = CtValue::Unit;
+    let mut args = [];
+    crate::Comptime::try_ambient_handle(
+        "HTTPJSONDecodeError",
+        &mut recv,
+        &mut args,
+        span,
+    )
+    .unwrap_or_else(|| Err(unsupported("HTTP JSON decode error adapter", span)))
+}
+
 fn datatree_kind(value: &CtValue) -> &'static str {
     match datatree_variant(value) {
         Some(("Null", _)) => "null",
@@ -1125,7 +1137,60 @@ impl<'a> EvalCtx<'a> {
                     };
                     return Ok(result);
                 }
-                let result = eval_handle(op, &mut r, &mut argv, self.span())?;
+                let mut result = eval_handle(op, &mut r, &mut argv, self.span())?;
+                let http_json = matches!(
+                    op,
+                    crate::Codegen::TIR::THandleOp::HTTPClientMethod { method, .. }
+                        | crate::Codegen::TIR::THandleOp::HTTPServerMethod { method, .. }
+                        if method == "json"
+                );
+                if http_json {
+                    result = match result {
+                        CtValue::ResErr(_) => result,
+                        CtValue::ResOk(value) => {
+                            let CtValue::Str(text) = *value else {
+                                return Err(unsupported("HTTP JSON text adapter", self.span()));
+                            };
+                            let parsed = apply_core_call(
+                                "core.encoding.json",
+                                "parse",
+                                vec![CtValue::Str(text)],
+                                self.span(),
+                                self.repl_mode,
+                            )?;
+                            let tree = match parsed {
+                                CtValue::ResOk(tree) => *tree,
+                                CtValue::ResErr(_) => {
+                                    ambient_http_json_decode_error(self.span())?
+                                }
+                                _ => {
+                                    return Err(unsupported(
+                                        "HTTP JSON parse result",
+                                        self.span(),
+                                    ))
+                                }
+                            };
+                            if matches!(tree, CtValue::ResErr(_)) {
+                                tree
+                            } else {
+                                let Type::Result { ok, .. } = &expr.ty else {
+                                    return Err(unsupported(
+                                        "HTTP JSON resolved result type",
+                                        self.span(),
+                                    ));
+                                };
+                                match self.eval_datatree_decode(tree, ok)? {
+                                    CtValue::ResOk(value) => CtValue::ResOk(value),
+                                    CtValue::ResErr(_) => {
+                                        ambient_http_json_decode_error(self.span())?
+                                    }
+                                    _ => unreachable!("DataTree decode returns Result"),
+                                }
+                            }
+                        }
+                        _ => return Err(unsupported("HTTP JSON ambient result", self.span())),
+                    };
+                }
                 self.write_back_place(recv, r, scope)?;
                 // `Rng.shuffle(&list)` mutates the list arg in place. Fragment
                 // lowering may keep `&deck` as Local (Write convention on the
@@ -1194,6 +1259,11 @@ impl<'a> EvalCtx<'a> {
                 let mut argv = Vec::with_capacity(args.len());
                 for a in args {
                     argv.push(self.eval_expr(a, scope)?);
+                }
+                if module == "core.http.server" && method == "json" && args.len() == 2 {
+                    let tree =
+                        self.eval_serde_encode_value(argv[1].clone(), &args[1].ty)?;
+                    argv[1] = CtValue::Str(crate::Comptime::render_datatree_for_tir(&tree));
                 }
                 if module == "core.encoding.cbor"
                     && matches!(method.as_str(), "to_bytes" | "to_bytes_canonical")

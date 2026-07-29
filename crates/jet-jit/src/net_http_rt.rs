@@ -312,6 +312,7 @@ include!("../../jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs");
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPMessage.rs");
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs");
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs");
+include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs");
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs");
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/WsClient.rs");
 include!("../../jet-codegen/src/Prelude/CoreLib/Top/Ws.rs");

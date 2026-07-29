@@ -1475,6 +1475,56 @@ impl LowerCtx<'_, '_> {
         self.lower_typed_tree_decode(text, ok_ty, self.host.encoding.json_parse)
     }
 
+    /// D-HTTP-JSON1=A: body text under `limit`, then typed `#Codable` JSON decode.
+    fn lower_http_body_json(
+        &mut self,
+        body: Value,
+        limit: Option<Value>,
+        ok_ty: &Type,
+    ) -> Result<Value, String> {
+        let host = self
+            .module
+            .declare_func_in_func(self.host.net_http.http_body_json_text, self.b.func);
+        let has_limit = self
+            .b
+            .ins()
+            .iconst(types::I64, i64::from(limit.is_some()));
+        let limit = limit.unwrap_or_else(|| self.b.ins().iconst(types::I64, 0));
+        let text_r = self.b.ins().call(host, &[body, has_limit, limit]);
+        let text_r = self.b.inst_results(text_r)[0];
+        let status_ref = self
+            .module
+            .declare_func_in_func(self.host.result_is_ok, self.b.func);
+        let status_call = self.b.ins().call(status_ref, &[text_r]);
+        let is_ok = self.b.inst_results(status_call)[0];
+        let ok_block = self.b.create_block();
+        let err_block = self.b.create_block();
+        let merge = self.b.create_block();
+        self.b.append_block_param(merge, types::I64);
+        self.b.ins().brif(is_ok, ok_block, &[], err_block, &[]);
+
+        self.b.switch_to_block(err_block);
+        self.b.seal_block(err_block);
+        self.b.ins().jump(merge, &[text_r]);
+
+        self.b.switch_to_block(ok_block);
+        self.b.seal_block(ok_block);
+        let text = self.result_payload(text_r, &Type::String)?;
+        let decoded =
+            self.lower_typed_tree_decode_values(&[text], ok_ty, self.host.encoding.json_parse, None)?;
+        let project = self.module.declare_func_in_func(
+            self.host.net_http.http_project_json_decode_error,
+            self.b.func,
+        );
+        let projected = self.b.ins().call(project, &[decoded]);
+        let projected = self.b.inst_results(projected)[0];
+        self.b.ins().jump(merge, &[projected]);
+
+        self.b.switch_to_block(merge);
+        self.b.seal_block(merge);
+        Ok(self.b.block_params(merge)[0])
+    }
+
     fn lower_typed_json_decode_traced(
         &mut self,
         text: &TExpr,
@@ -8351,6 +8401,154 @@ impl LowerCtx<'_, '_> {
                                 self.lower_expr(&args[1])?,
                                 self.lower_expr(&args[2])?,
                             ],
+                        ),
+                        "json" if args.len() == 2 => {
+                            let status = self.lower_expr(&args[0])?;
+                            let body = self.lower_typed_json_to_string(&args[1], false)?;
+                            let host = self.module.declare_func_in_func(
+                                self.host.net_http.http_json_response,
+                                self.b.func,
+                            );
+                            let call = self.b.ins().call(host, &[status, body]);
+                            return Ok(self.b.inst_results(call)[0]);
+                        }
+                        "static_files" if (3..=6).contains(&args.len()) => {
+                            let mux = self.lower_expr(&args[0])?;
+                            let prefix = self.lower_expr(&args[1])?;
+                            let root = self.lower_expr(&args[2])?;
+                            let index = if args.len() > 3 {
+                                let v = self.lower_expr(&args[3])?;
+                                self.b.ins().uextend(types::I64, v)
+                            } else {
+                                self.b.ins().iconst(types::I64, -1)
+                            };
+                            let dotfiles = if args.len() > 4 {
+                                let v = self.lower_expr(&args[4])?;
+                                self.b.ins().uextend(types::I64, v)
+                            } else {
+                                self.b.ins().iconst(types::I64, -1)
+                            };
+                            let follow_links = if args.len() > 5 {
+                                let v = self.lower_expr(&args[5])?;
+                                self.b.ins().uextend(types::I64, v)
+                            } else {
+                                self.b.ins().iconst(types::I64, -1)
+                            };
+                            let host = self.module.declare_func_in_func(
+                                self.host.net_http.http_static_files,
+                                self.b.func,
+                            );
+                            let call = self.b.ins().call(
+                                host,
+                                &[mux, prefix, root, index, dotfiles, follow_links],
+                            );
+                            return Ok(self.b.inst_results(call)[0]);
+                        }
+                        "cors_policy" if (1..=5).contains(&args.len()) => {
+                            let (origins_mode, origins) = match &args[0].ty {
+                                Type::List(_) => (
+                                    self.b.ins().iconst(types::I64, 1),
+                                    self.lower_expr(&args[0])?,
+                                ),
+                                Type::Named(n) if n == "HTTPCorsOrigins" => {
+                                    match &args[0].kind {
+                                        TExprKind::EnumLit { variant, payload, .. }
+                                            if variant == "Any"
+                                                && matches!(payload, TEnumPayload::Unit) =>
+                                        {
+                                            (
+                                                self.b.ins().iconst(types::I64, 0),
+                                                self.b.ins().iconst(types::I64, 0),
+                                            )
+                                        }
+                                        TExprKind::EnumLit { variant, payload, .. }
+                                            if variant == "List" =>
+                                        {
+                                            match payload {
+                                                TEnumPayload::Positional(values)
+                                                    if values.len() == 1 =>
+                                                {
+                                                    (
+                                                        self.b.ins().iconst(types::I64, 1),
+                                                        self.lower_expr(&values[0].value)?,
+                                                    )
+                                                }
+                                                _ => {
+                                                    return Err(
+                                                        "jit cors_policy HTTPCorsOrigins.List needs one list payload"
+                                                            .into(),
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            // Runtime: disc 0 = Any; else packed List handle.
+                                            let bits = self.lower_expr(&args[0])?;
+                                            let mask = self.b.ins().iconst(types::I64, 0xff);
+                                            let disc = self.b.ins().band(bits, mask);
+                                            let zero = self.b.ins().iconst(types::I64, 0);
+                                            let is_any =
+                                                self.b.ins().icmp(IntCC::Equal, disc, zero);
+                                            let list = self.b.ins().ushr_imm(bits, 8);
+                                            let one = self.b.ins().iconst(types::I64, 1);
+                                            let mode = self.b.ins().select(is_any, zero, one);
+                                            let origins = self.b.ins().select(is_any, zero, list);
+                                            (mode, origins)
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    return Err(
+                                        "jit cors_policy origins must be List or HTTPCorsOrigins"
+                                            .into(),
+                                    );
+                                }
+                            };
+                            let empty = self.b.ins().iconst(types::I64, 0);
+                            let methods = if args.len() > 1 {
+                                self.lower_expr(&args[1])?
+                            } else {
+                                empty
+                            };
+                            let headers = if args.len() > 2 {
+                                self.lower_expr(&args[2])?
+                            } else {
+                                empty
+                            };
+                            let credentials = if args.len() > 3 {
+                                let v = self.lower_expr(&args[3])?;
+                                self.b.ins().uextend(types::I64, v)
+                            } else {
+                                self.b.ins().iconst(types::I64, -1)
+                            };
+                            let max_age = if args.len() > 4 {
+                                self.lower_expr(&args[4])?
+                            } else {
+                                self.b.ins().iconst(types::I64, 0)
+                            };
+                            let has_max_age =
+                                self.b.ins().iconst(types::I64, i64::from(args.len() > 4));
+                            let host = self.module.declare_func_in_func(
+                                self.host.net_http.http_cors_policy,
+                                self.b.func,
+                            );
+                            let call = self.b.ins().call(
+                                host,
+                                &[
+                                    origins_mode,
+                                    origins,
+                                    methods,
+                                    headers,
+                                    credentials,
+                                    has_max_age,
+                                    max_age,
+                                ],
+                            );
+                            return Ok(self.b.inst_results(call)[0]);
+                        }
+                        "cors" if args.len() == 2 => (
+                            self.host.net_http.http_cors,
+                            vec![self.lower_expr(&args[0])?, self.lower_expr(&args[1])?],
                         ),
                         _ => {
                             return Err(format!("jit core call unsupported: {module}.{method}"))
@@ -15903,9 +16101,10 @@ impl LowerCtx<'_, '_> {
                         Ok(self.b.inst_results(call)[0])
                     }
                     ("HTTPResponse", "body") if args.is_empty() => {
-                        let host = self
-                            .module
-                            .declare_func_in_func(self.host.net_http.http_resp_body, self.b.func);
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_client_resp_body,
+                            self.b.func,
+                        );
                         let call = self.b.ins().call(host, &[recv_val]);
                         Ok(self.b.inst_results(call)[0])
                     }
@@ -15930,6 +16129,41 @@ impl LowerCtx<'_, '_> {
                             .module
                             .declare_func_in_func(self.host.net_http.http_body_text, self.b.func);
                         let call = self.b.ins().call(host, &[recv_val, limit]);
+                        Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HTTPBody", "json") if args.len() == 1 => {
+                        let limit = self.lower_expr(&args[0])?;
+                        let ok_ty = match ret_ty {
+                            Type::Result { ok, .. } => ok.as_ref(),
+                            other => other,
+                        };
+                        self.lower_http_body_json(recv_val, Some(limit), ok_ty)
+                    }
+                    ("HTTPResponse", "json") if args.len() <= 1 => {
+                        let body_host = self.module.declare_func_in_func(
+                            self.host.net_http.http_client_resp_body,
+                            self.b.func,
+                        );
+                        let body = self.b.ins().call(body_host, &[recv_val]);
+                        let body = self.b.inst_results(body)[0];
+                        let limit = if args.is_empty() {
+                            None
+                        } else {
+                            Some(self.lower_expr(&args[0])?)
+                        };
+                        let ok_ty = match ret_ty {
+                            Type::Result { ok, .. } => ok.as_ref(),
+                            other => other,
+                        };
+                        self.lower_http_body_json(body, limit, ok_ty)
+                    }
+                    ("HTTPRequest", "body") if args.len() == 1 => {
+                        let body = self.lower_expr(&args[0])?;
+                        let host = self.module.declare_func_in_func(
+                            self.host.net_http.http_client_request_body,
+                            self.b.func,
+                        );
+                        let call = self.b.ins().call(host, &[recv_val, body]);
                         Ok(self.b.inst_results(call)[0])
                     }
                     ("HTTPRequest", "form") if args.len() == 2 => {
@@ -16048,6 +16282,18 @@ impl LowerCtx<'_, '_> {
                         let call = self.b.ins().call(host, &[recv_val]);
                         Ok(self.b.inst_results(call)[0])
                     }
+                    ("HTTPRequest", "json") if args.is_empty() => {
+                        let body_host = self
+                            .module
+                            .declare_func_in_func(self.host.net_http.http_req_body, self.b.func);
+                        let body = self.b.ins().call(body_host, &[recv_val]);
+                        let body = self.b.inst_results(body)[0];
+                        let ok_ty = match ret_ty {
+                            Type::Result { ok, .. } => ok.as_ref(),
+                            other => other,
+                        };
+                        self.lower_http_body_json(body, None, ok_ty)
+                    }
                     ("HTTPRequest", "method") if args.is_empty() => {
                         let host = self
                             .module
@@ -16120,6 +16366,14 @@ impl LowerCtx<'_, '_> {
                             .declare_func_in_func(self.host.net_http.http_body_text, self.b.func);
                         let call = self.b.ins().call(host, &[recv_val, limit]);
                         Ok(self.b.inst_results(call)[0])
+                    }
+                    ("HTTPBody", "json") if args.len() == 1 => {
+                        let limit = self.lower_expr(&args[0])?;
+                        let ok_ty = match ret_ty {
+                            Type::Result { ok, .. } => ok.as_ref(),
+                            other => other,
+                        };
+                        self.lower_http_body_json(recv_val, Some(limit), ok_ty)
                     }
                     ("HTTPResponse", "status") if args.is_empty() => {
                         let host = self

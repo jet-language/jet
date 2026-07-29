@@ -266,6 +266,20 @@ pub fn ambient_core_call(
     args: Vec<CtValue>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    // I9: core.http.server adapters call the same Prelude helpers as AOT/JIT.
+    if module == "core.http.server" {
+        return Some(ambient_http_server_call(method, &args, span));
+    }
+    if module == "core.http.client" && method == "request" {
+        let result = match args.as_slice() {
+            [CtValue::Str(method), CtValue::Str(url)] => Ok(http_handle_value(
+                "HTTPRequest",
+                crate::net_http_rt::runtime_http_request_new(method.clone(), url.clone()),
+            )),
+            _ => Err(unsupported("core.http.client.request arguments", span)),
+        };
+        return Some(result);
+    }
     match (module, method) {
         ("core.io", "confirm") => {
             let Some(CtValue::Str(prompt)) = args.first() else {
@@ -590,6 +604,9 @@ pub fn ambient_handle(
     args: &mut [CtValue],
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if let Some(result) = ambient_http_handle(op, recv, args, span) {
+        return Some(result);
+    }
     let handle = db_handle(recv)?;
     match op {
         "DBBegin" => Some(Ok(CtValue::Bool(DB::runtime_begin(handle)))),
@@ -654,5 +671,255 @@ pub fn ambient_handle(
             }))
         }
         _ => None,
+    }
+}
+
+// ── I9 HTTP ambient: marshal CtValue ↔ shared runtime_* Prelude adapters ───
+
+fn http_handle_value(type_name: &str, handle: i64) -> CtValue {
+    CtValue::Struct {
+        type_name: type_name.to_string(),
+        fields: vec![("handle".to_string(), CtValue::Int(handle))],
+    }
+}
+
+fn http_handle_id(recv: &CtValue, type_name: &str) -> Option<i64> {
+    match recv {
+        CtValue::Struct {
+            type_name: tn,
+            fields,
+        } if tn == type_name => fields.iter().find_map(|(n, v)| match (n.as_str(), v) {
+            ("handle", CtValue::Int(h)) if *h > 0 => Some(*h),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+fn ct_string_list(v: &CtValue) -> Option<Vec<String>> {
+    match v {
+        CtValue::List(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                match item {
+                    CtValue::Str(s) => out.push(s.clone()),
+                    _ => return None,
+                }
+            }
+            Some(out)
+        }
+        _ => None,
+    }
+}
+
+fn ct_cors_origins(v: &CtValue) -> Option<(bool, Vec<String>)> {
+    match v {
+        CtValue::List(_) => Some((false, ct_string_list(v)?)),
+        CtValue::Enum {
+            type_name,
+            variant,
+            args,
+        } if type_name == "HTTPCorsOrigins" => match (variant.as_str(), args.as_slice()) {
+            ("Any", _) => Some((true, Vec::new())),
+            ("List", [(_, list)]) => Some((false, ct_string_list(list)?)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn ambient_http_server_call(
+    method: &str,
+    args: &[CtValue],
+    span: Span,
+) -> Result<CtValue, Diagnostic> {
+    match method {
+        "mux" if args.is_empty() => Ok(http_handle_value(
+            "HTTPMux",
+            crate::net_http_rt::runtime_http_mux(),
+        )),
+        "json" => {
+            let status = match args.first() {
+                Some(CtValue::Int(n)) => *n,
+                _ => return Err(unsupported("core.http.server.json status", span)),
+            };
+            let body = match args.get(1) {
+                Some(CtValue::Str(s)) => s.clone(),
+                _ => {
+                    return Err(unsupported(
+                        "core.http.server.json body (ambient expects JSON text)",
+                        span,
+                    ))
+                }
+            };
+            Ok(http_handle_value(
+                "HTTPResponse",
+                crate::net_http_rt::runtime_json_response(status, body),
+            ))
+        }
+        "static_files" => {
+            let mux = args
+                .first()
+                .ok_or_else(|| unsupported("core.http.server.static_files mux", span))?;
+            let prefix = match args.get(1) {
+                Some(CtValue::Str(s)) => s.clone(),
+                _ => return Err(unsupported("core.http.server.static_files prefix", span)),
+            };
+            let root = match args.get(2) {
+                Some(CtValue::Str(s)) => s.clone(),
+                _ => return Err(unsupported("core.http.server.static_files root", span)),
+            };
+            let bool_option = |index: usize| match args.get(index) {
+                Some(CtValue::Bool(value)) => Ok(Some(*value)),
+                None => Ok(None),
+                _ => Err(unsupported("core.http.server.static_files option", span)),
+            };
+            let mux_h = http_handle_id(mux, "HTTPMux")
+                .ok_or_else(|| unsupported("core.http.server.static_files mux handle", span))?;
+            crate::net_http_rt::runtime_static_files(
+                mux_h,
+                prefix,
+                root,
+                bool_option(3)?,
+                bool_option(4)?,
+                bool_option(5)?,
+            )
+            .map_err(|e| unsupported(&e, span))?;
+            Ok(CtValue::Unit)
+        }
+        "cors_policy" => {
+            let origins = args
+                .first()
+                .ok_or_else(|| unsupported("core.http.server.cors_policy origins", span))?;
+            let (origins_any, origin_list) = ct_cors_origins(origins)
+                .ok_or_else(|| unsupported("core.http.server.cors_policy origins form", span))?;
+            let list_option = |index: usize| match args.get(index) {
+                Some(value) => ct_string_list(value)
+                    .map(Some)
+                    .ok_or_else(|| unsupported("core.http.server.cors_policy list", span)),
+                None => Ok(None),
+            };
+            let credentials = match args.get(3) {
+                Some(CtValue::Bool(value)) => Some(*value),
+                None => None,
+                _ => return Err(unsupported("core.http.server.cors_policy credentials", span)),
+            };
+            let max_age = match args.get(4) {
+                Some(CtValue::Int(value)) => Some(*value),
+                None => None,
+                _ => return Err(unsupported("core.http.server.cors_policy max_age", span)),
+            };
+            match crate::net_http_rt::runtime_cors_policy(
+                origins_any,
+                origin_list,
+                list_option(1)?,
+                list_option(2)?,
+                credentials,
+                max_age,
+            ) {
+                Ok(h) => Ok(CtValue::ResOk(Box::new(http_handle_value(
+                    "HTTPCorsPolicy",
+                    h,
+                )))),
+                Err(error) => Ok(CtValue::ResErr(Box::new(error.value))),
+            }
+        }
+        "cors" => {
+            let mux = args
+                .first()
+                .ok_or_else(|| unsupported("core.http.server.cors mux", span))?;
+            let policy = args
+                .get(1)
+                .ok_or_else(|| unsupported("core.http.server.cors policy", span))?;
+            let mux_h = http_handle_id(mux, "HTTPMux")
+                .ok_or_else(|| unsupported("core.http.server.cors mux handle", span))?;
+            let policy_h = http_handle_id(policy, "HTTPCorsPolicy")
+                .ok_or_else(|| unsupported("core.http.server.cors policy handle", span))?;
+            crate::net_http_rt::runtime_cors(mux_h, policy_h).map_err(|e| unsupported(&e, span))?;
+            Ok(CtValue::Unit)
+        }
+        other => Err(unsupported(
+            &format!("core.http.server.{other} ambient"),
+            span,
+        )),
+    }
+}
+
+fn ambient_http_handle(
+    op: &str,
+    recv: &mut CtValue,
+    args: &mut [CtValue],
+    span: Span,
+) -> Option<Result<CtValue, Diagnostic>> {
+    if op == "HTTPJSONDecodeError" {
+        return Some(Ok(CtValue::ResErr(Box::new(
+            crate::net_http_rt::runtime_http_json_decode_error(),
+        ))));
+    }
+    if !(op.starts_with("HTTPClient:") || op.starts_with("HTTPServer:")) {
+        return None;
+    }
+    let result = match op {
+        "HTTPServer:HTTPRequest:json" if args.is_empty() => {
+            let request = http_handle_id(recv, "HTTPRequest")
+                .ok_or_else(|| unsupported("HTTPRequest.json receiver", span));
+            request.and_then(|request| {
+                let body = crate::net_http_rt::runtime_http_req_body(request)
+                    .map_err(|error| unsupported(&error, span))?;
+                let result = crate::net_http_rt::runtime_http_body_json_text(body, None)
+                    .map_err(|error| unsupported(&error, span))?;
+                Ok(http_json_text_result(result))
+            })
+        }
+        "HTTPClient:HTTPResponse:json" if args.len() <= 1 => {
+            let response = http_handle_id(recv, "HTTPResponse")
+                .ok_or_else(|| unsupported("HTTPResponse.json receiver", span));
+            response.and_then(|response| {
+                let body = crate::net_http_rt::runtime_http_resp_body(response)
+                    .map_err(|error| unsupported(&error, span))?;
+                let limit = match args.first() {
+                    Some(CtValue::Int(limit)) => Some(*limit),
+                    None => None,
+                    _ => return Err(unsupported("HTTPResponse.json limit", span)),
+                };
+                let result = crate::net_http_rt::runtime_http_body_json_text(body, limit)
+                    .map_err(|error| unsupported(&error, span))?;
+                Ok(http_json_text_result(result))
+            })
+        }
+        "HTTPClient:HTTPBody:json" | "HTTPServer:HTTPBody:json" if args.len() == 1 => {
+            let body = http_handle_id(recv, "HTTPBody")
+                .ok_or_else(|| unsupported("HTTPBody.json receiver", span));
+            body.and_then(|body| {
+                let Some(CtValue::Int(limit)) = args.first() else {
+                    return Err(unsupported("HTTPBody.json limit", span));
+                };
+                let result =
+                    crate::net_http_rt::runtime_http_body_json_text(body, Some(*limit))
+                        .map_err(|error| unsupported(&error, span))?;
+                Ok(http_json_text_result(result))
+            })
+        }
+        "HTTPClient:HTTPRequest:body" if args.len() == 1 => {
+            let request = http_handle_id(recv, "HTTPRequest")
+                .ok_or_else(|| unsupported("HTTPRequest.body receiver", span));
+            request.and_then(|request| {
+                let Some(CtValue::Str(body)) = args.first() else {
+                    return Err(unsupported("HTTPRequest.body text", span));
+                };
+                let handle = crate::net_http_rt::runtime_http_request_body(request, body.clone())
+                    .map_err(|error| unsupported(&error, span))?;
+                Ok(http_handle_value("HTTPRequest", handle))
+            })
+        }
+        _ => Err(unsupported(&format!("HTTP ambient handle `{op}`"), span)),
+    };
+    Some(result)
+}
+
+fn http_json_text_result(result: Result<String, CtValue>) -> CtValue {
+    match result {
+        Ok(text) => CtValue::ResOk(Box::new(CtValue::Str(text))),
+        Err(error) => CtValue::ResErr(Box::new(error)),
     }
 }

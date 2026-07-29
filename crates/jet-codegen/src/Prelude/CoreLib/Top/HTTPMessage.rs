@@ -35,6 +35,91 @@ enum JetHTTPError {
     Internal { incident_id: String },
 }
 
+enum JetHTTPErrorSurfacePayload {
+    Unit,
+    Int {
+        field: &'static str,
+        value: i64,
+    },
+    Text {
+        field: &'static str,
+        value: String,
+    },
+    Operation {
+        field: &'static str,
+        variant: &'static str,
+        ordinal: i64,
+    },
+}
+
+struct JetHTTPErrorSurfaceParts {
+    variant: &'static str,
+    ordinal: i64,
+    payload: JetHTTPErrorSurfacePayload,
+}
+
+/// Canonical CoreLib shape used by engine adapters to marshal `HTTPError`.
+/// Ordinals follow the ratified surface enum order, not Rust declaration order.
+fn jet_http_error_surface_parts(error: JetHTTPError) -> JetHTTPErrorSurfaceParts {
+    let unit = |variant, ordinal| JetHTTPErrorSurfaceParts {
+        variant,
+        ordinal,
+        payload: JetHTTPErrorSurfacePayload::Unit,
+    };
+    let int = |variant, ordinal, field, value| JetHTTPErrorSurfaceParts {
+        variant,
+        ordinal,
+        payload: JetHTTPErrorSurfacePayload::Int { field, value },
+    };
+    let text = |variant, ordinal, field, value| JetHTTPErrorSurfaceParts {
+        variant,
+        ordinal,
+        payload: JetHTTPErrorSurfacePayload::Text { field, value },
+    };
+    match error {
+        JetHTTPError::InvalidMethod => unit("InvalidMethod", 0),
+        JetHTTPError::InvalidUrl => unit("InvalidUrl", 1),
+        JetHTTPError::InvalidHeader => unit("InvalidHeader", 2),
+        JetHTTPError::InvalidStatus => unit("InvalidStatus", 3),
+        JetHTTPError::BodyConsumed => unit("BodyConsumed", 4),
+        JetHTTPError::InvalidFraming => unit("InvalidFraming", 5),
+        JetHTTPError::UnsupportedEncoding => unit("UnsupportedEncoding", 6),
+        JetHTTPError::Cancelled => unit("Cancelled", 7),
+        JetHTTPError::BodyTooLarge { limit } => int("BodyTooLarge", 8, "limit", limit),
+        JetHTTPError::Resolve { host } => text("Resolve", 9, "host", host),
+        JetHTTPError::Connect { address } => text("Connect", 10, "address", address),
+        JetHTTPError::TLS { stage } => text("TLS", 11, "stage", stage),
+        JetHTTPError::Timeout { phase } => text("Timeout", 12, "phase", phase),
+        JetHTTPError::Proxy { stage } => text("Proxy", 13, "stage", stage),
+        JetHTTPError::Redirect { reason } => text("Redirect", 14, "reason", reason),
+        JetHTTPError::Protocol { version } => text("Protocol", 15, "version", version),
+        JetHTTPError::IO { operation } => text("IO", 16, "operation", operation),
+        JetHTTPError::Policy { reason } => text("Policy", 17, "reason", reason),
+        JetHTTPError::ResourceUnavailable { resource } => {
+            text("ResourceUnavailable", 18, "resource", resource)
+        }
+        JetHTTPError::Internal { incident_id } => {
+            text("Internal", 19, "incident_id", incident_id)
+        }
+        JetHTTPError::UnsupportedTarget { operation } => {
+            let (variant, ordinal) = match operation {
+                JetHTTPOperation::ClientConnect => ("ClientConnect", 0),
+                JetHTTPOperation::ServerBind => ("ServerBind", 1),
+                JetHTTPOperation::ServeListener => ("ServeListener", 2),
+            };
+            JetHTTPErrorSurfaceParts {
+                variant: "UnsupportedTarget",
+                ordinal: 20,
+                payload: JetHTTPErrorSurfacePayload::Operation {
+                    field: "operation",
+                    variant,
+                    ordinal,
+                },
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct JetHTTPMethod(String);
 
@@ -564,9 +649,32 @@ fn jet_http_body_text(body: &JetHTTPBody, limit: i64) -> Result<String, JetHTTPE
     body.text(limit)
 }
 
+fn jet_http_body_json_text(body: &JetHTTPBody, limit: i64) -> Result<String, JetHTTPError> {
+    jet_http_body_text(body, limit)
+}
+
+fn jet_http_body_json_text_defaulted(
+    body: &JetHTTPBody,
+    limit: Option<i64>,
+) -> Result<String, JetHTTPError> {
+    jet_http_body_json_text(body, limit.unwrap_or(JET_HTTP_MAX_BODY_BYTES as i64))
+}
+
+fn jet_http_json_decode_error() -> JetHTTPError {
+    JetHTTPError::InvalidFraming
+}
+
 fn jet_http_body_json<T: user_Decode>(body: &JetHTTPBody, limit: i64) -> Result<T, JetHTTPError> {
-    let text = jet_http_body_text(body, limit)?;
-    jet_enc_json_decode(&text).map_err(|_| JetHTTPError::InvalidFraming)
+    let text = jet_http_body_json_text(body, limit)?;
+    jet_enc_json_decode(&text).map_err(|_| jet_http_json_decode_error())
+}
+
+fn jet_http_body_json_defaulted<T: user_Decode>(
+    body: &JetHTTPBody,
+    limit: Option<i64>,
+) -> Result<T, JetHTTPError> {
+    let text = jet_http_body_json_text_defaulted(body, limit)?;
+    jet_enc_json_decode(&text).map_err(|_| jet_http_json_decode_error())
 }
 
 fn jet_http_body_copy_to(
