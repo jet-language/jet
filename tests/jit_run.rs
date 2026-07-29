@@ -99,6 +99,81 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn args_parse_or_exit_runs_resident_for_return_help_and_usage_error() {
+    if skip_if_cranelift_host_unsupported() {
+        return;
+    }
+    let dir = common::unique_tmp("jit_args_parse_or_exit");
+    fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("args.jet");
+    fs::write(
+        &file,
+        r#"use core.args as args
+use core.io as io
+
+fn run() {
+    spec :: args.spec()
+        .flag("verbose", "print extra detail")
+    parsed :: spec.parse_or_exit(io.args())
+    print(parsed.flag("verbose"))
+}
+"#,
+    )
+    .unwrap();
+
+    let run = |case: &str, arg: &str| {
+        Command::new(env!("CARGO_BIN_EXE_jet"))
+            .arg("run")
+            .arg(&file)
+            .arg("--trace-tiers")
+            .arg("--")
+            .arg(arg)
+            .env("JET_RUN_CACHE_DIR", dir.join(format!("cache_{case}")))
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run parse_or_exit resident fixture")
+    };
+    let assert_no_fallback = |case: &str, output: &Output| {
+        let trace = String::from_utf8_lossy(&output.stderr);
+        assert!(!trace.contains("tier0 interp"), "{case} trace:\n{trace}");
+        assert!(!trace.contains("E0956"), "{case} trace:\n{trace}");
+    };
+
+    let normal = run("normal", "--verbose");
+    assert_eq!(normal.status.code(), Some(0));
+    assert_eq!(String::from_utf8_lossy(&normal.stdout), "true\n");
+    let normal_trace = String::from_utf8_lossy(&normal.stderr);
+    assert!(
+        normal_trace.contains("run") && normal_trace.contains("tier1 native"),
+        "normal trace:\n{normal_trace}"
+    );
+    assert_no_fallback("normal", &normal);
+
+    let help = run("help", "--help");
+    assert_eq!(help.status.code(), Some(0));
+    let help_stdout = String::from_utf8_lossy(&help.stdout);
+    assert!(
+        help_stdout.contains("Usage: ") && help_stdout.contains("[options]"),
+        "{help_stdout}"
+    );
+    assert!(help_stdout.contains("--help"), "{help_stdout}");
+    assert_no_fallback("help", &help);
+
+    let bad = run("bad", "--verbse");
+    assert_eq!(bad.status.code(), Some(2));
+    assert!(bad.stdout.is_empty());
+    let bad_stderr = String::from_utf8_lossy(&bad.stderr);
+    assert!(bad_stderr.contains("unknown option `--verbse`"), "{bad_stderr}");
+    assert!(
+        bad_stderr.contains("did you mean `--verbose`?"),
+        "{bad_stderr}"
+    );
+    assert_no_fallback("bad", &bad);
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 fn jet_string(value: &Path) -> String {
     value
         .to_string_lossy()
