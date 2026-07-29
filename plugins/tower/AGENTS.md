@@ -55,6 +55,7 @@ tower lint [--json] [--docs] # durability sweeper over the live board (+
                               # docs/ballots/*.md scan with --docs); exit 1
                               # on any finding, 0 clean
 tower question list --open   # owner questions — answer these before building
+tower message list [--open]  # all durable card messages, or only open ones
 tower card show '#12'        # one card, with computed lane + decisions
 tower card list --tag needs-triage --json   # triage / wayfinder tag filter
 tower card list --parent '#12' --json       # wayfinder map children
@@ -102,6 +103,8 @@ tower card update '#12' --phase building --log "started X" --by me
 tower card update '#12' --plan "1. ... 2. ..." --by me
 tower card update '#12' --refs "docs/spec/foo.md,examples/features/bar.jet"  # explicit doc pointers (also auto-harvested from body/plan into `tower brief`)
 tower question answer <qid> --text "..." --by me
+tower message add '#12' --text "..." --by me
+tower message done <id> --by owner
 tower decision add --file ballot.json --by me # or --file - for stdin, --draft if unfinished
 tower card update '#12' --phase verify --log "claiming done: tests green" --by me
 tower card release '#12' --by me              # if you stop without finishing
@@ -269,6 +272,7 @@ GET  /api/brief?card=&agent=&claim=0|1   one-shot work packet (#462); no
                                      picker; claims only when agent= AND
                                      claim=1 are both given
 GET  /api/events?limit=50           audit trail
+GET  /api/messages?card=&open=0|1   durable card messages; open=1 filters
 POST /api/card/add|update|claim|release|delete   (release: {handoff})
 POST /api/card/criteria-add {id,text}  criteria-meet {id,n,evidence}  criteria-verify {id,n,evidence}
 POST /api/decision/add|update|delete   (add: {draft}; update: {ready})
@@ -277,6 +281,9 @@ POST /api/acceptance/challenge {decisionId,outcome}     (owner UI, loopback or a
 POST /api/acceptance/resolve {challenge,decisionId,outcome,comment}  (single-use)
 POST /api/verdict {id,outcome,title}                    (owner-only; mints a ratified decision)
 POST /api/question/add|answer|delete
+POST /api/message/add {cardId,text}
+POST /api/message/done {id}                    (owner-only)
+POST /api/done/clear                           (owner-only; clears completed cards, not messages)
 POST /api/idea/add|update|delete|promote
 POST /api/epoch/add|update|current
 POST /api/milestone/add|update|delete

@@ -1,6 +1,6 @@
 import { boardEpochs, cardMatches, sortCards, ownerVerifyQueue, openAcceptanceBallot } from './board-state.js';
 import { renderMarkdown, splitBlocks } from './markdown.js';
-import { buildDoneMessageQueue } from './done-messages.js';
+import { buildDoneMessageQueue, renderDoneMessageQueue } from './done-messages.js';
 
 // Tower client. Vanilla JS, no framework, no build.
 // Two views: Now (everything blocked on the owner) and Board (epochs →
@@ -352,7 +352,7 @@ function doneMessageBlock() {
   const cursor = S.meta.completionCursor;
   if (!cursor && !doneQueueInit) {
     doneQueueInit = true;
-    api('done/clear', {}).catch(() => {});
+    api('done/clear', { by: 'owner' }).catch(() => {});
   }
   const { done, messages } = buildDoneMessageQueue({
     cursor,
@@ -360,30 +360,9 @@ function doneMessageBlock() {
     questions: S.questions || [],
   });
   if (!done.length && !messages.length) return null;
-  const doneRows = done.map(item => `<button class="queue__row" data-card="${esc(item.cardId)}">
-      <span class="queue__marker queue__marker--done">${item.marker}</span>
-      <span>${esc(item.text)}</span>
-    </button>`).join('');
-  const messageRows = messages.map(item => `<div class="queue__row queue__row--message">
-      <span class="queue__marker queue__marker--message">${item.marker}</span>
-      <button class="queue__message" data-card="${esc(item.cardId)}">
-        <b>${esc(item.ref)} ${esc(item.title)}</b><span>${esc(item.text)}</span>
-      </button>
-      <button class="btn btn--sm" data-message-done="${esc(item.id)}">Done</button>
-    </div>`).join('');
-  const since = cursor
-    ? ` since ${new Date(cursor).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
-    : '';
-  const node = el(`<div class="queue">
-      <div class="queue__head">
-        <div class="queue__h"><span class="queue__signal" aria-hidden="true">✦</span>Done and messages</div>
-        <span class="queue__count">${done.length} done${since} · ${messages.length} message${messages.length === 1 ? '' : 's'}</span>
-        ${done.length ? '<button class="btn btn--sm" data-clear-done>Clear done cards</button>' : ''}
-      </div>
-      ${done.length ? `<div class="queue__section"><div class="queue__label">Completed</div>${doneRows}</div>` : ''}
-      ${messages.length ? `<div class="queue__section"><div class="queue__label">Messages</div>${messageRows}</div>` : ''}
-    </div>`);
-  $('[data-clear-done]', node)?.addEventListener('click', () => api('done/clear', {}));
+  const node = el(renderDoneMessageQueue({ done, messages, since: cursor }));
+  $('[data-clear-done]', node)?.addEventListener('click', () =>
+    api('done/clear', { by: 'owner' }));
   node.querySelectorAll('[data-message-done]').forEach(button => button.addEventListener('click', () =>
     api('message/done', { id: button.dataset.messageDone, by: 'owner' })));
   node.querySelectorAll('[data-card]').forEach(button => button.addEventListener('click', () =>
