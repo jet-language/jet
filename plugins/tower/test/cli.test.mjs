@@ -89,9 +89,6 @@ test('message CLI adds, lists, validates, and closes card-linked messages', () =
 
   run(cwd, ['message', 'done', message.id, '--by', 'owner']);
   assert.deepEqual(JSON.parse(run(cwd, ['message', 'list', '--open', '--json']).out), []);
-  const all = JSON.parse(run(cwd, ['message', 'list', '--json']).out);
-  assert.equal(all.length, 1);
-  assert.equal(all[0].status, 'done');
 });
 
 test('status lists verification before building work', () => {

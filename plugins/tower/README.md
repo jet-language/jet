@@ -109,8 +109,7 @@ tower init | serve | import
 Agents can leave a durable card message with
 `tower message add '#N' --text "…" --by agent-name`. The Now page keeps each
 message until the owner marks it done. `tower message list` shows open
-and done messages; add `--open` to show only open messages.
-`tower message done <id> --by owner` closes one message. Clearing
+messages. `tower message done <id> --by owner` closes one message. Clearing
 completed cards in the Now page does not clear messages.
 
 `tower brief` is the one-shot agent work packet (#462): card, live blocker
@@ -141,7 +140,7 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
 - **Git linking** — `tower githook` installs a post-commit hook: commits
   mentioning `#12` append themselves to that card's log.
 - **⌘K** — jump to any card, ballot, or view; `j/k` walk the Now queue.
-- **Done & messages** — Now shows completed cards since the last clear and
+- **Done and messages** — Now shows completed cards since the last clear and
   durable card-linked agent messages. Clearing completed cards does not clear
   messages. The owner closes each message with its own Done button.
 - **Recently decided** — a quiet, collapsed strip on Now lists every ratified
