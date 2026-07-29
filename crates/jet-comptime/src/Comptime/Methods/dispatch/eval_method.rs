@@ -870,6 +870,26 @@ impl<'a> Interp<'a> {
             }
         }
 
+        if recv_type == Some("Regex") && method == "replace_all_with" && args.len() == 2 {
+            let recv = match evaluated_receiver.take() {
+                Some(value) => value,
+                None => self.eval(receiver, scope)?,
+            };
+            let argv = vec![
+                self.eval(&args[0].expr, scope)?,
+                self.eval(&args[1].expr, scope)?,
+            ];
+            let mut invoke = |callback: CtValue, values: Vec<CtValue>| {
+                self.call_inline_closure(&callback, values, span, scope)
+            };
+            if let Some(result) =
+                eval_regex_replace_all_with(&recv, &argv, span, &mut invoke)
+            {
+                return result;
+            }
+            evaluated_receiver = Some(recv);
+        }
+
         // c139: higher-order methods — need `&mut self` to invoke a closure
         // argument, so (like the mutating methods just below) they can't be
         // plain `apply_method` entries. Guarded to the receiver shapes they

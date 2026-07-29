@@ -2120,12 +2120,6 @@ pub(in super::super) fn apply_regex_method(
         "split_limit" => regex_split_limit(call_args, span),
         "replace" => regex_replace(call_args, span, false),
         "replace_all" => regex_replace(call_args, span, true),
-        "replace_all_with" => {
-            return Some(Err(unsupported(
-                "regex.replace_all_with callback outside the TIR evaluator",
-                span,
-            )));
-        }
         "match" => regex_match(call_args, span),
         _ => return None,
     })
