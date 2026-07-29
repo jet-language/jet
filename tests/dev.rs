@@ -3069,6 +3069,17 @@ fn run() {
     print(band.start)
     print(copied.contains(4))
     print(copied == band)
+    bands :: [1..3, 8..<10]
+    print("{bands[1]#Debug}")
+    print(bands[0].start)
+    print(bands[0].contains(3))
+    total := 0
+    loop n; copied {
+        total += n
+    }
+    print(total)
+    values :: [10, 20, 30, 40, 50, 60]
+    print(~values[copied])
     band = 7..9
     print(band)
 }
@@ -3077,12 +3088,12 @@ fn run() {
     let unboxed_run = run_cranelift_without_fallback(unboxed, "range_unboxed");
     assert_eq!(
         unboxed_run.stdout,
-        "Range { start: 2, end: 5, exclusive: true }\n2\ntrue\ntrue\nRange { start: 7, end: 9, exclusive: false }\n"
+        "Range { start: 2, end: 5, exclusive: true }\n2\ntrue\ntrue\nRange { start: 8, end: 10, exclusive: true }\n1\ntrue\n9\n[30, 40, 50]\nRange { start: 7, end: 9, exclusive: false }\n"
     );
     assert_eq!(
         jet_jit::struct_new_count_for_test(),
         0,
-        "Range construct/copy/pass/return/field/contains/show/equality must not call struct_new"
+        "Range construct/copy/pass/return/list/field/contains/show/equality/loop/slice must not call struct_new"
     );
 
     let src = r#"
