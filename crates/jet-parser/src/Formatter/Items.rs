@@ -449,6 +449,9 @@ impl<'a> Fmt<'a> {
 
     /// D-SHAPE2 / D-SERDE2–8: render one applied rule.
     pub(super) fn fmt_marker(&mut self, m: &Marker) {
+        if m.negated {
+            self.write("!");
+        }
         self.write(&m.name);
         if !m.args.is_empty() {
             self.write("(");

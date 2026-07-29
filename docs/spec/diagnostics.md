@@ -524,7 +524,7 @@ renumbered, and no new `W` code may be allocated.
 | E0919 | sema  | `#Inline(Always) fn` body exceeds the checked promise's statement ceiling (D-METHODMACRO1) |
 | E0920 | retired | `#InlineAlways` condensed into `#Inline(Always)`; one marker cannot conflict with itself |
 | E0921 | sema  | a reachable call violates an effective `no_alloc`, `zero_rc`, or `arena_bounded(N)` memory fact; reports the source operation, full call path, effective declaration, and declaration provenance (D-MEM-FACTS1) |
-| E0922 | sema  | explicit `Debug` derive (`#Debug`, `#[.., Debug]`, body `derive Debug;`) — `Debug` auto-derives, the opt-in spelling is retired (D-MARK-DEBUG1=A) |
+| E0922 | retired | explicit `Debug` derive retirement; superseded when D-AUTODERIVE-SYNTAX1=D restored signed `Debug` type controls |
 | E0925 | parse | `#Task`/`#Every(…)` written somewhere D-SCHEDULE1 doesn't place them — a method, or `#Every(…)` without `#Task` (card #505) |
 | E0926 | sema  | `#Every(…)`'s argument isn't a valid schedule — bad duration unit, non-positive duration, or malformed/out-of-range `"HH:MM"` (D-SCHEDULE1, card #505) |
 | E0927 | sema  | a `#Name`/`#Name` marker isn't in the registered vocabulary for its plane — a typo, or a spelling no longer supported (card #518) |
@@ -1865,20 +1865,11 @@ Implementation note: card #644 owns migration from the shipped local
 `no_alloc` denylist to this controlling transitive E0921 contract. No E0922 is
 allocated for that migration.
 
-### E0922 — explicit `Debug` derive is retired (D-MARK-DEBUG1=A)
+### E0922 — retired
 
-`Debug` auto-derives whenever every field on a struct/enum is debuggable
-(S55) — there is no opt-in spelling to write. `#Debug`, `#[.., Debug]`, and
-a body `derive Debug;` line all hit this error instead of silently doing
-nothing (the pre-D-MARK-DEBUG1 behavior).
-
-| What | Why | Fix |
-|------|-----|-----|
-| `` `Debug` derives automatically — writing it explicitly is retired ``. | Auto-derived `Debug` covers every type whose fields are all debuggable; D-MARK-DEBUG1 retired the explicit opt-in spelling so there's exactly one way to get it (I8). | Remove `Debug` here — printing already works via `{value#Debug}` interpolation; implement `Debug` by hand (`impl T.Debug { fn debug(self) => String { … } }`) only if you need custom output. |
-
-A hand-written `impl T.Debug { … }` override, and `{value#Debug}`
-interpolation/reflection lookups, are unaffected — only the explicit
-*derive* spelling is retired.
+D-AUTODERIVE-SYNTAX1=D restored `Debug` as a signed type-site control.
+`#Debug` opts in, `#!Debug` opts out, and a missing marker follows the
+package default. This diagnostic remains reserved so its code is not reused.
 
 ### E0925 — `#Task`/`#Every(…)` wrong placement (D-SCHEDULE1, card #505)
 

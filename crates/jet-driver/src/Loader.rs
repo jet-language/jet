@@ -197,8 +197,13 @@ fn load_entry_with_overlays_mode(
     // `parse_teaching` once that's declared.
     let mut inline_dep_lints: Vec<Diagnostic> = Vec::new();
     let organization_policy = load_organization_unsafe_policy()?;
-    let (project_root, pkg_dep_dirs, pkg_resolution, package_policy) = if let Some(manifest_dir) =
-        manifest_root
+    let (
+        project_root,
+        pkg_dep_dirs,
+        pkg_resolution,
+        package_policy,
+        package_auto_derive,
+    ) = if let Some(manifest_dir) = manifest_root
     {
         // Found a pkg.jet — validate it and collect dep source paths.
         let pack_path = manifest_dir.join(Syntax::PAYLOAD_FILE);
@@ -293,10 +298,11 @@ fn load_entry_with_overlays_mode(
                 // U17: declared package kinds + realized library staging dirs.
                 let resolution = collect_pkg_resolution(&raw);
                 let mut policy = organization_policy.clone();
+                let auto_derive = package_manifest.auto_derive.unwrap_or(true);
                 policy.extend(package_manifest.memory_policy);
                 let source = pack_path.display().to_string();
                 for declaration in policy.iter_mut().filter(|declaration| declaration.scope == crate::Policy::PolicyScope::Package) { declaration.source = source.clone(); }
-                (manifest_dir, dep_dirs, resolution, policy)
+                (manifest_dir, dep_dirs, resolution, policy, auto_derive)
             }
         }
     } else {
@@ -332,7 +338,13 @@ fn load_entry_with_overlays_mode(
                 }
             }
         }
-        (entry_dir, HashMap::new(), resolution, organization_policy)
+        (
+            entry_dir,
+            HashMap::new(),
+            resolution,
+            organization_policy,
+            true,
+        )
     };
 
     let mut modules = Vec::new();
@@ -353,6 +365,7 @@ fn load_entry_with_overlays_mode(
         &pkg_dep_dirs,
         &pkg_resolution,
         &package_policy,
+        package_auto_derive,
         &mut modules,
         &mut path_to_idx,
         &mut stack,
@@ -406,6 +419,7 @@ fn load_entry_with_overlays_mode(
                     &pkg_dep_dirs,
                     &pkg_resolution,
                     &package_policy,
+                    package_auto_derive,
                     &mut modules,
                     &mut path_to_idx,
                     &mut stack,
@@ -724,6 +738,7 @@ fn load_file(
     pkg_dep_dirs: &HashMap<String, PathBuf>,
     pkg_resolution: &PkgResolution,
     package_policy: &[crate::Policy::PolicyDeclaration],
+    package_auto_derive: bool,
     modules: &mut Vec<LoadedModule>,
     path_to_idx: &mut HashMap<PathBuf, usize>,
     stack: &mut Vec<PathBuf>,
@@ -795,6 +810,19 @@ fn load_file(
             Err(diags) => return Err(diags),
         }
     };
+    // Package policy governs this package, not imported dependency source.
+    let auto_derive_default = if norm.starts_with(project_root) {
+        package_auto_derive
+    } else {
+        true
+    };
+    for item in &mut prog.items {
+        match item {
+            Item::Struct(def) => def.auto_derive_default = auto_derive_default,
+            Item::Enum(def) => def.auto_derive_default = auto_derive_default,
+            _ => {}
+        }
+    }
 
     let alias = default_module_alias(path);
     stack.push(norm.clone());
@@ -876,6 +904,7 @@ fn load_file(
             pkg_dep_dirs,
             pkg_resolution,
             package_policy,
+            package_auto_derive,
             modules,
             path_to_idx,
             stack,
@@ -933,6 +962,7 @@ fn load_file(
             pkg_dep_dirs,
             pkg_resolution,
             package_policy,
+            package_auto_derive,
             modules,
             path_to_idx,
             stack,

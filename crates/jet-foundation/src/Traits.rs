@@ -175,14 +175,6 @@ impl TraitRegistry {
             for (name, span) in derives {
                 if self.local_tags.contains(name) {
                     diags.push(Generics::e0731(name, "`derive`", *span));
-                } else if name == DEBUG
-                    && crate::Policy::applied_rule(name).is_some_and(|row| {
-                        matches!(row.status, crate::Policy::RuleStatus::Retired { .. })
-                    })
-                {
-                    // D-MARK-DEBUG1=A: `Debug` auto-derives; an explicit
-                    // `#Debug`/`#[.., Debug]`/`derive Debug;` is retired.
-                    diags.push(Generics::e0922(*span));
                 }
             }
         }
@@ -745,18 +737,36 @@ impl TraitRegistry {
 
     fn compute_auto_derives(&mut self, items: &[Item]) {
         for item in items {
-            match item {
-                Item::Struct(s) if struct_auto_derive_ok(s) => {
-                    self.auto_printable.insert(s.name.clone());
-                    self.auto_debug.insert(s.name.clone());
-                    self.auto_equatable.insert(s.name.clone());
+            let (name, markers, default, qualifies) = match item {
+                Item::Struct(s) => (
+                    &s.name,
+                    &s.type_markers,
+                    s.auto_derive_default,
+                    struct_auto_derive_ok(s),
+                ),
+                Item::Enum(e) => (
+                    &e.name,
+                    &e.type_markers,
+                    e.auto_derive_default,
+                    enum_auto_derive_ok(e),
+                ),
+                _ => continue,
+            };
+            if !qualifies {
+                continue;
+            }
+            for (trait_name, derived) in [
+                (PRINTABLE, &mut self.auto_printable),
+                (EQUATABLE, &mut self.auto_equatable),
+                (DEBUG, &mut self.auto_debug),
+            ] {
+                if auto_derive_requested(markers, trait_name, default)
+                    && !self
+                        .trait_impls
+                        .contains(&(name.clone(), trait_name.to_string()))
+                {
+                    derived.insert(name.clone());
                 }
-                Item::Enum(e) if enum_auto_derive_ok(e) => {
-                    self.auto_printable.insert(e.name.clone());
-                    self.auto_debug.insert(e.name.clone());
-                    self.auto_equatable.insert(e.name.clone());
-                }
-                _ => {}
             }
         }
     }
@@ -1566,11 +1576,23 @@ impl TraitRegistry {
     }
 }
 
-fn struct_auto_derive_ok(s: &StructDef) -> bool {
+pub fn auto_derive_requested(
+    markers: &[crate::AST::Marker],
+    trait_name: &str,
+    package_default: bool,
+) -> bool {
+    markers
+        .iter()
+        .rev()
+        .find(|marker| marker.name == trait_name)
+        .map_or(package_default, |marker| !marker.negated)
+}
+
+pub fn struct_auto_derive_ok(s: &StructDef) -> bool {
     !s.fields.is_empty() && s.fields.iter().all(|f| field_auto_ok(&f.ty, &s.name))
 }
 
-fn enum_auto_derive_ok(e: &EnumDef) -> bool {
+pub fn enum_auto_derive_ok(e: &EnumDef) -> bool {
     use crate::AST::VariantPayload;
     e.variants.iter().all(|v| match &v.payload {
         VariantPayload::Unit => true,

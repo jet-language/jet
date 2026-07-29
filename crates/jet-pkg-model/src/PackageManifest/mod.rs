@@ -47,8 +47,9 @@ use super::RefSpec::{RefError, Source};
 use crate::Syntax;
 use Helpers::block_body;
 use ParseBlocks::{
-    parse_build_allow, parse_deps, parse_effects, parse_grants, parse_lints_policy, parse_package,
-    parse_memory_policy, parse_packages, parse_provider_policy, parse_trust_policy,
+    parse_auto_derive_policy, parse_build_allow, parse_deps, parse_effects, parse_grants,
+    parse_lints_policy, parse_package, parse_memory_policy, parse_packages, parse_provider_policy,
+    parse_trust_policy,
 };
 
 /// D-BUILDPROFILE1: optimization level for a named build profile. Stored in
@@ -261,6 +262,8 @@ pub struct PackManifest {
     pub lints_deny: Option<Vec<String>>,
     /// D-PACKAGE-POLICY-SCOPE1: typed package policy declarations; tightening only.
     pub memory_policy: Vec<crate::Policy::PolicyDeclaration>,
+    /// D-AUTODERIVE1=E: absent means the safe beginner default, enabled.
+    pub auto_derive: Option<bool>,
 }
 
 /// Why a `pkg.jet` package manifest could not be parsed. These are internal
@@ -417,6 +420,10 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         Some(body) => parse_memory_policy(&body)?,
         None => Vec::new(),
     };
+    let auto_derive = match block_body(&text, Syntax::MANIFEST_BLOCK_POLICY, '{', '}') {
+        Some(body) => parse_auto_derive_policy(&body)?,
+        None => None,
+    };
 
     for &section in RESERVED_SECTIONS {
         if let Some(body) = block_body(&text, section, '{', '}') {
@@ -440,6 +447,7 @@ pub fn parse(text: &str) -> Result<PackManifest, ManifestError> {
         provider_policy,
         lints_deny,
         memory_policy,
+        auto_derive,
     })
 }
 
@@ -494,6 +502,18 @@ deps: {
         assert_eq!(m.package.version, "0.1.0");
         assert_eq!(m.package.edition.as_deref(), Some("2026"));
         assert_eq!(m.package.license.as_deref(), Some("MIT OR Apache-2.0"));
+    }
+
+    #[test]
+    fn parses_auto_derive_package_policy() {
+        let disabled = parse(
+            "payload: { name: \"app\", version: \"1\" }\npolicy: .{ auto_derive: false }",
+        )
+        .unwrap();
+        assert_eq!(disabled.auto_derive, Some(false));
+
+        let defaulted = parse("payload: { name: \"app\", version: \"1\" }").unwrap();
+        assert_eq!(defaulted.auto_derive, None);
     }
 
     #[test]

@@ -424,6 +424,7 @@ mod tests {
             methods: vec![method("tag", true)],
             trait_impls: Vec::new(),
             derives: vec![("Debug".to_string(), span())],
+            auto_derive_default: true,
             is_published_schema: false,
             published_schema_span: None,
             is_single_use: false,

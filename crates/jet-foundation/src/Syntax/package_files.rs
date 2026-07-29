@@ -304,11 +304,11 @@ pub const ATTR_CODABLE: &str = "Codable"; // D-SERDE4
 pub const ATTR_ENCODE: &str = "Encode"; // D-SERDE4
 pub const ATTR_DECODE: &str = "Decode"; // D-SERDE4
                                         // D-MARKERMOVE3 (B, ratified 2026-07-02): the other built-in derive markers
-                                        // that join Codable/Encode/Decode on the contract plane (`@`). `Debug` is
-                                        // NOT one of these — D-MARK-DEBUG1=A retired the explicit derive spelling
-                                        // outright (E0922, Traits.rs); it auto-derives instead (S55). User derives
-                                        // (`derive T.Wire { … }`, applied as `#[Wire]`) stay `#` — the built-in/user
-                                        // line is the `@`/`#` plane line.
+                                        // that join Codable/Encode/Decode on the contract plane (`@`).
+                                        // D-AUTODERIVE-SYNTAX1=D restores Debug as a signed type-site auto-derive
+                                        // control beside Printable and Equatable. User derives (`derive T.Wire {
+                                        // … }`, applied as `#[Wire]`) stay `#` — the built-in/user line is the
+                                        // `@`/`#` plane line.
 pub const ATTR_SUMMARIZE: &str = "Summarize"; // D-MARKERMOVE3
 pub const ATTR_COMPARABLE: &str = "Comparable"; // D-MARKERMOVE3
                                                 // Per-field attributes (D-SERDE5 = A), written `#[…]` before a field.

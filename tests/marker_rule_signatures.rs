@@ -35,6 +35,17 @@ fn parse_codes(source: &str) -> Vec<String> {
 }
 
 #[test]
+fn signed_auto_derive_markers_parse_on_types() {
+    for source in [
+        "#!Printable\nstruct Quiet { value: Int }\nfn run() {}",
+        "#[!Debug, !Equatable, Printable]\nstruct Mixed { value: Int }\nfn run() {}",
+    ] {
+        let diagnostics = parse_codes(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}\n{source}");
+    }
+}
+
+#[test]
 fn field_and_variant_sites_reject_every_non_applicable_example() {
     for source in [
         "#[Task, Static] struct Bad { value: Int }\nfn run() {}",

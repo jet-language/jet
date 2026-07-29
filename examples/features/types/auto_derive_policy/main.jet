@@ -1,0 +1,29 @@
+// D-AUTODERIVE1=E / D-AUTODERIVE-SYNTAX1=D:
+// Package policy sets the default. Signed type markers opt individual traits
+// in or out. A hand-written implementation wins over both.
+
+#[Printable, !Debug, !Equatable]
+struct Visible {
+    value: Int
+}
+
+#Debug
+struct Diagnostic {
+    value: Int
+}
+
+struct Secret {
+    value: Int
+}
+
+impl Secret.Debug {
+    fn debug(self) => String {
+        return "[redacted]"
+    }
+}
+
+fn run() {
+    print(Visible.{ value: 7 })
+    print("{Diagnostic.{ value: 8 }#Debug}")
+    print("{Secret.{ value: 9 }#Debug}")
+}

@@ -57,7 +57,11 @@ pub(super) fn parse_memory_policy(body: &str) -> Result<Vec<crate::Policy::Polic
     let mut out = Vec::new();
     for (name, raw) in key_value_entries(body) {
         let Some(key) = crate::Policy::PolicyKey::parse(&name) else {
-            if matches!(name.as_str(), "trust" | "lints" | "providers") { continue; }
+            if matches!(name.as_str(), "trust" | "lints" | "providers")
+                || name == Syntax::MANIFEST_POLICY_AUTO_DERIVE
+            {
+                continue;
+            }
             return Err(ManifestError::BadMemoryPolicy { detail: format!("`{name}` is not a registered package policy") });
         };
         let value = match key {
@@ -84,6 +88,27 @@ pub(super) fn parse_memory_policy(body: &str) -> Result<Vec<crate::Policy::Polic
         crate::Policy::resolve(key, out.clone()).map_err(|error| ManifestError::BadMemoryPolicy { detail: format!("conflicting `{}` declarations: {error:?}", key.name()) })?;
     }
     Ok(out)
+}
+
+pub(super) fn parse_auto_derive_policy(body: &str) -> Result<Option<bool>, ManifestError> {
+    let values = key_value_entries(body)
+        .into_iter()
+        .filter(|(name, _)| name == Syntax::MANIFEST_POLICY_AUTO_DERIVE)
+        .map(|(_, raw)| match raw.trim() {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            _ => Err(ManifestError::BadMemoryPolicy {
+                detail: "`auto_derive` must be `true` or `false`".to_string(),
+            }),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    match values.as_slice() {
+        [] => Ok(None),
+        [value] => Ok(Some(*value)),
+        _ => Err(ManifestError::BadMemoryPolicy {
+            detail: "`auto_derive` may be declared once".to_string(),
+        }),
+    }
 }
 
 pub(super) fn parse_deps(body: &str) -> Result<Vec<Dep>, ManifestError> {

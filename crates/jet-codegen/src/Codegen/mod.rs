@@ -759,6 +759,9 @@ pub(crate) fn emit_synthetic_display_trait(out: &mut String) {
     out.push_str("pub trait user_Display {\n");
     out.push_str("    fn display(&self) -> String;\n");
     out.push_str("}\n\n");
+    out.push_str("pub trait user_Debug {\n");
+    out.push_str("    fn debug(&self) -> String;\n");
+    out.push_str("}\n\n");
 }
 
 pub(crate) fn emit_synthetic_operator_traits(out: &mut String) {
