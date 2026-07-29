@@ -56,6 +56,9 @@ tower lint [--json] [--docs] # durability sweeper over the live board (+
                               # on any finding, 0 clean
 tower question list --open   # owner questions — answer these before building
 tower card show '#12'        # one card, with computed lane + decisions
+tower card list --tag needs-triage --json   # triage / wayfinder tag filter
+tower card list --parent '#12' --json       # wayfinder map children
+tower card update '#12' --add-tag ready-for-agent --by me
 tower events --limit 20      # who did what, when
 ```
 
@@ -73,6 +76,12 @@ Report completions and blockers on the card itself: a `--log` entry when you
 advance it, a `tower question answer` when the owner asked something. The
 board (and the live SSE UI) is how the owner finds out — there is no
 side channel.
+
+Cards may carry free-form **`tags[]`** (triage roles like `needs-triage` /
+`ready-for-agent`, wayfinder labels like `wayfinder:map`) and an optional
+**`parentId`** (child of a wayfinder map). These are orthogonal to `phase`
+— do not encode triage state in phases. See `docs/agents/issue-tracker.md`
+and `docs/agents/triage-labels.md` in the host repo.
 
 Auth note: localhost is exempt. Remote access reads `auth.token` from the
 untracked `plugins/tower/.tower/secrets.json`; never put credentials in `config.json`.

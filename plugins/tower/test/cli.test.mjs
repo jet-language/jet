@@ -158,3 +158,30 @@ test('cli refuses legacy secrets in tracked config with safe migration guidance'
   assert.match(r.out, /\.tower\/secrets\.json/);
   assert.equal(r.out.includes(marker), false);
 });
+
+test('cli card tags, parent, and list filters', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-tags-'));
+  run(cwd, ['init', '--name', 'Tags']);
+  run(cwd, ['epoch', 'add', 'e1', '--name', 'E1']);
+  run(cwd, ['epoch', 'current', 'e1']);
+  const map = JSON.parse(run(cwd, [
+    'card', 'add', '--title', 'Map', '--add-tag', 'wayfinder:map,needs-triage', '--json', '--by', 'tester',
+  ]).out);
+  assert.deepEqual(map.tags, ['wayfinder:map', 'needs-triage']);
+  const child = JSON.parse(run(cwd, [
+    'card', 'add', '--title', 'Child', '--parent', `#${map.num}`, '--add-tag', 'wayfinder:research', '--json', '--by', 'tester',
+  ]).out);
+  assert.equal(child.parentId, map.id);
+  run(cwd, ['card', 'update', `#${map.num}`, '--remove-tag', 'needs-triage', '--add-tag', 'ready-for-agent', '--by', 'tester']);
+  const tagged = JSON.parse(run(cwd, ['card', 'list', '--tag', 'ready-for-agent', '--json']).out);
+  assert.equal(tagged.length, 1);
+  assert.equal(tagged[0].num, map.num);
+  const kids = JSON.parse(run(cwd, ['card', 'list', '--parent', `#${map.num}`, '--json']).out);
+  assert.equal(kids.length, 1);
+  assert.equal(kids[0].num, child.num);
+  const untagged = JSON.parse(run(cwd, ['card', 'add', '--title', 'Plain', '--json', '--by', 'tester']).out);
+  assert.deepEqual(untagged.tags, []);
+  const plain = JSON.parse(run(cwd, ['card', 'list', '--untagged', '--json']).out);
+  assert.equal(plain.some(c => c.num === untagged.num), true);
+  assert.equal(plain.some(c => c.num === map.num), false);
+});

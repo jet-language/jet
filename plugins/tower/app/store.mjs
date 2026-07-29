@@ -287,7 +287,15 @@ export function normalize(s) {
     if (e) e.status = 'active';
   }
   delete s.meta.currentEpoch;
-  for (const c of s.cards) { c.blockedBy ||= []; c.log ||= []; c.criteria ||= []; c.refs ||= []; c.needsAcceptance = !!c.needsAcceptance; }
+  for (const c of s.cards) {
+    c.blockedBy ||= [];
+    c.log ||= [];
+    c.criteria ||= [];
+    c.refs ||= [];
+    c.tags ||= [];
+    if (!('parentId' in c)) c.parentId = null;
+    c.needsAcceptance = !!c.needsAcceptance;
+  }
   for (const d of s.decisions) d.draft = !!d.draft;
   return s;
 }
@@ -563,6 +571,28 @@ function touchCard(card, by) {
   card.updatedBy = by || 'agent';
 }
 
+function normalizeTags(raw) {
+  if (raw == null) return [];
+  const list = Array.isArray(raw) ? raw : String(raw).split(',');
+  const out = [];
+  const seen = new Set();
+  for (const item of list) {
+    const tag = String(item ?? '').trim();
+    if (!tag) continue;
+    if (seen.has(tag)) continue;
+    seen.add(tag);
+    out.push(tag);
+  }
+  return out;
+}
+
+function resolveParentId(s, parent) {
+  if (parent == null || parent === '') return null;
+  const found = findCard(s, parent);
+  if (!found) fail('E_NOT_FOUND', `parent: no card ${parent}`);
+  return found.id;
+}
+
 export function addCard(s, p, config) {
   if (!p.title || !String(p.title).trim()) fail('E_INVALID', 'card needs a title');
   checkEnum(p.kind, config.kinds, 'kind');
@@ -574,6 +604,11 @@ export function addCard(s, p, config) {
   checkEpoch(s, epoch); checkMilestone(s, p.milestoneId);
   checkCardMilestone(s, { epoch, track, milestoneId: p.milestoneId });
   checkRefs(p.refs);
+  const parentId = 'parentId' in p || 'parent' in p
+    ? resolveParentId(s, p.parentId ?? p.parent)
+    : null;
+  if (parentId && parentId === (p.id || null))
+    fail('E_INVALID', 'card cannot parent itself');
   const card = {
     id: p.id || newId('c'),
     num: p.num || s.meta.nextNum++,
@@ -592,6 +627,8 @@ export function addCard(s, p, config) {
     log: p.log || [],
     criteria: Array.isArray(p.criteria) ? p.criteria.map((it, i) => normalizeCriterion(it, i)) : [],
     refs: Array.isArray(p.refs) ? p.refs : [],
+    tags: normalizeTags(p.tags),
+    parentId,
     needsAcceptance: !!p.needsAcceptance,
     created: now(), updated: now(), updatedBy: p.by || 'agent',
   };
@@ -601,7 +638,7 @@ export function addCard(s, p, config) {
   return card;
 }
 
-const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs'];
+const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs', 'tags', 'parentId'];
 
 // D-TWR-CRIT1=C / D-TWRGUARD1=C: gate --phase done. Criteria remain
 // owner-soft, but needsAcceptance is transport-hard: caller attribution can
@@ -717,6 +754,19 @@ export function updateCard(s, ref, patch, config) {
       fail('E_NOT_FOUND', `blockedBy: no card or decision ${id}`);
   }
   if ('refs' in patch) checkRefs(patch.refs);
+  if ('tags' in patch) patch.tags = normalizeTags(patch.tags);
+  if ('parentId' in patch || 'parent' in patch) {
+    const resolved = resolveParentId(s, 'parentId' in patch ? patch.parentId : patch.parent);
+    if (resolved === c.id) fail('E_INVALID', 'card cannot parent itself');
+    patch.parentId = resolved;
+  }
+  // Incremental tag edits (CLI --add-tag / --remove-tag) compose onto current tags.
+  if ('addTags' in patch || 'removeTags' in patch) {
+    const cur = new Set(c.tags || []);
+    for (const t of normalizeTags(patch.addTags)) cur.add(t);
+    for (const t of normalizeTags(patch.removeTags)) cur.delete(t);
+    patch.tags = [...cur];
+  }
   const openAcceptance = s.decisions.find(d => d.cardId === c.id && d.group === 'acceptance' && d.status !== 'ratified');
   if (openAcceptance && 'needsAcceptance' in patch && !(patch.needsAcceptance === true || patch.needsAcceptance === 'true'))
     fail('E_ACCEPTANCE_OWNER_UI', `${openAcceptance.id} is open — needsAcceptance cannot be cleared to bypass owner verification`);
@@ -728,6 +778,7 @@ export function updateCard(s, ref, patch, config) {
       else if (k === 'workOrder') c[k] = patch[k] == null || patch[k] === '' ? undefined : Number(patch[k]);
       else if (k === 'needsAcceptance') c.needsAcceptance = patch.needsAcceptance === true || patch.needsAcceptance === 'true';
       else if (k === 'criteria') c.criteria = Array.isArray(patch.criteria) ? patch.criteria.map((it, i) => normalizeCriterion(it, i)) : c.criteria;
+      else if (k === 'tags') c.tags = patch.tags;
       else c[k] = patch[k];
     }
   }
@@ -1156,6 +1207,7 @@ export function promoteIdea(s, ideaId, extra = {}, config) {
     track: extra.track || config.tracks.at(-1),
     phase: 'planning',
     priority: extra.priority || config.priorities.at(-1),
+    tags: extra.tags || b.tags || [],
     by: extra.by,
   }, config);
   card.log.unshift({ at: today(), text: 'Promoted from Ideas' });

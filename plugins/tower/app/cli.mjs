@@ -173,7 +173,18 @@ function cmdCard(store, { pos, flags }) {
       if (flags.epoch) cs = cs.filter(c => c.epoch === flags.epoch);
       if (flags.track) cs = cs.filter(c => c.track === flags.track);
       if (flags.phase) cs = cs.filter(c => c.phase === flags.phase);
+      if (flags.kind) cs = cs.filter(c => c.kind === flags.kind);
       if (flags.milestone) cs = cs.filter(c => c.milestoneId === flags.milestone);
+      if (flags.tag) {
+        const want = String(flags.tag).split(',').map(t => t.trim()).filter(Boolean);
+        cs = cs.filter(c => want.every(t => (c.tags || []).includes(t)));
+      }
+      if (flags.untagged) cs = cs.filter(c => !(c.tags || []).length);
+      if (flags.parent) {
+        const parent = db.findCard({ cards: s.cards }, flags.parent);
+        if (!parent) throw new TowerError('E_NOT_FOUND', `no card ${flags.parent}`);
+        cs = cs.filter(c => c.parentId === parent.id);
+      }
       if (flags.json) return out(flags, null, cs);
       for (const c of cs) console.log(cardLine(c));
       if (!cs.length) console.log('(no cards match)');
@@ -190,12 +201,17 @@ function cmdCard(store, { pos, flags }) {
     }
     case 'add': {
       const p = readPayload(flags) || {};
+      const tags = flags.addTag || flags.tags
+        ? String(flags.addTag || flags.tags).split(',')
+        : p.tags;
       const { result } = store.mutate((s, cfg) => db.addCard(s, {
         title: flags.title ?? p.title, body: flags.body ?? p.body, kind: flags.kind ?? p.kind,
         track: flags.track ?? p.track, epoch: flags.epoch ?? p.epoch, milestoneId: flags.milestone ?? p.milestoneId,
         phase: flags.phase ?? p.phase, priority: flags.priority ?? p.priority, plan: flags.plan ?? p.plan,
         blockedBy: flags.blockedBy ? String(flags.blockedBy).split(',') : p.blockedBy,
         refs: flags.refs ? String(flags.refs).split(',').map(x => x.trim()).filter(Boolean) : p.refs,
+        tags,
+        parent: flags.parent ?? p.parentId ?? p.parent,
         workOrder: flags.workOrder ?? p.workOrder, by,
       }, cfg));
       return out(flags, `added card #${result.num}`, result);
@@ -209,6 +225,10 @@ function cmdCard(store, { pos, flags }) {
         if (flags[f] !== undefined) patch[k] = flags[f];
       if (flags.blockedBy !== undefined) patch.blockedBy = flags.blockedBy === '' ? [] : String(flags.blockedBy).split(',');
       if (flags.refs !== undefined) patch.refs = flags.refs === '' ? [] : String(flags.refs).split(',').map(x => x.trim()).filter(Boolean);
+      if (flags.tags !== undefined) patch.tags = flags.tags === '' ? [] : String(flags.tags).split(',');
+      if (flags.addTag !== undefined) patch.addTags = String(flags.addTag).split(',');
+      if (flags.removeTag !== undefined) patch.removeTags = String(flags.removeTag).split(',');
+      if (flags.parent !== undefined) patch.parent = flags.parent;
       const current = db.findCard(store.load(), ref);
       const openAcceptance = current && store.load().decisions.find(d => d.cardId === current.id && d.group === 'acceptance' && d.status !== 'ratified');
       const clearsAcceptance = 'needsAcceptance' in patch && !(patch.needsAcceptance === true || patch.needsAcceptance === 'true');
@@ -815,6 +835,9 @@ const HELP = `tower — file-backed project board for an owner + AI agents
                                             unless --no-claim; no --agent → read-only.
 
   tower card     list|show|add|update|claim|release|delete
+  tower card list [--lane L] [--phase P] [--epoch E] [--track T] [--kind K]
+                  [--tag T] [--untagged] [--parent '#N'] [--milestone M] [--json]
+  tower card add|update … [--add-tag T] [--remove-tag T] [--tags a,b] [--parent '#N']
   tower card update <ref> --needs-acceptance true|false   flag for owner accept ballot on close
   tower card update <ref> --refs "docs/a.md,examples/b.jet"   explicit doc-path pointers
   tower card criteria <ref> --add "text" --by X           add an exit criterion

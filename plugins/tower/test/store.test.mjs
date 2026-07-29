@@ -252,3 +252,44 @@ test('deleteCard cascades decisions/questions and clears blockedBy refs', () => 
   assert.equal(s.questions.length, 0);
   assert.deepEqual(s.cards[0].blockedBy, []);
 });
+
+test('card tags default empty; add/remove/dedupe; promoteIdea carries idea tags', () => {
+  const st = fresh();
+  const { result: c } = st.mutate((s, cfg) => db.addCard(s, {
+    title: 'Triage me',
+    tags: ['needs-triage', 'needs-triage', ' bug '],
+  }, cfg));
+  assert.deepEqual(c.tags, ['needs-triage', 'bug']);
+  st.mutate((s, cfg) => db.updateCard(s, '#1', {
+    removeTags: ['needs-triage'],
+    addTags: ['ready-for-agent'],
+    by: 'agent-1',
+  }, cfg));
+  assert.deepEqual(st.load().cards[0].tags, ['bug', 'ready-for-agent']);
+  st.mutate((s) => db.addIdea(s, { text: 'from idea', tags: ['needs-info'], by: 'agent-1' }));
+  const ideaId = st.load().ideas[0].id;
+  const { result: promoted } = st.mutate((s, cfg) => db.promoteIdea(s, ideaId, { by: 'agent-1' }, cfg));
+  assert.deepEqual(promoted.tags, ['needs-info']);
+});
+
+test('card parentId links children; rejects self-parent and missing parent', () => {
+  const st = fresh();
+  const { result: map } = st.mutate((s, cfg) => db.addCard(s, {
+    title: 'Wayfinder map',
+    tags: ['wayfinder:map'],
+  }, cfg));
+  const { result: child } = st.mutate((s, cfg) => db.addCard(s, {
+    title: 'Child ticket',
+    parent: `#${map.num}`,
+    tags: ['wayfinder:grilling'],
+  }, cfg));
+  assert.equal(child.parentId, map.id);
+  assert.throws(
+    () => st.mutate((s, cfg) => db.updateCard(s, `#${map.num}`, { parent: `#${map.num}`, by: 'agent-1' }, cfg)),
+    (e) => e instanceof TowerError && e.code === 'E_INVALID',
+  );
+  assert.throws(
+    () => st.mutate((s, cfg) => db.addCard(s, { title: 'orphan', parent: '#999' }, cfg)),
+    (e) => e instanceof TowerError && e.code === 'E_NOT_FOUND',
+  );
+});

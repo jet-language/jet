@@ -15,9 +15,7 @@ fn run() {
         line_number += 1
         if line_number != 1 && line != "" {
             fields :: line.split("\t").to_list()
-            if fields.len() != 4 {
-                panic("bad process row {line_number}")
-            }
+            if fields.len() != 4 panic("bad process row {line_number}")
             label :: fields[0]
             program :: fields[1]
             arguments :: fields[2]
@@ -32,11 +30,7 @@ fn run() {
                 .stderr(.Capture)
                 .timeout(timeout)
                 .run() ?? panic("process failed")
-            if result.timed_out {
-                print("{label}|timeout")
-            } else {
-                print("{label}|exit={result.code}|stdout={result.output.trim()}")
-            }
+            if result.timed_out print("{label}|timeout") else print("{label}|exit={result.code}|stdout={result.output.trim()}")
         }
     }
 }
