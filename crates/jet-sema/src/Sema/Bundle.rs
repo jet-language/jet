@@ -1011,6 +1011,11 @@ fn check_bundle_opts_for_output_inner(
                         .insert(a.name.clone(), a.is_pub && !a.is_package_pub);
                     st.type_pkg_pub.insert(a.name.clone(), a.is_package_pub);
                 }
+                Item::Tag(t) => {
+                    st.type_pub
+                        .insert(t.name.clone(), t.is_pub && !t.is_package_pub);
+                    st.type_pkg_pub.insert(t.name.clone(), t.is_package_pub);
+                }
                 // D-QUAL3: a unit family lowers to one `#Numeric` distinct type
                 // per member, each erasing to `Float`.
                 Item::UnitFamily(uf) => {
@@ -1103,8 +1108,6 @@ fn check_bundle_opts_for_output_inner(
                         .insert(t.name.clone(), t.is_pub && !t.is_package_pub);
                     st.type_pkg_pub.insert(t.name.clone(), t.is_package_pub);
                 }
-                // D-QUAL2: a tag is a marker; it registers no callable items.
-                Item::Tag(_) => {}
                 Item::Module(_) => {}
                 Item::CodeModule(cm) => {
                     if let Some(body) = &cm.body {
@@ -1311,6 +1314,11 @@ fn check_bundle_opts_for_output_inner(
                             st.type_pub
                                 .insert(e.name.clone(), e.is_pub && !e.is_package_pub);
                             st.type_pkg_pub.insert(e.name.clone(), e.is_package_pub);
+                        }
+                        Item::Tag(t) => {
+                            st.type_pub
+                                .insert(t.name.clone(), t.is_pub && !t.is_package_pub);
+                            st.type_pkg_pub.insert(t.name.clone(), t.is_package_pub);
                         }
                         Item::Impl(i) => {
                             for m in &i.methods {

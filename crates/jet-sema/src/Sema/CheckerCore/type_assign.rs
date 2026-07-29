@@ -8,8 +8,8 @@ use crate::Sema::CheckerCoreLib::{
 };
 use crate::Sema::Checker;
 use crate::Sema::Diagnostics::{
-    option_used_where_plain_expected, result_used_where_plain_expected, soft_public_use,
-    type_fix_hint,
+    edit_distance, option_used_where_plain_expected, result_used_where_plain_expected,
+    soft_public_use, type_fix_hint,
 };
 use crate::Syntax;
 use super::helpers::no_any_type;
@@ -477,8 +477,59 @@ impl<'a> Checker<'a> {
                         self.check_declared_type_rules(t, span);
                     }
                 }
+                Type::Tagged { marker, inner } => {
+                    if marker != crate::AST::CORE_CRYPTO_NOMINAL_MARKER
+                        && !self.tag_is_declared(marker)
+                    {
+                        self.diags.push(undeclared_value_tag(
+                            marker,
+                            self.closest_declared_tag(marker).as_deref(),
+                            span,
+                        ));
+                    }
+                    self.check_declared_type_rules(inner, span);
+                }
                 _ => {}
             }
+        }
+
+        fn tag_is_declared(&self, name: &str) -> bool {
+            self.trait_reg.local_tags.contains(name)
+                || self.modules.is_some_and(|modules| {
+                    self.imports.values().copied().any(|idx| {
+                        modules[idx].trait_reg.local_tags.contains(name)
+                            && self.type_is_pub_in(idx, name)
+                    })
+                })
+        }
+
+        fn closest_declared_tag(&self, name: &str) -> Option<String> {
+            let mut candidates = self
+                .trait_reg
+                .local_tags
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            if let Some(modules) = self.modules {
+                for idx in self.imports.values().copied() {
+                    candidates.extend(
+                        modules[idx]
+                            .trait_reg
+                            .local_tags
+                            .iter()
+                            .filter(|tag| self.type_is_pub_in(idx, tag))
+                            .cloned(),
+                    );
+                }
+            }
+            candidates.sort();
+            candidates.dedup();
+            candidates
+                .into_iter()
+                .map(|candidate| (edit_distance(name, &candidate), candidate))
+                .filter(|(distance, _)| *distance <= 2)
+                .min_by(|a, b| a.cmp(b))
+                .map(|(_, candidate)| candidate)
         }
     
         /// Returns true when a diagnostic was emitted (the mismatch is already
@@ -595,6 +646,20 @@ impl<'a> Checker<'a> {
             ));
         }
     
+}
+
+fn undeclared_value_tag(marker: &str, suggestion: Option<&str>, span: Span) -> Diagnostic {
+    let fix = suggestion.map_or_else(
+        || format!("declare it first with `tag {marker}`, or check the spelling"),
+        |candidate| format!("did you mean `{candidate}`?"),
+    );
+    Diagnostic::error(
+        "E0733",
+        format!("there's no tag called `{marker}`"),
+        "a value tag in type position must name a declared `tag`".to_string(),
+        fix,
+        Some(span),
+    )
 }
 
 #[cfg(test)]
