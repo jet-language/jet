@@ -327,24 +327,30 @@ impl<'a> Checker<'a> {
                 Type::Tagged { marker, .. }
                     if marker == crate::AST::TERMINAL_FACT_SET_MARKER
             ) && method == "has"
-                && let [arg] = args
-                && let Expr::Str(parts, _) = &arg.expr
-                && let [StrPart::Lit(key)] = parts.as_slice()
-                && Syntax::terminal_fact(key).is_none()
             {
-                let candidates = Syntax::TERMINAL_FACTS
-                    .iter()
-                    .map(|fact| (*fact).to_string())
-                    .collect::<Vec<_>>();
-                if let Some(fact) = suggest_field(key, &candidates) {
-                    self.diags.push(Diagnostic::error(
-                        "E0302",
-                        format!("terminal capability key `{key}` looks like `{fact}`"),
-                        "preview string keys stay open, but close spellings of stable facts are probably typos"
-                            .to_string(),
-                        format!("write `TerminalFact.{fact}`"),
-                        Some(arg.span),
-                    ));
+                if let [arg] = args {
+                    if let Expr::Str(parts, _) = &arg.expr {
+                        if let [StrPart::Lit(key)] = parts.as_slice() {
+                            if Syntax::terminal_fact(key).is_none() {
+                                let candidates = Syntax::TERMINAL_FACTS
+                                    .iter()
+                                    .map(|fact| (*fact).to_string())
+                                    .collect::<Vec<_>>();
+                                if let Some(fact) = suggest_field(key, &candidates) {
+                                    self.diags.push(Diagnostic::error(
+                                        "E0302",
+                                        format!(
+                                            "terminal capability key `{key}` looks like `{fact}`"
+                                        ),
+                                        "preview string keys stay open, but close spellings of stable facts are probably typos"
+                                            .to_string(),
+                                        format!("write `TerminalFact.{fact}`"),
+                                        Some(arg.span),
+                                    ));
+                                }
+                            }
+                        }
+                    }
                 }
             }
             if let Type::Apply { name, .. } = recv_ty {
