@@ -1217,10 +1217,10 @@ fn fmt_rewrites_marker_stacking_to_one_shape_and_is_stable() {
     let single_twice = jet::format_source(&single).expect("canonical single marker should parse");
     assert_eq!(single, single_twice, "single-marker rewrite must be stable");
 
-    let stacked = jet::format_source("#Task #Every(5min) fn prune() {\n}\n")
+    let stacked = jet::format_source("#Job #Every(5min) fn prune() {\n}\n")
         .expect("fmt should recover a bare marker stack");
     assert!(
-        stacked.contains("#[Task, Every(5min)] fn prune"),
+        stacked.contains("#[Job, Every(5min)] fn prune"),
         "fmt must combine a bare stack into one marker list:\n{stacked}"
     );
     let stacked_twice =
@@ -1379,7 +1379,7 @@ struct Score {
 fn fmt_keeps_enum_variant_rename_and_tag() {
     // Enum derive + container rule share one group; the variant keeps its group.
     let src = "\
-#[Codable, Tag(\"type\")]
+#[Codable, Discriminant(\"type\")]
 enum Shape {
     #Rename(\"circle\") Circle(Float)
     Square(Float)
@@ -1387,7 +1387,7 @@ enum Shape {
 ";
     assert_fmt_keeps(
         src,
-        &["#[Codable, Tag(\"type\")]", "#Rename(\"circle\")"],
+        &["#[Codable, Discriminant(\"type\")]", "#Rename(\"circle\")"],
         "enum tag + variant rename",
     );
 }
@@ -2075,7 +2075,7 @@ fn run() {
 fn fmt_value_tag_type_d_qual4_stability() {
     // D-QUAL4=A: `#TagName T` in type position must survive fmt unchanged.
     let src = "\
-fn process(input: #Tainted String) => String {
+fn process(input: #Input String) => String {
     return \"{input}-clean\"
 }
 
@@ -2084,7 +2084,7 @@ fn run() {
     print(result)
 }
 ";
-    assert_fmt_keeps(src, &["#Tainted String"], "value-tag type qualifier");
+    assert_fmt_keeps(src, &["#Input String"], "value-tag type qualifier");
     let once = jet::format_source(src).expect("fmt should accept value-tag types");
     let twice = jet::format_source(&once).expect("second fmt of value-tag types must succeed");
     assert_eq!(once, twice, "value-tag type fmt must be idempotent");
@@ -2863,20 +2863,20 @@ fn run() {
 
 #[test]
 fn fmt_preserves_schedule_markers() {
-    // D-SCHEDULE1 (ratified 2026-07-11, card #505): `#Task`/`#Every(…)` must
+    // D-SCHEDULE1 (ratified 2026-07-11, card #505): `#Job`/`#Every(…)` must
     // round-trip byte-for-byte (fmt STABILITY, not just accept-without-crash)
-    // — same inline-marker convention as `#Reactive`/`#Sanitizer`/
+    // — same inline-marker convention as `#Reactive`/`#Scrub(Input)`/
     // `#Replayable`/`#State(…)` (one space-separated line before `fn`).
     let src = "\
-#[Task, Doc(\"Prune old sessions\"), Every(5min)] fn prune_sessions() {
+#[Job, Doc(\"Prune old sessions\"), Every(5min)] fn prune_sessions() {
     print(\"pruning\")
 }
 
-#[Task, Every(\"03:00\")] fn nightly_backup() {
+#[Job, Every(\"03:00\")] fn nightly_backup() {
     print(\"backing up\")
 }
 
-#Task fn manual_only() {
+#Job fn manual_only() {
     print(\"manual\")
 }
 
@@ -2886,7 +2886,7 @@ fn run() {
     manual_only()
 }
 ";
-    assert_fmt_stable(src, "#Task/#Doc/#Every task markers (D-TASKS-LIST1)");
+    assert_fmt_stable(src, "#Job/#Doc/#Every task markers (D-TASKS-LIST1)");
 }
 
 #[test]

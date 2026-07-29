@@ -815,15 +815,33 @@ fn core_module_member_symbols(module: &str) -> Vec<SemanticSymbol> {
         .into_iter()
         .map(|name| {
             let qualified_name = format!("{module}.{name}");
+            let declaration = (module == "core.lang")
+                .then(|| jet_foundation::Policy::rule_arg_declaration(&name))
+                .flatten();
             SemanticSymbol {
                 identity: format!("builtin:module:{qualified_name}"),
                 name: name.clone(),
                 qualified_name: qualified_name.clone(),
                 owner: None,
                 module_path: module.to_string(),
-                kind: SemanticSymbolKind::Function,
-                signature: qualified_name,
-                summary: String::new(),
+                kind: if declaration.is_some() {
+                    SemanticSymbolKind::Type
+                } else {
+                    SemanticSymbolKind::Function
+                },
+                signature: declaration.map_or_else(
+                    || qualified_name.clone(),
+                    |declaration| {
+                        format!(
+                            "enum {} {{ {} }}",
+                            qualified_name,
+                            declaration.variants.join(", ")
+                        )
+                    },
+                ),
+                summary: declaration.map_or_else(String::new, |_| {
+                    "Compiler vocabulary published as an ordinary enum.".to_string()
+                }),
                 examples: Vec::new(),
                 provenance: SemanticProvenance::Builtin {
                     module: module.to_string(),

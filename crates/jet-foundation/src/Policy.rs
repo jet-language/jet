@@ -1,6 +1,7 @@
 //! Compiler-owned scoped policy registry and resolution ladder (D-MARK-SCOPE1).
 
 use crate::Diagnostics::Span;
+use std::sync::LazyLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PolicyScope { Organization, Package, Module, Function, Block }
@@ -223,6 +224,71 @@ pub enum RuleArgType {
     Bool,
     Int,
     DurationOrString,
+}
+
+/// D-RULEARG-TYPES1=A + D-LANGNS-NAME1=A: compiler vocabulary is published as
+/// ordinary generated enums in `core.lang`. Marker signatures point at these
+/// declarations; diagnostics, reflection, and editor tools read the same rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuleArgDeclaration {
+    pub name: &'static str,
+    pub variants: &'static [&'static str],
+}
+
+fn canonical_rule_arg_variants(name: &str) -> Option<&'static [&'static str]> {
+    Some(match name {
+        "ABI" => &["system", "cdecl", "stdcall", "fastcall", "win64", "sysv64"],
+        "Capability" => crate::Facts::EFFECT_ROOTS,
+        "FfiLanguage" => &["c", "cpp", "asm"],
+        "InlineMode" => &["Hint", "Always", "Never"],
+        "IntType" => &[
+            "I8", "I16", "I32", "I64", "I128", "U8", "U16", "U32", "U64", "U128",
+        ],
+        "Layout" => &[crate::Syntax::LAYOUT_C, crate::Syntax::LAYOUT_COLUMNAR],
+        "Maturity" => &["Experimental", "Tested", "Hardened"],
+        "NamingCase" => &[
+            crate::Syntax::RENAME_ALL_CAMEL,
+            crate::Syntax::RENAME_ALL_SNAKE,
+            crate::Syntax::RENAME_ALL_PASCAL,
+            crate::Syntax::RENAME_ALL_KEBAB,
+            crate::Syntax::RENAME_ALL_SCREAMING,
+        ],
+        "ObligationMode" => &["None", "GateOnly", "Obligations", "PerSite", "Track", "Skip"],
+        "PolicySetting" => &[
+            "no_alloc",
+            "zero_rc",
+            "arena_bounded",
+            "unsafe",
+            "gc",
+            "explicit_units",
+        ],
+        "State" => &[],
+        "TaintKind" => crate::Syntax::BUILTIN_TAGS,
+        "Target" => &["Native", "Web", "Wasm", "JS", "Freestanding", "OS"],
+        "Track" => &["Frontend", "Backend", "Runtime", "Tooling"],
+        _ => return None,
+    })
+}
+
+/// Generated from the active/retired applied-rule signatures. `Track` is the
+/// compatibility reflection enum retained by D-RULEARG-TYPES1.
+pub static RULE_ARG_DECLARATIONS: LazyLock<Vec<RuleArgDeclaration>> = LazyLock::new(|| {
+    let mut names = std::collections::BTreeSet::from(["Track"]);
+    for row in APPLIED_RULES {
+        names.extend(row.signature.params.iter().map(|parameter| parameter.source_type));
+        names.extend(row.signature.variadic_source_type);
+    }
+    names
+        .into_iter()
+        .filter_map(|name| {
+            canonical_rule_arg_variants(name)
+                .map(|variants| RuleArgDeclaration { name, variants })
+        })
+        .collect()
+});
+
+pub fn rule_arg_declaration(name: &str) -> Option<&'static RuleArgDeclaration> {
+    RULE_ARG_DECLARATIONS.iter().find(|declaration| declaration.name == name)
 }
 
 impl RuleArgType {
@@ -533,13 +599,12 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     },
     rule!("Unsafe", sig!(param!("reason", String), param!("obligations", Ident => "ObligationMode", ".None")), &[RuleSite::Function, RuleSite::Method, RuleSite::Block, RuleSite::Operation], Call),
     rule!("Grant", sig!(variadic Ident => "Capability"), &[RuleSite::Block, RuleSite::Operation], Call),
-    rule!("Tainted", sig!(param!("kind", Ident => "TaintKind", ".Input")), &[RuleSite::Expression, RuleSite::Operation], BareOrCall),
-    rule!("Sanitizer", sig!(), CALLABLE_SITE, Bare),
+    rule!("Scrub", sig!(param!("tag", Ident)), CALLABLE_SITE, Call),
     rule!(retired "Pure", sig!(), CALLABLE_SITE, Bare, "=[]=>"),
     rule!("Pre", sig!(param!("condition", Any), param!("message", String)), CALLABLE_SITE, Call),
     rule!("Post", sig!(param!("condition", Any), param!("message", String)), CALLABLE_SITE, Call),
     rule!("Inline", sig!(param!("mode", Ident => "InlineMode", ".Hint")), &[RuleSite::Function, RuleSite::Method, RuleSite::Constant], BareOrCall),
-    rule!("Task", sig!(), FUNCTION_SITE, Bare),
+    rule!("Job", sig!(), FUNCTION_SITE, Bare),
     rule!("Every", sig!(param!("schedule", DurationOrString)), FUNCTION_SITE, Call),
     rule!("Replayable", sig!(), CALLABLE_SITE, Bare),
     rule!("WasmExport", sig!(), FUNCTION_SITE, Bare),
@@ -567,7 +632,7 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!("Layout", sig!(param!("kind", Ident => "Layout"), param!("tag", Ident => "IntType", "I32")), TYPE_SITE, Call),
     rule!("RenameAll", sig!(param!("case", Ident => "NamingCase")), TYPE_SITE, Call),
     rule!("DenyUnknownFields", sig!(), TYPE_SITE, Bare),
-    rule!("Tag", sig!(param!("field", String)), TYPE_SITE, Call),
+    rule!("Discriminant", sig!(param!("field", String)), TYPE_SITE, Call),
     rule!("Untagged", sig!(), TYPE_SITE, Bare),
     rule!("Redact", sig!(), FIELD_SITE, Bare),
     rule!("Rename", sig!(param!("name", String)), FIELD_OR_VARIANT_SITE, Call),
@@ -625,6 +690,10 @@ pub const APPLIED_RULES: &[AppliedRule] = &[
     rule!(retired "Html", sig!(param!("path", String)), FILE_SITE, Call, "#HTML"),
     rule!(retired "Sql", sig!(), BLOCK_SITE, Block, "#SQL"),
     rule!(retired "Ref", sig!(), FIELD_SITE, Bare, "use an owned value"),
+    rule!(retired "Tainted", sig!(param!("kind", Ident => "TaintKind", ".Input")), &[RuleSite::Expression, RuleSite::Operation], BareOrCall, "#Input"),
+    rule!(retired "Sanitizer", sig!(), CALLABLE_SITE, Bare, "#Scrub(Tag)"),
+    rule!(retired "Task", sig!(), FUNCTION_SITE, Bare, "#Job"),
+    rule!(retired "Tag", sig!(param!("field", String)), TYPE_SITE, Call, "#Discriminant"),
 ];
 
 pub fn applied_rule_registry() -> &'static [AppliedRule] {
@@ -637,6 +706,22 @@ pub fn applied_rule(name: &str) -> Option<&'static AppliedRule> {
 
 pub fn rule_allows(name: &str, site: RuleSite) -> bool {
     applied_rule(name).is_some_and(|row| row.sites.contains(&site))
+}
+
+pub const DERIVE_RULES: &[&str] = &[
+    "Codable", "Encode", "Decode", "Summarize", "Comparable", "Equatable", "Debug",
+    "Numeric", "Printable", "CLI", "Patchable", "UnitFamily",
+];
+
+/// A trait may rhyme with a type-site marker only when that marker is the
+/// trait's derive spelling (`trait X` → `#X`). Other type markers own their
+/// names and cannot silently collide with dispatch.
+pub fn nonderive_marker_trait_collision(name: &str) -> bool {
+    applied_rule(name).is_some_and(|row| {
+        matches!(row.status, RuleStatus::Active)
+            && row.sites.contains(&RuleSite::Type)
+            && !DERIVE_RULES.contains(&name)
+    })
 }
 
 #[cfg(test)]
@@ -668,16 +753,16 @@ mod tests {
             ("HTML", RuleSite::File),
             ("Test", RuleSite::Test),
             ("Bench", RuleSite::Bench),
-            ("Task", RuleSite::Function),
+            ("Job", RuleSite::Function),
         ];
         for (name, site) in legal {
             assert!(super::rule_allows(name, site), "#{name} at {site:?}");
         }
 
         let illegal = [
-            ("Task", RuleSite::Field),
+            ("Job", RuleSite::Field),
             ("Skip", RuleSite::Variant),
-            ("Task", RuleSite::Method),
+            ("Job", RuleSite::Method),
             ("HTML", RuleSite::Module),
             ("Inline", RuleSite::File),
             ("Bench", RuleSite::Test),
@@ -693,7 +778,7 @@ mod tests {
     #[test]
     fn authority_rows_are_site_bound_and_policy_is_lexical() {
         let rows = super::applied_rule_registry();
-        for name in ["Authority", "Unsafe", "Grant", "Tainted", "Sanitizer", "wire"] {
+        for name in ["Authority", "Unsafe", "Grant", "Scrub", "wire"] {
             let row = rows.iter().find(|row| row.name == name).unwrap();
             assert_eq!(row.resolution, super::RuleResolution::SiteBound);
             assert!(row.policy_scopes.is_empty());
@@ -705,6 +790,83 @@ mod tests {
         assert!(!super::rule_allows("Doc", super::RuleSite::Block));
         assert!(!super::rule_allows("Region", super::RuleSite::File));
         assert!(!super::rule_allows("PubFile", super::RuleSite::Field));
+    }
+
+    #[test]
+    fn every_typed_marker_argument_has_one_core_lang_declaration() {
+        assert_eq!(super::RULE_ARG_DECLARATIONS.len(), 14);
+        let mut expected = std::collections::BTreeSet::from(["Track"]);
+        for row in super::APPLIED_RULES {
+            expected.extend(row.signature.params.iter().map(|parameter| parameter.source_type));
+            expected.extend(row.signature.variadic_source_type);
+        }
+        expected.retain(|name| super::canonical_rule_arg_variants(name).is_some());
+        let actual = super::RULE_ARG_DECLARATIONS
+            .iter()
+            .map(|declaration| declaration.name)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(actual, expected);
+        for declaration in super::RULE_ARG_DECLARATIONS.iter() {
+            assert_eq!(
+                declaration.variants,
+                super::canonical_rule_arg_variants(declaration.name).unwrap(),
+                "{}",
+                declaration.name
+            );
+        }
+        for row in super::APPLIED_RULES {
+            for param in row.signature.params {
+                if matches!(
+                    param.source_type,
+                    "Value" | "String" | "Ident" | "Bool" | "Int" | "Duration | String" | "T.default"
+                ) {
+                    continue;
+                }
+                assert!(
+                    super::rule_arg_declaration(param.source_type).is_some(),
+                    "#{} parameter {} names missing core.lang.{}",
+                    row.name,
+                    param.name,
+                    param.source_type
+                );
+            }
+            if let Some(source_type) = row.signature.variadic_source_type {
+                if !matches!(
+                    source_type,
+                    "Value" | "String" | "Ident" | "Bool" | "Int" | "Duration | String"
+                ) {
+                    assert!(
+                        super::rule_arg_declaration(source_type).is_some(),
+                        "#{} variadic type core.lang.{source_type}",
+                        row.name
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn generated_rule_argument_variants_match_canonical_surface() {
+        let variants = |name| super::rule_arg_declaration(name).unwrap().variants;
+        assert_eq!(
+            variants("ABI"),
+            &["system", "cdecl", "stdcall", "fastcall", "win64", "sysv64"]
+        );
+        assert_eq!(variants("FfiLanguage"), &["c", "cpp", "asm"]);
+        assert_eq!(variants("Layout"), &["c", "columnar"]);
+        assert_eq!(
+            variants("NamingCase"),
+            &["camel", "snake", "pascal", "kebab", "screaming"]
+        );
+        assert_eq!(variants("Capability"), crate::Facts::EFFECT_ROOTS);
+    }
+
+    #[test]
+    fn nonderive_type_markers_cannot_rhyme_with_traits() {
+        assert!(super::nonderive_marker_trait_collision("Layout"));
+        assert!(super::nonderive_marker_trait_collision("Discriminant"));
+        assert!(!super::nonderive_marker_trait_collision("Comparable"));
+        assert!(!super::nonderive_marker_trait_collision("Debug"));
     }
 
     #[test]

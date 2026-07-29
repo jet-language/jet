@@ -611,7 +611,7 @@ impl<'a> Fmt<'a> {
             + usize::from(f.inline_foreign.is_some())
             + usize::from(f.web_marker.is_some())
             + usize::from(f.is_reactive)
-            + usize::from(f.is_sanitizer)
+            + usize::from(f.scrub_tag.is_some())
             + usize::from(f.is_replayable)
             + usize::from(f.is_task)
             + usize::from(f.every.is_some())
@@ -663,9 +663,12 @@ impl<'a> Fmt<'a> {
             start_rule!();
             self.write(marker.name());
         }
+        if let Some(tag) = &f.scrub_tag {
+            start_rule!();
+            self.write(&format!("{}({tag})", Syntax::KW_SCRUB));
+        }
         for (enabled, name) in [
             (f.is_reactive, Syntax::KW_REACTIVE),
-            (f.is_sanitizer, Syntax::KW_SANITIZER),
             (f.is_replayable, Syntax::ATTR_REPLAYABLE),
             (f.is_task, Syntax::KW_TASK),
         ] {

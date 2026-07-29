@@ -13,13 +13,13 @@
 
 // BEGIN GENERATED JET SYNTAX HIGHLIGHTS
 const JET_HIGHLIGHT_KEYWORD_CONTROL = ["break", "defer", "else", "if", "loop", "return"];
-const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Reactive", "Sanitizer", "State", "Tainted", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "comptime", "derive", "distinct", "enum", "extern", "fn", "impl", "migration", "module", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "taskgroup", "trait", "use", "validate", "via"];
+const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Bench", "Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "comptime", "derive", "distinct", "enum", "extern", "fn", "impl", "migration", "module", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "taskgroup", "trait", "use", "validate", "via"];
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["it", "self"];
 const JET_HIGHLIGHT_LITERAL = ["None", "Val", "false", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["BTreeMap", "BigInt", "BitSet", "Bool", "Budget", "BudgetApplies", "ByteBuffer", "CSV", "Char", "Computed", "DBValue", "DataTree", "Decimal", "Deque", "Derived", "Effect", "Error", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Int", "Iter", "JSON", "JSONError", "Key", "Lru", "Measurement", "PriorityQueue", "Ptr", "SelectBuilder", "Set", "Shared", "Signal", "SortedSet", "Stream", "String", "Subscription", "TOML", "TaskGroup", "U16", "U32", "U64", "U8", "UTF8Error", "Void", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["check", "input", "print"];
-const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Authority", "Bench", "Bindgen", "CLI", "Caps", "Codable", "CodableAsBase", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "Default", "DenyUnknownFields", "Doc", "Encode", "Env", "Equatable", "Every", "Extern", "FFI", "Flag", "Flatten", "Grant", "HTML", "Impure", "Inline", "Invariant", "Layout", "Live", "Local", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "SQL", "Sanitizer", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Summarize", "Tag", "Tainted", "Target", "Task", "Test", "Todo", "Track", "Transact", "Transition", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
+const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Authority", "Bench", "Bindgen", "CLI", "Caps", "Codable", "CodableAsBase", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "Default", "DenyUnknownFields", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Every", "Extern", "FFI", "Flag", "Flatten", "Grant", "HTML", "Impure", "Inline", "Invariant", "Job", "Layout", "Live", "Local", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PubFile", "PublishedSchema", "Reactive", "Redact", "Region", "Rename", "RenameAll", "Replayable", "SQL", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Summarize", "Target", "Test", "Todo", "Track", "Transact", "Transition", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "allow", "wire"];
 const JET_HIGHLIGHT_SIGIL = ["#", "&", "...", "::", ":=", "^", "~"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%=", "&&", "&=", "*", "*=", "+", "++", "+=", "-", "--", "-=", "->", "..", "..<", ".[", ".{", "/", "/=", "<", "<<", "<<=", "<=", "==", "=>", ">", ">=", ">>", ">>=", "?", "?.", "??", "^=", "|", "|=", "||"];
 // END GENERATED JET SYNTAX HIGHLIGHTS
@@ -314,14 +314,38 @@ module.exports = grammar({
         seq("{", repeat($.struct_field), "}"),
       ),
 
-    // ── Tag definition (D-QUAL2) ───────────────────────────────────────────
-    // `tag Reviewed;` or `tag Internal {}` — marker qualifier, no methods.
+    // ── Tag definition (D-TAG-SURFACE1=A) ──────────────────────────────────
+    // `tag Internal { deny: [DB, Exec], from: [Store.read] }`.
+    // A declaration always has a non-empty deny policy; `from` is optional.
     tag_def: ($) =>
       seq(
         optional("pub"),
         "tag",
         field("name", $.type_identifier),
-        optional(seq("{", "}")),
+        "{",
+        choice(
+          seq(
+            field("deny", $.tag_deny_clause),
+            optional(seq(optional(","), field("from", $.tag_from_clause))),
+          ),
+          seq(
+            field("from", $.tag_from_clause),
+            optional(","),
+            field("deny", $.tag_deny_clause),
+          ),
+        ),
+        "}",
+      ),
+
+    tag_deny_clause: ($) => seq("deny", ":", "[", commaSep1($.fact_path), "]"),
+
+    tag_from_clause: ($) =>
+      seq("from", ":", "[", commaSep1($.fact_path), "]"),
+
+    fact_path: ($) =>
+      seq(
+        choice($.identifier, $.type_identifier),
+        repeat(seq(".", choice($.identifier, $.type_identifier))),
       ),
 
     // ── Impl block (S27) ───────────────────────────────────────────────────
@@ -785,7 +809,7 @@ module.exports = grammar({
 
     ref_target: (_) => token.immediate(/[A-Za-z0-9_./:-]+/),
 
-    // A value-fact rule riding an expression: `#Tainted input` (D-TAINT1), or
+    // A direct value-fact rule riding an expression: `#Input value`, or
     // a bare rule value such as the typed hole `#Todo` (D-TOOL2).
     marked_expr: ($) => prec.right(seq($.attribute, optional($._expr))),
 

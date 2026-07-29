@@ -569,12 +569,12 @@ trait Greeter { fn greet(self) => String }
 #State(Open) fn write_line(self, s: String) { }       // valid only when Open
 #Transition(Closed, Open) fn open(self) => File { }  // consume Closed, yield Open
 
-// Taint tracking (D-TAINT1): `#Tainted` value-fact spreads; `#Sanitizer fn` strips it.
+// Taint tracking (D-TAINT1): `#Input` value-fact spreads; `#Scrub(Input) fn` strips it.
 fn taint(raw: String) {
-    user :: #Tainted raw                        // marks untrusted input
+    user :: #Input raw                        // marks untrusted input
     clean :: sanitize(user)                     // strip via sanitizer
 }
-#Sanitizer fn sanitize(s: String) => String { return s }
+#Scrub(Input) fn sanitize(s: #Input String) => String { return s }
 
 // Single-use / linear values (D-LIN1): must be consumed exactly once on every path.
 #SingleUse

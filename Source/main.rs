@@ -385,7 +385,7 @@ usage:
   {bin} run   <file.{ext}> -- ...   everything after `--` is forwarded to the program (D-CLI1)
   {bin} run   <file.{ext}> --gc-trace   record bounded automatic-GC promotion evidence
   {bin} run   <file.{ext}> --trace-tiers  expert: per-function tier, reason, timing
-  {bin} tasks [-p member]           list project `#Task` functions
+  {bin} tasks [-p member]           list project `#Job` functions
   {bin} test  <file|dir>            compile and run top-level test blocks (recurses into subdirs)
   {bin} test  <file|dir>  -- ...    `--` forwards to the test runner
   {bin} test  <file> --filter=foo   only run tests whose name contains `foo`
@@ -2183,7 +2183,7 @@ fn main() {
                 target.to_string()
             };
             // D-JPK-TASKRUN1: `jet run --task <name> <file>` swaps the named
-            // `#Task fn` in as the entry before codegen (same path as `fn dev`).
+            // `#Job fn` in as the entry before codegen (same path as `fn dev`).
             if cmd == "run" {
                 if let Some(task) = task_name.as_deref() {
                     if task.is_empty() {

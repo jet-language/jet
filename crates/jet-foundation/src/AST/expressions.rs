@@ -462,15 +462,13 @@ pub enum Expr {
         args: Vec<EnumLitArg>,
         span: Span,
     },
-    /// D-TAINT1 (ratified 2026-06-21): `#Tainted expr` — marks a value as
-    /// untrusted at its source. A value-fact tag (D-QUAL1): it rides the value,
-    /// taint spreads to anything derived from it, and a tainted value reaching a
-    /// sink effect (`DB`/`Exec`/`Net`) without passing through a `#Sanitizer fn`
-    /// is E0721. The tag is static and **erased in codegen** (I3) — lowering
+    /// D-TAG-SURFACE1=A: `#Tag value` attaches a declared value fact. It rides
+    /// the value, spreads to derived values, and is checked against the tag's
+    /// denied destinations. `#Scrub(Tag)` removes exactly that fact. The tag is
+    /// static and **erased in codegen** (I3) — lowering
     /// emits the inner expression unchanged, like `Expr::Present` but unwrapped.
     ///
-    /// D-TAINT2 (ratified 2026-07-13): the kind is named in parens —
-    /// `#Tainted(Credential) value`. `None` means the default `.Input` kind.
+    /// The direct tag name. `None` exists only while recovering old syntax.
     Tainted(Box<Expr>, Option<String>, Span),
     /// S32: `value(expr)` — present optional.
     Present(Box<Expr>, Span),

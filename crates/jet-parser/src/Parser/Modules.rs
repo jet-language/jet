@@ -773,7 +773,7 @@ impl<'a> Parser<'a> {
             TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
             // D-REPLAY1: `#Replayable fn` inside a module body.
             TokKind::Hash if self.at_replayable_fn() => self.func().map(Item::Func),
-            // D-SCHEDULE1 (card #505): `#Task fn` / `#Every(…) fn` inside a module body.
+            // D-SCHEDULE1 (card #505): `#Job fn` / `#Every(…) fn` inside a module body.
             TokKind::Hash if self.at_task_fn() || self.at_every_fn() => self.func().map(Item::Func),
             // D-MUSTUSE1 / D-MARKERMOVE1: `#MustUse fn` inside a module body (old
             // `#MustUse fn` spelling is E0062, taught inside `func()`).

@@ -50,7 +50,7 @@ Done when a contributor can:
 3. Hot-reload on `env.jet` edit → next prompt
 4. `env.dev` (core) + `env.full` (FFI/browser/graphics) via pack/profile — not `JET_DEV_SHELL` + flake attr
 5. Language/toolchain packs cover what Jet needs (rust, node, wasm tooling)
-6. `#Task`s cover common repo workflows
+6. `#Job`s cover common repo workflows
 7. `jet env test` proves tools on PATH + TZDIR/JET_ROOT hygiene
 8. Generated files (if needed) via `files.`
 9. Optional later: in-dev services; container from same env
@@ -83,7 +83,7 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 | Auto-activate on `cd` | D-ENVHOOK1 `jet env hook` | **shipped** | — |
 | Explicit allow / trust | vision trust-by-env-hash | **partial** | #784 slices (prompt + allowlist) |
 | Hot-reload on env edit | hook re-eval; async rebuild unproven | **gap** | #784 — devenv 2.1 semantics |
-| `enterShell` / lifecycle tasks | D-ECO7-class hook; `#Task` | **partial** | #784 |
+| `enterShell` / lifecycle tasks | D-ECO7-class hook; `#Job` | **partial** | #784 |
 | `enterTest` / clean-shell smoke | `jet test` ≠ env smoke | **gap** | **`jet env test`** |
 | `dotenv` | — | **gap** | #784 |
 | `unsetEnvVars` / env hygiene | — | **gap** | #784 |
@@ -117,7 +117,7 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 
 | Feature | Jet today | Status | Follow-up |
 |---|---|---|---|
-| Named scripts / aliases | `#Task fn` (D-JPK-TASKRUN1) | **shipped** (better shape) | Prefer typed tasks |
+| Named scripts / aliases | `#Job fn` (D-JPK-TASKRUN1) | **shipped** (better shape) | Prefer typed tasks |
 | Per-script packages | task-local deps unproven | **gap** | #787 |
 | Task DAG / before/after / modes | `#Every` / schedule; limited DAG | **gap** | #787 |
 | Task status skip / execIfModified | — | **gap** | #787 |
@@ -184,7 +184,7 @@ Legend: **shipped** · **partial** (ratified / in progress) · **gap** · **ball
 
 Keep as product advantages; do not dilute:
 
-- Typed `#Task fn` (not shell-string scripts)
+- Typed `#Job fn` (not shell-string scripts)
 - Vault secrets (stronger than secretspec)
 - Beginner `env.*` without Nix ceremony; expert flake-parts without a parallel system
 - One process supervisor (I8)
@@ -200,7 +200,7 @@ Keep as product advantages; do not dilute:
 5. LSP completions for options — **U26 partial**
 6. `languages.rust.enable` (+ channel/version) — **#791**
 7. Python venv + requirements — **pack slice**
-8. Scripts + per-script packages — **#Task + #787**
+8. Scripts + per-script packages — **#Job + #787**
 9. Generated files from config — **symlink/seed/copy + sync**
 10. Env smoke — **`jet env test`**
 11. Services one-liner (postgres) — **#786**
@@ -227,7 +227,7 @@ Small-scope slices measure progress; **TRACKER** cards close only when their sli
 | **#791** | **D-ENV-LANGPACK1=A** | **#836** pack surface · **#837** rust · **#838** node · **#839** python+venv · **#840** catalog→58 |
 | **#792** | Optional P2 | **#841** certs/hosts · **#842** android/apple · **#843** editor agents |
 | **#793** | **D-ENV-FLAKEPARTS1=A** | **#844** map flake-parts↔Jet modules · **#845** expert docs+golden |
-| **#853** | Dogfood acceptance spine | **#846** map flake→env.dev/full · **#847** shellHook/wrappers · **#848** replace nix-direnv `.envrc` · **#849** repo `#Task`s · **#850** repo `jet env test` · **#851** first-hour path · **#852** closeout (`needsAcceptance`) |
+| **#853** | Dogfood acceptance spine | **#846** map flake→env.dev/full · **#847** shellHook/wrappers · **#848** replace nix-direnv `.envrc` · **#849** repo `#Job`s · **#850** repo `jet env test` · **#851** first-hour path · **#852** closeout (`needsAcceptance`) |
 
 ### Already covered — do not duplicate
 

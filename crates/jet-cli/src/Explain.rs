@@ -130,8 +130,11 @@ pub fn lookup(code: &str) -> Option<Explanation> {
                 stage: "rule applicability".to_string(),
                 meaning: format!("`#{}{}`", row.name, row.signature.render()),
                 what: Some(format!(
-                    "form: {:?}; status: {:?}; attachment sites: {:?}.",
-                    row.form, row.status, row.sites
+                    "form: {:?}; status: {:?}; attachment sites: {:?}.{}",
+                    row.form,
+                    row.status,
+                    row.sites,
+                    marker_argument_declarations(row)
                 )),
                 why: Some(format!("resolution is {:?}; site-bound authority never becomes ambient policy", row.resolution)),
                 fix: Some(replacement.map_or_else(
@@ -141,6 +144,30 @@ pub fn lookup(code: &str) -> Option<Explanation> {
                 retired,
             })
         })
+}
+
+fn marker_argument_declarations(row: &jet_foundation::Policy::AppliedRule) -> String {
+    let mut declarations = row
+        .signature
+        .params
+        .iter()
+        .filter_map(|param| {
+            jet_foundation::Policy::rule_arg_declaration(param.source_type)
+                .map(|_| format!(" `core.lang.{}`", param.source_type))
+        })
+        .collect::<Vec<_>>();
+    if let Some(source_type) = row.signature.variadic_source_type {
+        if jet_foundation::Policy::rule_arg_declaration(source_type).is_some() {
+            declarations.push(format!(" `core.lang.{source_type}`"));
+        }
+    }
+    declarations.sort();
+    declarations.dedup();
+    if declarations.is_empty() {
+        String::new()
+    } else {
+        format!(" Argument declarations: {}.", declarations.join(","))
+    }
 }
 
 /// Existing `jet explain` rendering for one effective policy at a concrete site.

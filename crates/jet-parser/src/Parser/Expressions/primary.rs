@@ -88,14 +88,10 @@ impl<'a> Parser<'a> {
                         Some(TokKind::Ident(n)) if n == Syntax::KW_TAINTED
                     ) =>
                 {
-                    // D-TAINT1/TAINT2: `#Tainted expr` or `#Tainted(Kind) expr`.
-                    // The kind is optional; bare `#Tainted` defaults to the `.Input`
-                    // kind (backward compatible). D-TAINT2=A ratified `#Tainted(Kind)`
-                    // form with `Credential` (and the full D-TAINT1 closed set).
-                    // Taint propagation + sink checks run in the sema taint pass;
-                    // codegen erases the tag (I3), emitting the inner expr unchanged.
+                    // D-TAG-SURFACE1=A: recover retired `#Tainted[(Kind)] value`
+                    // as the corresponding ordinary tag application.
                     let start = self.bump().span.start; // `#`
-                    self.bump(); // `Tainted`
+                    let name_span = self.bump().span; // `Tainted`
                     // Optional `(Kind)` argument after the keyword.
                     let kind: Option<String> =
                         if matches!(self.toks.get(self.pos).map(|t| &t.kind), Some(TokKind::LParen)) {
@@ -119,19 +115,24 @@ impl<'a> Parser<'a> {
                         } else {
                             None
                         };
+                    let tag = kind.unwrap_or_else(|| "Input".to_string());
+                    self.diags.push(Diagnostic::error(
+                        "E0927",
+                        "`#Tainted` is retired".to_string(),
+                        "taint kinds are ordinary declared fact tags".to_string(),
+                        format!("write `#{tag} value`"),
+                        Some(Span::new(start, name_span.end)),
+                    ));
                     let inner = self.expr_primary(allow_struct_lit)?;
                     let span = Span::new(start, inner.span().end);
-                    return Ok(Expr::Tainted(Box::new(inner), kind, span));
+                    return Ok(Expr::Tainted(Box::new(inner), Some(tag), span));
                 }
                 TokKind::Hash
                     if matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.kind),
-                        // Any `#Ident` reaching here is past the `#Todo`/`#Tainted`
-                        // expression markers handled above, so in expression position it
-                        // is a SIMD reduce-op marker `#Add`/`#Mul`/`#Min`/`#Max`
-                        // (D-SIMD2). Parse it generically; sema validates the closed set
-                        // and the `.reduce(…)` position (E2510), giving a teaching error
-                        // for a typo like `#Avg` instead of a bare parse error.
+                        // D-TAG-SURFACE1=A: any declared tag may prefix a value.
+                        // The four old SIMD reduce selectors remain parser recovery
+                        // nodes until their existing retirement diagnostic fires.
                         Some(TokKind::Ident(n))
                             if n != Syntax::KW_TODO && n != Syntax::KW_TAINTED
                     ) =>
@@ -143,8 +144,13 @@ impl<'a> Parser<'a> {
                     } else {
                         String::new()
                     };
-                    let span = Span::new(start, tok.span.end);
-                    return Ok(Expr::ReduceMarker(name, span));
+                    if matches!(name.as_str(), "Add" | "Mul" | "Min" | "Max") {
+                        let span = Span::new(start, tok.span.end);
+                        return Ok(Expr::ReduceMarker(name, span));
+                    }
+                    let inner = self.expr_primary(allow_struct_lit)?;
+                    let span = Span::new(start, inner.span().end);
+                    return Ok(Expr::Tainted(Box::new(inner), Some(name), span));
                 }
                 TokKind::At => {
                     let span = self.bump().span;

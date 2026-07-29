@@ -908,10 +908,13 @@ fn collect_item(item: &Item, mp: &str, module: &LoadedModule, ctx: &mut WalkCtx<
                 },
             };
             let mut hover_text = hover_for_fn(f);
-            for (active, name) in [(f.is_unsafe, Syntax::KW_UNSAFE), (f.is_pure, Syntax::KW_PURE), (f.is_sanitizer, Syntax::KW_SANITIZER), (f.is_replayable, Syntax::ATTR_REPLAYABLE)] {
+            for (active, name) in [(f.is_unsafe, Syntax::KW_UNSAFE), (f.is_pure, Syntax::KW_PURE), (f.is_replayable, Syntax::ATTR_REPLAYABLE)] {
                 if active && jet_foundation::Policy::rule_allows(name, jet_foundation::Policy::RuleSite::Function) {
                     hover_text.push_str(&format!("\nrule: #{name} (function, site-bound)"));
                 }
+            }
+            if let Some(tag) = &f.scrub_tag {
+                hover_text.push_str(&format!("\nrule: #Scrub({tag}) (function, site-bound)"));
             }
             let declarations = module.policy_declarations.iter().filter(|d| matches!(d.scope, jet_foundation::Policy::PolicyScope::Organization | jet_foundation::Policy::PolicyScope::Package | jet_foundation::Policy::PolicyScope::Module) || (d.scope == jet_foundation::Policy::PolicyScope::Function && d.target == Some(f.span))).cloned().collect::<Vec<_>>();
             for key in [jet_foundation::Policy::PolicyKey::NoAlloc, jet_foundation::Policy::PolicyKey::ZeroRc, jet_foundation::Policy::PolicyKey::ArenaBounded, jet_foundation::Policy::PolicyKey::Unsafe, jet_foundation::Policy::PolicyKey::ScopedGc] {

@@ -1215,7 +1215,7 @@ fn interpreter_matches_expected_golden() {
     for stem in interpreter_example_stems() {
         let file = example_path(&stem);
         // D-JPK-TASKRUN1 / R12 (card #476): task_runner's meaningful entries are
-        // its `#Task` fns, not the `fn run()` usage hint. Mirror golden.rs's
+        // its `#Job` fns, not the `fn run()` usage hint. Mirror golden.rs's
         // AOT `--task` battery on the interpreter tier via `run_named_task`,
         // proving the same TIR dispatches each task identically. The bare
         // `fn run()` output is not a golden.
@@ -8355,8 +8355,8 @@ fn run() {
 }
 
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `jet dev`'s due-task tick
-/// consumer. `scheduled_tasks` must enumerate every `#Task #Every(…)` fn
-/// with its resolved schedule (and skip a plain `#Task fn` with no
+/// consumer. `scheduled_tasks` must enumerate every `#Job #Every(…)` fn
+/// with its resolved schedule (and skip a plain `#Job fn` with no
 /// `#Every(…)`), and `run_named_task` must actually execute one by name
 /// through the same interpreter tier `dev_iteration` uses — golden-testing
 /// the loop's per-tick logic without the long-running file watcher, same
@@ -8385,7 +8385,7 @@ fn schedule_every_dev_loop_consumer() {
     assert_eq!(
         names,
         vec!["nightly_backup", "prune_sessions"],
-        "scheduled_tasks must list every #Task fn carrying #Every(…), and skip the \
+        "scheduled_tasks must list every #Job fn carrying #Every(…), and skip the \
          #Every(…)-less `manual_only` task"
     );
     let schedules: std::collections::HashMap<&str, &jet::AST::EverySchedule> =

@@ -91,14 +91,9 @@ fn module_value_name(alias: &str, name: &str) -> String {
 }
 
 fn specialize_tag(source: &crate::AST::TagDef, types: &HashMap<String, Type>,
-    values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::TagDef {
+    _values: &HashMap<String, crate::AST::CtValue>) -> crate::AST::TagDef {
     let mut result = source.clone();
     result.name = mapped_definition_name(&source.name, types);
-    for method in &mut result.methods {
-        for param in &mut method.params { param.ty = specialize_module_type(&param.ty, types, values); }
-        if let Some(ret) = &mut method.return_type { *ret = specialize_module_type(ret, types, values); }
-        if let Some(body) = &mut method.default_body { substitute_stmts(body, types, values); }
-    }
     result
 }
 
@@ -2308,7 +2303,7 @@ mod instance_collision_tests {
         let source = r#"
 module everything<T> {
     const answer = 42
-    tag Marked;
+    tag Marked { deny: [Net] }
     trait Show { fn show(self) => T }
     struct Boxed { value: T }
     enum Maybe { Empty Value(T) }

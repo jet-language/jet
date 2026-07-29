@@ -244,7 +244,7 @@ fn tasks_lists_documented_scheduled_project_tasks_and_matches_run_outside_projec
     let hello = workspace.join("packages/hello/hello.jet");
     let mut hello_source = fs::read_to_string(&hello).unwrap();
     hello_source.push_str(
-        "\n#[Task, Doc(\"Say hello from this workspace member\")] fn greet() {}\n",
+        "\n#[Job, Doc(\"Say hello from this workspace member\")] fn greet() {}\n",
     );
     fs::write(&hello, hello_source).unwrap();
 

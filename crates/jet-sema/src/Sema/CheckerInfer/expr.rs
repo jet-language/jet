@@ -1722,7 +1722,17 @@ impl<'a> Checker<'a> {
             // Its type is exactly the inner's type; taint propagation + the E0721
             // sink check run in the dedicated taint pass (Sema/Taint.rs), erased
             // in codegen (I3).
-            Expr::Tainted(inner, _, _span) => self.infer(inner),
+            Expr::Tainted(inner, tag, span) => {
+                let tag = tag.as_deref().unwrap_or("Input");
+                if !self.tag_is_declared(tag) {
+                    self.diags.push(crate::Sema::Diagnostics::undeclared_value_tag(
+                        tag,
+                        self.closest_declared_tag(tag).as_deref(),
+                        *span,
+                    ));
+                }
+                self.infer(inner)
+            }
             Expr::Present(inner, _span) => {
                 let t = self.infer(inner)?;
                 Some(Type::Option(Box::new(t)))
@@ -2834,6 +2844,14 @@ impl<'a> Checker<'a> {
         }
         if let Expr::Field(base, leaf, _) = &**inner {
             if let Expr::Ident(alias, _) = &**base {
+                if self.core_imports.get(alias).map(String::as_str) == Some("core.lang")
+                    && crate::Policy::rule_arg_declaration(leaf).is_some()
+                {
+                    let enum_name = leaf.clone();
+                    **inner = Expr::Ident(enum_name.clone(), span);
+                    let mut empty = Vec::new();
+                    return Some(self.check_enum_lit(&enum_name, member, &mut empty, span));
+                }
                 if self.core_imports.get(alias).map(String::as_str) == Some("core.encoding") {
                     let enum_name = match leaf.as_str() {
                         "DataEvent" => Some("DataEvent"),
@@ -2845,6 +2863,26 @@ impl<'a> Checker<'a> {
                         **inner = Expr::Ident(enum_name.to_string(), span);
                         let mut empty = Vec::new();
                         return Some(self.check_enum_lit(enum_name, member, &mut empty, span));
+                    }
+                }
+                if leaf == "State" {
+                    let is_declared_state = self
+                        .struct_owner_module(alias, None)
+                        .and_then(|owner| self.modules.and_then(|modules| modules.get(owner)))
+                        .and_then(|module| module.declared_states.get(alias))
+                        .is_some_and(|states| states.iter().any(|state| state == member));
+                    if is_declared_state {
+                        self.diags.push(Diagnostic::error(
+                            "E0302",
+                            format!("`{alias}.State.{member}` is not a runtime value"),
+                            "the reserved `.State` plane contains compile-time facts"
+                                .to_string(),
+                            format!(
+                                "use it in `#State({alias}.State.{member})`, `#Transition`, or type reflection"
+                            ),
+                            Some(span),
+                        ));
+                        return None;
                     }
                 }
             }
@@ -2908,12 +2946,8 @@ impl<'a> Checker<'a> {
                 let mut empty = Vec::new();
                 return Some(self.check_enum_lit(type_name, member, &mut empty, span));
             }
-            if let Some(owner_mod) = self.struct_owner_module(type_name, None) {
-                let is_declared_state = self
-                    .modules
-                    .and_then(|modules| modules.get(owner_mod))
-                    .and_then(|module| module.declared_states.get(type_name))
-                    .is_some_and(|states| states.iter().any(|state| state == member));
+            if let Some(_owner_mod) = self.struct_owner_module(type_name, None) {
+                let is_declared_state = false;
                 let (what, why, fix) = if is_declared_state {
                     (
                         format!("`{type_name}.{member}` is not a value"),

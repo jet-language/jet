@@ -1630,7 +1630,7 @@ pub(crate) use Diagnostics::*;
 pub(crate) use Effects::*;
 pub(crate) use Purity::*;
 pub use Registration::*;
-pub(crate) use Taint::{check_func_taint, collect_sanitizers};
+pub(crate) use Taint::check_func_taint;
 pub(crate) use FFI::*;
 // D-STATE1: typestate pass — wrong-state operation (E0150).
 pub(crate) use State::{check_items_state, StateTable};

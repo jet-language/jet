@@ -1,10 +1,10 @@
-// D-TAINT1: an untrusted (`#Tainted`) value reaching a sink effect (here the
-// `Exec` subprocess sink `process.run`) without passing through a `#Sanitizer fn`
+// D-TAINT1: an untrusted (`#Input`) value reaching a sink effect (here the
+// `Exec` subprocess sink `process.run`) without passing through a `#Scrub(Input) fn`
 // is E0721 — the classic command-injection bug, caught at compile time.
 use core.process as process
 
 fn run() {
-    name :: #Tainted "world; rm -rf /"
+    name :: #Input "world; rm -rf /"
     result := process.run(["echo", name]) ?? return
     print(result.output)
 }

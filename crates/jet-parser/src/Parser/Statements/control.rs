@@ -943,7 +943,7 @@ impl<'a> Parser<'a> {
         let arguments = self.bound_registered_rule_arguments(&marker)?;
         let mut caps = Vec::with_capacity(marker.args.len());
         for argument in arguments.variadic() {
-            let Some(name) = Self::marker_effect_path(argument) else {
+            let Some(name) = Self::marker_enum_path(argument, "Capability") else {
                 return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_CAPS, argument.span()));
             };
             caps.push((name, argument.span()));
@@ -978,7 +978,8 @@ impl<'a> Parser<'a> {
             self.expect(TokKind::Colon, "after the scoped capability handle")?;
             let mut caps = Vec::new();
             loop {
-                caps.push(self.expect_effect_path_name("as a granted effect")?);
+                let (name, span) = self.expect_effect_path_name("as a granted effect")?;
+                caps.push((Self::strip_marker_enum_prefix(name, "Capability"), span));
                 if matches!(self.peek().kind, TokKind::RParen) {
                     break;
                 }
@@ -1011,7 +1012,7 @@ impl<'a> Parser<'a> {
         let arguments = self.bound_registered_rule_arguments(&marker)?;
         let mut caps = Vec::with_capacity(marker.args.len());
         for argument in arguments.variadic() {
-            let Some(name) = Self::marker_effect_path(argument) else {
+            let Some(name) = Self::marker_enum_path(argument, "Capability") else {
                 return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_GRANT, argument.span()));
             };
             caps.push((name, argument.span()));
@@ -1041,16 +1042,6 @@ impl<'a> Parser<'a> {
             body,
             span: Span::new(marker.span.start, end),
         })
-    }
-
-    fn marker_effect_path(expr: &Expr) -> Option<String> {
-        match expr {
-            Expr::Ident(name, _) => Some(name.clone()),
-            Expr::Field(base, member, _) => {
-                Some(format!("{}.{}", Self::marker_effect_path(base)?, member))
-            }
-            _ => None,
-        }
     }
 
     /// D-TXN4: parse a `#Transact(name) { … }` transaction block in statement

@@ -8,6 +8,7 @@ pub mod Collections;
 pub mod Diagnostics;
 mod ExactUnitConversion;
 pub mod ExitCodes;
+pub mod Facts;
 pub mod Generics;
 pub mod generated;
 pub mod JitBackend;

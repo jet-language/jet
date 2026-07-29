@@ -5,7 +5,7 @@
 //! projects bins into `~/.jet/bin` with per-install generation metadata under
 //! `~/.jet/tools/` — a minimal isolated install until the shared
 //! D-JPK-PROFILE1 `jet profile` surface is the front door. A bin name that
-//! collides with a project `#Task fn` is E1297 (JPK-TOOL-COLLIDE).
+//! collides with a project `#Job fn` is E1297 (JPK-TOOL-COLLIDE).
 
 use super::parse::Parsed;
 use super::ProfileDispatch;
@@ -316,7 +316,7 @@ fn report_collide(theme: &Theme, bin: &str, task: &str, path: &Path, raw: &str) 
     );
 }
 
-/// Scan project `.jet` sources for `#Task fn <name>` matching `bin`.
+/// Scan project `.jet` sources for `#Job fn <name>` matching `bin`.
 fn find_task_collision(dir: &Path, bin: &str) -> Option<(String, PathBuf)> {
     let mut files = Vec::new();
     collect_jet_files(dir, &mut files, 0);
@@ -362,13 +362,13 @@ fn collect_jet_files(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
 fn task_names_in(src: &str) -> Vec<String> {
     let mut names = Vec::new();
     let bytes = src.as_bytes();
-    let needle = b"#Task";
+    let needle = b"#Job";
     let mut i = 0;
     while i + needle.len() < bytes.len() {
         if &bytes[i..i + needle.len()] == needle {
             let after = &src[i + needle.len()..];
             let trimmed = after.trim_start();
-            // Optional `#Every(…)` between `#Task` and `fn`.
+            // Optional `#Every(…)` between `#Job` and `fn`.
             let after_every = if trimmed.starts_with('#') {
                 // skip one more marker + optional (…)
                 let mut rest = trimmed;
@@ -1354,8 +1354,8 @@ mod tests {
     #[test]
     fn task_names_parse_plain_and_every() {
         let src = r#"
-#Task fn serve() { }
-#Every(5min) #Task fn lint() { }
+#Job fn serve() { }
+#Every(5min) #Job fn lint() { }
 fn run() { }
 "#;
         let names = task_names_in(src);

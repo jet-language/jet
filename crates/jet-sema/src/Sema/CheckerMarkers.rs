@@ -76,11 +76,60 @@ fn validate_rule_arguments(
     let bindings = rule_signature_bindings(marker)?;
     let marker_name = marker.name.clone();
     let marker_span = marker.span;
+    let rule = crate::Policy::applied_rule(&marker_name);
     let mut types = Vec::with_capacity(bindings.len());
     let mut constants = Vec::with_capacity(bindings.len());
     let mut mismatch = false;
     for binding in &bindings {
         let argument = &mut marker.args[binding.source_index];
+        let source_type = binding
+            .parameter_index
+            .and_then(|index| rule.and_then(|rule| rule.signature.params.get(index)))
+            .map(|parameter| parameter.source_type)
+            .or_else(|| rule.and_then(|rule| rule.signature.variadic_source_type));
+        if let Some(declaration) =
+            source_type.and_then(crate::Policy::rule_arg_declaration)
+        {
+            let path = match argument {
+                crate::AST::Expr::Ident(name, _) => Some(name.clone()),
+                crate::AST::Expr::Field(base, member, _) => {
+                    fn path(expression: &crate::AST::Expr) -> Option<String> {
+                        match expression {
+                            crate::AST::Expr::Ident(name, _) => Some(name.clone()),
+                            crate::AST::Expr::Field(base, member, _) => {
+                                Some(format!("{}.{}", path(base)?, member))
+                            }
+                            _ => None,
+                        }
+                    }
+                    path(base).map(|base| format!("{base}.{member}"))
+                }
+                crate::AST::Expr::EnumLit { variant, .. } => Some(variant.clone()),
+                _ => None,
+            };
+            let candidate = path.as_deref().map(|path| {
+                let segments: Vec<&str> = path.split('.').collect();
+                let variant_segments = segments
+                    .iter()
+                    .position(|segment| *segment == declaration.name)
+                    .and_then(|index| segments.get(index + 1..))
+                    .filter(|segments| !segments.is_empty())
+                    .unwrap_or(&segments);
+                if matches!(declaration.name, "Capability" | "Target") {
+                    variant_segments.first().copied().unwrap_or(path)
+                } else {
+                    variant_segments.last().copied().unwrap_or(path)
+                }
+            });
+            if !declaration.variants.is_empty()
+                && candidate.is_some_and(|candidate| !declaration.variants.contains(&candidate))
+            {
+                return Err(crate::Policy::marker_argument_shape_error(
+                    &marker_name,
+                    marker_span,
+                ));
+            }
+        }
         let observation = if binding.ty == crate::Policy::RuleArgType::Ident
             || binding.ty == crate::Policy::RuleArgType::Any
                 && marker_name != Syntax::ATTR_DEFAULT

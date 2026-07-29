@@ -41,6 +41,15 @@ impl<'a> Checker<'a> {
                                     "CBOROptions" | "CBORError" | "CBORErrorKind"))
                         })
                     }) => Type::Named(n.split_once('.').unwrap().1.to_string()),
+                // D-LANGNS-NAME1=A: `core.lang` publishes compiler vocabulary
+                // as ordinary generated enum declarations.
+                Type::Named(n)
+                    if n.split_once('.').is_some_and(|(alias, leaf)| {
+                        self.core_imports.get(alias).is_some_and(|module| {
+                            module == "core.lang"
+                                && crate::Policy::rule_arg_declaration(leaf).is_some()
+                        })
+                    }) => Type::Named(n.split_once('.').unwrap().1.to_string()),
                 // D-EMAIL-SMTP-SURFACE1=A: core.email value annotations may use
                 // the caller's module alias while lowering to one Core type.
                 Type::Named(n)

@@ -1363,17 +1363,10 @@ impl<'a> Checker<'a> {
                             Type::Apply { name, .. } if name == "ExpiringSecret"
                         )
             );
+            // Fact tags are type-transparent. Method lookup always uses the
+            // carried value's type; the fact dataflow pass tracks the tag.
             let recv_ty = match recv_ty {
-                Type::Tagged { marker, inner }
-                    if matches!(
-                        marker.as_str(),
-                        crate::AST::DETERMINISTIC_CLOCK_MARKER
-                            | crate::AST::SYSTEM_CLOCK_MARKER
-                            | crate::AST::EXPIRING_SECRET_LOAN_MARKER
-                    ) =>
-                {
-                    *inner
-                }
+                Type::Tagged { inner, .. } => *inner,
                 other => other,
             };
             if receiver_is_clock

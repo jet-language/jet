@@ -814,7 +814,7 @@ impl<'a> Parser<'a> {
                     TokKind::Hash if self.at_sanitizer_fn() => self.func().map(Item::Func),
                     // D-REPLAY1: `#Replayable fn name(…)` deterministic replay guard.
                     TokKind::Hash if self.at_replayable_fn() => self.func().map(Item::Func),
-                    // D-SCHEDULE1 (card #505): `#Task fn name(…)` / `#Every(…) fn name(…)`
+                    // D-SCHEDULE1 (card #505): `#Job fn name(…)` / `#Every(…) fn name(…)`
                     // schedule-as-code markers on a free function.
                     TokKind::Hash if self.at_task_fn() || self.at_every_fn() => {
                         self.func().map(Item::Func)

@@ -152,13 +152,9 @@ impl TraitRegistry {
         for item in items {
             match item {
                 Item::Trait(t) => self.register_trait(t, diags),
-                // D-QUAL2: record tag names so derives / bounds can reject them,
-                // and flag any method written in a tag body (E0732).
+                // D-TAG-SURFACE1=A: tags are compile-time facts, not traits.
                 Item::Tag(t) => {
                     self.local_tags.insert(t.name.clone());
-                    for m in &t.methods {
-                        diags.push(Generics::e0732(&t.name, &m.name, m.name_span));
-                    }
                 }
                 Item::Struct(s) => self.register_struct_meta(s),
                 Item::Enum(e) => {
@@ -531,6 +527,16 @@ impl TraitRegistry {
     }
 
     fn register_trait(&mut self, t: &TraitDef, diags: &mut Vec<Diagnostic>) {
+        if crate::Policy::nonderive_marker_trait_collision(&t.name) {
+            diags.push(Diagnostic::error(
+                "E0106",
+                format!("the name `{}` is a non-derive type marker", t.name),
+                "trait names become their matching `#Trait` derive spelling, while this marker has different semantics".to_string(),
+                "choose a trait name that does not collide with a registered type marker".to_string(),
+                Some(t.name_span),
+            ));
+            return;
+        }
         if BUILTIN_TRAITS.contains(&t.name.as_str()) {
             diags.push(Diagnostic::error(
                 "E0106",

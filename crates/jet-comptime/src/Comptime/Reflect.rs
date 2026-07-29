@@ -11,6 +11,7 @@ use super::Value::CtValue;
 pub struct ProgramSemanticFacts {
     pub effects: std::collections::HashMap<String, Vec<String>>,
     pub reaches_panic: std::collections::BTreeSet<String>,
+    pub fact_registry: jet_foundation::Facts::FactRegistry,
 }
 
 fn identity(module: &str, symbol: &str) -> String {
@@ -41,6 +42,84 @@ fn ct_struct(type_name: &str, fields: &[(&str, CtValue)]) -> CtValue {
 
 fn marker_names(markers: &[Marker]) -> Vec<CtValue> {
     markers.iter().map(|m| ct_str(m.name.clone())).collect()
+}
+
+fn marker_arg_path(expression: &crate::AST::Expr) -> Option<String> {
+    match expression {
+        crate::AST::Expr::Ident(name, _) => Some(name.clone()),
+        crate::AST::Expr::Field(base, member, _) => {
+            Some(format!("{}.{}", marker_arg_path(base)?, member))
+        }
+        _ => None,
+    }
+}
+
+fn marker_arg_value(expression: &crate::AST::Expr, source_type: &str) -> CtValue {
+    if jet_foundation::Policy::rule_arg_declaration(source_type).is_some() {
+        if let Some(path) = marker_arg_path(expression) {
+            return CtValue::Enum {
+                type_name: source_type.to_string(),
+                variant: path.rsplit('.').next().unwrap_or(&path).to_string(),
+                args: Vec::new(),
+            };
+        }
+    }
+    match expression {
+        crate::AST::Expr::Str(parts, _) => CtValue::Str(
+            parts
+                .iter()
+                .filter_map(|part| match part {
+                    crate::AST::StrPart::Lit(text) => Some(text.clone()),
+                    _ => None,
+                })
+                .collect(),
+        ),
+        crate::AST::Expr::Int(value, ..) => CtValue::Int(*value),
+        crate::AST::Expr::Bool(value, _) => CtValue::Bool(*value),
+        crate::AST::Expr::Char(value, _) => CtValue::Char(*value),
+        _ => CtValue::Unit,
+    }
+}
+
+fn marker_info(marker: &Marker) -> CtValue {
+    let row = jet_foundation::Policy::applied_rule(&marker.name);
+    let bindings = row.and_then(|row| row.signature.marker_argument_bindings(marker));
+    let args = marker
+        .args
+        .iter()
+        .enumerate()
+        .map(|(index, argument)| {
+            let binding = bindings
+                .as_ref()
+                .and_then(|bindings| bindings.iter().find(|binding| binding.source_index == index));
+            let parameter = binding
+                .and_then(|binding| binding.parameter_index)
+                .and_then(|parameter| row.and_then(|row| row.signature.params.get(parameter)));
+            let source_type = parameter
+                .map(|parameter| parameter.source_type)
+                .unwrap_or("Value");
+            ct_struct(
+                "MarkerArgInfo",
+                &[
+                    (
+                        "name",
+                        ct_str(parameter.map(|parameter| parameter.name).unwrap_or("value")),
+                    ),
+                    (
+                        "ty",
+                        ct_str(
+                            source_type,
+                        ),
+                    ),
+                    ("value", marker_arg_value(argument, source_type)),
+                ],
+            )
+        })
+        .collect();
+    ct_struct(
+        "MarkerInfo",
+        &[("name", ct_str(marker.name.clone())), ("args", ct_list(args))],
+    )
 }
 
 fn format_param(name: &str, ty: &crate::AST::Type) -> String {
@@ -116,7 +195,7 @@ pub fn build_type_param_info(param: &TypeParam) -> CtValue {
     )
 }
 
-fn type_level_markers(s: &StructDef) -> Vec<CtValue> {
+fn type_level_marker_names(s: &StructDef) -> Vec<String> {
     let mut names: Vec<String> = s
         .type_markers
         .iter()
@@ -128,14 +207,131 @@ fn type_level_markers(s: &StructDef) -> Vec<CtValue> {
     }
     names.sort();
     names.dedup();
-    names.into_iter().map(ct_str).collect()
+    names
+}
+
+fn type_level_markers(s: &StructDef) -> Vec<CtValue> {
+    let mut markers = s
+        .type_markers
+        .iter()
+        .chain(s.serde_markers.iter())
+        .map(marker_info)
+        .collect::<Vec<_>>();
+    markers.extend(s.derives.iter().map(|(name, _)| {
+        ct_struct(
+            "MarkerInfo",
+            &[("name", ct_str(name.clone())), ("args", ct_list(Vec::new()))],
+        )
+    }));
+    markers
+}
+
+fn state_path(owner: &str, state: &str) -> String {
+    if state == "_" || state.contains(".State.") {
+        state.to_string()
+    } else {
+        format!("{owner}.State.{state}")
+    }
+}
+
+fn transition_info(owner: &str, method: &Func) -> Option<CtValue> {
+    let transition = method.state_transition.as_ref()?;
+    Some(ct_struct(
+        "TransitionInfo",
+        &[
+            ("operation", ct_str(method.name.clone())),
+            (
+                "from",
+                ct_str(
+                    transition
+                        .from
+                        .as_deref()
+                        .map(|state| state_path(owner, state))
+                        .unwrap_or_else(|| "_".to_string()),
+                ),
+            ),
+            ("to", ct_str(state_path(owner, &transition.to))),
+        ],
+    ))
+}
+
+fn reflected_facts(registry: &jet_foundation::Facts::FactRegistry) -> Vec<CtValue> {
+    registry
+        .iter()
+        .flat_map(|fact| {
+            if fact.members.is_empty() {
+                vec![ct_struct(
+                    "FactInfo",
+                    &[
+                        ("kind", ct_str(fact.kind.name())),
+                        ("name", ct_str(fact.name.clone())),
+                        ("path", ct_str(fact.name.clone())),
+                    ],
+                )]
+            } else {
+                fact.members
+                    .iter()
+                    .map(|member| {
+                        ct_struct(
+                            "FactInfo",
+                            &[
+                                ("kind", ct_str(fact.kind.name())),
+                                ("name", ct_str(member)),
+                                ("path", ct_str(format!("{}.{}", fact.name, member))),
+                            ],
+                        )
+                    })
+                    .collect()
+            }
+        })
+        .collect()
 }
 
 /// Build the `TypeInfo` handle passed into a user derive body for `struct` targets.
 pub fn build_struct_type_info(s: &StructDef) -> CtValue {
+    build_struct_type_info_with_states(s, &[])
+}
+
+pub fn build_struct_type_info_with_states(s: &StructDef, states: &[String]) -> CtValue {
     let fields_info: Vec<CtValue> = s.fields.iter().map(build_field_info).collect();
     let methods_info: Vec<CtValue> = s.methods.iter().map(build_method_info).collect();
     let type_params_info: Vec<CtValue> = s.type_params.iter().map(build_type_param_info).collect();
+    let state_info = states
+        .iter()
+        .map(|state| {
+            ct_struct(
+                "StateInfo",
+                &[
+                    ("name", ct_str(state)),
+                    ("path", ct_str(format!("{}.State.{state}", s.name))),
+                ],
+            )
+        })
+        .collect::<Vec<_>>();
+    let transition_info = s
+        .methods
+        .iter()
+        .chain(
+            s.trait_impls
+                .iter()
+                .flat_map(|implementation| implementation.methods.iter()),
+        )
+        .filter_map(|method| transition_info(&s.name, method))
+        .collect::<Vec<_>>();
+    let facts = states
+        .iter()
+        .map(|state| {
+            ct_struct(
+                "FactInfo",
+                &[
+                    ("kind", ct_str("State")),
+                    ("name", ct_str(state)),
+                    ("path", ct_str(format!("{}.State.{state}", s.name))),
+                ],
+            )
+        })
+        .collect::<Vec<_>>();
+    let marker_names = type_level_marker_names(s);
     ct_struct(
         "TypeInfo",
         &[
@@ -154,6 +350,13 @@ pub fn build_struct_type_info(s: &StructDef) -> CtValue {
             ("methods", ct_list(methods_info)),
             ("type_params", ct_list(type_params_info)),
             ("markers", ct_list(type_level_markers(s))),
+            (
+                "marker_names",
+                ct_list(marker_names.into_iter().map(ct_str).collect()),
+            ),
+            ("states", ct_list(state_info)),
+            ("transitions", ct_list(transition_info)),
+            ("facts", ct_list(facts)),
             (
                 "implements",
                 ct_list(
@@ -199,10 +402,31 @@ fn build_enum_type_info(def: &EnumDef, module: &str) -> CtValue {
             ("is_pub", ct_bool(def.is_pub)),
         ])
     }).collect();
-    let methods = def.methods.iter().map(|method| qualified_method_info(method, module, &def.name)).collect();
+    let methods = def
+        .methods
+        .iter()
+        .chain(
+            def.trait_impls
+                .iter()
+                .flat_map(|implementation| implementation.methods.iter()),
+        )
+        .map(|method| qualified_method_info(method, module, &def.name))
+        .collect();
     let params = def.type_params.iter().map(build_type_param_info).collect();
-    let mut markers = def.type_markers.iter().chain(def.serde_markers.iter()).map(|marker| ct_str(marker.name.clone())).collect::<Vec<_>>();
-    markers.extend(def.derives.iter().map(|(name, _)| ct_str(name.clone())));
+    let mut marker_names = def.type_markers.iter().chain(def.serde_markers.iter()).map(|marker| ct_str(marker.name.clone())).collect::<Vec<_>>();
+    marker_names.extend(def.derives.iter().map(|(name, _)| ct_str(name.clone())));
+    let mut markers = def.type_markers.iter().chain(def.serde_markers.iter()).map(marker_info).collect::<Vec<_>>();
+    markers.extend(def.derives.iter().map(|(name, _)| ct_struct("MarkerInfo", &[("name", ct_str(name.clone())), ("args", ct_list(Vec::new()))])));
+    let transitions = def
+        .methods
+        .iter()
+        .chain(
+            def.trait_impls
+                .iter()
+                .flat_map(|implementation| implementation.methods.iter()),
+        )
+        .filter_map(|method| transition_info(&def.name, method))
+        .collect();
     qualify_info(ct_struct("TypeInfo", &[
         ("name", ct_str(def.name.clone())),
         ("span", ct_struct(crate::Syntax::TYPE_SOURCE_SPAN, &[("start", CtValue::Int(def.name_span.start as i64)), ("end", CtValue::Int(def.name_span.end as i64))])),
@@ -210,6 +434,10 @@ fn build_enum_type_info(def: &EnumDef, module: &str) -> CtValue {
         ("methods", ct_list(methods)),
         ("type_params", ct_list(params)),
         ("markers", ct_list(markers)),
+        ("marker_names", ct_list(marker_names)),
+        ("states", ct_list(Vec::new())),
+        ("transitions", ct_list(transitions)),
+        ("facts", ct_list(Vec::new())),
         ("implements", ct_list(def.trait_impls.iter().map(|implementation| ct_str(implementation.trait_name.clone())).collect())),
     ]), module, &def.name, "enum")
 }
@@ -220,7 +448,10 @@ pub fn build_program_info(
     bundle: &crate::AST::ProgramBundle,
     facts: &ProgramSemanticFacts,
 ) -> CtValue {
-    let mut external_impls = std::collections::HashMap::<(String, String), (Vec<String>, Vec<CtValue>)>::new();
+    let mut external_impls = std::collections::HashMap::<
+        (String, String),
+        (Vec<String>, Vec<CtValue>, Vec<CtValue>),
+    >::new();
     for module in &bundle.modules {
         for item in &module.items {
             if let crate::AST::Item::Impl(implementation) = item {
@@ -229,6 +460,12 @@ pub fn build_program_info(
                     entry.0.push(trait_name.clone());
                 }
                 entry.1.extend(implementation.methods.iter().map(|method| qualified_method_info(method, &module.alias, &implementation.type_name)));
+                entry.2.extend(
+                    implementation
+                        .methods
+                        .iter()
+                        .filter_map(|method| transition_info(&implementation.type_name, method)),
+                );
             }
         }
     }
@@ -241,19 +478,59 @@ pub fn build_program_info(
         for item in &module.items {
             match item {
                 crate::AST::Item::Struct(def) => {
-                    let mut info = qualify_info(build_struct_type_info(def), &module.alias, &def.name, "struct");
+                    let states = module
+                        .items
+                        .iter()
+                        .find_map(|item| match item {
+                            crate::AST::Item::StateDecl(state)
+                                if state.type_name == def.name =>
+                            {
+                                Some(
+                                    state
+                                        .states
+                                        .iter()
+                                        .map(|(name, _)| name.clone())
+                                        .collect::<Vec<_>>(),
+                                )
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    let mut info = qualify_info(
+                        build_struct_type_info_with_states(def, &states),
+                        &module.alias,
+                        &def.name,
+                        "struct",
+                    );
                     if let CtValue::Struct { fields, .. } = &mut info {
                         if let Some((_, CtValue::List(methods))) = fields.iter_mut().find(|(name, _)| name == "methods") {
-                            *methods = def.methods.iter().map(|method| qualified_method_info(method, &module.alias, &def.name)).collect();
+                            *methods = def
+                                .methods
+                                .iter()
+                                .chain(
+                                    def.trait_impls
+                                        .iter()
+                                        .flat_map(|implementation| implementation.methods.iter()),
+                                )
+                                .map(|method| qualified_method_info(method, &module.alias, &def.name))
+                                .collect();
+                        }
+                        if let Some((_, CtValue::List(values))) =
+                            fields.iter_mut().find(|(name, _)| name == "facts")
+                        {
+                            *values = reflected_facts(&facts.fact_registry);
                         }
                     }
-                    if let Some((traits, methods)) = external_impls.get(&(module.alias.clone(), def.name.clone())) {
+                    if let Some((traits, methods, transitions)) = external_impls.get(&(module.alias.clone(), def.name.clone())) {
                         if let CtValue::Struct { fields, .. } = &mut info {
                             if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "implements") {
                                 values.extend(traits.iter().cloned().map(ct_str));
                             }
                             if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "methods") {
                                 values.extend(methods.iter().cloned());
+                            }
+                            if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "transitions") {
+                                values.extend(transitions.iter().cloned());
                             }
                         }
                     }
@@ -262,10 +539,18 @@ pub fn build_program_info(
                 }
                 crate::AST::Item::Enum(def) => {
                     let mut info = build_enum_type_info(def, &module.alias);
-                    if let Some((traits, methods)) = external_impls.get(&(module.alias.clone(), def.name.clone())) {
+                    if let CtValue::Struct { fields, .. } = &mut info {
+                        if let Some((_, CtValue::List(values))) =
+                            fields.iter_mut().find(|(name, _)| name == "facts")
+                        {
+                            *values = reflected_facts(&facts.fact_registry);
+                        }
+                    }
+                    if let Some((traits, methods, transitions)) = external_impls.get(&(module.alias.clone(), def.name.clone())) {
                         if let CtValue::Struct { fields, .. } = &mut info {
                             if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "implements") { values.extend(traits.iter().cloned().map(ct_str)); }
                             if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "methods") { values.extend(methods.iter().cloned()); }
+                            if let Some((_, CtValue::List(values))) = fields.iter_mut().find(|(name, _)| name == "transitions") { values.extend(transitions.iter().cloned()); }
                         }
                     }
                     types.push(info.clone());
@@ -378,6 +663,7 @@ mod tests {
             unsafe_span: None,
             is_pure: false,
             is_sanitizer: false,
+            scrub_tag: None,
             is_reactive: false,
                 reactive_upgrades: Vec::new(),
             declared_effects: None,
@@ -467,6 +753,68 @@ mod tests {
         };
         assert!(markers
             .iter()
-            .any(|m| matches!(m, CtValue::Str(s) if s == "Debug")));
+            .any(|marker| matches!(
+                marker,
+                CtValue::Struct { fields, .. }
+                    if fields.iter().any(|(name, value)|
+                        name == "name" && matches!(value, CtValue::Str(value) if value == "Debug"))
+            )));
+        let marker_names = get("marker_names");
+        assert!(matches!(marker_names, CtValue::List(_)));
+        let CtValue::List(marker_names) = marker_names else {
+            return;
+        };
+        assert!(marker_names
+            .iter()
+            .any(|name| matches!(name, CtValue::Str(name) if name == "Debug")));
+    }
+
+    #[test]
+    fn transition_reflection_normalizes_state_paths() {
+        let mut transition = method("open", true);
+        transition.state_transition = Some(crate::AST::StateTransition {
+            from: Some("Closed".to_string()),
+            to: "Door.State.Open".to_string(),
+            span: span(),
+        });
+        let info = transition_info("Door", &transition).expect("transition");
+        assert!(matches!(info, CtValue::Struct { .. }));
+        let CtValue::Struct { fields, .. } = info else {
+            return;
+        };
+        assert!(fields.iter().any(
+            |(name, value)| name == "from"
+                && matches!(value, CtValue::Str(path) if path == "Door.State.Closed")
+        ));
+        assert!(fields.iter().any(
+            |(name, value)| name == "to"
+                && matches!(value, CtValue::Str(path) if path == "Door.State.Open")
+        ));
+    }
+
+    #[test]
+    fn unified_fact_reflection_contains_effect_tag_and_state_rows() {
+        let mut registry = jet_foundation::Facts::FactRegistry::default();
+        registry.declare(
+            jet_foundation::Facts::FactKind::Effect,
+            "Exec",
+            std::iter::empty(),
+        );
+        registry.declare_with_rules(
+            jet_foundation::Facts::FactKind::Tag,
+            "PII",
+            std::iter::empty(),
+            ["Exec".to_string()],
+            std::iter::empty(),
+        );
+        registry.declare(
+            jet_foundation::Facts::FactKind::State,
+            "Door.State",
+            ["Open".to_string()],
+        );
+        let rows = format!("{:?}", reflected_facts(&registry));
+        assert!(rows.contains("Effect") && rows.contains("Exec"), "{rows}");
+        assert!(rows.contains("Tag") && rows.contains("PII"), "{rows}");
+        assert!(rows.contains("State") && rows.contains("Door.State.Open"), "{rows}");
     }
 }

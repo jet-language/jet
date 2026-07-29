@@ -312,6 +312,7 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         is_inline_always: false,
         inline_span: None,
         is_sanitizer: false,
+        scrub_tag: None,
         declared_effects: None,
         effect_via: None,
         state_requires: None,

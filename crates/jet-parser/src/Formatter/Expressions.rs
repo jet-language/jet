@@ -1074,13 +1074,11 @@ impl<'a> Fmt<'a> {
                     self.write(if named { "}" } else { ")" });
                 }
             }
-            // D-TAINT1/TAINT2: `#Tainted expr` or `#Tainted(Kind) expr`.
+            // D-TAG-SURFACE1=A: a direct value-fact application.
             Expr::Tainted(inner, kind, _) => {
-                if let Some(k) = kind {
-                    self.write(&format!("#{}({}) ", Syntax::KW_TAINTED, k));
-                } else {
-                    self.write(&format!("#{} ", Syntax::KW_TAINTED));
-                }
+                self.write("#");
+                self.write(kind.as_deref().unwrap_or("Input"));
+                self.write(" ");
                 self.fmt_expr(inner, Prec::Unary);
             }
             Expr::Present(inner, _) => {

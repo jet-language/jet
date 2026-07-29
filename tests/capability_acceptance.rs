@@ -540,12 +540,12 @@ fn static_guarantees_shared_engine() {
 #Invariant("value >= 0 && value < 4")
 Index4 :: distinct Int
 
-#Pre(n >= 0, "n non-negative") #Post(result >= 0, "result non-negative")
+#[Pre(n >= 0, "n non-negative"), Post(result >= 0, "result non-negative")]
 fn absish(n: Int) => Int {
     return n
 }
 
-#Sanitizer fn clean(raw: String) => String {
+#Scrub(Input) fn clean(raw: #Input String) => String {
     return raw
 }
 
@@ -562,7 +562,7 @@ fn pick(xs: [String#4], i: Index4) => String {
 }
 
 fn run() {
-    dirty :: #Tainted "x"
+    dirty :: #Input "x"
     safe := clean(dirty)
     words :: [String#4].{ "a", "b", "c", "d" }
     print(pick(words, Index4.from_int(1)))
@@ -599,8 +599,8 @@ fn run() {
         "I5 contracts example must remain"
     );
     assert!(
-        read("examples/features/effects/taint.jet").contains("#Tainted")
-            && read("examples/features/effects/taint.jet").contains("#Sanitizer"),
+        read("examples/features/effects/taint.jet").contains("#Input")
+            && read("examples/features/effects/taint.jet").contains("#Scrub(Input)"),
         "I5 taint/IFC slice example must remain"
     );
     assert!(

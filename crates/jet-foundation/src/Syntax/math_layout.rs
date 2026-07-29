@@ -347,7 +347,7 @@ pub const PAT_WILDCARD_SLOT: &str = "_";
 // (the formatter always emits `.` before a Pattern::Variant name). No new keyword or sigil —
 // reuses OP_DOT (S21). Value-position dot (`.Red` where type is known) is D-ENUMDOT2 (open).
 
-// D-TAG1 (ratified 2026-07-03): enum variant groups. A variant may enclose sub-variants
+// D-TAG1 (ratified 2026-07-03): variant groups. A variant may enclose sub-variants
 // in `{ }` (`enum Damage { Physical { Blunt, Pierce } Fire { Burn, Scald } Cold }`), to any
 // depth. A group name matches its whole subtree in `==` pattern tests and dispatch arms
 // (`d == .Fire` is true for `.Fire.Burn`); exhaustiveness is checked at the group level;
@@ -631,18 +631,18 @@ pub fn duration_suffix_nanos(suffix: &str) -> Option<u128> {
     }
 }
 
-/// D-SCHEDULE1 (ratified 2026-07-11, card #505): `#Task fn` — a top-level
+/// D-SCHEDULE1, amended by D-MARKER-NAME-HYGIENE1=A: `#Job fn` — a top-level
 /// function Jet can invoke by name with `jet run --task` (D-JPK-TASKRUN1),
 /// living beside `fn run()`. Bare marker, no arguments.
-pub const KW_TASK: &str = "Task";
+pub const KW_TASK: &str = "Job";
 
-/// D-JPK-TASKRUN1=A: lifecycle verbs a `#Task fn` must not reuse — they already
+/// D-JPK-TASKRUN1=A: lifecycle verbs a `#Job fn` must not reuse — they already
 /// name Jet's built-in entry points (`fn run`/`fn dev`/`fn build`/`fn test`).
 /// Sema rejects a collision as E0928.
 pub const TASK_RESERVED_LIFECYCLE: &[&str] = &["run", "dev", "build", "test"];
 
-/// D-SCHEDULE1: `#Every(…)` — a declarative schedule marker on a `#Task fn`.
-/// Legal only alongside `#Task` (E0925 otherwise).
+/// D-SCHEDULE1: `#Every(…)` — a declarative schedule marker on a `#Job fn`.
+/// Legal only alongside `#Job` (E0925 otherwise).
 pub const ATTR_EVERY: &str = "Every";
 
 /// D-SCHEDULE1: recognized duration suffixes for `#Every(<dur>)` — extends

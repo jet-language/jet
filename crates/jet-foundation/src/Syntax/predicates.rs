@@ -50,6 +50,8 @@ pub const UNIT_SUFFIX_EXPONENT_RESERVED: &str = "e"; // D-UNITLIT1
 /// key set equals this slice.
 pub const KNOWN_CORE_MODULES: &[&str] = &[
     "core",
+    // D-LANGNS-NAME1=A: generated declarations for compiler vocabulary.
+    "core.lang",
     "core.io",
     "core.env",
     // D-OSFACTS1=A: system facts and safe interrupt hook.

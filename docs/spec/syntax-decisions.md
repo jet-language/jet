@@ -1252,7 +1252,7 @@ D-VERDICT-732-1)*: on `#`: `MustUse`,
 (user derives of the same names also use `#`). D-SHAPE8 later moved explicit
 purity to the empty function-effect row (`f: fn(Int) =[]=> Int`). Field-level wire markers
 use `#`: `Rename`, `Skip`, `Default`, `Flatten`, `RenameAll`,
-`DenyUnknownFields`, `Tag`, `Untagged`.
+`DenyUnknownFields`, `Discriminant`, `Untagged`.
 
 **S82 — Applied-rule grammar shapes** *(D-SHAPE2/D-ATTR2/D-VERDICT-732-1)*:
 `#Rule` single, line before the declaration;
@@ -1356,7 +1356,7 @@ and `jet explain` reports the effective value plus every declaration it
 overrode. A compiler-owned applicability matrix decides which levels each
 setting may use and whether it may tighten, override, or merge. Site-specific
 proof and authority stay site-bound: `#Unsafe` authorization, `#Grant`,
-`#Tainted`, `#Sanitizer`, and field wire attributes do not widen through this
+direct fact tags, `#Scrub(Tag)`, and field wire attributes do not widen through this
 ladder. At package scope, each setting uses the coherent Package `policy:`
 surface owned by its policy decision; the common ladder does not mint a second
 manifest spelling.
@@ -1365,7 +1365,7 @@ The compiler registry is also the source of semantic-index/explain provenance:
 it returns one effective value and the complete outer-to-inner declaration
 chain. The shared memory fields are `no_alloc: true`, `zero_rc: true`,
 `arena_bounded: <positive bytes>`, and `gc: true`. Site-bound
-`#Unsafe`, `#Grant`, `#Tainted`, `#Sanitizer`, wire, and authority rows have
+`#Unsafe`, `#Grant`, direct fact tags, `#Scrub(Tag)`, wire, and authority rows have
 explicit applicability but never inherit.
 The concrete terminal view uses the ratified existing route:
 `jet explain marker Source/sensor.jet:9 arena_bounded`.
@@ -1448,9 +1448,10 @@ returns the tracked source note, and untracked Floats return `"untracked"`.
 No `Tracked<T>` wrapper exists and no general value-history type is introduced.
 
 **D-QUAL2 — Tag vs trait**: exactly two qualifier kinds — `trait` (has
-methods, dispatches) and `tag` (no methods, erases). Methods on a tag E0732;
-tag where dispatch expected E0731. **D-QUAL4**: type-position value tags are
-prefix — `#Tainted String`.
+methods and dispatches) and `tag` (declares an erased dataflow fact and its
+policy). A tag requires a nonempty `deny` list and may declare `from`. Methods
+on a tag are E0732; tag where dispatch is expected is E0731. **D-QUAL4**:
+type-position value tags use a direct prefix, such as `#PII String`.
 
 **D-MATURITY1 (superseded by D-MARK-META1=B, 2026-07-12)**: the maturity
 trio `#Experimental`/`#Tested`/`#Hardened` leaves the grammar — maturity
@@ -1762,17 +1763,17 @@ callee must not use the effect (E0749).
 erased first-class handle in the marker head. An effect
 without backing grant E0712; handle escape E0711.
 
-**D-TAINT1 — Taint** *(D-TAINT-SAN, D-IFC1)*: `#Tainted expr` marks untrusted
-values (closed kinds `.Input`/`.PII`/`.Secret`/`.Credential`; bare = `.Input`);
-taint spreads by dataflow; `#Sanitizer fn` strips by contract (bare
-`sanitizer` E0059); tainted value reaching a `DB`/`Exec`/`Net` sink is E0721.
-Full IFC deferred post-Epoch 3.
+**D-TAINT1 — Fact-tag dataflow** *(amended by D-TAG-SURFACE1=A)*:
+`#Input expr` attaches the Prelude `Input` tag. Direct tags spread through
+dataflow. A value reaching a destination named by its tag declaration is E0721.
+`#Scrub(Tag)` removes exactly the named tag when its signature consumes that
+tag and returns an untagged value. Bare `sanitizer` remains E0059 with this fix.
 
 **D-TAINT2=A — Credential taint** *(ratified 2026-07-13)*:
-`#Tainted(Credential) T` attaches the existing credential kind through the one
-taint lattice. Credential taint spreads by dataflow and may not reach
-`print`, `log`, or serialization sinks (E0722); `#Sanitizer fn` is the audited
-strip point. Other taint kinds retain the D-TAINT1 injection-sink rules.
+`#Credential T` attaches the Prelude credential tag through the shared fact
+lattice. Credential facts spread by dataflow and may not reach `print`, `log`,
+or serialization sinks (E0722); `#Scrub(Credential)` is the exact audited strip
+point. Other tags follow their declared `deny` and optional `from` policy.
 
 **D-DET1 — Determinism** *(D-DET-CAPAPI)*: an explicit `=[]=>` bound implies reproducible —
 wall-clock/OS-rng/fs/net rejected (E3401/E3403); injectable `Clock`
@@ -2482,7 +2483,7 @@ binding type; bare `decode(s)` yields dynamic `DataTree`). Hand-impl surface:
 { path, reason }`; encode infallible. Field markers (`#` plane):
 `#Rename("x")`, `#Skip`, `#Default`/`#Default(expr)`, `#Flatten`,
 `#RenameAll(camel|snake|pascal|kebab|screaming)` (E2409). Enum wire:
-externally tagged default, single-value variants bare; `#Tag("type")`
+externally tagged default, single-value variants bare; `#Discriminant("type")`
 internal (single unnamed payload under `"value"`), `#Untagged`. Unknown wire
 keys ignored by default;
 `#DenyUnknownFields` errors (E2412). Generic `#Codable` auto-adds
@@ -2877,7 +2878,7 @@ index, not a substitute for that law.
   cookies; httponly/secure/samesite defaults), password login (argon2id
   via the crypto suite), OAuth/OIDC client, email magic links, JWT/PASETO
   verification. `app.auth(users: db)` is the magic default; every knob
-  expert-overridable; secrets carry `#Tainted(Credential)`; policy
+  expert-overridable; secrets carry `#Credential`; policy
   may require stronger factors.
 - **D-AUTH2=A / D-AUTH-TOKENPOLICY1=A** *(ratified 2026-07-18)*: token
   verification ships as strict standalone typed `core.auth` functions before
@@ -4814,8 +4815,8 @@ Bare `jet self lsp` is E2101 before external-command discovery, preserves follow
 argv in its replacement, exits 2, and never starts a server. Help, palette,
 man pages, and completions advertise only canonical grouped spellings.
 
-**D-JPK-TASKRUN1=A — tasks are `#Task fn`**: a task is an ordinary Jet
-function marked `#Task`, living beside `fn run()`. Reuses typed-argument CLI
+**D-JPK-TASKRUN1=A — tasks are `#Job fn`**: a task is an ordinary Jet
+function marked `#Job`, living beside `fn run()`. Reuses typed-argument CLI
 parsing (D-CLIFLAG1) and `?` fallibility; a cross-task dependency is a plain
 function call, no separate DAG syntax. Invoked canonically with `jet run
 --task <name> <entry>`; `jetpack run <name>` is the Jetpack engine bridge.
@@ -4823,7 +4824,7 @@ function call, no separate DAG syntax. Invoked canonically with `jet run
 cannot reuse.
 
 **D-SCHEDULE1=A — schedule-as-code** *(ratified by owner 2026-07-11, card
-#505)*: `#Every(…)` is a directive marker on a `#Task fn`
+#505)*: `#Every(…)` is a directive marker on a `#Job fn`
 (D-JPK-TASKRUN1). `#Every(5min)` takes a duration literal (D-UNITLIT1);
 `#Every("03:00")` takes a daily wall-clock time; both are
 compile-checked. One declaration feeds every consumer: `jet dev` runs
@@ -4833,18 +4834,18 @@ Complex calendars (cron expressions, timezones, jitter) stay with the
 runtime API or jetos timers; operator-side cadence overrides live at the
 jetos/service layer with explain provenance.
 
-*Shipped 2026-07-12 (card #505, slice 2)*: `#Task fn` (D-JPK-TASKRUN1) and
+*Shipped 2026-07-12 (card #505, slice 2)*: `#Job fn` (D-JPK-TASKRUN1) and
 `#Every(…)` parse, placement-check (E0925), and value-check (E0926); `jet
 dev`'s watch loop runs due tasks on their own schedule (UTC for
 `#Every("HH:MM")` — timezone-aware calendars stay the jetos/service tier's
 job per this same law).
 
-*Shipped 2026-07-12 (card #476)*: reserved-lifecycle reject on `#Task fn
+*Shipped 2026-07-12 (card #476)*: reserved-lifecycle reject on `#Job fn
 run|dev|build|test` (E0928); `jet run --task <name> <entry>` dispatches an
-`#Task fn`, and the Jetpack engine bridges `jetpack run <name>` to that path
+`#Job fn`, and the Jetpack engine bridges `jetpack run <name>` to that path
 (D-JPK-DISPATCH1); unknown names list declared tasks (E1294). Typed task
 args reuse D-CLIFLAG1 once the task is the entry. Entry dispatch injects a
-synthetic `fn run { task(…) }` wrapper so the selected `#Task fn` keeps its
+synthetic `fn run { task(…) }` wrapper so the selected `#Job fn` keeps its
 name — a sibling's plain-call dependency (ballot: dependency = plain
 function call) does not die with E0102. D-SERVICE1 still has no typed
 builder/worker/group to carry a schedule into a service runtime — that
@@ -4865,7 +4866,7 @@ emit E1298 (JPK-TOOL-PROVIDER) instead of silent skip. `tool install` writes
 real symlinks under `~/.jet/bin` plus generation metadata at
 `~/.jet/tools/generations/<n>/` (profile `"tools"`) — a minimal isolated
 install until the shared D-JPK-PROFILE1 `jet profile` front door is the
-caller. Bin/`#Task fn` collision is E1297 (JPK-TOOL-COLLIDE).
+caller. Bin/`#Job fn` collision is E1297 (JPK-TOOL-COLLIDE).
 
 **D-JPK-PKGOVERRIDE1=B — keyed override record inside `overlay`**: a
 package's version/flags/env/patch overrides live under one
@@ -5172,3 +5173,36 @@ ambiguous links. Implemented end to end on card #544.
 **2026-07-28 — D-TRAILBLOCK2=A**: code-as-argument uses explicit `() => { … }` inside call parentheses (multiline bodies and multiple code args allowed); retires D-TRAILBLOCK1 trailing `{ }` sugar (`twice { … }` / `f() { … }`). E0335 teaches the `() =>` form. Card #1266.
 
 **2026-07-28 — D-UNIFYLIT1=A**: typed heads only for domain text (`SQL`/`HTML`/`Sh.{"…"}` + `.raw`); byte patterns `[U8].{"…"}`; retires `sql"`/`html"`/`sh"` prefixes, silent expected-type rewrite of bare quotes, and `b"…"`; text patterns keep plain `"…"` convenience. Amends D-TYPEDTEXT1/2 and D-BINPAT1; supersedes D-LITERAL-PREFIX1 prefix surface. Card #1265.
+
+**2026-07-29 — D-FACTMODEL1=A**: tags, states, taint kinds, and effect leaves
+are compile-time enum facts. They share one registry, segment-aware
+subsumption, and TypeInfo reflection. Facts classify and erase. They never
+select runtime types or dispatch. Card #1294.
+
+**2026-07-29 — D-TAG-SURFACE1=A** *(amends D-TAG-UNIFY1)*: a tag declaration
+has a required non-empty `deny` list and optional `from` list:
+`tag PII { deny: [Log, Net], from: [DB.read] }`. Direct `#PII` prefixes apply
+the fact to types, fields, returns, and expressions. `#Scrub(PII)` removes
+exactly that tag and its function signature must consume a tagged value and
+return an untagged value. `Input`, `PII`, `Secret`, and `Credential` are Prelude
+tag declarations. Bare `tag Name`, strict tag modes, `#Tainted`, and
+`#Sanitizer` are retired. Cards #1294 and #1295.
+
+**2026-07-29 — D-STATE-NS1=A**: each state declaration reserves
+`Type.State.Name`. Bare `Name` remains sugar inside `#State` and `#Transition`;
+qualified spelling is accepted there and is required for unambiguous
+reflection. A state path in value position is an error because state facts
+erase. Card #1296.
+
+**2026-07-29 — D-RULEARG-TYPES1=A, D-LANGNS-NAME1=A**: every nonprimitive
+marker argument type is a generated ordinary enum under `core.lang`. The
+marker registry generates exactly fourteen declarations and supplies parser,
+E0930, explain, hover, completion, documentation, and reflection. Dot literals
+use the expected enum type; importing `core.lang` is optional for them. Card
+#1293.
+
+**2026-07-29 — D-MARKER-NAME-HYGIENE1=A**: PascalCase type-site markers share
+the trait/derive namespace. Serde internal tagging is
+`#Discriminant("field")`, and a scheduled project entry is `#Job fn`.
+`#Tag` and `#Task` are retired with fixes. D-TAG1 prose calls nested enum
+families “variant groups.” Card #1300.

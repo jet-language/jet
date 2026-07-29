@@ -1,4 +1,4 @@
-//! D-JPK-TASKRUN1 (card #476): `jetpack run <task>` discovers `#Task fn`s.
+//! D-JPK-TASKRUN1 (card #476): `jetpack run <task>` discovers `#Job fn`s.
 
 use std::fs;
 use std::path::PathBuf;
@@ -50,7 +50,7 @@ fn jet_run_task_invokes_marked_fn() {
     write_main(
         &scratch.path,
         r#"
-#Task
+#Job
 fn greet() {
     print("hello-task")
 }
@@ -84,11 +84,11 @@ fn jetpack_run_task_and_unknown_lists_declared() {
     write_main(
         &scratch.path,
         r#"
-#Task
+#Job
 fn greet() {
     print("from-jetpack")
 }
-#Task
+#Job
 fn seed() {
     print("seeded")
 }
@@ -138,11 +138,11 @@ fn jet_run_task_leaf_stays_callable_from_sibling() {
     write_main(
         &scratch.path,
         r#"
-#Task
+#Job
 fn greet() {
     print("leaf-ok")
 }
-#Task
+#Job
 fn seed() {
     greet()
     print("dep-ok")
@@ -199,7 +199,7 @@ fn jet_run_task_typed_cli_args() {
 struct MigrateArgs {
     #[Doc("target"), Default("latest")] to: String
 }
-#Task
+#Job
 fn migrate(args: MigrateArgs) {
     print(args.to)
 }

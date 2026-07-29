@@ -22,35 +22,25 @@ pub const KW_PURE: &str = "Pure";
 pub const EFFECT_ARROW_OPEN: &str = "=[";
 pub const EFFECT_ARROW_CLOSE: &str = "]=>";
 
-/// D-TAINT1 (ratified 2026-06-21, option A; gated on D-EFF1): the value-fact tag
-/// that marks an untrusted value at its source — `#Tainted input`. The taint
-/// **spreads** along dataflow (assignment, interpolation, field store, return,
-/// arithmetic); a tainted value reaching a sink effect (`DB`/`Exec`/`Net`)
-/// without passing through a `#Sanitizer fn` is E0721. A value fact, not a
-/// declaration: it rides the value (D-QUAL1). PascalCase per D-CASING1 (the
-/// ratified card's lowercase `#tainted` is normalized to the tag convention).
-/// Static, erased in codegen (I3).
-///
-/// D-TAINT2 (ratified 2026-07-13, option A): the taint kind is named in parens —
-/// `#Tainted(Credential) value`. Without parens the kind defaults to `.Input`
-/// (backward compatible). The closed kind set from D-TAINT1 is `.Input` /
-/// `.PII` / `.Secret` / `.Credential`; Credential adds log/print/serialize sinks.
+/// Retired D-TAINT1 spelling. D-TAG-SURFACE1=A uses direct declared tags such
+/// as `#Input value` and `#Credential value`.
 pub const KW_TAINTED: &str = "Tainted";
 
-/// D-TAINT2 (ratified 2026-07-13, option A): the `Credential` taint kind —
-/// `#Tainted(Credential) value`. A credential value reaching `print`, `log`, or
+/// Prelude `Credential` fact tag. A credential value reaching `print`, `log`, or
 /// `serialize` sinks is E0722. Part of the closed kind set already ratified in
 /// D-TAINT1 (`.Input`/`.PII`/`.Secret`/`.Credential`). PascalCase per D-CASING1.
 pub const KW_CREDENTIAL: &str = "Credential";
 
-/// D-TAINT1: the `#Sanitizer fn name(…)` modifier — the one blessed way to strip
-/// taint. A sanitizer's return value is untainted by contract, regardless of
-/// whether its inputs were tainted (it is the audited cleaning step). A fn
-/// function modifier in the `#Unsafe` family; PascalCase per D-CASING1. Erased in
-/// codegen (I3). NOTE: the ratified card spells the modifier bare `sanitizer fn`;
-/// the D-CASING1 marker convention makes
-/// `#Sanitizer fn` the consistent default — a spelling fork queued as D-TAINT-SAN.
+/// Retired D-TAINT1 spelling. D-TAG-SURFACE1=A uses `#Scrub(Tag)`.
 pub const KW_SANITIZER: &str = "Sanitizer";
+
+/// D-TAG-SURFACE1=A: a typed function contract that removes exactly one
+/// declared fact tag from its result.
+pub const KW_SCRUB: &str = "Scrub";
+
+/// D-TAG-SURFACE1=A: Prelude fact tags. They are declarations, not compiler
+/// flags, and may be used anywhere a declared tag may be used.
+pub const BUILTIN_TAGS: &[&str] = &["Input", "PII", "Secret", "Credential"];
 
 /// D-STATE1 (ratified 2026-06-22, option A): the typestate **require-state** fn
 /// modifier — `#State(Confirmed) fn check_in(self, …)`. Declares the method valid
@@ -250,10 +240,8 @@ pub const FOREIGN_TEST: &str = "test";
 pub const FOREIGN_PURE: &str = "pure";
 pub const FOREIGN_TODO: &str = "todo";
 
-/// D-TAINT-SAN (ratified 2026-06-25, option B): the taint-strip modifier is the
-/// PascalCase marker `#Sanitizer fn`. Bare lowercase `sanitizer` in fn-modifier
-/// position (`sanitizer fn …`) is the retired spelling, recognized only for the
-/// teaching error E0059 that points at `#Sanitizer`. An ordinary identifier named
+/// Bare lowercase `sanitizer` in fn-modifier position is retained only for
+/// E0059, which points at `#Scrub(Tag)`. An ordinary identifier named
 /// `sanitizer` elsewhere is unaffected.
 pub const FOREIGN_SANITIZER: &str = "sanitizer";
 
@@ -538,7 +526,7 @@ pub const TOOL_STATE_DIR: &str = "tools";
 /// hangar providers — emit E1298 instead of silently skipping.
 pub const TOOL_EXTERNAL_PROVIDERS: &[&str] =
     &["npm", "pypi", "cargo", "crates", "brew", "go", "gem"];
-/// Diagnostic class JPK-TOOL-COLLIDE (E1297): install bin shadows a `#Task fn`.
+/// Diagnostic class JPK-TOOL-COLLIDE (E1297): install bin shadows a `#Job fn`.
 pub const TOOL_DIAG_COLLIDE: &str = "E1297";
 /// Diagnostic class JPK-TOOL-PROVIDER (E1298): external provider not available.
 pub const TOOL_DIAG_PROVIDER: &str = "E1298";

@@ -91,7 +91,10 @@ pub fn data_status_rows() -> Vec<(
 }
 pub use Methods::apply_dollar_splices;
 pub use Purity::walk_calls;
-pub use Reflect::{build_program_info, build_struct_type_info, ProgramSemanticFacts};
+pub use Reflect::{
+    build_program_info, build_struct_type_info, build_struct_type_info_with_states,
+    ProgramSemanticFacts,
+};
 pub use Value::CtValue;
 
 static REPL_INTERRUPT_COUNT: AtomicUsize = AtomicUsize::new(0);

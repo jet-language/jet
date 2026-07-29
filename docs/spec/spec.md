@@ -689,14 +689,14 @@ impl Circle {
   needing outside context — both need a design call on how `[FieldError]`
   composes with the existing single-`DecodeError` `Decode` trait contract
   before they can land without a breaking change.
-- **Tags (D-QUAL2):** `tag Name;` or `tag Name { }` — a marker qualifier with
-  no methods that erases at runtime (codegen emits nothing). Tags are the second
-  and only other qualifier kind beside traits; the beginner rule is one
-  sentence: *methods → trait, no methods → tag.* A tag carries no methods, so
+- **Tags (D-QUAL2, D-TAG-SURFACE1):** `tag Name { deny: [Net] }` declares an
+  erased dataflow fact and its policy. `deny` is required and nonempty; `from`
+  is optional. Direct `#Name` tags attach to values, fields, parameters, and
+  returns. `#Scrub(Name)` removes exactly that tag. A tag carries no methods, so
   declaring one in a tag body is **E0732**, and using a tag where dispatch or
   method attachment is expected — `derive`d, or implemented/used as a trait —
   is **E0731** (fix-it: declare it as a `trait`). All tags are PascalCase
-  (D-CASING1).
+  (D-CASING1). Prelude declares `Input`, `PII`, `Secret`, and `Credential`.
 - **Applied rules (D-SHAPE2/D-ATTR2):** `#Rule` or `#[A, B]` on the
   line before a declaration. Block markers use PascalCase and parenthesized
   arguments when arguments exist. An explicit empty effect row is `=[]=>`; `comptime`

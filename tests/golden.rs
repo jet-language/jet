@@ -218,7 +218,7 @@ fn golden_uses_release_run(stem: &str) -> bool {
 }
 
 fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
-    // D-JPK-TASKRUN1 / I5 (card #476): task_runner proves both `#Task` entry
+    // D-JPK-TASKRUN1 / I5 (card #476): task_runner proves both `#Job` entry
     // paths — leaf `greet` stays callable while sibling `seed` calls it.
     if entry.stem == "devloop/task_runner" {
         check_task_runner_tasks(entry, env);
@@ -585,7 +585,7 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
 }
 
 /// I5 for `examples/features/devloop/task_runner.jet`: compile+run both
-/// `#Task` entries via `compile_with_entry` (same path as `jet run --task`).
+/// `#Job` entries via `compile_with_entry` (same path as `jet run --task`).
 fn check_task_runner_tasks(entry: &GoldenEntry, env: &GoldenEnv) {
     let src = fs::read_to_string(&entry.path).unwrap();
     let path = entry.path.to_str().expect("example path is utf8");

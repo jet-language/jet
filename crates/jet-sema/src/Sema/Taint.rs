@@ -1,48 +1,19 @@
-//! Taint tracking (D-TAINT1, option A; D-TAINT2, option A).
-//!
-//! An *untrusted* value carries a `#Tainted` value-fact tag (D-QUAL1), attached
-//! inline at its source. Taint **spreads** along intraprocedural dataflow:
-//! anything derived from a tainted value (binding, reassignment, interpolation,
-//! field/index read, arithmetic, return) is tainted. A `#Sanitizer fn` is the
-//! one blessed way to strip it — its return value is untainted by contract, even
-//! when its inputs were tainted (the audited cleaning step). A tainted value
-//! reaching a **sink effect** (`DB`/`Exec`/`Net` — a security-sensitive Core
-//! operation) without first passing through a sanitizer is **E0721**.
-//!
-//! **D-TAINT2 (option A)**: the kind is named in parens — `#Tainted(Credential)
-//! value`. Bare `#Tainted` defaults to `.Input`. The `Credential` kind extends
-//! D-TAINT1 with log/print/serialize **credential sinks** (E0722) alongside the
-//! existing injection sinks (E0721). Only `Credential` is gated on additional
-//! sinks; other kinds (`.Input`/`.PII`/`.Secret`) use the injection sink set.
-//!
-//! This rides D-EFF1's effect classification (a sink is just a Core call whose
-//! effect is in the sink set) and is **fully erased in codegen** (I3): the tag
-//! is a compile-time proof with no runtime value.
-//!
-//! The model is intraprocedural plus the explicit `#Sanitizer fn` contract:
-//! taint is introduced only by `#Tainted` and cleared only by a sanitizer call.
-//! Taint does not silently cross an ordinary call boundary — that would be the
-//! research-grade information-flow-control analysis explicitly deferred to D-IFC1
-//! (D-TAINT1 option B). What the card lists as propagation (assignment,
-//! interpolation, field store, return, arithmetic) is exactly the dataflow this
-//! pass tracks.
+//! Declared fact-tag dataflow (D-FACTMODEL1=A, D-TAG-SURFACE1=A).
 
 use crate::Diagnostics::{Diagnostic, Span};
-use crate::Sema::Effects::{core_effect, Effect};
+use crate::Sema::Effects::core_effect;
 use crate::AST::{
     ElseBranch, EnumLitArg, Expr, ForKind, IfStmt, Item, LValue, Lambda, LambdaBody, OrFallback,
-    Stmt, StrPart,
+    Stmt, StrPart, Type,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 
-/// The injection sink effects (D-TAINT1): a tainted value reaching a Core call
-/// carrying one of these without a sanitizer is E0721. `DB` (query injection),
-/// `Exec` (command injection), `Net` (SSRF / request smuggling).
-fn is_sink_effect(e: Effect) -> bool {
-    matches!(e, Effect::DB | Effect::Exec | Effect::Net)
-}
+pub type TagSet = BTreeSet<String>;
+pub type FieldTags = HashMap<(String, String), TagSet>;
+pub type FieldTypes = HashMap<(String, String), String>;
+pub type ReturnTypes = HashMap<String, String>;
 
-/// D-TAINT2: the credential log/print/serialize sinks. A `#Tainted(Credential)`
+/// D-TAG-SURFACE1=A: credential log/print/serialize sinks. A `#Credential`
 /// value reaching `core.io.print`, `core.io.eprint`, `jet.log.*`, or
 /// `core.encoding.*.to_string*` is E0722.
 fn is_credential_sink(module: &str, method: &str) -> bool {
@@ -58,215 +29,261 @@ fn is_credential_sink(module: &str, method: &str) -> bool {
 }
 
 /// Per-function taint analyzer. Carries the program-level facts (which functions
-/// are `#Sanitizer`, how Core aliases resolve to modules) and the running set of
+/// are exact-tag scrubbers, how Core aliases resolve to modules) and the running set of
 /// tainted locals while it walks one function body.
 struct TaintCtx<'a> {
-    /// Names of `#Sanitizer fn` functions (bare names + `Type::method` keys). A
-    /// call to one yields an untainted value regardless of argument taint.
-    sanitizers: &'a HashSet<String>,
+    scrubbers: &'a HashMap<String, String>,
+    facts: &'a jet_foundation::Facts::FactRegistry,
+    returns: &'a HashMap<String, TagSet>,
+    return_types: &'a ReturnTypes,
+    field_tags: &'a FieldTags,
+    field_types: &'a FieldTypes,
     /// Core import aliases in scope for the module owning this body
     /// (alias → resolved module path, e.g. `db` → `jet.db`). Used to classify a
     /// `MethodCall` on a Core alias as a sink.
     core_imports: &'a HashMap<String, String>,
-    /// Locals currently holding a tainted value (any kind), in this function body.
-    tainted: HashSet<String>,
-    /// D-TAINT2: locals whose taint kind is `Credential`. A strict subset of
-    /// `tainted` — every credential-tainted local is also in the general set.
-    credential_tainted: HashSet<String>,
+    locals: HashMap<String, TagSet>,
+    local_types: HashMap<String, String>,
     diags: Vec<Diagnostic>,
 }
 
 impl<'a> TaintCtx<'a> {
-    fn new(sanitizers: &'a HashSet<String>, core_imports: &'a HashMap<String, String>) -> Self {
+    fn new(
+        scrubbers: &'a HashMap<String, String>,
+        facts: &'a jet_foundation::Facts::FactRegistry,
+        returns: &'a HashMap<String, TagSet>,
+        return_types: &'a ReturnTypes,
+        field_tags: &'a FieldTags,
+        field_types: &'a FieldTypes,
+        core_imports: &'a HashMap<String, String>,
+    ) -> Self {
         TaintCtx {
-            sanitizers,
+            scrubbers,
+            facts,
+            returns,
+            return_types,
+            field_tags,
+            field_types,
             core_imports,
-            tainted: HashSet::new(),
-            credential_tainted: HashSet::new(),
+            locals: HashMap::new(),
+            local_types: HashMap::new(),
             diags: Vec::new(),
         }
     }
 
-    /// Resolve a `MethodCall` on a bare Core alias to its sink effect, if any.
-    /// Returns `Some(effect)` when `receiver` is `Ident(alias)`, the alias is a
-    /// Core import, and the resolved Core call carries a sink effect.
-    fn call_sink_effect(&self, receiver: &Expr, method: &str) -> Option<Effect> {
+    fn union<'e>(&self, expressions: impl IntoIterator<Item = &'e Expr>) -> TagSet {
+        let mut tags = TagSet::new();
+        for expression in expressions {
+            tags.extend(self.tags_of(expression));
+        }
+        tags
+    }
+
+    fn source_tags(&self, destinations: &[String]) -> TagSet {
+        self.facts
+            .iter_kind(jet_foundation::Facts::FactKind::Tag)
+            .filter(|fact| {
+                fact.from.iter().any(|source| {
+                    destinations.iter().any(|destination| {
+                        jet_foundation::Facts::fact_covers(source, destination)
+                    })
+                })
+            })
+            .map(|fact| fact.name.clone())
+            .collect()
+    }
+
+    fn method_destinations(
+        &self,
+        receiver: &Expr,
+        method: &str,
+        recv_type: Option<&str>,
+    ) -> Vec<String> {
+        let mut destinations = Vec::new();
+        if let Some(owner) = recv_type {
+            destinations.push(format!("{owner}.{method}"));
+            destinations.push(format!("{owner}::{method}"));
+        }
         let Expr::Ident(alias, _) = receiver else {
-            return None;
+            return destinations;
         };
-        let module = self.core_imports.get(alias)?;
-        let e = core_effect(module, method)?;
-        if is_sink_effect(e) {
-            Some(e)
-        } else {
-            None
+        let Some(module) = self.core_imports.get(alias) else {
+            destinations.push(format!("{alias}.{method}"));
+            return destinations;
+        };
+        destinations.push(format!("{module}.{method}"));
+        if let Some(effect) = core_effect(module, method) {
+            destinations.push(effect.name().to_string());
+        }
+        if is_credential_sink(module, method) {
+            destinations.push("Log".to_string());
+        }
+        destinations
+    }
+
+    fn type_name(ty: &Type) -> Option<String> {
+        match ty {
+            Type::Named(name) => Some(name.clone()),
+            Type::Apply { name, .. } => Some(name.clone()),
+            Type::Tagged { inner, .. } => Self::type_name(inner),
+            _ => None,
         }
     }
 
-    /// D-TAINT2: true when the Core call `receiver.method(…)` is a credential
-    /// sink (print/log/serialize). Used alongside `is_credential_tainted` to
-    /// emit E0722.
-    fn call_is_credential_sink(&self, receiver: &Expr, method: &str) -> bool {
-        let Expr::Ident(alias, _) = receiver else {
-            return false;
-        };
-        let Some(module) = self.core_imports.get(alias) else {
-            return false;
-        };
-        is_credential_sink(module, method)
-    }
-
-    /// D-TAINT2: true when `e` evaluates to a `#Tainted(Credential)` value.
-    fn is_credential_tainted(&self, e: &Expr) -> bool {
-        match e {
-            Expr::Tainted(_, kind, _) => {
-                kind.as_deref() == Some(crate::Syntax::KW_CREDENTIAL)
+    fn type_of(&self, expression: &Expr) -> Option<String> {
+        match expression {
+            Expr::Ident(name, _) => self.local_types.get(name).cloned(),
+            Expr::StructLit { type_name, .. } => Some(type_name.clone()),
+            Expr::Call(call) => self.return_types.get(&call.name).cloned(),
+            Expr::MethodCall { recv_type, method, .. } => recv_type
+                .as_ref()
+                .and_then(|owner| self.return_types.get(&format!("{owner}::{method}")))
+                .cloned(),
+            Expr::Field(base, field, _) | Expr::OptField { base, member: field, .. } => {
+                let owner = self.type_of(base)?;
+                self.field_types.get(&(owner, field.clone())).cloned()
             }
-            Expr::Ident(name, _) => self.credential_tainted.contains(name),
-            // Derivations — credential taint flows through like general taint.
-            Expr::Binary(_, l, r, _) => {
-                self.is_credential_tainted(l) || self.is_credential_tainted(r)
-            }
-            Expr::Unary(_, inner, _)
-            | Expr::Deref(inner, _)
-            | Expr::Field(inner, _, _)
+            Expr::Paren(inner, _)
+            | Expr::Copy(inner, _)
             | Expr::Present(inner, _)
             | Expr::Ok(inner, _)
             | Expr::Err(inner, _)
-            | Expr::Try(inner, _, _) => self.is_credential_tainted(inner),
-            Expr::Str(parts, _) => parts.iter().any(|p| match p {
-                StrPart::Interp(e, _) => self.is_credential_tainted(e),
-                _ => false,
-            }),
-            Expr::StructLit { fields, .. } => {
-                fields.iter().any(|(_, _, f)| self.is_credential_tainted(f))
-            }
-            Expr::TypedLit { body, .. } => {
-                let mut hit = false;
-                body.for_each_expr(|f| {
-                    if self.is_credential_tainted(f) {
-                        hit = true;
-                    }
-                });
-                hit
-            }
-            Expr::MethodCall { receiver, args, recv_type, method, .. } => {
-                if let Some(ty) = recv_type {
-                    if self.sanitizers.contains(&format!("{ty}::{method}")) {
-                        return false;
-                    }
-                }
-                self.is_credential_tainted(receiver)
-                    || args.iter().any(|a| self.is_credential_tainted(&a.expr))
-            }
-            _ => false,
+            | Expr::Try(inner, _, _) => self.type_of(inner),
+            _ => None,
         }
     }
 
-    /// True when `e` evaluates to a tainted value (any kind), given the current
-    /// tainted-local set. Taint flows out of `#Tainted`, out of tainted locals,
-    /// and through any derivation (arithmetic, field/index read, interpolation,
-    /// optional/result wrappers, …). A `#Sanitizer fn` call is the cut point.
-    fn is_tainted(&self, e: &Expr) -> bool {
-        match e {
-            // The source of taint (any kind), and a tainted local reference.
-            Expr::Tainted(_, _, _) => true,
-            Expr::Ident(name, _) => self.tainted.contains(name),
-
-            // A free-function call's result is untainted: a `#Sanitizer fn`
-            // clears taint by contract, and an ordinary call doesn't propagate
-            // taint across the boundary in this intraprocedural model (that is
-            // the deferred D-IFC1 analysis). Either way the result is clean.
-            Expr::Call(_) => false,
-            Expr::MethodCall {
-                receiver,
-                method,
-                recv_type,
-                args,
-                ..
-            } => {
-                // `value.method(…)` where the method is a `#Sanitizer fn` clears
-                // taint. Otherwise taint flows from the receiver (a tainted
-                // string's `.trim()` is still tainted) and from any argument.
-                if let Some(ty) = recv_type {
-                    if self.sanitizers.contains(&format!("{ty}::{method}")) {
-                        return false;
-                    }
-                }
-                self.is_tainted(receiver) || args.iter().any(|a| self.is_tainted(&a.expr))
+    fn tags_of(&self, expression: &Expr) -> TagSet {
+        match expression {
+            Expr::Tainted(inner, tag, _) => {
+                let mut tags = self.tags_of(inner);
+                tags.insert(tag.clone().unwrap_or_else(|| "Input".to_string()));
+                tags
             }
-            Expr::CallValue { .. } => false,
-
-            // Derivations — taint flows through if any operand is tainted.
-            Expr::Binary(_, l, r, _) => self.is_tainted(l) || self.is_tainted(r),
-            Expr::CompareChain { operands, .. } => operands.iter().any(|e| self.is_tainted(e)),
+            Expr::Ident(name, _) => self.locals.get(name).cloned().unwrap_or_default(),
+            Expr::Call(call) => {
+                let mut tags = self.union(call.args.iter().map(|argument| &argument.expr));
+                tags.extend(self.source_tags(std::slice::from_ref(&call.name)));
+                tags.extend(self.returns.get(&call.name).cloned().unwrap_or_default());
+                if let Some(tag) = self.scrubbers.get(&call.name) {
+                    tags.remove(tag);
+                }
+                tags
+            }
+            Expr::MethodCall { receiver, method, recv_type, args, .. } => {
+                let mut tags = self.tags_of(receiver);
+                tags.extend(self.union(args.iter().map(|argument| &argument.expr)));
+                let destinations = self.method_destinations(receiver, method, recv_type.as_deref());
+                tags.extend(self.source_tags(&destinations));
+                let key = recv_type.as_ref().map(|ty| format!("{ty}::{method}"));
+                if let Some(returned) = key.as_ref().and_then(|key| self.returns.get(key)) {
+                    tags.extend(returned.iter().cloned());
+                }
+                if let Some(tag) = key.as_ref().and_then(|key| self.scrubbers.get(key)) {
+                    tags.remove(tag);
+                }
+                tags
+            }
+            Expr::CallValue { callee, args, .. } => {
+                let mut tags = self.tags_of(callee);
+                tags.extend(self.union(args.iter().map(|argument| &argument.expr)));
+                tags
+            }
+            Expr::Binary(_, left, right, _)
+            | Expr::Range { start: left, end: right, .. } => self.union([left.as_ref(), right.as_ref()]),
+            Expr::CompareChain { operands, .. } | Expr::ListLit(operands, _) => {
+                self.union(operands)
+            }
+            Expr::Field(inner, field, _) => {
+                let mut tags = self.tags_of(inner);
+                if let Some(owner) = self.type_of(inner) {
+                    tags.extend(
+                        self.field_tags
+                            .get(&(owner, field.clone()))
+                            .into_iter()
+                            .flat_map(|tags| tags.iter().cloned()),
+                    );
+                }
+                tags
+            }
             Expr::Unary(_, inner, _)
             | Expr::IncDec { operand: inner, .. }
             | Expr::Deref(inner, _)
             | Expr::RawOf(inner, _)
             | Expr::Copy(inner, _)
             | Expr::Place(inner, _, _)
-            | Expr::Field(inner, _, _)
             | Expr::Present(inner, _)
             | Expr::Ok(inner, _)
             | Expr::Err(inner, _)
-            | Expr::Try(inner, _, _) => self.is_tainted(inner),
-            Expr::OptField { base, .. } => self.is_tainted(base),
-            Expr::Index { base, index, .. } => self.is_tainted(base) || self.is_tainted(index),
+            | Expr::Try(inner, _, _)
+            | Expr::Paren(inner, _)
+            | Expr::Spread(inner, _) => self.tags_of(inner),
+            Expr::OptField { base, member, .. } => {
+                let mut tags = self.tags_of(base);
+                if let Some(owner) = self.type_of(base) {
+                    tags.extend(
+                        self.field_tags
+                            .get(&(owner, member.clone()))
+                            .into_iter()
+                            .flat_map(|tags| tags.iter().cloned()),
+                    );
+                }
+                tags
+            }
+            Expr::Index { base, index, .. } => self.union([base.as_ref(), index.as_ref()]),
             Expr::Slice {
-                base, start, end, range, ..
-            } => self.is_tainted(base)
-                || range.as_deref().map_or_else(
-                    || self.is_tainted(start) || self.is_tainted(end),
-                    |range| self.is_tainted(range),
-                ),
-            Expr::Range { start, end, .. } => {
-                self.is_tainted(start) || self.is_tainted(end)
-            }
-            Expr::ListLit(elems, _) => elems.iter().any(|el| self.is_tainted(el)),
-            Expr::MapLit(entries, _) => entries
-                .iter()
-                .any(|(k, v)| self.is_tainted(k) || self.is_tainted(v)),
-            Expr::TupleLit(fields, _, _) => fields.iter().any(|(_, e)| self.is_tainted(e)),
-            Expr::StructLit { fields, .. } => fields.iter().any(|(_, _, f)| self.is_tainted(f)),
-            Expr::TypedLit { body, .. } => {
-                let mut hit = false;
-                body.for_each_expr(|f| {
-                    if self.is_tainted(f) {
-                        hit = true;
-                    }
-                });
-                hit
-            },
-            Expr::EnumLit { args, .. } => args.iter().any(|a| match a {
-                EnumLitArg::Positional(e) => self.is_tainted(e),
-                EnumLitArg::Named { expr, .. } => self.is_tainted(expr),
-            }),
-            // Interpolation: a tainted value spliced into a string taints it.
-            Expr::Str(parts, _) => parts.iter().any(|p| match p {
-                StrPart::Interp(e, _) => self.is_tainted(e),
-                _ => false,
-            }),
-            Expr::OrFallback {
-                value, fallback, ..
-            } => {
-                self.is_tainted(value)
-                    || match fallback {
-                        OrFallback::Value(e) => self.is_tainted(e),
-                        OrFallback::Return(Some(e), _) => self.is_tainted(e),
-                        _ => false,
-                    }
-            }
-            Expr::PatternTest { subject, .. } => self.is_tainted(subject),
-            Expr::If {
-                then_value,
-                else_value,
+                base,
+                start,
+                end,
+                range,
                 ..
-            } => self.is_tainted(then_value) || self.is_tainted(else_value),
-            Expr::FanOut { items, .. } => items.iter().any(|e| self.is_tainted(e)),
-            Expr::PtrFromAddr { addr, .. } => self.is_tainted(addr),
-
-            // Literals, holes, lambdas, absent — never tainted on their own.
+            } => {
+                let mut tags = self.tags_of(base);
+                if let Some(range) = range {
+                    tags.extend(self.tags_of(range));
+                } else {
+                    tags.extend(self.tags_of(start));
+                    tags.extend(self.tags_of(end));
+                }
+                tags
+            }
+            Expr::MapLit(entries, _) => self.union(
+                entries.iter().flat_map(|(key, value)| [key, value]),
+            ),
+            Expr::TupleLit(fields, _, _) => self.union(fields.iter().map(|(_, value)| value)),
+            Expr::StructLit { fields, .. } => {
+                self.union(fields.iter().map(|(_, _, value)| value))
+            }
+            Expr::TypedLit { body, .. } => {
+                let mut tags = TagSet::new();
+                body.for_each_expr(|value| tags.extend(self.tags_of(value)));
+                tags
+            }
+            Expr::EnumLit { args, .. } => self.union(args.iter().map(|argument| match argument {
+                EnumLitArg::Positional(value) => value,
+                EnumLitArg::Named { expr, .. } => expr,
+            })),
+            Expr::Str(parts, _) => self.union(parts.iter().filter_map(|part| match part {
+                StrPart::Interp(value, _) => Some(value.as_ref()),
+                _ => None,
+            })),
+            Expr::OrFallback { value, fallback, .. } => {
+                let mut tags = self.tags_of(value);
+                if let OrFallback::Value(other) | OrFallback::Return(Some(other), _) = fallback {
+                    tags.extend(self.tags_of(other));
+                }
+                tags
+            }
+            Expr::PatternTest { subject, .. } => self.tags_of(subject),
+            Expr::If { then_value, else_value, .. } => {
+                self.union([then_value.as_ref(), else_value.as_ref()])
+            }
+            Expr::FanOut { callee, items, .. } => {
+                let mut tags = self.tags_of(callee);
+                tags.extend(self.union(items));
+                tags
+            }
+            Expr::PtrFromAddr { addr, .. } => self.tags_of(addr),
             Expr::Int(..)
             | Expr::Float(..)
             | Expr::Bool(..)
@@ -277,18 +294,28 @@ impl<'a> TaintCtx<'a> {
             | Expr::Lambda(_)
             | Expr::UnitLit { .. }
             | Expr::ComptimeSplice { .. }
-            // D-SHIFT1 (c7shift) / D-BINPAT1 (card #506 follow-up): a leaf
-            // literal, no nested `Expr` to recurse into.
             | Expr::StrMatchLit(_, _)
-            | Expr::BinMatchLit(_, _) => false,
-            Expr::Paren(inner, _) => self.is_tainted(inner),
-            Expr::Spread(inner, _) => self.is_tainted(inner),
+            | Expr::BinMatchLit(_, _) => TagSet::new(),
         }
+    }
+
+    fn denied_tag(&self, tags: &TagSet, destinations: &[String]) -> Option<String> {
+        tags.iter().find_map(|tag| {
+            self.facts
+                .get(jet_foundation::Facts::FactKind::Tag, tag)
+                .and_then(|fact| {
+                fact.deny.iter().any(|deny| {
+                    destinations.iter().any(|destination| {
+                        jet_foundation::Facts::fact_covers(deny, destination)
+                    })
+                }).then(|| tag.clone())
+                })
+        })
     }
 
     /// Walk an expression for sink violations:
     /// - E0721: a tainted (any kind) value reaches an injection sink (DB/Exec/Net).
-    /// - E0722: a `#Tainted(Credential)` value reaches a log/print/serialize sink.
+    /// - E0722: a `#Credential` value reaches a log/print/serialize sink.
     /// Recurses into every sub-expression so a nested sink is still checked.
     fn check_expr(&mut self, e: &Expr) {
         match e {
@@ -297,37 +324,26 @@ impl<'a> TaintCtx<'a> {
                 method,
                 method_span,
                 args,
+                recv_type,
                 ..
             } => {
-                // E0721: injection sinks (any taint kind).
-                if let Some(effect) = self.call_sink_effect(receiver, method) {
-                    for a in args {
-                        if self.is_tainted(&a.expr) {
-                            let alias = match receiver.as_ref() {
-                                Expr::Ident(n, _) => n.clone(),
-                                _ => String::new(),
-                            };
-                            self.diags.push(e0721(&alias, method, effect, *method_span));
-                            break;
-                        }
+                let destinations =
+                    self.method_destinations(receiver, method, recv_type.as_deref());
+                for argument in args {
+                    if let Some(tag) = self.denied_tag(&self.tags_of(&argument.expr), &destinations) {
+                        let api = match receiver.as_ref() {
+                            Expr::Ident(alias, _) => format!("{alias}.{method}"),
+                            _ => method.clone(),
+                        };
+                        self.diags.push(if tag == crate::Syntax::KW_CREDENTIAL
+                            && destinations.iter().any(|destination| destination == "Log")
+                        {
+                            e0722(&api, *method_span)
+                        } else {
+                            e0721(&tag, &api, &destinations, *method_span)
+                        });
+                        break;
                     }
-                }
-                // D-TAINT2 / E0722: credential sinks (print/log/serialize).
-                if self.call_is_credential_sink(receiver, method) {
-                    for a in args {
-                        if self.is_credential_tainted(&a.expr) {
-                            let alias = match receiver.as_ref() {
-                                Expr::Ident(n, _) => n.clone(),
-                                _ => String::new(),
-                            };
-                            self.diags
-                                .push(e0722(&alias, method, *method_span));
-                            break;
-                        }
-                    }
-                    // Also check the format string argument itself for credential
-                    // interpolation (`print("password: {cred}")` → the string
-                    // literal is the first arg and is_credential_tainted catches it).
                 }
                 self.check_expr(receiver);
                 for a in args {
@@ -336,14 +352,21 @@ impl<'a> TaintCtx<'a> {
             }
             Expr::Tainted(inner, _, _) => self.check_expr(inner),
             Expr::Call(c) => {
-                // D-TAINT2 / E0722: bare `print`/`eprint` are credential sinks too.
-                if matches!(c.name.as_str(), "print" | "eprint") {
-                    for a in &c.args {
-                        if self.is_credential_tainted(&a.expr) {
-                            self.diags
-                                .push(e0722("", &c.name, c.name_span));
-                            break;
-                        }
+                let destinations = if matches!(c.name.as_str(), "print" | "eprint") {
+                    vec!["Log".to_string()]
+                } else {
+                    vec![c.name.clone()]
+                };
+                for argument in &c.args {
+                    if let Some(tag) = self.denied_tag(&self.tags_of(&argument.expr), &destinations) {
+                        self.diags.push(if tag == crate::Syntax::KW_CREDENTIAL
+                            && destinations.iter().any(|destination| destination == "Log")
+                        {
+                            e0722(&c.name, c.name_span)
+                        } else {
+                            e0721(&tag, &c.name, &destinations, c.name_span)
+                        });
+                        break;
                     }
                 }
                 for a in &c.args {
@@ -486,18 +509,24 @@ impl<'a> TaintCtx<'a> {
             Stmt::BreakValue(e, _) | Stmt::BreakLabelValue(_, _, e, _) => self.check_expr(e),
             Stmt::Val(b) => {
                 self.check_expr(&b.init);
-                // A binding takes on its initializer's taint. A destructuring
-                // pattern spreads taint to every bound name (conservative).
-                let init_tainted = self.is_tainted(&b.init);
-                let init_cred = self.is_credential_tainted(&b.init);
+                let mut tags = self.tags_of(&b.init);
+                if let Some(ty) = &b.ty {
+                    tags.extend(type_tags(ty));
+                }
                 if let Some(pat) = &b.pattern {
                     for name in pattern_names(pat) {
-                        self.set_taint(name.clone(), init_tainted);
-                        self.set_credential_taint(name, init_cred);
+                        self.set_tags(name, tags.clone());
                     }
                 } else if !b.name.is_empty() {
-                    self.set_taint(b.name.clone(), init_tainted);
-                    self.set_credential_taint(b.name.clone(), init_cred);
+                    self.set_tags(b.name.clone(), tags);
+                    if let Some(type_name) = b
+                        .ty
+                        .as_ref()
+                        .and_then(Self::type_name)
+                        .or_else(|| self.type_of(&b.init))
+                    {
+                        self.local_types.insert(b.name.clone(), type_name);
+                    }
                 }
             }
             Stmt::Assign {
@@ -505,22 +534,11 @@ impl<'a> TaintCtx<'a> {
             } => {
                 self.check_expr(value);
                 if let LValue::Local { name, .. } = target {
-                    // A plain `x = v` resets taint to v's; a compound `x += v`
-                    // keeps x's taint if either side is tainted.
-                    let v_tainted = self.is_tainted(value);
-                    let v_cred = self.is_credential_tainted(value);
-                    let new = if op.is_some() {
-                        self.tainted.contains(name) || v_tainted
-                    } else {
-                        v_tainted
-                    };
-                    let new_cred = if op.is_some() {
-                        self.credential_tainted.contains(name) || v_cred
-                    } else {
-                        v_cred
-                    };
-                    self.set_taint(name.clone(), new);
-                    self.set_credential_taint(name.clone(), new_cred);
+                    let mut tags = self.tags_of(value);
+                    if op.is_some() {
+                        tags.extend(self.locals.get(name).cloned().unwrap_or_default());
+                    }
+                    self.set_tags(name.clone(), tags);
                 } else {
                     // Field/index assign targets are also walked for nested sinks.
                     if let LValue::Index { base, index, .. } = target {
@@ -546,26 +564,24 @@ impl<'a> TaintCtx<'a> {
                 var2,
                 ..
             } => {
-                let (coll_tainted, coll_cred) = match kind {
+                let collection_tags = match kind {
                     ForKind::Range { start, end, step, exclusive: _ } => {
                         self.check_expr(start);
                         self.check_expr(end);
                         if let Some(s) = step {
                             self.check_expr(s);
                         }
-                        (false, false)
+                        TagSet::new()
                     }
                     ForKind::In { collection, step } => {
                         self.check_expr(collection);
                         if let Some(step) = step { self.check_expr(step); }
-                        (self.is_tainted(collection), self.is_credential_tainted(collection))
+                        self.tags_of(collection)
                     }
                 };
-                self.set_taint(var.clone(), coll_tainted);
-                self.set_credential_taint(var.clone(), coll_cred);
+                self.set_tags(var.clone(), collection_tags.clone());
                 if let Some((v2, _)) = var2 {
-                    self.set_taint(v2.clone(), coll_tainted);
-                    self.set_credential_taint(v2.clone(), coll_cred);
+                    self.set_tags(v2.clone(), collection_tags);
                 }
                 self.check_block(body);
             }
@@ -659,23 +675,11 @@ impl<'a> TaintCtx<'a> {
         }
     }
 
-    /// Set or clear a local's taint. A `false` value removes it from the set so a
-    /// reassignment to a clean value un-taints the binding.
-    fn set_taint(&mut self, name: String, tainted: bool) {
-        if tainted {
-            self.tainted.insert(name);
+    fn set_tags(&mut self, name: String, tags: TagSet) {
+        if tags.is_empty() {
+            self.locals.remove(&name);
         } else {
-            self.tainted.remove(&name);
-        }
-    }
-
-    /// D-TAINT2: set or clear a local's credential taint. Mirrors `set_taint`.
-    fn set_credential_taint(&mut self, name: String, tainted: bool) {
-        if tainted {
-            self.tainted.insert(name.clone()); // credential → also general taint
-            self.credential_tainted.insert(name);
-        } else {
-            self.credential_tainted.remove(&name);
+            self.locals.insert(name, tags);
         }
     }
 }
@@ -693,53 +697,141 @@ fn pattern_names(pat: &crate::AST::BindPattern) -> Vec<String> {
     }
 }
 
-/// D-TAINT1/TAINT2: run the taint pass over one function body. Returns all
-/// taint diagnostics found (E0721 injection sinks and E0722 credential sinks).
+fn type_tags(ty: &Type) -> TagSet {
+    match ty {
+        Type::Tagged { marker, inner } => {
+            let mut tags = type_tags(inner);
+            tags.insert(marker.clone());
+            tags
+        }
+        _ => TagSet::new(),
+    }
+}
+
 pub fn check_func_taint(
-    body: &[Stmt],
-    sanitizers: &HashSet<String>,
+    function: &crate::AST::Func,
+    owner: Option<&str>,
+    scrubbers: &HashMap<String, String>,
+    facts: &jet_foundation::Facts::FactRegistry,
+    returns: &HashMap<String, TagSet>,
+    return_types: &ReturnTypes,
+    field_tags: &FieldTags,
+    field_types: &FieldTypes,
     core_imports: &HashMap<String, String>,
 ) -> Vec<Diagnostic> {
-    let mut ctx = TaintCtx::new(sanitizers, core_imports);
+    let mut ctx = TaintCtx::new(
+        scrubbers,
+        facts,
+        returns,
+        return_types,
+        field_tags,
+        field_types,
+        core_imports,
+    );
+    for parameter in &function.params {
+        ctx.set_tags(parameter.name.clone(), type_tags(&parameter.ty));
+        let type_name = match (&parameter.ty, owner) {
+            (Type::Named(name), Some(owner)) if name == "Self" => Some(owner.to_string()),
+            (ty, _) => TaintCtx::type_name(ty),
+        };
+        if let Some(type_name) = type_name {
+            ctx.local_types.insert(parameter.name.clone(), type_name);
+        }
+    }
+    ctx.check_block(&function.body);
+    ctx.diags
+}
+
+pub fn check_body_tags(
+    body: &[Stmt],
+    scrubbers: &HashMap<String, String>,
+    facts: &jet_foundation::Facts::FactRegistry,
+    returns: &HashMap<String, TagSet>,
+    return_types: &ReturnTypes,
+    field_tags: &FieldTags,
+    field_types: &FieldTypes,
+    core_imports: &HashMap<String, String>,
+) -> Vec<Diagnostic> {
+    let mut ctx = TaintCtx::new(
+        scrubbers,
+        facts,
+        returns,
+        return_types,
+        field_tags,
+        field_types,
+        core_imports,
+    );
     ctx.check_block(body);
     ctx.diags
 }
 
-/// Collect the set of `#Sanitizer fn` keys across a program's items: bare names
-/// for top-level functions, `Type::method` for methods. A call to one of these
-/// strips taint from its result.
-pub fn collect_sanitizers(items: &[Item], out: &mut HashSet<String>) {
+pub fn collect_return_tag_facts(
+    items: &[Item],
+    returns: &mut HashMap<String, TagSet>,
+    return_types: &mut ReturnTypes,
+) {
+    fn register(
+        function: &crate::AST::Func,
+        key: String,
+        returns: &mut HashMap<String, TagSet>,
+        return_types: &mut ReturnTypes,
+    ) {
+        let tags = function
+            .return_type
+            .as_ref()
+            .map(type_tags)
+            .unwrap_or_default();
+        if !tags.is_empty() {
+            returns.insert(key.clone(), tags);
+        }
+        if let Some(type_name) = function.return_type.as_ref().and_then(TaintCtx::type_name) {
+            return_types.insert(key, type_name);
+        }
+    }
+
     for item in items {
         match item {
-            Item::Func(f) if f.is_sanitizer => {
-                out.insert(f.name.clone());
+            Item::Func(function) => {
+                register(function, function.name.clone(), returns, return_types)
             }
-            Item::Impl(i) => {
-                for m in &i.methods {
-                    if m.is_sanitizer {
-                        out.insert(format!("{}::{}", i.type_name, m.name));
+            Item::Impl(implementation) => {
+                for method in &implementation.methods {
+                    register(
+                        method,
+                        format!("{}::{}", implementation.type_name, method.name),
+                        returns,
+                        return_types,
+                    );
+                }
+            }
+            Item::Struct(definition) => {
+                for method in &definition.methods {
+                    register(
+                        method,
+                        format!("{}::{}", definition.name, method.name),
+                        returns,
+                        return_types,
+                    );
+                }
+                for implementation in &definition.trait_impls {
+                    for method in &implementation.methods {
+                        register(
+                            method,
+                            format!("{}::{}", definition.name, method.name),
+                            returns,
+                            return_types,
+                        );
                     }
                 }
             }
-            Item::Struct(s) => {
-                for m in &s.methods {
-                    if m.is_sanitizer {
-                        out.insert(format!("{}::{}", s.name, m.name));
-                    }
-                }
-                for block in &s.trait_impls {
-                    for m in &block.methods {
-                        if m.is_sanitizer {
-                            out.insert(format!("{}::{}", s.name, m.name));
-                        }
-                    }
-                }
-            }
-            Item::Enum(e) => {
-                for m in &e.methods {
-                    if m.is_sanitizer {
-                        out.insert(format!("{}::{}", e.name, m.name));
-                    }
+            Item::Enum(definition) => {
+                for method in &definition.methods {
+                    register(
+                        method,
+                        format!("{}::{}", definition.name, method.name),
+                        returns,
+                        return_types,
+                    );
                 }
             }
             _ => {}
@@ -747,56 +839,301 @@ pub fn collect_sanitizers(items: &[Item], out: &mut HashSet<String>) {
     }
 }
 
-/// E0722 (D-TAINT2): a `#Tainted(Credential)` value reaches a log/print/serialize
-/// sink. Credentials must never appear in log files, stdout, or serialized output.
-pub fn e0722(alias: &str, method: &str, span: Span) -> Diagnostic {
-    let api = if alias.is_empty() {
-        method.to_string()
-    } else {
-        format!("{alias}.{method}")
+pub fn collect_function_paths(
+    module: &str,
+    items: &[Item],
+    paths: &mut BTreeSet<String>,
+) {
+    let mut register = |owner: Option<&str>, name: &str| {
+        let local = owner
+            .map(|owner| format!("{owner}.{name}"))
+            .unwrap_or_else(|| name.to_string());
+        paths.insert(local.clone());
+        paths.insert(format!("{module}.{local}"));
     };
+    for item in items {
+        match item {
+            Item::Func(function) => register(None, &function.name),
+            Item::Impl(implementation) => {
+                for method in &implementation.methods {
+                    register(Some(&implementation.type_name), &method.name);
+                }
+            }
+            Item::Struct(definition) => {
+                for method in &definition.methods {
+                    register(Some(&definition.name), &method.name);
+                }
+                for implementation in &definition.trait_impls {
+                    for method in &implementation.methods {
+                        register(Some(&definition.name), &method.name);
+                    }
+                }
+            }
+            Item::Enum(definition) => {
+                for method in &definition.methods {
+                    register(Some(&definition.name), &method.name);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+pub fn register_builtin_tag_facts(facts: &mut jet_foundation::Facts::FactRegistry) {
+    let injection = vec!["DB".to_string(), "Exec".to_string(), "Net".to_string()];
+    for tag in ["Input", "PII", "Secret"] {
+        facts.declare_with_rules(
+            jet_foundation::Facts::FactKind::Tag,
+            tag,
+            std::iter::empty(),
+            injection.clone(),
+            std::iter::empty(),
+        );
+    }
+    let mut credential = injection;
+    credential.push("Log".to_string());
+    facts.declare_with_rules(
+        jet_foundation::Facts::FactKind::Tag,
+        "Credential",
+        std::iter::empty(),
+        credential,
+        std::iter::empty(),
+    );
+}
+
+pub fn collect_field_facts(
+    items: &[Item],
+    field_tags: &mut FieldTags,
+    field_types: &mut FieldTypes,
+) {
+    for item in items {
+        let Item::Struct(definition) = item else {
+            continue;
+        };
+        for field in &definition.fields {
+            let key = (definition.name.clone(), field.name.clone());
+            let tags = type_tags(&field.ty);
+            if !tags.is_empty() {
+                field_tags.insert(key.clone(), tags);
+            }
+            if let Some(type_name) = TaintCtx::type_name(&field.ty) {
+                field_types.insert(key, type_name);
+            }
+        }
+    }
+}
+
+pub fn collect_tag_facts(
+    items: &[Item],
+    facts: &mut jet_foundation::Facts::FactRegistry,
+    scrubbers: &mut HashMap<String, String>,
+    known_sources: &BTreeSet<String>,
+    diags: &mut Vec<Diagnostic>,
+    declarations_only: bool,
+) {
+    fn closest<'a>(
+        name: &str,
+        candidates: impl IntoIterator<Item = &'a str>,
+    ) -> Option<&'a str> {
+        candidates
+            .into_iter()
+            .map(|candidate| (crate::Syntax::edit_distance(name, candidate), candidate))
+            .filter(|(distance, _)| *distance <= 3)
+            .min_by_key(|(distance, candidate)| (*distance, *candidate))
+            .map(|(_, candidate)| candidate)
+    }
+
+    fn register_scrubber(
+        function: &crate::AST::Func,
+        key: String,
+        facts: &jet_foundation::Facts::FactRegistry,
+        scrubbers: &mut HashMap<String, String>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        let Some(tag) = &function.scrub_tag else {
+            return;
+        };
+        if facts
+            .get(jet_foundation::Facts::FactKind::Tag, tag)
+            .is_none()
+        {
+            diags.push(crate::Sema::Diagnostics::undeclared_value_tag(
+                tag,
+                None,
+                function.name_span,
+            ));
+            return;
+        }
+        let consumes_tag = function
+            .params
+            .iter()
+            .any(|parameter| type_tags(&parameter.ty).contains(tag));
+        let returns_tag = function
+            .return_type
+            .as_ref()
+            .is_some_and(|ty| type_tags(ty).contains(tag));
+        if !consumes_tag || returns_tag {
+            diags.push(Diagnostic::error(
+                "E0736",
+                format!("`#Scrub({tag})` does not match this function signature"),
+                "a scrubber consumes a value carrying that tag and returns a value without it"
+                    .to_string(),
+                format!(
+                    "accept a `#{tag} T` parameter and return the untagged result"
+                ),
+                Some(function.name_span),
+            ));
+            return;
+        }
+        scrubbers.insert(key, tag.clone());
+    }
+
+    if declarations_only {
+        for item in items {
+            let Item::Tag(tag) = item else {
+                continue;
+            };
+            facts.declare_with_rules(
+                jet_foundation::Facts::FactKind::Tag,
+                tag.name.clone(),
+                std::iter::empty(),
+                tag.deny.iter().map(|(name, _)| name.clone()),
+                tag.from.iter().map(|(name, _)| name.clone()),
+            );
+            for (destination, span) in &tag.deny {
+                if crate::Sema::Effects::parse_effect_name(destination).is_none()
+                    && destination != "Html"
+                {
+                    let effects = crate::Sema::Effects::Effect::all();
+                    let suggestion = closest(
+                        destination,
+                        effects
+                            .iter()
+                            .map(String::as_str)
+                            .chain(["Html"].into_iter()),
+                    );
+                    diags.push(Diagnostic::error(
+                        "E0735",
+                        format!("`{destination}` is not a known tag destination"),
+                        "a `deny` entry names an effect or a registered sink".to_string(),
+                        suggestion
+                            .map(|candidate| format!("did you mean `{candidate}`?"))
+                            .unwrap_or_else(|| {
+                                "use a known effect such as `DB`, `Net`, `Exec`, `Log`, or `Html`"
+                                    .to_string()
+                            }),
+                        Some(*span),
+                    ));
+                }
+            }
+            for (source, span) in &tag.from {
+                if crate::Sema::Effects::parse_effect_name(source).is_none()
+                    && !known_sources.contains(source)
+                {
+                    let suggestion = closest(
+                        source,
+                        known_sources.iter().map(String::as_str),
+                    );
+                    diags.push(Diagnostic::error(
+                        "E0735",
+                        format!("`{source}` is not a known tag source"),
+                        "a `from` entry names an effect or a function path".to_string(),
+                        suggestion
+                            .map(|candidate| format!("did you mean `{candidate}`?"))
+                            .unwrap_or_else(|| {
+                                "use a known effect or a declared function path".to_string()
+                            }),
+                        Some(*span),
+                    ));
+                }
+            }
+        }
+        return;
+    }
+
+    for item in items {
+        match item {
+            Item::Func(function) => register_scrubber(
+                function,
+                function.name.clone(),
+                facts,
+                scrubbers,
+                diags,
+            ),
+            Item::Impl(i) => {
+                for m in &i.methods {
+                    register_scrubber(
+                        m,
+                        format!("{}::{}", i.type_name, m.name),
+                        facts,
+                        scrubbers,
+                        diags,
+                    );
+                }
+            }
+            Item::Struct(s) => {
+                for m in &s.methods {
+                    register_scrubber(
+                        m,
+                        format!("{}::{}", s.name, m.name),
+                        facts,
+                        scrubbers,
+                        diags,
+                    );
+                }
+                for block in &s.trait_impls {
+                    for m in &block.methods {
+                        register_scrubber(
+                            m,
+                            format!("{}::{}", s.name, m.name),
+                            facts,
+                            scrubbers,
+                            diags,
+                        );
+                    }
+                }
+            }
+            Item::Enum(e) => {
+                for m in &e.methods {
+                    register_scrubber(
+                        m,
+                        format!("{}::{}", e.name, m.name),
+                        facts,
+                        scrubbers,
+                        diags,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// E0722: a `#Credential` value reaches a log/print/serialize
+/// sink. Credentials must never appear in log files, stdout, or serialized output.
+pub fn e0722(api: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0722",
+        format!("a `Credential` value is denied at `{api}`"),
         format!(
-            "a credential value reaches `{}`, a logging sink",
-            api
+            "`{api}` writes to a log, terminal, or serialized output, where a credential would leak"
         ),
-        format!(
-            "`{}` writes to a log, terminal, or serialized output — a `#{}({})` value there leaks the secret",
-            api,
-            crate::Syntax::KW_TAINTED,
-            crate::Syntax::KW_CREDENTIAL,
-        ),
-        "log a non-secret field, or strip the credential with a `#Sanitizer fn` first".to_string(),
+        "log a non-secret field, or pass the value through a matching `#Scrub(Credential)` function"
+            .to_string(),
         Some(span),
     )
 }
 
-/// E0721 (D-TAINT1): a tainted (untrusted) value reaches a sink effect without
-/// passing through a `#Sanitizer fn`. Names the sink and offers the sanitizer
-/// fix-it — the one blessed way to clear taint before a security-sensitive call.
-pub fn e0721(alias: &str, method: &str, effect: Effect, span: Span) -> Diagnostic {
-    let api = if alias.is_empty() {
-        method.to_string()
-    } else {
-        format!("{alias}.{method}")
-    };
-    let kind = match effect {
-        Effect::DB => "a database query",
-        Effect::Exec => "a subprocess command",
-        Effect::Net => "a network request",
-        _ => "a sink",
-    };
+pub fn e0721(tag: &str, api: &str, destinations: &[String], span: Span) -> Diagnostic {
+    let destination = destinations.last().map(String::as_str).unwrap_or("sink");
     Diagnostic::error(
         "E0721",
-        format!("untrusted (`#{}`) data reaches `{}` without being sanitized", crate::Syntax::KW_TAINTED, api),
+        format!("a `{tag}` value is denied at `{api}`"),
         format!(
-            "`{}` runs {} — a `{}` sink; a `#{}` value used there unchecked is the classic injection bug",
-            api, kind, effect.name(), crate::Syntax::KW_TAINTED
+            "the declaration for `{tag}` denies `{destination}`, which covers this destination"
         ),
         format!(
-            "pass the value through a `#{} fn` first — its result is trusted, so it may reach the sink",
-            crate::Syntax::KW_SANITIZER
+            "remove the destination use, or pass the value through a matching `#Scrub({tag})` function"
         ),
         Some(span),
     )

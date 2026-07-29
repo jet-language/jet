@@ -101,6 +101,17 @@
 // `{value#Fixed(n)}` reuses `#` and ordinary integer-call parentheses.
 // D-QUANTITY-PRINT1 adds `Unit(name)` and `Unit(bare)` to that same selector
 // rail. Bare interpolation keeps the declared symbol as the default.
+// D-FACTMODEL1=A: tag, state, taint-kind, and effect leaves are one erased
+// compile-time fact model with one segment-aware subsumption rule.
+// D-TAG-SURFACE1=A: `tag Name { deny: [...], from: [...] }`, direct `#Name`
+// value/type facts, and `#Scrub(Name)` are the sole dataflow-tag surface.
+// D-STATE-NS1=A: state facts have the reserved `T.State.Name` qualified plane;
+// bare names are sugar only inside `#State` and `#Transition`.
+// D-RULEARG-TYPES1=A + D-LANGNS-NAME1=A: compiler marker vocabularies are
+// generated enums in `core.lang`, derived from Policy::APPLIED_RULES.
+// D-MARKER-NAME-HYGIENE1=A: `#Discriminant("field")` owns serde internal
+// discriminants and `#Job fn` owns scheduled entry functions. `#Tag` and
+// `#Task` are retired spellings.
 pub const HTTP_ROUTE_PARAM_PREFIX: &str = ":";
 pub const HTTP_ROUTE_CATCH_ALL_PREFIX: &str = "*";
 
@@ -301,7 +312,7 @@ pub const NAME_CASE_CATEGORIES: &[(&str, NameCase)] = &[
     ("distinct type", NameCase::Pascal),
     ("enum", NameCase::Pascal),
     ("enum variant", NameCase::Pascal),
-    ("enum variant group", NameCase::Pascal),
+    ("variant group", NameCase::Pascal),
     ("marker", NameCase::Pascal),
     ("protocol", NameCase::Pascal),
     ("protocol message", NameCase::Pascal),

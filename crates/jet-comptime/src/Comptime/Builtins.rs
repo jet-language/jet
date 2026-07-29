@@ -1165,10 +1165,23 @@ pub fn apply_method(
                 Some(CtValue::Str(s)) => s,
                 _ => return Err(unsupported("`has_marker` requires a string argument", span)),
             };
-            if let Some((_, CtValue::List(markers))) = fields.iter().find(|(n, _)| n == "markers") {
+            if let Some((_, CtValue::List(markers))) = fields
+                .iter()
+                .find(|(n, _)| n == "marker_names")
+                .or_else(|| fields.iter().find(|(n, _)| n == "markers"))
+            {
                 let found = markers
                     .iter()
-                    .any(|m| matches!(m, CtValue::Str(s) if *s == needle));
+                    .any(|m| match m {
+                        CtValue::Str(name) => *name == needle,
+                        CtValue::Struct { fields, .. } => fields.iter().any(
+                            |(field, value)| {
+                                field == "name"
+                                    && matches!(value, CtValue::Str(name) if *name == needle)
+                            },
+                        ),
+                        _ => false,
+                    });
                 return Ok(CtValue::Bool(found));
             }
             Ok(CtValue::Bool(false))

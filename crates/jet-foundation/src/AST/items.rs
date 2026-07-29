@@ -22,8 +22,8 @@ pub enum Item {
     UnitFamily(UnitFamilyDef),
     /// S28 (M9): `trait Name { fn sig(self) => T; … }`.
     Trait(TraitDef),
-    /// D-QUAL2 (ratified 2026-06-21): `tag Name;` or `tag Name { }` — a marker
-    /// qualifier with no methods. It erases at runtime (codegen emits nothing).
+    /// D-TAG-SURFACE1=A: `tag Name { deny: [...], from: [...] }` declares an
+    /// erased dataflow fact and its policy.
     /// A method in a tag body is E0732; using a tag where dispatch is expected
     /// is E0731.
     Tag(TagDef),
@@ -590,10 +590,7 @@ pub struct TraitDef {
     pub methods: Vec<TraitMethodSig>,
 }
 
-/// D-QUAL2: `tag Name;` / `tag Name { }` — a marker qualifier. By the taxonomy
-/// rule (methods → trait, no methods → tag) a tag carries no methods; any method
-/// found in its body is reported as E0732. The body is parsed permissively (so a
-/// stray method doesn't derail the parser) and validated in sema.
+/// D-TAG-SURFACE1=A: one declared dataflow fact and its source/sink policy.
 #[derive(Debug, Clone)]
 pub struct TagDef {
     pub is_pub: bool,
@@ -601,9 +598,10 @@ pub struct TagDef {
     pub is_package_pub: bool,
     pub name: String,
     pub name_span: Span,
-    /// Methods erroneously written in a tag body. Always empty for a well-formed
-    /// tag; each entry triggers E0732 in sema.
-    pub methods: Vec<TraitMethodSig>,
+    /// Required non-empty sink/effect list.
+    pub deny: Vec<(String, Span)>,
+    /// Optional source function/effect list.
+    pub from: Vec<(String, Span)>,
     pub span: Span,
 }
 
@@ -822,11 +820,12 @@ pub struct Func {
     pub unsafe_span: Option<Span>,
     /// S60 (E2-M16): `pure fn` — impure calls inside the body are E3401.
     pub is_pure: bool,
-    /// D-TAINT1 (ratified 2026-06-21): `#Sanitizer fn` — the blessed taint-strip
-    /// function. Its return value is **untainted by contract** even when its
-    /// inputs are tainted; this is the one place taint is cleared before a sink.
-    /// Static, erased in codegen (I3).
+    /// Retained internal bit for old serialized metadata. New source uses
+    /// `scrub_tag`; retired `#Sanitizer` never sets this bit.
     pub is_sanitizer: bool,
+    /// D-TAG-SURFACE1=A: `#Scrub(Tag)` removes exactly `Tag` from the result.
+    /// Static, erased before codegen.
+    pub scrub_tag: Option<String>,
     /// D-EFF1 / D-QUAL1: a `#(Net, DB)` effect bound on the signature, between
     /// the parameter list and the return arrow. `None` = unannotated (effects
     /// inferred). `Some(list)` = a declared upper bound; the inferred set must be
@@ -859,13 +858,13 @@ pub struct Func {
     /// ambient Time/Rand/Net/IO unless routed through deterministic capabilities.
     pub is_replayable: bool,
     pub replayable_span: Option<Span>,
-    /// D-JPK-TASKRUN1 / D-SCHEDULE1 (card #505): `#Task fn` — a top-level
+    /// D-JPK-TASKRUN1 / D-SCHEDULE1 (card #505): `#Job fn` — a top-level
     /// function Jet can invoke by name (`jet run --task <name> <entry>`).
     /// Top-level only (E0925 elsewhere). Erased in codegen (I3) — an ordinary fn.
     pub is_task: bool,
     pub task_span: Option<Span>,
     /// D-SCHEDULE1 (ratified 2026-07-11, card #505): `#Every(...)` — a
-    /// declarative schedule on a `#Task fn`. `None` means unscheduled (a
+    /// declarative schedule on a `#Job fn`. `None` means unscheduled (a
     /// plain task, invoked manually only). Legal only alongside `is_task`
     /// (E0925 otherwise). Compile-checked (E0926 on a bad argument), then
     /// carried as metadata for `jet dev`/service-runtime/jetos consumers —

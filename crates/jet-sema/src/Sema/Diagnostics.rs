@@ -6,6 +6,28 @@ pub(crate) use crate::Syntax::edit_distance;
 use crate::AST::{BinOp, ElseBranch, Expr, IfStmt, Pattern, Stmt, Type, VariantPayload};
 use std::collections::{HashMap, HashSet};
 
+pub(crate) fn undeclared_value_tag(
+    marker: &str,
+    suggestion: Option<&str>,
+    span: Span,
+) -> Diagnostic {
+    let fix = suggestion.map_or_else(
+        || {
+            format!(
+                "declare it first with `tag {marker} {{ deny: [Effect] }}`, or check the spelling"
+            )
+        },
+        |candidate| format!("did you mean `{candidate}`?"),
+    );
+    Diagnostic::error(
+        "E0733",
+        format!("there's no tag called `{marker}`"),
+        "a value tag must name a declared `tag`".to_string(),
+        fix,
+        Some(span),
+    )
+}
+
 pub(crate) fn compound_why(op: BinOp) -> String {
     match op {
         BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div => {

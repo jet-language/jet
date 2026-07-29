@@ -1,9 +1,9 @@
 //! D-SCHEDULE1 (ratified 2026-07-11, card #505): checked `#Every(…)`
-//! schedule arguments, plus D-JPK-TASKRUN1 reserved-name law on `#Task fn`.
+//! schedule arguments, plus D-JPK-TASKRUN1 reserved-name law on `#Job fn`.
 //!
 //! The parser only records the raw shape it saw (`EveryArg` — a duration
 //! literal or a quoted string) and, at parse time, whether `#Every(…)` is
-//! paired with `#Task` on the same function (E0925, pushed directly by
+//! paired with `#Job` on the same function (E0925, pushed directly by
 //! `jet-parser` — a placement question, not a value question). This module
 //! owns the one thing left for schedules: is the VALUE a real schedule?
 //! `EveryArg::resolve` (`crates/jet-foundation/src/AST/items.rs`) is the
@@ -12,11 +12,11 @@
 //! later to get the same answer, so this checker and every runtime consumer
 //! can never disagree.
 //!
-//! D-JPK-TASKRUN1 also lives here: a `#Task fn` must not reuse the reserved
+//! D-JPK-TASKRUN1 also lives here: a `#Job fn` must not reuse the reserved
 //! lifecycle verbs `run`/`dev`/`build`/`test` (E0928).
 //!
 //! I3: this module only decides; codegen never reads `Func::every` at all —
-//! a `#Task`/`#Every` function generates as an ordinary fn.
+//! a `#Job`/`#Every` function generates as an ordinary fn.
 
 use crate::AST::{EveryScheduleError, Func};
 use crate::Diagnostics::{Diagnostic, Span};
@@ -62,7 +62,7 @@ fn e0926_bad_schedule_value(reason: EveryScheduleError, span: Span) -> Diagnosti
     Diagnostic::error("E0926", what.to_string(), why.to_string(), fix.to_string(), Some(span))
 }
 
-/// E0928: `#Task fn` reused a reserved lifecycle verb (D-JPK-TASKRUN1).
+/// E0928: `#Job fn` reused a reserved lifecycle verb (D-JPK-TASKRUN1).
 fn e0928_reserved_task_name(name: &str, span: Span) -> Diagnostic {
     let reserved = Syntax::TASK_RESERVED_LIFECYCLE.join(", ");
     Diagnostic::error(
@@ -70,17 +70,17 @@ fn e0928_reserved_task_name(name: &str, span: Span) -> Diagnostic {
         format!("`{name}` is a built-in lifecycle verb, not a task name"),
         format!(
             "`run`, `dev`, `build`, and `test` already name Jet's built-in entry points — \
-             a `#Task fn` picks a user-chosen verb beside them (D-JPK-TASKRUN1)."
+             a `#Job fn` picks a user-chosen verb beside them (D-JPK-TASKRUN1)."
         ),
         format!(
-            "rename it, e.g. `#Task fn {name}_assets()`, or drop `#Task` if this is the lifecycle entry."
+            "rename it, e.g. `#Job fn {name}_assets()`, or drop `#Job` if this is the lifecycle entry."
         ),
         Some(span),
     )
     .with_detail(format!("reserved: {reserved}\n"))
 }
 
-/// D-JPK-TASKRUN1: reject `#Task fn run|dev|build|test`. Called alongside the
+/// D-JPK-TASKRUN1: reject `#Job fn run|dev|build|test`. Called alongside the
 /// `#Every` value check during registration.
 pub(crate) fn check_task_marker(f: &Func) -> Vec<Diagnostic> {
     if !f.is_task {
@@ -97,7 +97,7 @@ pub(crate) fn check_task_marker(f: &Func) -> Vec<Diagnostic> {
 /// once per function during registration (mirrors `check_inline_always_fn`'s
 /// call sites in `Registration.rs`/`Bundle.rs`) — E0925 placement is already
 /// handled by the parser, so this is the value check alone. Also runs the
-/// D-JPK-TASKRUN1 reserved-name check for `#Task`.
+/// D-JPK-TASKRUN1 reserved-name check for `#Job`.
 pub(crate) fn check_every_marker(f: &Func) -> Vec<Diagnostic> {
     let mut diags = check_task_marker(f);
     let Some(every) = &f.every else {

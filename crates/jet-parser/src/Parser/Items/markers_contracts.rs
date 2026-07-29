@@ -51,7 +51,11 @@ impl<'a> Parser<'a> {
                 return Ok((false, span));
             }
             let arguments = self.bound_registered_rule_arguments(&marker)?;
-            if !matches!(arguments.parameter(0), Some(crate::AST::Expr::Ident(mode, _)) if mode == "Always") {
+            if arguments
+                .parameter(0)
+                .and_then(Self::marker_enum_variant)
+                != Some("Always")
+            {
                 return Err(crate::Policy::marker_argument_shape_error(
                     Syntax::CONTRACT_INLINE,
                     marker.span,
@@ -95,12 +99,18 @@ impl<'a> Parser<'a> {
             } else {
                 false
             };
-            // D-TAINT1: `#Sanitizer fn` / `#Sanitizer pub fn` — the taint-strip
-            // modifier (guaranteed by `at_sanitizer_fn` when present at dispatch).
+            // D-TAG-SURFACE1=A: recover the retired `#Sanitizer` spelling.
             let is_sanitizer = if self.at_sanitizer_fn() {
-                self.bump(); // `@`
-                self.bump(); // `Sanitizer`
-                true
+                let start = self.bump().span.start;
+                let end = self.bump().span.end;
+                self.diags.push(Diagnostic::error(
+                    "E0927",
+                    "`#Sanitizer` is retired".to_string(),
+                    "a scrubber names the one declared tag it removes".to_string(),
+                    "write `#Scrub(Tag)`".to_string(),
+                    Some(Span::new(start, end)),
+                ));
+                false
             } else {
                 false
             };
@@ -116,7 +126,7 @@ impl<'a> Parser<'a> {
             let mut is_replayable = false;
             let mut replayable_span = None;
             let mut meta = None;
-            // D-SCHEDULE1 (card #505): `#Task fn` / `#Every(…) #Task fn` —
+            // D-SCHEDULE1 (card #505): `#Job fn` / `#Every(…) #Job fn` —
             // schedule-as-code. Either order, alongside the other markers above.
             let mut is_task = false;
             let mut task_span = None;
@@ -206,7 +216,7 @@ impl<'a> Parser<'a> {
                 is_replayable,
                 replayable_span,
             )?;
-            // D-SCHEDULE1: `#Every(…)` only means something alongside `#Task` —
+            // D-SCHEDULE1: `#Every(…)` only means something alongside `#Job` —
             // pushed as a recoverable diagnostic (like the E0062 plane teaching
             // errors above) so the rest of the function still parses normally.
             if let Some(m) = &every {
@@ -324,38 +334,33 @@ impl<'a> Parser<'a> {
                     marker.span,
                 ));
             };
-            // D-OSTARGET1=A: `#Target(OS.Linux|OS.MacOS|OS.Windows)` — the second,
-            // mutually-exclusive axis (native platform gating on an `impl`).
-            if let crate::AST::Expr::Field(base, os_name, os_span) = target {
-                if matches!(
-                    base.as_ref(),
-                    crate::AST::Expr::Ident(namespace, _)
-                        if namespace == crate::Syntax::TARGET_OS_NAMESPACE
-                ) {
-                    return crate::Syntax::OSTarget::parse(&os_name)
-                        .map(TargetMarker::OS)
-                        .ok_or_else(|| {
-                            Diagnostic::error(
-                                "E0003",
-                                format!("`#Target(OS.{os_name})` is not a known native OS"),
-                                "native OS targets are `OS.Linux`, `OS.MacOS`, or `OS.Windows`".to_string(),
-                                format!(
-                                    "write `#Target(OS.{})`, `#Target(OS.{})`, or `#Target(OS.{})`",
-                                    Syntax::TARGET_OS_LINUX,
-                                    Syntax::TARGET_OS_MACOS,
-                                    Syntax::TARGET_OS_WINDOWS,
-                                ),
-                                Some(*os_span),
-                            )
-                        });
-                }
-            }
-            let crate::AST::Expr::Ident(name, name_span) = target else {
+            let Some(name) = Self::marker_enum_path(target, "Target") else {
                 return Err(crate::Policy::marker_argument_shape_error(
                     Syntax::ATTR_TARGET,
                     marker.span,
                 ));
             };
+            // D-OSTARGET1=A: `#Target(OS.Linux|OS.MacOS|OS.Windows)` — the second,
+            // mutually-exclusive axis (native platform gating on an `impl`).
+            if let Some(os_name) = name.strip_prefix("OS.") {
+                return crate::Syntax::OSTarget::parse(os_name)
+                    .map(TargetMarker::OS)
+                    .ok_or_else(|| {
+                        Diagnostic::error(
+                            "E0003",
+                            format!("`#Target(OS.{os_name})` is not a known native OS"),
+                            "native OS targets are `OS.Linux`, `OS.MacOS`, or `OS.Windows`"
+                                .to_string(),
+                            format!(
+                                "write `#Target(OS.{})`, `#Target(OS.{})`, or `#Target(OS.{})`",
+                                Syntax::TARGET_OS_LINUX,
+                                Syntax::TARGET_OS_MACOS,
+                                Syntax::TARGET_OS_WINDOWS,
+                            ),
+                            Some(target.span()),
+                        )
+                    });
+            }
             if name == crate::Syntax::WEB_TARGET_DEFAULT_WEB {
                 return Ok(TargetMarker::DefaultWeb);
             }
@@ -373,9 +378,9 @@ impl<'a> Parser<'a> {
                         Syntax::WEB_BUCKET_JS,
                         Syntax::WEB_TARGET_DEFAULT_WEB,
                     ),
-                    Some(*name_span),
+                    Some(target.span()),
                 )
-                })
+            })
         }
     
         /// D-MARK-TARGET1=A (ratified 2026-07-11, card #498): consume
@@ -428,10 +433,10 @@ impl<'a> Parser<'a> {
             let start = self.peek().span.start;
             let marker = self.parse_rule_marker()?;
             let arguments = self.bound_registered_rule_arguments(&marker)?;
-            let Some(crate::AST::Expr::Ident(name, _)) = arguments.parameter(0) else {
+            let Some(name) = arguments.parameter(0).and_then(Self::marker_ident_path) else {
                 return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_STATE, marker.span));
             };
-            Ok((name.clone(), Span::new(start, marker.span.end)))
+            Ok((name, Span::new(start, marker.span.end)))
         }
     
         /// D-MARKSIG1=A: parse `#Transition(From, To)`. `From` may be the wildcard `_`
@@ -448,17 +453,17 @@ impl<'a> Parser<'a> {
                     marker.span,
                 ));
             };
-            let from = match from_argument {
-                crate::AST::Expr::Ident(name, _) if name == Syntax::STATE_ENTRY => None,
-                crate::AST::Expr::Ident(name, _) => Some(name.clone()),
-                _ => return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_TRANSITION, marker.span)),
+            let from = match Self::marker_ident_path(from_argument) {
+                Some(name) if name == Syntax::STATE_ENTRY => None,
+                Some(name) => Some(name),
+                None => return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_TRANSITION, marker.span)),
             };
-            let crate::AST::Expr::Ident(to, _) = to_argument else {
+            let Some(to) = Self::marker_ident_path(to_argument) else {
                 return Err(crate::Policy::marker_argument_shape_error(Syntax::KW_TRANSITION, marker.span));
             };
             Ok(crate::AST::StateTransition {
                 from,
-                to: to.clone(),
+                to,
                 span: Span::new(start, marker.span.end),
             })
         }
@@ -501,15 +506,15 @@ impl<'a> Parser<'a> {
             })
         }
 
-        /// E0925: `#Every(…)` without the `#Task` marker it schedules.
+        /// E0925: `#Every(…)` without the `#Job` marker it schedules.
         pub(super) fn e0925_every_without_task(span: Span) -> Diagnostic {
             Diagnostic::error(
                 "E0925",
-                "`#Every(…)` needs `#Task` on the same function".to_string(),
-                "a schedule only means something on a task — `#Every(…)` names when `#Task` \
+                "`#Every(…)` needs `#Job` on the same function".to_string(),
+                "a schedule only means something on a task — `#Every(…)` names when `#Job` \
                  runs, it isn't a standalone timer."
                     .to_string(),
-                "add `#Task` (`#Task #Every(5min) fn …`), or drop `#Every(…)` if this isn't a \
+                "add `#Job` (`#Job #Every(5min) fn …`), or drop `#Every(…)` if this isn't a \
                  scheduled task."
                     .to_string(),
                 Some(span),
