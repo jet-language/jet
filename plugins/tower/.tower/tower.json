@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1311,
-    "rev": 19751,
+    "rev": 19768,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -18644,8 +18644,8 @@
           "status": "met",
           "metBy": "e3-bd-771-b2",
           "verifiedBy": null,
-          "evidence": "Commits f8f5b39a8, 18238c517, 9fb3652fe, and 16b34423a complete D-PROCESS-SESSION1=A and D-PROCESS-SESSION2=D. Reviewer fixes make ProcessChild.terminal a TerminalSession? with None on ordinary AOT/JIT children and diagnose close literal terminal-fact typos while keeping preview keys open. I4 proof at 16b34423a adds distinct tests/ui fixtures and exact E0302 snapshots for TerminalFact.reszie and facts.has(\"reszie\"); the literal fixture first accepts preview_x without a diagnostic. Reference and decision docs match. Initial focused AOT, resident-JIT, beginner refusal, and process_builder golden proof passed before review. Per batch instruction, reviewer-fix project tests and snapshot execution are deferred to the grouped boundary; static git diff --check passed. Fresh-context re-review requested.",
-          "at": "2026-07-29T15:26:47.745Z"
+          "evidence": "Commits through a0f12117c complete D-PROCESS-SESSION1=A and D-PROCESS-SESSION2=D. Final exact-test fix a0f12117c adds the dedicated E0311 optional TerminalSession? receiver diagnostic and exact UI snapshot. Existing AOT and resident-JIT policy fixtures now unwrap Val(session) and lower session.resize(TerminalSize) without requiring a native backend, exercising the already-registered sema, TIR, AOT, JIT safety, and JIT host paths. Per instruction no project tests ran for this fix; static diff/debug checks passed. Re-run grouped proof and fresh-context review before closure.",
+          "at": "2026-07-29T16:13:10.880Z"
         }
       ],
       "refs": [
@@ -18658,10 +18658,10 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-23T19:56:07.441Z",
-      "updated": "2026-07-29T15:26:47.989Z",
+      "updated": "2026-07-29T16:13:11.132Z",
       "workOrder": 70,
       "updatedBy": "e3-bd-771-b2",
-      "claimedAt": "2026-07-29T15:26:47.988Z"
+      "claimedAt": "2026-07-29T16:13:11.132Z"
     },
     {
       "id": "c0dixxk4",
@@ -51833,48 +51833,59 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "verify",
       "priority": "P2",
       "plan": "Three ratified rulings, one slice, one HTTP surface. D-HTTP-JSON1=A, D-HTTP-STATIC-FILES1=A, D-HTTP-CORS1=A.\n\n1. JSON both ways, over the existing #Codable path. Add `resp.json<T>(limit)` on the client, `req.json<T>()` on the server, and `server.json(status, value)` for responses. Each is one Result. `server.json` sets Content-Type: application/json; charset=utf-8. `req.json<T>()` honours the framing cap already ratified for bodies. The raw text and byte paths stay for experts.\n2. `static_files(root)` mounts a directory under a prefix. Defaults: normalize the path, refuse escapes, hide dot-files, refuse symbolic links that leave the root, serve index.html for a directory request or 404. Content types come from the existing mime table. Range requests reuse the shipped per-file machinery. Named options carry index, dotfiles, and follow_links for experts.\n3. `server.cors(policy)` middleware. CorsPolicy names origins (a list or .Any), methods, headers, credentials, and max_age. No policy installed means no CORS headers at all. The constructor rejects .Any with credentials and says why. The middleware answers OPTIONS preflight and stamps allow headers on matching routes.\n4. Update docs/reference/core-library.md and extend examples/features/net/http_rest_service.jet to use the typed JSON calls, a static mount, and a CORS policy.\n\nOwned paths: the http client and server modules under crates/jet-codegen/src/Prelude/CoreLib, docs/reference/core-library.md, examples/features/net/.\n\nProof: targeted http tests for each of the three; a hostile-path test proving the static mount refuses escapes, dot-files, and link escapes; a constructor test proving .Any plus credentials is rejected; example golden; independent review closes.",
       "blockedBy": [],
-      "assignee": null,
-      "log": [],
+      "assignee": "bd-1273",
+      "log": [
+        {
+          "at": "2026-07-29",
+          "by": "bd-1273",
+          "text": "All four criteria met. Commit 7f3a73d1d on branch e3-web-defaults. One deviation for review: the example is a new file, and quick-run JIT lowering for the new calls is owed as a follow-up."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "bd-1273",
+          "text": "Prelude layer done. JSON response helper, static mount with safe defaults, CORS policy that refuses .Any plus credentials. cargo test --test http_server_lifecycle: 70 pass. Compiler plumbing next."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "resp.json<T>(limit), req.json<T>(), and server.json(status, value) work end to end over #Codable, with the content type set and the body cap honoured",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-1273",
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-28T20:29:35.966Z"
+          "at": "2026-07-29T16:12:39.447Z"
         },
         {
           "n": 2,
           "text": "static_files(root) serves a directory and refuses path escapes, dot-files, and symlink escapes by default; index and dotfile and follow_links options work",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-1273",
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-28T20:29:36.214Z"
+          "at": "2026-07-29T16:12:51.410Z"
         },
         {
           "n": 3,
           "text": "server.cors(policy) answers preflight and stamps allow headers; no policy means no headers; .Any plus credentials is rejected at construction with clear copy",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-1273",
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-28T20:29:36.460Z"
+          "at": "2026-07-29T16:12:51.678Z"
         },
         {
           "n": 4,
           "text": "core-library.md and the net example teach the new calls; example golden passes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "bd-1273",
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-07-28T20:29:36.707Z"
+          "at": "2026-07-29T16:13:10.263Z"
         }
       ],
       "refs": [
@@ -51884,9 +51895,10 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:07:54.667Z",
-      "updated": "2026-07-28T21:37:44.674Z",
-      "updatedBy": "tower-prep-rank",
-      "workOrder": 350
+      "updated": "2026-07-29T16:13:10.568Z",
+      "updatedBy": "bd-1273",
+      "workOrder": 350,
+      "claimedAt": "2026-07-29T16:13:10.568Z"
     },
     {
       "id": "c07m87c8",
@@ -52570,6 +52582,21 @@
         {
           "at": "2026-07-29",
           "by": "e3-bd-1283",
+          "text": "Exact-test fix aa0acc931: comptime fragment lowering now recovers Regex and Match receiver types from canonical global values, so global Regex.match and Match accessor calls lower as handle methods instead of unsupported static calls. The parity fixture now uses distinct comptime and runtime binding names, preserving the same direct-comptime versus runtime assertions without a false global/local collision. Static diff checks passed; root owns the exact test rerun."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1283",
+          "text": "Final batch review fix a2620fa4c: direct comptime Regex.replace_all_with now intercepts in the interpreter context and invokes the shared regex replacement helper through the existing inline-closure evaluator. The context-free Builtins path no longer carries an unsupported callback stub. TIR continues to use the same helper through its callable evaluator. Static diff checks passed; grouped tests remain pending."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1283",
+          "text": "Batch review fix bfa4e4a6d: TIR Match values now preserve group names and byte spans, and the evaluator implements group, name, start, end, group_start, and group_end. Regex replacement now expands numbered and named captures. replace_all_with stays a RegexMethod and invokes TIR callables through the existing evaluator seam. The forced-comptime-TIR parity regression covers Match accessors, capture replacement, and callback replacement. Static diff checks passed; grouped tests remain pending."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1283",
           "text": "Grouped review fix 05581bb99: the comptime regex executor now consumes the canonical validated grammar and supports noncapturing and named groups, range quantifiers, and Unicode classes. Reusable Regex methods now dispatch through the existing regex core operations, with a comptime/TIR/runtime regression. Static diff check passed; grouped tests remain pending."
         },
         {
@@ -52619,10 +52646,10 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-28T14:38:21.036Z",
-      "updated": "2026-07-29T15:20:08.869Z",
+      "updated": "2026-07-29T15:54:48.481Z",
       "updatedBy": "e3-bd-1283",
       "workOrder": 220,
-      "claimedAt": "2026-07-29T15:20:08.869Z"
+      "claimedAt": "2026-07-29T15:54:48.481Z"
     },
     {
       "id": "c083yh6b",
@@ -54740,6 +54767,16 @@
         {
           "at": "2026-07-29",
           "by": "e3-bd-1310",
+          "text": "Final reviewer fixes committed as 38c2fbdf3: eval-fragment method lowering now recovers canonical serde semantics from lowered receiver and parsed target types when early generated/custom bodies lack sema-populated recv_type/resolved_ret. Shared node builders serve both checked and fragment paths, so both emit the same SerdeEncode/DataTreeDecode TIR nodes; primitive/container encode stays in the canonical evaluator and no tuple/facade codec exists. U8 forced-TIR wording and exact regression are restored to reviewer-confirmed AOT `expected U8, found Int`. Static diff/check and debug-marker checks passed. Per instruction, no project tests were run; reviewer recheck remains pending."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1310",
+          "text": "Grouped parity failure fixes committed as 73c393848: early comptime now expands a clone through the existing generated serde mechanism, registers generated/custom codec methods as Type::encode/decode, and lowers them with the canonical TIR trait-method path plus struct facts. This supplies Packet.Encode without restoring the forbidden field-tuple codec or mutating production items. Exact migration error expectation now preserves the public CBOR `$score` path, and forced-TIR U8 overflow matches observed AOT `expected U8, found out-of-range Int`. Static diff/check and debug-marker checks passed. Per instruction, no project tests were run; root will cherry-pick and run the grouped pass."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "e3-bd-1310",
           "text": "I4 closeout committed as d8ce2605d: added exact tests/ui fixtures and snapshots for U64-specific E2411 direct CBOR encode, direct CBOR decode, and derived #Codable field paths. Snapshots pin What/Why/Fix copy and source spans for both serialization directions. Hand-authored from the diagnostic and sema span sites as instructed; static staged diff/check and debug-marker checks passed. No project tests or snapshot generator run; grouped verification remains pending."
         },
         {
@@ -54810,9 +54847,9 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-29T11:57:43.059Z",
-      "updated": "2026-07-29T15:27:54.924Z",
+      "updated": "2026-07-29T16:05:19.597Z",
       "updatedBy": "e3-bd-1310",
-      "claimedAt": "2026-07-29T15:27:54.923Z"
+      "claimedAt": "2026-07-29T16:05:19.597Z"
     }
   ],
   "decisions": [
@@ -72944,6 +72981,125 @@
   ],
   "events": [
     {
+      "at": "2026-07-29T16:13:11.132Z",
+      "by": "e3-bd-771-b2",
+      "action": "card.update",
+      "ref": "c0ft6gme",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-29T16:13:10.880Z",
+      "by": "e3-bd-771-b2",
+      "action": "card.criteria-meet",
+      "ref": "c0ft6gme",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T16:13:10.568Z",
+      "by": "bd-1273",
+      "action": "card.update",
+      "ref": "c047avgx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T16:13:10.263Z",
+      "by": "bd-1273",
+      "action": "card.criteria-meet",
+      "ref": "c047avgx",
+      "note": "#4"
+    },
+    {
+      "at": "2026-07-29T16:12:51.678Z",
+      "by": "bd-1273",
+      "action": "card.criteria-meet",
+      "ref": "c047avgx",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T16:12:51.410Z",
+      "by": "bd-1273",
+      "action": "card.criteria-meet",
+      "ref": "c047avgx",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T16:12:39.447Z",
+      "by": "bd-1273",
+      "action": "card.criteria-meet",
+      "ref": "c047avgx",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T16:05:19.597Z",
+      "by": "e3-bd-1310",
+      "action": "card.update",
+      "ref": "c0u592bs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T15:55:25.738Z",
+      "by": "e3-bd-1310",
+      "action": "card.update",
+      "ref": "c0u592bs",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T15:54:48.481Z",
+      "by": "e3-bd-1283",
+      "action": "card.update",
+      "ref": "c05051f9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T15:49:36.678Z",
+      "by": "e3-bd-771-b2",
+      "action": "card.update",
+      "ref": "c0ft6gme",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-29T15:49:36.438Z",
+      "by": "e3-bd-771-b2",
+      "action": "card.criteria-meet",
+      "ref": "c0ft6gme",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T15:45:37.427Z",
+      "by": "bd-1273",
+      "action": "card.update",
+      "ref": "c047avgx",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-07-29T15:45:29.779Z",
+      "by": "bd-1273",
+      "action": "card.update",
+      "ref": "c047avgx",
+      "note": "phase"
+    },
+    {
+      "at": "2026-07-29T15:36:28.156Z",
+      "by": "e3-bd-1283",
+      "action": "card.update",
+      "ref": "c05051f9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T15:32:48.404Z",
+      "by": "e3-bd-1283",
+      "action": "card.update",
+      "ref": "c05051f9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T15:30:44.722Z",
+      "by": "bd-1273",
+      "action": "card.claim",
+      "ref": "c047avgx",
+      "note": ""
+    },
+    {
       "at": "2026-07-29T15:27:54.924Z",
       "by": "e3-bd-1310",
       "action": "card.update",
@@ -76322,125 +76478,6 @@
       "by": "tower-prep",
       "action": "card.update",
       "ref": "c0kodh8n",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:14.161Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0b698t4",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:13.852Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0ptq2fy",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:13.538Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c05iu605",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:13.234Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0fttoym",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:12.903Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0anop1i",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:12.603Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c05968om",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:12.220Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c04de5hj",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:11.822Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c000i200",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:11.500Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0rgy9zq",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:11.198Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c08vpj75",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:10.887Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0ff4rd6",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:10.587Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0233d1b",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:10.239Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0i1vxui",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:09.871Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0by6tvm",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:09.547Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c08g84nj",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:09.230Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c02xubmv",
-      "note": "workOrder"
-    },
-    {
-      "at": "2026-07-28T21:55:08.891Z",
-      "by": "tower-prep",
-      "action": "card.update",
-      "ref": "c0x2g69u",
       "note": "workOrder"
     }
   ],
