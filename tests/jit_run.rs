@@ -133,9 +133,9 @@ fn run() {
         .Err(_) -> { print("terminal err") }
     }
     child :: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
-    if child.terminal.resize(TerminalSize.{ cols: 80, rows: 24 }) == {
-        .Ok(_) -> { print("resize ok") }
-        .Err(_) -> { print("resize err") }
+    if child.terminal == {
+        .Val(_) -> { print("terminal present") }
+        .None -> { print("terminal absent") }
     }
     waited :: child.wait() ?? panic("wait failed")
     print(waited.output.trim())
@@ -155,7 +155,7 @@ fn run() {
     };
     assert_eq!(
         stdout,
-        "false\nfalse\nfalse\nfalse\nterminal err\nresize err\nplain\n"
+        "false\nfalse\nfalse\nfalse\nterminal err\nterminal absent\nplain\n"
     );
     assert!(
         jet_jit::jit_executed_for_test(),

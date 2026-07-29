@@ -6014,9 +6014,9 @@ fn run() {
         .Err(_) -> { print("terminal unavailable") }
     }
     child :: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
-    if child.terminal.resize(TerminalSize.{ cols: 80, rows: 24 }) == {
-        .Ok(_) -> { print("plain child unexpectedly resized") }
-        .Err(_) -> { print("plain child has no terminal") }
+    if child.terminal == {
+        .Val(_) -> { print("plain child unexpectedly has terminal") }
+        .None -> { print("plain child has no terminal") }
     }
     waited :: child.wait() ?? panic("wait failed")
     print(waited.output.trim())
@@ -6045,6 +6045,22 @@ fn run() {
                 && diag.fix.contains("`TerminalFact.resize`")
         }),
         "{typo:?}"
+    );
+
+    let plain_child_terminal = jet::compile(
+        r#"use core.process as process
+fn run() {
+    child :: process.cmd(["echo", "plain"]).spawn() ?? panic("spawn failed")
+    child.terminal.resize(TerminalSize.{ cols: 80, rows: 24 })
+}
+"#,
+    )
+    .expect_err("a plain child must not expose a TerminalSession");
+    assert!(
+        plain_child_terminal
+            .iter()
+            .any(|diag| diag.code == "E0311" && diag.what.contains("resize")),
+        "{plain_child_terminal:?}"
     );
 }
 

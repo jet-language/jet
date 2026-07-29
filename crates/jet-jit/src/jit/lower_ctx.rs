@@ -10895,13 +10895,12 @@ impl LowerCtx<'_, '_> {
                     other => other.clone(),
                 };
                 // ProcessChild is an opaque resident handle, not a heap record.
-                // Its terminal projection keeps that same child identity; the
-                // TerminalSession host method validates whether a backend
-                // attached a real session.
+                // No resident terminal backend exists yet, so a child produced
+                // by this path has no TerminalSession. Option ABI: 0 = None.
                 if matches!(&record_ty, Type::Named(name) if name == "ProcessChild")
                     && field == "terminal"
                 {
-                    return Ok(handle);
+                    return Ok(self.b.ins().iconst(types::I64, 0));
                 }
                 let type_name = record_type_key(&record_ty)
                     .or_else(|| self.method_struct.clone());

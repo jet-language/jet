@@ -1127,7 +1127,8 @@ policy :: TerminalPolicy.{
 plan :: process.cmd(["python", "-i"]).terminal(policy)
 if plan.capabilities().has(TerminalFact.resize) {
     child :: plan.spawn()?
-    child.terminal.resize(TerminalSize.{ cols: 160, rows: 50 })?
+    session :: child.terminal ?? return
+    session.resize(TerminalSize.{ cols: 160, rows: 50 })?
 }
 ```
 
@@ -1135,14 +1136,16 @@ if plan.capabilities().has(TerminalFact.resize) {
 `.Cooked` policy. `capabilities()` returns a `Set[String]`. Use the checked
 keys `TerminalFact.terminal`, `TerminalFact.resize`, and `TerminalFact.raw`
 for stable facts. String keys remain open for preview facts without adding a
-second report type. `ProcessChild.terminal` is a `TerminalSession`;
-`resize(size)` returns `Unit ? IOError`.
+second report type. `ProcessChild.terminal` holds a terminal session only for
+a terminal-backed child, so its type is `TerminalSession?`. After unwrapping
+it, `resize(size)` returns `Unit ? IOError`.
 
 A terminal session needs a Unix PTY or a Windows ConPTY. While no such backend
 is present, every launch path that asks for a terminal — `run()`, `spawn()`,
 and `pipeline()` — fails with an `IOError` that names the missing backend. The
 child never runs on plain pipes with the requested terminal silently dropped.
-The capability set is empty, and resize fails. PTY/ConPTY transport,
+The capability set is empty, and a plain child's terminal field is `.None`.
+PTY/ConPTY transport,
 transcripts, binary streams, process-tree control, and resource limits are
 separate backend slices of the same process mechanism.
 

@@ -2507,7 +2507,8 @@ index, not a substitute for that law.
   closed instead of silently running on pipes.
 - **D-PROCESS-SESSION2=D**: the expert surface is
   `terminal(TerminalPolicy)`, with `TerminalSize` and `.Raw`/`.Cooked`
-  `TerminalMode`; `ProcessChild.terminal` returns the `TerminalSession` handle.
+  `TerminalMode`; `ProcessChild.terminal` is `TerminalSession?`, present only
+  when that child was launched with a terminal.
   `ProcessSpec.capabilities()` returns an open keyed report. Stable keys use
   `TerminalFact` constants; string keys allow preview facts without a parallel
   report type.

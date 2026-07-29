@@ -141,7 +141,7 @@ fn jet_process_spec_spawn(
         stderr: std::rc::Rc::new(std::cell::RefCell::new(
             child.stderr.take().map(std::io::BufReader::new),
         )),
-        terminal: jet_std::TerminalSession,
+        terminal: None,
         inner: std::rc::Rc::new(std::cell::RefCell::new(Some(child))),
         timeout_ms: spec.timeout_ms,
         started: std::time::Instant::now(),

@@ -337,7 +337,9 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         };
     }
     if type_name == "ProcessChild" && field == "terminal" {
-        return Some(Type::Named(Syntax::TYPE_TERMINAL_SESSION.to_string()));
+        return Some(Type::Option(Box::new(Type::Named(
+            Syntax::TYPE_TERMINAL_SESSION.to_string(),
+        ))));
     }
     if type_name == Syntax::TYPE_IO_CONTEXT {
         return match field {

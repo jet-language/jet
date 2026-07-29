@@ -332,7 +332,7 @@
             std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<std::process::ChildStdout>>>>,
         pub stderr:
             std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<std::process::ChildStderr>>>>,
-        pub terminal: TerminalSession,
+        pub terminal: Option<TerminalSession>,
         pub timeout_ms: Option<i64>,
         pub started: std::time::Instant,
     }
