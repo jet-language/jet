@@ -342,6 +342,10 @@ impl<'a> InlineAlwaysScan<'a> {
                 self.scan_expr(start);
                 self.scan_expr(end);
             }
+            Expr::Range { start, end, .. } => {
+                self.scan_expr(start);
+                self.scan_expr(end);
+            }
             Expr::Ident(_, _) => {}
             Expr::Unary(_, inner, _) => self.scan_expr(inner),
             Expr::Binary(_, l, r, _) => {

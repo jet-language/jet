@@ -662,6 +662,23 @@ impl<'a> Fmt<'a> {
                 self.fmt_expr(end, Prec::OrFallback);
                 self.write("]");
             }
+            Expr::Range {
+                start,
+                end,
+                exclusive,
+                ..
+            } => {
+                let wrap = prec > Prec::Range;
+                if wrap {
+                    self.write("(");
+                }
+                self.fmt_expr(start, Prec::Or);
+                self.write(if *exclusive { "..<" } else { ".." });
+                self.fmt_expr(end, Prec::Or);
+                if wrap {
+                    self.write(")");
+                }
+            }
             Expr::Ident(name, _) => self.write(name),
             Expr::Call(c) => self.fmt_call(c),
             Expr::Unary(op, inner, _) => {

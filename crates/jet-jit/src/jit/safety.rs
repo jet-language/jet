@@ -1780,6 +1780,13 @@ fn resident_safe_builtin_op(
                 && args.is_empty()
         }
         TBuiltinOp::Contains
+            if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) =>
+        {
+            args.len() == 1
+                && matches!(&args[0].ty, Type::Int)
+                && resident_safe_expr(&args[0], callees)
+        }
+        TBuiltinOp::Contains
             if matches!(&recv.ty, Type::Apply { name, args: targs }
                 if name == "Set"
                     && targs.len() == 1

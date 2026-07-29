@@ -1167,6 +1167,7 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 TStmt::Range {
                     label: label_name(label),
                     var: var.clone(),
+                    source: None,
                     start,
                     end,
                     step,
@@ -1188,6 +1189,25 @@ pub(crate) fn lower_stmt(s: &Stmt, cx: &Cx, env: &mut LowerEnv) -> TStmt {
                 // variable binds with its concrete type. This lets `core_struct_field_rust_name`
                 // emit plain field names (not `user_<field>`) for core types like DirEntry.
                 let lowered_coll = lower_expr(collection, cx, env);
+                if matches!(&lowered_coll.ty, Type::Named(name) if name == Syntax::TYPE_RANGE) {
+                    let step = step.as_ref().map(|s| lower_expr(s, cx, env));
+                    let zero = || TExpr {
+                        ty: Type::Int,
+                        kind: TExprKind::IntLit(0, None),
+                    };
+                    let mut branch = clone_env(env);
+                    branch.bind(var, TLocal::user(var), Some(Type::Int));
+                    return TStmt::Range {
+                        label: label_name(label),
+                        var: var.clone(),
+                        source: Some(lowered_coll),
+                        start: zero(),
+                        end: zero(),
+                        step,
+                        exclusive: false,
+                        body: lower_stmts(body, cx, &mut branch),
+                    };
+                }
                 let mut method_kind = method_kind;
                 let mut coll_elem_ty: Option<Type> = match &lowered_coll.ty {
                     Type::List(inner) => Some((**inner).clone()),

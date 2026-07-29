@@ -659,6 +659,7 @@ fn emit_tir_stmt(
         TStmt::Range {
             label,
             var,
+            source,
             start,
             end,
             step,
@@ -666,6 +667,48 @@ fn emit_tir_stmt(
             body,
         } => {
             let lbl = tir_label_prefix(label);
+            if let Some(source) = source {
+                let source = emit_expr_with_cleanups(source, cx, active_deferred_closes);
+                out.push_str(&format!("{}{{ let _jet_range = {};\n", pad, source));
+                let range_pad = "    ".repeat(indent + 1);
+                let body_pad = "    ".repeat(indent + 2);
+                let stride = step.as_ref().map(|step| {
+                    emit_expr_with_cleanups(step, cx, active_deferred_closes)
+                });
+                if let Some(stride) = &stride {
+                    out.push_str(&format!(
+                        "{}let _jet_loop_stride = {};\n",
+                        range_pad, stride
+                    ));
+                    out.push_str(&format!(
+                        "{}if _jet_loop_stride <= 0 {{ {}jet_panic({:?}, 0, \"E0123: loop stride must be positive\"); }}\n",
+                        range_pad, cx.root_prefix, cx.file
+                    ));
+                }
+                for (condition, op) in [(true, ".."), (false, "..=")] {
+                    out.push_str(&format!(
+                        "{}{} _jet_range.exclusive {{\n",
+                        range_pad,
+                        if condition { "if" } else { "} else if !" }
+                    ));
+                    let step_suffix = if stride.is_some() {
+                        ".step_by(_jet_loop_stride as usize)"
+                    } else {
+                        ""
+                    };
+                    out.push_str(&format!(
+                        "{}{}for {} in (_jet_range.start{op}_jet_range.end){step_suffix} {{\n",
+                        body_pad,
+                        lbl,
+                        mangle(var)
+                    ));
+                    emit_tir_stmts_nested(body, cx, out, indent + 3, active_deferred_closes);
+                    out.push_str(&format!("{}}}\n", body_pad));
+                }
+                out.push_str(&format!("{}}}\n", range_pad));
+                out.push_str(&format!("{}}}\n", pad));
+                return;
+            }
             let s = emit_expr_with_cleanups(start, cx, active_deferred_closes);
             let e = emit_expr_with_cleanups(end, cx, active_deferred_closes);
             // S22: `..` → `..=`; D-RANGE-EXCL1=C: `..<` → `..`.

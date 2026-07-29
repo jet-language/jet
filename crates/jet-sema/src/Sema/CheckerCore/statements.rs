@@ -1778,6 +1778,18 @@ impl<'a> Checker<'a> {
                                 Some(Type::Named(n)) if n == "ProcessLines" => {
                                     self.declare_loop_var(var.clone(), *var_span, &Type::String);
                                 }
+                                Some(Type::Named(n)) if n == Syntax::TYPE_RANGE => {
+                                    if var2.is_some() {
+                                        self.diags.push(Diagnostic::error(
+                                            "E0109",
+                                            "a Range loop has one value per step".to_string(),
+                                            "Range values yield whole numbers, not key-value pairs".to_string(),
+                                            "use one loop name".to_string(),
+                                            Some(collection.span()),
+                                        ));
+                                    }
+                                    self.declare_loop_var(var.clone(), *var_span, &Type::Int);
+                                }
                                 Some(Type::Named(n)) if n == "HTTPBodyChunks" => {
                                     self.declare_loop_var(
                                         var.clone(),

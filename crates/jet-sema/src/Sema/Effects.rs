@@ -1509,6 +1509,9 @@ fn expr_handle_escape(e: &crate::AST::Expr, handle: &str) -> Option<Span> {
         Expr::Slice { base, start, end, .. } => expr_handle_escape(base, handle)
             .or_else(|| expr_handle_escape(start, handle))
             .or_else(|| expr_handle_escape(end, handle)),
+        Expr::Range { start, end, .. } => {
+            expr_handle_escape(start, handle).or_else(|| expr_handle_escape(end, handle))
+        }
         Expr::ListLit(elems, _) => elems.iter().find_map(|el| expr_handle_escape(el, handle)),
         Expr::TupleLit(fields, _, _) => {
             fields.iter().find_map(|(_, e)| expr_handle_escape(e, handle))

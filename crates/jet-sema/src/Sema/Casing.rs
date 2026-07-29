@@ -386,6 +386,9 @@ fn expr_names(expr: &Expr, out: &mut Vec<Diagnostic>) {
         Expr::Slice { base, start, end, .. } => {
             expr_names(base, out); expr_names(start, out); expr_names(end, out);
         }
+        Expr::Range { start, end, .. } => {
+            expr_names(start, out); expr_names(end, out);
+        }
         Expr::CallValue { callee, args, .. } => {
             expr_names(callee, out);
             for arg in args { expr_names(&arg.expr, out); }

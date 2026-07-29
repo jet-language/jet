@@ -166,6 +166,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // controls. TerminalFact is a namespace of checked String keys, not a
         // fifth value type.
         | "TerminalPolicy" | "TerminalSize" | "TerminalMode" | "TerminalSession"
+        | "Range"
         | "IOContext" | "IOOperation"
         // D-TEXTWIDTH1=B: `TextWidth` (dot-ctor struct, `core_constructable_fields`)
         // + its two dot-literal enum fields + the `.Reject` policy error.
@@ -310,6 +311,12 @@ pub(crate) fn core_type_known(name: &str) -> bool {
 }
 
 pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
+    if type_name == Syntax::TYPE_RANGE {
+        return match field {
+            "start" | "end" => Some(Type::Int),
+            _ => None,
+        };
+    }
     if type_name == "TLSPeerIdentity" {
         return match field {
             "verified_server_name" => Some(Type::String),

@@ -306,6 +306,14 @@ optional third clause (`loop i; 0..10; 2`); `step` has no loop role.
 `a >= b`). Prefer `loop i, item; xs` or `loop i; xs.indexes` for index loops;
 the compiler teaches when inclusive `0..xs.len()` indexes the same `xs`.
 D-ITER1's pipeline adapter is `indexed()` (renamed from `enumerate`).
+**D-RANGE-VALUE1=A** *(ratified 2026-07-28, card #1298)*: both spellings
+construct one nominal `Range` over `Int`. The value carries whether its end is
+exclusive and exposes `.start`, `.end`, and `.contains(value)`. A Range may be
+stored, passed, returned, looped, or used as a slice bound. Literal loop ranges
+still lower directly to jumps; no iterator object or allocation is added.
+Range arm heads and `distinct Int(0..10)` constraints stay literal-only.
+D-SHAPE-PLACE1's retired `.view(range)` method remains retired; bracket slicing
+is the one live range-place surface.
 
 **D-RANGE-EXCL1=C — Exclusive range + index idioms**: half-open `a..<b` runs
 `a` through `b-1` and is empty when `a >= b`. Inclusive `..` (S22) is unchanged.
@@ -617,7 +625,9 @@ Distinct-only `#Numeric` exposes `+ - * /` and ordering for the same type
 types**: `distinct Int(0..10)` is an `Int` provably within bounds; literal
 conversion checks at compile time (E0135 out of bounds), runtime conversion
 is fallible (`Severity.from_int(raw)?`, else E0136); an empty/reversed range is E0137;
-arithmetic widens to the base type.
+arithmetic widens to the base type. The constraint bounds are integer literals,
+not Range values; accepting a runtime value here would make the declaration
+value-dependent (D-RANGE-VALUE1=A).
 
 **D-FIELDPOL1 — Computed fields** *(ratified 2026-07-03, card #181)*: a struct
 field `name: T => expr` is never stored — every read recomputes `expr` against

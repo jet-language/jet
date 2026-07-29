@@ -3280,14 +3280,23 @@ impl LowerCtx<'_, '_> {
             TStmt::Range {
                 label,
                 var,
+                source,
                 start,
                 end,
                 step,
                 exclusive,
                 body,
             } => {
-                let start_val = self.lower_expr(start)?;
-                let end_val = self.lower_expr(end)?;
+                let (start_val, end_val, exclusive_val) = if let Some(source) = source {
+                    let handle = self.lower_expr(source)?;
+                    (
+                        self.lower_record_field(handle, "Range", "start", &Type::Int)?,
+                        self.lower_record_field(handle, "Range", "end", &Type::Int)?,
+                        Some(self.lower_record_field(handle, "Range", "exclusive", &Type::Bool)?),
+                    )
+                } else {
+                    (self.lower_expr(start)?, self.lower_expr(end)?, None)
+                };
                 let loop_var = self.fresh_var(types::I64);
                 self.b.def_var(loop_var, start_val);
                 self.vars.insert(TIR::local_place(var), loop_var);
@@ -3303,10 +3312,15 @@ impl LowerCtx<'_, '_> {
                 let cur = self.b.use_var(loop_var);
                 // Inclusive `..` stops after `end`; exclusive `..<` stops at `end`
                 // (D-RANGE-EXCL1=C).
-                let past_end = if *exclusive {
-                    self.b
+                let past_end = if let Some(exclusive_val) = exclusive_val {
+                    let exclusive_end = self.b
                         .ins()
-                        .icmp(IntCC::SignedGreaterThanOrEqual, cur, end_val)
+                        .icmp(IntCC::SignedGreaterThanOrEqual, cur, end_val);
+                    let inclusive_end =
+                        self.b.ins().icmp(IntCC::SignedGreaterThan, cur, end_val);
+                    self.b.ins().select(exclusive_val, exclusive_end, inclusive_end)
+                } else if *exclusive {
+                    self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, cur, end_val)
                 } else {
                     self.b.ins().icmp(IntCC::SignedGreaterThan, cur, end_val)
                 };
@@ -10944,14 +10958,39 @@ impl LowerCtx<'_, '_> {
                 base,
                 start,
                 end,
+                range,
                 line,
             } => {
                 let list = self.lower_expr(base)?;
-                let s = self.lower_expr(start)?;
-                let e = self.lower_expr(end)?;
-                // Jet ranges are inclusive; heap list_slice is exclusive-end.
-                let one = self.b.ins().iconst(types::I64, 1);
-                let end_excl = self.b.ins().iadd(e, one);
+                let (s, end_excl) = if let Some(range) = range {
+                    let handle = self.lower_expr(range)?;
+                    let s = self.lower_record_field(
+                        handle,
+                        "Range",
+                        "start",
+                        &Type::Int,
+                    )?;
+                    let e = self.lower_record_field(
+                        handle,
+                        "Range",
+                        "end",
+                        &Type::Int,
+                    )?;
+                    let exclusive = self.lower_record_field(
+                        handle,
+                        "Range",
+                        "exclusive",
+                        &Type::Bool,
+                    )?;
+                    let one = self.b.ins().iconst(types::I64, 1);
+                    let inclusive_end = self.b.ins().iadd(e, one);
+                    (s, self.b.ins().select(exclusive, e, inclusive_end))
+                } else {
+                    let s = self.lower_expr(start)?;
+                    let e = self.lower_expr(end)?;
+                    let one = self.b.ins().iconst(types::I64, 1);
+                    (s, self.b.ins().iadd(e, one))
+                };
                 let line_const = self.b.ins().iconst(types::I32, *line as i64);
                 let host_ref = self
                     .module
@@ -13014,6 +13053,27 @@ impl LowerCtx<'_, '_> {
                 }
             }
             TBuiltinOp::Contains => {
+                if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) {
+                    let start =
+                        self.lower_record_field(recv_val, "Range", "start", &Type::Int)?;
+                    let end = self.lower_record_field(recv_val, "Range", "end", &Type::Int)?;
+                    let exclusive =
+                        self.lower_record_field(recv_val, "Range", "exclusive", &Type::Bool)?;
+                    let needle = self.lower_expr(&args[0])?;
+
+                    let above_start =
+                        self.b.ins().icmp(IntCC::SignedGreaterThanOrEqual, needle, start);
+                    let below_end = self.b.ins().icmp(IntCC::SignedLessThan, needle, end);
+                    let through_end =
+                        self.b.ins().icmp(IntCC::SignedLessThanOrEqual, needle, end);
+                    let exclusive_inside = self.b.ins().band(above_start, below_end);
+                    let inclusive_inside = self.b.ins().band(above_start, through_end);
+                    return Ok(self.b.ins().select(
+                        exclusive,
+                        exclusive_inside,
+                        inclusive_inside,
+                    ));
+                }
                 // Set.has(x) / SortedSet.has — Int elems.
                 if matches!(&recv.ty, Type::Apply { name, .. } if name == "Set") {
                     let needle = self.lower_expr(&args[0])?;
@@ -19396,6 +19456,7 @@ impl LowerCtx<'_, '_> {
 
 fn core_struct_field_index(type_name: &str, field: &str) -> Option<usize> {
     let fields: &[&str] = match type_name {
+        "Range" => &["start", "end", "exclusive"],
         "DirEntry" => &["name", "path", "is_dir"],
         "Stat" => &[
             "size",

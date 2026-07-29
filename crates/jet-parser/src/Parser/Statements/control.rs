@@ -95,7 +95,26 @@ impl<'a> Parser<'a> {
                 }
                 self.expect(TokKind::Semi, "after the loop source binding")?;
                 let first = self.expr_no_struct_lit()?;
-                let kind = if matches!(self.peek().kind, TokKind::DotDot | TokKind::DotDotLt) {
+                let kind = if let Expr::Range {
+                    start,
+                    end,
+                    exclusive,
+                    ..
+                } = &first
+                {
+                    let step = if matches!(self.peek().kind, TokKind::Semi) {
+                        self.bump();
+                        Some(self.expr_no_struct_lit()?)
+                    } else {
+                        None
+                    };
+                    ForKind::Range {
+                        start: (**start).clone(),
+                        end: (**end).clone(),
+                        step,
+                        exclusive: *exclusive,
+                    }
+                } else if matches!(self.peek().kind, TokKind::DotDot | TokKind::DotDotLt) {
                     let exclusive = matches!(self.peek().kind, TokKind::DotDotLt);
                     self.bump();
                     let end = self.expr_no_struct_lit()?;
@@ -1149,7 +1168,26 @@ impl<'a> Parser<'a> {
             }
             self.expect(TokKind::Semi, "after the loop source binding")?;
             let first = self.expr_no_struct_lit()?;
-            let kind = if matches!(self.peek().kind, TokKind::DotDot | TokKind::DotDotLt) {
+            let kind = if let Expr::Range {
+                start,
+                end,
+                exclusive,
+                ..
+            } = &first
+            {
+                let step = if matches!(self.peek().kind, TokKind::Semi) {
+                    self.bump();
+                    Some(self.expr_no_struct_lit()?)
+                } else {
+                    None
+                };
+                ForKind::Range {
+                    start: (**start).clone(),
+                    end: (**end).clone(),
+                    step,
+                    exclusive: *exclusive,
+                }
+            } else if matches!(self.peek().kind, TokKind::DotDot | TokKind::DotDotLt) {
                 // D-RANGE-EXCL1=C: `..` inclusive (S22); `..<` half-open.
                 let exclusive = matches!(self.peek().kind, TokKind::DotDotLt);
                 self.bump();
@@ -1520,7 +1558,20 @@ impl<'a> Parser<'a> {
                 }
                 self.expect(TokKind::Semi, "after the loop binding")?;
                 let first = self.expr_no_struct_lit()?;
-                let kind = if matches!(self.peek().kind, TokKind::DotDot | TokKind::DotDotLt) {
+                let kind = if let Expr::Range {
+                    start,
+                    end,
+                    exclusive,
+                    ..
+                } = &first
+                {
+                    ForKind::Range {
+                        start: (**start).clone(),
+                        end: (**end).clone(),
+                        step: None,
+                        exclusive: *exclusive,
+                    }
+                } else if matches!(self.peek().kind, TokKind::DotDot | TokKind::DotDotLt) {
                     let exclusive = matches!(self.peek().kind, TokKind::DotDotLt);
                     self.bump();
                     let end = self.expr_no_struct_lit()?;

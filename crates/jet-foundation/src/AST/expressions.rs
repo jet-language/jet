@@ -330,6 +330,14 @@ pub enum Expr {
         end: Box<Expr>,
         span: Span,
     },
+    /// D-RANGE-VALUE1=A: one nominal `Range` value over `Int`.
+    /// `..` is inclusive; `..<` carries a half-open end in the same value.
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
+        exclusive: bool,
+        span: Span,
+    },
     Ident(String, Span),
     Call(Call),
     Unary(UnOp, Box<Expr>, Span),
@@ -579,6 +587,7 @@ impl Expr {
             | Expr::MapLit(_, s)
             | Expr::Index { span: s, .. }
             | Expr::Slice { span: s, .. }
+            | Expr::Range { span: s, .. }
             | Expr::Ident(_, s)
             | Expr::Unary(_, _, s)
             | Expr::Binary(_, _, _, s)

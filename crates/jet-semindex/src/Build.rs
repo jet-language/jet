@@ -2008,6 +2008,10 @@ fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
             structural_slot(ctx, "start", StructuralSlotKind::Scalar, |ctx| collect_expr(start, mp, ctx));
             structural_slot(ctx, "end", StructuralSlotKind::Scalar, |ctx| collect_expr(end, mp, ctx));
         }
+        AST::Expr::Range { start, end, .. } => {
+            structural_slot(ctx, "start", StructuralSlotKind::Scalar, |ctx| collect_expr(start, mp, ctx));
+            structural_slot(ctx, "end", StructuralSlotKind::Scalar, |ctx| collect_expr(end, mp, ctx));
+        }
         AST::Expr::Str(parts, _) => {
             structural_slot(ctx, "interpolations", StructuralSlotKind::List, |ctx| {
                 for part in parts {

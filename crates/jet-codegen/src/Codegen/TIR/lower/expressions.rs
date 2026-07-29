@@ -208,6 +208,7 @@ fn expr_tag(e: &Expr) -> &'static str {
         Expr::MapLit(..) => "MapLit",
         Expr::Index { .. } => "Index",
         Expr::Slice { .. } => "Slice",
+        Expr::Range { .. } => "Range",
         Expr::Ident(..) => "Ident",
         Expr::Call(..) => "Call",
         Expr::Unary(..) => "Unary",
@@ -343,6 +344,30 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         Expr::Bool(b, _) => TExpr {
             ty: Type::Bool,
             kind: TExprKind::BoolLit(*b),
+        },
+        Expr::Range {
+            start,
+            end,
+            exclusive,
+            ..
+        } => TExpr {
+            ty: Type::Named(Syntax::TYPE_RANGE.to_string()),
+            kind: TExprKind::StructLit {
+                fields: vec![
+                    ("start".to_string(), lower_expr(start, cx, env), false),
+                    ("end".to_string(), lower_expr(end, cx, env), false),
+                    (
+                        "exclusive".to_string(),
+                        TExpr {
+                            ty: Type::Bool,
+                            kind: TExprKind::BoolLit(*exclusive),
+                        },
+                        false,
+                    ),
+                ],
+                extra: None,
+                as_trait: None,
+            },
         },
         Expr::Char(c, _) => TExpr {
             ty: Type::Char,
@@ -2216,6 +2241,22 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             let base_t = lower_expr(base, cx, env);
             let index_t = lower_expr(index, cx, env);
             let line = crate::Diagnostics::span_line_col(&cx.src, span.start).0;
+            if matches!(kind, IndexKind::Range) {
+                let zero = || TExpr {
+                    ty: Type::Int,
+                    kind: TExprKind::IntLit(0, None),
+                };
+                return TExpr {
+                    ty: base_t.ty.clone(),
+                    kind: TExprKind::Slice {
+                        base: Box::new(base_t),
+                        start: Box::new(zero()),
+                        end: Box::new(zero()),
+                        range: Some(Box::new(index_t)),
+                        line,
+                    },
+                };
+            }
             // D-SIMD2: `v[i]` lane access on a SIMD lane type → a bounds-checked lane
             // read. The result is the lane scalar; sema resolved `IndexKind::Lane`.
             if let IndexKind::Lane(lane_ty) = kind {
@@ -2337,6 +2378,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     base: Box::new(base_t),
                     start: Box::new(start_t),
                     end: Box::new(end_t),
+                    range: None,
                     line,
                 },
             }

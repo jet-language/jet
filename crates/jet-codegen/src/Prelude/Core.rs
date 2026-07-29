@@ -1540,6 +1540,36 @@ fn jet_slice_vec<T: Clone>(xs: &[T], a: i64, b: i64, file: &str, line: u32) -> V
     }
     xs[a as usize..=b as usize].to_vec()
 }
+fn jet_slice_range<T: Clone>(
+    xs: &[T],
+    range: &JetRange,
+    file: &str,
+    line: u32,
+) -> Vec<T> {
+    let len = xs.len() as i64;
+    let valid = range.start >= 0
+        && range.end >= 0
+        && range.start <= range.end
+        && if range.exclusive { range.end <= len } else { range.end < len };
+    if !valid {
+        jet_panic(
+            file,
+            line,
+            &format!(
+                "can't slice {} items from {} to {} ({})",
+                len,
+                range.start,
+                range.end,
+                if range.exclusive { "exclusive" } else { "inclusive" }
+            ),
+        );
+    }
+    if range.exclusive {
+        xs[range.start as usize..range.end as usize].to_vec()
+    } else {
+        xs[range.start as usize..=range.end as usize].to_vec()
+    }
+}
 // D-DYNARRAY1: `View<T>` — `list.view(a..b)` is the zero-copy sibling of
 // `list[a..b]` (`jet_slice_vec` above): same inclusive bounds, same panic
 // wording, but a borrowed Rust slice instead of a fresh `Vec` — no element

@@ -1260,6 +1260,11 @@ impl Cx {
                 format!("{}JetWebPage", self.root_prefix)
             }
             Type::Named(name)
+                if name == Syntax::TYPE_RANGE && !self.type_names.contains(name) =>
+            {
+                format!("{}JetRange", self.root_prefix)
+            }
+            Type::Named(name)
                 if name == Syntax::TYPE_EFFECT && !self.type_names.contains(name) =>
             {
                 format!("{}jet_std::JetReactiveEffect", self.root_prefix)

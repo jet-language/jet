@@ -120,6 +120,10 @@ fn collect_tuple_shapes_from_expr(expr: &Expr, out: &mut CollectedTypeShapes) {
             collect_tuple_shapes_from_expr(start, out);
             collect_tuple_shapes_from_expr(end, out);
         }
+        Expr::Range { start, end, .. } => {
+            collect_tuple_shapes_from_expr(start, out);
+            collect_tuple_shapes_from_expr(end, out);
+        }
         Expr::Ident(_, _)
         | Expr::Int(_, _, _, _)
         | Expr::Float(_, _, _)
