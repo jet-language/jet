@@ -847,13 +847,27 @@ fn eval_expr_hook(
     let mut cx = empty_cx();
     seed_fragment_distinct_types(&mut cx, req.distinct_ranges, req.distinct_bases);
     seed_fragment_funcs(&mut cx, req.funcs);
+    cx.struct_fields = normalize_struct_field_types(req.structs);
+    cx.type_names.extend(req.structs.keys().cloned());
     cx.core_imports = req.core_imports.clone();
     let lowered: Vec<TFunc> = req
         .funcs
-        .values()
-        .filter_map(|f| {
+        .iter()
+        .filter_map(|(name, f)| {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                crate::Codegen::TIR::with_eval_fragment(|| TIR::lower_func(f, &cx))
+                crate::Codegen::TIR::with_eval_fragment(|| {
+                    let mut lowered = match name.rsplit_once("::") {
+                        Some((owner, "encode")) => {
+                            TIR::lower_trait_method(f, owner, &cx, crate::Generics::ENCODE)
+                        }
+                        Some((owner, "decode")) => {
+                            TIR::lower_trait_method(f, owner, &cx, crate::Generics::DECODE)
+                        }
+                        _ => TIR::lower_func(f, &cx),
+                    };
+                    lowered.name = name.clone();
+                    lowered
+                })
             }))
             .ok()
         })

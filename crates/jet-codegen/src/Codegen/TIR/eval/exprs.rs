@@ -371,14 +371,9 @@ impl<'a> EvalCtx<'a> {
                             (0..=(1_i128 << u32::from(*bits)) - 1).contains(&i128::from(*value))
                         };
                         if !in_range {
-                            let found = if !*signed && *bits == 8 {
-                                "Int"
-                            } else {
-                                "out-of-range Int"
-                            };
                             Err(decode_error(
                                 "",
-                                format!("expected {}, found {found}", ty.name()),
+                                format!("expected {}, found out-of-range Int", ty.name()),
                             ))
                         } else {
                             Ok(CtValue::Int(*value))

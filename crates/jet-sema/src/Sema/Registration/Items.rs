@@ -148,13 +148,35 @@ pub(crate) fn eval_comptime_items(
     }
     let mut results: Vec<(String, crate::Comptime::CtValue)> = Vec::new();
     {
+        // Comptime runs before the production serde expansion pass. Expand a
+        // clone so the canonical TIR evaluator can call the same generated
+        // Encode/Decode bodies without mutating or duplicating module items.
+        let mut eval_items = items.to_vec();
+        let mut ignored_early_serde_diags = Vec::new();
+        super::Serde::expand_builtin_serde_items(
+            &mut eval_items,
+            &mut ignored_early_serde_diags,
+        );
         let mut funcs: HashMap<String, &Func> = HashMap::new();
         let mut structs = HashMap::new();
         let mut externs: HashSet<String> = HashSet::new();
-        for item in items.iter() {
+        for item in &eval_items {
             match item {
                 Item::Func(f) => {
                     funcs.insert(f.name.clone(), f);
+                }
+                Item::Impl(implementation)
+                    if matches!(
+                        implementation.trait_name.as_deref(),
+                        Some(crate::Generics::ENCODE | crate::Generics::DECODE)
+                    ) =>
+                {
+                    for method in &implementation.methods {
+                        funcs.insert(
+                            format!("{}::{}", implementation.type_name, method.name),
+                            method,
+                        );
+                    }
                 }
                 Item::Struct(s) => {
                     structs.insert(s.name.clone(), s);

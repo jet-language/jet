@@ -713,7 +713,7 @@ fn run() {
         matches!(
             failed_change,
             jet::AST::CtValue::Str(ref value)
-                if value == "score:expected Int, found text \"bad\""
+                if value == "$score:expected Int, found text \"bad\""
         ),
         "failed migration change lost its keyed decode error: {failed_change:?}"
     );
@@ -727,7 +727,7 @@ fn run() {
     assert_eq!(aot.exit, 0, "migration corpus AOT failed: {}", aot.stderr);
     assert_eq!(
         aot.stdout,
-        "Ada|95|localhost\nscore:expected Int, found text \"bad\"\n"
+        "Ada|95|localhost\n$score:expected Int, found text \"bad\"\n"
     );
     let (backend, dev) = run_default_dev(path.to_str().unwrap());
     assert_eq!(backend, DevBackend::DeoptInterp);
@@ -898,7 +898,7 @@ fn run() {
         &mut direct_sink,
     )
     .expect("primitive boundaries must execute in the TIR evaluator");
-    let expected = "-8|4000000000|1.5|1,2|222,173|7|7|true|true|true|true|true|expected I8, found out-of-range Int|expected U8, found Int|expected a fixed list of length 2, found 1";
+    let expected = "-8|4000000000|1.5|1,2|222,173|7|7|true|true|true|true|true|expected I8, found out-of-range Int|expected U8, found out-of-range Int|expected a fixed list of length 2, found 1";
     assert!(
         matches!(direct, jet::AST::CtValue::Str(ref value) if value == expected),
         "direct primitive result diverged: {direct:?}"
