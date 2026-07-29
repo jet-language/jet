@@ -1388,6 +1388,33 @@ impl<'a> Checker<'a> {
                     ));
                 }
             }
+            // D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: only a
+            // terminal-backed child carries a session. The optional field must
+            // be unwrapped before the real TerminalSession method dispatch.
+            if method == "resize"
+                && matches!(
+                    &recv_ty,
+                    Type::Option(inner)
+                        if matches!(
+                            inner.as_ref(),
+                            Type::Named(name) if name == Syntax::TYPE_TERMINAL_SESSION
+                        )
+                )
+            {
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                self.diags.push(Diagnostic::error(
+                    "E0311",
+                    "`.resize()` needs `TerminalSession`, not `TerminalSession?`".to_string(),
+                    "a child has a terminal session only when a terminal-backed launch succeeds"
+                        .to_string(),
+                    "unwrap the optional handle first, then call `session.resize(size)`"
+                        .to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
             if matches!(&recv_ty, Type::Apply { name, .. } if name == crate::Syntax::TYPE_EVENT)
                 && matches!(method, "emit_async" | "queued_count")
             {

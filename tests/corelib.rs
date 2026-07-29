@@ -6015,7 +6015,10 @@ fn run() {
     }
     child :: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
     if child.terminal == {
-        .Val(_) -> { print("plain child unexpectedly has terminal") }
+        .Val(session) -> {
+            session.resize(TerminalSize.{ cols: 80, rows: 24 }) ?? panic("resize failed")
+            print("plain child unexpectedly has terminal")
+        }
         .None -> { print("plain child has no terminal") }
     }
     waited :: child.wait() ?? panic("wait failed")
@@ -6077,7 +6080,12 @@ fn run() {
     assert!(
         plain_child_terminal
             .iter()
-            .any(|diag| diag.code == "E0311" && diag.what.contains("resize")),
+            .any(|diag| {
+                diag.code == "E0311"
+                    && diag.what
+                        == "`.resize()` needs `TerminalSession`, not `TerminalSession?`"
+                    && diag.fix.contains("session.resize(size)")
+            }),
         "{plain_child_terminal:?}"
     );
 }

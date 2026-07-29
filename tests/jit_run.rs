@@ -134,7 +134,10 @@ fn run() {
     }
     child :: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
     if child.terminal == {
-        .Val(_) -> { print("terminal present") }
+        .Val(session) -> {
+            session.resize(TerminalSize.{ cols: 80, rows: 24 }) ?? panic("resize failed")
+            print("terminal present")
+        }
         .None -> { print("terminal absent") }
     }
     waited :: child.wait() ?? panic("wait failed")
