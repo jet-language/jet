@@ -1915,7 +1915,7 @@ struct ServeArgs {
 }
 #CLI
 struct ImportArgs {
-    #[Doc("file to import")] file: String
+    #Doc("file to import") file: String
 }
 enum Cmd { Serve(ServeArgs) Import(ImportArgs) }
 fn run(cmd: Cmd) {}
