@@ -3058,9 +3058,45 @@ fn range_values_run_in_resident_jit_without_fallback() {
     if skip_if_cranelift_host_unsupported() {
         return;
     }
+    let unboxed = r#"
+fn identity(band: ^Range) => Range {
+    return band
+}
+fn run() {
+    band := 2..<5
+    copied :: identity(band)
+    print(copied)
+    print(band.start)
+    print(copied.contains(4))
+    print(copied == band)
+    band = 7..9
+    print(band)
+}
+"#;
+    jet_jit::reset_struct_new_count_for_test();
+    let unboxed_run = run_cranelift_without_fallback(unboxed, "range_unboxed");
+    assert_eq!(
+        unboxed_run.stdout,
+        "Range { start: 2, end: 5, exclusive: true }\n2\ntrue\ntrue\nRange { start: 7, end: 9, exclusive: false }\n"
+    );
+    assert_eq!(
+        jet_jit::struct_new_count_for_test(),
+        0,
+        "Range construct/copy/pass/return/field/contains/show/equality must not call struct_new"
+    );
+
     let src = r#"
+fn identity(band: ^Range) => Range {
+    return band
+}
 fn run() {
     band :: 2..<5
+    copied :: identity(band)
+    print(copied == band)
+    bands :: [1..3, 8..<10]
+    print(bands[0])
+    print("{bands[1]#Debug}")
+    print(bands[0].contains(3))
     print(band)
     print("{band}")
     print("{band#Debug}")
@@ -3094,6 +3130,10 @@ fn run() {
         .unwrap_or_else(|error| panic!("Range resident compilation failed: {error}"));
     let native = run_cranelift_without_fallback(src, "range_values");
     let expected = "\
+true
+Range { start: 1, end: 3, exclusive: false }
+Range { start: 8, end: 10, exclusive: true }
+true
 Range { start: 2, end: 5, exclusive: true }
 Range { start: 2, end: 5, exclusive: true }
 Range { start: 2, end: 5, exclusive: true }

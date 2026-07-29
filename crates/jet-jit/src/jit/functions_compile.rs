@@ -125,6 +125,7 @@ fn lower_spawn_function(
             } else {
                 None
             },
+            ret_range: false,
             shield_depth: 0,
             deadline_depth: 0,
             switch_subject: None,
@@ -325,6 +326,7 @@ pub(crate) fn lower_callable_lambda(
             next_var: 0,
             method_struct: None,
             ret_clif,
+            ret_range: false,
             shield_depth: 0,
             deadline_depth: 0,
             switch_subject: None,
@@ -458,6 +460,9 @@ fn lower_function(
             next_var: 0,
             method_struct,
             ret_clif: tir.ret.as_ref().and_then(|ret| meta.clif_ty(ret)),
+            ret_range: tir.ret.as_ref().is_some_and(|ret| {
+                matches!(ret, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE)
+            }),
             shield_depth: 0,
             deadline_depth: 0,
             switch_subject: None,
@@ -478,7 +483,17 @@ fn lower_function(
             }
             param_idx = 1;
         }
-        for (i, (name, ty, convention)) in tir.params.iter().enumerate() {
+        for (name, ty, convention) in &tir.params {
+            if matches!(ty, Type::Named(range) if range == jet_foundation::Syntax::TYPE_RANGE) {
+                let values = [
+                    param_vals[param_idx],
+                    param_vals[param_idx + 1],
+                    param_vals[param_idx + 2],
+                ];
+                lctx.bind_range_local(name, values);
+                param_idx += 3;
+                continue;
+            }
             let scalar_write = matches!(
                 convention,
                 jet_foundation::AST::AccessConvention::Write
@@ -497,7 +512,8 @@ fn lower_function(
                 meta.clif_ty(ty).ok_or("jit param clif type")?
             };
             let var = lctx.fresh_var(clif);
-            lctx.b.def_var(var, param_vals[param_idx + i]);
+            lctx.b.def_var(var, param_vals[param_idx]);
+            param_idx += 1;
             lctx.vars.insert(name.clone(), var);
             let stored_ty = if scalar_write {
                 Type::Apply {
@@ -526,7 +542,9 @@ fn lower_function(
                     let call = lctx.b.ins().call(host_ref, &[tag, unit]);
                     let result = lctx.b.inst_results(call)[0];
                     lctx.b.ins().return_(&[result]);
-                } else if clif_ty(ret).is_some() {
+                } else if clif_ty(ret).is_some()
+                    || matches!(ret, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE)
+                {
                     return Err("jit function missing return".to_string());
                 } else {
                     lctx.b.ins().return_(&[]);
@@ -621,6 +639,7 @@ fn lower_generator_body(
             next_var: 0,
             method_struct: None,
             ret_clif: Some(types::I64),
+            ret_range: false,
             shield_depth: 0,
             deadline_depth: 0,
             switch_subject: None,

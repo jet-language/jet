@@ -1148,9 +1148,12 @@ pub(crate) fn expr_root_ident(expr: &Expr) -> Option<&str> {
     }
 }
 
-/// Types the generated Rust copies implicitly (no move on read).
+/// Types every execution tier copies implicitly (no move on read).
 pub(crate) fn type_is_copy(ty: &Type) -> bool {
-    ty.is_scalar() || matches!(ty, Type::Char) || is_u8_ty(ty)
+    ty.is_scalar()
+        || matches!(ty, Type::Char)
+        || is_u8_ty(ty)
+        || matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_RANGE)
 }
 
 pub(crate) fn is_task_type(ty: &Type) -> bool {

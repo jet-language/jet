@@ -9,7 +9,8 @@ use crate::Sema::CheckerCoreLib::{
 };
 use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
 use crate::Sema::Diagnostics::{
-    edit_distance, is_cloneable, is_printable, type_fix_hint, typed_text_mismatch,
+    edit_distance, is_cloneable, is_printable, type_fix_hint, type_is_copy,
+    typed_text_mismatch,
 };
 use crate::Sema::Effects::builtin_effect;
 use crate::Sema::FFI::e3211;
@@ -1213,7 +1214,9 @@ impl<'a> Checker<'a> {
                 match (param_conv, arg.convention) {
                     (AccessConvention::Move, AccessConvention::Read) => {
                         if let Expr::Ident(name, span) = &arg.expr {
-                            if !self.is_resource_type(param_ty)
+                            if type_is_copy(param_ty) {
+                                // Copy values cross an owning parameter by bits.
+                            } else if !self.is_resource_type(param_ty)
                                 && is_cloneable(param_ty, self.registry)
                             {
                                 arg.flags.implicit_clone = true;
@@ -1254,7 +1257,7 @@ impl<'a> Checker<'a> {
                     (AccessConvention::Move, AccessConvention::Move) => {
                         // The value is given away for real.
                         if let Expr::Ident(name, span) = &arg.expr {
-                            if !param_ty.is_scalar() {
+                            if !type_is_copy(param_ty) {
                                 self.mark_moved(name.clone(), *span);
                             }
                         }

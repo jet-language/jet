@@ -61,6 +61,12 @@ pub enum JetVal {
         end: usize,
     },
     List(Vec<JetVal>),
+    /// D-RANGE-VALUE1: inline list element, not an arena record handle.
+    Range {
+        start: i64,
+        end: i64,
+        exclusive: bool,
+    },
     /// String-keyed map; values are packed i64 (ints or heap handles).
     Map(BTreeMap<String, i64>),
     Record(Vec<JetVal>),
@@ -250,6 +256,26 @@ impl JetArena {
         }
     }
 
+    pub fn list_push_range(
+        &mut self,
+        list: i64,
+        start: i64,
+        end: i64,
+        exclusive: bool,
+    ) -> Option<()> {
+        match self.values.get_mut(list as usize) {
+            Some(JetVal::List(values)) => {
+                values.push(JetVal::Range {
+                    start,
+                    end,
+                    exclusive,
+                });
+                Some(())
+            }
+            _ => None,
+        }
+    }
+
     pub fn list_len(&self, list: i64) -> Option<i64> {
         match self.values.get(list as usize) {
             Some(JetVal::List(values)) => Some(values.len() as i64),
@@ -277,6 +303,23 @@ impl JetArena {
         match self.values.get(list as usize) {
             Some(JetVal::List(values)) => match values.get(index as usize) {
                 Some(JetVal::Float(value)) => Some(*value),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    pub fn list_get_range(&self, list: i64, index: i64) -> Option<(i64, i64, bool)> {
+        if index < 0 {
+            return None;
+        }
+        match self.values.get(list as usize) {
+            Some(JetVal::List(values)) => match values.get(index as usize) {
+                Some(JetVal::Range {
+                    start,
+                    end,
+                    exclusive,
+                }) => Some((*start, *end, *exclusive)),
                 _ => None,
             },
             _ => None,
@@ -614,6 +657,21 @@ mod tests {
 
         let slice = arena.list_slice(list, 0, 1).unwrap();
         assert_eq!(arena.list_get_float(slice, 0), Some(1.5));
+    }
+
+    #[test]
+    fn arena_stores_ranges_inline_in_lists() {
+        let mut arena = JetArena::default();
+        let list = arena.alloc_empty_list();
+
+        arena.list_push_range(list, 2, 5, true).unwrap();
+
+        assert_eq!(arena.list_get_range(list, 0), Some((2, 5, true)));
+        assert_eq!(
+            arena.values.len(),
+            1,
+            "a Range list element must not allocate an arena record"
+        );
     }
 
     #[test]

@@ -4,6 +4,7 @@ use cranelift_module::{FuncId, Linkage, Module};
 use jet_codegen::scheduler::{
     JetSchedulerChannel, JetSchedulerJoin, JetSchedulerSender, JetTaskControl,
 };
+use std::cell::Cell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use super::resident::resident_teardown;
@@ -11,6 +12,20 @@ use super::{
     Archive, Collections, Compress, Concurrency, CoreHost, Crypto, Encoding, Fmt, JitResultValue,
     Memory, Net, Numeric, Parse, Process, Random, Sketch, Solver, Text, Time, TRY_COMPILE_PANIC_HOOK_LOCK,
 };
+
+thread_local! {
+    static STRUCT_NEW_COUNT: Cell<usize> = const { Cell::new(0) };
+}
+
+#[doc(hidden)]
+pub fn reset_struct_new_count_for_test() {
+    STRUCT_NEW_COUNT.with(|count| count.set(0));
+}
+
+#[doc(hidden)]
+pub fn struct_new_count_for_test() -> usize {
+    STRUCT_NEW_COUNT.with(Cell::get)
+}
 
 pub(crate) fn catch_jit_panic<R>(context: &str, f: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
     let result = {
@@ -1007,6 +1022,7 @@ extern "C" fn jet_jit_numeric_bit_count(value: i64, op: i64, width: i64) -> i64 
 }
 
 extern "C" fn jet_jit_struct_new(n: i64) -> i64 {
+    STRUCT_NEW_COUNT.with(|count| count.set(count.get() + 1));
     Concurrency::with_runtime_mut(|rt| rt.heap.alloc_record(n as usize))
 }
 
