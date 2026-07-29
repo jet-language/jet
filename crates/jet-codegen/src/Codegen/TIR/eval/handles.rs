@@ -139,6 +139,116 @@ fn datatree_int_result(recv: &CtValue) -> CtValue {
     }
 }
 
+fn decode_error(path: String, reason: String) -> CtValue {
+    CtValue::Struct {
+        type_name: "DecodeError".to_string(),
+        fields: vec![
+            ("path".to_string(), CtValue::Str(path)),
+            ("reason".to_string(), CtValue::Str(reason)),
+        ],
+    }
+}
+
+fn datatree_payload<'a>(recv: &'a CtValue, variant: &str) -> Option<&'a CtValue> {
+    match recv {
+        CtValue::Enum {
+            type_name,
+            variant: actual,
+            args,
+        } if type_name == "JSON" && actual == variant => args.first().map(|(_, value)| value),
+        _ => None,
+    }
+}
+
+fn datatree_field_result(recv: &CtValue, args: &[CtValue]) -> CtValue {
+    let name = match args.first() {
+        Some(CtValue::Str(name)) => name,
+        _ => {
+            return CtValue::ResErr(Box::new(decode_error(
+                String::new(),
+                "field name must be Text".to_string(),
+            )));
+        }
+    };
+    let result = match datatree_payload(recv, "Object") {
+        Some(CtValue::Map(fields)) => fields
+            .get(&crate::AST::CtKey::Str(name.clone()))
+            .cloned()
+            .ok_or_else(|| {
+                decode_error(
+                    name.clone(),
+                    format!("field `{name}` not found"),
+                )
+            }),
+        _ => Err(decode_error(
+            name.clone(),
+            format!(
+                "expected object, got {}",
+                crate::Comptime::render_datatree_for_tir(recv)
+            ),
+        )),
+    };
+    match result {
+        Ok(value) => CtValue::ResOk(Box::new(value)),
+        Err(error) => CtValue::ResErr(Box::new(error)),
+    }
+}
+
+fn datatree_at_result(recv: &CtValue, args: &[CtValue]) -> CtValue {
+    let index = match args.first() {
+        Some(CtValue::Int(index)) => *index,
+        _ => -1,
+    };
+    let result = match datatree_payload(recv, "Array") {
+        Some(CtValue::List(items)) => {
+            let resolved = if index < 0 {
+                items.len().wrapping_sub(index.unsigned_abs() as usize)
+            } else {
+                index as usize
+            };
+            items.get(resolved).cloned().ok_or_else(|| {
+                decode_error(
+                    format!("[{index}]"),
+                    format!("index {index} out of bounds (len {})", items.len()),
+                )
+            })
+        }
+        _ => Err(decode_error(
+            format!("[{index}]"),
+            format!(
+                "expected array, got {}",
+                crate::Comptime::render_datatree_for_tir(recv)
+            ),
+        )),
+    };
+    match result {
+        Ok(value) => CtValue::ResOk(Box::new(value)),
+        Err(error) => CtValue::ResErr(Box::new(error)),
+    }
+}
+
+fn datatree_scalar_result(recv: &CtValue, variant: &str, name: &str) -> CtValue {
+    let value = match (variant, datatree_payload(recv, variant)) {
+        ("Float", Some(value)) => Some(value.clone()),
+        ("Float", None) => datatree_payload(recv, "Int").and_then(|value| match value {
+            CtValue::Int(value) => Some(CtValue::Float(crate::AST::CtFloat::f64(*value as f64))),
+            _ => None,
+        }),
+        (_, Some(value)) => Some(value.clone()),
+        _ => None,
+    };
+    match value {
+        Some(value) => CtValue::ResOk(Box::new(value)),
+        None => CtValue::ResErr(Box::new(decode_error(
+            String::new(),
+            format!(
+                "expected {name}, got {}",
+                crate::Comptime::render_datatree_for_tir(recv)
+            ),
+        ))),
+    }
+}
+
 pub(super) fn eval_handle(
     op: &THandleOp,
     recv: &mut CtValue,
@@ -515,12 +625,12 @@ pub(super) fn eval_handle(
         THandleOp::RegexMethod { method, .. } => apply_method(recv, method, args.to_vec(), span),
         THandleOp::HTTPClientMethod { .. } => Err(unsupported("handle `HTTPClientMethod`", span)),
         THandleOp::HTTPServerMethod { .. } => Err(unsupported("handle `HTTPServerMethod`", span)),
-        THandleOp::DataTreeField => Err(unsupported("handle `DataTreeField`", span)),
-        THandleOp::DataTreeAt => Err(unsupported("handle `DataTreeAt`", span)),
+        THandleOp::DataTreeField => Ok(datatree_field_result(recv, args)),
+        THandleOp::DataTreeAt => Ok(datatree_at_result(recv, args)),
         THandleOp::DataTreeInt | THandleOp::JSONInt => Ok(datatree_int_result(recv)),
-        THandleOp::DataTreeText => Err(unsupported("handle `DataTreeText`", span)),
-        THandleOp::DataTreeBool => Err(unsupported("handle `DataTreeBool`", span)),
-        THandleOp::DataTreeFloat => Err(unsupported("handle `DataTreeFloat`", span)),
+        THandleOp::DataTreeText => Ok(datatree_scalar_result(recv, "Text", "text")),
+        THandleOp::DataTreeBool => Ok(datatree_scalar_result(recv, "Bool", "bool")),
+        THandleOp::DataTreeFloat => Ok(datatree_scalar_result(recv, "Float", "float")),
         THandleOp::DataTreeDecode(_) => Err(unsupported("handle `DataTreeDecode`", span)),
         THandleOp::SerdeEncode => Err(unsupported("handle `SerdeEncode`", span)),
         THandleOp::JSONField => Err(unsupported("handle `JSONField`", span)),

@@ -455,6 +455,128 @@ fn run() {
 }
 
 #[test]
+fn cbor_codable_bodies_match_aot_resident_and_forced_deopt() {
+    on_encoding_stack(cbor_codable_bodies_match_aot_resident_and_forced_deopt_inner);
+}
+
+fn cbor_codable_bodies_match_aot_resident_and_forced_deopt_inner() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping forced-deopt Codable parity (need rustc)");
+        return;
+    }
+    let source = r#"
+use core.encoding.cbor as cbor
+use core.encoding.hex as hex
+use core.text as text
+
+struct Token { raw: String }
+
+impl Token.Encode {
+    fn encode(self) => DataTree = DataTree.Text("wire")
+}
+
+impl Token.Decode {
+    fn decode(tree: DataTree) => Token ? DecodeError {
+        value :: tree.text()?
+        if value != "wire" {
+            return Err(DecodeError.{ path: "", reason: "bad token" })
+        }
+        return Ok(Token.{ raw: "decoded" })
+    }
+}
+
+#Codable
+enum Event {
+    Idle
+    Count(Int)
+}
+
+#[Codable, RenameAll(camel)]
+struct Packet {
+    display_name: String
+    token: Token
+    event: Event
+    bytes: [U8]
+    numbers: [Int]
+    labels: [String: Int]
+    maybe: Int?
+    score: Float
+    letter: Char
+}
+
+fn resident() => String {
+    value := Packet.{
+        display_name: "Ada",
+        token: Token.{ raw: "ignored" },
+        event: Event.Count(7),
+        bytes: [222, 173],
+        numbers: [-2, 3],
+        labels: [String: Int].{ "x": 6 },
+        maybe: Val(8),
+        score: 1.5,
+        letter: 'Z'
+    }
+    encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
+    decoded := cbor.decode<Packet>(~encoded) ?? panic("decode")
+    roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
+    return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}"
+}
+
+fn forced_deopt() => String {
+    folded :: text.casefold("Straße")
+    if folded != "strasse" { panic("casefold") }
+    value := Packet.{
+        display_name: "Ada",
+        token: Token.{ raw: "ignored" },
+        event: Event.Count(7),
+        bytes: [222, 173],
+        numbers: [-2, 3],
+        labels: [String: Int].{ "x": 6 },
+        maybe: Val(8),
+        score: 1.5,
+        letter: 'Z'
+    }
+    encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
+    decoded := cbor.decode<Packet>(~encoded) ?? panic("decode")
+    roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
+    return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}"
+}
+
+fn run() {
+    print(resident())
+    print(forced_deopt())
+}
+"#;
+    let scratch = Scratch::new("cbor_codable_deopt");
+    let path = scratch.write_project("2026", source);
+    let bundle = checked_bundle(path.to_str().unwrap());
+    let plan = plan_bundle_tiers(&bundle);
+    assert!(!plan.whole_interp, "regression needs mixed tiers: {plan:?}");
+    assert!(
+        plan.deopt.iter().any(|(name, _)| name == "forced_deopt"),
+        "regression must force the codec body through named deopt: {plan:?}"
+    );
+    assert!(
+        !plan.deopt.iter().any(|(name, _)| name == "resident"),
+        "resident control must stay on the resident tier: {plan:?}"
+    );
+    let aot = run_aot(&path, scratch.path());
+    assert_eq!(aot.exit, 0, "Codable corpus AOT failed: {}", aot.stderr);
+    let mut lines = aot.stdout.lines();
+    let resident = lines.next().expect("resident output");
+    let deopt = lines.next().expect("deopt output");
+    assert_eq!(resident, deopt, "AOT corpus functions diverged");
+    assert!(resident.ends_with("|decoded"), "hand Decode body did not run: {resident}");
+    assert!(lines.next().is_none(), "unexpected AOT output: {}", aot.stdout);
+    let (backend, dev) = run_default_dev(path.to_str().unwrap());
+    assert_eq!(backend, DevBackend::DeoptInterp);
+    assert_eq!(dev, aot);
+    assert!(jit_executed_for_test(), "resident control must execute JIT");
+    assert!(deopt_invoked_for_test(), "forced-deopt control must execute TIR evaluator");
+    assert!(!fallback_invoked_for_test(), "codec corpus must not fall back");
+}
+
+#[test]
 fn datatree_int_accessor_matches_aot_without_coercion() {
     on_encoding_stack(datatree_int_accessor_matches_aot_without_coercion_inner);
 }
