@@ -802,6 +802,9 @@ printf "Ada\n" | nix develop -c jet run ask.jet
 |----------|---------|--------------|
 | `args()` | `[String]` | Command-line arguments |
 | `input([prompt])` | `String ? IOError` | Read one line from stdin; optional prompt |
+| `confirm(prompt)` | `Bool` | Ask yes or no; show `[y/N]` and use no for a bare Enter |
+| `choose(prompt, items)` | `String ? IOError` | Number the strings and re-prompt until the user makes a valid choice |
+| `input_secret(prompt)` | `String ? IOError` | Read one line without echo; return an error when stdin is not a terminal |
 | `read_all_input()` | `String ? IOError` | Read all of stdin to end-of-file |
 | `eprint(value)` | nothing | Print to stderr (any printable value) |
 | `stdin()` | `StdinHandle` | Buffered stdin handle with `.read_line()` and `.lines()` |
@@ -817,6 +820,8 @@ printf "Ada\n" | nix develop -c jet run ask.jet
 | `progress(text)` | `() ? IOError` | TTY: carriage-return progress update; non-TTY: one plain line |
 
 `print` stays in the core prelude (no `use` needed). Use `io.eprint` for stderr.
+Use `input` for public text and scripts. Use `input_secret` for passwords and
+tokens. It never falls back to an echoed read when stdin is redirected.
 `core.term` still owns `live { ... }` and `term.read_key()` for direct raw-key
 input; it is the shipped raw-mode/key-event bridge under D-TERM1.
 

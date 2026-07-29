@@ -20,6 +20,13 @@ fn result_ok_unit() -> i64 {
     })
 }
 
+fn result_ok_bits(bits: u64) -> i64 {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.results.push(super::JitResultValue { ok: true, bits });
+        rt.results.len() as i64
+    })
+}
+
 fn result_err(msg: &str) -> i64 {
     Concurrency::with_runtime_mut(|rt| {
         let sid = rt.heap.alloc_string(msg.to_string());
@@ -81,6 +88,152 @@ fn style_enabled() -> bool {
             .map(|term| term != "dumb")
             .unwrap_or(true)
         && std::io::stdout().is_terminal()
+}
+
+fn write_prompt(prompt: &str) -> Result<(), String> {
+    print!("{prompt}");
+    std::io::stdout()
+        .flush()
+        .map_err(|error| format!("flush stdout: {error}"))
+}
+
+fn read_line() -> Result<String, String> {
+    let mut line = String::new();
+    std::io::stdin()
+        .read_line(&mut line)
+        .map_err(|error| format!("read stdin: {error}"))?;
+    while line.ends_with('\n') || line.ends_with('\r') {
+        line.pop();
+    }
+    Ok(line)
+}
+
+#[cfg(unix)]
+mod terminal_mode {
+    const TCSANOW: i32 = 0;
+    const ECHO: u32 = 0o0000010;
+    const ICANON: u32 = 0o0000002;
+    const VMIN: usize = 6;
+    const VTIME: usize = 5;
+
+    #[repr(C)]
+    struct Termios {
+        c_iflag: u32,
+        c_oflag: u32,
+        c_cflag: u32,
+        c_lflag: u32,
+        #[cfg(target_os = "linux")]
+        c_line: u8,
+        c_cc: [u8; 32],
+        #[cfg(target_os = "linux")]
+        c_ispeed: u32,
+        #[cfg(target_os = "linux")]
+        c_ospeed: u32,
+        #[cfg(not(target_os = "linux"))]
+        _pad: [u8; 12],
+    }
+
+    unsafe extern "C" {
+        fn tcgetattr(fd: i32, termios: *mut Termios) -> i32;
+        fn tcsetattr(fd: i32, optional_actions: i32, termios: *const Termios) -> i32;
+    }
+
+    std::thread_local! {
+        static SAVED: std::cell::RefCell<Vec<Termios>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    pub fn enter(raw: bool) -> bool {
+        unsafe {
+            let mut mode = std::mem::zeroed::<Termios>();
+            if tcgetattr(0, &mut mode) != 0 {
+                return false;
+            }
+            let saved_mode = std::mem::transmute_copy(&mode);
+            mode.c_lflag &= !ECHO;
+            if raw {
+                mode.c_lflag &= !ICANON;
+                mode.c_cc[VMIN] = 1;
+                mode.c_cc[VTIME] = 0;
+            }
+            if tcsetattr(0, TCSANOW, &mode) != 0 {
+                return false;
+            }
+            SAVED.with(|saved| saved.borrow_mut().push(saved_mode));
+            true
+        }
+    }
+
+    pub fn leave() {
+        unsafe {
+            SAVED.with(|saved| {
+                if let Some(mode) = saved.borrow_mut().pop() {
+                    tcsetattr(0, TCSANOW, &mode);
+                }
+            });
+        }
+    }
+}
+
+#[cfg(windows)]
+mod terminal_mode {
+    unsafe extern "system" {
+        fn GetStdHandle(nStdHandle: u32) -> *mut std::ffi::c_void;
+        fn GetConsoleMode(hConsoleHandle: *mut std::ffi::c_void, lpMode: *mut u32) -> i32;
+        fn SetConsoleMode(hConsoleHandle: *mut std::ffi::c_void, dwMode: u32) -> i32;
+    }
+
+    const STD_INPUT_HANDLE: u32 = 0xFFFFFFF6u32;
+    const ENABLE_ECHO_INPUT: u32 = 0x0004;
+    const ENABLE_LINE_INPUT: u32 = 0x0002;
+
+    std::thread_local! {
+        static SAVED: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    pub fn enter(raw: bool) -> bool {
+        unsafe {
+            let handle = GetStdHandle(STD_INPUT_HANDLE);
+            let mut mode = 0;
+            if GetConsoleMode(handle, &mut mode) == 0 {
+                return false;
+            }
+            let mut next = mode & !ENABLE_ECHO_INPUT;
+            if raw {
+                next &= !ENABLE_LINE_INPUT;
+            }
+            if SetConsoleMode(handle, next) == 0 {
+                return false;
+            }
+            SAVED.with(|saved| saved.borrow_mut().push(mode));
+            true
+        }
+    }
+
+    pub fn leave() {
+        unsafe {
+            let handle = GetStdHandle(STD_INPUT_HANDLE);
+            SAVED.with(|saved| {
+                if let Some(mode) = saved.borrow_mut().pop() {
+                    SetConsoleMode(handle, mode);
+                }
+            });
+        }
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+mod terminal_mode {
+    pub fn enter(_raw: bool) -> bool {
+        false
+    }
+    pub fn leave() {}
+}
+
+struct TerminalModeGuard;
+impl Drop for TerminalModeGuard {
+    fn drop(&mut self) {
+        terminal_mode::leave();
+    }
 }
 
 extern "C" fn jet_jit_io_stdout() -> i64 {
@@ -212,6 +365,76 @@ extern "C" fn jet_jit_io_progress(text: i64) -> i64 {
     result_ok_unit()
 }
 
+extern "C" fn jet_jit_io_confirm(prompt: i64) -> i8 {
+    let prompt = format!("{} [y/N] ", clone_str(prompt));
+    let answer = write_prompt(&prompt)
+        .and_then(|_| read_line())
+        .unwrap_or_default();
+    i8::from(matches!(
+        answer.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
+}
+
+extern "C" fn jet_jit_io_choose(prompt: i64, items: i64) -> i64 {
+    let prompt = clone_str(prompt);
+    let values = Concurrency::with_runtime_mut(|rt| {
+        let len = rt.heap.list_len(items).unwrap_or(0);
+        (0..len)
+            .map(|index| {
+                rt.heap
+                    .list_get_int(items, index)
+                    .and_then(|id| rt.heap.clone_string(id))
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>()
+    });
+    if values.is_empty() {
+        return result_err("choose needs at least one item");
+    }
+    println!("{prompt}");
+    for (index, item) in values.iter().enumerate() {
+        println!("  {}) {item}", index + 1);
+    }
+    loop {
+        let answer = match write_prompt("> ").and_then(|_| read_line()) {
+            Ok(answer) => answer,
+            Err(error) => return result_err(&error),
+        };
+        if let Ok(index) = answer.trim().parse::<usize>() {
+            if let Some(item) = index.checked_sub(1).and_then(|index| values.get(index)) {
+                let id = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(item.clone()));
+                return result_ok_bits(id as u64);
+            }
+        }
+        println!("Enter a number from 1 to {}.", values.len());
+    }
+}
+
+extern "C" fn jet_jit_io_input_secret(prompt: i64) -> i64 {
+    if !std::io::stdin().is_terminal() {
+        return result_err("secret input needs a terminal");
+    }
+    if let Err(error) = write_prompt(&clone_str(prompt)) {
+        return result_err(&error);
+    }
+    if !terminal_mode::enter(false) {
+        println!();
+        return result_err("could not disable terminal echo");
+    }
+    let guard = TerminalModeGuard;
+    let secret = read_line();
+    drop(guard);
+    println!();
+    match secret {
+        Ok(secret) => {
+            let id = Concurrency::with_runtime_mut(|rt| rt.heap.alloc_string(secret));
+            result_ok_bits(id as u64)
+        }
+        Err(error) => result_err(&error),
+    }
+}
+
 /// Materialize stdin lines into a string list (for-in walk).
 extern "C" fn jet_jit_stdin_lines(_h: i64) -> i64 {
     let mut lines = Vec::new();
@@ -299,22 +522,11 @@ extern "C" fn jet_jit_file_writer_flush(handle: i64) -> i64 {
 }
 
 extern "C" fn jet_jit_term_enter() {
-    // Canonical enter restores via leave; under non-TTY tests tcgetattr fails
-    // and AOT is a no-op. Keep pairing via a depth counter only.
-    TERM_DEPTH.with(|d| d.set(d.get().saturating_add(1)));
+    let _ = terminal_mode::enter(true);
 }
 
 extern "C" fn jet_jit_term_leave() {
-    TERM_DEPTH.with(|d| {
-        let n = d.get();
-        if n > 0 {
-            d.set(n - 1);
-        }
-    });
-}
-
-thread_local! {
-    static TERM_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    terminal_mode::leave();
 }
 
 pub(crate) struct IOHostFns {
@@ -336,6 +548,9 @@ pub(crate) struct IOHostFns {
     pub style: FuncId,
     pub style_force: FuncId,
     pub progress: FuncId,
+    pub confirm: FuncId,
+    pub choose: FuncId,
+    pub input_secret: FuncId,
     pub stdin_lines: FuncId,
     pub file_lines: FuncId,
     pub file_writer_write_line: FuncId,
@@ -365,6 +580,12 @@ pub(crate) fn register_io_symbols(builder: &mut JITBuilder) {
     builder.symbol("jet_jit_io_style", jet_jit_io_style as *const u8);
     builder.symbol("jet_jit_io_style_force", jet_jit_io_style_force as *const u8);
     builder.symbol("jet_jit_io_progress", jet_jit_io_progress as *const u8);
+    builder.symbol("jet_jit_io_confirm", jet_jit_io_confirm as *const u8);
+    builder.symbol("jet_jit_io_choose", jet_jit_io_choose as *const u8);
+    builder.symbol(
+        "jet_jit_io_input_secret",
+        jet_jit_io_input_secret as *const u8,
+    );
     builder.symbol("jet_jit_stdin_lines", jet_jit_stdin_lines as *const u8);
     builder.symbol("jet_jit_file_lines", jet_jit_file_lines as *const u8);
     builder.symbol(
@@ -428,6 +649,9 @@ pub(crate) fn declare_io_host_fns(module: &mut JITModule) -> Result<IOHostFns, S
         style: import("jet_jit_io_style", &binary)?,
         style_force: import("jet_jit_io_style_force", &binary)?,
         progress: import("jet_jit_io_progress", &unary)?,
+        confirm: import("jet_jit_io_confirm", &unary_i8)?,
+        choose: import("jet_jit_io_choose", &binary)?,
+        input_secret: import("jet_jit_io_input_secret", &unary)?,
         stdin_lines: import("jet_jit_stdin_lines", &unary)?,
         file_lines: import("jet_jit_file_lines", &unary)?,
         file_writer_write_line: import("jet_jit_file_writer_write_line", &binary)?,

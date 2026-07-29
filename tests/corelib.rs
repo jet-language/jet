@@ -7493,6 +7493,61 @@ fn run() {
 }
 
 #[test]
+fn io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets() {
+    let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
+    if !have_rustc {
+        eprintln!("note: skipping core.io prompt test (need rustc)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_corelib_prompts_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    let source = include_str!("../examples/features/io/terminal_parity.jet");
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "terminal_parity",
+        source,
+        &[],
+        Some("\nnot-a-number\n3\n2\n"),
+    );
+    assert_eq!(code, 0, "prompt fixture failed: {stderr}");
+    assert_eq!(
+        stdout,
+        include_str!("../examples/features/expected/io/terminal_parity.out")
+    );
+    assert_eq!(
+        stderr,
+        include_str!("../examples/features/expected/io/terminal_parity.stderr.out")
+    );
+
+    #[cfg(unix)]
+    {
+        let shell = r#"
+{
+  sleep 0.2
+  printf '\r'
+  sleep 0.1
+  printf 'bad\r3\r2\r'
+  sleep 0.2
+  printf 'swordfish\r'
+} | timeout 8s script -qec '"$JET_PROMPT_BIN"' /dev/null
+"#;
+        let output = Command::new("sh")
+            .args(["-c", shell])
+            .env("JET_PROMPT_BIN", dir.join("terminal_parity"))
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run prompt fixture under PTY");
+        let shown = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "PTY prompt failed:\n{shown}");
+        assert!(shown.contains("secret length: 9"), "{shown}");
+        assert!(!shown.contains("swordfish"), "secret was echoed:\n{shown}");
+    }
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn random_and_time_output_pins_with_seed_and_epoch() {
     let have_rustc = Command::new("rustc").arg("--version").output().is_ok();
     if !have_rustc {

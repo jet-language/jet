@@ -272,6 +272,87 @@ fn jet_std_io_input(prompt: Option<&String>) -> Result<String, jet_std::IOError>
     }
     Ok(s)
 }
+
+// D-IO-PROMPT1=A: safe defaults and one terminal-owned secret-input path.
+fn jet_std_io_confirm(prompt: &String) -> bool {
+    let shown = format!("{prompt} [y/N] ");
+    matches!(
+        jet_std_io_input(Some(&shown))
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "y" | "yes"
+    )
+}
+
+fn jet_std_io_choose(prompt: &String, items: &Vec<String>) -> Result<String, jet_std::IOError> {
+    if items.is_empty() {
+        return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+            jet_std::IOOperation::Read,
+            Some("stdin".to_string()),
+            None,
+            Some("choose needs at least one item".to_string()),
+        )));
+    }
+    println!("{prompt}");
+    for (index, item) in items.iter().enumerate() {
+        println!("  {}) {item}", index + 1);
+    }
+    loop {
+        let answer = jet_std_io_input(Some(&"> ".to_string()))?;
+        if let Ok(index) = answer.trim().parse::<usize>() {
+            if let Some(item) = index.checked_sub(1).and_then(|index| items.get(index)) {
+                return Ok(item.clone());
+            }
+        }
+        println!("Enter a number from 1 to {}.", items.len());
+    }
+}
+
+struct JetSecretTerminalGuard;
+impl Drop for JetSecretTerminalGuard {
+    fn drop(&mut self) {
+        jet_term_leave();
+    }
+}
+
+fn jet_std_io_input_secret(prompt: &String) -> Result<String, jet_std::IOError> {
+    use std::io::{IsTerminal, Write};
+    if !std::io::stdin().is_terminal() {
+        return Err(jet_std::IOError::InvalidInput(jet_std::IOContext::new(
+            jet_std::IOOperation::Read,
+            Some("stdin".to_string()),
+            None,
+            Some("secret input needs a terminal".to_string()),
+        )));
+    }
+    print!("{prompt}");
+    std::io::stdout()
+        .flush()
+        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Flush, Some("stdout".to_string()), e))?;
+    if !jet_term_enter_secret() {
+        println!();
+        return Err(jet_std::IOError::other(
+            jet_std::IOOperation::Read,
+            Some("stdin".to_string()),
+            "could not disable terminal echo",
+        ));
+    }
+    let guard = JetSecretTerminalGuard;
+    let mut secret = String::new();
+    let read = std::io::stdin()
+        .read_line(&mut secret)
+        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), e));
+    drop(guard);
+    println!();
+    read?;
+    while secret.ends_with('\n') || secret.ends_with('\r') {
+        secret.pop();
+    }
+    Ok(secret)
+}
+
 fn jet_std_io_read_all_input() -> Result<String, jet_std::IOError> {
     use std::io::Read;
     let mut s = String::new();
