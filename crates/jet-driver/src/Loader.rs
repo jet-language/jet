@@ -513,7 +513,10 @@ fn load_entry_with_overlays_mode(
 
     // D-EFFBUDGET1: dependency name → resolved source root, for both `deps:`
     // entries and hangar-realized `use <pkg>` libraries (U17).
-    let mut dep_roots = pkg_dep_dirs.clone();
+    let mut dep_roots: HashMap<String, PathBuf> = pkg_dep_dirs
+        .iter()
+        .map(|(name, dependency)| (name.clone(), dependency.source_root.clone()))
+        .collect();
     for (name, dir) in &pkg_resolution.realized_libs {
         dep_roots.entry(name.clone()).or_insert_with(|| dir.clone());
     }
@@ -688,9 +691,17 @@ fn dry_resolve_recursive(
     Ok(())
 }
 
-/// Collect the source directories for each dependency from a manifest.
-/// Returns a map of dep alias → source root (path dep directory or `.jet-build/deps/<name>`).
-fn collect_dep_dirs(mf: &Manifest::Manifest, project_root: &Path) -> HashMap<String, PathBuf> {
+#[derive(Clone)]
+struct DependencyDir {
+    manifest_root: PathBuf,
+    source_root: PathBuf,
+}
+
+/// Collect each dependency's owning manifest root and source root.
+fn collect_dep_dirs(
+    mf: &Manifest::Manifest,
+    project_root: &Path,
+) -> HashMap<String, DependencyDir> {
     let mut dirs = HashMap::new();
     for (dep_name, spec) in &mf.dependencies {
         match spec {
@@ -700,9 +711,15 @@ fn collect_dep_dirs(mf: &Manifest::Manifest, project_root: &Path) -> HashMap<Str
                 let src_root = if abs.join(".jet").is_dir() {
                     abs.join(".jet")
                 } else {
-                    abs
+                    abs.clone()
                 };
-                dirs.insert(dep_name.clone(), src_root);
+                dirs.insert(
+                    dep_name.clone(),
+                    DependencyDir {
+                        manifest_root: abs,
+                        source_root: src_root,
+                    },
+                );
             }
             Manifest::DepSpec::Git { .. } => {
                 // Git deps are in .jet-build/deps/<name>/ after `jet fetch`.
@@ -711,9 +728,15 @@ fn collect_dep_dirs(mf: &Manifest::Manifest, project_root: &Path) -> HashMap<Str
                     let src_root = if linked.join(".jet").is_dir() {
                         linked.join(".jet")
                     } else {
-                        linked
+                        linked.clone()
                     };
-                    dirs.insert(dep_name.clone(), src_root);
+                    dirs.insert(
+                        dep_name.clone(),
+                        DependencyDir {
+                            manifest_root: linked,
+                            source_root: src_root,
+                        },
+                    );
                 }
             }
             Manifest::DepSpec::Registry(_) => {
@@ -728,7 +751,7 @@ fn collect_dep_dirs(mf: &Manifest::Manifest, project_root: &Path) -> HashMap<Str
 /// resolution from its `pkg.jet`, for callers that only have the project
 /// root (e.g. `resolve_import_target`, run after the bundle is loaded). Returns
 /// empty maps when there is no manifest (R9 single-file mode).
-fn project_resolution(project_root: &Path) -> (HashMap<String, PathBuf>, PkgResolution) {
+fn project_resolution(project_root: &Path) -> (HashMap<String, DependencyDir>, PkgResolution) {
     let pack_path = project_root.join(Syntax::PAYLOAD_FILE);
     let Some(Ok(mf)) = Manifest::load(project_root) else {
         return (HashMap::new(), PkgResolution::default());
@@ -742,14 +765,14 @@ fn auto_derive_default_for_file(
     path: &Path,
     project_root: &Path,
     project_default: bool,
-    dependency_roots: &HashMap<String, PathBuf>,
+    dependency_roots: &HashMap<String, DependencyDir>,
 ) -> bool {
-    let dependency_root = dependency_roots
+    let dependency = dependency_roots
         .values()
-        .filter(|root| path.starts_with(root))
-        .max_by_key(|root| root.components().count());
-    if let Some(root) = dependency_root {
-        return crate::PackageManifest::PackManifest::load(root)
+        .filter(|dependency| path.starts_with(&dependency.source_root))
+        .max_by_key(|dependency| dependency.source_root.components().count());
+    if let Some(dependency) = dependency {
+        return crate::PackageManifest::PackManifest::load(&dependency.manifest_root)
             .and_then(Result::ok)
             .and_then(|manifest| manifest.auto_derive)
             .unwrap_or(true);
@@ -781,7 +804,7 @@ fn load_file(
     path: &Path,
     display: &str,
     project_root: &Path,
-    pkg_dep_dirs: &HashMap<String, PathBuf>,
+    pkg_dep_dirs: &HashMap<String, DependencyDir>,
     pkg_resolution: &PkgResolution,
     package_policy: &[crate::Policy::PolicyDeclaration],
     package_auto_derive: bool,
@@ -1089,7 +1112,7 @@ fn resolve_import(
     imp: &ImportDecl,
     importing: &Path,
     project_root: &Path,
-    pkg_dep_dirs: &HashMap<String, PathBuf>,
+    pkg_dep_dirs: &HashMap<String, DependencyDir>,
     pkg_resolution: &PkgResolution,
     project_parts: &crate::ProjectParts::ProjectPartsReport,
     project_part_failures: &[crate::ProjectParts::ProjectPartScanFailure],
@@ -1285,7 +1308,7 @@ fn resolve_file_import(
 fn resolve_module_import(
     name: &str,
     project_root: &Path,
-    pkg_dep_dirs: &HashMap<String, PathBuf>,
+    pkg_dep_dirs: &HashMap<String, DependencyDir>,
     pkg_resolution: &PkgResolution,
     span: Span,
     project_parts: &crate::ProjectParts::ProjectPartsReport,
@@ -1320,7 +1343,8 @@ fn resolve_module_import(
     // M12.1: check package dep dirs first.
     // `import words;` where "words" is a dep name → look in the dep's source root.
     let first_segment = name.split('.').next().unwrap_or(name);
-    if let Some(dep_root) = pkg_dep_dirs.get(first_segment) {
+    if let Some(dependency) = pkg_dep_dirs.get(first_segment) {
+        let dep_root = &dependency.source_root;
         // Search within the dep's source tree for the module.
         let dep_matches = find_module_files(name, dep_root);
         if !dep_matches.is_empty() {

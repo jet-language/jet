@@ -64,6 +64,43 @@ pub struct TraitInfo {
 }
 
 impl TraitRegistry {
+    /// Compute the three automatic structural traits once for a whole bundle.
+    /// Registration may visit files in any order; the final fixed point sees
+    /// every named type and explicit opt-out before admitting an outer type.
+    pub fn bundle_auto_derives<'a>(
+        item_groups: impl IntoIterator<Item = &'a [Item]>,
+    ) -> TraitRegistry {
+        let item_groups: Vec<&[Item]> = item_groups.into_iter().collect();
+        let mut registry = TraitRegistry::default();
+        registry.register_synthetic_display_debug();
+        for items in &item_groups {
+            registry.register_items(items, &mut Vec::new());
+        }
+        loop {
+            let before = registry.auto_printable.len()
+                + registry.auto_debug.len()
+                + registry.auto_equatable.len();
+            for items in &item_groups {
+                registry.compute_auto_derives(items);
+            }
+            let after = registry.auto_printable.len()
+                + registry.auto_debug.len()
+                + registry.auto_equatable.len();
+            if after == before {
+                break;
+            }
+        }
+        registry
+    }
+
+    pub fn merge_auto_derives(&mut self, source: &TraitRegistry) {
+        self.auto_printable
+            .extend(source.auto_printable.iter().cloned());
+        self.auto_debug.extend(source.auto_debug.iter().cloned());
+        self.auto_equatable
+            .extend(source.auto_equatable.iter().cloned());
+    }
+
     pub fn register_items(&mut self, items: &[Item], diags: &mut Vec<Diagnostic>) {
         for item in items {
             match item {
@@ -785,7 +822,13 @@ impl TraitRegistry {
     }
 
     fn auto_derive_dependencies_ready(&self, item: &Item, trait_name: &str) -> bool {
-        let supports = |ty: &Type| self.auto_derive_type_ready(ty, trait_name);
+        let type_params = match item {
+            Item::Struct(s) => &s.type_params,
+            Item::Enum(e) => &e.type_params,
+            _ => return false,
+        };
+        let supports =
+            |ty: &Type| self.auto_derive_type_ready(ty, trait_name, type_params);
         match item {
             Item::Struct(s) => s
                 .fields
@@ -803,26 +846,42 @@ impl TraitRegistry {
         }
     }
 
-    fn auto_derive_type_ready(&self, ty: &Type, trait_name: &str) -> bool {
+    fn auto_derive_type_ready(
+        &self,
+        ty: &Type,
+        trait_name: &str,
+        type_params: &[TypeParam],
+    ) -> bool {
         match ty {
             Type::List(inner) | Type::Option(inner) | Type::FixedList { elem: inner, .. } => {
-                self.auto_derive_type_ready(inner, trait_name)
+                self.auto_derive_type_ready(inner, trait_name, type_params)
             }
             Type::Result { ok, err } => {
-                self.auto_derive_type_ready(ok, trait_name)
-                    && self.auto_derive_type_ready(err, trait_name)
+                self.auto_derive_type_ready(ok, trait_name, type_params)
+                    && self.auto_derive_type_ready(err, trait_name, type_params)
             }
             Type::Tuple(fields) => fields
                 .iter()
-                .all(|(_, field)| self.auto_derive_type_ready(field, trait_name)),
-            Type::Apply { args, .. } => args
-                .iter()
-                .all(|arg| self.auto_derive_type_ready(arg, trait_name)),
-            Type::Tagged { inner, .. } => self.auto_derive_type_ready(inner, trait_name),
-            Type::Named(name) if self.local_types.contains(name) => {
+                .all(|(_, field)| self.auto_derive_type_ready(field, trait_name, type_params)),
+            Type::Apply { name, args } => {
                 self.implements_trait(name, trait_name)
+                    && args
+                        .iter()
+                        .all(|arg| self.auto_derive_type_ready(arg, trait_name, type_params))
             }
-            _ => true,
+            Type::Tagged { inner, .. } => {
+                self.auto_derive_type_ready(inner, trait_name, type_params)
+            }
+            Type::Named(name) if type_params.iter().any(|param| param.name == *name) => true,
+            Type::Named(name) => self.implements_trait(name, trait_name),
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::String
+            | Type::Char
+            | Type::IntN { .. }
+            | Type::Float32 => true,
+            _ => false,
         }
     }
 
