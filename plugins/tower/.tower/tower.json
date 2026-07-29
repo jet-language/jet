@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 1317,
-    "rev": 19987,
+    "rev": 19997,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -21,11 +21,10 @@
         "radar:e8",
         "radar:e9",
         "radar:e6",
-        "radar:e5",
-        "radar-sq"
+        "radar:e5"
       ]
     },
-    "digestCursor": "2026-07-29T23:19:33.764Z"
+    "completionCursor": "2026-07-29T23:19:33.764Z"
   },
   "epochs": [
     {
@@ -56707,12 +56706,27 @@
       "track": "sidequest",
       "epoch": "e3",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P1",
       "plan": "Reuse card-linked notes with kind=message. Derive a Done and messages queue: completed cards come from the completion cursor; open agent messages come from durable notes. Add message add/list/done CLI and API actions, per-message Done controls, and separate Clear done cards behavior. Replace timeline tests with queue, persistence, CLI, API, and UI tests.",
       "blockedBy": [],
-      "assignee": "catchup-queue",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-07-29",
+          "by": "e3-batch-review",
+          "text": "Independent review clean at 378602d53. Verified all three criteria against owner law: cursor/retirement semantics, durable owner-cleared messages, owner-lane guards and attribution, single protocol mechanism, exact renderer states/controls, and migration/restart. Scoped 48/48; full Tower 231 pass, 1 established skip; UI syntax and diff hygiene clean."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "catchup-queue-builder",
+          "text": "Implementation complete at 378602d53. Targeted checks pass 50/50; one full Tower run passes 231 with one established skip. Ready for independent criterion verification."
+        },
+        {
+          "at": "2026-07-29",
+          "by": "catchup-queue",
+          "text": "Ownership collision: another chat committed and later reverted changes on branch catchup-queue while the assigned implementer was paused. Preserved that branch unchanged. Canonical implementation moved to owned worktree .claude/worktrees/catchup-queue-final, branch catchup-queue-final, from reviewed commit 19a1e1035. Remaining review findings: retain unseen done cards, reject messages on owner-only cards, attribute clears, document API, and test rendered queue states."
+        },
         {
           "at": "2026-07-29",
           "by": "catchup-queue",
@@ -56723,29 +56737,29 @@
         {
           "n": 1,
           "text": "Done and messages view shows only completed cards since the last clear, labels each card DONE, and omits intermediate card progress.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-29T23:23:25.695Z"
+          "status": "verified",
+          "metBy": "catchup-queue-builder",
+          "verifiedBy": "e3-batch-review",
+          "evidence": "Independent review of d4a113d66..378602d53 confirmed the queue derives only DONE completions after the cursor, renders exact DONE markers with no progress events, retains unseen aged completions, and resumes retirement after owner clear. Renderer states and scoped/full Tower suites pass.",
+          "at": "2026-07-29T23:52:31.412Z"
         },
         {
           "n": 2,
           "text": "Agents can post a card-linked message that survives reloads and restarts; each message remains until the owner marks it Done, independent of clearing completed cards.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-29T23:23:27.565Z"
+          "status": "verified",
+          "metBy": "catchup-queue-builder",
+          "verifiedBy": "e3-batch-review",
+          "evidence": "Independent review confirmed messages persist in questions[] as kind=message/open, survive store reopen, remain independent of completion clear, block premature deletion/retirement, and require owner-attributed Done. Frozen and computed decide lanes reject agent posts. Store, API, CLI, and renderer tests pass.",
+          "at": "2026-07-29T23:52:38.033Z"
         },
         {
           "n": 3,
           "text": "CLI, HTTP API, UI, help/docs, and tests use one durable storage mechanism with clear add/list/done behavior and no legacy parallel inbox.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-07-29T23:23:29.443Z"
+          "status": "verified",
+          "metBy": "catchup-queue-builder",
+          "verifiedBy": "e3-batch-review",
+          "evidence": "Independent protocol inventory found one questions[] mechanism across CLI message add/list/done, GET/POST API routes, owner done/clear UI controls, help/docs, migration, and restart tests; normalize removes any legacy messages collection. Syntax checks, diff check, scoped 48/48, and full Tower 231 pass with one established skip.",
+          "at": "2026-07-29T23:52:42.880Z"
         }
       ],
       "refs": [],
@@ -56753,9 +56767,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-07-29T23:23:04.331Z",
-      "updated": "2026-07-29T23:23:33.181Z",
-      "updatedBy": "catchup-queue",
-      "claimedAt": "2026-07-29T23:23:33.181Z"
+      "updated": "2026-07-29T23:52:49.369Z",
+      "updatedBy": "e3-batch-review",
+      "completedAt": "2026-07-29T23:52:49.369Z"
     }
   ],
   "decisions": [
@@ -74905,6 +74919,69 @@
   ],
   "events": [
     {
+      "at": "2026-07-29T23:52:49.369Z",
+      "by": "e3-batch-review",
+      "action": "card.update",
+      "ref": "c0oss0a5",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T23:52:42.880Z",
+      "by": "e3-batch-review",
+      "action": "card.criteria-verify",
+      "ref": "c0oss0a5",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T23:52:38.034Z",
+      "by": "e3-batch-review",
+      "action": "card.criteria-verify",
+      "ref": "c0oss0a5",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T23:52:31.413Z",
+      "by": "e3-batch-review",
+      "action": "card.criteria-verify",
+      "ref": "c0oss0a5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T23:52:14.411Z",
+      "by": "catchup-queue-builder",
+      "action": "card.update",
+      "ref": "c0oss0a5",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-07-29T23:52:12.476Z",
+      "by": "catchup-queue-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0oss0a5",
+      "note": "#3"
+    },
+    {
+      "at": "2026-07-29T23:52:10.540Z",
+      "by": "catchup-queue-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0oss0a5",
+      "note": "#2"
+    },
+    {
+      "at": "2026-07-29T23:52:08.419Z",
+      "by": "catchup-queue-builder",
+      "action": "card.criteria-meet",
+      "ref": "c0oss0a5",
+      "note": "#1"
+    },
+    {
+      "at": "2026-07-29T23:42:36.075Z",
+      "by": "catchup-queue",
+      "action": "card.update",
+      "ref": "c0oss0a5",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-07-29T23:23:33.181Z",
       "by": "catchup-queue",
       "action": "card.update",
@@ -78340,69 +78417,6 @@
       "action": "card.criteria-verify",
       "ref": "c0tsprkx",
       "note": "#3"
-    },
-    {
-      "at": "2026-07-28T22:49:16.238Z",
-      "by": "e3-bd-root-review",
-      "action": "card.criteria-verify",
-      "ref": "c0tsprkx",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-28T22:49:15.990Z",
-      "by": "e3-bd-root-review",
-      "action": "card.criteria-verify",
-      "ref": "c0tsprkx",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-28T22:47:43.804Z",
-      "by": "e3-bd-1302",
-      "action": "card.update",
-      "ref": "c0tsprkx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-07-28T22:47:26.476Z",
-      "by": "e3-bd-1302",
-      "action": "card.criteria-meet",
-      "ref": "c0tsprkx",
-      "note": "#3"
-    },
-    {
-      "at": "2026-07-28T22:47:26.282Z",
-      "by": "e3-bd-1302",
-      "action": "card.criteria-meet",
-      "ref": "c0tsprkx",
-      "note": "#2"
-    },
-    {
-      "at": "2026-07-28T22:47:20.698Z",
-      "by": "e3-bd-1302",
-      "action": "card.criteria-meet",
-      "ref": "c0tsprkx",
-      "note": "#1"
-    },
-    {
-      "at": "2026-07-28T22:45:57.084Z",
-      "by": "cursor-parity",
-      "action": "card.update",
-      "ref": "c07z598z",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-07-28T22:41:39.573Z",
-      "by": "e3-bd-1302",
-      "action": "card.claim",
-      "ref": "c0tsprkx",
-      "note": ""
-    },
-    {
-      "at": "2026-07-28T22:40:49.214Z",
-      "by": "e3-bd-1302",
-      "action": "card.update",
-      "ref": "c0tsprkx",
-      "note": "phase,logEntry"
     }
   ],
   "nextNum": 368,
