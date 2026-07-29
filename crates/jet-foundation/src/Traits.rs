@@ -1392,8 +1392,7 @@ impl TraitRegistry {
             AccessConvention::Move,
         );
         // Keep sema's named-type admission tied to real prelude protocol
-        // implementations. Compiler-known handles such as Range are types, but
-        // do not become printable merely by being known to the compiler.
+        // implementations.
         for ty in [
             "ArgsSpec",
             "AriaRole",
@@ -1466,6 +1465,7 @@ impl TraitRegistry {
             "ProcessResult",
             "ProcessSpec",
             "Quat",
+            "Range",
             "RangeError",
             "Rect",
             "ReflectField",
@@ -1518,12 +1518,20 @@ impl TraitRegistry {
             "Mat3",
             "Mat4",
             "Quat",
+            "Range",
             "Vec2",
             "Vec3",
             "Vec4",
         ] {
             self.auto_debug.insert(ty.to_string());
         }
+        // D-RANGE-VALUE1=A: Range uses the same structural value contracts as
+        // an ordinary record. Values.rs owns the matching runtime protocols.
+        self.auto_equatable.insert(Syntax::TYPE_RANGE.to_string());
+        self.trait_impls.insert((
+            Syntax::TYPE_RANGE.to_string(),
+            DISPLAY.to_string(),
+        ));
         // D-ENCSTREAM-SURFACE1=A: EncodingError Display is the exact stream error
         // projection law; Format/Kind/Cause/Error compare by value.
         self.trait_impls

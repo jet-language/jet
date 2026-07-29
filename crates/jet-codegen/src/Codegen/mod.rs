@@ -1348,6 +1348,8 @@ mod tests {
         let unicode =
             std::fs::read_to_string(root.join("src/Prelude/Core/UnicodeString.rs")).unwrap();
         let values = std::fs::read_to_string(root.join("src/Prelude/Core/Values.rs")).unwrap();
+        let range_bounds =
+            std::fs::read_to_string(root.join("src/Prelude/Core/RangeBounds.rs")).unwrap();
         let expiring_secret =
             std::fs::read_to_string(root.join("src/Prelude/Core/ExpiringSecret.rs")).unwrap();
         let core = std::fs::read_to_string(root.join("src/Prelude/Core.rs")).unwrap();
@@ -1364,6 +1366,7 @@ mod tests {
         for (relative, source) in [
             ("src/Prelude/Core/UnicodeString.rs", unicode.as_str()),
             ("src/Prelude/Core/Values.rs", values.as_str()),
+            ("src/Prelude/Core/RangeBounds.rs", range_bounds.as_str()),
             (
                 "src/Prelude/Core/ExpiringSecret.rs",
                 expiring_secret.as_str(),
@@ -1402,6 +1405,9 @@ mod tests {
         let values_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/Values.rs\")")
             .unwrap();
+        let range_bounds_pos = production_codegen
+            .find("include_str!(\"../Prelude/Core/RangeBounds.rs\")")
+            .unwrap();
         let expiring_secret_pos = production_codegen
             .find("include_str!(\"../Prelude/Core/ExpiringSecret.rs\")")
             .unwrap();
@@ -1425,7 +1431,8 @@ mod tests {
             .unwrap();
         assert!(
             unicode_pos < values_pos
-                && values_pos < expiring_secret_pos
+                && values_pos < range_bounds_pos
+                && range_bounds_pos < expiring_secret_pos
                 && expiring_secret_pos < core_pos
                 && core_pos < collections_pos
                 && collections_pos < control_pos
@@ -1441,6 +1448,7 @@ mod tests {
             [
                 unicode.as_str(),
                 values.as_str(),
+                range_bounds.as_str(),
                 expiring_secret.as_str(),
                 core.as_str(),
                 collections.as_str(),
@@ -1457,6 +1465,7 @@ mod tests {
         let expected = [
             unicode.as_str(),
             values.as_str(),
+            range_bounds.as_str(),
             expiring_secret.as_str(),
             core.as_str(),
             collections.as_str(),
@@ -1470,10 +1479,10 @@ mod tests {
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 223_882, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 227_757, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "b35db66f488768b9de62e2d80bd2998e5f2e237a95364d57b2c585118f5f8137",
+            "69343721d4715c9dca3a4d27b93dee8bd4ef73640c7500bbe3d3fabfc71150b2",
             "split changed historical prelude bytes, order, or boundary newline"
         );
     }

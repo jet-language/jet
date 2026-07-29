@@ -3061,6 +3061,11 @@ fn range_values_run_in_resident_jit_without_fallback() {
     let src = r#"
 fn run() {
     band :: 2..<5
+    print(band)
+    print("{band}")
+    print("{band#Debug}")
+    print(band == (2..<5))
+    print(band == (2..5))
     print(band.start)
     print(band.end)
     print(band.contains(4))
@@ -3071,8 +3076,7 @@ fn run() {
     }
     print(total)
     values := [10, 20, 30, 40, 50, 60]
-    window :: values[band]
-    print(window)
+    print(~values[band])
     edit :: &values[band]
     edit[0] = 99
     print(values)
@@ -3089,7 +3093,20 @@ fn run() {
     jet_jit::try_compile_bundle(&bundle)
         .unwrap_or_else(|error| panic!("Range resident compilation failed: {error}"));
     let native = run_cranelift_without_fallback(src, "range_values");
-    let expected = "2\n5\ntrue\nfalse\n9\n[30, 40, 50]\n[10, 20, 99, 40, 50, 60]\n";
+    let expected = "\
+Range { start: 2, end: 5, exclusive: true }
+Range { start: 2, end: 5, exclusive: true }
+Range { start: 2, end: 5, exclusive: true }
+true
+false
+2
+5
+true
+false
+9
+[30, 40, 50]
+[10, 20, 99, 40, 50, 60]
+";
     assert_eq!(native.stdout, expected);
 
     let dir = common::unique_tmp("jet_range_value_interpreter");

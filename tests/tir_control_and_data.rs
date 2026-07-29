@@ -484,6 +484,10 @@ fn identity(band: ^Range) => Range {
 }
 fn run() {
     bands :: [1..3, 8..<10]
+    print(bands[0])
+    print(\"{bands[1]#Debug}\")
+    print(bands[0] == (1..3))
+    print(bands[0] == (1..<3))
     print(bands[0].contains(3))
     band :: identity(4..<7)
     print(band.start)
@@ -502,7 +506,23 @@ fn run() {
 ";
     let (code, stdout) = build_and_run("tir_range_values", src);
     assert_eq!(code, 0);
-    assert_eq!(stdout, "true\n4\n7\ntrue\nfalse\nfalse\n15\n[50, 60, 70]\n");
+    assert_eq!(
+        stdout,
+        "\
+Range { start: 1, end: 3, exclusive: false }
+Range { start: 8, end: 10, exclusive: true }
+true
+false
+true
+4
+7
+true
+false
+false
+15
+[50, 60, 70]
+"
+    );
 }
 
 /// Named loops: `next(outer)` and `break(outer)` driving a nested
