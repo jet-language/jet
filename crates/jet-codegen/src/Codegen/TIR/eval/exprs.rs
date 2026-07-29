@@ -3408,38 +3408,35 @@ impl<'a> EvalCtx<'a> {
                 let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
                 let Some(defs) = self.struct_fields.get(ty) else {
                     // Builtin struct with no declared fields on hand (Vec3, …).
-                    // Still render Jet-source names — `debug_rust` re-mangles (I2).
-                    if fields.is_empty() {
-                        return format!("{ty} {{}}");
-                    }
-                    let parts: Vec<String> = fields
+                    // Adapt its fields to the same record assembler AOT uses.
+                    let fields = fields
                         .iter()
                         .map(|(name, value)| {
                             let name = name.strip_prefix("user_").unwrap_or(name);
-                            format!("{name}: {}", self.debug_value(value))
+                            (name.to_string(), self.debug_value(value))
                         })
-                        .collect();
-                    return format!("{ty} {{ {} }}", parts.join(", "));
+                        .collect::<Vec<_>>();
+                    return jet_foundation::StructuralDebug::jet_debug_record(ty, fields);
                 };
-                if defs.is_empty() {
-                    return format!("{ty} {{}}");
-                }
-                let parts: Vec<String> = defs
+                let fields = defs
                     .iter()
                     .map(|(name, redact)| {
                         if *redact {
-                            format!("{name}: [redacted]")
+                            (name.clone(), "[redacted]".to_string())
                         } else {
                             let rendered = fields
                                 .iter()
-                                .find(|(n, _)| n == name || n.strip_prefix("user_") == Some(name.as_str()))
-                                .map(|(_, value)| value.debug_rust())
-                                .unwrap_or_else(|| CtValue::Unit.debug_rust());
-                            format!("{name}: {rendered}")
+                                .find(|(n, _)| {
+                                    n == name
+                                        || n.strip_prefix("user_") == Some(name.as_str())
+                                })
+                                .map(|(_, value)| self.debug_value(value))
+                                .unwrap_or_else(|| self.debug_value(&CtValue::Unit));
+                            (name.clone(), rendered)
                         }
                     })
-                    .collect();
-                format!("{ty} {{ {} }}", parts.join(", "))
+                    .collect::<Vec<_>>();
+                jet_foundation::StructuralDebug::jet_debug_record(ty, fields)
             }
             CtValue::Enum {
                 type_name,
@@ -3448,6 +3445,13 @@ impl<'a> EvalCtx<'a> {
             } => {
                 let ty = type_name.strip_prefix("user_").unwrap_or(type_name);
                 let var = variant.strip_prefix("user_").unwrap_or(variant);
+                if ty.starts_with("__JetUnion_") {
+                    let payload = args
+                        .first()
+                        .map(|(_, value)| self.debug_value(value))
+                        .unwrap_or_default();
+                    return jet_foundation::StructuralDebug::jet_debug_union(payload);
+                }
                 if ty == "IOError" {
                     let parts: Vec<String> = args
                         .iter()
@@ -3517,6 +3521,14 @@ impl<'a> EvalCtx<'a> {
                     format!("{var}({})", parts.join(", "))
                 }
             }
+            CtValue::Map(entries) => jet_foundation::StructuralDebug::jet_debug_map(
+                entries.iter().map(|(key, value)| {
+                    (
+                        self.debug_value(&key.to_value()),
+                        self.debug_value(value),
+                    )
+                }),
+            ),
             _ => v.debug_rust(),
         }
     }

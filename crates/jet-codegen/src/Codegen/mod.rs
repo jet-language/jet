@@ -57,6 +57,7 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/RuntimeControl.rs"),
     include_str!("../Prelude/Observe.rs"),
     include_str!("../../../jet-foundation/src/ExactUnitConversion.rs"),
+    include_str!("../../../jet-foundation/src/StructuralDebug.rs"),
 ];
 
 fn push_prelude(out: &mut String) {
@@ -1358,6 +1359,8 @@ mod tests {
         let exact_units =
             std::fs::read_to_string(root.join("../jet-foundation/src/ExactUnitConversion.rs"))
                 .unwrap();
+        let structural_debug =
+            std::fs::read_to_string(root.join("../jet-foundation/src/StructuralDebug.rs")).unwrap();
         for (relative, source) in [
             ("src/Prelude/Core/UnicodeString.rs", unicode.as_str()),
             ("src/Prelude/Core/Values.rs", values.as_str()),
@@ -1375,6 +1378,10 @@ mod tests {
             (
                 "../jet-foundation/src/ExactUnitConversion.rs",
                 exact_units.as_str(),
+            ),
+            (
+                "../jet-foundation/src/StructuralDebug.rs",
+                structural_debug.as_str(),
             ),
         ] {
             assert!(
@@ -1413,6 +1420,9 @@ mod tests {
         let exact_units_pos = production_codegen
             .find("include_str!(\"../../../jet-foundation/src/ExactUnitConversion.rs\")")
             .unwrap();
+        let structural_debug_pos = production_codegen
+            .find("include_str!(\"../../../jet-foundation/src/StructuralDebug.rs\")")
+            .unwrap();
         assert!(
             unicode_pos < values_pos
                 && values_pos < expiring_secret_pos
@@ -1420,7 +1430,8 @@ mod tests {
                 && core_pos < collections_pos
                 && collections_pos < control_pos
                 && control_pos < observe_pos
-                && observe_pos < exact_units_pos,
+                && observe_pos < exact_units_pos
+                && exact_units_pos < structural_debug_pos,
             "prelude ownership order is generated-byte order"
         );
         assert!(production_codegen.contains("for part in PRELUDE_PARTS"));
@@ -1436,6 +1447,7 @@ mod tests {
                 runtime_control.as_str(),
                 observe.as_str(),
                 exact_units.as_str(),
+                structural_debug.as_str(),
             ],
             "PRELUDE_PARTS must list every owned module exactly once in generated-byte order"
         );
@@ -1451,16 +1463,17 @@ mod tests {
             runtime_control.as_str(),
             observe.as_str(),
             exact_units.as_str(),
+            structural_debug.as_str(),
         ]
         .concat();
         assert_eq!(
             emitted, expected,
             "owned prelude modules must concatenate without byte loss or boundary changes"
         );
-        assert_eq!(emitted.len(), 213_351, "split changed prelude byte length");
+        assert_eq!(emitted.len(), 223_882, "split changed prelude byte length");
         assert_eq!(
             crate::SHA256::sha256_hex(emitted.as_bytes()),
-            "8372b9ec3b7b16433127995a019da916ade4e24cda94ec2fdcbc1efbea358a8e",
+            "b35db66f488768b9de62e2d80bd2998e5f2e237a95364d57b2c585118f5f8137",
             "split changed historical prelude bytes, order, or boundary newline"
         );
     }
