@@ -1427,9 +1427,12 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
         }
+        let nominal_name = import_ns
+            .map(|alias| format!("{alias}.{type_name}"))
+            .unwrap_or_else(|| type_name.to_string());
         if !type_args.is_empty() {
             Type::Apply {
-                name: type_name.to_string(),
+                name: nominal_name,
                 args: type_args.to_vec(),
             }
         } else if self
@@ -1439,7 +1442,7 @@ impl<'a> Checker<'a> {
             .is_some_and(|p| !p.is_empty())
         {
             Type::Apply {
-                name: type_name.to_string(),
+                name: nominal_name,
                 args: self
                     .trait_reg
                     .struct_params
@@ -1450,7 +1453,7 @@ impl<'a> Checker<'a> {
                     .collect(),
             }
         } else {
-            Type::Named(type_name.to_string())
+            Type::Named(nominal_name)
         }
     }
 

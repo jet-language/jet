@@ -1,4 +1,5 @@
 use jet::JitBackend::JitBackend;
+use std::process::Command;
 
 fn project_dir(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
@@ -76,6 +77,39 @@ fn collect_struct_defaults(items: &[jet::AST::Item], out: &mut Vec<(String, bool
             _ => {}
         }
     }
+}
+
+fn aot_output(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<(i32, String)> {
+    if Command::new("rustc").arg("--version").output().is_err() {
+        return None;
+    }
+    let dir = project_dir(name);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let rust = dir.join("main.rs");
+    let binary = dir.join("main_bin");
+    std::fs::write(
+        &rust,
+        jet::Codegen::emit_bundle(bundle, jet::Sema::CompileMode::Run, None),
+    )
+    .unwrap();
+    let built = Command::new("rustc")
+        .args(["--edition", "2021", "-O"])
+        .arg(&rust)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "AOT generated Rust failed:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let ran = Command::new(binary).output().unwrap();
+    Some((
+        ran.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&ran.stdout).into_owned(),
+    ))
 }
 
 #[test]
@@ -229,9 +263,8 @@ fn run() {
 
     let entry = project_dir("reject_use").join("main.jet");
     let bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(
-        bundle.modules.iter().map(|module| module.items.as_slice()),
-    );
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle);
+    let facts = &facts[bundle.entry];
     for (type_name, selected) in [
         ("OuterReader", &facts.auto_printable),
         ("OuterHidden", &facts.auto_printable),
@@ -337,8 +370,145 @@ fn package_default_reaches_nested_and_dependency_modules() {
         errors.iter().any(|diagnostic| diagnostic.code == "E0112"),
         "{errors:#?}"
     );
-    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(
-        bundle.modules.iter().map(|module| module.items.as_slice()),
-    );
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle);
+    let facts = &facts[bundle.entry];
     assert!(!facts.auto_printable.contains("ImportedOuter"));
+}
+
+#[test]
+fn same_named_dependency_type_keeps_its_own_auto_derive_policy() {
+    let workspace = project_dir("same_named_types");
+    let app = workspace.join("app");
+    let dep = workspace.join("dep");
+    let _ = std::fs::remove_dir_all(&workspace);
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::create_dir_all(dep.join(".jet")).unwrap();
+    std::fs::write(
+        app.join("pkg.jet"),
+        "payload: { name: \"app\", version: \"1\" }\ndeps: { dep: ../dep }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("main.jet"),
+        r#"
+use dep as vendor
+
+struct Token { value: Int }
+struct LocalEnvelope { token: Token }
+struct DependencyEnvelope { token: vendor.Token }
+
+fn reject(value: vendor.Token) {
+    print(value)
+}
+
+fn run() {
+    print(LocalEnvelope.{ token: Token.{ value: 7 } })
+}
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dep.join("pkg.jet"),
+        "payload: { name: \"dep\", version: \"1\" }\npolicy: .{ auto_derive: false }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dep.join(".jet").join("main.jet"),
+        "pub struct Token { value: Int }\n",
+    )
+    .unwrap();
+
+    let mut bundle =
+        jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
+    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert_eq!(
+        errors
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "E0112")
+            .count(),
+        1,
+        "{errors:#?}"
+    );
+
+    std::fs::write(
+        app.join("main.jet"),
+        r#"
+use dep as vendor
+
+struct Token { value: Int }
+struct LocalEnvelope { token: Token }
+struct DependencyEnvelope { token: vendor.Token }
+struct MapEnvelope { values: [String: Int] }
+struct UnionEnvelope { value: Int | String }
+
+fn run() {
+    token :: Token.{ value: 7 }
+    print(token)
+    print("{token#Debug}")
+    print(token == Token.{ value: 7 })
+}
+"#,
+    )
+    .unwrap();
+    let mut bundle =
+        jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
+    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+        .into_iter()
+        .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+        .collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle);
+    let app_facts = &facts[bundle.entry];
+    let dep_idx = bundle
+        .modules
+        .iter()
+        .position(|module| module.path == dep.join(".jet").join("main.jet"))
+        .unwrap();
+    let dep_facts = &facts[dep_idx];
+    for selected in [
+        &app_facts.auto_printable,
+        &app_facts.auto_debug,
+        &app_facts.auto_equatable,
+    ] {
+        assert!(selected.contains("Token"), "{selected:?}");
+        assert!(selected.contains("LocalEnvelope"), "{selected:?}");
+        assert!(selected.contains("UnionEnvelope"), "{selected:?}");
+        assert!(!selected.contains("DependencyEnvelope"), "{selected:?}");
+        assert!(!selected.contains("vendor.Token"), "{selected:?}");
+    }
+    assert!(app_facts.auto_printable.contains("MapEnvelope"));
+    assert!(app_facts.auto_debug.contains("MapEnvelope"));
+    assert!(!app_facts.auto_equatable.contains("MapEnvelope"));
+    for selected in [
+        &dep_facts.auto_printable,
+        &dep_facts.auto_debug,
+        &dep_facts.auto_equatable,
+    ] {
+        assert!(!selected.contains("Token"), "{selected:?}");
+    }
+
+    let expected = "Token { value: 7 }\nToken { value: 7 }\ntrue\n";
+    if let Some((exit, stdout)) = aot_output(&bundle, "same_named_types_aot") {
+        assert_eq!(exit, 0);
+        assert_eq!(stdout, expected);
+    }
+    let mut backend = jet_jit::CraneliftBackend::new();
+    let outcome = backend.run(&bundle, false);
+    let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
+        panic!("same-name program did not run in the default JIT: {outcome:?}");
+    };
+    assert_eq!(stdout, expected);
+    let outcome = jet::Interpreter::dev_iteration(
+        app.join("main.jet").to_str().unwrap(),
+        false,
+        true,
+    );
+    let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
+        panic!("same-name program did not run in the forced interpreter: {outcome:?}");
+    };
+    assert_eq!(stdout, expected);
 }
