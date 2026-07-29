@@ -3393,7 +3393,9 @@ impl<'a> Checker<'a> {
         match arg.convention {
             AccessConvention::Read => {
                 if let Expr::Ident(name, span) = &arg.expr {
-                    if !crate::Sema::Diagnostics::is_secret_bearing_crypto_type(param_ty)
+                    if type_is_copy(param_ty) {
+                        // Copy values cross an owning parameter by bits.
+                    } else if !crate::Sema::Diagnostics::is_secret_bearing_crypto_type(param_ty)
                         && !self.is_resource_type(param_ty)
                         && is_cloneable(param_ty, self.registry)
                     {
@@ -3429,7 +3431,7 @@ impl<'a> Checker<'a> {
             }
             AccessConvention::Move => {
                 if let Expr::Ident(name, span) = &arg.expr {
-                    if !param_ty.is_scalar() {
+                    if !type_is_copy(param_ty) {
                         self.mark_moved(name.clone(), *span);
                     }
                 }

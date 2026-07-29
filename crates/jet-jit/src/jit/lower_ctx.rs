@@ -77,6 +77,8 @@ pub(crate) struct LowerCtx<'a, 'b> {
     /// CLIF return type of the function being lowered (`None` = returns void).
     /// Drives the dummy value `emit_trap_check` returns on the trap-unwind path.
     pub(crate) ret_clif: Option<types::Type>,
+    /// D-RANGE-VALUE1: this function returns the three-scalar Range ABI.
+    pub(crate) ret_range: bool,
     /// Lexical `#Shield` depth in emitted native code. Used to emit exact
     /// cleanup calls before every non-local control-flow edge.
     pub(crate) shield_depth: u32,
@@ -116,6 +118,47 @@ pub(crate) struct TxnFrame {
 }
 
 impl LowerCtx<'_, '_> {
+    fn is_range_ty(ty: &Type) -> bool {
+        matches!(ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE)
+    }
+
+    fn range_local_keys(key: &str) -> [String; 3] {
+        [
+            format!("{key}.__range_start"),
+            format!("{key}.__range_end"),
+            format!("{key}.__range_exclusive"),
+        ]
+    }
+
+    pub(crate) fn bind_range_local(&mut self, key: &str, values: [Value; 3]) {
+        let keys = Self::range_local_keys(key);
+        for ((field_key, value), ty) in keys
+            .into_iter()
+            .zip(values)
+            .zip([types::I64, types::I64, types::I8])
+        {
+            let var = self.fresh_var(ty);
+            self.b.def_var(var, value);
+            self.vars.insert(field_key, var);
+        }
+        self.var_tys.insert(
+            key.to_string(),
+            Type::Named(jet_foundation::Syntax::TYPE_RANGE.to_string()),
+        );
+    }
+
+    fn assign_range_local(&mut self, key: &str, values: [Value; 3]) -> Result<(), String> {
+        for (field_key, value) in Self::range_local_keys(key).into_iter().zip(values) {
+            let var = self
+                .vars
+                .get(&field_key)
+                .copied()
+                .ok_or_else(|| format!("jit assign to unknown Range `{key}`"))?;
+            self.b.def_var(var, value);
+        }
+        Ok(())
+    }
+
     fn receiver_is(ty: &Type, expected: &str) -> bool {
         matches!(ty, Type::Named(name) if name == expected)
             || matches!(ty, Type::Apply { name, .. } if name == expected)
@@ -260,6 +303,13 @@ impl LowerCtx<'_, '_> {
             self.b.ins().call(close, &[sender]);
         }
         self.emit_deadline_pops_to(0);
+        if self.ret_range {
+            let start = self.b.ins().iconst(types::I64, 0);
+            let end = self.b.ins().iconst(types::I64, 0);
+            let exclusive = self.b.ins().iconst(types::I8, 0);
+            self.b.ins().return_(&[start, end, exclusive]);
+            return;
+        }
         match self.ret_clif {
             Some(ty) => {
                 let value = if ty == types::F64 {
@@ -2385,6 +2435,11 @@ impl LowerCtx<'_, '_> {
         }
         match stmt {
             TStmt::Let { name, init, .. } => {
+                if Self::is_range_ty(&init.ty) {
+                    let values = self.lower_range_expr(init)?;
+                    self.bind_range_local(&TIR::local_place(name), values);
+                    return Ok(());
+                }
                 // Mutable field place (`left :: &counters.left`) → write-through
                 // handle `[struct, field_idx]` so later `left = 3` updates the owner.
                 if let TExprKind::Borrow {
@@ -2773,6 +2828,16 @@ impl LowerCtx<'_, '_> {
                 }
                 let local = place.as_local().ok_or("jit assign to non-local place")?;
                 let key = Self::local_key(local);
+                if self.var_tys.get(&key).is_some_and(Self::is_range_ty) {
+                    if op.is_some() || local.deref {
+                        return Err(
+                            "jit Range compound or deref assignment unsupported".to_string()
+                        );
+                    }
+                    let values = self.lower_range_expr(value)?;
+                    self.assign_range_local(&key, values)?;
+                    return Ok(());
+                }
                 let var = self
                     .vars
                     .get(&key)
@@ -2977,7 +3042,16 @@ impl LowerCtx<'_, '_> {
                 self.b.ins().call(setter, &[handle, field_index, value]);
             }
             TStmt::Return(Some(expr)) => {
-                let val = self.lower_expr(expr)?;
+                let range_values = if self.ret_range {
+                    Some(self.lower_range_expr(expr)?)
+                } else {
+                    None
+                };
+                let val = if range_values.is_none() {
+                    Some(self.lower_expr(expr)?)
+                } else {
+                    None
+                };
                 // Keep compile-time txn_stack: a `return` in one `if` branch must
                 // not pop frames needed by the fallthrough / sibling path.
                 self.emit_txn_rollbacks_keep()?;
@@ -2990,6 +3064,12 @@ impl LowerCtx<'_, '_> {
                         .declare_func_in_func(self.host.conc.sender_close, self.b.func);
                     self.b.ins().call(close, &[sender]);
                 }
+                if let Some(values) = range_values {
+                    self.b.ins().return_(&values);
+                    self.dead = true;
+                    return Ok(());
+                }
+                let val = val.expect("non-Range return has one value");
                 let ret_val = match (self.ret_clif, self.b.func.dfg.value_type(val)) {
                     (Some(ty), got) if ty == types::I64 && got == types::F64 => self
                         .b
@@ -3288,12 +3368,8 @@ impl LowerCtx<'_, '_> {
                 body,
             } => {
                 let (start_val, end_val, exclusive_val) = if let Some(source) = source {
-                    let handle = self.lower_expr(source)?;
-                    (
-                        self.lower_record_field(handle, "Range", "start", &Type::Int)?,
-                        self.lower_record_field(handle, "Range", "end", &Type::Int)?,
-                        Some(self.lower_record_field(handle, "Range", "exclusive", &Type::Bool)?),
-                    )
+                    let [start, end, exclusive] = self.lower_range_expr(source)?;
+                    (start, end, Some(exclusive))
                 } else {
                     (self.lower_expr(start)?, self.lower_expr(end)?, None)
                 };
@@ -6562,8 +6638,8 @@ impl LowerCtx<'_, '_> {
         fmt: StrFormat,
     ) -> Result<(), String> {
         if type_name == jet_foundation::Syntax::TYPE_RANGE {
-            let handle = self.lower_expr(expr)?;
-            let text = self.lower_range_show(handle)?;
+            let values = self.lower_range_expr(expr)?;
+            let text = self.lower_range_show(values)?;
             let push_ref = self
                 .module
                 .declare_func_in_func(self.host.str_push_str, self.b.func);
@@ -6796,11 +6872,7 @@ impl LowerCtx<'_, '_> {
         range: &TExpr,
         line: usize,
     ) -> Result<(Value, Value), String> {
-        let handle = self.lower_expr(range)?;
-        let start = self.lower_record_field(handle, "Range", "start", &Type::Int)?;
-        let end = self.lower_record_field(handle, "Range", "end", &Type::Int)?;
-        let exclusive =
-            self.lower_record_field(handle, "Range", "exclusive", &Type::Bool)?;
+        let [start, end, exclusive] = self.lower_range_expr(range)?;
         let exclusive = self.b.ins().uextend(types::I64, exclusive);
         let line = self.b.ins().iconst(types::I32, line as i64);
         let host = self
@@ -7465,6 +7537,16 @@ impl LowerCtx<'_, '_> {
         let new_call = self.b.ins().call(new_ref, &[]);
         let handle = self.b.inst_results(new_call)[0];
         for e in elems {
+            if Self::is_range_ty(&e.ty) {
+                let [start, end, exclusive] = self.lower_range_expr(e)?;
+                let push = self
+                    .module
+                    .declare_func_in_func(self.host.coll.list_push_range, self.b.func);
+                self.b
+                    .ins()
+                    .call(push, &[handle, start, end, exclusive]);
+                continue;
+            }
             let v = self.lower_expr(e)?;
             let push_id = match list_ty {
                 ty if jit_list_float_type(ty) => self.host.coll.list_push_f64,
@@ -7787,6 +7869,17 @@ impl LowerCtx<'_, '_> {
                 let mut arg_vals = Vec::with_capacity(args.len());
                 let mut copy_back = Vec::new();
                 for arg in args {
+                    if Self::is_range_ty(&arg.value.ty) {
+                        if arg.mut_borrow
+                            || arg.arc_clone
+                            || arg.widen_to_vec
+                            || arg.widen_to_union.is_some()
+                        {
+                            return Err("jit Range call wrapper unsupported".to_string());
+                        }
+                        arg_vals.extend(self.lower_range_expr(&arg.value)?);
+                        continue;
+                    }
                     let scalar_write = arg.mut_borrow
                         && matches!(
                             &arg.value.ty,
@@ -7834,6 +7927,9 @@ impl LowerCtx<'_, '_> {
                 for (var, slot, clif) in copy_back {
                     let value = self.b.ins().stack_load(clif, slot, 0);
                     self.b.def_var(var, value);
+                }
+                if Self::is_range_ty(&expr.ty) {
+                    return Err("jit Range call needs the three-value ABI".to_string());
                 }
                 let result = clif_ty(&expr.ty).map(|_| self.b.inst_results(call)[0]);
                 self.emit_trap_check()?;
@@ -11034,11 +11130,26 @@ impl LowerCtx<'_, '_> {
             }
             TExprKind::StructLit {
                 fields, as_trait, ..
-            } => self.lower_struct_lit(fields, as_trait.as_ref()),
+            } => {
+                if Self::is_range_ty(&expr.ty) {
+                    Err("jit Range literal needs the three-value ABI".to_string())
+                } else {
+                    self.lower_struct_lit(fields, as_trait.as_ref())
+                }
+            }
             TExprKind::TupleLit { fields, .. } => self.lower_tuple_lit(fields),
             TExprKind::Field {
                 recv, field, ..
             } => {
+                if Self::is_range_ty(&recv.ty) {
+                    let values = self.lower_range_expr(recv)?;
+                    return match field.as_str() {
+                        "start" => Ok(values[0]),
+                        "end" => Ok(values[1]),
+                        "exclusive" => Ok(values[2]),
+                        _ => Err(format!("jit field `{field}` on `Range`")),
+                    };
+                }
                 let mut handle = self.lower_expr(recv)?;
                 let record_ty = match &recv.ty {
                     Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
@@ -12810,6 +12921,19 @@ impl LowerCtx<'_, '_> {
         args: &[TExpr],
         _ret_ty: &Type,
     ) -> Result<Value, String> {
+        if matches!(op, TBuiltinOp::Contains) && Self::is_range_ty(&recv.ty) {
+            let [start, end, exclusive] = self.lower_range_expr(recv)?;
+            let needle = self.lower_expr(&args[0])?;
+            let exclusive = self.b.ins().uextend(types::I64, exclusive);
+            let host = self
+                .module
+                .declare_func_in_func(self.host.coll.range_contains, self.b.func);
+            let call = self
+                .b
+                .ins()
+                .call(host, &[start, end, exclusive, needle]);
+            return Ok(self.b.inst_results(call)[0]);
+        }
         let recv_val = self.lower_expr(recv)?;
         match op {
             TBuiltinOp::LenString => {
@@ -13082,23 +13206,6 @@ impl LowerCtx<'_, '_> {
                 }
             }
             TBuiltinOp::Contains => {
-                if matches!(&recv.ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE) {
-                    let start =
-                        self.lower_record_field(recv_val, "Range", "start", &Type::Int)?;
-                    let end = self.lower_record_field(recv_val, "Range", "end", &Type::Int)?;
-                    let exclusive =
-                        self.lower_record_field(recv_val, "Range", "exclusive", &Type::Bool)?;
-                    let needle = self.lower_expr(&args[0])?;
-                    let exclusive = self.b.ins().uextend(types::I64, exclusive);
-                    let host = self
-                        .module
-                        .declare_func_in_func(self.host.coll.range_contains, self.b.func);
-                    let call = self
-                        .b
-                        .ins()
-                        .call(host, &[start, end, exclusive, needle]);
-                    return Ok(self.b.inst_results(call)[0]);
-                }
                 // Set.has(x) / SortedSet.has — Int elems.
                 if matches!(&recv.ty, Type::Apply { name, .. } if name == "Set") {
                     let needle = self.lower_expr(&args[0])?;
@@ -17298,9 +17405,36 @@ impl LowerCtx<'_, '_> {
         lhs: &TExpr,
         rhs: &TExpr,
     ) -> Result<Value, String> {
+        let lhs_ty = self.expr_arith_type(lhs);
+        if matches!(op, BinOp::Eq | BinOp::Ne) && Self::is_range_ty(&lhs_ty) {
+            let [left_start, left_end, left_exclusive] = self.lower_range_expr(lhs)?;
+            let [right_start, right_end, right_exclusive] = self.lower_range_expr(rhs)?;
+            let left_exclusive = self.b.ins().uextend(types::I64, left_exclusive);
+            let right_exclusive = self.b.ins().uextend(types::I64, right_exclusive);
+            let host = self
+                .module
+                .declare_func_in_func(self.host.coll.range_equal, self.b.func);
+            let call = self.b.ins().call(
+                host,
+                &[
+                    left_start,
+                    left_end,
+                    left_exclusive,
+                    right_start,
+                    right_end,
+                    right_exclusive,
+                ],
+            );
+            let equal = self.b.inst_results(call)[0];
+            return Ok(if matches!(op, BinOp::Eq) {
+                equal
+            } else {
+                let one = self.b.ins().iconst(types::I8, 1);
+                self.b.ins().isub(one, equal)
+            });
+        }
         let l = self.lower_expr(lhs)?;
         let r = self.lower_expr(rhs)?;
-        let lhs_ty = self.expr_arith_type(lhs);
         let _rhs_ty = self.expr_arith_type(rhs);
         if Self::is_math_value_ty(&lhs_ty)
             || Self::is_math_value_ty(&rhs.ty)
@@ -17360,35 +17494,6 @@ impl LowerCtx<'_, '_> {
                 bits,
                 right_signed,
             );
-        }
-        if matches!(op, BinOp::Eq | BinOp::Ne)
-            && matches!(&lhs_ty, Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE)
-        {
-            let [left_start, left_end, left_exclusive] = self.lower_range_fields(l)?;
-            let [right_start, right_end, right_exclusive] = self.lower_range_fields(r)?;
-            let left_exclusive = self.b.ins().uextend(types::I64, left_exclusive);
-            let right_exclusive = self.b.ins().uextend(types::I64, right_exclusive);
-            let host = self
-                .module
-                .declare_func_in_func(self.host.coll.range_equal, self.b.func);
-            let call = self.b.ins().call(
-                host,
-                &[
-                    left_start,
-                    left_end,
-                    left_exclusive,
-                    right_start,
-                    right_end,
-                    right_exclusive,
-                ],
-            );
-            let equal = self.b.inst_results(call)[0];
-            return Ok(if matches!(op, BinOp::Eq) {
-                equal
-            } else {
-                let one = self.b.ins().iconst(types::I8, 1);
-                self.b.ins().isub(one, equal)
-            });
         }
         if overflow {
             let host_id = match op {
@@ -17571,16 +17676,103 @@ impl LowerCtx<'_, '_> {
         self.b.ins().select(cmp, one, zero)
     }
 
-    fn lower_range_fields(&mut self, handle: Value) -> Result<[Value; 3], String> {
-        Ok([
-            self.lower_record_field(handle, "Range", "start", &Type::Int)?,
-            self.lower_record_field(handle, "Range", "end", &Type::Int)?,
-            self.lower_record_field(handle, "Range", "exclusive", &Type::Bool)?,
-        ])
+    /// Lower a Range through its lossless resident ABI. A Range is three SSA
+    /// scalars, never an arena record handle.
+    fn lower_range_expr(&mut self, expr: &TExpr) -> Result<[Value; 3], String> {
+        if !Self::is_range_ty(&expr.ty) {
+            return Err(format!("jit expected Range, got {:?}", expr.ty));
+        }
+        match &expr.kind {
+            TExprKind::StructLit { fields, .. } => {
+                let field = |name: &str| {
+                    fields
+                        .iter()
+                        .find(|(field, _, _)| field == name)
+                        .map(|(_, value, _)| value)
+                        .ok_or_else(|| format!("jit Range literal missing `{name}`"))
+                };
+                Ok([
+                    self.lower_expr(field("start")?)?,
+                    self.lower_expr(field("end")?)?,
+                    self.lower_expr(field("exclusive")?)?,
+                ])
+            }
+            TExprKind::Local(local) if !local.deref => {
+                let key = Self::local_key(local);
+                let keys = Self::range_local_keys(&key);
+                let mut values = Vec::with_capacity(3);
+                for field_key in keys {
+                    let var = self
+                        .vars
+                        .get(&field_key)
+                        .copied()
+                        .ok_or_else(|| format!("jit unknown Range local `{}`", local.name))?;
+                    values.push(self.b.use_var(var));
+                }
+                Ok([values[0], values[1], values[2]])
+            }
+            TExprKind::Call { name, args } => {
+                let func_id = self
+                    .func_ids
+                    .get(name)
+                    .copied()
+                    .ok_or_else(|| format!("jit call to unknown function `{name}`"))?;
+                let mut arg_values = Vec::new();
+                for arg in args {
+                    if Self::is_range_ty(&arg.value.ty) {
+                        if arg.mut_borrow
+                            || arg.arc_clone
+                            || arg.widen_to_vec
+                            || arg.widen_to_union.is_some()
+                        {
+                            return Err("jit Range call wrapper unsupported".to_string());
+                        }
+                        arg_values.extend(self.lower_range_expr(&arg.value)?);
+                    } else {
+                        arg_values.push(self.lower_call_arg(arg)?);
+                    }
+                }
+                let func_ref = self.module.declare_func_in_func(func_id, self.b.func);
+                let call = self.b.ins().call(func_ref, &arg_values);
+                let results = self.b.inst_results(call);
+                if results.len() != 3 {
+                    return Err(format!(
+                        "jit Range call `{name}` returned {} values",
+                        results.len()
+                    ));
+                }
+                let values = [results[0], results[1], results[2]];
+                self.emit_trap_check()?;
+                Ok(values)
+            }
+            TExprKind::Index {
+                base,
+                index,
+                is_map: false,
+                line,
+            } => {
+                let list = self.lower_expr(base)?;
+                let index = self.lower_expr(index)?;
+                let line = self.b.ins().iconst(types::I32, *line as i64);
+                let mut get = |host| {
+                    let host = self.module.declare_func_in_func(host, self.b.func);
+                    let call = self.b.ins().call(host, &[list, index, line]);
+                    self.b.inst_results(call)[0]
+                };
+                let values = [
+                    get(self.host.coll.list_get_range_start),
+                    get(self.host.coll.list_get_range_end),
+                    get(self.host.coll.list_get_range_exclusive),
+                ];
+                self.emit_trap_check()?;
+                Ok(values)
+            }
+            _ => Err("jit Range expression unsupported".to_string()),
+        }
     }
 
-    fn lower_range_show(&mut self, handle: Value) -> Result<Value, String> {
-        let [start, end, exclusive] = self.lower_range_fields(handle)?;
+    fn lower_range_show(&mut self, values: [Value; 3]) -> Result<Value, String> {
+        let [start, end, exclusive] = values;
         let exclusive = self.b.ins().uextend(types::I64, exclusive);
         let host = self
             .module
@@ -17595,6 +17787,15 @@ impl LowerCtx<'_, '_> {
     /// — a `Type`, not a `TIR` variant, so its own `_ => Err(..)` is a real
     /// unsupported-print-type gap, not a hidden `TExprKind` case.
     fn emit_print(&mut self, inner: &TExpr) -> Result<(), String> {
+        if Self::is_range_ty(&inner.ty) {
+            let values = self.lower_range_expr(inner)?;
+            let text = self.lower_range_show(values)?;
+            let print = self
+                .module
+                .declare_func_in_func(self.host.print_str, self.b.func);
+            self.b.ins().call(print, &[text]);
+            return Ok(());
+        }
         if let Type::IntN { signed, .. } = &inner.ty {
             let value = self.lower_expr(inner)?;
             let signed = self
@@ -17646,17 +17847,6 @@ impl LowerCtx<'_, '_> {
                         self.b.ins().call(print, &[val]);
                         return Ok(());
                     }
-                    return Ok(());
-                }
-                if matches!(
-                    &print_ty,
-                    Type::Named(name) if name == jet_foundation::Syntax::TYPE_RANGE
-                ) {
-                    let text = self.lower_range_show(val)?;
-                    let print = self
-                        .module
-                        .declare_func_in_func(self.host.print_str, self.b.func);
-                    self.b.ins().call(print, &[text]);
                     return Ok(());
                 }
                 // List / materialized Iter — same jet_show `[a, b, c]` AOT uses.

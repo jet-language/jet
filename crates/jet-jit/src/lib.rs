@@ -137,6 +137,8 @@ mod tier_cache;
 // `Concurrency.rs` (a real sibling module, not an include! fragment) reaches
 // `JitRuntime` via `super::JitRuntime` — keep that path alive at crate root.
 pub(crate) use runtime_host::JitRuntime;
+#[doc(hidden)]
+pub use runtime_host::{reset_struct_new_count_for_test, struct_new_count_for_test};
 
 pub use api_debug::{
     cranelift_host_supported, jit_dump_main_ops, jit_dump_main_stmts, jit_dump_mixed_switch_conds,

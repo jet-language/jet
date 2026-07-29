@@ -169,6 +169,12 @@ pub(crate) fn clif_ty_with_distinct(
     if matches!(&ty, Type::Named(n) if n == "Unit") {
         return None;
     }
+    // D-RANGE-VALUE1: Range uses a lossless three-value resident ABI
+    // (`start: I64`, `end: I64`, `exclusive: I8`). It is deliberately not an
+    // I64 arena handle, so callers must use the explicit Range ABI helpers.
+    if matches!(&ty, Type::Named(n) if n == jet_foundation::Syntax::TYPE_RANGE) {
+        return None;
+    }
     if matches!(&ty, Type::Named(n)
         if matches!(
             n.as_str(),
@@ -271,6 +277,12 @@ pub(crate) fn func_signature(
         sig.params.push(AbiParam::new(types::I64));
     }
     for (_, ty, convention) in &tir.params {
+        if matches!(ty, Type::Named(n) if n == jet_foundation::Syntax::TYPE_RANGE) {
+            sig.params.push(AbiParam::new(types::I64));
+            sig.params.push(AbiParam::new(types::I64));
+            sig.params.push(AbiParam::new(types::I8));
+            continue;
+        }
         if matches!(convention, jet_foundation::AST::AccessConvention::Write)
             && matches!(
                 ty,
@@ -291,7 +303,11 @@ pub(crate) fn func_signature(
         }
     }
     if let Some(ret) = &tir.ret {
-        if let Some(clif) = meta.clif_ty(ret) {
+        if matches!(ret, Type::Named(n) if n == jet_foundation::Syntax::TYPE_RANGE) {
+            sig.returns.push(AbiParam::new(types::I64));
+            sig.returns.push(AbiParam::new(types::I64));
+            sig.returns.push(AbiParam::new(types::I8));
+        } else if let Some(clif) = meta.clif_ty(ret) {
             sig.returns.push(AbiParam::new(clif));
         }
     }
@@ -314,6 +330,9 @@ pub(crate) fn fn_value_signature(
         ));
     }
     if let Some(ret) = ret {
+        if matches!(ret.as_ref(), Type::Named(n) if n == jet_foundation::Syntax::TYPE_RANGE) {
+            return Err("jit callable Range return unsupported".to_string());
+        }
         if let Some(clif) = meta.clif_ty(ret) {
             sig.returns.push(AbiParam::new(clif));
         }

@@ -69,6 +69,19 @@ extern "C" fn jet_jit_list_push_f64(list: i64, v: f64) {
     });
 }
 
+extern "C" fn jet_jit_list_push_range(
+    list: i64,
+    start: i64,
+    end: i64,
+    exclusive: i8,
+) {
+    Concurrency::with_runtime_mut(|rt| {
+        rt.heap
+            .list_push_range(list, start, end, exclusive != 0)
+            .expect("jit list push Range: bad handle");
+    });
+}
+
 extern "C" fn jet_jit_list_len(list: i64) -> i64 {
     Concurrency::with_runtime_mut(|rt| rt.heap.list_len(list).expect("jit list len: bad handle"))
 }
@@ -158,6 +171,31 @@ extern "C" fn jet_jit_list_get_f64(list: i64, idx: i64, _line: u32) -> f64 {
             0.0
         }
     })
+}
+
+fn jet_jit_list_get_range(list: i64, idx: i64) -> (i64, i64, bool) {
+    Concurrency::with_runtime_mut(|rt| match rt.heap.list_get_range(list, idx) {
+        Some(value) => value,
+        None => {
+            if rt.heap.list_len(list).is_none() {
+                jet_foundation::ice!(None, "jit list get Range: bad handle");
+            }
+            rt.set_trap("index out of bounds: the index is outside the list");
+            (0, 0, false)
+        }
+    })
+}
+
+extern "C" fn jet_jit_list_get_range_start(list: i64, idx: i64, _line: u32) -> i64 {
+    jet_jit_list_get_range(list, idx).0
+}
+
+extern "C" fn jet_jit_list_get_range_end(list: i64, idx: i64, _line: u32) -> i64 {
+    jet_jit_list_get_range(list, idx).1
+}
+
+extern "C" fn jet_jit_list_get_range_exclusive(list: i64, idx: i64, _line: u32) -> i8 {
+    i8::from(jet_jit_list_get_range(list, idx).2)
 }
 
 /// `0` = absent; otherwise `value + 1`.
@@ -1511,8 +1549,12 @@ pub(crate) struct CollectionsHostFns {
     pub list_new: cranelift_module::FuncId,
     pub list_push: cranelift_module::FuncId,
     pub list_push_f64: cranelift_module::FuncId,
+    pub list_push_range: cranelift_module::FuncId,
     pub list_get: cranelift_module::FuncId,
     pub list_get_f64: cranelift_module::FuncId,
+    pub list_get_range_start: cranelift_module::FuncId,
+    pub list_get_range_end: cranelift_module::FuncId,
+    pub list_get_range_exclusive: cranelift_module::FuncId,
     pub list_get_opt: cranelift_module::FuncId,
     pub list_set: cranelift_module::FuncId,
     pub list_set_f64: cranelift_module::FuncId,
@@ -1620,8 +1662,24 @@ pub(crate) fn register_collections_symbols(builder: &mut cranelift_jit::JITBuild
     builder.symbol("jet_jit_list_new", jet_jit_list_new as *const u8);
     builder.symbol("jet_jit_list_push", jet_jit_list_push as *const u8);
     builder.symbol("jet_jit_list_push_f64", jet_jit_list_push_f64 as *const u8);
+    builder.symbol(
+        "jet_jit_list_push_range",
+        jet_jit_list_push_range as *const u8,
+    );
     builder.symbol("jet_jit_list_get", jet_jit_list_get as *const u8);
     builder.symbol("jet_jit_list_get_f64", jet_jit_list_get_f64 as *const u8);
+    builder.symbol(
+        "jet_jit_list_get_range_start",
+        jet_jit_list_get_range_start as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_list_get_range_end",
+        jet_jit_list_get_range_end as *const u8,
+    );
+    builder.symbol(
+        "jet_jit_list_get_range_exclusive",
+        jet_jit_list_get_range_exclusive as *const u8,
+    );
     builder.symbol("jet_jit_list_get_opt", jet_jit_list_get_opt as *const u8);
     builder.symbol("jet_jit_list_set", jet_jit_list_set as *const u8);
     builder.symbol("jet_jit_list_set_f64", jet_jit_list_set_f64 as *const u8);
@@ -1751,6 +1809,11 @@ pub(crate) fn declare_collections_host_fns(
     let mut sig_push_f64 = Signature::new(cc);
     sig_push_f64.params.push(AbiParam::new(types::I64));
     sig_push_f64.params.push(AbiParam::new(types::F64));
+    let mut sig_push_range = Signature::new(cc);
+    sig_push_range.params.push(AbiParam::new(types::I64));
+    sig_push_range.params.push(AbiParam::new(types::I64));
+    sig_push_range.params.push(AbiParam::new(types::I64));
+    sig_push_range.params.push(AbiParam::new(types::I8));
     let mut sig_len = Signature::new(cc);
     sig_len.params.push(AbiParam::new(types::I64));
     sig_len.returns.push(AbiParam::new(types::I64));
@@ -1760,6 +1823,12 @@ pub(crate) fn declare_collections_host_fns(
     let mut sig_get_f64 = sig_get.clone();
     sig_get_f64.returns.clear();
     sig_get_f64.returns.push(AbiParam::new(types::F64));
+    let sig_get_range_scalar = sig_get.clone();
+    let mut sig_get_range_exclusive = sig_get.clone();
+    sig_get_range_exclusive.returns.clear();
+    sig_get_range_exclusive
+        .returns
+        .push(AbiParam::new(types::I8));
     let mut sig_get_opt = sig_len.clone();
     sig_get_opt.params.push(AbiParam::new(types::I64));
     let mut sig_list_eq = Signature::new(cc);
@@ -1840,8 +1909,18 @@ pub(crate) fn declare_collections_host_fns(
         list_new: import("jet_jit_list_new", &sig_new)?,
         list_push: import("jet_jit_list_push", &sig_push)?,
         list_push_f64: import("jet_jit_list_push_f64", &sig_push_f64)?,
+        list_push_range: import("jet_jit_list_push_range", &sig_push_range)?,
         list_get: import("jet_jit_list_get", &sig_get)?,
         list_get_f64: import("jet_jit_list_get_f64", &sig_get_f64)?,
+        list_get_range_start: import(
+            "jet_jit_list_get_range_start",
+            &sig_get_range_scalar,
+        )?,
+        list_get_range_end: import("jet_jit_list_get_range_end", &sig_get_range_scalar)?,
+        list_get_range_exclusive: import(
+            "jet_jit_list_get_range_exclusive",
+            &sig_get_range_exclusive,
+        )?,
         list_get_opt: import("jet_jit_list_get_opt", &sig_get_opt)?,
         list_set: import("jet_jit_list_set", &sig_set)?,
         list_set_f64: import("jet_jit_list_set_f64", &sig_set_f64)?,
