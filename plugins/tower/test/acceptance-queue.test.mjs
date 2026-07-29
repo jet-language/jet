@@ -250,6 +250,7 @@ test('dedicated owner UI action accepts atomically with immutable provenance', a
   const state = await (await fetch(url('/api/state'))).json();
   const card = state.cards.find(c => c.num === 1);
   assert.equal(card.phase, 'done');
+  assert.match(card.completedAt, /^\d{4}-\d{2}-\d{2}T/, 'owner acceptance records a stable completion timestamp');
   const ratifyEvent = state.events.find(e => e.action === 'acceptance.resolve' && e.ref === 'D-ACCEPT-1');
   assert.ok(ratifyEvent, 'ratification must be in the event log');
   assert.equal(ratifyEvent.by, 'owner');

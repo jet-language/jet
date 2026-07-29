@@ -209,18 +209,33 @@ function ageChip(iso) {
   const label = h < 48 ? Math.round(h) + 'h' : Math.round(h / 24) + 'd';
   return `<span class="agechip ${h > 72 ? 'agechip--hot' : ''}" title="waiting ${label}">${label}</span>`;
 }
-const ageOf = (it) => it.type === 'decision' ? it.decision.created : it.type === 'verify' ? (it.ballot ? it.ballot.created : it.card.updated) : it.card.created;
+const ageOf = (it) => ['done', 'message'].includes(it.type)
+  ? it.at
+  : it.type === 'decision'
+    ? it.decision.created
+    : it.ballot ? it.ballot.created : it.card.updated;
 
 // Owner verification queue: ONLY needsAcceptance cards (visual/UI/UX/DX taste).
 // Bare phase=verify is agent technical closeout — never surfaces on Now/beacon.
 const verifyQueue = () => ownerVerifyQueue(S.cards);
+const queueNotices = () => {
+  const { done, messages } = buildDoneMessageQueue({
+    cursor: S.meta.completionCursor,
+    cards: S.cards || [],
+    questions: S.questions || [],
+  });
+  return [
+    ...messages.map(message => ({ ...message, type: 'message' })),
+    ...done.map(item => ({ ...item, type: 'done' })),
+  ];
+};
 
 // Every owner-blocking item, in the order the beacon + Now view show them.
 // Acceptance ballots are excluded from the plain 'decision' bucket — they
 // get the richer dedicated verification treatment below instead of the
 // generic ballot deck.
 function duties() {
-  const out = [];
+  const out = queueNotices();
   for (const v of verifyQueue()) out.push({ type: 'verify', id: v.card.id, card: v.card, ballot: v.ballot });
   for (const d of openGenericDecisions()) out.push({ type: 'decision', id: d.id, decision: d });
   return out;
@@ -234,7 +249,11 @@ function renderBeacon() {
   b.classList.toggle('beacon--clear', !items.length);
   for (const it of items.slice(0, 40)) {
     const h = (Date.now() - new Date(ageOf(it) || Date.now()).getTime()) / 3.6e6;
-    const title = it.type === 'decision' ? it.decision.title : 'verify: ' + it.card.title;
+    const title = it.type === 'message'
+      ? `message: ${it.ref} ${it.title}`
+      : it.type === 'done'
+        ? `done: ${it.text}`
+        : it.type === 'decision' ? it.decision.title : 'verify: ' + it.card.title;
     const seg = el(`<button class="beacon__seg" style="opacity:${Math.min(1, .55 + h / 96).toFixed(2)}" title="${esc(title)}"></button>`);
     seg.addEventListener('click', () => jumpTo(it));
     b.appendChild(seg);
@@ -242,7 +261,7 @@ function renderBeacon() {
 }
 function jumpTo(it) {
   if (it.type === 'decision') focusAll(it.decision.id);
-  else { go('now'); }
+  else go('now');
 }
 
 // ---- chrome ------------------------------------------------------------------

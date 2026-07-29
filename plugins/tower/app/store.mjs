@@ -160,6 +160,13 @@ function isOlderThanDays(dateStr, days) {
   return (Date.now() - t) > days * 86_400_000;
 }
 
+function isPendingCompletion(card, cursor) {
+  if (card.phase !== 'done') return false;
+  if (!cursor) return true;
+  const completedAt = card.completedAt || (String(card.updated || '').length > 10 ? card.updated : null);
+  return !!completedAt && completedAt > cursor;
+}
+
 const LIVE_EVENTS = 500;
 
 // The one retirement chokepoint (called only from `mutate`, right after the
@@ -181,7 +188,10 @@ function retire(s, config, dataDir) {
     .filter(q => q.kind === 'message' && q.status === 'open')
     .map(q => q.cardId));
   const retireCardIds = new Set(s.cards
-    .filter(c => c.phase === 'done' && !messageCardIds.has(c.id) && isOlderThanDays(c.updated, days))
+    .filter(c => c.phase === 'done'
+      && !isPendingCompletion(c, s.meta.completionCursor)
+      && !messageCardIds.has(c.id)
+      && isOlderThanDays(c.updated, days))
     .map(c => c.id));
   if (retireCardIds.size) {
     for (const c of s.cards) {
@@ -1028,9 +1038,11 @@ export function createAcceptanceResolver() {
     d.provenanceHistory = [...(d.provenanceHistory || []), Object.freeze({ ...provenance })];
     if (outcome === 'accept') {
       c.phase = 'done';
+      c.completedAt = now();
       c.log.unshift({ at: today(), by: 'owner', text: `Accepted — ${d.id} resolved through owner verification UI.` });
     } else {
       c.phase = 'building';
+      delete c.completedAt;
       c.log.unshift({ at: today(), by: 'owner', text: `Bounced back to building: ${comment || '(no comment)'}` });
     }
     touchCard(c, 'owner');
