@@ -738,6 +738,64 @@ fn run() {
 }
 
 #[test]
+fn u64_codable_is_rejected_before_backend_selection() {
+    let cases = [
+        (
+            r#"
+use core.encoding.cbor as cbor
+fn run() {
+    value :: U64 = U64.{ 1 }
+    cbor.to_bytes(value)
+}
+"#,
+            "U64 can't be serialized",
+            "convert the U64 to Int after checking it fits, or encode it as Text explicitly",
+        ),
+        (
+            r#"
+use core.encoding.cbor as cbor
+fn run() {
+    cbor.decode<U64>([U8].{ 0x01 })
+}
+"#,
+            "U64 can't be decoded",
+            "decode an Int or Text and convert it to U64 explicitly",
+        ),
+    ];
+    for (source, what, fix) in cases {
+        let diagnostics = jet::compile(source).expect_err("U64 must not enter Codable backends");
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "E2411")
+            .expect("U64 Codable rejection must use E2411");
+        assert_eq!(diagnostic.what, what);
+        assert_eq!(
+            diagnostic.why,
+            "Codable uses the shared DataTree model, whose Int values are signed 64-bit; U64 cannot round-trip every value"
+        );
+        assert_eq!(diagnostic.fix, fix);
+    }
+    let derived = jet::compile(
+        r#"
+#Codable
+struct Counter {
+    value: U64
+}
+fn run() {}
+"#,
+    )
+    .expect_err("a derived U64 field must not promise a Codable wire form");
+    assert_eq!(
+        derived
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "E2411")
+            .map(|diagnostic| diagnostic.what.as_str())
+            .collect::<Vec<_>>(),
+        ["U64 can't be serialized", "U64 can't be decoded"]
+    );
+}
+
+#[test]
 fn cbor_primitive_container_boundaries_match_aot_and_forced_deopt() {
     on_encoding_stack(cbor_primitive_container_boundaries_match_aot_and_forced_deopt_inner);
 }
@@ -796,6 +854,13 @@ fn invalid_i8_error() => String {
     }
 }
 
+fn invalid_u8_error() => String {
+    if cbor.decode<U8>([U8].{ 0x19, 0x01, 0x00 }) == {
+        .Ok(_) -> return "accepted"
+        .Err(error) -> return error.reason
+    }
+}
+
 fn invalid_fixed_bytes_error() => String {
     if cbor.decode<[U8#2]>([U8].{ 0x41, 0xde }) == {
         .Ok(_) -> return "accepted"
@@ -813,7 +878,7 @@ fn forced_deopt() => String {
     tree := cbor.decode<DataTree>(~(cbor.to_bytes_canonical(DataTree.Object(["n": DataTree.Int(7)])) ?? panic("tree encode"))) ?? panic("tree decode")
     severity := cbor.decode<Severity>(~(cbor.to_bytes_canonical(Severity.from_int(7)) ?? panic("range encode"))) ?? panic("range decode")
     tree_n := (tree.field("n") ?? panic("tree field")).int() ?? panic("tree int")
-    return "{signed}|{unsigned}|{narrow}|{pair[0]},{pair[1]}|{bytes[0]},{bytes[1]}|{tree_n}|{severity.raw()}|{invalid_i8_rejected()}|{invalid_u32_rejected()}|{invalid_f32_rejected()}|{invalid_fixed_rejected()}|{invalid_range_rejected()}|{invalid_i8_error()}|{invalid_fixed_bytes_error()}"
+    return "{signed}|{unsigned}|{narrow}|{pair[0]},{pair[1]}|{bytes[0]},{bytes[1]}|{tree_n}|{severity.raw()}|{invalid_i8_rejected()}|{invalid_u32_rejected()}|{invalid_f32_rejected()}|{invalid_fixed_rejected()}|{invalid_range_rejected()}|{invalid_i8_error()}|{invalid_u8_error()}|{invalid_fixed_bytes_error()}"
 }
 
 fn run() {
@@ -833,7 +898,7 @@ fn run() {
         &mut direct_sink,
     )
     .expect("primitive boundaries must execute in the TIR evaluator");
-    let expected = "-8|4000000000|1.5|1,2|222,173|7|7|true|true|true|true|true|expected I8, found out-of-range Int|expected a fixed list of length 2, found 1";
+    let expected = "-8|4000000000|1.5|1,2|222,173|7|7|true|true|true|true|true|expected I8, found out-of-range Int|expected U8, found Int|expected a fixed list of length 2, found 1";
     assert!(
         matches!(direct, jet::AST::CtValue::Str(ref value) if value == expected),
         "direct primitive result diverged: {direct:?}"

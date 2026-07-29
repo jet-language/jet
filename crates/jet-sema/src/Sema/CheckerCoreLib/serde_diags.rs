@@ -112,6 +112,26 @@ pub(crate) fn unknown_core_item(module: &str, name: &str, span: Span) -> Diagnos
 /// holds something with no wire form (a closure, handle, …), or a user type that
 /// hasn't opted in with `#[Codable]`/`#[Encode]`/`#[Decode]`.
 pub(crate) fn e2411(ty: &str, encode: bool, span: Span) -> Diagnostic {
+    if ty == crate::Syntax::TYPE_U64 {
+        let (verb, fix) = if encode {
+            (
+                "serialized",
+                "convert the U64 to Int after checking it fits, or encode it as Text explicitly",
+            )
+        } else {
+            (
+                "decoded",
+                "decode an Int or Text and convert it to U64 explicitly",
+            )
+        };
+        return Diagnostic::error(
+            "E2411",
+            format!("U64 can't be {verb}"),
+            "Codable uses the shared DataTree model, whose Int values are signed 64-bit; U64 cannot round-trip every value".to_string(),
+            fix.to_string(),
+            Some(span),
+        );
+    }
     let (verb, marker) = if encode {
         ("serialized", "`#[Codable]` or `#[Encode]`")
     } else {
@@ -285,6 +305,10 @@ pub(super) fn apply_serde_ok(
     }
 }
 
+pub(crate) fn sized_int_has_datatree_form(ty: &Type) -> bool {
+    !matches!(ty, Type::IntN { signed: false, bits: 64 })
+}
+
 pub(crate) fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
     match ty {
         Type::Int
@@ -292,8 +316,8 @@ pub(crate) fn is_encodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
         | Type::Bool
         | Type::String
         | Type::Char
-        | Type::IntN { .. }
         | Type::Float32 => true,
+        Type::IntN { .. } => sized_int_has_datatree_form(ty),
         Type::List(e) | Type::Option(e) | Type::Shared(e) => is_encodable_ty(e, reg),
         Type::FixedList { elem, .. } => is_encodable_ty(elem, reg),
         Type::Map { key, value, .. } => matches!(**key, Type::String) && is_encodable_ty(value, reg),
@@ -321,8 +345,8 @@ pub(crate) fn is_decodable_ty(ty: &Type, reg: &TraitRegistry) -> bool {
         | Type::Bool
         | Type::String
         | Type::Char
-        | Type::IntN { .. }
         | Type::Float32 => true,
+        Type::IntN { .. } => sized_int_has_datatree_form(ty),
         Type::List(e) | Type::Option(e) | Type::Shared(e) => is_decodable_ty(e, reg),
         Type::FixedList { elem, .. } => is_decodable_ty(elem, reg),
         Type::Map { key, value, .. } => matches!(**key, Type::String) && is_decodable_ty(value, reg),

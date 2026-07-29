@@ -2,7 +2,9 @@ use crate::AST::Type;
 use crate::Diagnostics::Span;
 use crate::Sema::Checker;
 use super::core_types::is_json_type_name;
-use super::serde_diags::{apply_serde_ok, e2411};
+use super::serde_diags::{
+    apply_serde_ok, e2411, sized_int_has_datatree_form,
+};
 impl<'a> Checker<'a> {
         fn serde_trait_impl(&self, name: &str, trait_name: &str) -> bool {
             if self.trait_reg.implements_trait(name, trait_name) {
@@ -54,8 +56,11 @@ impl<'a> Checker<'a> {
                 | Type::Bool
                 | Type::String
                 | Type::Char
-                | Type::IntN { .. }
                 | Type::Float32 => true,
+                // Codable's shared DataTree Int is i64. Admitting U64 here
+                // would let sema promise a round trip that no codec lens can
+                // preserve for values above i64::MAX.
+                Type::IntN { .. } => sized_int_has_datatree_form(t),
                 Type::List(e) | Type::Option(e) | Type::Shared(e) => self.is_encodable(e),
                 Type::FixedList { elem, .. } => self.is_encodable(elem),
                 Type::Map { key, value, .. } => matches!(**key, Type::String) && self.is_encodable(value),
@@ -91,8 +96,8 @@ impl<'a> Checker<'a> {
                 | Type::Bool
                 | Type::String
                 | Type::Char
-                | Type::IntN { .. }
                 | Type::Float32 => true,
+                Type::IntN { .. } => sized_int_has_datatree_form(t),
                 Type::List(e) | Type::Option(e) | Type::Shared(e) => self.is_decodable(e),
                 Type::FixedList { elem, .. } => self.is_decodable(elem),
                 Type::Map { key, value, .. } => matches!(**key, Type::String) && self.is_decodable(value),
