@@ -1236,13 +1236,35 @@ impl LowerCtx<'_, '_> {
         let disc = self.b.inst_results(disc_call)[0];
         let want = self.b.ins().iconst(types::I64, 5); // Array
         let is_arr = self.b.ins().icmp(IntCC::Equal, disc, want);
+        let byte_elements = matches!(
+            elem_ty,
+            Type::IntN {
+                signed: false,
+                bits: 8
+            }
+        ) || matches!(elem_ty, Type::Named(name) if name == "U8");
         let bad_block = self.b.create_block();
         let good_block = self.b.create_block();
+        let bytes_block = byte_elements.then(|| self.b.create_block());
         let merge = self.b.create_block();
         self.b.append_block_param(merge, types::I64);
-        self.b
-            .ins()
-            .brif(is_arr, good_block, &[], bad_block, &[]);
+        if let Some(bytes_block) = bytes_block {
+            let check_bytes = self.b.create_block();
+            self.b
+                .ins()
+                .brif(is_arr, good_block, &[], check_bytes, &[]);
+            self.b.switch_to_block(check_bytes);
+            self.b.seal_block(check_bytes);
+            let bytes_disc = self.b.ins().iconst(types::I64, 7);
+            let is_bytes = self.b.ins().icmp(IntCC::Equal, disc, bytes_disc);
+            self.b
+                .ins()
+                .brif(is_bytes, bytes_block, &[], bad_block, &[]);
+        } else {
+            self.b
+                .ins()
+                .brif(is_arr, good_block, &[], bad_block, &[]);
+        }
 
         self.b.switch_to_block(bad_block);
         self.b.seal_block(bad_block);
@@ -1252,6 +1274,21 @@ impl LowerCtx<'_, '_> {
         let err = self.b.ins().call(host_ref, &[tree]);
         let err = self.b.inst_results(err)[0];
         self.b.ins().jump(merge, &[err]);
+
+        if let Some(bytes_block) = bytes_block {
+            self.b.switch_to_block(bytes_block);
+            self.b.seal_block(bytes_block);
+            let one = self.b.ins().iconst(types::I64, 1);
+            let payload_call = self.b.ins().call(get_i, &[tree, one]);
+            let payload = self.b.inst_results(payload_call)[0];
+            let tag = self.b.ins().iconst(types::I8, 1);
+            let result_ref = self
+                .module
+                .declare_func_in_func(self.host.result_new_i64, self.b.func);
+            let result_call = self.b.ins().call(result_ref, &[tag, payload]);
+            let result = self.b.inst_results(result_call)[0];
+            self.b.ins().jump(merge, &[result]);
+        }
 
         self.b.switch_to_block(good_block);
         self.b.seal_block(good_block);

@@ -2808,13 +2808,17 @@ fn run() {
         .Ok(_) -> print("unexpected success")
         .Err(error) -> print("{error.byte_offset}|{error.path}|{error.reason}")
     }
+    if cbor.decode<Int>([65, 0]) == {
+        .Ok(_) -> print("unexpected success")
+        .Err(error) -> print("{error.byte_offset}|{error.path}|{error.reason}")
+    }
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "cbor_whole", source, &[], None);
     assert_eq!(code, 0, "CBOR whole-value program failed: {stderr}");
     assert_eq!(
         stdout,
-        "[162, 98, 105, 100, 7, 103, 112, 97, 121, 108, 111, 97, 100, 66, 222, 173]\ntrue\n7\n[222, 173]\n[1, 2, 255]\n-1\n0|$[0]|expected Int, found text \"x\"\n"
+        "[162, 98, 105, 100, 7, 103, 112, 97, 121, 108, 111, 97, 100, 66, 222, 173]\ntrue\n7\n[222, 173]\n[1, 2, 255]\n-1\n0|$[0]|expected Int, found text \"x\"\n0|$|expected Int, found Bytes\n"
     );
     let path = dir.join("cbor_whole.jet");
     fs::write(&path, source).unwrap();
@@ -2827,12 +2831,27 @@ fn run() {
         "CBOR fixture must type-check: {diagnostics:?}"
     );
     jet_jit::try_compile_bundle(&bundle).expect("CBOR fixture must compile for resident JIT");
+    jet_jit::reset_jit_trace_for_test();
     match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: dev_stdout,
             stderr: dev_stderr,
             exit_code,
-        } => assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new())),
+        } => {
+            assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
+            assert!(
+                jet_jit::jit_executed_for_test(),
+                "CBOR whole-value fixture must execute resident JIT"
+            );
+            assert!(
+                !jet_jit::deopt_invoked_for_test(),
+                "CBOR whole-value fixture must not silently deopt"
+            );
+            assert!(
+                !jet_jit::fallback_invoked_for_test(),
+                "CBOR whole-value fixture must not fall back"
+            );
+        }
         other => panic!("CBOR whole-value default-dev failed: {other:?}"),
     }
     let _ = fs::remove_dir_all(&dir);

@@ -212,20 +212,14 @@ pub(crate) fn alloc_datatree(tree: &json_rt::DataTree) -> i64 {
             alloc_dt_record(DT_TEXT, sid)
         }
         json_rt::DataTree::Bytes(bs) => {
-            // Bytes is internal to typed codecs; expose it to the shared
-            // DataTreeDecode<[U8]> path as an Array of Int nodes.
-            let handles: Vec<i64> = bs
-                .iter()
-                .map(|byte| alloc_datatree(&json_rt::DataTree::Int(i64::from(*byte))))
-                .collect();
             let list = Concurrency::with_runtime_mut(|rt| {
                 let list = rt.heap.alloc_empty_list();
-                for handle in handles {
-                    let _ = rt.heap.list_push_int(list, handle);
+                for byte in bs {
+                    let _ = rt.heap.list_push_int(list, i64::from(*byte));
                 }
                 list
             });
-            alloc_dt_record(DT_ARRAY, list)
+            alloc_dt_record(DT_BYTES, list)
         }
         json_rt::DataTree::Array(items) => {
             let handles: Vec<i64> = items.iter().map(alloc_datatree).collect();
@@ -1817,7 +1811,7 @@ fn typed_datatree_kind(tree: &json_rt::DataTree) -> &'static str {
         json_rt::DataTree::Int(_) => "Int",
         json_rt::DataTree::Float(_) => "Float",
         json_rt::DataTree::Text(_) => "Text",
-        json_rt::DataTree::Bytes(_) => "value",
+        json_rt::DataTree::Bytes(_) => "Bytes",
         json_rt::DataTree::Array(_) => "a list",
         json_rt::DataTree::Object(_) => "an object",
     }
