@@ -1,6 +1,41 @@
 // ── C-FFI data types ──────────────────────────────────────────────────────────
 
+use super::{ExternFn, Type};
 use std::path::{Path, PathBuf};
+
+fn hidden_c_bridge_type(ty: &Type) -> bool {
+    match ty {
+        Type::Int
+        | Type::Float
+        | Type::Bool
+        | Type::Char
+        | Type::String
+        | Type::IntN { .. }
+        | Type::Float32 => true,
+        Type::Fn { params, ret, .. } => {
+            params.iter().all(hidden_c_bridge_type)
+                && ret.as_deref().is_none_or(hidden_c_bridge_type)
+        }
+        Type::Tagged { inner, .. } => hidden_c_bridge_type(inner),
+        _ => false,
+    }
+}
+
+impl ExternFn {
+    /// Whether this C signature can cross the separate hidden Rust bridge crate.
+    ///
+    /// Program-local structs, enums, distinct types, and pointer targets must
+    /// use CModule's direct wrapper, where their generated Rust types exist.
+    pub fn hidden_c_bridge_compatible(&self) -> bool {
+        self.params
+            .iter()
+            .all(|param| hidden_c_bridge_type(&param.ty))
+            && self
+                .return_type
+                .as_ref()
+                .is_none_or(hidden_c_bridge_type)
+    }
+}
 
 /// The result of resolving one C `use` in one file.
 #[derive(Debug, Clone)]

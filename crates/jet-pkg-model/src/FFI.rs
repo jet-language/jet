@@ -113,7 +113,15 @@ pub fn collect_externs(bundle: &ProgramBundle) -> Vec<ExternEntry> {
                         });
                     }
                 } else if let Item::CModule(c_module) = item {
-                    for function in &c_module.functions {
+                    // The hidden crate can share primitive C ABI values, but it
+                    // cannot name or own a program-local struct, enum, distinct,
+                    // or pointer target. Those functions stay on CModule's
+                    // direct wrapper path, where codegen has the real Jet type.
+                    for function in c_module
+                        .functions
+                        .iter()
+                        .filter(|function| function.hidden_c_bridge_compatible())
+                    {
                         out.push(ExternEntry {
                             jet_name: function.name.clone(),
                             rust_path: function.rust_path.clone(),
@@ -267,6 +275,15 @@ pub fn prepare_for_target(
         .used_core
         .iter()
         .any(|u| u == "core.vault" || u.starts_with("core.vault::") || u == "core.vault.expert" || u.starts_with("core.vault.expert::"));
+    // Link discovery is independent of hidden-bridge eligibility. A C surface
+    // made only from local Jet types must still resolve its declared provider
+    // and report E3201 when the provider is absent.
+    let c_link_args = if bundle.cffi.links_c() {
+        crate::CFFI::rustc_link_args_for_target(&bundle.cffi, &bundle.project_root, target)?
+    } else {
+        Vec::new()
+    };
+
     if entries.is_empty()
         && !needs_regex
         && !needs_archive
@@ -286,7 +303,7 @@ pub fn prepare_for_target(
         return Err(vec![diagnostic]);
     }
     let native_link_args = if entries.iter().any(|entry| entry.c_abi) {
-        crate::CFFI::rustc_link_args_for_target(&bundle.cffi, &bundle.project_root, target)?
+        c_link_args
     } else {
         Vec::new()
     };

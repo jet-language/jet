@@ -2176,7 +2176,11 @@ fn extern_func_map(items: &[Item]) -> HashMap<String, String> {
                     map.insert(func.name.clone(), format!("jet_ffi_{}", func.name));
                 }
             } else if let Item::CModule(module) = item {
-                for function in &module.functions {
+                for function in module
+                    .functions
+                    .iter()
+                    .filter(|function| function.hidden_c_bridge_compatible())
+                {
                     map.insert(
                         function.name.clone(),
                         format!("jet_ffi_{}", function.name),
